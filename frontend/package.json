@@ -1,0 +1,23 @@
+{
+  "name": "multimodal-parser-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && rm -rf /var/www/multimodal-parser/dist/* && cp -r dist/* /var/www/multimodal-parser/dist/ && chown -R www-data:www-data /var/www/multimodal-parser/dist/",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "echarts": "^6.0.0",
+    "marked": "^18.0.2",
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.27",
+    "tailwindcss": "^3.3.3",
+    "vite": "^4.4.5"
+  }
+}
