@@ -96,7 +96,7 @@
         </button>
 
         <div class="mb-8">
-          <h3 class="text-lg font-semibold text-gray-700 mb-3 border-l-4 border-purple-500 pl-2">考点分布 (原始明细)</h3>
+          <h3 class="text-lg font-semibold text-gray-700 mb-3 border-l-4 border-purple-500 pl-2">考点分布 (精炼题库)</h3>
           <div ref="chartRef" class="w-full h-[320px]"></div>
         </div>
         
@@ -452,7 +452,6 @@ const activeTab = ref('MasterBank')
 const jdData = ref([])
 const interviewData = ref([])
 const masterBank = ref([])
-const rawTaggedData = ref([]) 
 const isBuilding = ref(false)
 const analytics = ref({ tech_trends: {} })
 
@@ -524,14 +523,14 @@ onUnmounted(() => {
 })
 
 const updateDistributionChart = () => {
-  if (!myChart || !rawTaggedData.value.length) return
+  if (!myChart || !masterBank.value.length) return
 
   const cat1Map = {}
   const cat2Map = {}
 
-  rawTaggedData.value.forEach(item => {
-    const c1 = (item['一级大类'] && item['一级大类'] !== '未分类(API漏标)') ? item['一级大类'] : '其他/未分类'
-    const c2 = (item['二级子类'] && item['二级子类'] !== '未分类') ? item['二级子类'] : '未知'
+  masterBank.value.forEach(item => {
+    const c1 = (item.cat1 && item.cat1 !== '未分类(API漏标)') ? item.cat1 : '其他/未分类'
+    const c2 = (item.cat2 && item.cat2 !== '未分类') ? item.cat2 : '未知'
     
     cat1Map[c1] = (cat1Map[c1] || 0) + 1
     
@@ -867,10 +866,6 @@ const fetchTableData = async () => {
       _editCompany: ''
     }))
 
-    const resTagged = await fetch(`${API_BASE}/data/tagged`)
-    rawTaggedData.value = await resTagged.json()
-    nextTick(() => { updateDistributionChart() })
-
     const resMaster = await fetch(`${API_BASE}/master-bank`)
     const bankData = await resMaster.json()
     masterBank.value = bankData.map(q => ({ 
@@ -882,6 +877,7 @@ const fetchTableData = async () => {
       _isEditingAnswer: false,
       _editAnswer: ''
     }))
+    nextTick(() => { updateDistributionChart() })
   } catch (e) {
     console.error('获取表格数据失败', e)
   }
