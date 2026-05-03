@@ -1,0 +1,190 @@
+import os
+import json
+import csv
+import logging
+import tempfile
+from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi.responses import FileResponse
+from app.core.config import DATA_DIR, ALLOWED_UPDATE_COLUMNS
+from app.db.connection import get_db_connection, run_db
+from app.models.schemas import GenericUpdateRequest
+
+logger = logging.getLogger("multimodal-parser")
+
+router = APIRouter()
+
+
+@router.get("/api/data/{file_type}")
+async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500)):
+    table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
+    table_name = table_map.get(file_type.lower())
+    if not table_name:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    offset = (page - 1) * page_size
+
+    def _query():
+        with get_db_connection() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY id ASC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            return total, rows
+
+    total, rows = await run_db(_query)
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        if table_name == 'jd':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus']})
+        elif table_name == 'interview':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty']})
+        elif table_name == 'questions_detail':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "题目": d['question'], "一级大类": d['cat1'], "二级子类": d['cat2'], "考点标签": d['tags'], "难度标签": d['diff_tag']})
+    return {"items": result, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/api/download/{file_type}")
+async def download_csv(file_type: str):
+    table_map = {
+        "jd": ("jd", ["来源链接", "公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"]),
+        "interview": ("interview", ["来源链接", "公司", "面试轮次", "考察重点", "具体题目清单", "难易程度"]),
+        "tagged": ("questions_detail", ["来源链接", "公司", "面试轮次", "题目", "一级大类", "二级子类", "考点标签", "难度标签"])
+    }
+    if file_type not in table_map:
+        raise HTTPException(status_code=404, detail="未知文件类型")
+    table_name, headers = table_map[file_type]
+
+    # 使用唯一临时文件避免并发冲突
+    fd, temp_file_path = tempfile.mkstemp(suffix=".csv", dir=DATA_DIR)
+    os.close(fd)
+
+    def _export():
+        with get_db_connection() as conn:
+            rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY id ASC").fetchall()
+        with open(temp_file_path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            for r in rows:
+                d = dict(r)
+                if table_name == 'jd':
+                    writer.writerow([d['url'], d['company'], d['job_title'], d['salary'], d['tech_stack'], d['bonus']])
+                elif table_name == 'interview':
+                    writer.writerow([d['url'], d['company'], d['round'], d['focus'], d['questions_list'], d['difficulty']])
+                elif table_name == 'questions_detail':
+                    writer.writerow([d['url'], d['company'], d['round'], d['question'], d['cat1'], d['cat2'], d['tags'], d['diff_tag']])
+
+    await run_db(_export)
+    # 使用 BackgroundTasks 在响应发送后清理临时文件
+    bg_cleanup = BackgroundTasks()
+    bg_cleanup.add_task(_cleanup_temp_file, temp_file_path)
+    return FileResponse(path=temp_file_path, filename=f"{file_type}_data.csv", media_type='text/csv', background=bg_cleanup)
+
+
+def _cleanup_temp_file(path: str):
+    """清理临时文件"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        logger.warning(f"清理临时文件失败: {path} → {e}")
+
+
+@router.delete("/api/data/{file_type}/{record_id}")
+async def delete_data(file_type: str, record_id: int):
+    """通过 record_id 直接删除记录，避免行号偏移导致删错"""
+    table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
+    table_name = table_map.get(file_type.lower())
+    if not table_name:
+        raise HTTPException(status_code=400, detail="不支持的表类型")
+
+    def _delete():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            target_row = cursor.execute(f"SELECT id, url, questions_list FROM {table_name} WHERE id = ?", (record_id,)).fetchone()
+            if not target_row:
+                raise HTTPException(status_code=404, detail="未找到该记录，可能已被删除")
+
+            if table_name == 'interview':
+                url = target_row['url']
+                # 通过 sources 字段中的 URL 追溯受影响的 master_bank 记录
+                affected_rows = cursor.execute("SELECT id, sources FROM master_question_bank").fetchall()
+                for mr in affected_rows:
+                    try:
+                        sources = json.loads(mr['sources']) if mr['sources'] else []
+                    except Exception:
+                        sources = []
+                    match_count = sum(1 for s in sources if s.get('url') == url)
+                    if match_count > 0:
+                        new_sources = [s for s in sources if s.get('url') != url]
+                        cursor.execute(
+                            "UPDATE master_question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            (len(new_sources), json.dumps(new_sources), mr['id'])
+                        )
+
+                # 保留有 AI 答案的记录，即使 frequency 降为 0（避免答案丢失）
+                cursor.execute(
+                    "DELETE FROM master_question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+                )
+                cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+
+            cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
+            conn.commit()
+
+    try:
+        await run_db(_delete)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("操作失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/api/data/update")
+async def update_generic_data(req: GenericUpdateRequest):
+    allowed_tables = ["master_question_bank", "jd", "interview", "questions_detail"]
+    if req.table_name not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"安全拦截：不被允许操作的数据表 '{req.table_name}'")
+
+    if not req.update_data:
+        raise HTTPException(status_code=400, detail="更新数据不能为空")
+
+    # 白名单校验：只允许更新指定字段
+    allowed_cols = ALLOWED_UPDATE_COLUMNS.get(req.table_name, set())
+    for col in req.update_data.keys():
+        if col not in allowed_cols:
+            raise HTTPException(status_code=400, detail=f"安全拦截：不允许更新字段 '{col}'，允许的字段: {allowed_cols}")
+
+    # 防止通过通用更新接口意外清空 ai_answer
+    if req.table_name == "master_question_bank" and "ai_answer" in req.update_data:
+        new_val = req.update_data["ai_answer"]
+        if not new_val or (isinstance(new_val, str) and not new_val.strip()):
+            raise HTTPException(status_code=400, detail="不允许将 ai_answer 设置为空值，请使用 /api/master-bank/generate-answer 接口重新生成答案")
+
+    set_clauses = [f"{col} = ?" for col in req.update_data.keys()]
+    values = list(req.update_data.values())
+
+    if req.table_name == "master_question_bank" and "updated_at" not in req.update_data:
+        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+
+    values.append(req.record_id)
+
+    sql = f"UPDATE {req.table_name} SET {', '.join(set_clauses)} WHERE id = ?"
+
+    def _update():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(values))
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="未找到对应的记录，可能已被删除")
+            conn.commit()
+
+    try:
+        await run_db(_update)
+        return {"status": "success", "message": f"{req.table_name} 表数据更新成功"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("操作失败")
+        raise HTTPException(status_code=500, detail=f"数据库更新失败: {str(e)}")
