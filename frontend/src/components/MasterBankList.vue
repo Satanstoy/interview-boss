@@ -20,11 +20,11 @@
       <p class="text-sm">你可以点击左侧"全部高频真题"查看所有，或者录入更多面经自动扩充。</p>
     </div>
 
-    <div v-for="q in items" :key="q.id" class="border border-gray-200 rounded-lg overflow-hidden bg-white hover:border-blue-300 transition shadow-sm" :class="q._selected ? 'border-blue-400 ring-1 ring-blue-400' : ''">
+    <div v-for="q in items" :key="q.id" class="border border-gray-200 rounded-lg overflow-hidden bg-white hover:border-blue-300 transition shadow-sm" :class="isSelected(q.id) ? 'border-blue-400 ring-1 ring-blue-400' : ''">
       <!-- Card header -->
       <div class="p-5 flex gap-4 items-start cursor-pointer hover:bg-slate-50 transition" @click="q._showAnswer = !q._showAnswer">
         <div class="flex items-center h-full pt-3" @click.stop>
-          <input type="checkbox" v-model="q._selected" class="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+          <input type="checkbox" :checked="isSelected(q.id)" @change="$emit('toggle-item', q.id)" class="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
         </div>
         <div class="flex flex-col items-center justify-center bg-red-50 text-red-600 font-bold rounded-lg p-3 min-w-[60px] border border-red-100 shadow-inner">
           <span class="text-xs font-normal text-red-400 mb-0.5">考频</span>
@@ -119,10 +119,11 @@ import { marked } from 'marked'
 
 defineProps({
   items: { type: Array, default: () => [] },
-  selectedCount: { type: Number, default: 0 }
+  selectedCount: { type: Number, default: 0 },
+  isSelected: { type: Function, default: () => false }
 })
 
-defineEmits(['toggle-select-all', 'invert-selection', 'batch-generate', 'batch-delete', 'toggle-star', 'retag', 'generate-answer', 'save-field'])
+defineEmits(['toggle-select-all', 'invert-selection', 'batch-generate', 'batch-delete', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item'])
 
 const isFailedAnswer = (answer) => answer && answer.includes('生成失败')
 const renderMarkdown = (text) => text ? marked.parse(text) : ''

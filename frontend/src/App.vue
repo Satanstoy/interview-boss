@@ -152,8 +152,10 @@
             v-if="activeTab === 'MasterBank'"
             :items="filteredMasterBank"
             :selected-count="masterSelection.selectedCount.value"
+            :is-selected="(id) => masterSelection.selectedIds.value.has(id)"
             @toggle-select-all="masterSelection.toggleSelectAll()"
             @invert-selection="masterSelection.invertSelection()"
+            @toggle-item="masterSelection.toggleItem($event)"
             @batch-generate="batchGenerateAnswers"
             @batch-delete="batchDeleteMasterBank"
             @toggle-star="toggleStar"
@@ -373,15 +375,17 @@ const generateAnswer = async (question) => {
 }
 
 const batchGenerateAnswers = async () => {
-  const targets = filteredMasterBank.value.filter(q => q._selected && !q.ai_answer && !q._isLoadingAnswer)
-  if (targets.length === 0) { alert('选中的题目都已经生成过答案，或者当前没有选中任何题目！'); return }
-  if (!confirm(`确定要为 ${targets.length} 道新考点排队生成答案吗？`)) return
+  const sel = masterSelection.selectedIds.value
+  const targets = filteredMasterBank.value.filter(q => sel.has(q.id) && !q._isLoadingAnswer)
+  if (targets.length === 0) { alert('当前没有选中任何题目！'); return }
+  if (!confirm(`确定要为 ${targets.length} 道选中题目排队生成答案吗？`)) return
   for (const q of targets) await generateAnswer(q)
   alert('批量生成解答完成！')
 }
 
 const batchDeleteMasterBank = async () => {
-  const targets = filteredMasterBank.value.filter(q => q._selected)
+  const sel = masterSelection.selectedIds.value
+  const targets = filteredMasterBank.value.filter(q => sel.has(q.id))
   if (targets.length === 0) return
   if (!confirm(`确定要彻底删除这 ${targets.length} 道高频真题吗？此操作不可恢复！`)) return
   let ok = 0
