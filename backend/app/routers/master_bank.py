@@ -8,9 +8,11 @@ import numpy as np
 from collections import Counter
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL, EMBEDDING_MODEL, SIMILARITY_THRESHOLD
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT
 from app.db.connection import get_db_connection, run_db
+from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest
 from app.services.llm import client, client_of_embedding, _call_llm_with_retry
 from app.services.embedding import cosine_similarity, cosine_similarity_batch
 from app.services.utils import normalize_category
@@ -258,6 +260,126 @@ async def delete_master_question(question_id: int):
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
+@router.post("/api/master-bank/batch-delete")
+async def batch_delete_master_bank(req: BatchDeleteRequest):
+    """批量删除题库题目，单事务完成"""
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+
+    def _batch_delete():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(req.ids))
+            rows = cursor.execute(
+                f"SELECT id, question FROM master_question_bank WHERE id IN ({placeholders})", req.ids
+            ).fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到任何匹配记录")
+
+            question_texts = [r["question"] for r in rows if r["question"]]
+            if question_texts:
+                qph = ",".join("?" * len(question_texts))
+                cursor.execute(f"DELETE FROM questions_detail WHERE question IN ({qph})", question_texts)
+
+            found_ids = [r["id"] for r in rows]
+            ph2 = ",".join("?" * len(found_ids))
+            cursor.execute(f"DELETE FROM master_question_bank WHERE id IN ({ph2})", found_ids)
+            conn.commit()
+            return len(found_ids)
+
+    try:
+        deleted = await run_db(_batch_delete)
+        return {"status": "success", "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("批量删除失败")
+        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
+
+
+@router.post("/api/master-bank/batch-generate-answers")
+async def batch_generate_answers(req: BatchGenerateAnswersRequest):
+    """批量生成答案（SSE 流式推送进度）"""
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+
+    def _load():
+        with get_db_connection() as conn:
+            placeholders = ",".join("?" * len(req.ids))
+            return conn.execute(
+                f"SELECT id, question, ai_answer FROM master_question_bank WHERE id IN ({placeholders})", req.ids
+            ).fetchall()
+
+    rows = await run_db(_load)
+    if not rows:
+        raise HTTPException(status_code=404, detail="未找到任何匹配题目")
+
+    questions = [(r["id"], r["question"]) for r in rows
+                 if r["question"] and (not r["ai_answer"] or '生成失败' in r["ai_answer"])]
+    skipped = len(rows) - len(questions)
+
+    async def event_stream():
+        if not questions:
+            yield f"data: {json.dumps({'type': 'done', 'generated': 0, 'failed': 0, 'skipped': skipped})}\n\n"
+            return
+
+        total = len(questions)
+        generated = 0
+        failed = 0
+        done_count = 0
+        results_lock = asyncio.Lock()
+
+        # 先发送 init 事件
+        yield f"data: {json.dumps({'type': 'init', 'total': total, 'skipped': skipped})}\n\n"
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def _gen_one(idx, qid, question_text):
+            nonlocal generated, failed, done_count
+            async with semaphore:
+                try:
+                    prompt = ANSWER_PROMPT.replace("{question}", question_text)
+                    answer = await _call_llm_with_retry(prompt)
+                    def _update():
+                        with get_db_connection() as conn:
+                            conn.execute(
+                                "UPDATE master_question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (answer, qid)
+                            )
+                            conn.commit()
+                    await run_db(_update)
+                    async with results_lock:
+                        generated += 1
+                        done_count += 1
+                    yield_event = json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'success': True})
+                except Exception as e:
+                    logger.error(f"批量生成答案失败 [ID:{qid}]: {e}")
+                    def _mark_failed():
+                        with get_db_connection() as conn:
+                            conn.execute(
+                                "UPDATE master_question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (qid,)
+                            )
+                            conn.commit()
+                    await run_db(_mark_failed)
+                    async with results_lock:
+                        failed += 1
+                        done_count += 1
+                    yield_event = json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'success': False})
+                return yield_event
+
+        # 并发执行但按完成顺序收集事件
+        tasks = [_gen_one(i, qid, qtext) for i, (qid, qtext) in enumerate(questions)]
+
+        for coro in asyncio.as_completed(tasks):
+            event_data = await coro
+            yield f"data: {event_data}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'generated': generated, 'failed': failed, 'skipped': skipped})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/api/master-bank/re-tag/{question_id}")
 async def retag_master_question(question_id: int):
     def _get():
@@ -345,7 +467,7 @@ async def retag_master_question(question_id: int):
 
 @router.get("/api/master-bank/random")
 async def get_random_questions(
-    count: int = Query(5, ge=1, le=20),
+    count: int = Query(5, ge=1, le=50),
     cat1: Optional[str] = Query(None),
     difficulty: Optional[str] = Query(None)
 ):

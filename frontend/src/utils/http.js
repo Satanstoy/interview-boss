@@ -225,4 +225,67 @@ export function upload(url, formData, options = {}) {
   })
 }
 
+/**
+ * POST 请求，返回 SSE 流式响应
+ * @param {string} url
+ * @param {object} body
+ * @param {function} onEvent - 每收到一个 SSE 事件时调用，参数为解析后的 JSON
+ * @returns {Promise<object>} - 最终 done 事件的数据
+ */
+export async function postSSE(url, body, onEvent) {
+  const controller = new AbortController()
+  pendingControllers.add(controller)
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`HTTP ${res.status}: ${text}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalResult = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // 保留不完整的行
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(trimmed.slice(6))
+          if (onEvent) onEvent(data)
+          if (data.type === 'done') finalResult = data
+        } catch (e) { /* 忽略解析错误 */ }
+      }
+    }
+
+    // 处理 buffer 中剩余数据
+    if (buffer.trim().startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.trim().slice(6))
+        if (onEvent) onEvent(data)
+        if (data.type === 'done') finalResult = data
+      } catch (e) { /* ignore */ }
+    }
+
+    return finalResult
+  } finally {
+    pendingControllers.delete(controller)
+  }
+}
+
 export default { get, post, put, del, upload, cancelAllRequests }

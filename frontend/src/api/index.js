@@ -1,4 +1,4 @@
-import { get, post, put, del, upload } from '../utils/http.js'
+import { get, post, put, del, upload, postSSE } from '../utils/http.js'
 
 const API = '/api'
 
@@ -7,8 +7,9 @@ export const fetchJdData = () => get(`${API}/data/jd?page_size=500`)
 export const fetchInterviewData = () => get(`${API}/data/interview?page_size=500`)
 export const fetchMasterBank = () => get(`${API}/master-bank?page_size=500`)
 export const fetchAnalytics = () => get(`${API}/analytics`)
-export const fetchRandomQuestions = (count = 5, difficulty) => {
+export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {
   const params = new URLSearchParams({ count: String(count) })
+  if (cat1) params.append('cat1', cat1)
   if (difficulty) params.append('difficulty', difficulty)
   return get(`${API}/master-bank/random?${params}`)
 }
@@ -29,6 +30,11 @@ export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`)
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`)
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
+
+// ── Batch operations ──
+export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete`, { file_type: fileType, ids })
+export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
+export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
 
 // ── Download ──
 export const getDownloadUrl = (type) => `${API}/download/${type}`

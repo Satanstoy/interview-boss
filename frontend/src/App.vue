@@ -1,11 +1,9 @@
 <template>
-  <div class="min-h-screen p-3 lg:p-8 max-w-[98%] mx-auto bg-slate-50">
+  <div class="min-h-screen p-5 lg:p-8 max-w-[98%] mx-auto bg-slate-50">
     <header class="mb-6 lg:mb-10 text-center">
-      <h1 class="text-2xl lg:text-4xl font-bold text-gray-900 mb-2">多模态 JD 与面经智能解析系统</h1>
-      <p class="text-sm lg:text-base text-gray-500">将零散的内容放至暂存区，确认无误后一键提交解析与增量聚类</p>
+      <h1 class="text-2xl lg:text-4xl font-bold text-gray-900 mb-2">面试题库管理系统</h1>
+      <p class="text-sm lg:text-base text-gray-500">上传面经和 JD，AI 自动提取题目并归类整理</p>
     </header>
-
-    <StagingPanel @submitted="onSubmitted" />
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
       <AnalyticsSidebar
@@ -14,7 +12,7 @@
         :popular-tags="popularTags"
         :selected-tag="selectedTag"
         @refresh="fetchAnalytics"
-        @select-tag="selectedTag = $event"
+        @select-tag="onSelectTag($event)"
       />
 
       <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -22,7 +20,7 @@
 
         <div class="p-3 lg:p-6">
           <SearchFilterBar
-            v-if="activeTab === 'MasterBank' || activeTab === 'MockInterview'"
+            v-if="activeTab === 'MasterBank'"
             :search-query="searchQuery"
             :filter-difficulty="filterDifficulty"
             :show-starred-only="showStarredOnly"
@@ -32,22 +30,39 @@
             @update:show-starred-only="showStarredOnly = $event"
           />
 
+          <!-- Sub-tag filter chips -->
+          <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-4">
+            <span class="text-xs text-gray-500 self-center mr-1">子标签：</span>
+            <button
+              v-for="st in availableSubTags"
+              :key="st.tag"
+              @click="toggleSubTag(st.tag)"
+              class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              :class="selectedSubTags.includes(st.tag)
+                ? 'bg-green-100 text-green-700 border-green-300 font-semibold'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300'"
+            >
+              {{ st.tag }}
+              <span class="ml-1 text-xs opacity-60">{{ st.count }}</span>
+            </button>
+          </div>
+
           <!-- Action bar -->
           <div class="flex flex-wrap justify-between items-center mb-4 lg:mb-6 gap-2">
             <h2 class="text-lg lg:text-xl font-bold flex items-center gap-2">
-              {{ activeTab === 'JD' ? '职位描述库' : activeTab === 'Interview' ? '原始面经流水' : activeTab === 'MockInterview' ? '模拟面试' : '必考真题库' }}
+              {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : '高频题库' }}
               <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="text-sm font-normal bg-green-100 text-green-700 px-3 py-1 rounded-full border border-green-200">
-                分类筛选: {{ selectedTag }}
+                筛选: {{ selectedTag }}
               </span>
             </h2>
             <div class="flex flex-wrap gap-2">
               <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="text-sm bg-purple-600 text-white font-bold px-4 py-2 rounded hover:bg-purple-700 transition">
-                {{ isBuilding ? '正在提取全量特征并聚类去重...' : '全量重新计算题库排序' }}
+                {{ isBuilding ? '重建中...' : '重建题库' }}
               </button>
-              <button @click="fetchTableData" :disabled="isDataLoading" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
                 {{ isDataLoading ? '加载中...' : '刷新数据' }}
               </button>
-              <button v-if="activeTab === 'JD' || activeTab === 'Interview'" @click="downloadCSV" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">一键导出 CSV</button>
+              <button v-if="activeTab === 'JD' || activeTab === 'Interview'" @click="downloadCSV" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">导出 CSV</button>
             </div>
           </div>
 
@@ -70,9 +85,9 @@
             :rows="jdData"
             :selected-count="jdSelection.selectedCount.value"
             :is-selected="(id) => jdSelection.selectedIds.value.has(id)"
+            :batch-actions="jdBatchActions"
             @toggle-select-all="jdSelection.toggleSelectAll()"
             @invert-selection="jdSelection.invertSelection()"
-            @batch-delete="batchDeleteData('jd', jdData, jdSelection)"
             @toggle-item="jdSelection.toggleItem($event)"
           >
             <template #actions="{ row }">
@@ -104,16 +119,11 @@
             :rows="interviewData"
             :selected-count="interviewSelection.selectedCount.value"
             :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
+            :batch-actions="interviewBatchActions"
             @toggle-select-all="interviewSelection.toggleSelectAll()"
             @invert-selection="interviewSelection.invertSelection()"
-            @batch-delete="batchDeleteData('interview', interviewData, interviewSelection)"
             @toggle-item="interviewSelection.toggleItem($event)"
           >
-            <template #batch-actions>
-              <button @click="batchReprocessInterview" :disabled="interviewSelection.selectedCount.value === 0" class="text-sm bg-blue-100 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-200 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                批量重新分析 ({{ interviewSelection.selectedCount.value }})
-              </button>
-            </template>
             <template #actions="{ row }">
               <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="text-blue-500 hover:text-blue-700 font-bold mr-2 disabled:opacity-50" title="重新提取并打标">
                 <svg v-if="reprocessingIds[row.id]" class="animate-spin inline-block w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -144,8 +154,11 @@
           <MockInterview
             v-if="activeTab === 'MockInterview'"
             ref="mockInterviewRef"
-            :filter-difficulty="filterDifficulty"
+            :popular-tags="popularTags"
           />
+
+          <!-- Import Tab -->
+          <StagingPanel v-if="activeTab === 'Import'" @submitted="onSubmitted" />
 
           <!-- MasterBank Tab -->
           <MasterBankList
@@ -153,19 +166,23 @@
             :items="filteredMasterBank"
             :selected-count="masterSelection.selectedCount.value"
             :is-selected="(id) => masterSelection.selectedIds.value.has(id)"
+            :batch-actions="masterBatchActions"
             @toggle-select-all="masterSelection.toggleSelectAll()"
             @invert-selection="masterSelection.invertSelection()"
             @toggle-item="masterSelection.toggleItem($event)"
-            @batch-generate="batchGenerateAnswers"
-            @batch-delete="batchDeleteMasterBank"
             @toggle-star="toggleStar"
             @retag="retagQuestion"
             @generate-answer="generateAnswer"
             @save-field="saveFieldFromEvent"
+            @expand-all="filteredMasterBank.forEach(q => q._showAnswer = true)"
+            @collapse-all="filteredMasterBank.forEach(q => q._showAnswer = false)"
           />
         </div>
       </div>
     </div>
+
+    <ToastContainer />
+    <ConfirmDialog />
   </div>
 </template>
 
@@ -183,6 +200,12 @@ import DataTable from './components/DataTable.vue'
 import MasterBankList from './components/MasterBankList.vue'
 import MockInterview from './components/MockInterview.vue'
 import InlineEdit from './components/InlineEdit.vue'
+import ToastContainer from './components/ToastContainer.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+import { useToast, useConfirm } from './composables/useNotification.js'
+
+const toast = useToast()
+const { confirm: showConfirm } = useConfirm()
 
 // ── State ──
 const activeTab = ref('MasterBank')
@@ -194,6 +217,7 @@ const isDataLoading = ref(false)
 const dataLoadError = ref(null)
 const analytics = ref({ tech_trends: {} })
 const selectedTag = ref('全部')
+const selectedSubTags = ref([])
 const searchQuery = ref('')
 const filterDifficulty = ref('')
 const showStarredOnly = ref(false)
@@ -233,10 +257,31 @@ const popularTags = computed(() => {
   return Object.entries(counts).sort((a, b) => b[1] - a[1]).reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
 })
 
+const availableSubTags = computed(() => {
+  if (selectedTag.value === '全部') return []
+  const catItems = masterBank.value.filter(q =>
+    (q.cat1 || '未分类').split(',').map(c => c.trim()).includes(selectedTag.value)
+  )
+  const counts = {}
+  catItems.forEach(q => {
+    const tags = (q.tags || '').split(',').map(t => t.trim()).filter(t => t)
+    tags.forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
+  })
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([tag, count]) => ({ tag, count }))
+})
+
 const filteredMasterBank = computed(() => {
   let result = masterBank.value
   if (selectedTag.value !== '全部') {
     result = result.filter(q => (q.cat1 || '未分类').split(',').map(c => c.trim()).includes(selectedTag.value))
+  }
+  if (selectedSubTags.value.length > 0) {
+    result = result.filter(q => {
+      const itemTags = (q.tags || '').split(',').map(t => t.trim()).filter(t => t)
+      return selectedSubTags.value.some(st => itemTags.includes(st))
+    })
   }
   if (searchQuery.value.trim()) {
     const query = searchQuery.value.trim().toLowerCase()
@@ -246,6 +291,117 @@ const filteredMasterBank = computed(() => {
   if (showStarredOnly.value) result = result.filter(q => q.is_starred)
   return result
 })
+
+// ── Batch action definitions ──
+const jdBatchActions = computed(() => [
+  {
+    key: 'batch-delete',
+    label: '批量删除',
+    color: 'red',
+    handler: async (onProgress) => {
+      const ids = [...jdSelection.selectedIds.value]
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`)) return
+      onProgress(0, ids.length)
+      try {
+        const result = await api.batchDeleteData('jd', ids)
+        onProgress(result.deleted, ids.length)
+        toast.success(`已成功删除 ${result.deleted} 条记录！`)
+      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      jdSelection.clearSelection()
+      fetchTableData()
+      fetchAnalytics()
+    }
+  }
+])
+
+const interviewBatchActions = computed(() => [
+  {
+    key: 'batch-reprocess',
+    label: '批量重新分析',
+    color: 'blue',
+    handler: async (onProgress) => {
+      const ids = [...interviewSelection.selectedIds.value]
+      if (!await showConfirm(`确定要重新分析选中的 ${ids.length} 条面经？`)) return
+      onProgress(0, ids.length)
+      let ok = 0
+      for (let i = 0; i < ids.length; i++) {
+        try { await api.reprocessInterview(ids[i]); ok++ } catch (e) { console.error(e) }
+        onProgress(i + 1, ids.length)
+      }
+      toast.success(`批量重新分析完成，成功解析 ${ok} 条记录！`)
+      interviewSelection.clearSelection()
+      fetchTableData()
+      fetchAnalytics()
+    }
+  },
+  {
+    key: 'batch-delete',
+    label: '批量删除',
+    color: 'red',
+    handler: async (onProgress) => {
+      const ids = [...interviewSelection.selectedIds.value]
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`)) return
+      onProgress(0, ids.length)
+      try {
+        const result = await api.batchDeleteData('interview', ids)
+        onProgress(result.deleted, ids.length)
+        toast.success(`已成功删除 ${result.deleted} 条记录！`)
+      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      interviewSelection.clearSelection()
+      fetchTableData()
+      fetchAnalytics()
+    }
+  }
+])
+
+const masterBatchActions = computed(() => [
+  {
+    key: 'batch-generate',
+    label: '批量生成答案',
+    color: 'blue',
+    handler: async (onProgress) => {
+      const ids = [...masterSelection.selectedIds.value]
+      if (!await showConfirm(`确定要为选中的 ${ids.length} 道题目生成答案？`)) return
+      try {
+        const result = await api.batchGenerateAnswers(ids, (event) => {
+          if (event.type === 'init') {
+            if (event.total === 0) {
+              toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
+            } else {
+              onProgress(0, event.total)
+            }
+          } else if (event.type === 'progress') {
+            onProgress(event.current, event.total)
+          }
+        })
+        if (result) {
+          const parts = []
+          if (result.generated) parts.push(`成功 ${result.generated} 题`)
+          if (result.failed) parts.push(`失败 ${result.failed} 题`)
+          if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
+          toast.success(parts.length ? `生成完成：${parts.join('，')}` : '生成完成')
+        }
+      } catch (e) { toast.error(`批量生成答案失败: ${e.message}`) }
+      fetchTableData()
+    }
+  },
+  {
+    key: 'batch-delete',
+    label: '批量删除',
+    color: 'red',
+    handler: async (onProgress) => {
+      const ids = [...masterSelection.selectedIds.value]
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 道题目？`)) return
+      onProgress(0, ids.length)
+      try {
+        const result = await api.batchDeleteMasterBank(ids)
+        onProgress(result.deleted, ids.length)
+        toast.success(`已成功删除 ${result.deleted} 道题目！`)
+      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      fetchTableData()
+    }
+  }
+])
 
 // ── Data fetching ──
 const fetchTableData = async () => {
@@ -260,6 +416,7 @@ const fetchTableData = async () => {
     jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
     interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
     masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
+    selectedSubTags.value = []
     jdSelection.clearSelection()
     interviewSelection.clearSelection()
   } catch (e) {
@@ -284,56 +441,45 @@ const onTabChange = (tab) => {
   activeTab.value = tab
 }
 
-const deleteDataRow = async (type, recordId) => {
-  if (!confirm('确定要彻底删除这一行记录吗？此操作不可恢复！')) return
-  try {
-    await api.deleteRecord(type, recordId)
-    fetchTableData()
-    fetchAnalytics()
-  } catch (err) { alert(`删除失败: ${err.message}`) }
+const onSelectTag = (tag) => {
+  selectedTag.value = tag
+  selectedSubTags.value = []
+  activeTab.value = 'MasterBank'
 }
 
-const batchDeleteData = async (type, dataList, selection) => {
-  const ids = dataList.filter(item => selection.selectedIds.value.has(item.id)).map(item => item.id)
-  if (ids.length === 0) return
-  if (!confirm(`确定要彻底删除选中的 ${ids.length} 行记录吗？此操作不可恢复！`)) return
-  let ok = 0
-  for (const id of ids) { try { await api.deleteRecord(type, id); ok++ } catch (e) { console.error(`删除 ID:${id} 失败`, e) } }
-  alert(`已成功删除 ${ok} 条记录！`)
-  selection.clearSelection()
-  fetchTableData()
-  fetchAnalytics()
+const toggleSubTag = (tag) => {
+  const idx = selectedSubTags.value.indexOf(tag)
+  if (idx === -1) {
+    selectedSubTags.value = [...selectedSubTags.value, tag]
+  } else {
+    selectedSubTags.value = selectedSubTags.value.filter(t => t !== tag)
+  }
+}
+
+const deleteDataRow = async (type, recordId) => {
+  if (!await showConfirm('确定要删除该记录？')) return
+  try {
+    await api.deleteRecord(type, recordId)
+    toast.success('删除成功')
+    fetchTableData()
+    fetchAnalytics()
+  } catch (err) { toast.error(`删除失败: ${err.message}`) }
 }
 
 const reprocessInterview = async (id) => {
-  if (!confirm('确定要重新调用大模型提取并打标该面经记录吗？')) return
+  if (!await showConfirm('确定要重新解析该面经？')) return
   reprocessingIds.value[id] = true
   try {
     const data = await api.reprocessInterview(id)
-    alert(data.message)
+    toast.success('重新解析完成')
     fetchTableData()
     fetchAnalytics()
-  } catch (e) { alert(`错误: ${e.message}`) }
+  } catch (e) { toast.error(`失败：${e.message}`) }
   finally { reprocessingIds.value[id] = false }
 }
 
-const batchReprocessInterview = async () => {
-  const targets = interviewData.value.filter(item => interviewSelection.selectedIds.value.has(item.id) && !reprocessingIds.value[item.id])
-  if (targets.length === 0) return
-  if (!confirm(`确定要为选中的 ${targets.length} 条面经记录排队重新分析吗？`)) return
-  let ok = 0
-  for (const item of targets) {
-    reprocessingIds.value[item.id] = true
-    try { await api.reprocessInterview(item.id); ok++ } catch (e) { console.error(`重新解析面经ID ${item.id} 失败`, e) }
-    finally { reprocessingIds.value[item.id] = false }
-  }
-  alert(`批量重新分析完成，成功解析 ${ok} 条记录！`)
-  fetchTableData()
-  fetchAnalytics()
-}
-
 const retagQuestion = async (question) => {
-  if (!confirm('确定要重新调用大模型对该题目进行结构化打标吗？')) return
+  if (!await showConfirm('确定要重新分类该题目？')) return
   question._isRetagging = true
   try {
     const data = await api.retagQuestion(question.id)
@@ -341,8 +487,9 @@ const retagQuestion = async (question) => {
     question.cat2 = data.data.cat2
     question.tags = data.data.tags
     question.difficulty = data.data.difficulty
+    toast.success('分类成功')
     fetchAnalytics()
-  } catch (e) { alert(`错误: ${e.message}`) }
+  } catch (e) { toast.error(`失败：${e.message}`) }
   finally { question._isRetagging = false }
 }
 
@@ -351,7 +498,8 @@ const saveField = async (tableName, recordId, dbColumn, newValue, rowObj, editSt
     await api.updateRecord({ table_name: tableName, record_id: recordId, update_data: { [dbColumn]: newValue } })
     rowObj[frontendKey] = newValue
     rowObj[editStateKey] = false
-  } catch (err) { alert(`系统错误: ${err.message}`) }
+    toast.success('保存成功')
+  } catch (err) { toast.error(`保存失败: ${err.message}`) }
 }
 
 const saveFieldFromEvent = ({ tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey }) => {
@@ -362,7 +510,7 @@ const toggleStar = async (question) => {
   try {
     const data = await api.toggleStar(question.id)
     question.is_starred = data.is_starred
-  } catch (e) { alert(`收藏操作失败: ${e.message}`) }
+  } catch (e) { toast.error(`操作失败：${e.message}`) }
 }
 
 const generateAnswer = async (question) => {
@@ -370,39 +518,20 @@ const generateAnswer = async (question) => {
   try {
     const data = await api.generateAnswer(question.id)
     question.ai_answer = data.answer
-  } catch (e) { alert(`生成解答失败: ${e.message}`) }
+    toast.success('答案生成成功')
+  } catch (e) { toast.error(`生成失败：${e.message}`) }
   finally { question._isLoadingAnswer = false }
 }
 
-const batchGenerateAnswers = async () => {
-  const sel = masterSelection.selectedIds.value
-  const targets = filteredMasterBank.value.filter(q => sel.has(q.id) && !q._isLoadingAnswer)
-  if (targets.length === 0) { alert('当前没有选中任何题目！'); return }
-  if (!confirm(`确定要为 ${targets.length} 道选中题目排队生成答案吗？`)) return
-  for (const q of targets) await generateAnswer(q)
-  alert('批量生成解答完成！')
-}
-
-const batchDeleteMasterBank = async () => {
-  const sel = masterSelection.selectedIds.value
-  const targets = filteredMasterBank.value.filter(q => sel.has(q.id))
-  if (targets.length === 0) return
-  if (!confirm(`确定要彻底删除这 ${targets.length} 道高频真题吗？此操作不可恢复！`)) return
-  let ok = 0
-  for (const q of targets) { try { await api.deleteMasterQuestion(q.id); ok++ } catch (e) { console.error(`删除 ID:${q.id} 失败`, e) } }
-  alert(`已成功删除 ${ok} 道题目！`)
-  fetchTableData()
-}
-
 const triggerBuildMasterBank = async () => {
-  if (!confirm('这将调用 Embeddings API 对所有题目进行重新聚类。确定继续吗？')) return
+  if (!await showConfirm('将重新整理全部题目，确定继续？')) return
   isBuilding.value = true
   try {
     const data = await api.buildMasterBank()
-    alert(`全量聚类计算完毕！共归纳出 ${data.total_unique} 道核心真题。`)
+    toast.success(`重建完成，共 ${data.total_unique} 道题目`)
     fetchTableData()
     fetchAnalytics()
-  } catch (e) { alert('计算失败：' + e.message) }
+  } catch (e) { toast.error('重建失败：' + e.message) }
   finally { isBuilding.value = false }
 }
 

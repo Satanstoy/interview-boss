@@ -12,7 +12,7 @@
 
     <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100">
       <div class="p-4 lg:p-6 flex flex-col">
-        <label class="block text-sm font-semibold text-gray-700 mb-2">补充纯文本内容</label>
+        <label class="block text-sm font-semibold text-gray-700 mb-2">文本内容</label>
         <textarea
           v-model="stagedText"
           class="flex-1 w-full border border-gray-300 rounded-lg p-3 focus:ring-blue-500 focus:border-blue-500 resize-none"
@@ -28,7 +28,7 @@
         @drop.prevent="handleDrop"
       >
         <div class="flex justify-between items-center mb-2">
-          <label class="block text-sm font-semibold text-gray-700">图片暂存区 ({{ stagedFiles.length }} 张)</label>
+          <label class="block text-sm font-semibold text-gray-700">图片 ({{ stagedFiles.length }} 张)</label>
           <div>
             <input type="file" multiple class="hidden" ref="fileInput" @change="handleFileSelect" accept="image/*" />
             <button @click="$refs.fileInput.click()" class="text-xs bg-gray-200 text-gray-700 px-3 py-1 rounded hover:bg-gray-300 transition">
@@ -60,7 +60,7 @@
     <div class="bg-gray-50 border-t border-gray-200 p-4 flex flex-col items-center">
       <div class="flex gap-4 w-full justify-end mb-4">
         <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2 rounded-lg text-gray-600 hover:bg-gray-200 transition">
-          清空暂存
+          清空
         </button>
         <button
           @click="submitAll"
@@ -68,12 +68,12 @@
           class="bg-blue-600 text-white font-bold px-8 py-2 rounded-lg hover:bg-blue-700 transition shadow-md disabled:bg-blue-300 disabled:cursor-not-allowed flex items-center gap-2"
         >
           <svg v-if="isUploading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-          {{ isUploading ? '大模型正在提取及增量聚类中...' : '提交联合解析' }}
+          {{ isUploading ? 'AI 正在解析中...' : '提交解析' }}
         </button>
       </div>
 
       <div v-if="uploadResult" class="text-green-600 font-medium w-full text-center bg-green-50 p-2 rounded">
-        解析成功！已提取为：<span class="font-bold ml-1">{{ uploadResult.type }}</span> （新考点已丢入后台排队生成解答）
+        解析成功！类型：<span class="font-bold ml-1">{{ uploadResult.type }}</span>
       </div>
       <div v-if="uploadError" class="text-red-600 font-medium w-full text-center bg-red-50 p-2 rounded">
         {{ uploadError }}

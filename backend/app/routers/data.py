@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from app.core.config import DATA_DIR, ALLOWED_UPDATE_COLUMNS
 from app.db.connection import get_db_connection, run_db
-from app.models.schemas import GenericUpdateRequest
+from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
 
 logger = logging.getLogger("multimodal-parser")
 
@@ -138,6 +138,62 @@ async def delete_data(file_type: str, record_id: int):
         raise
     except Exception as e:
         logger.exception("操作失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/data/batch-delete")
+async def batch_delete_data(req: BatchDataDeleteRequest):
+    """批量删除记录，单事务完成"""
+    table_map = {"jd": "jd", "interview": "interview"}
+    table_name = table_map.get(req.file_type.lower())
+    if not table_name:
+        raise HTTPException(status_code=400, detail="不支持的表类型，仅支持 jd 和 interview")
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+
+    def _batch_delete():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join("?" * len(req.ids))
+            rows = cursor.execute(
+                f"SELECT id, url FROM {table_name} WHERE id IN ({placeholders})", req.ids
+            ).fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到任何匹配记录")
+
+            if table_name == "interview":
+                urls_to_delete = {r["url"] for r in rows if r["url"]}
+                all_master = cursor.execute("SELECT id, sources FROM master_question_bank").fetchall()
+                for mr in all_master:
+                    try:
+                        sources = json.loads(mr["sources"]) if mr["sources"] else []
+                    except Exception:
+                        sources = []
+                    if any(s.get("url") in urls_to_delete for s in sources):
+                        new_sources = [s for s in sources if s.get("url") not in urls_to_delete]
+                        cursor.execute(
+                            "UPDATE master_question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            (len(new_sources), json.dumps(new_sources), mr["id"])
+                        )
+                cursor.execute(
+                    "DELETE FROM master_question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+                )
+                for url in urls_to_delete:
+                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+
+            found_ids = [r["id"] for r in rows]
+            ph2 = ",".join("?" * len(found_ids))
+            cursor.execute(f"DELETE FROM {table_name} WHERE id IN ({ph2})", found_ids)
+            conn.commit()
+            return len(found_ids)
+
+    try:
+        deleted = await run_db(_batch_delete)
+        return {"status": "success", "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("批量删除失败")
         raise HTTPException(status_code=500, detail=str(e))
 
 

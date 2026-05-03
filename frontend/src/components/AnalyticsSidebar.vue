@@ -1,47 +1,48 @@
 <template>
   <div class="lg:col-span-1 bg-white p-4 lg:p-6 rounded-xl shadow-sm border border-gray-100 h-fit lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto custom-scrollbar">
-    <h2 class="text-2xl font-bold mb-6">全局分析</h2>
-    <button @click="$emit('refresh')" class="w-full bg-indigo-50 text-indigo-700 px-4 py-2 rounded mb-6 hover:bg-indigo-100 transition">
-      刷新分析数据
+    <h2 class="text-xl font-bold mb-5 text-gray-800">数据概览</h2>
+    <button @click="$emit('refresh')" class="w-full bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg mb-5 hover:bg-indigo-100 transition text-sm font-medium">
+      刷新
     </button>
 
-    <div class="mb-8">
-      <h3 class="text-lg font-semibold text-gray-700 mb-3 border-l-4 border-purple-500 pl-2">考点分布 (精炼题库)</h3>
-      <div ref="chartRef" class="w-full h-[320px]"></div>
+    <div class="mb-6">
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">考点分布</h3>
+      <div v-if="masterBank.length > 0" ref="chartRef" class="w-full h-[260px] lg:h-[300px]"></div>
+      <div v-else class="w-full h-[260px] lg:h-[300px] flex items-center justify-center text-gray-400 text-sm">暂无数据</div>
     </div>
 
-    <div class="mb-8">
-      <h3 class="text-lg font-semibold text-gray-700 mb-3 border-l-4 border-blue-500 pl-2">热点技术栈 (JD)</h3>
-      <ul class="space-y-2">
-        <li v-for="(count, tech) in analytics.tech_trends" :key="tech" class="flex justify-between items-center text-sm px-2">
-          <span class="bg-gray-100 px-2 py-1 rounded break-all mr-2">{{ tech }}</span>
-          <span class="text-gray-500 font-mono whitespace-nowrap">{{ count }} 次</span>
+    <div class="mb-6">
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">热门技术栈</h3>
+      <ul class="space-y-1.5">
+        <li v-for="(count, tech) in analytics.tech_trends" :key="tech" class="flex justify-between items-center text-sm px-2 py-1 rounded hover:bg-gray-50">
+          <span class="text-gray-700 break-all mr-2">{{ tech }}</span>
+          <span class="text-gray-400 font-mono text-xs whitespace-nowrap bg-gray-100 px-2 py-0.5 rounded">{{ count }}</span>
         </li>
         <li v-if="!analytics.tech_trends || Object.keys(analytics.tech_trends).length === 0" class="text-gray-400 text-sm px-2">暂无数据</li>
       </ul>
     </div>
 
     <div>
-      <h3 class="text-lg font-semibold text-gray-700 mb-3 border-l-4 border-green-500 pl-2">题库分类目录</h3>
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">分类目录</h3>
       <ul class="space-y-1">
         <li
           @click="$emit('select-tag', '全部')"
-          class="flex justify-between items-center text-sm cursor-pointer p-2 rounded transition-colors border border-transparent"
-          :class="selectedTag === '全部' ? 'bg-green-50 text-green-700 font-bold border-green-200' : 'hover:bg-gray-50 text-gray-600'"
+          class="flex justify-between items-center text-sm cursor-pointer px-2 py-1.5 rounded-lg transition-colors border border-transparent"
+          :class="selectedTag === '全部' ? 'bg-green-50 text-green-700 font-semibold border-green-200' : 'hover:bg-gray-50 text-gray-600'"
         >
-          <span>全部高频真题</span>
-          <span class="text-gray-500 font-mono">{{ masterBank.length }} 题</span>
+          <span>全部</span>
+          <span class="text-gray-400 font-mono text-xs">{{ masterBank.length }}</span>
         </li>
         <li
           v-for="(count, topic) in popularTags" :key="topic"
           @click="$emit('select-tag', topic)"
-          class="flex justify-between items-center text-sm cursor-pointer p-2 rounded transition-colors border border-transparent group"
-          :class="selectedTag === topic ? 'bg-green-50 text-green-700 font-bold border-green-200' : 'hover:bg-gray-50 text-gray-600'"
+          class="flex justify-between items-center text-sm cursor-pointer px-2 py-1.5 rounded-lg transition-colors border border-transparent group"
+          :class="selectedTag === topic ? 'bg-green-50 text-green-700 font-semibold border-green-200' : 'hover:bg-gray-50 text-gray-600'"
         >
           <span class="break-all mr-2 group-hover:text-green-600 transition-colors">{{ topic }}</span>
-          <span class="text-gray-400 font-mono whitespace-nowrap group-hover:text-green-500">{{ count }} 题</span>
+          <span class="text-gray-400 font-mono text-xs whitespace-nowrap group-hover:text-green-500">{{ count }}</span>
         </li>
-        <li v-if="!popularTags || Object.keys(popularTags).length === 0" class="text-gray-400 text-sm p-2">暂无数据</li>
+        <li v-if="!popularTags || Object.keys(popularTags).length === 0" class="text-gray-400 text-sm px-2 py-1.5">暂无数据</li>
       </ul>
     </div>
   </div>
@@ -78,6 +79,7 @@ const updateDistributionChart = () => {
   myChart.setOption({
     tooltip: {
       trigger: 'item',
+      confine: true,
       backgroundColor: 'rgba(255, 255, 255, 0.95)',
       borderColor: '#e5e7eb',
       textStyle: { color: '#374151' },
