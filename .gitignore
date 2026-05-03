@@ -11,3 +11,9 @@ wheels/
 
 # Environment variables
 .env
+
+# SQLite runtime files
+*.db-shm
+*.db-wal
+*.db.bak.*
+backend/data/*.db
