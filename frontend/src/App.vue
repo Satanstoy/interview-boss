@@ -1,11 +1,11 @@
 <template>
-  <div class="min-h-screen p-8 max-w-[98%] mx-auto bg-slate-50">
-    <header class="mb-10 text-center">
-      <h1 class="text-4xl font-bold text-gray-900 mb-2">多模态 JD 与面经智能解析系统</h1>
-      <p class="text-gray-500">将零散的内容放至暂存区，确认无误后一键提交解析与增量聚类</p>
+    <div class="min-h-screen p-3 lg:p-8 max-w-[98%] mx-auto bg-slate-50">
+    <header class="mb-6 lg:mb-10 text-center">
+      <h1 class="text-2xl lg:text-4xl font-bold text-gray-900 mb-2">多模态 JD 与面经智能解析系统</h1>
+      <p class="text-sm lg:text-base text-gray-500">将零散的内容放至暂存区，确认无误后一键提交解析与增量聚类</p>
     </header>
 
-    <div class="bg-white rounded-xl shadow-md border border-gray-200 mb-10 overflow-hidden">
+    <div class="bg-white rounded-xl shadow-md border border-gray-200 mb-6 lg:mb-10 overflow-hidden">
       <div class="bg-gray-50 p-4 border-b border-gray-200 flex items-center gap-4">
         <label class="font-semibold text-gray-700 whitespace-nowrap">来源链接 (URL):</label>
         <input 
@@ -16,8 +16,8 @@
         />
       </div>
 
-      <div class="grid grid-cols-2 divide-x divide-gray-100">
-        <div class="p-6 flex flex-col">
+      <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100">
+        <div class="p-4 lg:p-6 flex flex-col">
           <label class="block text-sm font-semibold text-gray-700 mb-2">补充纯文本内容</label>
           <textarea 
             v-model="stagedText"
@@ -27,7 +27,7 @@
         </div>
 
         <div 
-          class="p-6 flex flex-col transition-colors relative"
+          class="p-4 lg:p-6 flex flex-col transition-colors relative"
           :class="isDragging ? 'bg-blue-50' : ''"
           @dragover.prevent="isDragging = true"
           @dragleave.prevent="isDragging = false"
@@ -53,7 +53,7 @@
             
             <div v-else class="flex flex-wrap gap-3">
               <div v-for="(item, index) in stagedFiles" :key="item.id" class="relative group">
-                <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-gray-300 shadow-sm" />
+                <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-gray-300 shadow-sm" @error="handleImgError" />
                 <button @click="removeFile(index)" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow">
                   <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
@@ -87,9 +87,9 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-4 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
       
-      <div class="col-span-1 bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit sticky top-8 max-h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar">
+      <div class="lg:col-span-1 bg-white p-4 lg:p-6 rounded-xl shadow-sm border border-gray-100 h-fit lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto custom-scrollbar">
         <h2 class="text-2xl font-bold mb-6">📊 全局分析</h2>
         <button @click="fetchAnalytics" class="w-full bg-indigo-50 text-indigo-700 px-4 py-2 rounded mb-6 hover:bg-indigo-100 transition">
           刷新分析数据
@@ -136,48 +136,102 @@
         </div>
       </div>
 
-      <div class="col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         
-        <div class="flex border-b bg-gray-50">
+        <div class="flex flex-wrap border-b bg-gray-50">
           <button 
             @click="activeTab = 'JD'"
-            class="flex-1 py-4 text-lg font-medium transition-colors"
+            class="flex-1 min-w-0 py-3 lg:py-4 text-sm lg:text-lg font-medium transition-colors"
             :class="activeTab === 'JD' ? 'text-blue-600 bg-white border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'"
           >
-            Job Descriptions (JD)
+            JD
           </button>
           <button 
             @click="activeTab = 'Interview'"
-            class="flex-1 py-4 text-lg font-medium transition-colors"
+            class="flex-1 min-w-0 py-3 lg:py-4 text-sm lg:text-lg font-medium transition-colors"
             :class="activeTab === 'Interview' ? 'text-gray-600 bg-white border-b-2 border-gray-600' : 'text-gray-500 hover:text-gray-700'"
           >
-            面经流水记录
+            面经
           </button>
           <button 
             @click="activeTab = 'MasterBank'"
-            class="flex-1 py-4 text-lg font-bold transition-colors"
+            class="flex-1 min-w-0 py-3 lg:py-4 text-sm lg:text-lg font-bold transition-colors"
             :class="activeTab === 'MasterBank' ? 'text-red-600 bg-white border-b-2 border-red-600' : 'text-gray-500 hover:text-gray-700'"
           >
-            🔥 核心精炼题库
+            🔥题库
+          </button>
+          <button 
+            @click="activeTab = 'MockInterview'; startMockInterview()"
+            class="flex-1 min-w-0 py-3 lg:py-4 text-sm lg:text-lg font-bold transition-colors"
+            :class="activeTab === 'MockInterview' ? 'text-orange-600 bg-white border-b-2 border-orange-600' : 'text-gray-500 hover:text-gray-700'"
+          >
+            🎯模拟
           </button>
         </div>
 
-        <div class="p-6">
-          <div class="flex justify-between items-center mb-6">
-            <h2 class="text-xl font-bold flex items-center gap-2">
-              {{ activeTab === 'JD' ? '职位描述库' : activeTab === 'Interview' ? '原始面经流水' : '必考真题库' }}
+        <div class="p-3 lg:p-6">
+          <!-- 搜索和筛选栏（MasterBank 和 MockInterview 共用） -->
+          <div v-if="activeTab === 'MasterBank' || activeTab === 'MockInterview'" class="mb-4 flex flex-wrap gap-3 items-center">
+            <div class="flex-1 min-w-[200px]">
+              <input 
+                v-model="searchQuery"
+                type="text" 
+                class="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                placeholder="🔍 搜索题目关键词..."
+                @input="onSearchInput"
+              />
+            </div>
+            <select v-model="filterDifficulty" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+              <option value="">全部难度</option>
+              <option value="L1">L1-基础</option>
+              <option value="L2">L2-中等</option>
+              <option value="L3">L3-困难</option>
+            </select>
+            <button 
+              v-if="activeTab === 'MasterBank'"
+              @click="showStarredOnly = !showStarredOnly"
+              class="px-3 py-2 text-sm rounded-lg border transition"
+              :class="showStarredOnly ? 'bg-yellow-100 border-yellow-300 text-yellow-700' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'"
+            >
+              {{ showStarredOnly ? '⭐ 仅看收藏' : '☆ 全部' }}
+            </button>
+          </div>
+
+          <div class="flex flex-wrap justify-between items-center mb-4 lg:mb-6 gap-2">
+            <h2 class="text-lg lg:text-xl font-bold flex items-center gap-2">
+              {{ activeTab === 'JD' ? '职位描述库' : activeTab === 'Interview' ? '原始面经流水' : activeTab === 'MockInterview' ? '🎯 模拟面试' : '必考真题库' }}
               <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="text-sm font-normal bg-green-100 text-green-700 px-3 py-1 rounded-full border border-green-200">
                 分类筛选: {{ selectedTag }}
               </span>
+              <span v-if="activeTab === 'MasterBank' && searchQuery" class="text-sm font-normal bg-blue-100 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
+                搜索: {{ searchQuery }}
+              </span>
             </h2>
-            <div class="space-x-3">
+            <div class="flex flex-wrap gap-2">
               <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="text-sm bg-purple-600 text-white font-bold px-4 py-2 rounded hover:bg-purple-700 transition">
                 {{ isBuilding ? '正在提取全量特征并聚类去重...' : '⚡ 全量重新计算题库排序' }}
               </button>
+              <button v-if="activeTab === 'MockInterview'" @click="startMockInterview" class="text-sm bg-orange-600 text-white font-bold px-4 py-2 rounded hover:bg-orange-700 transition">
+                🔄 换一批题目
+              </button>
               
-              <button @click="fetchTableData" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200">刷新数据</button>
-              <button v-if="activeTab !== 'MasterBank'" @click="downloadCSV" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">一键导出 CSV</button>
+              <button @click="fetchTableData" :disabled="isDataLoading" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+            {{ isDataLoading ? '加载中...' : '刷新数据' }}
+          </button>
+              <button v-if="activeTab !== 'MasterBank' && activeTab !== 'MockInterview'" @click="downloadCSV" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">一键导出 CSV</button>
             </div>
+          </div>
+
+          <!-- 全局数据加载错误提示 -->
+          <div v-if="dataLoadError" class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+            <span>⚠️ {{ dataLoadError }}</span>
+            <button @click="fetchTableData" class="text-sm bg-red-100 hover:bg-red-200 px-3 py-1 rounded transition">重试</button>
+          </div>
+
+          <!-- 全局数据加载骨架 -->
+          <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 text-center">
+            <svg class="animate-spin h-8 w-8 text-blue-500 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <p class="text-gray-500">数据加载中...</p>
           </div>
 
           <div v-if="activeTab === 'JD'" class="overflow-x-auto w-full">
@@ -210,7 +264,7 @@
                   <td class="p-3 whitespace-nowrap">
                     <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3" title="访问链接">🔗</a>
                     <span v-else class="text-gray-300 mr-3">-</span>
-                    <button @click="deleteDataRow('jd', idx)" class="text-red-500 hover:text-red-700 font-bold" title="删除该行">🗑️</button>
+                    <button @click="deleteDataRow('jd', row.id)" class="text-red-500 hover:text-red-700 font-bold" title="删除该行">🗑️</button>
                   </td>
 
                   <td class="p-3 whitespace-nowrap group">
@@ -285,7 +339,7 @@
                     </button>
                     <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3" title="访问链接">🔗</a>
                     <span v-else class="text-gray-300 mr-3">-</span>
-                    <button @click="deleteDataRow('interview', idx)" class="text-red-500 hover:text-red-700 font-bold" title="删除该行">🗑️</button>
+                    <button @click="deleteDataRow('interview', row.id)" class="text-red-500 hover:text-red-700 font-bold" title="删除该行">🗑️</button>
                   </td>
 
                   <td class="p-3 font-medium whitespace-nowrap group">
@@ -300,13 +354,60 @@
                     </div>
                   </td>
 
-                  <td class="p-3 whitespace-nowrap">{{ row['面试轮次'] }}</td>
-                  <td class="p-3 whitespace-pre-wrap break-words">{{ row['考察重点'] }}</td>
-                  <td class="p-3 whitespace-pre-wrap break-words leading-relaxed">{{ row['具体题目清单'] }}</td>
-                  <td class="p-3 whitespace-nowrap">
-                    <span class="px-2 py-1 rounded text-xs" :class="(row['难易程度'] || '').includes('难') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
-                      {{ row['难易程度'] || row['难度'] || '-' }}
-                    </span>
+                  <td class="p-3 whitespace-nowrap group">
+                    <div v-if="!row._isEditingRound" class="flex items-center gap-2">
+                      {{ row['面试轮次'] }}
+                      <button @click="row._isEditingRound = true; row._editRound = row['面试轮次']" class="text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition" title="编辑">✏️</button>
+                    </div>
+                    <div v-else class="flex items-center gap-1">
+                      <input v-model="row._editRound" class="border rounded px-2 py-1 w-20 text-sm" @keyup.enter="saveField('interview', row.id, 'round', row._editRound, row, '_isEditingRound', '面试轮次')" />
+                      <button @click="saveField('interview', row.id, 'round', row._editRound, row, '_isEditingRound', '面试轮次')" class="text-green-500 hover:text-green-700" title="保存">💾</button>
+                      <button @click="row._isEditingRound = false" class="text-red-400 hover:text-red-600" title="取消">✖</button>
+                    </div>
+                  </td>
+                  <td class="p-3 whitespace-pre-wrap break-words group">
+                    <div v-if="!row._isEditingFocus" class="flex items-start gap-2">
+                      <span class="flex-1">{{ row['考察重点'] }}</span>
+                      <button @click="row._isEditingFocus = true; row._editFocus = row['考察重点']" class="text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">✏️</button>
+                    </div>
+                    <div v-else class="flex flex-col gap-1">
+                      <textarea v-model="row._editFocus" rows="3" class="border rounded px-2 py-1 w-full text-sm"></textarea>
+                      <div class="flex gap-1 justify-end">
+                        <button @click="saveField('interview', row.id, 'focus', row._editFocus, row, '_isEditingFocus', '考察重点')" class="text-green-500 hover:text-green-700 text-sm" title="保存">💾</button>
+                        <button @click="row._isEditingFocus = false" class="text-red-400 hover:text-red-600 text-sm" title="取消">✖</button>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="p-3 whitespace-pre-wrap break-words leading-relaxed group">
+                    <div v-if="!row._isEditingQuestions" class="flex items-start gap-2">
+                      <span class="flex-1">{{ row['具体题目清单'] }}</span>
+                      <button @click="row._isEditingQuestions = true; row._editQuestions = row['具体题目清单']" class="text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">✏️</button>
+                    </div>
+                    <div v-else class="flex flex-col gap-1">
+                      <textarea v-model="row._editQuestions" rows="6" class="border rounded px-2 py-1 w-full text-sm font-mono"></textarea>
+                      <div class="flex gap-1 justify-end">
+                        <button @click="saveField('interview', row.id, 'questions_list', row._editQuestions, row, '_isEditingQuestions', '具体题目清单')" class="text-green-500 hover:text-green-700 text-sm" title="保存">💾</button>
+                        <button @click="row._isEditingQuestions = false" class="text-red-400 hover:text-red-600 text-sm" title="取消">✖</button>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="p-3 whitespace-nowrap group">
+                    <div v-if="!row._isEditingDifficulty" class="flex items-center gap-2">
+                      <span class="px-2 py-1 rounded text-xs" :class="(row['难易程度'] || '').includes('难') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
+                        {{ row['难易程度'] || row['难度'] || '-' }}
+                      </span>
+                      <button @click="row._isEditingDifficulty = true; row._editDifficulty = row['难易程度'] || ''" class="text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition" title="编辑">✏️</button>
+                    </div>
+                    <div v-else class="flex items-center gap-1">
+                      <select v-model="row._editDifficulty" class="border rounded px-2 py-1 text-sm">
+                        <option value="">未提供</option>
+                        <option value="简单">简单</option>
+                        <option value="中等">中等</option>
+                        <option value="困难">困难</option>
+                      </select>
+                      <button @click="saveField('interview', row.id, 'difficulty', row._editDifficulty, row, '_isEditingDifficulty', '难易程度')" class="text-green-500 hover:text-green-700" title="保存">💾</button>
+                      <button @click="row._isEditingDifficulty = false" class="text-red-400 hover:text-red-600" title="取消">✖</button>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="interviewData.length === 0">
@@ -314,6 +415,52 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- 模拟面试模式 -->
+          <div v-if="activeTab === 'MockInterview'" class="space-y-6">
+            <div v-if="mockQuestions.length === 0" class="text-center py-10 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+              <p class="mb-2 text-lg">正在加载模拟面试题目...</p>
+              <p class="text-sm">如果没有题目，请先录入面经数据。</p>
+            </div>
+            <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-orange-200 rounded-xl overflow-hidden bg-white shadow-sm">
+              <div class="p-5 bg-gradient-to-r from-orange-50 to-amber-50">
+                <div class="flex items-start gap-4">
+                  <div class="flex flex-col items-center justify-center bg-orange-100 text-orange-700 font-bold rounded-lg p-3 min-w-[50px] border border-orange-200">
+                    <span class="text-xs font-normal text-orange-400">第</span>
+                    <span class="text-xl leading-none">{{ qIdx + 1 }}</span>
+                    <span class="text-xs font-normal text-orange-400">题</span>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex gap-2 mb-2 items-center flex-wrap">
+                      <span class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded font-semibold">{{ q.cat1 || '未分类' }}</span>
+                      <span class="text-xs font-medium px-2 py-0.5 rounded" :class="String(q.difficulty).includes('L3') ? 'bg-red-50 text-red-600' : String(q.difficulty).includes('L2') ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'">
+                        {{ q.difficulty || '-' }}
+                      </span>
+                      <span class="text-xs text-gray-400 ml-auto">考频 {{ q.frequency }}</span>
+                    </div>
+                    <h3 class="text-lg font-bold text-gray-800 leading-snug">{{ q.question }}</h3>
+                  </div>
+                </div>
+              </div>
+              <div class="border-t border-orange-100">
+                <button 
+                  @click="q._showAnswer = !q._showAnswer"
+                  class="w-full py-3 text-sm font-medium text-orange-600 hover:bg-orange-50 transition flex items-center justify-center gap-2"
+                >
+                  {{ q._showAnswer ? '🙈 收起参考答案' : '👁️ 查看参考答案（先自己想想！）' }}
+                </button>
+                <div v-if="q._showAnswer" class="p-6 bg-slate-50 border-t border-orange-100">
+                  <div v-if="q.ai_answer" class="text-gray-700 text-sm leading-relaxed" v-html="renderMarkdown(q.ai_answer)"></div>
+                  <div v-else class="text-center py-4">
+                    <p class="text-gray-400 mb-3 text-sm">该题目暂无 AI 生成的参考答案。</p>
+                    <button @click="generateAnswer(q)" class="bg-blue-100 text-blue-700 font-bold px-6 py-2 rounded-lg hover:bg-blue-200 transition text-sm">
+                      ✨ 召唤 AI 生成参考答案
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-if="activeTab === 'MasterBank'" class="space-y-4">
@@ -356,6 +503,9 @@
                     <span class="text-xs ml-auto font-medium px-2 py-0.5 rounded" :class="String(q.difficulty).includes('困难') || String(q.difficulty).includes('L3') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'">
                       难度: {{ q.difficulty || '-' }}
                     </span>
+                    <button @click.stop="toggleStar(q)" class="text-lg ml-1 transition-transform hover:scale-125" :title="q.is_starred ? '取消收藏' : '收藏'">
+                      {{ q.is_starred ? '⭐' : '☆' }}
+                    </button>
                     <button @click.stop="retagQuestion(q)" :disabled="q._isRetagging" class="text-xs bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded border border-yellow-200 hover:bg-yellow-100 transition disabled:opacity-50 ml-2">
                       <svg v-if="q._isRetagging" class="animate-spin inline-block w-3 h-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                       {{ q._isRetagging ? '打标中...' : '🏷️ 重新打标' }}
@@ -403,7 +553,7 @@
                     ✏️ 修改答案
                   </button>
                   
-                  <div v-if="q.ai_answer" class="text-gray-700 text-sm leading-relaxed max-w-none" v-html="renderMarkdown(q.ai_answer)"></div>
+                  <div v-if="q.ai_answer && !isFailedAnswer(q.ai_answer)" class="text-gray-700 text-sm leading-relaxed max-w-none" v-html="renderMarkdown(q.ai_answer)"></div>
                   
                   <div v-else-if="q._isLoadingAnswer" class="flex flex-col items-center justify-center py-6 text-blue-600 gap-3">
                     <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -411,7 +561,8 @@
                   </div>
 
                   <div v-else class="text-center py-4">
-                    <p class="text-gray-500 mb-3 text-sm">该题目是由系统后台刚刚抽取出的新考点，尚未生成解答。</p>
+                    <p v-if="isFailedAnswer(q.ai_answer)" class="text-red-500 mb-3 text-sm">⚠️ 上次自动生成失败，请手动重试。</p>
+                    <p v-else class="text-gray-500 mb-3 text-sm">该题目是由系统后台刚刚抽取出的新考点，尚未生成解答。</p>
                     <button @click.stop="generateAnswer(q)" class="bg-blue-100 text-blue-700 font-bold px-6 py-2.5 rounded-lg hover:bg-blue-200 transition shadow-sm border border-blue-200">
                       ✨ 召唤 AI 生成满分回答
                     </button>
@@ -436,6 +587,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import * as echarts from 'echarts'
+import { get, post, put, del, upload, cancelAllRequests } from './utils/http.js'
 
 const API_BASE = '/api'
 
@@ -447,6 +599,8 @@ const isDragging = ref(false)
 const isUploading = ref(false)
 const uploadResult = ref(null)
 const uploadError = ref(null)
+const isDataLoading = ref(false)
+const dataLoadError = ref(null)
 
 const activeTab = ref('MasterBank')
 const jdData = ref([])
@@ -456,19 +610,34 @@ const isBuilding = ref(false)
 const analytics = ref({ tech_trends: {} })
 
 const selectedTag = ref('全部')
+const searchQuery = ref('')
+const filterDifficulty = ref('')
+const showStarredOnly = ref(false)
+const mockQuestions = ref([])
 
 const reprocessingIds = ref({})
 
 const chartRef = ref(null)
 let myChart = null
+let resizeHandler = null
 
 const popularTags = computed(() => {
   const counts = {}
   masterBank.value.forEach(q => {
-    const cat = q.cat1 || '未分类'
-    counts[cat] = (counts[cat] || 0) + 1
+    const rawCat = q.cat1 || '未分类'
+    const cats = rawCat.split(',').map(c => c.trim()).filter(c => c)
+    if (cats.length === 0) {
+      counts['未分类'] = (counts['未分类'] || 0) + 1
+    } else {
+      cats.forEach(cat => {
+        counts[cat] = (counts[cat] || 0) + 1
+      })
+    }
   })
-  return counts
+  // 按出现次数降序排序
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .reduce((acc, [key, val]) => { acc[key] = val; return acc }, {})
 })
 
 const selectedJdCount = computed(() => jdData.value.filter(item => item._selected).length)
@@ -507,7 +676,8 @@ onMounted(() => {
   
   if (chartRef.value) {
     myChart = echarts.init(chartRef.value)
-    window.addEventListener('resize', () => myChart && myChart.resize())
+    resizeHandler = () => myChart && myChart.resize()
+    window.addEventListener('resize', resizeHandler)
   }
   
   fetchTableData()
@@ -516,33 +686,31 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('paste', handleGlobalPaste)
-  if (myChart) {
-    window.removeEventListener('resize', myChart.resize)
-    myChart.dispose()
+  if (myChart && resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
   }
+  if (myChart) {
+    myChart.dispose()
+    myChart = null
+  }
+  // 取消所有进行中的请求
+  cancelAllRequests()
 })
 
 const updateDistributionChart = () => {
   if (!myChart || !masterBank.value.length) return
 
   const cat1Map = {}
-  const cat2Map = {}
 
   masterBank.value.forEach(item => {
     const c1 = (item.cat1 && item.cat1 !== '未分类(API漏标)') ? item.cat1 : '其他/未分类'
-    const c2 = (item.cat2 && item.cat2 !== '未分类') ? item.cat2 : '未知'
-    
     cat1Map[c1] = (cat1Map[c1] || 0) + 1
-    
-    const c2Key = `${c1}|${c2}`
-    cat2Map[c2Key] = (cat2Map[c2Key] || 0) + 1
   })
 
-  const innerData = Object.keys(cat1Map).map(k => ({ name: k, value: cat1Map[k] }))
-  const outerData = Object.keys(cat2Map).map(k => {
-    const [c1, c2] = k.split('|')
-    return { name: c2, value: cat2Map[k], cat1: c1 }
-  })
+  const pieData = Object.keys(cat1Map)
+    .map(k => ({ name: k, value: cat1Map[k] }))
+    .sort((a, b) => b.value - a.value)
 
   const option = {
     tooltip: {
@@ -550,56 +718,43 @@ const updateDistributionChart = () => {
       backgroundColor: 'rgba(255, 255, 255, 0.95)',
       borderColor: '#e5e7eb',
       textStyle: { color: '#374151' },
-      formatter: (params) => {
-        if (params.seriesName === '一级大类') {
-          const c1 = params.name
-          const subItems = outerData.filter(d => d.cat1 === c1).sort((a,b) => b.value - a.value)
-          let html = `<div style="font-weight:bold;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:4px;">${c1} (共 ${params.value} 题)</div>`
-          subItems.forEach(item => {
-            html += `<div style="font-size:12px;color:#6b7280;margin:2px 0;">• ${item.name}: ${item.value} 题</div>`
-          })
-          return html
-        }
-        return `<div style="font-size:12px;color:#9ca3af;margin-bottom:2px;">${params.data.cat1}</div>
-                <div style="font-weight:bold;">${params.name}: ${params.value} 题 (${params.percent}%)</div>`
-      }
+      formatter: '{b}: {c} 题 ({d}%)'
     },
     series: [
       {
-        name: '一级大类',
         type: 'pie',
-        selectedMode: 'single',
-        radius: [0, '40%'],
-        label: { 
-          position: 'inner', 
-          fontSize: 10,
-          color: '#fff',
-          formatter: '{b}' 
-        },
-        labelLine: { show: false },
-        data: innerData,
+        radius: ['35%', '70%'],
+        center: ['50%', '55%'],
+        avoidLabelOverlap: true,
         itemStyle: {
+          borderRadius: 6,
           borderColor: '#fff',
-          borderWidth: 1
-        }
-      },
-      {
-        name: '二级子类',
-        type: 'pie',
-        radius: ['50%', '75%'],
+          borderWidth: 2
+        },
         label: {
-          show: false 
+          show: true,
+          fontSize: 11,
+          formatter: '{b}\n{d}%'
         },
-        data: outerData,
-        itemStyle: {
-          borderColor: '#fff',
-          borderWidth: 1
-        }
+        labelLine: {
+          show: true,
+          length: 8,
+          length2: 12
+        },
+        data: pieData
       }
     ]
   }
   
-  myChart.setOption(option)
+  myChart.setOption(option, true)
+}
+
+/**
+ * 图片加载失败兜底：替换为灰色占位
+ */
+const handleImgError = (e) => {
+  e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2U1ZTdlYiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOWNhM2FmIiBmb250LXNpemU9IjE0Ij7lm77niYc8L3RleHQ+PC9zdmc+'
+  e.target.alt = '图片加载失败'
 }
 
 const addFileToStaging = (file) => {
@@ -653,25 +808,7 @@ const submitAll = async () => {
   })
 
   try {
-    const res = await fetch(`${API_BASE}/submit`, {
-      method: 'POST',
-      body: formData
-    })
-    
-    let data
-    try {
-      data = await res.json()
-    } catch (e) {
-      const errorText = await res.text()
-      throw new Error(`服务器响应异常: ${errorText.substring(0, 100)}...`)
-    }
-
-    if (!res.ok) {
-      if (res.status === 409) {
-        throw new Error(data.detail)
-      }
-      throw new Error(data.detail || '提交解析失败')
-    }
+    const data = await upload(`${API_BASE}/submit`, formData)
     
     uploadResult.value = data
     activeTab.value = 'MasterBank'
@@ -689,18 +826,11 @@ const submitAll = async () => {
   }
 }
 
-const deleteDataRow = async (type, index) => {
+const deleteDataRow = async (type, recordId) => {
   if (!confirm('⚠️ 警告：确定要彻底删除这一行记录吗？此操作不可恢复！')) return
   
   try {
-    const res = await fetch(`${API_BASE}/data/${type}/${index}`, {
-      method: 'DELETE'
-    })
-    
-    const data = await res.json()
-    if (!res.ok) {
-      throw new Error(data.detail || '删除失败')
-    }
+    await del(`${API_BASE}/data/${type}/${recordId}`)
     
     fetchTableData()
     fetchAnalytics()
@@ -711,21 +841,20 @@ const deleteDataRow = async (type, index) => {
 
 const batchDeleteData = async (type) => {
   const dataList = type === 'jd' ? jdData.value : interviewData.value;
-  const selectedIndices = dataList
-    .map((item, index) => item._selected ? index : -1)
-    .filter(index => index !== -1)
-    .sort((a, b) => b - a);
+  const selectedIds = dataList
+    .filter(item => item._selected)
+    .map(item => item.id);
 
-  if (selectedIndices.length === 0) return;
-  if (!confirm(`⚠️ 警告：确定要彻底删除选中的 ${selectedIndices.length} 行记录吗？此操作不可恢复！`)) return;
+  if (selectedIds.length === 0) return;
+  if (!confirm(`⚠️ 警告：确定要彻底删除选中的 ${selectedIds.length} 行记录吗？此操作不可恢复！`)) return;
 
   let successCount = 0;
-  for (const idx of selectedIndices) {
+  for (const id of selectedIds) {
     try {
-      const res = await fetch(`${API_BASE}/data/${type}/${idx}`, { method: 'DELETE' });
-      if (res.ok) successCount++;
+      await del(`${API_BASE}/data/${type}/${id}`);
+      successCount++;
     } catch (e) {
-      console.error(`删除索引 ${idx} 失败`, e);
+      console.error(`删除 ID:${id} 失败`, e);
     }
   }
   
@@ -744,17 +873,10 @@ const reprocessInterview = async (id) => {
   
   reprocessingIds.value[id] = true
   try {
-    const res = await fetch(`${API_BASE}/interview/${id}/re-process`, { method: 'POST' })
-    const data = await res.json()
-    
-    if (res.ok) {
-      alert(`✅ ${data.message}`)
-      fetchTableData()
-      fetchAnalytics()
-    } else {
-      const errorMsg = typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail;
-      throw new Error(errorMsg || '重新解析失败')
-    }
+    const data = await post(`${API_BASE}/interview/${id}/re-process`)
+    alert(`✅ ${data.message}`)
+    fetchTableData()
+    fetchAnalytics()
   } catch (e) {
     alert(`错误: ${e.message}`)
   } finally {
@@ -775,8 +897,8 @@ const batchReprocessInterview = async () => {
     
     reprocessingIds.value[id] = true;
     try {
-      const res = await fetch(`${API_BASE}/interview/${id}/re-process`, { method: 'POST' });
-      if (res.ok) successCount++;
+      await post(`${API_BASE}/interview/${id}/re-process`);
+      successCount++;
     } catch (e) {
       console.error(`重新解析面经ID ${id} 失败`, e);
     } finally {
@@ -794,18 +916,12 @@ const retagQuestion = async (question) => {
   
   question._isRetagging = true
   try {
-    const res = await fetch(`${API_BASE}/master-bank/re-tag/${question.id}`, { method: 'POST' })
-    const data = await res.json()
-    
-    if (res.ok) {
-      question.cat1 = data.data.cat1
-      question.cat2 = data.data.cat2
-      question.tags = data.data.tags
-      question.difficulty = data.data.difficulty
-      fetchAnalytics()
-    } else {
-      throw new Error(data.detail || '重新打标失败')
-    }
+    const data = await post(`${API_BASE}/master-bank/re-tag/${question.id}`)
+    question.cat1 = data.data.cat1
+    question.cat2 = data.data.cat2
+    question.tags = data.data.tags
+    question.difficulty = data.data.difficulty
+    fetchAnalytics()
   } catch (e) {
     alert(`错误: ${e.message}`)
   } finally {
@@ -818,36 +934,34 @@ const saveField = async (tableName, recordId, dbColumn, newValue, rowObj, editSt
     const updateData = {};
     updateData[dbColumn] = newValue;
 
-    const res = await fetch(`${API_BASE}/data/update`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        table_name: tableName,
-        record_id: recordId,
-        update_data: updateData
-      })
+    await put(`${API_BASE}/data/update`, {
+      table_name: tableName,
+      record_id: recordId,
+      update_data: updateData
     });
 
-    const data = await res.json();
-    if (res.ok) {
-      if (frontendKey === 'ai_answer') {
-        rowObj.ai_answer = newValue;
-      } else {
-        rowObj[frontendKey] = newValue;
-      }
-      rowObj[editStateKey] = false; 
+    if (frontendKey === 'ai_answer') {
+      rowObj.ai_answer = newValue;
     } else {
-      throw new Error(data.detail || '保存失败');
+      rowObj[frontendKey] = newValue;
     }
+    rowObj[editStateKey] = false; 
   } catch (err) {
     alert(`系统错误: ${err.message}`);
   }
 };
 
 const fetchTableData = async () => {
+  isDataLoading.value = true
+  dataLoadError.value = null
   try {
-    const resJd = await fetch(`${API_BASE}/data/jd`)
-    const rawJd = await resJd.json()
+    const [jdResp, intResp, masterResp] = await Promise.all([
+      get(`${API_BASE}/data/jd?page_size=500`),
+      get(`${API_BASE}/data/interview?page_size=500`),
+      get(`${API_BASE}/master-bank?page_size=500`),
+    ])
+
+    const rawJd = jdResp.items || jdResp
     jdData.value = rawJd.map(item => ({ 
       ...item, 
       _selected: false, 
@@ -857,17 +971,23 @@ const fetchTableData = async () => {
       _editTitle: ''
     }))
     
-    const resInt = await fetch(`${API_BASE}/data/interview`)
-    const rawInt = await resInt.json()
+    const rawInt = intResp.items || intResp
     interviewData.value = rawInt.map(item => ({ 
       ...item, 
       _selected: false, 
       _isEditingCompany: false, 
-      _editCompany: ''
+      _editCompany: '',
+      _isEditingRound: false,
+      _editRound: '',
+      _isEditingFocus: false,
+      _editFocus: '',
+      _isEditingQuestions: false,
+      _editQuestions: '',
+      _isEditingDifficulty: false,
+      _editDifficulty: ''
     }))
 
-    const resMaster = await fetch(`${API_BASE}/master-bank`)
-    const bankData = await resMaster.json()
+    const bankData = masterResp.items || masterResp
     masterBank.value = bankData.map(q => ({ 
       ...q, 
       _showAnswer: false, 
@@ -880,13 +1000,15 @@ const fetchTableData = async () => {
     nextTick(() => { updateDistributionChart() })
   } catch (e) {
     console.error('获取表格数据失败', e)
+    dataLoadError.value = e.message || '数据加载失败，请刷新重试'
+  } finally {
+    isDataLoading.value = false
   }
 }
 
 const fetchAnalytics = async () => {
   try {
-    const res = await fetch(`${API_BASE}/analytics`)
-    analytics.value = await res.json()
+    analytics.value = await get(`${API_BASE}/analytics`)
   } catch (e) {
     console.error('获取分析数据失败', e)
   }
@@ -901,7 +1023,30 @@ const filteredMasterBank = computed(() => {
   let result = masterBank.value
   
   if (selectedTag.value !== '全部') {
-    result = result.filter(q => (q.cat1 || '未分类') === selectedTag.value)
+    result = result.filter(q => {
+      const rawCat = q.cat1 || '未分类'
+      const cats = rawCat.split(',').map(c => c.trim()).filter(c => c)
+      return cats.includes(selectedTag.value)
+    })
+  }
+
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.trim().toLowerCase()
+    result = result.filter(q => 
+      (q.question || '').toLowerCase().includes(query) ||
+      (q.cat1 || '').toLowerCase().includes(query) ||
+      (q.tags || '').toLowerCase().includes(query)
+    )
+  }
+
+  if (filterDifficulty.value) {
+    result = result.filter(q => 
+      (q.difficulty || '').includes(filterDifficulty.value)
+    )
+  }
+
+  if (showStarredOnly.value) {
+    result = result.filter(q => q.is_starred)
   }
 
   return result
@@ -941,8 +1086,8 @@ const batchDeleteMasterBank = async () => {
   let successCount = 0
   for (const q of targets) {
     try {
-      const res = await fetch(`${API_BASE}/master-bank/${q.id}`, { method: 'DELETE' })
-      if (res.ok) successCount++
+      await del(`${API_BASE}/master-bank/${q.id}`)
+      successCount++
     } catch (e) {
       console.error(`删除 ID:${q.id} 失败`, e)
     }
@@ -961,15 +1106,10 @@ const triggerBuildMasterBank = async () => {
   
   isBuilding.value = true
   try {
-    const res = await fetch(`${API_BASE}/master-bank/build`, { method: 'POST' })
-    const data = await res.json()
-    if(res.ok) {
-      alert(`⚡ 全量聚类计算完毕！从所有杂乱面经中共归纳出 ${data.total_unique} 道核心真题。`)
-      fetchTableData()
-      fetchAnalytics()
-    } else {
-      throw new Error(data.detail || '未知错误')
-    }
+    const data = await post(`${API_BASE}/master-bank/build`)
+    alert(`⚡ 全量聚类计算完毕！从所有杂乱面经中共归纳出 ${data.total_unique} 道核心真题。`)
+    fetchTableData()
+    fetchAnalytics()
   } catch(e) {
     alert("计算失败：" + e.message)
   } finally {
@@ -981,26 +1121,60 @@ const toggleAnswer = (question) => {
   question._showAnswer = !question._showAnswer
 }
 
+const isFailedAnswer = (answer) => {
+  return answer && answer.includes('生成失败')
+}
+
 const generateAnswer = async (question) => {
   question._isLoadingAnswer = true
+  // 如果是失败状态，先清空以便后端重新生成
+  if (isFailedAnswer(question.ai_answer)) {
+    question.ai_answer = null
+  }
   try {
-    const res = await fetch(`${API_BASE}/master-bank/generate-answer/${question.id}`, { method: 'POST' })
-    const data = await res.json()
-    if(res.ok) {
-      question.ai_answer = data.answer
-    } else {
-      alert("生成解答失败，请查看后端日志")
-    }
+    const data = await post(`${API_BASE}/master-bank/generate-answer/${question.id}`)
+    question.ai_answer = data.answer
   } catch(e) {
     console.error("网络或接口错误", e)
+    alert(`生成解答失败: ${e.message}`)
   } finally {
     question._isLoadingAnswer = false
+  }
+}
+
+const toggleStar = async (question) => {
+  try {
+    const data = await post(`${API_BASE}/master-bank/toggle-star/${question.id}`)
+    question.is_starred = data.is_starred
+  } catch (e) {
+    console.error('收藏操作失败', e)
+    alert(`收藏操作失败: ${e.message}`)
   }
 }
 
 const renderMarkdown = (text) => {
   if (!text) return ''
   return marked.parse(text)
+}
+
+let searchDebounceTimer = null
+const onSearchInput = () => {
+  clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    // 搜索是纯前端过滤，computed 自动响应
+  }, 200)
+}
+
+const startMockInterview = async () => {
+  try {
+    const params = new URLSearchParams({ count: '5' })
+    if (filterDifficulty.value) params.append('difficulty', filterDifficulty.value)
+    const data = await get(`${API_BASE}/master-bank/random?${params}`)
+    mockQuestions.value = data.map(q => ({ ...q, _showAnswer: false }))
+  } catch (e) {
+    console.error('获取模拟面试题目失败', e)
+    mockQuestions.value = []
+  }
 }
 </script>
 
