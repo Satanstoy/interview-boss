@@ -1,18 +1,45 @@
 <template>
-  <div class="min-h-screen p-5 lg:p-8 max-w-[98%] mx-auto bg-slate-50">
-    <header class="mb-6 lg:mb-10 text-center">
-      <h1 class="text-2xl lg:text-4xl font-bold text-gray-900 mb-2">面试题库管理系统</h1>
-      <p class="text-sm lg:text-base text-gray-500">上传面经和 JD，AI 自动提取题目并归类整理</p>
-    </header>
+  <div class="min-h-screen bg-slate-50">
+    <!-- Top bar -->
+    <nav class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+      <div class="max-w-[98%] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
+        <h1 class="text-lg lg:text-xl font-bold text-gray-900">面试题库管理系统</h1>
+        <div class="flex items-center gap-3">
+          <span v-if="activeSeason" class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+            {{ activeSeason }}
+          </span>
+          <button
+            @click="showSettings = true"
+            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition"
+            title="系统配置"
+          >
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
 
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+    <!-- Settings modal -->
+    <SettingsPanel
+      :visible="showSettings"
+      :active-season="activeSeason"
+      @close="showSettings = false"
+      @update:active-season="activeSeason = $event"
+    />
+
+    <main class="p-5 lg:p-8 max-w-[98%] mx-auto">
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
       <AnalyticsSidebar
         :analytics="analytics"
         :master-bank="masterBank"
         :popular-tags="popularTags"
         :selected-tag="selectedTag"
+        :practice-stats="practiceStats"
+        :recommend-seed="recommendSeed"
         @refresh="fetchAnalytics"
         @select-tag="onSelectTag($event)"
+        @go-to-question="onGoToQuestion"
+        @refresh-recommend="recommendSeed++"
       />
 
       <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -50,7 +77,7 @@
           <!-- Action bar -->
           <div class="flex flex-wrap justify-between items-center mb-4 lg:mb-6 gap-2">
             <h2 class="text-lg lg:text-xl font-bold flex items-center gap-2">
-              {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : '高频题库' }}
+              {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : activeTab === 'KnowledgeGraph' ? '知识图谱' : '高频题库' }}
               <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="text-sm font-normal bg-green-100 text-green-700 px-3 py-1 rounded-full border border-green-200">
                 筛选: {{ selectedTag }}
               </span>
@@ -113,10 +140,17 @@
           </DataTable>
 
           <!-- Interview Tab -->
+          <div v-if="activeTab === 'Interview' && interviewSeasons.length > 0" class="flex items-center gap-2 mb-4">
+            <label class="text-xs text-gray-500">招聘季筛选：</label>
+            <select v-model="filterSeason" class="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-blue-500 focus:border-blue-500">
+              <option value="">全部</option>
+              <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </div>
           <DataTable
             v-if="activeTab === 'Interview'"
             :columns="interviewColumns"
-            :rows="interviewData"
+            :rows="filteredInterviewData"
             :selected-count="interviewSelection.selectedCount.value"
             :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
             :batch-actions="interviewBatchActions"
@@ -157,8 +191,15 @@
             :popular-tags="popularTags"
           />
 
+          <!-- KnowledgeGraph Tab -->
+          <KnowledgeGraph
+            v-if="activeTab === 'KnowledgeGraph'"
+            @filter-by-tag="onGraphFilterTag"
+            @filter-by-category="onGraphFilterCategory"
+          />
+
           <!-- Import Tab -->
-          <StagingPanel v-if="activeTab === 'Import'" @submitted="onSubmitted" />
+          <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" @submitted="onSubmitted" />
 
           <!-- MasterBank Tab -->
           <MasterBankList
@@ -180,6 +221,7 @@
         </div>
       </div>
     </div>
+    </main>
 
     <ToastContainer />
     <ConfirmDialog />
@@ -187,18 +229,20 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { cancelAllRequests } from './utils/http.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 
 import StagingPanel from './components/StagingPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 import AnalyticsSidebar from './components/AnalyticsSidebar.vue'
 import TabBar from './components/TabBar.vue'
 import SearchFilterBar from './components/SearchFilterBar.vue'
 import DataTable from './components/DataTable.vue'
 import MasterBankList from './components/MasterBankList.vue'
 import MockInterview from './components/MockInterview.vue'
+import KnowledgeGraph from './components/KnowledgeGraph.vue'
 import InlineEdit from './components/InlineEdit.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -221,8 +265,13 @@ const selectedSubTags = ref([])
 const searchQuery = ref('')
 const filterDifficulty = ref('')
 const showStarredOnly = ref(false)
+const filterSeason = ref('')
 const reprocessingIds = ref({})
 const mockInterviewRef = ref(null)
+const activeSeason = ref('')
+const showSettings = ref(false)
+const practiceStats = ref({})
+const recommendSeed = ref(0)
 
 // ── Selection composables ──
 const jdSelection = useSelection(() => jdData.value)
@@ -243,7 +292,8 @@ const interviewColumns = [
   { key: 'round', label: '面试轮次', frontendKey: '面试轮次' },
   { key: 'focus', label: '考察重点', frontendKey: '考察重点', cellClass: 'whitespace-pre-wrap break-words min-w-[120px]' },
   { key: 'questions_list', label: '具体题目清单', frontendKey: '具体题目清单', cellClass: 'whitespace-pre-wrap break-words min-w-[300px]' },
-  { key: 'difficulty', label: '难度', frontendKey: '难易程度' }
+  { key: 'difficulty', label: '难度', frontendKey: '难易程度' },
+  { key: 'season', label: '招聘季', frontendKey: 'season' }
 ]
 
 // ── Computed ──
@@ -290,6 +340,23 @@ const filteredMasterBank = computed(() => {
   if (filterDifficulty.value) result = result.filter(q => (q.difficulty || '').includes(filterDifficulty.value))
   if (showStarredOnly.value) result = result.filter(q => q.is_starred)
   return result
+})
+
+const interviewSeasons = computed(() => {
+  const seasons = [...new Set(interviewData.value.map(d => d.season).filter(Boolean))]
+  return seasons.sort()
+})
+
+const filteredInterviewData = computed(() => {
+  if (!filterSeason.value) return interviewData.value
+  return interviewData.value.filter(d => d.season === filterSeason.value)
+})
+
+// Refresh practice stats when returning from mock interview
+watch(activeTab, (newTab, oldTab) => {
+  if (oldTab === 'MockInterview' && newTab === 'MasterBank') {
+    fetchPracticeStats()
+  }
 })
 
 // ── Batch action definitions ──
@@ -430,6 +497,10 @@ const fetchAnalytics = async () => {
   try { analytics.value = await api.fetchAnalytics() } catch (e) { console.error('获取分析数据失败', e) }
 }
 
+const fetchPracticeStats = async () => {
+  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.error('获取练习统计失败', e) }
+}
+
 // ── Actions ──
 const onSubmitted = () => {
   activeTab.value = 'MasterBank'
@@ -445,6 +516,29 @@ const onSelectTag = (tag) => {
   selectedTag.value = tag
   selectedSubTags.value = []
   activeTab.value = 'MasterBank'
+}
+
+const onGraphFilterTag = (tagName) => {
+  selectedTag.value = '全部'
+  selectedSubTags.value = []
+  searchQuery.value = tagName
+  activeTab.value = 'MasterBank'
+}
+
+const onGraphFilterCategory = (catName) => {
+  selectedTag.value = catName
+  selectedSubTags.value = []
+  searchQuery.value = ''
+  activeTab.value = 'MasterBank'
+}
+
+const onGoToQuestion = (question) => {
+  activeTab.value = 'MasterBank'
+  // Set search to the question text (truncated for a reasonable search)
+  const q = question.question || ''
+  searchQuery.value = q.length > 30 ? q.substring(0, 30) : q
+  selectedTag.value = '全部'
+  selectedSubTags.value = []
 }
 
 const toggleSubTag = (tag) => {
@@ -538,7 +632,7 @@ const triggerBuildMasterBank = async () => {
 const downloadCSV = () => { window.open(api.getDownloadUrl(activeTab.value.toLowerCase()), '_blank') }
 
 // ── Lifecycle ──
-onMounted(() => { fetchTableData(); fetchAnalytics() })
+onMounted(() => { fetchTableData(); fetchAnalytics(); fetchPracticeStats() })
 onUnmounted(() => cancelAllRequests())
 </script>
 

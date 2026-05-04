@@ -1,6 +1,7 @@
-
 import logging
-from collections import Counter
+import json
+from datetime import datetime, timedelta
+from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException
 from app.db.connection import get_db_connection, run_db
 from app.services.utils import normalize_category
@@ -27,6 +28,97 @@ async def get_analytics():
 
     tech, topics, popular, difficulty = await run_db(_query)
     return {"tech_trends": tech, "interview_topics": topics, "popular_tags": popular, "difficulty_distribution": difficulty}
+
+
+@router.get("/api/practice-stats")
+async def get_practice_stats():
+    """返回学习进度统计数据：各难度练习情况、每日趋势、薄弱项"""
+
+    def _query():
+        with get_db_connection() as conn:
+            # Master bank difficulty distribution
+            diff_counts = {}
+            for r in conn.execute(
+                "SELECT difficulty, COUNT(*) as cnt FROM master_question_bank GROUP BY difficulty"
+            ).fetchall():
+                diff_counts[r['difficulty'] or '未标注'] = r['cnt']
+
+            # Practice history aggregated stats
+            practiced = {}
+            for r in conn.execute(
+                "SELECT question_id, MAX(score) as best_score, COUNT(*) as attempt_count "
+                "FROM practice_history GROUP BY question_id"
+            ).fetchall():
+                practiced[r['question_id']] = {
+                    'best_score': r['best_score'] or 0,
+                    'attempt_count': r['attempt_count']
+                }
+
+            # Map practiced question_ids to their difficulty
+            practiced_ids = list(practiced.keys())
+            practiced_diff = {}
+            if practiced_ids:
+                placeholders = ','.join('?' * len(practiced_ids))
+                for r in conn.execute(
+                    f"SELECT id, difficulty FROM master_question_bank WHERE id IN ({placeholders})",
+                    practiced_ids
+                ).fetchall():
+                    practiced_diff[r['id']] = r['difficulty'] or '未标注'
+
+            # Per-difficulty practice stats
+            by_difficulty = {}
+            for diff, total in diff_counts.items():
+                practiced_in_diff = [
+                    qid for qid, d in practiced_diff.items() if d == diff
+                ]
+                scores = [practiced[qid]['best_score'] for qid in practiced_in_diff]
+                by_difficulty[diff] = {
+                    'total': total,
+                    'practiced': len(practiced_in_diff),
+                    'avg_score': round(sum(scores) / len(scores), 1) if scores else 0
+                }
+
+            # Daily trend (last 14 days)
+            daily_trend = []
+            for i in range(13, -1, -1):
+                day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+                rows = conn.execute(
+                    "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
+                    "FROM practice_history WHERE date(created_at) = ?",
+                    (day,)
+                ).fetchone()
+                daily_trend.append({
+                    'date': day,
+                    'count': rows['cnt'] or 0,
+                    'avg_score': round(rows['avg_s'] or 0, 1)
+                })
+
+            # Weak questions (recent score < 60)
+            weak_rows = conn.execute(
+                "SELECT ph.question_id, mq.question, ph.score, ph.created_at "
+                "FROM practice_history ph "
+                "JOIN master_question_bank mq ON ph.question_id = mq.id "
+                "WHERE ph.score < 60 "
+                "ORDER BY ph.created_at DESC LIMIT 5"
+            ).fetchall()
+
+            recent_weak = [dict(r) for r in weak_rows]
+
+            # Overall stats
+            total_score = sum(p['best_score'] for p in practiced.values())
+            avg_score = round(total_score / len(practiced), 1) if practiced else 0
+
+            return {
+                'total_questions': sum(diff_counts.values()),
+                'practiced_questions': len(practiced),
+                'avg_score': avg_score,
+                'by_difficulty': by_difficulty,
+                'daily_trend': daily_trend,
+                'recent_weak': recent_weak
+            }
+
+    data = await run_db(_query)
+    return data
 
 
 @router.post("/api/normalize-categories")
@@ -103,3 +195,81 @@ async def sync_db():
     except Exception as e:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail=f"数据库同步失败: {str(e)}")
+
+
+@router.get("/api/knowledge-graph")
+async def get_knowledge_graph():
+    """构建知识点关联图谱数据（节点 + 边）"""
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT cat1, cat2, tags FROM master_question_bank WHERE tags IS NOT NULL AND tags != ''"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    rows = await run_db(_query)
+
+    tag_cat_counts = defaultdict(Counter)
+    tag_counts = Counter()
+    cooccurrence = Counter()
+    cat1_counts = Counter()
+
+    for row in rows:
+        cat1 = row['cat1'] or '未分类'
+        cat1_counts[cat1] += 1
+        tags = [t.strip() for t in (row['tags'] or '').split(',') if t.strip()]
+        for tag in tags:
+            tag_counts[tag] += 1
+            tag_cat_counts[tag][cat1] += 1
+        tags_sorted = sorted(set(tags))
+        for i in range(len(tags_sorted)):
+            for j in range(i + 1, len(tags_sorted)):
+                cooccurrence[(tags_sorted[i], tags_sorted[j])] += 1
+
+    cat1_list = sorted(cat1_counts.keys())
+    cat1_index = {c: i for i, c in enumerate(cat1_list)}
+
+    nodes = []
+    for cat1 in cat1_list:
+        nodes.append({
+            "id": f"cat:{cat1}",
+            "name": cat1,
+            "category": cat1_index[cat1],
+            "size": cat1_counts[cat1],
+            "type": "category"
+        })
+
+    for tag, count in tag_counts.items():
+        primary_cat = tag_cat_counts[tag].most_common(1)[0][0] if tag_cat_counts[tag] else '未分类'
+        nodes.append({
+            "id": f"tag:{tag}",
+            "name": tag,
+            "category": cat1_index.get(primary_cat, 0),
+            "size": count,
+            "type": "tag"
+        })
+
+    links = []
+    for tag in tag_counts:
+        if tag_cat_counts[tag]:
+            primary_cat = tag_cat_counts[tag].most_common(1)[0][0]
+            links.append({
+                "source": f"tag:{tag}",
+                "target": f"cat:{primary_cat}",
+                "weight": tag_cat_counts[tag][primary_cat]
+            })
+
+    for (tag_a, tag_b), count in cooccurrence.items():
+        if count >= 2:
+            links.append({
+                "source": f"tag:{tag_a}",
+                "target": f"tag:{tag_b}",
+                "weight": count
+            })
+
+    return {
+        "nodes": nodes,
+        "links": links,
+        "categories": [{"name": c} for c in cat1_list]
+    }
