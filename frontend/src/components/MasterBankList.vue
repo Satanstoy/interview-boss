@@ -79,17 +79,23 @@
           <textarea v-model="q._editAnswer" rows="8" class="w-full max-w-3xl border border-blue-300 rounded p-4 text-sm focus:ring-blue-500 focus:border-blue-500 shadow-inner font-mono"></textarea>
           <div class="flex gap-2 justify-end mt-2">
             <button @click="q._isEditingAnswer = false" class="px-5 py-2 bg-gray-200 rounded-lg text-gray-700 text-sm hover:bg-gray-300 transition">取消</button>
-            <button @click="$emit('save-field', { tableName: 'master_question_bank', recordId: q.id, dbColumn: 'ai_answer', newValue: q._editAnswer, rowObj: q, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' })" class="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm hover:bg-blue-700 transition shadow">保存</button>
+            <button @click="$emit('save-field', { tableName: 'question_bank', recordId: q.id, dbColumn: 'ai_answer', newValue: q._editAnswer, rowObj: q, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' })" class="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm hover:bg-blue-700 transition shadow">保存</button>
           </div>
         </div>
 
         <!-- View answer mode -->
         <div v-else>
-          <button v-if="q.ai_answer" @click="q._isEditingAnswer = true; q._editAnswer = q.ai_answer" class="absolute top-4 right-4 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded text-xs transition opacity-60 hover:opacity-100 shadow-sm z-10">
-            编辑
-          </button>
-
-          <div v-if="q.ai_answer && !isFailedAnswer(q.ai_answer)" class="text-gray-700 text-sm leading-relaxed max-w-none answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
+          <div v-if="q.ai_answer && !isFailedAnswer(q.ai_answer)" class="relative">
+            <div class="absolute top-0 right-0 flex gap-1.5 z-10">
+              <button @click="q._isEditingAnswer = true; q._editAnswer = q.ai_answer" class="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded text-xs transition opacity-60 hover:opacity-100 shadow-sm">
+                编辑
+              </button>
+              <button @click.stop="$emit('generate-answer', q)" :disabled="q._isLoadingAnswer" class="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-3 py-1 rounded text-xs transition opacity-60 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
+                重新生成
+              </button>
+            </div>
+            <div class="text-gray-700 text-sm leading-relaxed max-w-none answer-content pt-6" v-html="renderMarkdown(q.ai_answer)"></div>
+          </div>
 
           <div v-else-if="q._isLoadingAnswer" class="flex flex-col items-center justify-center py-6 text-blue-600 gap-3">
             <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>

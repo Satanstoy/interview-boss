@@ -4,6 +4,7 @@
  * - 自动重试（网络错误重试 2 次，间隔 1s/3s）
  * - 请求取消（组件卸载自动取消）
  * - 统一错误拦截（401/403/500/502/503/504）
+ * - JWT 认证（自动附加 Authorization header）
  */
 
 const DEFAULT_TIMEOUT = 10_000
@@ -13,6 +14,17 @@ const RETRY_DELAYS = [1000, 3000]
 
 // 全局 AbortController 管理，用于组件卸载时批量取消
 const pendingControllers = new Set()
+
+// 401 回调（由 App.vue 注册，用于弹出登录框）
+let onUnauthorized = null
+export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
+
+/**
+ * 获取 auth token
+ */
+function getAuthToken() {
+  try { return localStorage.getItem('auth_token') || '' } catch { return '' }
+}
 
 /**
  * 创建带超时的 AbortController
@@ -87,8 +99,16 @@ async function request(url, options = {}) {
     const { controller, timer } = createTimeoutController(timeout)
 
     try {
+      // 自动附加 Authorization header
+      const authHeaders = {}
+      const token = getAuthToken()
+      if (token) authHeaders['Authorization'] = `Bearer ${token}`
+
+      const mergedHeaders = { ...authHeaders, ...(fetchOptions.headers || {}) }
+
       const res = await fetch(url, {
         ...fetchOptions,
+        headers: mergedHeaders,
         signal: controller.signal,
       })
 
@@ -111,6 +131,11 @@ async function request(url, options = {}) {
 
       // HTTP 状态码错误处理
       if (!res.ok) {
+        // 401 自动触发登录
+        if (res.status === 401 && onUnauthorized) {
+          onUnauthorized()
+        }
+
         const message = (typeof data === 'object' && data?.detail)
           ? (typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail)
           : getStatusMessage(res.status)
@@ -237,9 +262,13 @@ export async function postSSE(url, body, onEvent) {
   pendingControllers.add(controller)
 
   try {
+    const authHeaders = {}
+    const token = getAuthToken()
+    if (token) authHeaders['Authorization'] = `Bearer ${token}`
+
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(body),
       signal: controller.signal,
     })

@@ -1,18 +1,21 @@
 import os
 import json
 import time
+import random as _random
 import shutil
 import logging
 import asyncio
 import numpy as np
 from collections import Counter
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import DB_PATH, LLM_MODEL, EMBEDDING_MODEL, SIMILARITY_THRESHOLD
-from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT
+from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT
+from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
-from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest
+from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest
 from app.services.llm import client, client_of_embedding, _call_llm_with_retry
 from app.services.embedding import cosine_similarity, cosine_similarity_batch
 from app.services.utils import normalize_category
@@ -21,16 +24,68 @@ logger = logging.getLogger("multimodal-parser")
 
 router = APIRouter()
 
+security_optional = HTTPBearer(auto_error=False)
+
+
+async def _get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security_optional)):
+    """可选认证：有 token 解析用户，无 token 返回 None"""
+    if credentials is None:
+        return None
+    try:
+        from jose import jwt
+        from app.core.auth import SECRET_KEY, ALGORITHM
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return None
+
+        def _query():
+            with get_db_connection() as conn:
+                return conn.execute("SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)).fetchone()
+
+        user = await run_db(_query)
+        return dict(user) if user else None
+    except Exception:
+        return None
+
+
+def _build_bank_where_clause(user: Optional[dict], table_alias: str = "qb"):
+    """根据用户 bank_mode 构建 WHERE 子句"""
+    prefix = f"{table_alias}." if table_alias else ""
+    if user is None:
+        # 未登录：只看公共已审核
+        return f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", []
+
+    mode = user.get('bank_mode', 'public')
+    uid = user['id']
+
+    if mode == 'personal':
+        return f"WHERE {prefix}owner_id = ?", [uid]
+    elif mode == 'mixed':
+        return f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?", [uid]
+    else:  # 'public'
+        return f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", []
+
 
 @router.get("/api/master-bank")
-async def get_master_bank(sort: str = "frequency_desc", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=1000)):
+async def get_master_bank(
+    sort: str = "frequency_desc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=1000),
+    user: Optional[dict] = Depends(_get_optional_user)
+):
     order_clause = "ORDER BY frequency DESC" if sort != "recent" else "ORDER BY id DESC"
     offset = (page - 1) * page_size
+    where_clause, params = _build_bank_where_clause(user)
 
     def _query():
         with get_db_connection() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM master_question_bank").fetchone()[0]
-            rows = conn.execute(f"SELECT id, question, cat1, cat2, tags, difficulty, frequency, ai_answer, sources, is_starred FROM master_question_bank {order_clause} LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            total = conn.execute(f"SELECT COUNT(*) FROM question_bank qb {where_clause}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.is_starred, qb.owner_id, qb.status "
+                f"FROM question_bank qb {where_clause} {order_clause} LIMIT ? OFFSET ?",
+                params + [page_size, offset]
+            ).fetchall()
             return total, rows
 
     total, rows = await run_db(_query)
@@ -42,6 +97,7 @@ async def get_master_bank(sort: str = "frequency_desc", page: int = Query(1, ge=
             d['sources'] = json.loads(d['sources']) if d['sources'] else []
         except Exception:
             d['sources'] = []
+        d['is_personal'] = d.get('owner_id') is not None
         result.append(d)
 
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -63,7 +119,7 @@ async def build_master_bank():
             raw = conn.execute("SELECT * FROM questions_detail").fetchall()
             # 保留已有的 ai_answer 及其向量，用于重建后按语义匹配恢复
             existing = conn.execute(
-                "SELECT question, ai_answer, vector FROM master_question_bank WHERE ai_answer IS NOT NULL AND ai_answer != ''"
+                "SELECT question, ai_answer, vector FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != ''"
             ).fetchall()
             existing_answers_map = {}
             for r in existing:
@@ -154,7 +210,11 @@ async def build_master_bank():
 
     def _save():
         with get_db_connection() as conn:
-            conn.execute("DELETE FROM master_question_bank")
+            # 获取管理员 ID
+            admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+            admin_id = admin_id[0] if admin_id else None
+
+            conn.execute("DELETE FROM question_bank")
             restored_count = 0
             for c in clusters:
                 diff_str = Counter(c['diffs']).most_common(1)[0][0] if c['diffs'] else "未知"
@@ -172,8 +232,8 @@ async def build_master_bank():
                         logger.info(f"通过向量匹配恢复答案 (sim={best_sim:.4f}): {c['question'][:40]}...")
 
                 conn.execute(
-                    "INSERT INTO master_question_bank (question, cat1, tags, difficulty, frequency, vector, sources, ai_answer) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (c['question'], ",".join(c['cat1']), ",".join(c['tags']), diff_str, c['frequency'], json.dumps(c['vector']), json.dumps(c['sources']), ai_answer)
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, vector, sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
+                    (c['question'], ",".join(c['cat1']), ",".join(c['tags']), diff_str, c['frequency'], json.dumps(c['vector']), json.dumps(c['sources']), ai_answer, admin_id)
                 )
             conn.commit()
             logger.info(f"答案恢复统计: 精确匹配 {len(clusters) - restored_count} 条, 向量匹配恢复 {restored_count} 条")
@@ -188,11 +248,11 @@ async def toggle_star(question_id: int):
     """切换题目收藏状态"""
     def _toggle():
         with get_db_connection() as conn:
-            row = conn.execute("SELECT is_starred FROM master_question_bank WHERE id = ?", (question_id,)).fetchone()
+            row = conn.execute("SELECT is_starred FROM question_bank WHERE id = ?", (question_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该题目")
             new_val = 0 if row['is_starred'] else 1
-            conn.execute("UPDATE master_question_bank SET is_starred = ? WHERE id = ?", (new_val, question_id))
+            conn.execute("UPDATE question_bank SET is_starred = ? WHERE id = ?", (new_val, question_id))
             conn.commit()
             return new_val
 
@@ -209,7 +269,7 @@ async def toggle_star(question_id: int):
 async def generate_master_answer(question_id: int):
     def _get():
         with get_db_connection() as conn:
-            return conn.execute("SELECT question, ai_answer FROM master_question_bank WHERE id = ?", (question_id,)).fetchone()
+            return conn.execute("SELECT question, ai_answer FROM question_bank WHERE id = ?", (question_id,)).fetchone()
 
     row = await run_db(_get)
     if not row:
@@ -224,7 +284,7 @@ async def generate_master_answer(question_id: int):
 
         def _update():
             with get_db_connection() as conn:
-                conn.execute("UPDATE master_question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
+                conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
                 conn.commit()
 
         await run_db(_update)
@@ -239,7 +299,7 @@ async def delete_master_question(question_id: int):
     def _delete():
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            row = cursor.execute("SELECT id, question, sources FROM master_question_bank WHERE id = ?", (question_id,)).fetchone()
+            row = cursor.execute("SELECT id, question, sources FROM question_bank WHERE id = ?", (question_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该题目，可能已被删除")
 
@@ -248,12 +308,13 @@ async def delete_master_question(question_id: int):
             if question_text:
                 cursor.execute("DELETE FROM questions_detail WHERE question = ?", (question_text,))
 
-            cursor.execute("DELETE FROM master_question_bank WHERE id = ?", (question_id,))
+            cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+            cursor.execute("DELETE FROM user_practice_history WHERE question_bank_id = ?", (question_id,))
             conn.commit()
 
     try:
         await run_db(_delete)
-        return {"status": "success", "message": "题目删除成功（已联动清理 questions_detail）"}
+        return {"status": "success", "message": "题目删除成功（已联动清理 questions_detail 和练习历史）"}
     except HTTPException:
         raise
     except Exception as e:
@@ -271,7 +332,7 @@ async def batch_delete_master_bank(req: BatchDeleteRequest):
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, question FROM master_question_bank WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, question FROM question_bank WHERE id IN ({placeholders})", req.ids
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
@@ -283,7 +344,8 @@ async def batch_delete_master_bank(req: BatchDeleteRequest):
 
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))
-            cursor.execute(f"DELETE FROM master_question_bank WHERE id IN ({ph2})", found_ids)
+            cursor.execute(f"DELETE FROM question_bank WHERE id IN ({ph2})", found_ids)
+            cursor.execute(f"DELETE FROM user_practice_history WHERE question_bank_id IN ({ph2})", found_ids)
             conn.commit()
             return len(found_ids)
 
@@ -307,7 +369,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest):
         with get_db_connection() as conn:
             placeholders = ",".join("?" * len(req.ids))
             return conn.execute(
-                f"SELECT id, question, ai_answer FROM master_question_bank WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, question, ai_answer FROM question_bank WHERE id IN ({placeholders})", req.ids
             ).fetchall()
 
     rows = await run_db(_load)
@@ -343,7 +405,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest):
                     def _update():
                         with get_db_connection() as conn:
                             conn.execute(
-                                "UPDATE master_question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                "UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (answer, qid)
                             )
                             conn.commit()
@@ -357,7 +419,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest):
                     def _mark_failed():
                         with get_db_connection() as conn:
                             conn.execute(
-                                "UPDATE master_question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                "UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (qid,)
                             )
                             conn.commit()
@@ -384,7 +446,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest):
 async def retag_master_question(question_id: int):
     def _get():
         with get_db_connection() as conn:
-            return conn.execute("SELECT question, cat1, cat2, tags, difficulty FROM master_question_bank WHERE id = ?", (question_id,)).fetchone()
+            return conn.execute("SELECT question, cat1, cat2, tags, difficulty FROM question_bank WHERE id = ?", (question_id,)).fetchone()
 
     row = await run_db(_get)
 
@@ -443,7 +505,7 @@ async def retag_master_question(question_id: int):
         def _update():
             with get_db_connection() as conn:
                 conn.execute(
-                    "UPDATE master_question_bank SET cat1 = ?, cat2 = ?, tags = ?, difficulty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    "UPDATE question_bank SET cat1 = ?, cat2 = ?, tags = ?, difficulty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (cat1, cat2, tags, diff, question_id)
                 )
                 conn.execute(
@@ -469,25 +531,197 @@ async def retag_master_question(question_id: int):
 async def get_random_questions(
     count: int = Query(5, ge=1, le=50),
     cat1: Optional[str] = Query(None),
-    difficulty: Optional[str] = Query(None)
+    difficulty: Optional[str] = Query(None),
+    user: Optional[dict] = Depends(_get_optional_user)
 ):
-    """随机抽题接口，支持按分类和难度筛选"""
+    """加权随机抽题，避免重复抽取近期练过的题目"""
+
+    where_clause, base_params = _build_bank_where_clause(user, "qb")
+
     def _query():
         with get_db_connection() as conn:
             conditions = []
-            params = []
+            params = list(base_params)
             if cat1:
-                conditions.append("cat1 LIKE ?")
+                conditions.append("qb.cat1 LIKE ?")
                 params.append(f"%{cat1}%")
             if difficulty:
-                conditions.append("difficulty LIKE ?")
+                conditions.append("qb.difficulty LIKE ?")
                 params.append(f"%{difficulty}%")
 
-            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            rows = conn.execute(
-                f"SELECT id, question, cat1, cat2, tags, difficulty, frequency, ai_answer, sources FROM master_question_bank {where_clause} ORDER BY RANDOM() LIMIT ?",
-                params + [count]
+            if conditions:
+                where_with_extra = f"{where_clause} AND {' AND '.join(conditions)}"
+            else:
+                where_with_extra = where_clause
+
+            candidates = conn.execute(
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources FROM question_bank qb {where_with_extra}",
+                params
             ).fetchall()
+
+            if not candidates:
+                return [], {}
+
+            ids = [r['id'] for r in candidates]
+            placeholders = ",".join("?" * len(ids))
+
+            # 查询当前用户的练习历史
+            uid = user['id'] if user else None
+            if uid:
+                stats = conn.execute(
+                    f"SELECT question_bank_id, COUNT(*) as cnt, MAX(created_at) as last_at FROM user_practice_history WHERE user_id = ? AND question_bank_id IN ({placeholders}) GROUP BY question_bank_id",
+                    [uid] + ids
+                ).fetchall()
+            else:
+                stats = []
+
+            practice_map = {}
+            now = time.time()
+            for s in stats:
+                qid = s['question_bank_id']
+                try:
+                    from datetime import datetime
+                    last_dt = datetime.fromisoformat(s['last_at'])
+                    hours_ago = (now - last_dt.timestamp()) / 3600
+                except Exception:
+                    hours_ago = 9999
+                practice_map[qid] = {"count": s['cnt'], "hours_ago": hours_ago}
+
+            return candidates, practice_map
+
+    candidates, practice_map = await run_db(_query)
+
+    if not candidates:
+        return []
+
+    # 计算每个题目的抽选权重
+    weights = []
+    for r in candidates:
+        qid = r['id']
+        if qid not in practice_map:
+            w = 1.5  # 未练习过的题目加权
+        else:
+            info = practice_map[qid]
+            w = 1.0 / (1 + info['count'] * 0.3)  # 重复因子
+            if info['hours_ago'] < 24:
+                w *= 0.3  # 24h 内练过，大幅降权
+            elif info['hours_ago'] < 72:
+                w *= 0.7  # 1-3 天内，适度降权
+        weights.append(max(w, 0.01))
+
+    # 加权无放回采样
+    selected_indices = []
+    remaining = list(range(len(candidates)))
+    remaining_weights = list(weights)
+    for _ in range(min(count, len(candidates))):
+        total = sum(remaining_weights)
+        if total <= 0:
+            break
+        r = _random.random() * total
+        cumulative = 0
+        chosen_idx = 0
+        for i, w in enumerate(remaining_weights):
+            cumulative += w
+            if cumulative >= r:
+                chosen_idx = i
+                break
+        selected_indices.append(remaining[chosen_idx])
+        remaining.pop(chosen_idx)
+        remaining_weights.pop(chosen_idx)
+
+    result = []
+    for idx in selected_indices:
+        r = candidates[idx]
+        d = dict(r)
+        try:
+            d['sources'] = json.loads(d['sources']) if d['sources'] else []
+        except Exception:
+            d['sources'] = []
+        info = practice_map.get(r['id'])
+        d['attempt_count'] = info['count'] if info else 0
+        d['last_practiced_at'] = info.get('last_at') if info else None
+        result.append(d)
+
+    return result
+
+
+@router.post("/api/evaluate-answer")
+async def evaluate_answer(req: EvaluateAnswerRequest, user: Optional[dict] = Depends(_get_optional_user)):
+    """对比用户答案与 AI 参考答案，返回多维度评估结果"""
+    if not req.user_answer.strip():
+        raise HTTPException(status_code=400, detail="用户答案不能为空")
+    if not req.reference_answer.strip():
+        raise HTTPException(status_code=400, detail="参考答案不能为空")
+
+    prompt = EVAL_PROMPT.format(
+        question=req.question_text,
+        user_answer=req.user_answer[:3000],
+        reference_answer=req.reference_answer[:3000]
+    )
+
+    try:
+        raw = await _call_llm_with_retry(
+            prompt=prompt,
+            system_msg="你是一名专业的技术面试评估专家。",
+            response_format={"type": "json_object"}
+        )
+        result = json.loads(raw)
+
+        # 防御性解析：确保必要字段存在
+        result.setdefault("overall_score", 0)
+        result.setdefault("dimensions", {})
+        result.setdefault("strengths", [])
+        result.setdefault("weaknesses", [])
+        result.setdefault("suggestions", "")
+
+        for dim_key in ("completeness", "depth", "accuracy", "logic"):
+            result["dimensions"].setdefault(dim_key, {"score": 0, "comment": ""})
+
+        # 钳制分数范围
+        result["overall_score"] = max(0, min(100, int(result["overall_score"])))
+        for dim in result["dimensions"].values():
+            dim["score"] = max(0, min(100, int(dim.get("score", 0))))
+
+        # 自动记录练习历史（写入 user_practice_history，关联用户）
+        if req.question_id:
+            uid = user['id'] if user else None
+            if uid:
+                def _record():
+                    with get_db_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score) VALUES (?, ?, ?, ?, ?)",
+                            (uid, req.question_id, req.user_answer, json.dumps(result, ensure_ascii=False), result["overall_score"])
+                        )
+                        conn.commit()
+                try:
+                    await run_db(_record)
+                except Exception as e:
+                    logger.warning(f"记录练习历史失败（不影响评估结果）: {e}")
+
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"评估结果 JSON 解析失败: {e}")
+        raise HTTPException(status_code=500, detail="评估结果解析失败，请重试")
+    except Exception as e:
+        logger.exception("答案评估失败")
+        raise HTTPException(status_code=500, detail=f"评估失败: {str(e)}")
+
+
+@router.get("/api/practice-history/{question_id}")
+async def get_practice_history(question_id: int, user: Optional[dict] = Depends(_get_optional_user)):
+    """获取指定题目的练习历史（当前用户的）"""
+    uid = user['id'] if user else None
+
+    def _query():
+        with get_db_connection() as conn:
+            if uid:
+                rows = conn.execute(
+                    "SELECT id, question_bank_id, user_answer, evaluation_result, score, created_at FROM user_practice_history WHERE question_bank_id = ? AND user_id = ? ORDER BY created_at DESC",
+                    (question_id, uid)
+                ).fetchall()
+            else:
+                rows = []
             return rows
 
     rows = await run_db(_query)
@@ -495,8 +729,96 @@ async def get_random_questions(
     for r in rows:
         d = dict(r)
         try:
-            d['sources'] = json.loads(d['sources']) if d['sources'] else []
+            d['evaluation_result'] = json.loads(d['evaluation_result']) if d['evaluation_result'] else None
         except Exception:
-            d['sources'] = []
+            d['evaluation_result'] = None
         result.append(d)
     return result
+
+
+# ── 上传到题库 ──
+
+class UploadToBankRequest(BatchGenerateAnswersRequest):
+    """复用 ids 结构，额外字段用 Query"""
+    pass
+
+
+@router.post("/api/master-bank/upload")
+async def upload_to_bank(
+    question_text: str = Query(...),
+    cat1: str = Query(""),
+    cat2: str = Query(""),
+    tags: str = Query(""),
+    difficulty: str = Query(""),
+    target: str = Query("public"),  # 'public' or 'personal'
+    user: dict = Depends(get_current_user)
+):
+    """上传题目到题库"""
+    if target not in ('public', 'personal'):
+        raise HTTPException(status_code=400, detail="target 可选: public / personal")
+
+    def _insert():
+        with get_db_connection() as conn:
+            if target == 'personal':
+                conn.execute(
+                    "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'approved')",
+                    (question_text, cat1, cat2, tags, difficulty, user['id'], user['id'])
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, NULL, ?, 'pending')",
+                    (question_text, cat1, cat2, tags, difficulty, user['id'])
+                )
+            conn.commit()
+
+    await run_db(_insert)
+    status_msg = "已加入个人题库" if target == 'personal' else "已提交到公共题库，等待管理员审核"
+    return {"status": "success", "message": status_msg}
+
+
+# ── 管理员审核 ──
+
+@router.get("/api/master-bank/pending")
+async def get_pending_questions(admin: dict = Depends(get_admin_user)):
+    """获取待审核题目列表"""
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.created_at, u.username as submitted_by_name "
+                "FROM question_bank qb LEFT JOIN users u ON qb.submitted_by = u.id "
+                "WHERE qb.owner_id IS NULL AND qb.status = 'pending' ORDER BY qb.created_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    items = await run_db(_query)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/api/master-bank/approve/{question_id}")
+async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
+    """审核通过题目"""
+    def _approve():
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            conn.execute("UPDATE question_bank SET status = 'approved' WHERE id = ?", (question_id,))
+            conn.commit()
+
+    await run_db(_approve)
+    return {"status": "success", "message": "已通过审核"}
+
+
+@router.post("/api/master-bank/reject/{question_id}")
+async def reject_question(question_id: int, admin: dict = Depends(get_admin_user)):
+    """拒绝题目"""
+    def _reject():
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            conn.execute("UPDATE question_bank SET status = 'rejected' WHERE id = ?", (question_id,))
+            conn.commit()
+
+    await run_db(_reject)
+    return {"status": "success", "message": "已拒绝"}

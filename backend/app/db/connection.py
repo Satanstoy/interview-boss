@@ -1,13 +1,17 @@
 import sqlite3
 import asyncio
 import threading
+import logging
 from app.core.config import DB_PATH
+
+logger = logging.getLogger("multimodal-parser")
 
 _local = threading.local()
 
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
+        # ── 保留旧表兼容 ──
         conn.execute('''
             CREATE TABLE IF NOT EXISTS master_question_bank (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +37,151 @@ def init_db():
             conn.execute("ALTER TABLE master_question_bank ADD COLUMN sources TEXT DEFAULT '[]'")
         if "is_starred" not in columns:
             conn.execute("ALTER TABLE master_question_bank ADD COLUMN is_starred INTEGER DEFAULT 0")
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS interview (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT,
+                company TEXT,
+                round TEXT,
+                focus TEXT,
+                questions_list TEXT,
+                difficulty TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute("PRAGMA table_info(interview)")
+        interview_cols = [info[1] for info in cursor.fetchall()]
+        if "season" not in interview_cols:
+            conn.execute("ALTER TABLE interview ADD COLUMN season TEXT DEFAULT ''")
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_profile (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        for k, v in [("active_season", ""), ("llm_model", ""), ("embedding_model", ""), ("similarity_threshold", ""),
+                     ("llm_api_key", ""), ("llm_base_url", ""), ("embedding_api_key", ""), ("embedding_base_url", ""), ("llm_timeout", "")]:
+            conn.execute("INSERT OR IGNORE INTO user_profile (key, value) VALUES (?, ?)", (k, v))
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS practice_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL,
+                user_answer TEXT,
+                evaluation_result TEXT,
+                score INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('practice_history')")
+        indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_practice_question" not in indexes:
+            conn.execute("CREATE INDEX idx_practice_question ON practice_history(question_id)")
+
+        # ── users 表 ──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                is_admin INTEGER DEFAULT 0,
+                bank_mode TEXT DEFAULT 'public',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # ── question_bank 表（统一题库，取代 master_question_bank）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS question_bank (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT NOT NULL,
+                cat1 TEXT,
+                cat2 TEXT,
+                tags TEXT,
+                difficulty TEXT,
+                frequency INTEGER DEFAULT 1,
+                ai_answer TEXT,
+                vector TEXT,
+                sources TEXT DEFAULT '[]',
+                is_starred INTEGER DEFAULT 0,
+                owner_id INTEGER,
+                submitted_by INTEGER,
+                status TEXT DEFAULT 'approved',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (owner_id) REFERENCES users(id),
+                FOREIGN KEY (submitted_by) REFERENCES users(id)
+            )
+        ''')
+
+        # ── user_practice_history 表 ──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_practice_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                question_bank_id INTEGER NOT NULL,
+                user_answer TEXT,
+                evaluation_result TEXT,
+                score INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (question_bank_id) REFERENCES question_bank(id)
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('user_practice_history')")
+        uph_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_uph_user" not in uph_indexes:
+            conn.execute("CREATE INDEX idx_uph_user ON user_practice_history(user_id)")
+        if "idx_uph_question" not in uph_indexes:
+            conn.execute("CREATE INDEX idx_uph_question ON user_practice_history(question_bank_id)")
+
+        # ── 种子管理员 ──
+        from passlib.context import CryptContext
+        pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+        if not admin_row:
+            admin_hash = pwd_ctx.hash("qnmlgb233..")
+            conn.execute(
+                "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, 1, 'public')",
+                ("sj", admin_hash)
+            )
+            logger.info("种子管理员账户已创建: sj")
+
+        # ── 数据迁移: master_question_bank → question_bank ──
+        qb_count = conn.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0]
+        if qb_count == 0:
+            old_count = conn.execute("SELECT COUNT(*) FROM master_question_bank").fetchone()[0]
+            if old_count > 0:
+                admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()[0]
+                conn.execute("""
+                    INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, ai_answer, vector, sources, is_starred, owner_id, submitted_by, status, created_at, updated_at)
+                    SELECT question, cat1, cat2, tags, difficulty, frequency, ai_answer, vector, sources, is_starred, NULL, ?, 'approved', created_at, updated_at
+                    FROM master_question_bank
+                """, (admin_id,))
+                logger.info(f"已迁移 {old_count} 条题目到 question_bank 表")
+
+        # ── 数据迁移: practice_history → user_practice_history ──
+        uph_count = conn.execute("SELECT COUNT(*) FROM user_practice_history").fetchone()[0]
+        if uph_count == 0:
+            ph_count = conn.execute("SELECT COUNT(*) FROM practice_history").fetchone()[0]
+            if ph_count > 0:
+                admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()[0]
+                # 需要将旧 question_id 映射到新 question_bank id
+                # 通过 question 文本匹配
+                conn.execute("""
+                    INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score, created_at)
+                    SELECT ?, qb.id, ph.user_answer, ph.evaluation_result, ph.score, ph.created_at
+                    FROM practice_history ph
+                    JOIN master_question_bank mqb ON ph.question_id = mqb.id
+                    JOIN question_bank qb ON qb.question = mqb.question AND qb.owner_id IS NULL
+                """, (admin_id,))
+                migrated = conn.execute("SELECT changes()").fetchone()[0]
+                logger.info(f"已迁移 {migrated} 条练习记录到 user_practice_history 表")
+
+        conn.commit()
 
 
 def get_db_connection():

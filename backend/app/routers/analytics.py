@@ -2,13 +2,36 @@ import logging
 import json
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 from app.db.connection import get_db_connection, run_db
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("multimodal-parser")
 
 router = APIRouter()
+
+security_optional = HTTPBearer(auto_error=False)
+
+
+async def _get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security_optional)):
+    if credentials is None:
+        return None
+    try:
+        from jose import jwt
+        from app.core.auth import SECRET_KEY, ALGORITHM
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if user_id is None:
+            return None
+        def _query():
+            with get_db_connection() as conn:
+                return conn.execute("SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)).fetchone()
+        user = await run_db(_query)
+        return dict(user) if user else None
+    except Exception:
+        return None
 
 
 @router.get("/api/analytics")
@@ -31,28 +54,47 @@ async def get_analytics():
 
 
 @router.get("/api/practice-stats")
-async def get_practice_stats():
-    """返回学习进度统计数据：各难度练习情况、每日趋势、薄弱项"""
+async def get_practice_stats(user: Optional[dict] = Depends(_get_optional_user)):
+    """返回学习进度统计数据：各难度练习情况、每日趋势、薄弱项（按用户隔离）"""
+
+    uid = user['id'] if user else None
 
     def _query():
         with get_db_connection() as conn:
+            # 根据用户 bank_mode 决定题库范围
+            if user:
+                mode = user.get('bank_mode', 'public')
+                if mode == 'personal':
+                    bank_where = "WHERE owner_id = ?"
+                    bank_params = [uid]
+                elif mode == 'mixed':
+                    bank_where = "WHERE (owner_id IS NULL AND status = 'approved') OR owner_id = ?"
+                    bank_params = [uid]
+                else:
+                    bank_where = "WHERE owner_id IS NULL AND status = 'approved'"
+                    bank_params = []
+            else:
+                bank_where = "WHERE owner_id IS NULL AND status = 'approved'"
+                bank_params = []
+
             # Master bank difficulty distribution
             diff_counts = {}
             for r in conn.execute(
-                "SELECT difficulty, COUNT(*) as cnt FROM master_question_bank GROUP BY difficulty"
+                f"SELECT difficulty, COUNT(*) as cnt FROM question_bank {bank_where} GROUP BY difficulty", bank_params
             ).fetchall():
                 diff_counts[r['difficulty'] or '未标注'] = r['cnt']
 
-            # Practice history aggregated stats
+            # Practice history aggregated stats (per user)
             practiced = {}
-            for r in conn.execute(
-                "SELECT question_id, MAX(score) as best_score, COUNT(*) as attempt_count "
-                "FROM practice_history GROUP BY question_id"
-            ).fetchall():
-                practiced[r['question_id']] = {
-                    'best_score': r['best_score'] or 0,
-                    'attempt_count': r['attempt_count']
-                }
+            if uid:
+                for r in conn.execute(
+                    "SELECT question_bank_id, MAX(score) as best_score, COUNT(*) as attempt_count "
+                    "FROM user_practice_history WHERE user_id = ? GROUP BY question_bank_id", [uid]
+                ).fetchall():
+                    practiced[r['question_bank_id']] = {
+                        'best_score': r['best_score'] or 0,
+                        'attempt_count': r['attempt_count']
+                    }
 
             # Map practiced question_ids to their difficulty
             practiced_ids = list(practiced.keys())
@@ -60,7 +102,7 @@ async def get_practice_stats():
             if practiced_ids:
                 placeholders = ','.join('?' * len(practiced_ids))
                 for r in conn.execute(
-                    f"SELECT id, difficulty FROM master_question_bank WHERE id IN ({placeholders})",
+                    f"SELECT id, difficulty FROM question_bank WHERE id IN ({placeholders})",
                     practiced_ids
                 ).fetchall():
                     practiced_diff[r['id']] = r['difficulty'] or '未标注'
@@ -80,29 +122,32 @@ async def get_practice_stats():
 
             # Daily trend (last 14 days)
             daily_trend = []
-            for i in range(13, -1, -1):
-                day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-                rows = conn.execute(
-                    "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
-                    "FROM practice_history WHERE date(created_at) = ?",
-                    (day,)
-                ).fetchone()
-                daily_trend.append({
-                    'date': day,
-                    'count': rows['cnt'] or 0,
-                    'avg_score': round(rows['avg_s'] or 0, 1)
-                })
+            if uid:
+                for i in range(13, -1, -1):
+                    day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+                    rows = conn.execute(
+                        "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
+                        "FROM user_practice_history WHERE user_id = ? AND date(created_at) = ?",
+                        (uid, day)
+                    ).fetchone()
+                    daily_trend.append({
+                        'date': day,
+                        'count': rows['cnt'] or 0,
+                        'avg_score': round(rows['avg_s'] or 0, 1)
+                    })
 
             # Weak questions (recent score < 60)
-            weak_rows = conn.execute(
-                "SELECT ph.question_id, mq.question, ph.score, ph.created_at "
-                "FROM practice_history ph "
-                "JOIN master_question_bank mq ON ph.question_id = mq.id "
-                "WHERE ph.score < 60 "
-                "ORDER BY ph.created_at DESC LIMIT 5"
-            ).fetchall()
-
-            recent_weak = [dict(r) for r in weak_rows]
+            recent_weak = []
+            if uid:
+                weak_rows = conn.execute(
+                    "SELECT uph.question_bank_id as question_id, qb.question, uph.score, uph.created_at "
+                    "FROM user_practice_history uph "
+                    "JOIN question_bank qb ON uph.question_bank_id = qb.id "
+                    "WHERE uph.user_id = ? AND uph.score < 60 "
+                    "ORDER BY uph.created_at DESC LIMIT 5",
+                    [uid]
+                ).fetchall()
+                recent_weak = [dict(r) for r in weak_rows]
 
             # Overall stats
             total_score = sum(p['best_score'] for p in practiced.values())
@@ -136,19 +181,19 @@ async def normalize_categories():
                 if new_cat1 != r['cat1'] or new_cat2 != r['cat2']:
                     cursor.execute("UPDATE questions_detail SET cat1 = ?, cat2 = ? WHERE id = ?", (new_cat1, new_cat2, r['id']))
                     updated_detail += 1
-            rows = cursor.execute("SELECT id, cat1, cat2 FROM master_question_bank").fetchall()
+            rows = cursor.execute("SELECT id, cat1, cat2 FROM question_bank").fetchall()
             for r in rows:
                 new_cat1 = normalize_category(r['cat1'])
                 new_cat2 = normalize_category(r['cat2'])
                 if new_cat1 != r['cat1'] or new_cat2 != r['cat2']:
-                    cursor.execute("UPDATE master_question_bank SET cat1 = ?, cat2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_cat1, new_cat2, r['id']))
+                    cursor.execute("UPDATE question_bank SET cat1 = ?, cat2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_cat1, new_cat2, r['id']))
                     updated_master += 1
             conn.commit()
         return updated_detail, updated_master
 
     try:
         detail_count, master_count = await run_db(_normalize)
-        return {"status": "success", "message": f"规范化完成：questions_detail 更新 {detail_count} 条，master_question_bank 更新 {master_count} 条"}
+        return {"status": "success", "message": f"规范化完成：questions_detail 更新 {detail_count} 条，question_bank 更新 {master_count} 条"}
     except Exception as e:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail=f"规范化失败: {str(e)}")
@@ -174,7 +219,8 @@ async def clear_db():
             cursor.execute("DELETE FROM jd")
             cursor.execute("DELETE FROM interview")
             cursor.execute("DELETE FROM questions_detail")
-            cursor.execute("DELETE FROM master_question_bank")
+            cursor.execute("DELETE FROM question_bank")
+            cursor.execute("DELETE FROM user_practice_history")
             cursor.execute("DELETE FROM sqlite_sequence")
             conn.commit()
 
@@ -204,7 +250,7 @@ async def get_knowledge_graph():
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                "SELECT cat1, cat2, tags FROM master_question_bank WHERE tags IS NOT NULL AND tags != ''"
+                "SELECT cat1, cat2, tags FROM question_bank WHERE tags IS NOT NULL AND tags != '' AND (owner_id IS NULL AND status = 'approved')"
             ).fetchall()
         return [dict(r) for r in rows]
 

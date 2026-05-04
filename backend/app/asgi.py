@@ -6,9 +6,11 @@ from fastapi.responses import JSONResponse
 from app.core.logging_config import logger
 from app.db.connection import init_db
 from app.middleware.request_log import log_requests
-from app.routers import health, submit, data, master_bank, interview, analytics
+from app.routers import health, submit, data, master_bank, interview, analytics, profile, auth
+from app.core.config import _reload_from_db
 
 init_db()
+_reload_from_db()
 
 app = FastAPI(title="Multimodal CV & JD Parser")
 
@@ -33,8 +35,10 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(submit.router)
 app.include_router(data.router)
 app.include_router(master_bank.router)
 app.include_router(interview.router)
 app.include_router(analytics.router)
+app.include_router(profile.router)

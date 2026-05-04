@@ -2,6 +2,12 @@ import { get, post, put, del, upload, postSSE } from '../utils/http.js'
 
 const API = '/api'
 
+// ── Auth ──
+export const authRegister = (username, password) => post(`${API}/auth/register`, { username, password })
+export const authLogin = (username, password) => post(`${API}/auth/login`, { username, password })
+export const authMe = () => get(`${API}/auth/me`)
+export const authUpdateBankMode = (bank_mode) => put(`${API}/auth/bank-mode`, { bank_mode })
+
 // ── Data fetching ──
 export const fetchJdData = () => get(`${API}/data/jd?page_size=500`)
 export const fetchInterviewData = () => get(`${API}/data/interview?page_size=500`)
@@ -32,6 +38,15 @@ export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/$
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data)
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
+
+// ── Bank upload & review ──
+export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) => {
+  const params = new URLSearchParams({ question_text, cat1: cat1 || '', cat2: cat2 || '', tags: tags || '', difficulty: difficulty || '', target: target || 'public' })
+  return post(`${API}/master-bank/upload?${params}`, null, { headers: {} })
+}
+export const fetchPendingQuestions = () => get(`${API}/master-bank/pending`)
+export const approveQuestion = (id) => post(`${API}/master-bank/approve/${id}`)
+export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 
 // ── Batch operations ──
 export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete`, { file_type: fileType, ids })

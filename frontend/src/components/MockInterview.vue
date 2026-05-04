@@ -61,6 +61,11 @@
           <span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-semibold">{{ selectedDifficultyLabel }}</span>
           <span class="text-gray-400">|</span>
           <span class="text-gray-600">共 {{ mockQuestions.length }} 题</span>
+          <template v-if="quizSummary">
+            <span class="text-gray-400">|</span>
+            <span class="text-gray-600">已答 {{ quizSummary.answered }}/{{ quizSummary.total }}</span>
+            <span class="font-bold" :class="scoreTextColor(quizSummary.avgScore)">均分 {{ quizSummary.avgScore }}</span>
+          </template>
         </div>
         <div class="flex gap-2">
           <button @click="loadQuestions" class="text-sm bg-orange-600 text-white font-semibold px-4 py-1.5 rounded-lg hover:bg-orange-700 transition">换一批</button>
@@ -96,12 +101,154 @@
                 <span class="text-xs font-medium px-2 py-0.5 rounded" :class="String(q.difficulty).includes('L3') ? 'bg-red-50 text-red-600' : String(q.difficulty).includes('L2') ? 'bg-yellow-50 text-yellow-600' : 'bg-green-50 text-green-600'">
                   {{ q.difficulty || '-' }}
                 </span>
+                <span v-if="q.attempt_count > 0" class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded font-medium">已刷 {{ q.attempt_count }} 次</span>
+                <span v-else class="bg-emerald-50 text-emerald-600 text-xs px-2 py-0.5 rounded font-medium">新题</span>
+                <button @click="handleToggleStar(q)" class="text-lg ml-1 transition-transform hover:scale-125" :title="q.is_starred ? '取消收藏' : '收藏'">
+                  {{ q.is_starred ? '★' : '☆' }}
+                </button>
                 <span class="text-xs text-gray-400 ml-auto">频率 {{ q.frequency }}</span>
               </div>
               <h3 class="text-base lg:text-lg font-bold text-gray-800 leading-snug">{{ q.question }}</h3>
             </div>
           </div>
         </div>
+
+        <!-- User answer input -->
+        <div class="px-5 py-4 border-t border-orange-100 bg-white">
+          <label class="text-xs font-semibold text-gray-500 mb-1.5 block">你的回答</label>
+          <textarea
+            v-model="q._userAnswer"
+            placeholder="在这里输入你的回答，然后点击「提交评估」让 AI 对比参考答案评分..."
+            rows="5"
+            class="w-full border border-gray-200 rounded-lg p-3 text-sm leading-relaxed focus:ring-orange-500 focus:border-orange-500 resize-y"
+          ></textarea>
+          <div class="flex gap-2 mt-2">
+            <button
+              @click="handleEvaluate(q)"
+              :disabled="q._isEvaluating"
+              class="bg-orange-600 text-white text-sm font-semibold px-5 py-2 rounded-lg hover:bg-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <svg v-if="q._isEvaluating" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+              {{ q._isEvaluating ? '评估中...' : '提交评估' }}
+            </button>
+            <button
+              v-if="q._userAnswer"
+              @click="q._userAnswer = ''; q._evaluation = null"
+              class="text-sm text-gray-500 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition"
+            >清空</button>
+          </div>
+        </div>
+
+        <!-- Evaluation result -->
+        <div v-if="q._evaluation" class="px-5 py-4 border-t border-orange-100 bg-gradient-to-br from-orange-50 to-amber-50">
+          <h4 class="text-sm font-bold text-gray-700 mb-3">评估结果</h4>
+
+          <!-- Overall score -->
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-3xl font-extrabold" :class="scoreTextColor(q._evaluation.overall_score)">{{ q._evaluation.overall_score }}</span>
+            <div class="flex-1">
+              <div class="bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500" :class="scoreColor(q._evaluation.overall_score)" :style="{ width: q._evaluation.overall_score + '%' }"></div>
+              </div>
+            </div>
+            <span class="text-xs text-gray-400">/ 100</span>
+          </div>
+
+          <!-- Dimension scores -->
+          <div class="space-y-2 mb-4">
+            <div v-for="(val, key) in q._evaluation.dimensions" :key="key" class="flex items-start gap-2">
+              <span class="text-xs text-gray-500 w-14 shrink-0 pt-0.5">{{ dimLabel[key] || key }}</span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div class="bg-gray-200 rounded-full h-2 flex-1 overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-500" :class="scoreColor(val.score)" :style="{ width: val.score + '%' }"></div>
+                  </div>
+                  <span class="text-xs font-bold w-8 text-right" :class="scoreTextColor(val.score)">{{ val.score }}</span>
+                </div>
+                <p v-if="val.comment" class="text-xs text-gray-400 mt-0.5 leading-snug">{{ val.comment }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Strengths & Weaknesses -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <div v-if="q._evaluation.strengths?.length">
+              <p class="text-xs font-semibold text-green-700 mb-1">亮点</p>
+              <ul class="space-y-1">
+                <li v-for="s in q._evaluation.strengths" :key="s" class="text-xs text-gray-600 flex gap-1.5">
+                  <span class="text-green-500 shrink-0">+</span>{{ s }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="q._evaluation.weaknesses?.length">
+              <p class="text-xs font-semibold text-red-700 mb-1">不足</p>
+              <ul class="space-y-1">
+                <li v-for="w in q._evaluation.weaknesses" :key="w" class="text-xs text-gray-600 flex gap-1.5">
+                  <span class="text-red-500 shrink-0">-</span>{{ w }}
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Suggestions -->
+          <div v-if="q._evaluation.suggestions">
+            <p class="text-xs font-semibold text-gray-700 mb-1">改进建议</p>
+            <div class="text-sm text-gray-600 leading-relaxed answer-content" v-html="renderMarkdown(q._evaluation.suggestions)"></div>
+          </div>
+        </div>
+
+        <!-- Practice history toggle -->
+        <div v-if="q.attempt_count > 0" class="border-t border-orange-100">
+          <button
+            @click="toggleHistory(q)"
+            class="w-full py-2.5 text-xs font-medium text-gray-500 hover:bg-gray-50 transition flex items-center justify-center gap-2"
+          >
+            <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            {{ q._showHistory ? '收起练习记录' : `查看练习记录 (${q.attempt_count}次)` }}
+          </button>
+          <div v-if="q._showHistory" class="px-5 py-4 bg-gray-50 border-t border-orange-100 space-y-2 max-h-64 overflow-y-auto">
+            <div v-if="q._historyLoading" class="text-center py-3 text-xs text-gray-400">加载中...</div>
+            <div v-else-if="q._history && q._history.length > 0">
+              <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-gray-100 last:border-b-0">
+                <div class="flex items-center gap-3 py-2 cursor-pointer hover:bg-gray-100/50 px-1 rounded" @click="h._expanded = !h._expanded">
+                  <span class="text-xs text-gray-400 w-5 text-right shrink-0">#{{ q._history.length - hIdx }}</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-xs font-bold" :class="scoreTextColor(h.score)">{{ h.score }}分</span>
+                      <span class="text-xs text-gray-300">{{ h.created_at?.slice(0, 16)?.replace('T', ' ') }}</span>
+                    </div>
+                    <p v-if="!h._expanded" class="text-xs text-gray-500 truncate">{{ h.user_answer?.slice(0, 80) }}{{ h.user_answer?.length > 80 ? '...' : '' }}</p>
+                  </div>
+                  <div class="w-16 shrink-0">
+                    <div class="bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                      <div class="h-full rounded-full" :class="scoreColor(h.score)" :style="{ width: h.score + '%' }"></div>
+                    </div>
+                  </div>
+                  <svg class="w-3.5 h-3.5 text-gray-400 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                </div>
+                <div v-if="h._expanded" class="pl-6 pr-2 pb-3 space-y-2">
+                  <div>
+                    <p class="text-xs font-semibold text-gray-500 mb-1">我的回答</p>
+                    <p class="text-xs text-gray-600 bg-white rounded p-2 border border-gray-100 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
+                  </div>
+                  <div v-if="h.evaluation_result">
+                    <div class="flex items-center gap-3 mb-1">
+                      <span class="text-xs font-semibold text-gray-500">维度评分：</span>
+                      <span v-for="(val, key) in h.evaluation_result.dimensions" :key="key" class="text-xs text-gray-500">
+                        {{ dimLabel[key] || key }} <span class="font-bold" :class="scoreTextColor(val.score)">{{ val.score }}</span>
+                      </span>
+                    </div>
+                    <div v-if="h.evaluation_result.suggestions" class="text-xs text-gray-500">
+                      <span class="font-semibold">建议：</span>{{ h.evaluation_result.suggestions?.slice(0, 200) }}{{ h.evaluation_result.suggestions?.length > 200 ? '...' : '' }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="text-center py-3 text-xs text-gray-400">暂无练习记录</div>
+          </div>
+        </div>
+
         <div class="border-t border-orange-100">
           <button
             @click="q._showAnswer = !q._showAnswer"
@@ -110,12 +257,41 @@
             {{ q._showAnswer ? '收起答案' : '查看答案' }}
           </button>
           <div v-if="q._showAnswer" class="p-6 bg-slate-50 border-t border-orange-100">
-            <div v-if="q.ai_answer" class="text-gray-700 text-sm leading-relaxed answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
-            <div v-else class="text-center py-4">
-              <p class="text-gray-400 mb-3 text-sm">暂无 AI 答案。</p>
-              <button @click="handleGenerate(q)" :disabled="q._isLoadingAnswer" class="bg-blue-100 text-blue-700 font-bold px-6 py-2 rounded-lg hover:bg-blue-200 transition text-sm disabled:opacity-50">
-                {{ q._isLoadingAnswer ? '生成中...' : 'AI 生成答案' }}
-              </button>
+            <!-- Edit mode -->
+            <div v-if="q._isEditingAnswer" class="flex flex-col gap-3">
+              <label class="text-xs font-semibold text-gray-600">编辑参考答案</label>
+              <textarea
+                v-model="q._editAnswer"
+                rows="10"
+                class="w-full border border-blue-300 rounded-lg p-3 text-sm leading-relaxed focus:ring-blue-500 focus:border-blue-500 resize-y font-mono"
+              ></textarea>
+              <div class="flex gap-2 justify-end">
+                <button @click="q._isEditingAnswer = false" class="px-4 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition">取消</button>
+                <button @click="handleSaveAnswer(q)" :disabled="q._isSavingAnswer" class="px-4 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
+                  {{ q._isSavingAnswer ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </div>
+            <!-- View mode -->
+            <div v-else>
+              <div v-if="q.ai_answer" class="relative">
+                <button
+                  @click="q._isEditingAnswer = true; q._editAnswer = q.ai_answer"
+                  class="absolute top-0 right-0 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-md transition border border-blue-200"
+                >编辑答案</button>
+                <div class="text-gray-700 text-sm leading-relaxed answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
+              </div>
+              <div v-else class="text-center py-4">
+                <p class="text-gray-400 mb-3 text-sm">暂无 AI 答案。</p>
+                <div class="flex gap-2 justify-center flex-wrap">
+                  <button @click="handleGenerate(q)" :disabled="q._isLoadingAnswer" class="bg-blue-100 text-blue-700 font-bold px-5 py-2 rounded-lg hover:bg-blue-200 transition text-sm disabled:opacity-50">
+                    {{ q._isLoadingAnswer ? '生成中...' : 'AI 生成答案' }}
+                  </button>
+                  <button @click="q._isEditingAnswer = true; q._editAnswer = ''" class="bg-gray-100 text-gray-600 font-bold px-5 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
+                    手动编写
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -127,7 +303,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { marked } from 'marked'
-import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer } from '../api/index.js'
+import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '../api/index.js'
 import { useToast } from '../composables/useNotification.js'
 
 const toast = useToast()
@@ -170,7 +346,7 @@ const loadQuestions = async () => {
       cat1: selectedCat.value || undefined,
       difficulty: selectedDifficulty.value || undefined
     })
-    mockQuestions.value = data.map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false }))
+    mockQuestions.value = data.map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false, _userAnswer: '', _evaluation: null, _isEvaluating: false, _showHistory: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false }))
   } catch (e) {
     console.error('获取题目失败', e)
     mockQuestions.value = []
@@ -192,5 +368,97 @@ const handleGenerate = async (q) => {
   }
 }
 
+const handleSaveAnswer = async (q) => {
+  if (!q._editAnswer.trim()) {
+    toast.warning('答案不能为空')
+    return
+  }
+  q._isSavingAnswer = true
+  try {
+    await updateRecord({ table_name: 'question_bank', record_id: q.id, update_data: { ai_answer: q._editAnswer } })
+    q.ai_answer = q._editAnswer
+    q._isEditingAnswer = false
+    toast.success('答案已保存')
+  } catch (e) {
+    toast.error(`保存失败: ${e.message}`)
+  } finally {
+    q._isSavingAnswer = false
+  }
+}
+
 const renderMarkdown = (text) => text ? marked.parse(text) : ''
+
+const handleEvaluate = async (q) => {
+  if (!q._userAnswer.trim()) {
+    toast.warning('请先输入你的答案')
+    return
+  }
+  if (!q.ai_answer) {
+    toast.warning('请先生成或查看 AI 参考答案')
+    return
+  }
+  q._isEvaluating = true
+  q._evaluation = null
+  try {
+    const data = await evaluateAnswer({
+      question_id: q.id,
+      question_text: q.question,
+      user_answer: q._userAnswer,
+      reference_answer: q.ai_answer
+    })
+    q._evaluation = data
+    q.attempt_count = (q.attempt_count || 0) + 1
+    q._history = null  // force reload history next time
+    toast.success('评估完成')
+  } catch (e) {
+    toast.error(`评估失败: ${e.message}`)
+  } finally {
+    q._isEvaluating = false
+  }
+}
+
+const scoreColor = (score) => {
+  if (score >= 80) return 'bg-green-500'
+  if (score >= 60) return 'bg-yellow-500'
+  return 'bg-red-500'
+}
+
+const scoreTextColor = (score) => {
+  if (score >= 80) return 'text-green-700'
+  if (score >= 60) return 'text-yellow-700'
+  return 'text-red-700'
+}
+
+const dimLabel = { completeness: '完整性', depth: '深度', accuracy: '准确性', logic: '逻辑性' }
+
+const handleToggleStar = async (q) => {
+  try {
+    const data = await apiToggleStar(q.id)
+    q.is_starred = data.is_starred
+  } catch (e) {
+    toast.error(`操作失败: ${e.message}`)
+  }
+}
+
+const quizSummary = computed(() => {
+  const evaluated = mockQuestions.value.filter(q => q._evaluation)
+  if (evaluated.length === 0) return null
+  const avg = Math.round(evaluated.reduce((s, q) => s + q._evaluation.overall_score, 0) / evaluated.length)
+  return { answered: evaluated.length, total: mockQuestions.value.length, avgScore: avg }
+})
+
+const toggleHistory = async (q) => {
+  q._showHistory = !q._showHistory
+  if (q._showHistory && !q._history) {
+    q._historyLoading = true
+    try {
+      q._history = (await fetchPracticeHistory(q.id)).map(h => ({ ...h, _expanded: false }))
+    } catch (e) {
+      console.error('加载练习记录失败', e)
+      q._history = []
+    } finally {
+      q._historyLoading = false
+    }
+  }
+}
 </script>

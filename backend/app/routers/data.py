@@ -38,7 +38,7 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
         if table_name == 'jd':
             result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus']})
         elif table_name == 'interview':
-            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty']})
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty'], "season": d.get('season', '')})
         elif table_name == 'questions_detail':
             result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "题目": d['question'], "一级大类": d['cat1'], "二级子类": d['cat2'], "考点标签": d['tags'], "难度标签": d['diff_tag']})
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -48,7 +48,7 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
 async def download_csv(file_type: str):
     table_map = {
         "jd": ("jd", ["来源链接", "公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"]),
-        "interview": ("interview", ["来源链接", "公司", "面试轮次", "考察重点", "具体题目清单", "难易程度"]),
+        "interview": ("interview", ["来源链接", "公司", "面试轮次", "考察重点", "具体题目清单", "难易程度", "招聘季"]),
         "tagged": ("questions_detail", ["来源链接", "公司", "面试轮次", "题目", "一级大类", "二级子类", "考点标签", "难度标签"])
     }
     if file_type not in table_map:
@@ -70,7 +70,7 @@ async def download_csv(file_type: str):
                 if table_name == 'jd':
                     writer.writerow([d['url'], d['company'], d['job_title'], d['salary'], d['tech_stack'], d['bonus']])
                 elif table_name == 'interview':
-                    writer.writerow([d['url'], d['company'], d['round'], d['focus'], d['questions_list'], d['difficulty']])
+                    writer.writerow([d['url'], d['company'], d['round'], d['focus'], d['questions_list'], d['difficulty'], d.get('season', '')])
                 elif table_name == 'questions_detail':
                     writer.writerow([d['url'], d['company'], d['round'], d['question'], d['cat1'], d['cat2'], d['tags'], d['diff_tag']])
 
@@ -107,8 +107,8 @@ async def delete_data(file_type: str, record_id: int):
 
             if table_name == 'interview':
                 url = target_row['url']
-                # 通过 sources 字段中的 URL 追溯受影响的 master_bank 记录
-                affected_rows = cursor.execute("SELECT id, sources FROM master_question_bank").fetchall()
+                # 通过 sources 字段中的 URL 追溯受影响的 question_bank 记录
+                affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
                 for mr in affected_rows:
                     try:
                         sources = json.loads(mr['sources']) if mr['sources'] else []
@@ -118,13 +118,13 @@ async def delete_data(file_type: str, record_id: int):
                     if match_count > 0:
                         new_sources = [s for s in sources if s.get('url') != url]
                         cursor.execute(
-                            "UPDATE master_question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
                             (len(new_sources), json.dumps(new_sources), mr['id'])
                         )
 
                 # 保留有 AI 答案的记录，即使 frequency 降为 0（避免答案丢失）
                 cursor.execute(
-                    "DELETE FROM master_question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+                    "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
                 )
                 cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
 
@@ -163,7 +163,7 @@ async def batch_delete_data(req: BatchDataDeleteRequest):
 
             if table_name == "interview":
                 urls_to_delete = {r["url"] for r in rows if r["url"]}
-                all_master = cursor.execute("SELECT id, sources FROM master_question_bank").fetchall()
+                all_master = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
                 for mr in all_master:
                     try:
                         sources = json.loads(mr["sources"]) if mr["sources"] else []
@@ -172,11 +172,11 @@ async def batch_delete_data(req: BatchDataDeleteRequest):
                     if any(s.get("url") in urls_to_delete for s in sources):
                         new_sources = [s for s in sources if s.get("url") not in urls_to_delete]
                         cursor.execute(
-                            "UPDATE master_question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
                             (len(new_sources), json.dumps(new_sources), mr["id"])
                         )
                 cursor.execute(
-                    "DELETE FROM master_question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+                    "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
                 )
                 for url in urls_to_delete:
                     cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
@@ -199,7 +199,7 @@ async def batch_delete_data(req: BatchDataDeleteRequest):
 
 @router.put("/api/data/update")
 async def update_generic_data(req: GenericUpdateRequest):
-    allowed_tables = ["master_question_bank", "jd", "interview", "questions_detail"]
+    allowed_tables = ["question_bank", "jd", "interview", "questions_detail"]
     if req.table_name not in allowed_tables:
         raise HTTPException(status_code=400, detail=f"安全拦截：不被允许操作的数据表 '{req.table_name}'")
 
@@ -213,7 +213,7 @@ async def update_generic_data(req: GenericUpdateRequest):
             raise HTTPException(status_code=400, detail=f"安全拦截：不允许更新字段 '{col}'，允许的字段: {allowed_cols}")
 
     # 防止通过通用更新接口意外清空 ai_answer
-    if req.table_name == "master_question_bank" and "ai_answer" in req.update_data:
+    if req.table_name == "question_bank" and "ai_answer" in req.update_data:
         new_val = req.update_data["ai_answer"]
         if not new_val or (isinstance(new_val, str) and not new_val.strip()):
             raise HTTPException(status_code=400, detail="不允许将 ai_answer 设置为空值，请使用 /api/master-bank/generate-answer 接口重新生成答案")
@@ -221,7 +221,7 @@ async def update_generic_data(req: GenericUpdateRequest):
     set_clauses = [f"{col} = ?" for col in req.update_data.keys()]
     values = list(req.update_data.values())
 
-    if req.table_name == "master_question_bank" and "updated_at" not in req.update_data:
+    if req.table_name == "question_bank" and "updated_at" not in req.update_data:
         set_clauses.append("updated_at = CURRENT_TIMESTAMP")
 
     values.append(req.record_id)

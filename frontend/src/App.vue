@@ -8,6 +8,19 @@
           <span v-if="activeSeason" class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
             {{ activeSeason }}
           </span>
+          <UserMenu
+            v-if="currentUser"
+            :user="currentUser"
+            :pending-count="pendingReviewCount"
+            @logout="handleLogout"
+            @bank-mode-changed="handleBankModeChanged"
+            @show-review="showReviewPanel = true"
+          />
+          <button
+            v-else
+            @click="showLoginModal = true"
+            class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg transition font-medium"
+          >登录</button>
           <button
             @click="showSettings = true"
             class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition"
@@ -225,12 +238,14 @@
 
     <ToastContainer />
     <ConfirmDialog />
+    <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
+    <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { cancelAllRequests } from './utils/http.js'
+import { cancelAllRequests, setUnauthorizedHandler } from './utils/http.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 
@@ -246,6 +261,9 @@ import KnowledgeGraph from './components/KnowledgeGraph.vue'
 import InlineEdit from './components/InlineEdit.vue'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import LoginModal from './components/LoginModal.vue'
+import UserMenu from './components/UserMenu.vue'
+import AdminReview from './components/AdminReview.vue'
 import { useToast, useConfirm } from './composables/useNotification.js'
 
 const toast = useToast()
@@ -272,6 +290,12 @@ const activeSeason = ref('')
 const showSettings = ref(false)
 const practiceStats = ref({})
 const recommendSeed = ref(0)
+
+// ── Auth state ──
+const currentUser = ref(null)
+const showLoginModal = ref(false)
+const showReviewPanel = ref(false)
+const pendingReviewCount = ref(0)
 
 // ── Selection composables ──
 const jdSelection = useSelection(() => jdData.value)
@@ -632,7 +656,56 @@ const triggerBuildMasterBank = async () => {
 const downloadCSV = () => { window.open(api.getDownloadUrl(activeTab.value.toLowerCase()), '_blank') }
 
 // ── Lifecycle ──
-onMounted(() => { fetchTableData(); fetchAnalytics(); fetchPracticeStats() })
+const initAuth = () => {
+  try {
+    const saved = localStorage.getItem('auth_user')
+    const token = localStorage.getItem('auth_token')
+    if (saved && token) {
+      currentUser.value = JSON.parse(saved)
+      loadPendingCount()
+    }
+  } catch {}
+}
+
+const handleLoginSuccess = (user) => {
+  currentUser.value = user
+  fetchTableData()
+  fetchPracticeStats()
+  loadPendingCount()
+}
+
+const handleLogout = () => {
+  currentUser.value = null
+  fetchTableData()
+  fetchPracticeStats()
+  pendingReviewCount.value = 0
+}
+
+const handleBankModeChanged = (user) => {
+  currentUser.value = user
+  fetchTableData()
+  fetchPracticeStats()
+}
+
+const loadPendingCount = async () => {
+  if (!currentUser.value?.is_admin) { pendingReviewCount.value = 0; return }
+  try {
+    const data = await api.fetchPendingQuestions()
+    pendingReviewCount.value = data.total || 0
+  } catch { pendingReviewCount.value = 0 }
+}
+
+// Register 401 handler
+setUnauthorizedHandler(() => {
+  showLoginModal.value = true
+})
+
+onMounted(() => {
+  initAuth()
+  fetchTableData()
+  fetchAnalytics()
+  fetchPracticeStats()
+})
 onUnmounted(() => cancelAllRequests())
 </script>
 

@@ -19,3 +19,14 @@ class BatchDeleteRequest(BaseModel):
 
 class BatchGenerateAnswersRequest(BaseModel):
     ids: List[int]
+
+
+class EvaluateAnswerRequest(BaseModel):
+    question_id: int
+    question_text: str
+    user_answer: str
+    reference_answer: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    settings: Dict[str, str]

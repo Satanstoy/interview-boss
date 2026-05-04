@@ -83,7 +83,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
 
     def _load_existing():
         with get_db_connection() as conn:
-            return conn.execute("SELECT id, question, vector, sources FROM master_question_bank").fetchall()
+            return conn.execute("SELECT id, question, vector, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved'").fetchall()
 
     existing_masters = await run_db(_load_existing)
 
@@ -110,7 +110,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
 
             def _update():
                 with get_db_connection() as conn:
-                    conn.execute("UPDATE master_question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
+                    conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
                     conn.commit()
 
             await run_db(_update)
@@ -120,7 +120,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
             # 标记失败状态，前端可识别并支持手动重试
             def _mark_failed():
                 with get_db_connection() as conn:
-                    conn.execute("UPDATE master_question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
+                    conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
                     conn.commit()
             try:
                 await run_db(_mark_failed)
@@ -130,6 +130,10 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     def _update_db():
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            # 获取管理员 ID 作为默认 submitted_by
+            admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+            admin_id = admin_row[0] if admin_row else None
+
             for emb_idx, (orig_idx, row) in enumerate(valid_rows):
                 new_vec = embeddings[emb_idx]
                 url, company, round_, q_text = row[0], row[1], row[2], row[3]
@@ -146,15 +150,15 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
                         best_match['sources'].append(new_source)
 
                     cursor.execute(
-                        "UPDATE master_question_bank SET frequency = frequency + 1, sources = ? WHERE id = ?",
+                        "UPDATE question_bank SET frequency = frequency + 1, sources = ? WHERE id = ?",
                         (json.dumps(best_match['sources']), best_match['id'])
                     )
                     best_match['frequency'] = best_match.get('frequency', 1) + 1
                 else:
                     sources_json = json.dumps([new_source])
                     cursor.execute(
-                        "INSERT INTO master_question_bank (question, cat1, tags, difficulty, vector, sources) VALUES (?, ?, ?, ?, ?, ?)",
-                        (q_text, cat1, tags, diff_tag, json.dumps(new_vec), sources_json)
+                        "INSERT INTO question_bank (question, cat1, tags, difficulty, vector, sources, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
+                        (q_text, cat1, tags, diff_tag, json.dumps(new_vec), sources_json, admin_id)
                     )
                     new_id = cursor.lastrowid
                     master_vecs.append({"id": new_id, "question": q_text, "vector": new_vec, "sources": [new_source]})
@@ -171,6 +175,7 @@ async def submit_data(
     bg_tasks: BackgroundTasks,
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
+    season: Optional[str] = Form(""),
     files: List[UploadFile] = File(default=[])
 ):
     url = url.strip() if url else ""
@@ -268,7 +273,7 @@ async def submit_data(
 
         elif doc_type == "Interview":
             questions = format_array_for_csv(data.get("具体题目清单", []))
-            await run_db(lambda: _insert_interview(saved_url, data, questions))
+            await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip()))
 
             q_list = data.get("具体题目清单", [])
             if q_list:

@@ -38,11 +38,11 @@ def _insert_jd(saved_url: str, data: dict, tech_stack: str):
         conn.commit()
 
 
-def _insert_interview(saved_url: str, data: dict, questions: str):
+def _insert_interview(saved_url: str, data: dict, questions: str, season: str = ""):
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO interview (url, company, round, focus, questions_list, difficulty) VALUES (?, ?, ?, ?, ?, ?)",
-            (saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), data.get("考察重点", "未提供"), questions, data.get("难易程度", "未提供"))
+            "INSERT INTO interview (url, company, round, focus, questions_list, difficulty, season) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), data.get("考察重点", "未提供"), questions, data.get("难易程度", "未提供"), season)
         )
         conn.commit()
 
@@ -60,7 +60,7 @@ def _insert_details(tagged_rows: list):
 def _cleanup_old_sources(url: str):
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        affected_rows = cursor.execute("SELECT id, sources FROM master_question_bank").fetchall()
+        affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
         for mr in affected_rows:
             try:
                 sources = json.loads(mr['sources']) if mr['sources'] else []
@@ -70,12 +70,12 @@ def _cleanup_old_sources(url: str):
             if match_count > 0:
                 new_sources = [s for s in sources if s.get('url') != url]
                 cursor.execute(
-                    "UPDATE master_question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                    "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
                     (len(new_sources), json.dumps(new_sources), mr['id'])
                 )
         # 保留有 AI 答案的记录，即使 frequency 降为 0（避免答案丢失）
         cursor.execute(
-            "DELETE FROM master_question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+            "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
         )
         conn.commit()
 
