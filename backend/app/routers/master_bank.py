@@ -10,7 +10,6 @@ from collections import Counter
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import DB_PATH, LLM_MODEL, EMBEDDING_MODEL, SIMILARITY_THRESHOLD
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT
 from app.core.auth import get_current_user, get_admin_user
@@ -24,38 +23,10 @@ logger = logging.getLogger("multimodal-parser")
 
 router = APIRouter()
 
-security_optional = HTTPBearer(auto_error=False)
 
-
-async def _get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security_optional)):
-    """可选认证：有 token 解析用户，无 token 返回 None"""
-    if credentials is None:
-        return None
-    try:
-        from jose import jwt
-        from app.core.auth import SECRET_KEY, ALGORITHM
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("user_id")
-        if user_id is None:
-            return None
-
-        def _query():
-            with get_db_connection() as conn:
-                return conn.execute("SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)).fetchone()
-
-        user = await run_db(_query)
-        return dict(user) if user else None
-    except Exception:
-        return None
-
-
-def _build_bank_where_clause(user: Optional[dict], table_alias: str = "qb"):
+def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
     """根据用户 bank_mode 构建 WHERE 子句"""
     prefix = f"{table_alias}." if table_alias else ""
-    if user is None:
-        # 未登录：只看公共已审核
-        return f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", []
-
     mode = user.get('bank_mode', 'public')
     uid = user['id']
 
@@ -72,7 +43,7 @@ async def get_master_bank(
     sort: str = "frequency_desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=1000),
-    user: Optional[dict] = Depends(_get_optional_user)
+    user: dict = Depends(get_current_user)
 ):
     order_clause = "ORDER BY frequency DESC" if sort != "recent" else "ORDER BY id DESC"
     offset = (page - 1) * page_size
@@ -532,7 +503,7 @@ async def get_random_questions(
     count: int = Query(5, ge=1, le=50),
     cat1: Optional[str] = Query(None),
     difficulty: Optional[str] = Query(None),
-    user: Optional[dict] = Depends(_get_optional_user)
+    user: dict = Depends(get_current_user)
 ):
     """加权随机抽题，避免重复抽取近期练过的题目"""
 
@@ -646,7 +617,7 @@ async def get_random_questions(
 
 
 @router.post("/api/evaluate-answer")
-async def evaluate_answer(req: EvaluateAnswerRequest, user: Optional[dict] = Depends(_get_optional_user)):
+async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_current_user)):
     """对比用户答案与 AI 参考答案，返回多维度评估结果"""
     if not req.user_answer.strip():
         raise HTTPException(status_code=400, detail="用户答案不能为空")
@@ -684,19 +655,17 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: Optional[dict] = Dep
 
         # 自动记录练习历史（写入 user_practice_history，关联用户）
         if req.question_id:
-            uid = user['id'] if user else None
-            if uid:
-                def _record():
-                    with get_db_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score) VALUES (?, ?, ?, ?, ?)",
-                            (uid, req.question_id, req.user_answer, json.dumps(result, ensure_ascii=False), result["overall_score"])
-                        )
-                        conn.commit()
-                try:
-                    await run_db(_record)
-                except Exception as e:
-                    logger.warning(f"记录练习历史失败（不影响评估结果）: {e}")
+            def _record():
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score) VALUES (?, ?, ?, ?, ?)",
+                        (user['id'], req.question_id, req.user_answer, json.dumps(result, ensure_ascii=False), result["overall_score"])
+                    )
+                    conn.commit()
+            try:
+                await run_db(_record)
+            except Exception as e:
+                logger.warning(f"记录练习历史失败（不影响评估结果）: {e}")
 
         return result
 
@@ -709,19 +678,14 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: Optional[dict] = Dep
 
 
 @router.get("/api/practice-history/{question_id}")
-async def get_practice_history(question_id: int, user: Optional[dict] = Depends(_get_optional_user)):
+async def get_practice_history(question_id: int, user: dict = Depends(get_current_user)):
     """获取指定题目的练习历史（当前用户的）"""
-    uid = user['id'] if user else None
-
     def _query():
         with get_db_connection() as conn:
-            if uid:
-                rows = conn.execute(
-                    "SELECT id, question_bank_id, user_answer, evaluation_result, score, created_at FROM user_practice_history WHERE question_bank_id = ? AND user_id = ? ORDER BY created_at DESC",
-                    (question_id, uid)
-                ).fetchall()
-            else:
-                rows = []
+            rows = conn.execute(
+                "SELECT id, question_bank_id, user_answer, evaluation_result, score, created_at FROM user_practice_history WHERE question_bank_id = ? AND user_id = ? ORDER BY created_at DESC",
+                (question_id, user['id'])
+            ).fetchall()
             return rows
 
     rows = await run_db(_query)

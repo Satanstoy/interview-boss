@@ -40,7 +40,24 @@
       @update:active-season="activeSeason = $event"
     />
 
-    <main class="p-5 lg:p-8 max-w-[98%] mx-auto">
+    <!-- Login gate: block content until authenticated -->
+    <div v-if="!currentUser" class="flex flex-col items-center justify-center min-h-[60vh]">
+      <div class="text-center">
+        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
+          <svg class="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+        </div>
+        <h2 class="text-xl font-bold text-gray-800 mb-2">请先登录</h2>
+        <p class="text-gray-500 mb-6">登录后即可使用题库、刷题、模拟面试等功能</p>
+        <button
+          @click="showLoginModal = true"
+          class="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition text-sm"
+        >立即登录</button>
+      </div>
+    </div>
+
+    <main v-else class="p-5 lg:p-8 max-w-[98%] mx-auto">
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
       <AnalyticsSidebar
         :analytics="analytics"
@@ -663,14 +680,17 @@ const initAuth = () => {
     if (saved && token) {
       currentUser.value = JSON.parse(saved)
       loadPendingCount()
+    } else {
+      showLoginModal.value = true
     }
-  } catch {}
+  } catch {
+    showLoginModal.value = true
+  }
 }
 
 const handleLoginSuccess = (user) => {
   currentUser.value = user
-  fetchTableData()
-  fetchPracticeStats()
+  loadAllData()
   loadPendingCount()
 }
 
@@ -700,11 +720,17 @@ setUnauthorizedHandler(() => {
   showLoginModal.value = true
 })
 
-onMounted(() => {
-  initAuth()
+const loadAllData = () => {
   fetchTableData()
   fetchAnalytics()
   fetchPracticeStats()
+}
+
+onMounted(() => {
+  initAuth()
+  if (currentUser.value) {
+    loadAllData()
+  }
 })
 onUnmounted(() => cancelAllRequests())
 </script>

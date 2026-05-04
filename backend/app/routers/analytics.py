@@ -3,35 +3,13 @@ import json
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("multimodal-parser")
 
 router = APIRouter()
-
-security_optional = HTTPBearer(auto_error=False)
-
-
-async def _get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security_optional)):
-    if credentials is None:
-        return None
-    try:
-        from jose import jwt
-        from app.core.auth import SECRET_KEY, ALGORITHM
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("user_id")
-        if user_id is None:
-            return None
-        def _query():
-            with get_db_connection() as conn:
-                return conn.execute("SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)).fetchone()
-        user = await run_db(_query)
-        return dict(user) if user else None
-    except Exception:
-        return None
 
 
 @router.get("/api/analytics")
@@ -54,25 +32,21 @@ async def get_analytics():
 
 
 @router.get("/api/practice-stats")
-async def get_practice_stats(user: Optional[dict] = Depends(_get_optional_user)):
+async def get_practice_stats(user: dict = Depends(get_current_user)):
     """返回学习进度统计数据：各难度练习情况、每日趋势、薄弱项（按用户隔离）"""
 
-    uid = user['id'] if user else None
+    uid = user['id']
 
     def _query():
         with get_db_connection() as conn:
             # 根据用户 bank_mode 决定题库范围
-            if user:
-                mode = user.get('bank_mode', 'public')
-                if mode == 'personal':
-                    bank_where = "WHERE owner_id = ?"
-                    bank_params = [uid]
-                elif mode == 'mixed':
-                    bank_where = "WHERE (owner_id IS NULL AND status = 'approved') OR owner_id = ?"
-                    bank_params = [uid]
-                else:
-                    bank_where = "WHERE owner_id IS NULL AND status = 'approved'"
-                    bank_params = []
+            mode = user.get('bank_mode', 'public')
+            if mode == 'personal':
+                bank_where = "WHERE owner_id = ?"
+                bank_params = [uid]
+            elif mode == 'mixed':
+                bank_where = "WHERE (owner_id IS NULL AND status = 'approved') OR owner_id = ?"
+                bank_params = [uid]
             else:
                 bank_where = "WHERE owner_id IS NULL AND status = 'approved'"
                 bank_params = []
@@ -86,15 +60,14 @@ async def get_practice_stats(user: Optional[dict] = Depends(_get_optional_user))
 
             # Practice history aggregated stats (per user)
             practiced = {}
-            if uid:
-                for r in conn.execute(
-                    "SELECT question_bank_id, MAX(score) as best_score, COUNT(*) as attempt_count "
-                    "FROM user_practice_history WHERE user_id = ? GROUP BY question_bank_id", [uid]
-                ).fetchall():
-                    practiced[r['question_bank_id']] = {
-                        'best_score': r['best_score'] or 0,
-                        'attempt_count': r['attempt_count']
-                    }
+            for r in conn.execute(
+                "SELECT question_bank_id, MAX(score) as best_score, COUNT(*) as attempt_count "
+                "FROM user_practice_history WHERE user_id = ? GROUP BY question_bank_id", [uid]
+            ).fetchall():
+                practiced[r['question_bank_id']] = {
+                    'best_score': r['best_score'] or 0,
+                    'attempt_count': r['attempt_count']
+                }
 
             # Map practiced question_ids to their difficulty
             practiced_ids = list(practiced.keys())
@@ -122,32 +95,29 @@ async def get_practice_stats(user: Optional[dict] = Depends(_get_optional_user))
 
             # Daily trend (last 14 days)
             daily_trend = []
-            if uid:
-                for i in range(13, -1, -1):
-                    day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-                    rows = conn.execute(
-                        "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
-                        "FROM user_practice_history WHERE user_id = ? AND date(created_at) = ?",
-                        (uid, day)
-                    ).fetchone()
-                    daily_trend.append({
-                        'date': day,
-                        'count': rows['cnt'] or 0,
-                        'avg_score': round(rows['avg_s'] or 0, 1)
-                    })
+            for i in range(13, -1, -1):
+                day = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+                rows = conn.execute(
+                    "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
+                    "FROM user_practice_history WHERE user_id = ? AND date(created_at) = ?",
+                    (uid, day)
+                ).fetchone()
+                daily_trend.append({
+                    'date': day,
+                    'count': rows['cnt'] or 0,
+                    'avg_score': round(rows['avg_s'] or 0, 1)
+                })
 
             # Weak questions (recent score < 60)
-            recent_weak = []
-            if uid:
-                weak_rows = conn.execute(
-                    "SELECT uph.question_bank_id as question_id, qb.question, uph.score, uph.created_at "
-                    "FROM user_practice_history uph "
-                    "JOIN question_bank qb ON uph.question_bank_id = qb.id "
-                    "WHERE uph.user_id = ? AND uph.score < 60 "
-                    "ORDER BY uph.created_at DESC LIMIT 5",
-                    [uid]
-                ).fetchall()
-                recent_weak = [dict(r) for r in weak_rows]
+            weak_rows = conn.execute(
+                "SELECT uph.question_bank_id as question_id, qb.question, uph.score, uph.created_at "
+                "FROM user_practice_history uph "
+                "JOIN question_bank qb ON uph.question_bank_id = qb.id "
+                "WHERE uph.user_id = ? AND uph.score < 60 "
+                "ORDER BY uph.created_at DESC LIMIT 5",
+                [uid]
+            ).fetchall()
+            recent_weak = [dict(r) for r in weak_rows]
 
             # Overall stats
             total_score = sum(p['best_score'] for p in practiced.values())
