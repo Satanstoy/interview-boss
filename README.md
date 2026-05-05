@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="logo.png" alt="InterviewBoss Logo" width="400" />
+
 # InterviewBoss
 
 **AI 驱动的面试备战平台 — 从 JD / 面经到高频题库，一键搞定**

@@ -302,8 +302,9 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '../utils/markdown.js'
 import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '../api/index.js'
+import { sanitizeAgainstInjection, validateNumber } from '../utils/validate.js'
 import { useToast } from '../composables/useNotification.js'
 
 const toast = useToast()
@@ -339,10 +340,15 @@ const startQuiz = () => {
 }
 
 const loadQuestions = async () => {
+  const countResult = validateNumber(questionCount.value, 1, 50, '题目数量')
+  if (!countResult.valid) {
+    toast.warning(countResult.error)
+    return
+  }
   isLoading.value = true
   try {
     const data = await fetchRandomQuestions({
-      count: questionCount.value,
+      count: countResult.value,
       cat1: selectedCat.value || undefined,
       difficulty: selectedDifficulty.value || undefined
     })
@@ -373,6 +379,12 @@ const handleSaveAnswer = async (q) => {
     toast.warning('答案不能为空')
     return
   }
+  try {
+    sanitizeAgainstInjection(q._editAnswer, '答案内容')
+  } catch (e) {
+    toast.warning(e.message)
+    return
+  }
   q._isSavingAnswer = true
   try {
     await updateRecord({ table_name: 'question_bank', record_id: q.id, update_data: { ai_answer: q._editAnswer } })
@@ -386,7 +398,7 @@ const handleSaveAnswer = async (q) => {
   }
 }
 
-const renderMarkdown = (text) => text ? marked.parse(text) : ''
+const renderMarkdown = (text) => renderSafeMarkdown(text)
 
 const handleEvaluate = async (q) => {
   if (!q._userAnswer.trim()) {
@@ -395,6 +407,12 @@ const handleEvaluate = async (q) => {
   }
   if (!q.ai_answer) {
     toast.warning('请先生成或查看 AI 参考答案')
+    return
+  }
+  try {
+    sanitizeAgainstInjection(q._userAnswer, '你的回答')
+  } catch (e) {
+    toast.warning(e.message)
     return
   }
   q._isEvaluating = true

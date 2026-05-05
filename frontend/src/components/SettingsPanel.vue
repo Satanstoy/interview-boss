@@ -148,6 +148,10 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { fetchProfile, updateProfile } from '../api/index.js'
+import { validateSeason, validateNumber, validateSettingsField, validateApiKey } from '../utils/validate.js'
+import { useToast } from '../composables/useNotification.js'
+
+const toast = useToast()
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -215,18 +219,52 @@ watch(() => props.visible, (val) => {
 })
 
 const saveProfile = async () => {
-  const required = {
+  // 验证必填字段
+  const requiredFields = {
     llm_model: '主模型名称',
     llm_base_url: '主模型 Base URL',
     embedding_model: 'Embedding 模型名称',
     embedding_base_url: 'Embedding Base URL'
   }
-  const empty = Object.entries(required).filter(([k]) => !form[k]?.trim())
-  if (empty.length > 0) {
-    const names = empty.map(([, label]) => label).join('、')
-    saveMessage.value = `${names} 不能为空`
+  for (const [key, label] of Object.entries(requiredFields)) {
+    const result = validateSettingsField(form[key], label)
+    if (!result.valid) {
+      saveMessage.value = result.error
+      saveSuccess.value = false
+      return
+    }
+  }
+
+  // 验证数字字段
+  const timeoutResult = validateNumber(form.llm_timeout, 10, 600, 'LLM 超时')
+  if (!timeoutResult.valid) {
+    saveMessage.value = timeoutResult.error
     saveSuccess.value = false
     return
+  }
+  const thresholdResult = validateNumber(form.similarity_threshold, 0, 1, '相似度阈值')
+  if (!thresholdResult.valid) {
+    saveMessage.value = thresholdResult.error
+    saveSuccess.value = false
+    return
+  }
+
+  // 验证可选 API Key
+  if (form.llm_api_key) {
+    const keyResult = validateApiKey(form.llm_api_key)
+    if (!keyResult.valid) {
+      saveMessage.value = keyResult.error
+      saveSuccess.value = false
+      return
+    }
+  }
+  if (form.embedding_api_key) {
+    const keyResult = validateApiKey(form.embedding_api_key)
+    if (!keyResult.valid) {
+      saveMessage.value = keyResult.error
+      saveSuccess.value = false
+      return
+    }
   }
 
   isSaving.value = true
@@ -234,15 +272,15 @@ const saveProfile = async () => {
   try {
     const payload = {
       active_season: form.active_season,
-      llm_model: form.llm_model,
-      llm_base_url: form.llm_base_url,
-      embedding_model: form.embedding_model,
-      embedding_base_url: form.embedding_base_url,
+      llm_model: form.llm_model.trim(),
+      llm_base_url: form.llm_base_url.trim(),
+      embedding_model: form.embedding_model.trim(),
+      embedding_base_url: form.embedding_base_url.trim(),
       similarity_threshold: String(form.similarity_threshold),
       llm_timeout: String(form.llm_timeout)
     }
-    if (form.llm_api_key) payload.llm_api_key = form.llm_api_key
-    if (form.embedding_api_key) payload.embedding_api_key = form.embedding_api_key
+    if (form.llm_api_key) payload.llm_api_key = form.llm_api_key.trim()
+    if (form.embedding_api_key) payload.embedding_api_key = form.embedding_api_key.trim()
 
     await updateProfile(payload)
     saveMessage.value = '配置已保存（已同步到 .env）'
@@ -263,12 +301,32 @@ const saveProfile = async () => {
   }
 }
 
-const addSeason = () => {
-  const val = newSeason.value.trim()
-  if (val && !seasons.value.includes(val)) {
-    seasons.value.push(val)
-    form.active_season = val
-    newSeason.value = ''
+const addSeason = async () => {
+  const result = validateSeason(newSeason.value)
+  if (!result.valid) {
+    saveMessage.value = result.error
+    saveSuccess.value = false
+    return
+  }
+  if (seasons.value.includes(result.value)) {
+    saveMessage.value = '该招聘季已存在'
+    saveSuccess.value = false
+    return
+  }
+  seasons.value.push(result.value)
+  form.active_season = result.value
+  newSeason.value = ''
+
+  // 立即保存到后端，避免用户关闭面板导致丢失
+  try {
+    await updateProfile({ active_season: result.value })
+    emit('update:activeSeason', result.value)
+    toast.success(`招聘季「${result.value}」已添加并设为当前`)
+  } catch (e) {
+    saveMessage.value = `添加失败: ${e.message}`
+    saveSuccess.value = false
+    // 回滚本地状态
+    seasons.value = seasons.value.filter(s => s !== result.value)
   }
 }
 </script>

@@ -85,6 +85,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { submitData } from '../api/index.js'
+import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '../utils/validate.js'
 
 const emit = defineEmits(['submitted'])
 
@@ -105,8 +106,19 @@ const handleImgError = (e) => {
   e.target.alt = '图片加载失败'
 }
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB per file
+const MAX_FILES = 20
+
 const addFileToStaging = (file) => {
   if (!file.type.startsWith('image/')) return
+  if (stagedFiles.value.length >= MAX_FILES) {
+    uploadError.value = `最多上传 ${MAX_FILES} 张图片`
+    return
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    uploadError.value = `图片 "${file.name}" 超过 10MB 限制`
+    return
+  }
   stagedFiles.value.push({
     id: Date.now() + Math.random(),
     file,
@@ -140,13 +152,42 @@ const clearStaging = () => {
 
 const submitAll = async () => {
   if (!stagedText.value.trim() && stagedFiles.value.length === 0) return
+
+  // 验证 URL（如果提供）
+  if (sourceUrl.value.trim()) {
+    const urlResult = validateUrl(sourceUrl.value)
+    if (!urlResult.valid) {
+      uploadError.value = urlResult.error
+      return
+    }
+  }
+
+  // 检测文本内容中的注入攻击
+  if (stagedText.value.trim()) {
+    try {
+      sanitizeAgainstInjection(stagedText.value, '文本内容')
+    } catch (e) {
+      uploadError.value = e.message
+      return
+    }
+  }
+
+  // 验证文件
+  if (stagedFiles.value.length > 0) {
+    const fileResult = validateFiles(stagedFiles.value.map(f => f.file))
+    if (!fileResult.valid) {
+      uploadError.value = fileResult.error
+      return
+    }
+  }
+
   isUploading.value = true
   uploadResult.value = null
   uploadError.value = null
 
   const formData = new FormData()
-  formData.append('url', sourceUrl.value)
-  formData.append('text', stagedText.value)
+  formData.append('url', sanitizeText(sourceUrl.value, 2048))
+  formData.append('text', stagedText.value.slice(0, 100000)) // 100KB text limit
   formData.append('season', props.activeSeason || '')
   stagedFiles.value.forEach(item => formData.append('files', item.file))
 

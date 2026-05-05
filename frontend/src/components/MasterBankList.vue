@@ -142,8 +142,8 @@
 </template>
 
 <script setup>
-import { marked } from 'marked'
 import BatchActionPanel from './BatchActionPanel.vue'
+import { renderSafeMarkdown } from '../utils/markdown.js'
 
 defineProps({
   items: { type: Array, default: () => [] },
@@ -155,7 +155,7 @@ defineProps({
 defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all'])
 
 const isFailedAnswer = (answer) => answer && answer.includes('生成失败')
-const renderMarkdown = (text) => text ? marked.parse(text) : ''
+const renderMarkdown = (text) => renderSafeMarkdown(text)
 </script>
 
 <style scoped>

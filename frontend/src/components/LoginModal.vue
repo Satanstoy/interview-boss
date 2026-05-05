@@ -30,6 +30,7 @@
                   type="text"
                   name="username"
                   placeholder="2-32 个字符"
+                  maxlength="32"
                   class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 focus:bg-white"
                   :disabled="loading"
                   autocomplete="username"
@@ -89,6 +90,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { authLogin, authRegister } from '../api/index.js'
 import { setAuthToken } from '../utils/http.js'
+import { validateUsername, validatePassword } from '../utils/validate.js'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close', 'login-success'])
@@ -112,15 +114,21 @@ watch(() => props.visible, (v) => {
 async function handleSubmit() {
   if (loading.value) return
   error.value = ''
+
+  const userResult = validateUsername(username.value)
+  if (!userResult.valid) { error.value = userResult.error; return }
+  const passResult = validatePassword(password.value)
+  if (!passResult.valid) { error.value = passResult.error; return }
+
   loading.value = true
   try {
     const fn = isRegister.value ? authRegister : authLogin
     const args = isRegister.value
-      ? [username.value.trim(), password.value]
-      : [username.value.trim(), password.value, rememberMe.value]
+      ? [userResult.value, passResult.value]
+      : [userResult.value, passResult.value, rememberMe.value]
     const data = await fn(...args)
     setAuthToken(data.token)
-    triggerBrowserSavePassword(username.value, password.value)
+    triggerBrowserSavePassword(userResult.value, passResult.value)
     emit('login-success', data.user)
     emit('close')
     username.value = ''

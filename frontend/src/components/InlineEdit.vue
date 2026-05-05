@@ -12,24 +12,28 @@
     </div>
 
     <!-- Edit mode -->
-    <div v-else class="flex items-center gap-1">
-      <input v-if="type === 'text'" v-model="editValue" class="border rounded px-2 py-1 w-full text-sm" @keyup.enter="save" />
-      <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border rounded px-2 py-1 w-full text-sm"></textarea>
-      <select v-else-if="type === 'select'" v-model="editValue" class="border rounded px-2 py-1 text-sm">
-        <option value="">未提供</option>
-        <option v-for="opt in options" :key="opt" :value="opt">{{ opt }}</option>
-      </select>
-      <input v-else v-model="editValue" class="border rounded px-2 py-1 w-full text-sm" @keyup.enter="save" />
-      <div class="flex gap-1 shrink-0">
-        <button @click="save" class="text-green-500 hover:text-green-700 text-sm font-medium" title="保存">保存</button>
-        <button @click="editing = false" class="text-red-400 hover:text-red-600 text-sm" title="取消">取消</button>
+    <div v-else class="flex flex-col gap-1 w-full">
+      <div class="flex items-center gap-1">
+        <input v-if="type === 'text'" v-model="editValue" class="border rounded px-2 py-1 w-full text-sm" @keyup.enter="save" />
+        <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border rounded px-2 py-1 w-full text-sm"></textarea>
+        <select v-else-if="type === 'select'" v-model="editValue" class="border rounded px-2 py-1 text-sm">
+          <option value="">未提供</option>
+          <option v-for="opt in options" :key="opt" :value="opt">{{ opt }}</option>
+        </select>
+        <input v-else v-model="editValue" class="border rounded px-2 py-1 w-full text-sm" @keyup.enter="save" />
+        <div class="flex gap-1 shrink-0">
+          <button @click="save" class="text-green-500 hover:text-green-700 text-sm font-medium" title="保存">保存</button>
+          <button @click="editing = false" class="text-red-400 hover:text-red-600 text-sm" title="取消">取消</button>
+        </div>
       </div>
+      <p v-if="validationError" class="text-red-500 text-xs mt-0.5">{{ validationError }}</p>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { validateTextField } from '../utils/validate.js'
 
 const props = defineProps({
   row: { type: Object, required: true },
@@ -45,17 +49,25 @@ const emit = defineEmits(['save'])
 
 const editing = ref(false)
 const editValue = ref('')
+const validationError = ref('')
 
 const displayValue = ref(props.row[props.field])
 const displayRef = displayValue
 
 const startEdit = () => {
   editValue.value = props.row[props.field] || ''
+  validationError.value = ''
   editing.value = true
 }
 
 const save = () => {
-  emit('save', props.tableName, props.row.id, props.dbColumn, editValue.value, props.row, '_editing_inline', props.field)
+  const result = validateTextField(editValue.value, props.field)
+  if (!result.valid) {
+    validationError.value = result.error
+    return
+  }
+  validationError.value = ''
+  emit('save', props.tableName, props.row.id, props.dbColumn, result.value, props.row, '_editing_inline', props.field)
   editing.value = false
 }
 </script>
