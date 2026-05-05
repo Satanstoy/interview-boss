@@ -1,3 +1,74 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-50 text-gray-800;
+  }
+
+  /* Global focus ring */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary-400 ring-offset-2;
+  }
+
+  /* Global selection color */
+  ::selection {
+    @apply bg-primary-100 text-primary-900;
+  }
+}
+
+@layer components {
+  /* Skeleton loader */
+  .skeleton {
+    @apply bg-gray-200 rounded animate-pulse;
+    background-image: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 40%, #e5e7eb 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s infinite linear;
+  }
+
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+
+  /* Smooth card */
+  .card-smooth {
+    @apply bg-white rounded-2xl shadow-card border border-gray-100/80 transition-all duration-300;
+  }
+  .card-smooth:hover {
+    @apply shadow-card-hover border-gray-200;
+  }
+
+  /* Button base */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-brand rounded-xl transition-all duration-200 hover:shadow-glow hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl transition-all duration-200 hover:bg-gray-50 hover:border-gray-300 active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 rounded-lg transition-all duration-200 hover:bg-gray-100 hover:text-gray-800;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full;
+  }
+}
+
+@layer utilities {
+  /* Stagger animation for list items */
+  .stagger-item {
+    animation: slideUp 0.3s ease-out both;
+  }
+}

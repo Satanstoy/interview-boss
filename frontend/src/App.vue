@@ -1,11 +1,11 @@
 <template>
   <div class="min-h-screen bg-slate-50">
     <!-- Top bar -->
-    <nav class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
-      <div class="max-w-[98%] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
-        <h1 class="text-lg lg:text-xl font-bold text-gray-900">面试题库管理系统</h1>
+    <nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
+      <div class="max-w-[1440px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
+        <h1 class="text-lg lg:text-xl font-extrabold bg-gradient-to-r from-primary-600 via-accent-600 to-primary-500 bg-clip-text text-transparent tracking-tight">InterviewBoss</h1>
         <div class="flex items-center gap-3">
-          <span v-if="activeSeason" class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+          <span v-if="activeSeason" class="badge bg-primary-50 text-primary-700 border border-primary-100 px-3 py-1">
             {{ activeSeason }}
           </span>
           <UserMenu
@@ -19,11 +19,11 @@
           <button
             v-else
             @click="showLoginModal = true"
-            class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg transition font-medium"
+            class="btn-primary text-sm"
           >登录</button>
           <button
             @click="showSettings = true"
-            class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition"
+            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-200"
             title="系统配置"
           >
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -41,24 +41,24 @@
     />
 
     <!-- Login gate: block content until authenticated -->
-    <div v-if="!currentUser" class="flex flex-col items-center justify-center min-h-[60vh]">
-      <div class="text-center">
-        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-100 flex items-center justify-center">
-          <svg class="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <div v-if="!currentUser" class="flex flex-col items-center justify-center min-h-[70vh] animate-fade-in">
+      <div class="text-center max-w-md mx-auto px-4">
+        <div class="w-20 h-20 mx-auto mb-6 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow">
+          <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
           </svg>
         </div>
-        <h2 class="text-xl font-bold text-gray-800 mb-2">请先登录</h2>
-        <p class="text-gray-500 mb-6">登录后即可使用题库、刷题、模拟面试等功能</p>
+        <h2 class="text-2xl font-extrabold text-gray-800 mb-2">欢迎使用 InterviewBoss</h2>
+        <p class="text-gray-500 mb-8 leading-relaxed">登录后即可使用题库管理、AI 刷题、模拟面试、知识图谱等全部功能</p>
         <button
           @click="showLoginModal = true"
-          class="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition text-sm"
+          class="btn-primary px-10 py-3 text-base"
         >立即登录</button>
       </div>
     </div>
 
-    <main v-else class="p-5 lg:p-8 max-w-[98%] mx-auto">
-      <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+    <main v-else class="p-5 lg:p-8 max-w-[1440px] mx-auto">
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
       <AnalyticsSidebar
         :analytics="analytics"
         :master-bank="masterBank"
@@ -72,10 +72,10 @@
         @refresh-recommend="recommendSeed++"
       />
 
-      <div class="lg:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="lg:col-span-3 bg-white rounded-2xl shadow-card border border-gray-100/80 overflow-hidden">
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="p-3 lg:p-6">
+        <div class="p-4 lg:p-6">
           <SearchFilterBar
             v-if="activeTab === 'MasterBank'"
             :search-query="searchQuery"
@@ -89,50 +89,72 @@
 
           <!-- Sub-tag filter chips -->
           <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-4">
-            <span class="text-xs text-gray-500 self-center mr-1">子标签：</span>
+            <span class="text-xs text-gray-400 self-center mr-1 font-medium">子标签：</span>
             <button
               v-for="st in availableSubTags"
               :key="st.tag"
               @click="toggleSubTag(st.tag)"
-              class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+              class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
               :class="selectedSubTags.includes(st.tag)
-                ? 'bg-green-100 text-green-700 border-green-300 font-semibold'
-                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300'"
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold shadow-sm'
+                : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'"
             >
               {{ st.tag }}
-              <span class="ml-1 text-xs opacity-60">{{ st.count }}</span>
+              <span class="ml-1 opacity-50">{{ st.count }}</span>
             </button>
           </div>
 
           <!-- Action bar -->
-          <div class="flex flex-wrap justify-between items-center mb-4 lg:mb-6 gap-2">
-            <h2 class="text-lg lg:text-xl font-bold flex items-center gap-2">
+          <div class="flex flex-wrap justify-between items-center mb-5 gap-3">
+            <h2 class="text-lg lg:text-xl font-bold text-gray-800 flex items-center gap-2">
               {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : activeTab === 'KnowledgeGraph' ? '知识图谱' : '高频题库' }}
-              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="text-sm font-normal bg-green-100 text-green-700 px-3 py-1 rounded-full border border-green-200">
+              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1">
                 筛选: {{ selectedTag }}
               </span>
             </h2>
             <div class="flex flex-wrap gap-2">
-              <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="text-sm bg-purple-600 text-white font-bold px-4 py-2 rounded hover:bg-purple-700 transition">
+              <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="btn-primary text-sm bg-gradient-to-r from-accent-600 to-primary-600">
                 {{ isBuilding ? '重建中...' : '重建题库' }}
               </button>
-              <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-sm">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                 {{ isDataLoading ? '加载中...' : '刷新数据' }}
               </button>
-              <button v-if="activeTab === 'JD' || activeTab === 'Interview'" @click="downloadCSV" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">导出 CSV</button>
+              <button v-if="activeTab === 'JD' || activeTab === 'Interview'" @click="downloadCSV" class="btn-secondary text-sm">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                导出 CSV
+              </button>
             </div>
           </div>
 
           <!-- Error banner -->
-          <div v-if="dataLoadError" class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-            <span>{{ dataLoadError }}</span>
-            <button @click="fetchTableData" class="text-sm bg-red-100 hover:bg-red-200 px-3 py-1 rounded transition">重试</button>
+          <div v-if="dataLoadError" class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center justify-between">
+            <span class="flex items-center gap-2 text-sm">
+              <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              {{ dataLoadError }}
+            </span>
+            <button @click="fetchTableData" class="text-sm bg-red-100 hover:bg-red-200 px-3 py-1 rounded-lg transition font-medium">重试</button>
           </div>
 
           <!-- Loading skeleton -->
-          <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 text-center">
-            <svg class="animate-spin h-8 w-8 text-blue-500 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <p class="text-gray-500">数据加载中...</p>
+          <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 space-y-4">
+            <div class="flex items-center gap-3 mb-6">
+              <div class="skeleton h-8 w-8 rounded-lg"></div>
+              <div class="skeleton h-4 w-32 rounded"></div>
+            </div>
+            <div v-for="i in 3" :key="i" class="card-smooth p-5 space-y-3">
+              <div class="flex gap-3">
+                <div class="skeleton h-10 w-10 rounded-lg"></div>
+                <div class="flex-1 space-y-2">
+                  <div class="skeleton h-4 w-3/4 rounded"></div>
+                  <div class="skeleton h-3 w-1/2 rounded"></div>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <div class="skeleton h-5 w-16 rounded-full"></div>
+                <div class="skeleton h-5 w-20 rounded-full"></div>
+              </div>
+            </div>
           </div>
 
           <!-- JD Tab -->
@@ -733,14 +755,9 @@ onUnmounted(() => cancelAllRequests())
 </script>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { width: 6px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
-
-:deep(pre) { background-color: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
+:deep(pre) { background-color: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
 :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em; }
-:deep(p code) { background-color: #e2e8f0; color: #c53030; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
+:deep(p code) { background-color: #f1f5f9; color: #dc2626; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(strong) { font-weight: 700; color: #111827; }
