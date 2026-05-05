@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
@@ -32,6 +33,9 @@ export default {
           50: '#f8fafc',
           100: '#f1f5f9',
           200: '#e2e8f0',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
         },
       },
       fontFamily: {
@@ -41,6 +45,8 @@ export default {
         'card': '0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04)',
         'card-hover': '0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04)',
         'glow': '0 0 20px -5px rgb(59 130 246 / 0.3)',
+        'glass': '0 8px 32px rgba(0, 0, 0, 0.12)',
+        'glass-dark': '0 8px 32px rgba(0, 0, 0, 0.3)',
       },
       borderRadius: {
         'xl': '0.875rem',

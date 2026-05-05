@@ -9,20 +9,20 @@ def _check_duplicate_url_sync(url: str) -> bool:
     sig = _extract_url_signature(url)
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        # 先按精确 URL 匹配
+        # 先按精确 URL 匹配（参数化查询，安全）
         cursor.execute("SELECT 1 FROM jd WHERE url = ?", (url,))
         if cursor.fetchone():
             return True
         cursor.execute("SELECT 1 FROM interview WHERE url = ?", (url,))
         if cursor.fetchone():
             return True
-        # 再按 URL 签名匹配（增强去重）
+        # 再按 URL 签名匹配（只取 url 列，减少数据传输）
         if sig:
-            cursor.execute("SELECT id, url FROM jd")
+            cursor.execute("SELECT url FROM jd")
             for row in cursor.fetchall():
                 if _extract_url_signature(row['url']) == sig:
                     return True
-            cursor.execute("SELECT id, url FROM interview")
+            cursor.execute("SELECT url FROM interview")
             for row in cursor.fetchall():
                 if _extract_url_signature(row['url']) == sig:
                     return True

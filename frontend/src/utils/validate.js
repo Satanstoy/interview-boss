@@ -72,11 +72,11 @@ export function validateUsername(username) {
 }
 
 /**
- * 验证密码：至少 6 位，最大 128 位
+ * 验证密码：至少 8 位，最大 128 位
  */
 export function validatePassword(password) {
   if (typeof password !== 'string') return { valid: false, error: '密码不能为空', value: '' }
-  if (password.length < 6) return { valid: false, error: '密码至少 6 位', value: '' }
+  if (password.length < 8) return { valid: false, error: '密码至少 8 位', value: '' }
   if (password.length > 128) return { valid: false, error: '密码不能超过 128 位', value: '' }
   return { valid: true, value: password }
 }

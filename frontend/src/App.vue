@@ -1,11 +1,11 @@
 <template>
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-slate-50 dark:bg-surface-900">
     <!-- Top bar -->
-    <nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
+    <nav class="sticky top-0 z-50 bg-white/80 dark:bg-surface-900/80 backdrop-blur-xl border-b border-gray-100/80 dark:border-gray-800/80 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
       <div class="max-w-[1440px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <h1 class="text-lg lg:text-xl font-extrabold bg-gradient-to-r from-primary-600 via-accent-600 to-primary-500 bg-clip-text text-transparent tracking-tight">InterviewBoss</h1>
         <div class="flex items-center gap-3">
-          <span v-if="activeSeason" class="badge bg-primary-50 text-primary-700 border border-primary-100 px-3 py-1">
+          <span v-if="activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 px-3 py-1">
             {{ activeSeason }}
           </span>
           <UserMenu
@@ -21,9 +21,22 @@
             @click="showLoginModal = true"
             class="btn-primary text-sm"
           >登录</button>
+          <!-- Dark mode toggle -->
+          <button
+            @click="toggleDark()"
+            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
+            :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
+          >
+            <svg v-if="isDark" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+            <svg v-else class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          </button>
           <button
             @click="showSettings = true"
-            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-200"
+            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
             title="系统配置"
           >
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -40,20 +53,43 @@
       @update:active-season="activeSeason = $event"
     />
 
-    <!-- Login gate: block content until authenticated -->
-    <div v-if="!currentUser" class="flex flex-col items-center justify-center min-h-[70vh] animate-fade-in">
-      <div class="text-center max-w-md mx-auto px-4">
-        <div class="w-20 h-20 mx-auto mb-6 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow">
-          <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <!-- Login gate: modernized welcome screen -->
+    <div v-if="!currentUser" class="relative min-h-[calc(100vh-56px)] flex items-center justify-center overflow-hidden">
+      <div class="absolute inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-200/30 dark:bg-primary-900/20 rounded-full blur-3xl animate-pulse-slow"></div>
+        <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-accent-200/30 dark:bg-accent-900/20 rounded-full blur-3xl animate-pulse-slow" style="animation-delay: 1.5s"></div>
+      </div>
+
+      <div class="relative text-center max-w-lg mx-auto px-4 animate-fade-in">
+        <div class="w-24 h-24 mx-auto mb-8 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow transform hover:scale-105 transition-transform duration-300">
+          <svg class="w-12 h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
           </svg>
         </div>
-        <h2 class="text-2xl font-extrabold text-gray-800 mb-2">欢迎使用 InterviewBoss</h2>
-        <p class="text-gray-500 mb-8 leading-relaxed">登录后即可使用题库管理、AI 刷题、模拟面试、知识图谱等全部功能</p>
+
+        <h2 class="text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-3">
+          欢迎使用 InterviewBoss
+        </h2>
+        <p class="text-gray-500 dark:text-gray-400 mb-10 leading-relaxed text-lg">
+          AI 驱动的面试准备平台
+        </p>
+
+        <div class="grid grid-cols-3 gap-4 mb-10">
+          <div v-for="feature in loginFeatures" :key="feature.label"
+            class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/60 dark:bg-surface-800/60 backdrop-blur-sm border border-gray-100 dark:border-gray-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
+              <span class="text-lg">{{ feature.icon }}</span>
+            </div>
+            <span class="text-xs font-semibold text-gray-600 dark:text-gray-400">{{ feature.label }}</span>
+          </div>
+        </div>
+
         <button
           @click="showLoginModal = true"
-          class="btn-primary px-10 py-3 text-base"
+          class="btn-primary px-12 py-3.5 text-base hover:shadow-glow transform hover:scale-[1.03] transition-all duration-300"
         >立即登录</button>
+
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-4">登录后即可使用全部功能</p>
       </div>
     </div>
 
@@ -72,7 +108,7 @@
         @refresh-recommend="recommendSeed++"
       />
 
-      <div class="lg:col-span-3 bg-white rounded-2xl shadow-card border border-gray-100/80 overflow-hidden">
+      <div class="lg:col-span-3 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-gray-100/80 dark:border-gray-700/50 overflow-hidden">
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
         <div class="p-4 lg:p-6">
@@ -89,15 +125,15 @@
 
           <!-- Sub-tag filter chips -->
           <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-4">
-            <span class="text-xs text-gray-400 self-center mr-1 font-medium">子标签：</span>
+            <span class="text-xs text-gray-400 dark:text-gray-500 self-center mr-1 font-medium">子标签：</span>
             <button
               v-for="st in availableSubTags"
               :key="st.tag"
               @click="toggleSubTag(st.tag)"
               class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
               :class="selectedSubTags.includes(st.tag)
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold shadow-sm'
-                : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:border-gray-300'"
+                ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-700 font-semibold shadow-sm'
+                : 'bg-white dark:bg-surface-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 hover:border-gray-300 dark:hover:border-gray-500'"
             >
               {{ st.tag }}
               <span class="ml-1 opacity-50">{{ st.count }}</span>
@@ -106,9 +142,9 @@
 
           <!-- Action bar -->
           <div class="flex flex-wrap justify-between items-center mb-5 gap-3">
-            <h2 class="text-lg lg:text-xl font-bold text-gray-800 flex items-center gap-2">
+            <h2 class="text-lg lg:text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
               {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : activeTab === 'KnowledgeGraph' ? '知识图谱' : '高频题库' }}
-              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1">
+              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs px-3 py-1">
                 筛选: {{ selectedTag }}
               </span>
             </h2>
@@ -128,156 +164,166 @@
           </div>
 
           <!-- Error banner -->
-          <div v-if="dataLoadError" class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center justify-between">
+          <div v-if="dataLoadError" class="mb-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
             <span class="flex items-center gap-2 text-sm">
               <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               {{ dataLoadError }}
             </span>
-            <button @click="fetchTableData" class="text-sm bg-red-100 hover:bg-red-200 px-3 py-1 rounded-lg transition font-medium">重试</button>
+            <button @click="fetchTableData" class="text-sm bg-red-100 dark:bg-red-900/50 hover:bg-red-200 dark:hover:bg-red-800/50 px-3 py-1 rounded-lg transition font-medium">重试</button>
           </div>
 
           <!-- Loading skeleton -->
           <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 space-y-4">
             <div class="flex items-center gap-3 mb-6">
-              <div class="skeleton h-8 w-8 rounded-lg"></div>
-              <div class="skeleton h-4 w-32 rounded"></div>
+              <div class="skeleton h-10 w-10 rounded-xl"></div>
+              <div class="flex-1 space-y-2">
+                <div class="skeleton h-5 w-48 rounded"></div>
+                <div class="skeleton h-3 w-24 rounded"></div>
+              </div>
             </div>
-            <div v-for="i in 3" :key="i" class="card-smooth p-5 space-y-3">
+            <div v-for="(w, i) in skeletonCards" :key="i" class="card-smooth p-5 space-y-3">
               <div class="flex gap-3">
-                <div class="skeleton h-10 w-10 rounded-lg"></div>
+                <div class="skeleton h-12 w-12 rounded-lg"></div>
                 <div class="flex-1 space-y-2">
-                  <div class="skeleton h-4 w-3/4 rounded"></div>
-                  <div class="skeleton h-3 w-1/2 rounded"></div>
+                  <div class="skeleton h-4 rounded" :style="{ width: w.title }"></div>
+                  <div class="skeleton h-3 rounded" :style="{ width: w.subtitle }"></div>
                 </div>
+                <div class="skeleton h-6 w-16 rounded-full"></div>
               </div>
               <div class="flex gap-2">
-                <div class="skeleton h-5 w-16 rounded-full"></div>
                 <div class="skeleton h-5 w-20 rounded-full"></div>
+                <div class="skeleton h-5 w-14 rounded-full"></div>
+                <div class="skeleton h-5 w-24 rounded-full"></div>
               </div>
             </div>
           </div>
 
-          <!-- JD Tab -->
-          <DataTable
-            v-if="activeTab === 'JD'"
-            :columns="jdColumns"
-            :rows="jdData"
-            :selected-count="jdSelection.selectedCount.value"
-            :is-selected="(id) => jdSelection.selectedIds.value.has(id)"
-            :batch-actions="jdBatchActions"
-            @toggle-select-all="jdSelection.toggleSelectAll()"
-            @invert-selection="jdSelection.invertSelection()"
-            @toggle-item="jdSelection.toggleItem($event)"
-          >
-            <template #actions="{ row }">
-              <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
-              <span v-else class="text-gray-300 mr-3">-</span>
-              <button @click="deleteDataRow('jd', row.id)" class="text-red-500 hover:text-red-700 font-bold">删除</button>
-            </template>
-            <template #cell-company="{ row }">
-              <InlineEdit :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
-            </template>
-            <template #cell-job_title="{ row }">
-              <InlineEdit :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
-            </template>
-            <template #cell-salary="{ row }">
-              <span class="text-red-600">{{ row['薪资范围'] }}</span>
-            </template>
-            <template #cell-tech_stack="{ row }">
-              <span class="whitespace-pre-wrap break-words min-w-[200px]">{{ row['核心技术要求'] }}</span>
-            </template>
-            <template #cell-bonus="{ row }">
-              <span class="text-gray-500 whitespace-pre-wrap break-words">{{ row['加分项'] }}</span>
-            </template>
-          </DataTable>
+          <!-- Tab content with transitions -->
+          <Transition name="tab-fade" mode="out-in">
+            <div :key="activeTab">
+              <!-- JD Tab -->
+              <DataTable
+                v-if="activeTab === 'JD'"
+                :columns="jdColumns"
+                :rows="jdData"
+                :selected-count="jdSelection.selectedCount.value"
+                :is-selected="(id) => jdSelection.selectedIds.value.has(id)"
+                :batch-actions="jdBatchActions"
+                @toggle-select-all="jdSelection.toggleSelectAll()"
+                @invert-selection="jdSelection.invertSelection()"
+                @toggle-item="jdSelection.toggleItem($event)"
+              >
+                <template #actions="{ row }">
+                  <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
+                  <span v-else class="text-gray-300 dark:text-gray-600 mr-3">-</span>
+                  <button @click="deleteDataRow('jd', row.id)" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">删除</button>
+                </template>
+                <template #cell-company="{ row }">
+                  <InlineEdit :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
+                </template>
+                <template #cell-job_title="{ row }">
+                  <InlineEdit :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
+                </template>
+                <template #cell-salary="{ row }">
+                  <span class="text-red-600 dark:text-red-400">{{ row['薪资范围'] }}</span>
+                </template>
+                <template #cell-tech_stack="{ row }">
+                  <span class="whitespace-pre-wrap break-words min-w-[200px]">{{ row['核心技术要求'] }}</span>
+                </template>
+                <template #cell-bonus="{ row }">
+                  <span class="text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words">{{ row['加分项'] }}</span>
+                </template>
+              </DataTable>
 
-          <!-- Interview Tab -->
-          <div v-if="activeTab === 'Interview' && interviewSeasons.length > 0" class="flex items-center gap-2 mb-4">
-            <label class="text-xs text-gray-500">招聘季筛选：</label>
-            <select v-model="filterSeason" class="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-blue-500 focus:border-blue-500">
-              <option value="">全部</option>
-              <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
-            </select>
-          </div>
-          <DataTable
-            v-if="activeTab === 'Interview'"
-            :columns="interviewColumns"
-            :rows="filteredInterviewData"
-            :selected-count="interviewSelection.selectedCount.value"
-            :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
-            :batch-actions="interviewBatchActions"
-            @toggle-select-all="interviewSelection.toggleSelectAll()"
-            @invert-selection="interviewSelection.invertSelection()"
-            @toggle-item="interviewSelection.toggleItem($event)"
-          >
-            <template #actions="{ row }">
-              <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="text-blue-500 hover:text-blue-700 font-bold mr-2 disabled:opacity-50" title="重新提取并打标">
-                <svg v-if="reprocessingIds[row.id]" class="animate-spin inline-block w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                <span v-else>重新分析</span>
-              </button>
-              <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
-              <span v-else class="text-gray-300 mr-3">-</span>
-              <button @click="deleteDataRow('interview', row.id)" class="text-red-500 hover:text-red-700 font-bold">删除</button>
-            </template>
-            <template #cell-company="{ row }">
-              <InlineEdit :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
-            </template>
-            <template #cell-round="{ row }">
-              <InlineEdit :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
-            </template>
-            <template #cell-focus="{ row }">
-              <InlineEdit :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
-            </template>
-            <template #cell-questions_list="{ row }">
-              <InlineEdit :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
-            </template>
-            <template #cell-difficulty="{ row }">
-              <InlineEdit :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
-            </template>
-          </DataTable>
+              <!-- Interview Tab -->
+              <div v-if="activeTab === 'Interview' && interviewSeasons.length > 0" class="flex items-center gap-2 mb-4">
+                <label class="text-xs text-gray-500 dark:text-gray-400">招聘季筛选：</label>
+                <select v-model="filterSeason" class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-gray-800 dark:text-gray-200 focus:ring-blue-500 focus:border-blue-500">
+                  <option value="">全部</option>
+                  <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
+                </select>
+              </div>
+              <DataTable
+                v-if="activeTab === 'Interview'"
+                :columns="interviewColumns"
+                :rows="filteredInterviewData"
+                :selected-count="interviewSelection.selectedCount.value"
+                :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
+                :batch-actions="interviewBatchActions"
+                @toggle-select-all="interviewSelection.toggleSelectAll()"
+                @invert-selection="interviewSelection.invertSelection()"
+                @toggle-item="interviewSelection.toggleItem($event)"
+              >
+                <template #actions="{ row }">
+                  <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-bold mr-2 disabled:opacity-50" title="重新提取并打标">
+                    <svg v-if="reprocessingIds[row.id]" class="animate-spin inline-block w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span v-else>重新分析</span>
+                  </button>
+                  <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
+                  <span v-else class="text-gray-300 dark:text-gray-600 mr-3">-</span>
+                  <button @click="deleteDataRow('interview', row.id)" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">删除</button>
+                </template>
+                <template #cell-company="{ row }">
+                  <InlineEdit :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
+                </template>
+                <template #cell-round="{ row }">
+                  <InlineEdit :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
+                </template>
+                <template #cell-focus="{ row }">
+                  <InlineEdit :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
+                </template>
+                <template #cell-questions_list="{ row }">
+                  <InlineEdit :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
+                </template>
+                <template #cell-difficulty="{ row }">
+                  <InlineEdit :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
+                </template>
+              </DataTable>
 
-          <!-- MockInterview Tab -->
-          <MockInterview
-            v-if="activeTab === 'MockInterview'"
-            ref="mockInterviewRef"
-            :popular-tags="popularTags"
-          />
+              <!-- MockInterview Tab -->
+              <MockInterview
+                v-if="activeTab === 'MockInterview'"
+                ref="mockInterviewRef"
+                :popular-tags="popularTags"
+              />
 
-          <!-- KnowledgeGraph Tab -->
-          <KnowledgeGraph
-            v-if="activeTab === 'KnowledgeGraph'"
-            @filter-by-tag="onGraphFilterTag"
-            @filter-by-category="onGraphFilterCategory"
-          />
+              <!-- KnowledgeGraph Tab -->
+              <KnowledgeGraph
+                v-if="activeTab === 'KnowledgeGraph'"
+                @filter-by-tag="onGraphFilterTag"
+                @filter-by-category="onGraphFilterCategory"
+              />
 
-          <!-- Import Tab -->
-          <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" @submitted="onSubmitted" />
+              <!-- Import Tab -->
+              <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" @submitted="onSubmitted" />
 
-          <!-- MasterBank Tab -->
-          <MasterBankList
-            v-if="activeTab === 'MasterBank'"
-            :items="filteredMasterBank"
-            :selected-count="masterSelection.selectedCount.value"
-            :is-selected="(id) => masterSelection.selectedIds.value.has(id)"
-            :batch-actions="masterBatchActions"
-            :practiced-questions="practicedQuestions"
-            @toggle-select-all="masterSelection.toggleSelectAll()"
-            @invert-selection="masterSelection.invertSelection()"
-            @toggle-item="masterSelection.toggleItem($event)"
-            @toggle-star="toggleStar"
-            @retag="retagQuestion"
-            @generate-answer="generateAnswer"
-            @save-field="saveFieldFromEvent"
-            @expand-all="filteredMasterBank.forEach(q => q._showAnswer = true)"
-            @collapse-all="filteredMasterBank.forEach(q => q._showAnswer = false)"
-            @practice="practiceQuestion = $event"
-          />
+              <!-- MasterBank Tab -->
+              <MasterBankList
+                v-if="activeTab === 'MasterBank'"
+                :items="filteredMasterBank"
+                :selected-count="masterSelection.selectedCount.value"
+                :is-selected="isMasterSelected"
+                :batch-actions="masterBatchActions"
+                :practiced-questions="practicedQuestions"
+                @toggle-select-all="masterSelection.toggleSelectAll()"
+                @invert-selection="masterSelection.invertSelection()"
+                @toggle-item="masterSelection.toggleItem($event)"
+                @toggle-star="toggleStar"
+                @retag="retagQuestion"
+                @generate-answer="generateAnswer"
+                @save-field="saveFieldFromEvent"
+                @expand-all=""
+                @collapse-all=""
+                @practice="practiceQuestion = $event"
+              />
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
     </main>
 
-    <ToastContainer />
+    <Toaster position="top-right" richColors closeButton />
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
@@ -290,6 +336,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken } from './utils/http.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
+import { useTheme } from './composables/useTheme.js'
 
 import StagingPanel from './components/StagingPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -301,7 +348,7 @@ import MasterBankList from './components/MasterBankList.vue'
 import MockInterview from './components/MockInterview.vue'
 import KnowledgeGraph from './components/KnowledgeGraph.vue'
 import InlineEdit from './components/InlineEdit.vue'
-import ToastContainer from './components/ToastContainer.vue'
+import { Toaster } from 'vue-sonner'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import LoginModal from './components/LoginModal.vue'
 import UserMenu from './components/UserMenu.vue'
@@ -311,6 +358,7 @@ import { useToast, useConfirm } from './composables/useNotification.js'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()
+const { isDark, toggleDark } = useTheme()
 
 // ── State ──
 const activeTab = ref('MasterBank')
@@ -345,6 +393,23 @@ const practiceQuestion = ref(null)
 const jdSelection = useSelection(() => jdData.value)
 const interviewSelection = useSelection(() => interviewData.value)
 const masterSelection = useSelection(() => filteredMasterBank.value)
+const isMasterSelected = (id) => masterSelection.selectedIds.value.has(id)
+
+// ── Login features ──
+const loginFeatures = [
+  { icon: '📚', label: '智能题库', iconBg: 'bg-blue-100 dark:bg-blue-900/30' },
+  { icon: '🤖', label: 'AI 刷题', iconBg: 'bg-violet-100 dark:bg-violet-900/30' },
+  { icon: '🎯', label: '模拟面试', iconBg: 'bg-orange-100 dark:bg-orange-900/30' },
+]
+
+// ── Skeleton data ──
+const skeletonCards = [
+  { title: '75%', subtitle: '45%' },
+  { title: '60%', subtitle: '55%' },
+  { title: '85%', subtitle: '35%' },
+  { title: '50%', subtitle: '65%' },
+  { title: '70%', subtitle: '40%' },
+]
 
 // ── Column definitions ──
 const jdColumns = [
@@ -420,7 +485,6 @@ const filteredInterviewData = computed(() => {
   return interviewData.value.filter(d => d.season === filterSeason.value)
 })
 
-// Derive per-question practice info from practiceStats
 const practicedQuestions = computed(() => {
   const stats = practiceStats.value
   if (!stats?.practiced_details) return {}
@@ -431,7 +495,6 @@ const handlePracticeEvaluated = async ({ questionId, score }) => {
   await fetchPracticeStats()
 }
 
-// Refresh practice stats when returning from mock interview
 watch(activeTab, (newTab, oldTab) => {
   if (oldTab === 'MockInterview' && newTab === 'MasterBank') {
     fetchPracticeStats()
@@ -446,7 +509,7 @@ const jdBatchActions = computed(() => [
     color: 'red',
     handler: async (onProgress) => {
       const ids = [...jdSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`)) return
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`, { title: '确认删除', variant: 'danger' })) return
       onProgress(0, ids.length)
       try {
         const result = await api.batchDeleteData('jd', ids)
@@ -486,7 +549,7 @@ const interviewBatchActions = computed(() => [
     color: 'red',
     handler: async (onProgress) => {
       const ids = [...interviewSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`)) return
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`, { title: '确认删除', variant: 'danger' })) return
       onProgress(0, ids.length)
       try {
         const result = await api.batchDeleteData('interview', ids)
@@ -537,7 +600,7 @@ const masterBatchActions = computed(() => [
     color: 'red',
     handler: async (onProgress) => {
       const ids = [...masterSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 道题目？`)) return
+      if (!await showConfirm(`确定要删除选中的 ${ids.length} 道题目？`, { title: '确认删除', variant: 'danger' })) return
       onProgress(0, ids.length)
       try {
         const result = await api.batchDeleteMasterBank(ids)
@@ -613,7 +676,6 @@ const onGraphFilterCategory = (catName) => {
 
 const onGoToQuestion = (question) => {
   activeTab.value = 'MasterBank'
-  // Set search to the question text (truncated for a reasonable search)
   const q = question.question || ''
   searchQuery.value = q.length > 30 ? q.substring(0, 30) : q
   selectedTag.value = '全部'
@@ -630,7 +692,7 @@ const toggleSubTag = (tag) => {
 }
 
 const deleteDataRow = async (type, recordId) => {
-  if (!await showConfirm('确定要删除该记录？')) return
+  if (!await showConfirm('确定要删除该记录？', { title: '确认删除', variant: 'danger' })) return
   try {
     await api.deleteRecord(type, recordId)
     toast.success('删除成功')
@@ -697,7 +759,7 @@ const generateAnswer = async (question) => {
 }
 
 const triggerBuildMasterBank = async () => {
-  if (!await showConfirm('将重新整理全部题目，确定继续？')) return
+  if (!await showConfirm('将重新整理全部题目，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
   try {
     const data = await api.buildMasterBank()
@@ -712,7 +774,6 @@ const downloadCSV = () => { window.open(api.getDownloadUrl(activeTab.value.toLow
 
 // ── Lifecycle ──
 const initAuth = async () => {
-  // 尝试用 HttpOnly refresh cookie 自动恢复登录状态
   const refreshResult = await refreshAuthToken()
   if (refreshResult?.token && refreshResult?.user) {
     setAuthToken(refreshResult.token)
@@ -725,7 +786,6 @@ const initAuth = async () => {
 }
 
 const handleLoginSuccess = (user) => {
-  // access token 已由 LoginModal 调用 setAuthToken 存入内存
   currentUser.value = user
   loadAllData()
   loadPendingCount()
@@ -753,7 +813,6 @@ const loadPendingCount = async () => {
   } catch { pendingReviewCount.value = 0 }
 }
 
-// Register 401 handler
 setUnauthorizedHandler(() => {
   showLoginModal.value = true
 })
@@ -762,6 +821,14 @@ const loadAllData = () => {
   fetchTableData()
   fetchAnalytics()
   fetchPracticeStats()
+  loadActiveSeason()
+}
+
+const loadActiveSeason = async () => {
+  try {
+    const data = await api.fetchProfile()
+    activeSeason.value = data.settings?.active_season || ''
+  } catch { /* ignore */ }
 }
 
 onMounted(async () => {
@@ -773,10 +840,15 @@ onUnmounted(() => cancelAllRequests())
 <style scoped>
 :deep(pre) { background-color: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
 :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em; }
-:deep(p code) { background-color: #f1f5f9; color: #dc2626; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
+:deep(p code) { @apply bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
-:deep(strong) { font-weight: 700; color: #111827; }
-:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; color: #111827; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+:deep(strong) { font-weight: 700; @apply text-gray-900 dark:text-gray-100; }
+:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-gray-900 dark:text-gray-100; margin-top: 1.5rem; margin-bottom: 0.5rem; }
 :deep(h3) { font-size: 1.125rem; }
+
+.tab-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.tab-fade-enter-from { opacity: 0; transform: translateY(8px); }
+.tab-fade-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>

@@ -1,4 +1,5 @@
 import logging
+import time
 from enum import Enum
 from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
 from fastapi.responses import HTMLResponse
@@ -9,7 +10,7 @@ from app.core.auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_current_user, get_refresh_token,
     store_refresh_token, get_refresh_token_jti, delete_refresh_token,
-    cleanup_expired_refresh_tokens, REFRESH_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_REMEMBER_DAYS,
+    REFRESH_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_REMEMBER_DAYS,
 )
 from app.db.connection import get_db_connection, run_db
 
@@ -18,6 +19,59 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 limiter = Limiter(key_func=get_remote_address)
+
+# ── 账号锁定机制：连续失败 5 次后锁定 15 分钟（持久化到 SQLite）──
+MAX_LOGIN_FAILURES = 5
+LOCKOUT_DURATION = 900  # 15 分钟
+
+
+def _check_lockout(username: str):
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT failure_count, locked_until FROM login_failures WHERE username = ?", (username,)
+        ).fetchone()
+        if not row:
+            return
+        entry = dict(row)
+    now = time.time()
+    if entry.get("locked_until", 0) > now:
+        remaining = int(entry["locked_until"] - now)
+        raise HTTPException(
+            status_code=429,
+            detail=f"账号已被临时锁定，请 {remaining} 秒后重试"
+        )
+    # 锁定已过期，重置
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM login_failures WHERE username = ?", (username,))
+        conn.commit()
+
+
+def _record_failure(username: str):
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT failure_count FROM login_failures WHERE username = ?", (username,)
+        ).fetchone()
+        if row:
+            new_count = row["failure_count"] + 1
+            locked_until = time.time() + LOCKOUT_DURATION if new_count >= MAX_LOGIN_FAILURES else 0
+            conn.execute(
+                "UPDATE login_failures SET failure_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?",
+                (new_count, locked_until, username)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO login_failures (username, failure_count, locked_until) VALUES (?, 1, 0)",
+                (username,)
+            )
+        conn.commit()
+    if row and row["failure_count"] + 1 >= MAX_LOGIN_FAILURES:
+        logger.warning(f"账号 '{username}' 连续失败 {row['failure_count'] + 1} 次，已锁定 {LOCKOUT_DURATION}s")
+
+
+def _clear_failures(username: str):
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM login_failures WHERE username = ?", (username,))
+        conn.commit()
 
 
 def _require_custom_header(request: Request):
@@ -35,7 +89,7 @@ def _require_custom_header(request: Request):
 
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=32)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
 
 
 class LoginRequest(BaseModel):
@@ -61,7 +115,7 @@ def _set_refresh_cookie(response: Response, token: str, remember: bool = False):
         value=token,
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="strict",
         max_age=days * 86400,
         path="/",
     )
@@ -121,6 +175,8 @@ async def register(request: Request, req: RegisterRequest, response: Response):
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, req: LoginRequest, response: Response):
+    _check_lockout(req.username)
+
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
@@ -130,9 +186,10 @@ async def login(request: Request, req: LoginRequest, response: Response):
 
     user = await run_db(_query)
     if not user or not verify_password(req.password, user['password_hash']):
+        _record_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    cleanup_expired_refresh_tokens()
+    _clear_failures(req.username)
     return _issue_token_pair(dict(user), response, remember=req.remember_me)
 
 
@@ -210,9 +267,10 @@ async def login_form(
 ):
     """
     接受 application/x-www-form-urlencoded 的登录请求。
-    用于浏览器密码管理器检测（隐藏 iframe 提交），确保返回 200 触发「保存密码」提示。
-    真正的认证由前端 AJAX 的 /api/auth/login 完成。
+    用于浏览器密码管理器检测（隐藏 iframe 提交）。
     """
+    _check_lockout(username)
+
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
@@ -222,7 +280,9 @@ async def login_form(
 
     user = await run_db(_query)
     if not user or not verify_password(password, user['password_hash']):
-        # 返回 200 而非 401，让浏览器认为提交成功从而触发保存密码
+        _record_failure(username)
+        # 仍然返回 200 触发密码管理器，但失败计数已记录，超过阈值后 /login 会返回 429
         return HTMLResponse(content="<html><body>ok</body></html>")
 
+    _clear_failures(username)
     return HTMLResponse(content="<html><body>ok</body></html>")

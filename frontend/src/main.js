@@ -1,6 +1,10 @@
 import { createApp } from 'vue'
 import './style.css'
+import 'vue-sonner/style.css'
 import App from './App.vue'
+import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
 /**
  * 全局错误捕获 & 白屏检测
@@ -90,6 +94,9 @@ detectBlankScreen()
 
 // 创建并挂载 Vue 应用
 const app = createApp(App)
+app.use(autoAnimatePlugin)
+app.component('DynamicScroller', DynamicScroller)
+app.component('DynamicScrollerItem', DynamicScrollerItem)
 
 // Vue 全局错误处理器
 app.config.errorHandler = (err, instance, info) => {

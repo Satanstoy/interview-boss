@@ -15,9 +15,9 @@ export const authLogout = async () => {
 }
 
 // ── Data fetching ──
-export const fetchJdData = () => get(`${API}/data/jd?page_size=500`)
-export const fetchInterviewData = () => get(`${API}/data/interview?page_size=500`)
-export const fetchMasterBank = () => get(`${API}/master-bank?page_size=500`)
+export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
+export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
+export const fetchMasterBank = (page = 1, pageSize = 100) => get(`${API}/master-bank?page=${page}&page_size=${pageSize}`)
 export const fetchAnalytics = () => get(`${API}/analytics`)
 export const fetchPracticeStats = () => get(`${API}/practice-stats`)
 export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {

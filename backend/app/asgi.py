@@ -14,6 +14,7 @@ from app.db.connection import init_db
 from app.middleware.request_log import log_requests
 from app.routers import health, submit, data, master_bank, interview, analytics, profile, auth
 from app.core.config import _reload_from_db
+from app.core.auth import cleanup_expired_refresh_tokens
 
 init_db()
 _reload_from_db()
@@ -40,8 +41,8 @@ if ALLOWED_ORIGINS:
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Request-ID"],
     )
 
 # ── GZip 压缩（>500B 的响应自动压缩）──
@@ -54,10 +55,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         if not DEBUG:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         return response
 
 
@@ -83,3 +85,26 @@ app.include_router(master_bank.router)
 app.include_router(interview.router)
 app.include_router(analytics.router)
 app.include_router(profile.router)
+
+
+@app.on_event("startup")
+async def startup_cleanup():
+    """启动时清理过期的 refresh token"""
+    try:
+        cleanup_expired_refresh_tokens()
+        logger.info("已清理过期的 refresh token")
+    except Exception as e:
+        logger.warning(f"清理过期 refresh token 失败: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_cleanup():
+    """关闭时清理数据库连接"""
+    from app.db.connection import _local
+    conn = getattr(_local, 'conn', None)
+    if conn is not None:
+        try:
+            conn.close()
+            logger.info("数据库连接已关闭")
+        except Exception as e:
+            logger.warning(f"关闭数据库连接失败: {e}")

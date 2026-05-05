@@ -1,7 +1,7 @@
 <template>
   <div class="relative">
     <!-- User button -->
-    <button @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-white/10 transition-all duration-200 text-white group">
+    <button @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-white/10 dark:hover:bg-white/5 transition-all duration-200 text-white group">
       <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-white/30 to-white/10 flex items-center justify-center text-sm font-bold backdrop-blur-sm border border-white/20 group-hover:from-white/40 group-hover:to-white/20 transition">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
@@ -13,20 +13,20 @@
 
     <!-- Dropdown -->
     <Transition name="menu">
-      <div v-if="showMenu" class="absolute right-0 top-full mt-2 w-60 bg-white rounded-2xl shadow-xl border border-gray-100 py-1.5 z-50 overflow-hidden">
+      <div v-if="showMenu" class="absolute right-0 top-full mt-2 w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 py-1.5 z-50 overflow-hidden">
         <!-- User info -->
-        <div class="px-4 py-3 border-b border-gray-100">
-          <p class="text-sm font-bold text-gray-800">{{ user?.username }}</p>
-          <p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+        <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+          <p class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ user?.username }}</p>
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
             {{ user?.is_admin ? '管理员' : '普通用户' }}
           </p>
         </div>
 
         <!-- Bank mode -->
-        <div class="px-4 py-3 border-b border-gray-100">
-          <p class="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wider">题库模式</p>
-          <div class="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+        <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+          <p class="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium uppercase tracking-wider">题库模式</p>
+          <div class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
             <button
               v-for="mode in bankModes"
               :key="mode.value"
@@ -34,8 +34,8 @@
               :class="[
                 'flex-1 px-2 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
                 user?.bank_mode === mode.value
-                  ? 'bg-white text-primary-700 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-white dark:bg-surface-700 text-primary-700 dark:text-primary-400 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               ]"
             >{{ mode.label }}</button>
           </div>
@@ -45,24 +45,24 @@
         <button
           v-if="user?.is_admin"
           @click="$emit('show-review'); showMenu = false"
-          class="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2.5 transition-colors"
         >
-          <div class="w-7 h-7 rounded-lg bg-orange-100 flex items-center justify-center">
-            <svg class="w-4 h-4 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="w-7 h-7 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+            <svg class="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </div>
           审核题库
-          <span v-if="pendingCount > 0" class="ml-auto bg-orange-100 text-orange-700 text-xs px-2 py-0.5 rounded-full font-bold">{{ pendingCount }}</span>
+          <span v-if="pendingCount > 0" class="ml-auto bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs px-2 py-0.5 rounded-full font-bold">{{ pendingCount }}</span>
         </button>
 
         <!-- Logout -->
         <button
           @click="handleLogout"
-          class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2.5 transition-colors"
         >
-          <div class="w-7 h-7 rounded-lg bg-red-100 flex items-center justify-center">
-            <svg class="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="w-7 h-7 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+            <svg class="w-4 h-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
             </svg>
           </div>

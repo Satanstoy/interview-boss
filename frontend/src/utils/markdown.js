@@ -24,13 +24,22 @@ const purifyConfig = {
   ADD_ATTR: ['target', 'rel'],
 }
 
+// LRU 缓存：避免相同文本反复做 marked.parse + DOMPurify.sanitize
+const CACHE_MAX = 200
+const cache = new Map()
+
 /**
- * 安全渲染 Markdown 为 HTML
- * 1. marked.parse() 将 markdown 转为 HTML
- * 2. DOMPurify 清理所有 XSS 攻击向量
+ * 安全渲染 Markdown 为 HTML（带缓存）
  */
 export function renderSafeMarkdown(text) {
   if (!text) return ''
+  if (cache.has(text)) return cache.get(text)
   const rawHtml = marked.parse(text)
-  return DOMPurify.sanitize(rawHtml, purifyConfig)
+  const result = DOMPurify.sanitize(rawHtml, purifyConfig)
+  // 简易 LRU：满了就删最早的
+  if (cache.size >= CACHE_MAX) {
+    cache.delete(cache.keys().next().value)
+  }
+  cache.set(text, result)
+  return result
 }

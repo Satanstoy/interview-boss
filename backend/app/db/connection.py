@@ -156,6 +156,38 @@ def init_db():
         if "idx_rt_user" not in rt_indexes:
             conn.execute("CREATE INDEX idx_rt_user ON refresh_tokens(user_id)")
 
+        # ── login_failures 表（持久化登录锁定，替代内存字典）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS login_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                failure_count INTEGER DEFAULT 0,
+                locked_until REAL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # ── 性能索引 ──
+        cursor.execute("PRAGMA index_list('jd')")
+        jd_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_jd_url" not in jd_indexes:
+            conn.execute("CREATE INDEX idx_jd_url ON jd(url)")
+
+        cursor.execute("PRAGMA index_list('interview')")
+        iv_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_interview_url" not in iv_indexes:
+            conn.execute("CREATE INDEX idx_interview_url ON interview(url)")
+
+        cursor.execute("PRAGMA index_list('questions_detail')")
+        qd_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_qd_url" not in qd_indexes:
+            conn.execute("CREATE INDEX idx_qd_url ON questions_detail(url)")
+
+        cursor.execute("PRAGMA index_list('question_bank')")
+        qb_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_qb_owner_status" not in qb_indexes:
+            conn.execute("CREATE INDEX idx_qb_owner_status ON question_bank(owner_id, status)")
+
         # 迁移：添加 remember 列（标记是否为 remember-me 登录）
         rt_columns = {row[1] for row in cursor.execute("PRAGMA table_info('refresh_tokens')").fetchall()}
         if "remember" not in rt_columns:
@@ -185,7 +217,7 @@ def init_db():
         if qb_count == 0:
             old_count = conn.execute("SELECT COUNT(*) FROM master_question_bank").fetchone()[0]
             if old_count > 0:
-                admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()[0]
+                admin_id = conn.execute("SELECT id FROM users WHERE username = ?", (admin_username,)).fetchone()[0]
                 conn.execute("""
                     INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, ai_answer, vector, sources, is_starred, owner_id, submitted_by, status, created_at, updated_at)
                     SELECT question, cat1, cat2, tags, difficulty, frequency, ai_answer, vector, sources, is_starred, NULL, ?, 'approved', created_at, updated_at
@@ -198,7 +230,7 @@ def init_db():
         if uph_count == 0:
             ph_count = conn.execute("SELECT COUNT(*) FROM practice_history").fetchone()[0]
             if ph_count > 0:
-                admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()[0]
+                admin_id = conn.execute("SELECT id FROM users WHERE username = ?", (admin_username,)).fetchone()[0]
                 # 需要将旧 question_id 映射到新 question_bank id
                 # 通过 question 文本匹配
                 conn.execute("""

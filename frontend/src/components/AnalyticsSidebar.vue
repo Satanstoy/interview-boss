@@ -1,20 +1,20 @@
 <template>
-  <div class="lg:col-span-1 bg-white rounded-2xl shadow-card border border-gray-100/80 h-fit lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto custom-scrollbar">
+  <div class="lg:col-span-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-gray-100/80 dark:border-gray-700/50 h-fit lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto custom-scrollbar">
 
     <!-- Learning Progress -->
-    <div class="p-5 border-b border-gray-100">
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-gray-800 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-primary-100 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+        <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <div class="w-6 h-6 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+            <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
           </div>
           学习进度
         </h3>
-        <span class="text-xs text-gray-400 tabular-nums">{{ practiceStats.practiced_questions || 0 }}/{{ practiceStats.total_questions || 0 }} 题</span>
+        <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{{ practiceStats.practiced_questions || 0 }}/{{ practiceStats.total_questions || 0 }} 题</span>
       </div>
 
       <!-- Overall progress bar -->
-      <div class="w-full bg-gray-100 rounded-full h-2 mb-4 overflow-hidden">
+      <div class="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2 mb-4 overflow-hidden">
         <div
           class="h-2 rounded-full transition-all duration-700 ease-out"
           :class="progressPercent >= 80 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' : progressPercent >= 40 ? 'bg-gradient-to-r from-amber-400 to-amber-500' : 'bg-gradient-to-r from-primary-400 to-primary-500'"
@@ -27,14 +27,14 @@
         <div v-for="diff in diffOrder" :key="diff" class="group">
           <div class="flex items-center justify-between text-xs mb-1.5">
             <span class="font-semibold" :class="diffColor(diff)">{{ diff }}</span>
-            <span class="text-gray-400 tabular-nums">
+            <span class="text-gray-400 dark:text-gray-500 tabular-nums">
               {{ (practiceStats.by_difficulty?.[diff]?.practiced || 0) }}/{{ (practiceStats.by_difficulty?.[diff]?.total || 0) }}
               <span v-if="practiceStats.by_difficulty?.[diff]?.avg_score" class="ml-1 font-bold" :class="scoreColor(practiceStats.by_difficulty[diff].avg_score)">
                 {{ practiceStats.by_difficulty[diff].avg_score }}分
               </span>
             </span>
           </div>
-          <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+          <div class="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
             <div
               class="h-1.5 rounded-full transition-all duration-700 ease-out"
               :class="diffBarColor(diff)"
@@ -46,7 +46,7 @@
 
       <!-- Average score badge -->
       <div v-if="practiceStats.avg_score" class="mt-4 flex items-center gap-2 text-xs">
-        <span class="text-gray-400">平均最高分</span>
+        <span class="text-gray-400 dark:text-gray-500">平均最高分</span>
         <span class="font-bold px-2.5 py-0.5 rounded-lg" :class="scoreBadgeClass(practiceStats.avg_score)">
           {{ practiceStats.avg_score }}
         </span>
@@ -54,35 +54,35 @@
     </div>
 
     <!-- Daily Recommendation -->
-    <div class="p-5 border-b border-gray-100">
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-gray-800 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+        <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <div class="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+            <svg class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
           每日推荐
         </h3>
-        <button @click="$emit('refresh-recommend')" class="text-xs text-gray-400 hover:text-primary-500 transition p-1 rounded-lg hover:bg-primary-50" title="换一批">
+        <button @click="$emit('refresh-recommend')" class="text-xs text-gray-400 hover:text-primary-500 dark:hover:text-primary-400 transition p-1 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/30" title="换一批">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
         </button>
       </div>
-      <div v-if="recommendations.length === 0" class="text-xs text-gray-400 text-center py-6">
+      <div v-if="recommendations.length === 0" class="text-xs text-gray-400 dark:text-gray-500 text-center py-6">
         暂无推荐，继续加油
       </div>
-      <ul v-else class="space-y-1.5">
+      <ul v-auto-animate class="space-y-1.5">
         <li
           v-for="q in recommendations"
           :key="q.id"
           @click="$emit('go-to-question', q)"
-          class="group flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer hover:bg-primary-50/60 transition-all duration-200"
+          class="group flex items-start gap-2.5 p-2.5 rounded-xl cursor-pointer hover:bg-primary-50/60 dark:hover:bg-primary-900/20 transition-all duration-200"
         >
           <span class="flex-shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md" :class="freqBadgeClass(q.frequency)">
             {{ q.frequency > 1 ? '高频' : '新题' }}
           </span>
           <div class="min-w-0 flex-1">
-            <p class="text-xs text-gray-600 leading-relaxed line-clamp-2 group-hover:text-primary-700 transition-colors">{{ q.question }}</p>
+            <p class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2 group-hover:text-primary-700 dark:group-hover:text-primary-400 transition-colors">{{ q.question }}</p>
             <div class="flex items-center gap-1.5 mt-1.5">
-              <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500">{{ shortCat(q.cat1) }}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{{ shortCat(q.cat1) }}</span>
               <span class="text-[10px] px-1.5 py-0.5 rounded-md" :class="diffChipClass(q.difficulty)">{{ shortDiff(q.difficulty) }}</span>
             </div>
           </div>
@@ -91,25 +91,25 @@
     </div>
 
     <!-- Starred Quick Access -->
-    <div class="p-5 border-b border-gray-100">
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-gray-800 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+        <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <div class="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+            <svg class="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
           </div>
           收藏夹
         </h3>
-        <span class="text-xs text-gray-400 tabular-nums">{{ starredItems.length }} 题</span>
+        <span class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{{ starredItems.length }} 题</span>
       </div>
-      <div v-if="starredItems.length === 0" class="text-xs text-gray-400 text-center py-6">
-        点击题目卡片的 <svg class="inline w-3 h-3 text-gray-300" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> 收藏
+      <div v-if="starredItems.length === 0" class="text-xs text-gray-400 dark:text-gray-500 text-center py-6">
+        点击题目卡片的 <svg class="inline w-3 h-3 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> 收藏
       </div>
-      <ul v-else class="space-y-0.5 max-h-40 overflow-y-auto custom-scrollbar">
+      <ul v-auto-animate v-else class="space-y-0.5 max-h-40 overflow-y-auto custom-scrollbar">
         <li
           v-for="q in starredItems"
           :key="q.id"
           @click="$emit('go-to-question', q)"
-          class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-amber-50 transition-all duration-200 text-xs text-gray-600 hover:text-amber-700"
+          class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all duration-200 text-xs text-gray-600 dark:text-gray-400 hover:text-amber-700 dark:hover:text-amber-400"
         >
           <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
           <span class="truncate">{{ q.question }}</span>
@@ -118,60 +118,60 @@
     </div>
 
     <!-- Compact Pie Chart -->
-    <div class="p-5 border-b border-gray-100">
-      <h3 class="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
+      <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+          <svg class="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
         </div>
         考点分布
       </h3>
       <div v-show="masterBank.length > 0" ref="chartRef" class="w-full h-[200px]"></div>
-      <div v-if="masterBank.length === 0" class="w-full h-[120px] flex items-center justify-center text-gray-400 text-xs">暂无数据</div>
+      <div v-if="masterBank.length === 0" class="w-full h-[120px] flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs">暂无数据</div>
     </div>
 
     <!-- Category Directory -->
-    <div class="p-5 border-b border-gray-100">
-      <h3 class="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
+      <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+          <svg class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
         </div>
         分类目录
       </h3>
-      <ul class="space-y-0.5">
+      <ul v-auto-animate class="space-y-0.5">
         <li
           @click="$emit('select-tag', '全部')"
           class="flex justify-between items-center text-xs cursor-pointer px-2.5 py-2 rounded-lg transition-all duration-200 border border-transparent"
-          :class="selectedTag === '全部' ? 'bg-emerald-50 text-emerald-700 font-semibold border-emerald-200' : 'hover:bg-gray-50 text-gray-600'"
+          :class="selectedTag === '全部' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-200 dark:border-emerald-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'"
         >
           <span>全部</span>
-          <span class="text-gray-400 font-mono text-[11px] tabular-nums">{{ masterBank.length }}</span>
+          <span class="text-gray-400 dark:text-gray-500 font-mono text-[11px] tabular-nums">{{ masterBank.length }}</span>
         </li>
         <li
           v-for="(count, topic) in popularTags" :key="topic"
           @click="$emit('select-tag', topic)"
           class="flex justify-between items-center text-xs cursor-pointer px-2.5 py-2 rounded-lg transition-all duration-200 border border-transparent group"
-          :class="selectedTag === topic ? 'bg-emerald-50 text-emerald-700 font-semibold border-emerald-200' : 'hover:bg-gray-50 text-gray-600'"
+          :class="selectedTag === topic ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-200 dark:border-emerald-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'"
         >
-          <span class="break-all mr-2 group-hover:text-emerald-600 transition-colors">{{ topic }}</span>
-          <span class="text-gray-400 font-mono text-[11px] whitespace-nowrap tabular-nums group-hover:text-emerald-500">{{ count }}</span>
+          <span class="break-all mr-2 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{{ topic }}</span>
+          <span class="text-gray-400 dark:text-gray-500 font-mono text-[11px] whitespace-nowrap tabular-nums group-hover:text-emerald-500 dark:group-hover:text-emerald-400">{{ count }}</span>
         </li>
       </ul>
     </div>
 
     <!-- Hot Tech Stacks -->
-    <div class="p-5 border-b border-gray-100">
-      <h3 class="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-rose-100 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" /></svg>
+    <div class="p-5 border-b border-gray-100 dark:border-gray-700">
+      <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
+          <svg class="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" /></svg>
         </div>
         热门技术栈
       </h3>
       <ul class="space-y-1">
-        <li v-for="(count, tech) in analytics.tech_trends" :key="tech" class="flex justify-between items-center text-xs px-2.5 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">
-          <span class="text-gray-600 break-all mr-2">{{ tech }}</span>
-          <span class="text-gray-400 font-mono text-[11px] whitespace-nowrap bg-gray-100 px-2 py-0.5 rounded-md tabular-nums">{{ count }}</span>
+        <li v-for="(count, tech) in analytics.tech_trends" :key="tech" class="flex justify-between items-center text-xs px-2.5 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+          <span class="text-gray-600 dark:text-gray-400 break-all mr-2">{{ tech }}</span>
+          <span class="text-gray-400 dark:text-gray-500 font-mono text-[11px] whitespace-nowrap bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-md tabular-nums">{{ count }}</span>
         </li>
-        <li v-if="!analytics.tech_trends || Object.keys(analytics.tech_trends).length === 0" class="text-gray-400 text-xs px-2.5 py-2">暂无数据</li>
+        <li v-if="!analytics.tech_trends || Object.keys(analytics.tech_trends).length === 0" class="text-gray-400 dark:text-gray-500 text-xs px-2.5 py-2">暂无数据</li>
       </ul>
     </div>
 
@@ -187,7 +187,15 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { PieChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([PieChart, TooltipComponent, CanvasRenderer])
+import { useTheme } from '../composables/useTheme.js'
+
+const { isDark } = useTheme()
 
 const props = defineProps({
   analytics: { type: Object, default: () => ({ tech_trends: {} }) },
@@ -219,10 +227,10 @@ const diffProgress = (diff) => {
 }
 
 const diffColor = (diff) => {
-  if (diff.includes('L1')) return 'text-emerald-600'
-  if (diff.includes('L2')) return 'text-amber-600'
-  if (diff.includes('L3')) return 'text-red-600'
-  return 'text-gray-600'
+  if (diff.includes('L1')) return 'text-emerald-600 dark:text-emerald-400'
+  if (diff.includes('L2')) return 'text-amber-600 dark:text-amber-400'
+  if (diff.includes('L3')) return 'text-red-600 dark:text-red-400'
+  return 'text-gray-600 dark:text-gray-400'
 }
 
 const diffBarColor = (diff) => {
@@ -233,15 +241,15 @@ const diffBarColor = (diff) => {
 }
 
 const scoreColor = (score) => {
-  if (score >= 80) return 'text-emerald-600'
-  if (score >= 60) return 'text-amber-600'
-  return 'text-red-600'
+  if (score >= 80) return 'text-emerald-600 dark:text-emerald-400'
+  if (score >= 60) return 'text-amber-600 dark:text-amber-400'
+  return 'text-red-600 dark:text-red-400'
 }
 
 const scoreBadgeClass = (score) => {
-  if (score >= 80) return 'bg-emerald-100 text-emerald-700'
-  if (score >= 60) return 'bg-amber-100 text-amber-700'
-  return 'bg-red-100 text-red-700'
+  if (score >= 80) return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+  if (score >= 60) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+  return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
 }
 
 const recommendations = computed(() => {
@@ -299,17 +307,17 @@ const shortDiff = (diff) => {
 }
 
 const diffChipClass = (diff) => {
-  if (!diff) return 'bg-gray-100 text-gray-500'
-  if (diff.includes('L1')) return 'bg-emerald-50 text-emerald-600'
-  if (diff.includes('L2')) return 'bg-amber-50 text-amber-600'
-  if (diff.includes('L3')) return 'bg-red-50 text-red-600'
-  return 'bg-gray-100 text-gray-500'
+  if (!diff) return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+  if (diff.includes('L1')) return 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+  if (diff.includes('L2')) return 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
+  if (diff.includes('L3')) return 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
 }
 
 const freqBadgeClass = (freq) => {
-  if (freq >= 3) return 'bg-red-100 text-red-600'
-  if (freq >= 2) return 'bg-orange-100 text-orange-600'
-  return 'bg-gray-100 text-gray-500'
+  if (freq >= 3) return 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+  if (freq >= 2) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
 }
 
 const updateDistributionChart = () => {
@@ -325,9 +333,9 @@ const updateDistributionChart = () => {
     tooltip: {
       trigger: 'item',
       confine: true,
-      backgroundColor: 'rgba(255, 255, 255, 0.95)',
-      borderColor: '#e5e7eb',
-      textStyle: { color: '#374151', fontSize: 12 },
+      backgroundColor: isDark.value ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+      borderColor: isDark.value ? '#334155' : '#e5e7eb',
+      textStyle: { color: isDark.value ? '#e2e8f0' : '#374151', fontSize: 12 },
       formatter: '{b}: {c} 题 ({d}%)'
     },
     series: [{
@@ -335,8 +343,8 @@ const updateDistributionChart = () => {
       radius: ['30%', '65%'],
       center: ['50%', '55%'],
       avoidLabelOverlap: true,
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, fontSize: 10, formatter: '{b}\n{d}%' },
+      itemStyle: { borderRadius: 6, borderColor: isDark.value ? '#1e293b' : '#fff', borderWidth: 2 },
+      label: { show: true, fontSize: 10, color: isDark.value ? '#cbd5e1' : '#374151', formatter: '{b}\n{d}%' },
       labelLine: { show: true, length: 6, length2: 10 },
       data: pieData
     }]
@@ -347,6 +355,10 @@ watch(() => props.masterBank, () => nextTick(() => {
   if (myChart) myChart.resize()
   updateDistributionChart()
 }), { deep: true })
+
+watch(isDark, () => {
+  if (myChart) updateDistributionChart()
+})
 
 onMounted(() => {
   if (chartRef.value) {

@@ -33,15 +33,13 @@ ALLOWED_UPDATE_COLUMNS = {
 
 
 def get_profile_setting(key: str, default: str = "") -> str:
-    """从 user_profile 表读取配置值"""
-    import sqlite3
+    """从 user_profile 表读取配置值（复用线程级连接）"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA journal_mode=WAL")
-        row = conn.execute("SELECT value FROM user_profile WHERE key = ?", (key,)).fetchone()
-        conn.close()
-        if row and row[0]:
-            return row[0]
+        from app.db.connection import get_db_connection
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT value FROM user_profile WHERE key = ?", (key,)).fetchone()
+            if row and row[0]:
+                return row[0]
     except Exception:
         pass
     return default

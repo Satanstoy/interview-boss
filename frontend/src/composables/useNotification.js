@@ -1,40 +1,32 @@
+import { toast } from 'vue-sonner'
 import { ref } from 'vue'
 
-const toasts = ref([])
-let toastId = 0
-
-let confirmResolve = null
-const confirmState = ref({ show: false, message: '', title: '' })
-
 export function useToast() {
-  const addToast = (message, type = 'info', duration = 3000) => {
-    const id = ++toastId
-    toasts.value.push({ id, message, type })
-    while (toasts.value.length > 5) toasts.value.shift()
-    if (duration > 0) {
-      setTimeout(() => removeToast(id), duration)
-    }
-    return id
-  }
-
-  const removeToast = (id) => {
-    const idx = toasts.value.findIndex(t => t.id === id)
-    if (idx !== -1) toasts.value.splice(idx, 1)
-  }
-
-  const success = (msg, duration) => addToast(msg, 'success', duration)
-  const error = (msg, duration) => addToast(msg, 'error', duration || 8000)
-  const info = (msg, duration) => addToast(msg, 'info', duration)
-  const warning = (msg, duration) => addToast(msg, 'warning', duration || 4000)
-
-  return { toasts, addToast, removeToast, success, error, info, warning }
+  const success = (msg, options) => toast.success(msg, options)
+  const error = (msg, options) => toast.error(msg, { duration: 8000, ...options })
+  const info = (msg, options) => toast.info(msg, options)
+  const warning = (msg, options) => toast.warning(msg, { duration: 4000, ...options })
+  return { success, error, info, warning }
 }
 
+let confirmResolve = null
+const confirmState = ref({ show: false, message: '', title: '', variant: 'warning', confirmLabel: '确定', cancelLabel: '取消' })
+
 export function useConfirm() {
-  const confirm = (message, title = '确认操作') => {
+  const confirm = (message, titleOrOptions = '确认操作') => {
+    const opts = typeof titleOrOptions === 'string'
+      ? { title: titleOrOptions }
+      : titleOrOptions
     return new Promise((resolve) => {
       confirmResolve = resolve
-      confirmState.value = { show: true, message, title }
+      confirmState.value = {
+        show: true,
+        message,
+        title: opts.title || '确认操作',
+        variant: opts.variant || 'warning',
+        confirmLabel: opts.confirmLabel || '确定',
+        cancelLabel: opts.cancelLabel || '取消',
+      }
     })
   }
 

@@ -2,28 +2,32 @@
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="$emit('close')">
-        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden animate-slide-up">
+        <div class="bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden animate-slide-up">
           <!-- Gradient header -->
-          <div class="relative px-6 pt-8 pb-5 bg-gradient-to-br from-primary-50 via-white to-accent-50">
-            <div class="absolute top-3 right-3">
-              <button @click="$emit('close')" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-white/60 transition">
+          <div class="relative px-6 pt-8 pb-5 bg-gradient-to-br from-primary-50 via-white to-accent-50 dark:from-primary-900/30 dark:via-surface-800 dark:to-accent-900/30 overflow-hidden">
+            <div class="absolute -top-6 -right-6 w-24 h-24 bg-primary-200/20 dark:bg-primary-700/20 rounded-full blur-xl"></div>
+            <div class="absolute -bottom-4 -left-4 w-16 h-16 bg-accent-200/20 dark:bg-accent-700/20 rounded-full blur-xl"></div>
+            <div class="absolute top-3 right-3 z-10">
+              <button @click="$emit('close')" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/60 transition">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             </div>
-            <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-glow">
-              <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-              </svg>
+            <div class="relative z-10">
+              <div class="w-12 h-12 mx-auto mb-3 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-glow">
+                <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                </svg>
+              </div>
+              <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 text-center">{{ isRegister ? '创建账号' : '欢迎回来' }}</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 text-center mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
             </div>
-            <h2 class="text-xl font-bold text-gray-800 text-center">{{ isRegister ? '创建账号' : '欢迎回来' }}</h2>
-            <p class="text-sm text-gray-500 text-center mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
           </div>
 
           <!-- Form -->
           <form @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post" class="px-6 pb-2 pt-4">
             <div class="space-y-4">
               <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-1.5">用户名</label>
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">用户名</label>
                 <input
                   ref="usernameInput"
                   v-model="username"
@@ -31,19 +35,19 @@
                   name="username"
                   placeholder="2-32 个字符"
                   maxlength="32"
-                  class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 focus:bg-white"
+                  class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
                   :disabled="loading"
                   autocomplete="username"
                 />
               </div>
               <div>
-                <label class="block text-sm font-semibold text-gray-700 mb-1.5">密码</label>
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">密码</label>
                 <input
                   v-model="password"
                   type="password"
                   name="password"
                   placeholder="至少 6 位"
-                  class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 focus:bg-white"
+                  class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
                   :disabled="loading"
                   autocomplete="current-password"
                 />
@@ -52,11 +56,11 @@
 
             <!-- Remember me + Error -->
             <label v-if="!isRegister" class="flex items-center gap-2 mt-3 cursor-pointer group">
-              <input v-model="rememberMe" type="checkbox" class="w-4 h-4 rounded-md border-gray-300 text-primary-600 focus:ring-primary-500 transition" />
-              <span class="text-sm text-gray-500 group-hover:text-gray-700 transition">记住我（30 天免登录）</span>
+              <input v-model="rememberMe" type="checkbox" class="w-4 h-4 rounded-md border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 transition" />
+              <span class="text-sm text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition">记住我（30 天免登录）</span>
             </label>
             <Transition name="fade">
-              <p v-if="error" class="text-red-500 text-sm mt-2 flex items-center gap-1.5">
+              <p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {{ error }}
               </p>
@@ -66,17 +70,19 @@
             <button
               type="submit"
               :disabled="loading || !username.trim() || password.length < (isRegister ? 6 : 1)"
-              class="w-full mt-5 py-2.5 btn-primary text-base"
+              class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
             >
-              <svg v-if="loading" class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              {{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}
+              <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
+              <span v-if="loading" class="absolute inset-0 flex items-center justify-center">
+                <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              </span>
             </button>
           </form>
 
           <!-- Toggle -->
-          <div class="px-6 py-4 bg-gray-50/80 text-center border-t border-gray-100">
-            <span class="text-sm text-gray-500">{{ isRegister ? '已有账号？' : '没有账号？' }}</span>
-            <button @click="isRegister = !isRegister; error = ''" class="text-sm text-primary-600 hover:text-primary-700 font-semibold ml-1 transition">
+          <div class="px-6 py-4 bg-gray-50/80 dark:bg-surface-900/80 text-center border-t border-gray-100 dark:border-gray-700">
+            <span class="text-sm text-gray-500 dark:text-gray-400">{{ isRegister ? '已有账号？' : '没有账号？' }}</span>
+            <button @click="isRegister = !isRegister; error = ''" class="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold ml-1 transition">
               {{ isRegister ? '去登录' : '注册一个' }}
             </button>
           </div>

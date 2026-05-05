@@ -1,38 +1,45 @@
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-sm text-gray-500">
-        共 <span class="font-semibold text-gray-700">{{ nodeCount }}</span> 个知识点，
-        <span class="font-semibold text-gray-700">{{ linkCount }}</span> 条关联
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        共 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ nodeCount }}</span> 个知识点，
+        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ linkCount }}</span> 条关联
       </p>
       <div class="flex gap-2 items-center">
-        <span class="text-xs text-gray-400">拖拽节点可调整布局 | 点击节点跳转题库</span>
-        <button @click="resetView" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition">重置视图</button>
+        <span class="text-xs text-gray-400 dark:text-gray-500">拖拽节点可调整布局 | 点击节点跳转题库</span>
+        <button @click="resetView" class="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-3 py-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">重置视图</button>
       </div>
     </div>
 
-    <div v-if="isLoading" class="text-center py-16 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+    <div v-if="isLoading" class="text-center py-16 text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl">
       <svg class="animate-spin h-8 w-8 text-violet-400 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
       <p>正在加载知识图谱...</p>
     </div>
 
-    <div v-else-if="nodeCount === 0" class="text-center py-16 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+    <div v-else-if="nodeCount === 0" class="text-center py-16 text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl">
       <p class="text-lg mb-1">暂无数据</p>
       <p class="text-sm">请先导入面经数据并重建题库。</p>
     </div>
 
-    <div v-show="nodeCount > 0" ref="chartRef" class="w-full bg-white rounded-xl border border-gray-200" style="height: 640px;"></div>
+    <div v-show="nodeCount > 0" ref="chartRef" class="w-full bg-white dark:bg-surface-800 rounded-xl border border-gray-200 dark:border-gray-600" style="height: 640px;"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 import { fetchKnowledgeGraph } from '../api/index.js'
 import { useToast } from '../composables/useNotification.js'
+import { useTheme } from '../composables/useTheme.js'
 
 const toast = useToast()
 const emit = defineEmits(['filter-by-tag', 'filter-by-category'])
+const { isDark } = useTheme()
 
 const chartRef = ref(null)
 const isLoading = ref(false)
@@ -155,7 +162,44 @@ const renderChart = ({ nodes, links, categories }) => {
       emit('filter-by-tag', d.name)
     }
   })
+
+  updateChartTheme()
 }
+
+const updateChartTheme = () => {
+  if (!myChart) return
+  const dark = isDark.value
+  myChart.setOption({
+    tooltip: {
+      backgroundColor: dark ? '#1e293b' : '#fff',
+      borderColor: dark ? '#334155' : '#e5e7eb',
+      textStyle: { color: dark ? '#e2e8f0' : '#374151' }
+    },
+    legend: {
+      textStyle: { color: dark ? '#cbd5e1' : '#374151' }
+    },
+    series: [{
+      lineStyle: { color: dark ? '#64748b' : '#aaa' },
+      links: myChart.getOption()?.series?.[0]?.links
+        ? myChart.getOption().series[0].links.map(l => ({ ...l }))
+        : undefined
+    }]
+  })
+  // Update node border colors
+  const opt = myChart.getOption()
+  if (opt?.series?.[0]?.data) {
+    const updatedData = opt.series[0].data.map(n => ({
+      ...n,
+      itemStyle: {
+        ...n.itemStyle,
+        borderColor: dark ? '#1e293b' : '#fff'
+      }
+    }))
+    myChart.setOption({ series: [{ data: updatedData }] })
+  }
+}
+
+watch(isDark, () => updateChartTheme())
 
 const resetView = () => {
   if (myChart) {

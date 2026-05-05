@@ -17,16 +17,31 @@ if _env_secret:
     if len(_env_secret) < 32:
         logger.warning("JWT_SECRET 长度不足 32 字节，建议使用 64 字节以上的随机字符串")
 else:
-    SECRET_KEY = os.urandom(64).hex()
-    # 自动持久化到 .env，避免重启后所有会话失效
+    # 先尝试从 .env 文件读取（避免多进程竞态各自生成不同密钥）
     try:
         from pathlib import Path
         _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-        from dotenv import set_key
-        set_key(str(_env_path), "JWT_SECRET", SECRET_KEY)
-        logger.info("JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）")
-    except Exception as e:
-        logger.warning(f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效")
+        if _env_path.exists():
+            with open(_env_path) as f:
+                for line in f:
+                    if line.strip().startswith("JWT_SECRET="):
+                        _env_secret = line.strip().split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+    except Exception:
+        pass
+
+    if _env_secret and len(_env_secret) >= 32:
+        SECRET_KEY = _env_secret
+    else:
+        SECRET_KEY = os.urandom(64).hex()
+        try:
+            from pathlib import Path
+            _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+            from dotenv import set_key
+            set_key(str(_env_path), "JWT_SECRET", SECRET_KEY)
+            logger.info("JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）")
+        except Exception as e:
+            logger.warning(f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15

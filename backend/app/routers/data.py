@@ -15,6 +15,16 @@ logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 
+# ── 表名白名单：防止 SQL 注入 ──
+_ALLOWED_TABLES = {"jd", "interview", "questions_detail", "question_bank"}
+
+
+def _safe_table_name(name: str) -> str:
+    """验证表名是否在白名单中，防止 SQL 注入"""
+    if name not in _ALLOWED_TABLES:
+        raise ValueError(f"不被允许的表名: {name}")
+    return name
+
 
 @router.get("/api/data/{file_type}")
 async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500), user: dict = Depends(get_current_user)):
@@ -26,9 +36,10 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
     offset = (page - 1) * page_size
 
     def _query():
+        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
-            total = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-            rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY id ASC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            total = conn.execute(f"SELECT COUNT(*) FROM {safe_name}").fetchone()[0]
+            rows = conn.execute(f"SELECT * FROM {safe_name} ORDER BY id ASC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
             return total, rows
 
     total, rows = await run_db(_query)
@@ -61,8 +72,9 @@ async def download_csv(file_type: str, user: dict = Depends(get_current_user)):
     os.close(fd)
 
     def _export():
+        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
-            rows = conn.execute(f"SELECT * FROM {table_name} ORDER BY id ASC").fetchall()
+            rows = conn.execute(f"SELECT * FROM {safe_name} ORDER BY id ASC").fetchall()
         with open(temp_file_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
             writer.writerow(headers)
@@ -100,9 +112,10 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_c
         raise HTTPException(status_code=400, detail="不支持的表类型")
 
     def _delete():
+        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            target_row = cursor.execute(f"SELECT id, url, questions_list FROM {table_name} WHERE id = ?", (record_id,)).fetchone()
+            target_row = cursor.execute(f"SELECT id, url, questions_list FROM {safe_name} WHERE id = ?", (record_id,)).fetchone()
             if not target_row:
                 raise HTTPException(status_code=404, detail="未找到该记录，可能已被删除")
 
@@ -129,7 +142,7 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_c
                 )
                 cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
 
-            cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
+            cursor.execute(f"DELETE FROM {safe_name} WHERE id = ?", (record_id,))
             conn.commit()
 
     try:
@@ -153,11 +166,12 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
         raise HTTPException(status_code=400, detail="ids 不能为空")
 
     def _batch_delete():
+        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, url FROM {table_name} WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, url FROM {safe_name} WHERE id IN ({placeholders})", req.ids
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
@@ -184,7 +198,7 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
 
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))
-            cursor.execute(f"DELETE FROM {table_name} WHERE id IN ({ph2})", found_ids)
+            cursor.execute(f"DELETE FROM {safe_name} WHERE id IN ({ph2})", found_ids)
             conn.commit()
             return len(found_ids)
 
@@ -200,8 +214,9 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
 
 @router.put("/api/data/update")
 async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(get_current_user)):
-    allowed_tables = ["question_bank", "jd", "interview", "questions_detail"]
-    if req.table_name not in allowed_tables:
+    try:
+        _safe_table_name(req.table_name)
+    except ValueError:
         raise HTTPException(status_code=400, detail=f"安全拦截：不被允许操作的数据表 '{req.table_name}'")
 
     if not req.update_data:
@@ -218,6 +233,13 @@ async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(ge
         new_val = req.update_data["ai_answer"]
         if not new_val or (isinstance(new_val, str) and not new_val.strip()):
             raise HTTPException(status_code=400, detail="不允许将 ai_answer 设置为空值，请使用 /api/master-bank/generate-answer 接口重新生成答案")
+
+    # 安全校验：列名必须只含 [a-z_0-9]，防止 SQL 注入
+    import re
+    _COL_RE = re.compile(r'^[a-z_][a-z_0-9]*$')
+    for col in req.update_data.keys():
+        if not _COL_RE.match(col):
+            raise HTTPException(status_code=400, detail=f"安全拦截：非法列名 '{col}'")
 
     set_clauses = [f"{col} = ?" for col in req.update_data.keys()]
     values = list(req.update_data.values())

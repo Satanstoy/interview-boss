@@ -35,10 +35,17 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute("SELECT key, value FROM user_profile").fetchall()
+            settings_map = {r['key']: r['value'] for r in rows}
             seasons = conn.execute(
                 "SELECT DISTINCT season FROM interview WHERE season IS NOT NULL AND season != '' ORDER BY season"
             ).fetchall()
-        return {r['key']: r['value'] for r in rows}, [r['season'] for r in seasons]
+            season_list = [r['season'] for r in seasons]
+            # 确保当前 active_season 也在可选列表中
+            active = settings_map.get('active_season', '')
+            if active and active not in season_list:
+                season_list.append(active)
+                season_list.sort()
+        return settings_map, season_list
 
     settings, used_seasons = await run_db(_query)
 

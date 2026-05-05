@@ -10,27 +10,30 @@
   }
 
   body {
-    @apply bg-surface-50 text-gray-800;
+    @apply bg-surface-50 text-gray-800 dark:bg-surface-900 dark:text-gray-200;
   }
 
   /* Global focus ring */
   *:focus-visible {
-    @apply outline-none ring-2 ring-primary-400 ring-offset-2;
+    @apply outline-none ring-2 ring-primary-400 ring-offset-2 dark:ring-offset-surface-900;
   }
 
   /* Global selection color */
   ::selection {
-    @apply bg-primary-100 text-primary-900;
+    @apply bg-primary-100 text-primary-900 dark:bg-primary-900 dark:text-primary-100;
   }
 }
 
 @layer components {
   /* Skeleton loader */
   .skeleton {
-    @apply bg-gray-200 rounded animate-pulse;
+    @apply bg-gray-200 dark:bg-gray-700 rounded animate-pulse;
     background-image: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 40%, #e5e7eb 100%);
     background-size: 200% 100%;
     animation: shimmer 1.8s infinite linear;
+  }
+  .dark .skeleton {
+    background-image: linear-gradient(90deg, #374151 0%, #4b5563 40%, #374151 100%);
   }
 
   /* Custom scrollbar */
@@ -38,13 +41,15 @@
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #475569; }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #64748b; }
 
   /* Smooth card */
   .card-smooth {
-    @apply bg-white rounded-2xl shadow-card border border-gray-100/80 transition-all duration-300;
+    @apply bg-white rounded-2xl shadow-card border border-gray-100/80 dark:bg-surface-800 dark:border-gray-700/50 dark:shadow-glass-dark transition-[box-shadow,transform] duration-300;
   }
   .card-smooth:hover {
-    @apply shadow-card-hover border-gray-200;
+    @apply shadow-card-hover border-gray-200 dark:border-gray-600 -translate-y-0.5;
   }
 
   /* Button base */
@@ -53,11 +58,11 @@
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl transition-all duration-200 hover:bg-gray-50 hover:border-gray-300 active:scale-[0.98];
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-surface-800 border border-gray-200 dark:border-gray-600 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-surface-700 hover:border-gray-300 dark:hover:border-gray-500 active:scale-[0.98];
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 rounded-lg transition-all duration-200 hover:bg-gray-100 hover:text-gray-800;
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 rounded-lg transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200;
   }
 
   /* Badge */

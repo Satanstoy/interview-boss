@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import openai
@@ -231,17 +232,31 @@ async def submit_data(
             if not q_list or all(not q.strip() for q in q_list):
                 raise HTTPException(status_code=422, detail="大模型未能从内容中提取到面试题目，请确认提交的是面经内容而非其他类型。")
 
-            # 对"未提供"的关键字段进行重试补全
-            missing_fields = []
-            if data.get("公司") == "未提供":
-                missing_fields.append("公司")
-            if data.get("面试轮次") == "未提供":
-                missing_fields.append("面试轮次")
-            if data.get("难易程度") == "未提供":
-                missing_fields.append("难易程度")
+        if doc_type == "JD":
+            tech_stack = format_array_for_csv(data.get("核心技术要求", []))
+            await run_db(lambda: _insert_jd(saved_url, data, tech_stack))
+            return {"status": "success", "type": "JD", "saved_data": data}
 
-            if missing_fields and len(missing_fields) <= 2:
-                retry_prompt = f"""以下是从一份面经中提取的信息，但有几个字段缺失（返回了"未提供"）。
+        elif doc_type == "Interview":
+            questions = format_array_for_csv(data.get("具体题目清单", []))
+            await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip()))
+
+            q_list = data.get("具体题目清单", [])
+            if q_list:
+                try:
+                    # 重试补全和题目标签化并行执行
+                    missing_fields = []
+                    if data.get("公司") == "未提供":
+                        missing_fields.append("公司")
+                    if data.get("面试轮次") == "未提供":
+                        missing_fields.append("面试轮次")
+                    if data.get("难易程度") == "未提供":
+                        missing_fields.append("难易程度")
+
+                    async def retry_fill_fields():
+                        if not missing_fields or len(missing_fields) > 2:
+                            return
+                        retry_prompt = f"""以下是从一份面经中提取的信息，但有几个字段缺失（返回了"未提供"）。
 请根据已有内容推断这些缺失字段的值。
 
 已提取的信息：
@@ -256,41 +271,41 @@ async def submit_data(
 请返回一个JSON对象，只包含需要补全的字段。对于难易程度，请根据题目难度判断为"简单"、"中等"或"困难"。
 对于公司，请从内容中推断（如题目中提到的公司名、岗位信息等）。
 对于面试轮次，请从内容中推断（如一面、二面、HR面等）。"""
+                        try:
+                            retry_kwargs = dict(
+                                model=LLM_MODEL,
+                                messages=[
+                                    {"role": "system", "content": "你是一个信息补全助手。根据已有信息推断缺失字段，返回JSON。"},
+                                    {"role": "user", "content": retry_prompt}
+                                ],
+                                temperature=0.2,
+                            )
+                            if _should_use_response_format():
+                                retry_kwargs["response_format"] = {"type": "json_object"}
+                            retry_response = await client.chat.completions.create(**retry_kwargs)
+                            retry_data = _extract_json(retry_response.choices[0].message.content)
+                            for field in missing_fields:
+                                val = retry_data.get(field, "未提供")
+                                if val and val != "未提供":
+                                    data[field] = val
+                                    logger.info(f"字段补全成功: {field} = {val}")
+                        except Exception as e:
+                            logger.warning(f"字段补全重试失败: {e}")
 
-                try:
-                    retry_kwargs = dict(
-                        model=LLM_MODEL,
-                        messages=[
-                            {"role": "system", "content": "你是一个信息补全助手。根据已有信息推断缺失字段，返回JSON。"},
-                            {"role": "user", "content": retry_prompt}
-                        ],
-                        temperature=0.2,
+                    # 并行执行：重试补全 + 题目标签化
+                    _, tagged_rows = await asyncio.gather(
+                        retry_fill_fields(),
+                        tag_questions_batch(saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), q_list)
                     )
-                    if _should_use_response_format():
-                        retry_kwargs["response_format"] = {"type": "json_object"}
-                    retry_response = await client.chat.completions.create(**retry_kwargs)
-                    retry_data = _extract_json(retry_response.choices[0].message.content)
-                    for field in missing_fields:
-                        val = retry_data.get(field, "未提供")
-                        if val and val != "未提供":
-                            data[field] = val
-                            logger.info(f"字段补全成功: {field} = {val}")
-                except Exception as e:
-                    logger.warning(f"字段补全重试失败: {e}")
 
-        if doc_type == "JD":
-            tech_stack = format_array_for_csv(data.get("核心技术要求", []))
-            await run_db(lambda: _insert_jd(saved_url, data, tech_stack))
-            return {"status": "success", "type": "JD", "saved_data": data}
+                    # 重试可能更新了公司/轮次，同步到已标签化的行
+                    if missing_fields:
+                        updated_company = data.get("公司", "未提供")
+                        updated_round = data.get("面试轮次", "未提供")
+                        for row in tagged_rows:
+                            row[1] = updated_company
+                            row[2] = updated_round
 
-        elif doc_type == "Interview":
-            questions = format_array_for_csv(data.get("具体题目清单", []))
-            await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip()))
-
-            q_list = data.get("具体题目清单", [])
-            if q_list:
-                try:
-                    tagged_rows = await tag_questions_batch(saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), q_list)
                     await run_db(lambda: _insert_details(tagged_rows))
                     await incremental_update_master_bank(tagged_rows, bg_tasks)
 
