@@ -7,7 +7,7 @@ from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.services.utils import normalize_category
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

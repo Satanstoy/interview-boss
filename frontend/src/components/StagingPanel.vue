@@ -88,6 +88,10 @@ import { submitData } from '../api/index.js'
 
 const emit = defineEmits(['submitted'])
 
+const props = defineProps({
+  activeSeason: { type: String, default: '' }
+})
+
 const sourceUrl = ref('')
 const stagedText = ref('')
 const stagedFiles = ref([])
@@ -143,6 +147,7 @@ const submitAll = async () => {
   const formData = new FormData()
   formData.append('url', sourceUrl.value)
   formData.append('text', stagedText.value)
+  formData.append('season', props.activeSeason || '')
   stagedFiles.value.forEach(item => formData.append('files', item.file))
 
   try {

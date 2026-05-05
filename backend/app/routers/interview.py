@@ -6,7 +6,7 @@ from app.db.connection import get_db_connection, run_db
 from app.db.operations import _cleanup_old_sources, _replace_details
 from app.routers.submit import tag_questions_batch, incremental_update_master_bank
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

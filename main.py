@@ -1,5 +1,5 @@
 def main():
-    print("Hello from multimodal-parser!")
+    print("Hello from InterviewBoss!")
 
 
 if __name__ == "__main__":

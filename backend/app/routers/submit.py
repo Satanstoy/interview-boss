@@ -11,7 +11,7 @@ from app.services.llm import client
 from app.services.embedding import find_best_match
 from app.services.utils import encode_image, normalize_category, format_array_for_csv
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

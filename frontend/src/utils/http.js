@@ -5,6 +5,7 @@
  * - 请求取消（组件卸载自动取消）
  * - 统一错误拦截（401/403/500/502/503/504）
  * - JWT 认证（自动附加 Authorization header）
+ * - Token 自动刷新（401 时尝试用 refresh token 续期）
  */
 
 const DEFAULT_TIMEOUT = 10_000
@@ -15,15 +16,62 @@ const RETRY_DELAYS = [1000, 3000]
 // 全局 AbortController 管理，用于组件卸载时批量取消
 const pendingControllers = new Set()
 
+// ── Access Token 内存存储（比 localStorage 更安全，XSS 无法直接读取）──
+let _accessToken = ''
+
+/**
+ * 设置 access token（登录成功后由前端调用）
+ */
+export function setAuthToken(token) {
+  _accessToken = token || ''
+}
+
+/**
+ * 获取当前 access token
+ */
+export function getAuthToken() {
+  return _accessToken
+}
+
+/**
+ * 手动触发 token 刷新（供 App.vue 初始化时调用）
+ * @returns {Promise<{token, user} | null>}
+ */
+export const refreshAuthToken = tryRefreshToken
+
 // 401 回调（由 App.vue 注册，用于弹出登录框）
 let onUnauthorized = null
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn }
 
-/**
- * 获取 auth token
- */
-function getAuthToken() {
-  try { return localStorage.getItem('auth_token') || '' } catch { return '' }
+// ── Token 自动刷新逻辑 ──
+let _refreshPromise = null
+
+async function tryRefreshToken() {
+  // 合并并发的 refresh 请求
+  if (_refreshPromise) return _refreshPromise
+
+  _refreshPromise = (async () => {
+    try {
+      // 使用原生 fetch 避免递归调用 request()
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include', // 关键：发送 HttpOnly refresh cookie
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      if (data.token) {
+        _accessToken = data.token
+        return data // 返回 { token, user }
+      }
+      return null
+    } catch {
+      return null
+    }
+  })()
+
+  const result = await _refreshPromise
+  _refreshPromise = null
+  return result
 }
 
 /**
@@ -46,7 +94,6 @@ function cleanup(controller, timer) {
  */
 function isRetryableError(err) {
   if (err.name === 'AbortError') return false
-  // 网络断开、DNS 失败等
   return err instanceof TypeError || err.message?.includes('Failed to fetch')
 }
 
@@ -83,6 +130,7 @@ function getStatusMessage(status) {
  * @param {number} options.timeout - 超时时间（ms）
  * @param {number} options.retries - 重试次数
  * @param {boolean} options.noRetry - 禁用重试
+ * @param {boolean} options._isRetry - 内部标记：这是一次 401 重试
  * @returns {Promise<any>} - 解析后的 JSON 数据
  */
 async function request(url, options = {}) {
@@ -90,6 +138,7 @@ async function request(url, options = {}) {
     timeout = DEFAULT_TIMEOUT,
     retries = MAX_RETRIES,
     noRetry = false,
+    _isRetry = false,
     ...fetchOptions
   } = options
 
@@ -110,9 +159,21 @@ async function request(url, options = {}) {
         ...fetchOptions,
         headers: mergedHeaders,
         signal: controller.signal,
+        credentials: 'same-origin',
       })
 
       cleanup(controller, timer)
+
+      // 401 → 尝试自动刷新 token（只尝试一次，避免无限循环）
+      if (res.status === 401 && !_isRetry && url !== '/api/auth/refresh' && url !== '/api/auth/login' && url !== '/api/auth/register') {
+        const refreshResult = await tryRefreshToken()
+        if (refreshResult) {
+          // 刷新成功，用新 token 重试原始请求（仅一次）
+          return request(url, { ...options, _isRetry: true })
+        }
+        // 刷新失败 → 触发登录弹窗
+        if (onUnauthorized) onUnauthorized()
+      }
 
       // 解析响应
       let data
@@ -121,7 +182,6 @@ async function request(url, options = {}) {
         data = await res.json()
       } else {
         const text = await res.text()
-        // 尝试 JSON 解析（后端可能不返回 content-type）
         try {
           data = JSON.parse(text)
         } catch {
@@ -131,11 +191,6 @@ async function request(url, options = {}) {
 
       // HTTP 状态码错误处理
       if (!res.ok) {
-        // 401 自动触发登录
-        if (res.status === 401 && onUnauthorized) {
-          onUnauthorized()
-        }
-
         const message = (typeof data === 'object' && data?.detail)
           ? (typeof data.detail === 'object' ? JSON.stringify(data.detail) : data.detail)
           : getStatusMessage(res.status)
@@ -252,10 +307,6 @@ export function upload(url, formData, options = {}) {
 
 /**
  * POST 请求，返回 SSE 流式响应
- * @param {string} url
- * @param {object} body
- * @param {function} onEvent - 每收到一个 SSE 事件时调用，参数为解析后的 JSON
- * @returns {Promise<object>} - 最终 done 事件的数据
  */
 export async function postSSE(url, body, onEvent) {
   const controller = new AbortController()
@@ -271,6 +322,7 @@ export async function postSSE(url, body, onEvent) {
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(body),
       signal: controller.signal,
+      credentials: 'same-origin',
     })
 
     if (!res.ok) {
@@ -289,7 +341,7 @@ export async function postSSE(url, body, onEvent) {
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      buffer = lines.pop() // 保留不完整的行
+      buffer = lines.pop()
 
       for (const line of lines) {
         const trimmed = line.trim()
@@ -298,23 +350,36 @@ export async function postSSE(url, body, onEvent) {
           const data = JSON.parse(trimmed.slice(6))
           if (onEvent) onEvent(data)
           if (data.type === 'done') finalResult = data
-        } catch (e) { /* 忽略解析错误 */ }
+        } catch { /* 忽略解析错误 */ }
       }
     }
 
-    // 处理 buffer 中剩余数据
     if (buffer.trim().startsWith('data: ')) {
       try {
         const data = JSON.parse(buffer.trim().slice(6))
         if (onEvent) onEvent(data)
         if (data.type === 'done') finalResult = data
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
 
     return finalResult
   } finally {
     pendingControllers.delete(controller)
   }
+}
+
+/**
+ * 带 cookie 的 fetch（用于 logout 等需要 HttpOnly cookie 的操作）
+ */
+export async function fetchWithCredentials(url, options = {}) {
+  const token = getAuthToken()
+  const authHeaders = {}
+  if (token) authHeaders['Authorization'] = `Bearer ${token}`
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: { ...authHeaders, ...(options.headers || {}) },
+  })
 }
 
 export default { get, post, put, del, upload, cancelAllRequests }

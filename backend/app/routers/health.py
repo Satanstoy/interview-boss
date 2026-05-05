@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from app.db.connection import get_db_connection, run_db
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

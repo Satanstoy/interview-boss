@@ -2,7 +2,7 @@ import time
 import logging
 from fastapi import Request
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 
 async def log_requests(request: Request, call_next):

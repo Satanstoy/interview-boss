@@ -137,3 +137,46 @@ ANSWER_PROMPT = """你是一名资深后端与算法面试官。请根据【面�
 
 ## 请直接用上述规则生成回答：
 """
+
+EVAL_PROMPT = """你是一名资深面试评估专家。请对比【参考答案】和【我的回答】，对回答质量进行多维度评估。
+
+## 评估维度（每项 0-100 分）
+1. **完整性 (completeness)**：是否覆盖了参考答案中的关键要点，有无重大遗漏
+2. **深度 (depth)**：对知识点的理解是否透彻，是否停留在表面
+3. **准确性 (accuracy)**：技术细节是否正确，有无事实性错误
+4. **逻辑性 (logic)**：回答结构是否清晰，论述是否连贯有条理
+
+## 输出规则
+- `overall_score` 为加权总分（准确性 35%、完整性 30%、深度 20%、逻辑性 15%），四舍五入取整
+- 每个维度给出简短评语（1-2 句，中文）
+- `strengths` 列出 1-3 个回答中的亮点
+- `weaknesses` 列出 1-3 个主要不足
+- `suggestions` 给出具体的改进建议（Markdown 格式，200 字以内）
+- 全部用中文输出
+
+## 输出格式（严格 JSON）
+```json
+{{
+  "overall_score": 78,
+  "dimensions": {{
+    "completeness": {{"score": 80, "comment": "..."}},
+    "depth": {{"score": 70, "comment": "..."}},
+    "accuracy": {{"score": 85, "comment": "..."}},
+    "logic": {{"score": 75, "comment": "..."}}
+  }},
+  "strengths": ["亮点1", "亮点2"],
+  "weaknesses": ["不足1", "不足2"],
+  "suggestions": "Markdown 格式的改进建议..."
+}}
+```
+
+## 面试题
+{question}
+
+## 参考答案
+{reference_answer}
+
+## 我的回答
+{user_answer}
+
+## 请严格按上述 JSON 格式输出评估结果："""

@@ -262,7 +262,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { cancelAllRequests, setUnauthorizedHandler } from './utils/http.js'
+import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken } from './utils/http.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 
@@ -673,28 +673,28 @@ const triggerBuildMasterBank = async () => {
 const downloadCSV = () => { window.open(api.getDownloadUrl(activeTab.value.toLowerCase()), '_blank') }
 
 // ── Lifecycle ──
-const initAuth = () => {
-  try {
-    const saved = localStorage.getItem('auth_user')
-    const token = localStorage.getItem('auth_token')
-    if (saved && token) {
-      currentUser.value = JSON.parse(saved)
-      loadPendingCount()
-    } else {
-      showLoginModal.value = true
-    }
-  } catch {
+const initAuth = async () => {
+  // 尝试用 HttpOnly refresh cookie 自动恢复登录状态
+  const refreshResult = await refreshAuthToken()
+  if (refreshResult?.token && refreshResult?.user) {
+    setAuthToken(refreshResult.token)
+    currentUser.value = refreshResult.user
+    loadAllData()
+    loadPendingCount()
+  } else {
     showLoginModal.value = true
   }
 }
 
 const handleLoginSuccess = (user) => {
+  // access token 已由 LoginModal 调用 setAuthToken 存入内存
   currentUser.value = user
   loadAllData()
   loadPendingCount()
 }
 
 const handleLogout = () => {
+  setAuthToken('')
   currentUser.value = null
   fetchTableData()
   fetchPracticeStats()
@@ -726,11 +726,8 @@ const loadAllData = () => {
   fetchPracticeStats()
 }
 
-onMounted(() => {
-  initAuth()
-  if (currentUser.value) {
-    loadAllData()
-  }
+onMounted(async () => {
+  await initAuth()
 })
 onUnmounted(() => cancelAllRequests())
 </script>

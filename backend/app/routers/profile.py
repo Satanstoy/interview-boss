@@ -5,7 +5,7 @@ from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
 from app.models.schemas import ProfileUpdateRequest
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

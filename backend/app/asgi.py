@@ -12,7 +12,7 @@ from app.core.config import _reload_from_db
 init_db()
 _reload_from_db()
 
-app = FastAPI(title="Multimodal CV & JD Parser")
+app = FastAPI(title="InterviewBoss")
 
 app.add_middleware(
     CORSMiddleware,

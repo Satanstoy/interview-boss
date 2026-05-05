@@ -4,7 +4,7 @@ from dotenv import load_dotenv, set_key
 
 load_dotenv()
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 DATA_DIR = "/root/sj/multimodal-parser/backend/data"
 os.makedirs(DATA_DIR, exist_ok=True)

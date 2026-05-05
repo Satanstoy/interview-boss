@@ -7,10 +7,13 @@ def encode_image(file_bytes: bytes) -> str:
 
 
 def normalize_category(text: str) -> str:
-    """规范化分类名称，去除多余空格，统一格式（如 'A. 项目' → 'A.项目'）"""
+    """规范化分类名称，去除多余空格，统一格式，处理逗号分隔的多分类（取第一个）"""
     if not text:
         return text
     text = text.strip()
+    # 处理逗号分隔的多分类：取第一个
+    if ',' in text:
+        text = text.split(',')[0].strip()
     text = re.sub(r'^([A-Fa-f]\d?)\.\s+', r'\1.', text)
     return text
 

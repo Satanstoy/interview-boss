@@ -1,12 +1,18 @@
-import { get, post, put, del, upload, postSSE } from '../utils/http.js'
+import { get, post, put, del, upload, postSSE, fetchWithCredentials } from '../utils/http.js'
 
 const API = '/api'
 
 // ── Auth ──
 export const authRegister = (username, password) => post(`${API}/auth/register`, { username, password })
-export const authLogin = (username, password) => post(`${API}/auth/login`, { username, password })
+export const authLogin = (username, password, remember_me = false) => post(`${API}/auth/login`, { username, password, remember_me })
 export const authMe = () => get(`${API}/auth/me`)
 export const authUpdateBankMode = (bank_mode) => put(`${API}/auth/bank-mode`, { bank_mode })
+export const authRefresh = () => post(`${API}/auth/refresh`, null)
+export const authLogout = async () => {
+  try {
+    await fetchWithCredentials(`${API}/auth/logout`, { method: 'POST' })
+  } catch { /* 忽略网络错误，前端仍会清除本地状态 */ }
+}
 
 // ── Data fetching ──
 export const fetchJdData = () => get(`${API}/data/jd?page_size=500`)

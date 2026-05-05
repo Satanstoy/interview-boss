@@ -17,3 +17,10 @@ wheels/
 *.db-wal
 *.db.bak.*
 backend/data/*.db
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/

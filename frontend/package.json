@@ -1,11 +1,11 @@
 {
-  "name": "multimodal-parser-frontend",
+  "name": "interview-boss-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && rm -rf /var/www/multimodal-parser/dist/* && cp -r dist/* /var/www/multimodal-parser/dist/ && chown -R www-data:www-data /var/www/multimodal-parser/dist/",
+    "build": "vite build && rm -rf /var/www/interview-boss/dist/* && cp -r dist/* /var/www/interview-boss/dist/ && chown -R www-data:www-data /var/www/interview-boss/dist/",
     "preview": "vite preview"
   },
   "dependencies": {

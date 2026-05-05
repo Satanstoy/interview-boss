@@ -4,7 +4,7 @@ import threading
 import logging
 from app.core.config import DB_PATH
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 _local = threading.local()
 
@@ -137,6 +137,24 @@ def init_db():
             conn.execute("CREATE INDEX idx_uph_user ON user_practice_history(user_id)")
         if "idx_uph_question" not in uph_indexes:
             conn.execute("CREATE INDEX idx_uph_question ON user_practice_history(question_bank_id)")
+
+        # ── refresh_tokens 表（用于双 token 机制的服务端校验）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                jti TEXT UNIQUE NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('refresh_tokens')")
+        rt_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_rt_jti" not in rt_indexes:
+            conn.execute("CREATE INDEX idx_rt_jti ON refresh_tokens(jti)")
+        if "idx_rt_user" not in rt_indexes:
+            conn.execute("CREATE INDEX idx_rt_user ON refresh_tokens(user_id)")
 
         # ── 种子管理员 ──
         from passlib.context import CryptContext

@@ -19,7 +19,7 @@ from app.services.llm import client, client_of_embedding, _call_llm_with_retry
 from app.services.embedding import cosine_similarity, cosine_similarity_batch
 from app.services.utils import normalize_category
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 

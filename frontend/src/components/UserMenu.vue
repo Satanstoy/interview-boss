@@ -71,7 +71,8 @@
 
 <script setup>
 import { ref } from 'vue'
-import { authUpdateBankMode } from '../api/index.js'
+import { authUpdateBankMode, authLogout } from '../api/index.js'
+import { setAuthToken } from '../utils/http.js'
 
 const props = defineProps({
   user: Object,
@@ -93,17 +94,18 @@ async function switchBankMode(mode) {
   try {
     await authUpdateBankMode(mode)
     const updated = { ...props.user, bank_mode: mode }
-    localStorage.setItem('auth_user', JSON.stringify(updated))
     emit('bank-mode-changed', updated)
   } catch (e) {
     console.error('切换题库模式失败:', e)
   }
 }
 
-function handleLogout() {
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('auth_user')
+async function handleLogout() {
   showMenu.value = false
+  // 通知后端删除 refresh token cookie
+  await authLogout()
+  // 清除内存中的 access token
+  setAuthToken('')
   emit('logout')
 }
 </script>

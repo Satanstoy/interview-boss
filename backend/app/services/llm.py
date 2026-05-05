@@ -5,7 +5,7 @@ from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APITimeoutEr
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
 
-logger = logging.getLogger("multimodal-parser")
+logger = logging.getLogger("interview-boss")
 
 client = AsyncOpenAI(
     api_key=os.environ.get("OPENAI_API_KEY"),
@@ -18,6 +18,17 @@ client_of_embedding = AsyncOpenAI(
     base_url=os.environ.get("OPENAI_BASE_URL_EMBEDDING"),
     timeout=60
 )
+
+
+def rebuild_clients():
+    """用 config 模块中的当前值重建 LLM 客户端（配置热更新时调用）"""
+    global client, client_of_embedding
+    from app.core.config import LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT as _TIMEOUT
+    from app.core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL
+
+    client = AsyncOpenAI(api_key=LLM_API_KEY or None, base_url=LLM_BASE_URL or None, timeout=_TIMEOUT)
+    client_of_embedding = AsyncOpenAI(api_key=EMBEDDING_API_KEY or None, base_url=EMBEDDING_BASE_URL or None, timeout=60)
+    logger.info("LLM 客户端已重建")
 
 
 @retry(

@@ -20,6 +20,7 @@ const tabs = [
   { key: 'Interview', label: '面经库', activeClass: 'text-gray-700 border-gray-500' },
   { key: 'MasterBank', label: '高频题库', activeClass: 'text-red-600 border-red-600' },
   { key: 'MockInterview', label: '题目抽测', activeClass: 'text-orange-600 border-orange-600' },
+  { key: 'KnowledgeGraph', label: '知识图谱', activeClass: 'text-violet-600 border-violet-600' },
   { key: 'Import', label: '导入', activeClass: 'text-emerald-600 border-emerald-600' }
 ]
 </script>
