@@ -129,7 +129,8 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
                 'avg_score': avg_score,
                 'by_difficulty': by_difficulty,
                 'daily_trend': daily_trend,
-                'recent_weak': recent_weak
+                'recent_weak': recent_weak,
+                'practiced_details': practiced
             }
 
     data = await run_db(_query)

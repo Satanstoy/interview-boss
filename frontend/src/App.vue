@@ -260,6 +260,7 @@
             :selected-count="masterSelection.selectedCount.value"
             :is-selected="(id) => masterSelection.selectedIds.value.has(id)"
             :batch-actions="masterBatchActions"
+            :practiced-questions="practicedQuestions"
             @toggle-select-all="masterSelection.toggleSelectAll()"
             @invert-selection="masterSelection.invertSelection()"
             @toggle-item="masterSelection.toggleItem($event)"
@@ -269,6 +270,7 @@
             @save-field="saveFieldFromEvent"
             @expand-all="filteredMasterBank.forEach(q => q._showAnswer = true)"
             @collapse-all="filteredMasterBank.forEach(q => q._showAnswer = false)"
+            @practice="practiceQuestion = $event"
           />
         </div>
       </div>
@@ -279,6 +281,7 @@
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
+    <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" />
   </div>
 </template>
 
@@ -303,6 +306,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import LoginModal from './components/LoginModal.vue'
 import UserMenu from './components/UserMenu.vue'
 import AdminReview from './components/AdminReview.vue'
+import PracticePanel from './components/PracticePanel.vue'
 import { useToast, useConfirm } from './composables/useNotification.js'
 
 const toast = useToast()
@@ -335,6 +339,7 @@ const currentUser = ref(null)
 const showLoginModal = ref(false)
 const showReviewPanel = ref(false)
 const pendingReviewCount = ref(0)
+const practiceQuestion = ref(null)
 
 // ── Selection composables ──
 const jdSelection = useSelection(() => jdData.value)
@@ -414,6 +419,17 @@ const filteredInterviewData = computed(() => {
   if (!filterSeason.value) return interviewData.value
   return interviewData.value.filter(d => d.season === filterSeason.value)
 })
+
+// Derive per-question practice info from practiceStats
+const practicedQuestions = computed(() => {
+  const stats = practiceStats.value
+  if (!stats?.practiced_details) return {}
+  return stats.practiced_details
+})
+
+const handlePracticeEvaluated = async ({ questionId, score }) => {
+  await fetchPracticeStats()
+}
 
 // Refresh practice stats when returning from mock interview
 watch(activeTab, (newTab, oldTab) => {

@@ -54,6 +54,18 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
               </svg>
             </button>
+            <!-- Practice status badge -->
+            <span v-if="practicedQuestions[q.id]" class="badge text-[10px] font-bold"
+              :class="practicedQuestions[q.id].best_score >= 80 ? 'bg-green-50 text-green-700 border border-green-200' : practicedQuestions[q.id].best_score >= 60 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-red-50 text-red-700 border border-red-200'">
+              {{ practicedQuestions[q.id].best_score }}分
+            </span>
+            <span v-else class="badge text-[10px] bg-blue-50 text-blue-500 border border-blue-100">New</span>
+            <!-- Practice button -->
+            <button @click.stop="$emit('practice', q)"
+              class="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200 hover:bg-blue-100 transition-all duration-200 flex items-center gap-1 font-medium">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+              做题
+            </button>
             <button @click.stop="$emit('retag', q)" :disabled="q._isRetagging"
               class="text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-lg border border-amber-200 hover:bg-amber-100 transition-all duration-200 disabled:opacity-50 flex items-center gap-1">
               <svg v-if="q._isRetagging" class="animate-spin w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -149,10 +161,11 @@ defineProps({
   items: { type: Array, default: () => [] },
   selectedCount: { type: Number, default: 0 },
   isSelected: { type: Function, default: () => false },
-  batchActions: { type: Array, default: () => [] }
+  batchActions: { type: Array, default: () => [] },
+  practicedQuestions: { type: Object, default: () => ({}) }
 })
 
-defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all'])
+defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice'])
 
 const isFailedAnswer = (answer) => answer && answer.includes('生成失败')
 const renderMarkdown = (text) => renderSafeMarkdown(text)
