@@ -11,6 +11,8 @@ wheels/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # SQLite runtime files
 *.db-shm
@@ -24,3 +26,6 @@ node_modules/
 # IDE
 .vscode/
 .idea/
+
+# Claude Code local settings (may contain tokens)
+.claude/settings.local.json
