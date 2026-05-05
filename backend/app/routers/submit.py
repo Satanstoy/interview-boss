@@ -2,9 +2,10 @@ import json
 import logging
 
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from app.core.config import LLM_MODEL, MAX_FILE_SIZE
 from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT
+from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
 from app.services.llm import client
@@ -173,11 +174,15 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
 @router.post("/api/submit")
 async def submit_data(
     bg_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
     season: Optional[str] = Form(""),
     files: List[UploadFile] = File(default=[])
 ):
+    # 输入长度限制
+    if text and len(text) > 50000:
+        raise HTTPException(status_code=400, detail="文本内容过长，请限制在 50000 字符以内")
     url = url.strip() if url else ""
     if url and await run_db(lambda: _check_duplicate_url_sync(url)):
         raise HTTPException(status_code=409, detail="该链接的内容已存在于数据库中，请勿重复上传！")
@@ -290,4 +295,4 @@ async def submit_data(
             raise HTTPException(status_code=500, detail="模型返回了未知的分类类型: " + str(doc_type))
     except Exception as e:
         logger.exception("提交处理失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="提交处理失败，请查看服务端日志")

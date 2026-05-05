@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GenericUpdateRequest(BaseModel):
@@ -23,9 +23,9 @@ class BatchGenerateAnswersRequest(BaseModel):
 
 class EvaluateAnswerRequest(BaseModel):
     question_id: int
-    question_text: str
-    user_answer: str
-    reference_answer: str
+    question_text: str = Field(..., max_length=10000)
+    user_answer: str = Field(..., max_length=10000)
+    reference_answer: str = Field(..., max_length=10000)
 
 
 class ProfileUpdateRequest(BaseModel):

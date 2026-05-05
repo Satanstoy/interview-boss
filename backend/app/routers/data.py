@@ -4,9 +4,10 @@ import csv
 import logging
 import tempfile
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from app.core.config import DATA_DIR, ALLOWED_UPDATE_COLUMNS
+from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
 
@@ -16,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/api/data/{file_type}")
-async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500)):
+async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500), user: dict = Depends(get_current_user)):
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
@@ -45,7 +46,7 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
 
 
 @router.get("/api/download/{file_type}")
-async def download_csv(file_type: str):
+async def download_csv(file_type: str, user: dict = Depends(get_current_user)):
     table_map = {
         "jd": ("jd", ["来源链接", "公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"]),
         "interview": ("interview", ["来源链接", "公司", "面试轮次", "考察重点", "具体题目清单", "难易程度", "招聘季"]),
@@ -91,7 +92,7 @@ def _cleanup_temp_file(path: str):
 
 
 @router.delete("/api/data/{file_type}/{record_id}")
-async def delete_data(file_type: str, record_id: int):
+async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_current_user)):
     """通过 record_id 直接删除记录，避免行号偏移导致删错"""
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
@@ -138,11 +139,11 @@ async def delete_data(file_type: str, record_id: int):
         raise
     except Exception as e:
         logger.exception("操作失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
 
 @router.post("/api/data/batch-delete")
-async def batch_delete_data(req: BatchDataDeleteRequest):
+async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(get_current_user)):
     """批量删除记录，单事务完成"""
     table_map = {"jd": "jd", "interview": "interview"}
     table_name = table_map.get(req.file_type.lower())
@@ -194,11 +195,11 @@ async def batch_delete_data(req: BatchDataDeleteRequest):
         raise
     except Exception as e:
         logger.exception("批量删除失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
 
 @router.put("/api/data/update")
-async def update_generic_data(req: GenericUpdateRequest):
+async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(get_current_user)):
     allowed_tables = ["question_bank", "jd", "interview", "questions_detail"]
     if req.table_name not in allowed_tables:
         raise HTTPException(status_code=400, detail=f"安全拦截：不被允许操作的数据表 '{req.table_name}'")
@@ -243,4 +244,4 @@ async def update_generic_data(req: GenericUpdateRequest):
         raise
     except Exception as e:
         logger.exception("操作失败")
-        raise HTTPException(status_code=500, detail=f"数据库更新失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="数据库更新失败，请查看服务端日志")

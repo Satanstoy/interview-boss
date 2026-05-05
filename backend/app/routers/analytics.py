@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.services.utils import normalize_category
 
@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/api/analytics")
-async def get_analytics():
+async def get_analytics(user: dict = Depends(get_current_user)):
     def _query():
         tech_counter, tag_counter, level_counter = Counter(), Counter(), Counter()
         with get_db_connection() as conn:
@@ -137,7 +137,7 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
 
 
 @router.post("/api/normalize-categories")
-async def normalize_categories():
+async def normalize_categories(admin: dict = Depends(get_admin_user)):
     """批量规范化现有数据库中 cat1/cat2 字段的格式（去除多余空格）"""
     def _normalize():
         updated_detail = 0
@@ -166,11 +166,11 @@ async def normalize_categories():
         return {"status": "success", "message": f"规范化完成：questions_detail 更新 {detail_count} 条，question_bank 更新 {master_count} 条"}
     except Exception as e:
         logger.exception("操作失败")
-        raise HTTPException(status_code=500, detail=f"规范化失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="规范化失败，请查看服务端日志")
 
 
 @router.post("/api/clear-db")
-async def clear_db():
+async def clear_db(admin: dict = Depends(get_admin_user)):
     """清空所有数据库表（执行前自动创建备份）"""
     import os
     import shutil
@@ -181,7 +181,7 @@ async def clear_db():
         logger.info(f"清空前已创建数据库备份: {backup_path}")
     except Exception as e:
         logger.error(f"创建备份失败，拒绝清空操作: {e}")
-        raise HTTPException(status_code=500, detail=f"备份创建失败，清空操作已中止: {str(e)}")
+        raise HTTPException(status_code=500, detail="备份创建失败，清空操作已中止")
 
     def _clear():
         with get_db_connection() as conn:
@@ -198,11 +198,11 @@ async def clear_db():
         await run_db(_clear)
         return {"status": "success", "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清空失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="清空失败，请查看服务端日志")
 
 
 @router.post("/api/sync-db")
-async def sync_db():
+async def sync_db(admin: dict = Depends(get_admin_user)):
     """使用 Embedding 语义聚类重建题库（与 build_master_bank 逻辑一致）"""
     from app.routers.master_bank import build_master_bank
     try:
@@ -210,11 +210,11 @@ async def sync_db():
         return {"status": "success", "message": f"数据库同步完成，共 {result.get('total_unique', 0)} 道核心真题"}
     except Exception as e:
         logger.exception("操作失败")
-        raise HTTPException(status_code=500, detail=f"数据库同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="数据库同步失败，请查看服务端日志")
 
 
 @router.get("/api/knowledge-graph")
-async def get_knowledge_graph():
+async def get_knowledge_graph(user: dict = Depends(get_current_user)):
     """构建知识点关联图谱数据（节点 + 边）"""
 
     def _query():

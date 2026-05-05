@@ -10,7 +10,7 @@ InterviewBoss is a Chinese-language AI-powered interview prep platform. It inges
 
 ### Backend (Python / FastAPI)
 ```bash
-cd backend
+cd /root/sj/multimodal-parser
 uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000
 ```
 
@@ -22,10 +22,15 @@ npm run dev      # Dev server at http://localhost:3000
 npm run build    # Production build → /var/www/interview-boss/dist/
 ```
 
-### Running with uv (root level)
+### Python 依赖管理（必须使用 uv）
 ```bash
-uv sync          # Install from pyproject.toml
+# uv 二进制绝对路径: /root/.local/bin/uv（不在 PATH 中）
+uv sync                    # 从 pyproject.toml 安装所有依赖
+uv add <package>           # 添加新依赖
+# 安装后需要重启后端服务才能生效
 ```
+
+**重要：本项目所有 Python 依赖操作必须使用 uv，不要用 pip/pip3。**
 
 ## Architecture
 
@@ -68,6 +73,10 @@ Backend env vars (in `backend/.env`, see `.env.example`):
 - `OPENAI_API_KEY`, `OPENAI_BASE_URL` — LLM API connection
 - `LLM_MODEL_NAME`, `EMBEDDING_MODEL_NAME` — Model selection
 - `JWT_SECRET` — JWT signing key (auto-generated if not set)
+- `ADMIN_USERNAME` — 种子管理员用户名（默认 sj）
+- `ADMIN_PASSWORD` — 种子管理员密码（首次启动必填，之后可改）
+- `DEBUG` — 设为 true 开启热重载和 Swagger 文档
+- `ALLOWED_ORIGINS` — CORS 允许的来源（逗号分隔，开发时设 http://localhost:3000）
 
 Production: nginx at `/etc/nginx/conf.d/interview-boss.conf` reverse-proxies `/api/` to uvicorn on port 8000 with 180s timeout; serves frontend static files from `/var/www/interview-boss/dist/`.
 

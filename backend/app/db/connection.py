@@ -158,15 +158,22 @@ def init_db():
 
         # ── 种子管理员 ──
         from passlib.context import CryptContext
+        import os
         pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+        admin_username = os.getenv("ADMIN_USERNAME", "sj")
+        admin_password = os.getenv("ADMIN_PASSWORD")
+        admin_row = conn.execute("SELECT id FROM users WHERE username = ?", (admin_username,)).fetchone()
         if not admin_row:
-            admin_hash = pwd_ctx.hash("qnmlgb233..")
+            if not admin_password:
+                raise RuntimeError(
+                    "首次启动需要设置管理员密码，请在 .env 中配置 ADMIN_PASSWORD 环境变量"
+                )
+            admin_hash = pwd_ctx.hash(admin_password)
             conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, 1, 'public')",
-                ("sj", admin_hash)
+                (admin_username, admin_hash)
             )
-            logger.info("种子管理员账户已创建: sj")
+            logger.info(f"种子管理员账户已创建: {admin_username}")
 
         # ── 数据迁移: master_question_bank → question_bank ──
         qb_count = conn.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0]

@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
@@ -27,7 +28,7 @@ def _mask_key(value: str) -> str:
 
 
 @router.get("/api/profile")
-async def get_profile():
+async def get_profile(admin: dict = Depends(get_admin_user)):
     """读取全部用户配置（API Key 掩码返回）"""
 
     def _query():
@@ -79,7 +80,7 @@ async def get_profile():
 
 
 @router.put("/api/profile")
-async def update_profile(req: ProfileUpdateRequest):
+async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_admin_user)):
     """批量更新用户配置"""
 
     invalid = set(req.settings.keys()) - ALLOWED_PROFILE_KEYS
@@ -121,4 +122,4 @@ async def update_profile(req: ProfileUpdateRequest):
         return {"status": "success", "message": "配置已保存（已同步到 .env）"}
     except Exception as e:
         logger.exception("保存配置失败")
-        raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="保存配置失败，请查看服务端日志")

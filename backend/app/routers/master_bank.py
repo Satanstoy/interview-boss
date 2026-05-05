@@ -75,7 +75,7 @@ async def get_master_bank(
 
 
 @router.post("/api/master-bank/build")
-async def build_master_bank():
+async def build_master_bank(admin: dict = Depends(get_admin_user)):
     """全量重建题库：保留已有的 AI 答案，使用 Embedding 语义聚类"""
     # 重建前自动备份数据库
     backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
@@ -215,7 +215,7 @@ async def build_master_bank():
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
-async def toggle_star(question_id: int):
+async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
     """切换题目收藏状态"""
     def _toggle():
         with get_db_connection() as conn:
@@ -233,11 +233,11 @@ async def toggle_star(question_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
 @router.post("/api/master-bank/generate-answer/{question_id}")
-async def generate_master_answer(question_id: int):
+async def generate_master_answer(question_id: int, user: dict = Depends(get_current_user)):
     def _get():
         with get_db_connection() as conn:
             return conn.execute("SELECT question, ai_answer FROM question_bank WHERE id = ?", (question_id,)).fetchone()
@@ -266,7 +266,7 @@ async def generate_master_answer(question_id: int):
 
 
 @router.delete("/api/master-bank/{question_id}")
-async def delete_master_question(question_id: int):
+async def delete_master_question(question_id: int, user: dict = Depends(get_current_user)):
     def _delete():
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -289,11 +289,11 @@ async def delete_master_question(question_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="删除失败，请查看服务端日志")
 
 
 @router.post("/api/master-bank/batch-delete")
-async def batch_delete_master_bank(req: BatchDeleteRequest):
+async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends(get_current_user)):
     """批量删除题库题目，单事务完成"""
     if not req.ids:
         raise HTTPException(status_code=400, detail="ids 不能为空")
@@ -327,11 +327,11 @@ async def batch_delete_master_bank(req: BatchDeleteRequest):
         raise
     except Exception as e:
         logger.exception("批量删除失败")
-        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="批量删除失败，请查看服务端日志")
 
 
 @router.post("/api/master-bank/batch-generate-answers")
-async def batch_generate_answers(req: BatchGenerateAnswersRequest):
+async def batch_generate_answers(req: BatchGenerateAnswersRequest, user: dict = Depends(get_current_user)):
     """批量生成答案（SSE 流式推送进度）"""
     if not req.ids:
         raise HTTPException(status_code=400, detail="ids 不能为空")
@@ -414,7 +414,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest):
 
 
 @router.post("/api/master-bank/re-tag/{question_id}")
-async def retag_master_question(question_id: int):
+async def retag_master_question(question_id: int, user: dict = Depends(get_current_user)):
     def _get():
         with get_db_connection() as conn:
             return conn.execute("SELECT question, cat1, cat2, tags, difficulty FROM question_bank WHERE id = ?", (question_id,)).fetchone()
@@ -495,7 +495,7 @@ async def retag_master_question(question_id: int):
 
     except Exception as e:
         logger.exception("重新打标失败")
-        raise HTTPException(status_code=500, detail=f"重新打标失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="重新打标失败，请查看服务端日志")
 
 
 @router.get("/api/master-bank/random")
@@ -674,7 +674,7 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
         raise HTTPException(status_code=500, detail="评估结果解析失败，请重试")
     except Exception as e:
         logger.exception("答案评估失败")
-        raise HTTPException(status_code=500, detail=f"评估失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="评估失败，请稍后重试")
 
 
 @router.get("/api/practice-history/{question_id}")
@@ -709,11 +709,11 @@ class UploadToBankRequest(BatchGenerateAnswersRequest):
 
 @router.post("/api/master-bank/upload")
 async def upload_to_bank(
-    question_text: str = Query(...),
-    cat1: str = Query(""),
-    cat2: str = Query(""),
-    tags: str = Query(""),
-    difficulty: str = Query(""),
+    question_text: str = Query(..., max_length=5000),
+    cat1: str = Query("", max_length=100),
+    cat2: str = Query("", max_length=100),
+    tags: str = Query("", max_length=500),
+    difficulty: str = Query("", max_length=20),
     target: str = Query("public"),  # 'public' or 'personal'
     user: dict = Depends(get_current_user)
 ):

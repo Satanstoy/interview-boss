@@ -1,7 +1,10 @@
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Response, Form
+from enum import Enum
+from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.core.auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_current_user, get_refresh_token,
@@ -14,20 +17,41 @@ logger = logging.getLogger("interview-boss")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+limiter = Limiter(key_func=get_remote_address)
+
+
+def _require_custom_header(request: Request):
+    """CSRF 防护：要求请求携带自定义头 X-Requested-With。
+    跨域页面无法在简单请求中设置自定义头，因此可阻止 CSRF。
+    同时也接受 Content-Type: application/json（前端所有 API 调用均使用 JSON）。
+    """
+    if request.headers.get("X-Requested-With"):
+        return
+    ct = request.headers.get("content-type", "")
+    if "application/json" in ct:
+        return
+    raise HTTPException(status_code=403, detail="缺少必要的请求头，请通过前端发起请求")
+
 
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=2, max_length=32)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=1, max_length=32)
+    password: str = Field(..., min_length=1, max_length=128)
     remember_me: bool = False
 
 
+class BankMode(str, Enum):
+    public = "public"
+    personal = "personal"
+    mixed = "mixed"
+
+
 class BankModeRequest(BaseModel):
-    bank_mode: str  # 'public' / 'personal' / 'mixed'
+    bank_mode: BankMode
 
 
 def _set_refresh_cookie(response: Response, token: str, remember: bool = False):
@@ -36,6 +60,7 @@ def _set_refresh_cookie(response: Response, token: str, remember: bool = False):
         key="refresh_token",
         value=token,
         httponly=True,
+        secure=True,
         samesite="lax",
         max_age=days * 86400,
         path="/",
@@ -66,12 +91,8 @@ def _issue_token_pair(user: dict, response: Response, remember: bool = False) ->
 
 
 @router.post("/register")
-async def register(req: RegisterRequest, response: Response):
-    if len(req.username) < 2 or len(req.username) > 32:
-        raise HTTPException(status_code=400, detail="用户名长度需在 2-32 之间")
-    if len(req.password) < 6:
-        raise HTTPException(status_code=400, detail="密码长度至少 6 位")
-
+@limiter.limit("5/minute")
+async def register(request: Request, req: RegisterRequest, response: Response):
     password_hash = hash_password(req.password)
 
     def _create():
@@ -98,7 +119,8 @@ async def register(req: RegisterRequest, response: Response):
 
 
 @router.post("/login")
-async def login(req: LoginRequest, response: Response):
+@limiter.limit("10/minute")
+async def login(request: Request, req: LoginRequest, response: Response):
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
@@ -115,7 +137,8 @@ async def login(req: LoginRequest, response: Response):
 
 
 @router.post("/refresh")
-async def refresh_token(response: Response, rt: str = Depends(get_refresh_token)):
+@limiter.limit("30/minute")
+async def refresh_token(request: Request, response: Response, rt: str = Depends(get_refresh_token), _csrf: None = Depends(_require_custom_header)):
     """
     用 HttpOnly cookie 中的 refresh token 换取新 token pair。
     不依赖 access token（页面刷新后 access token 已在内存中丢失，但 cookie 仍有效）。
@@ -149,7 +172,7 @@ async def refresh_token(response: Response, rt: str = Depends(get_refresh_token)
 
 
 @router.post("/logout")
-async def logout(response: Response, rt: str = Depends(get_refresh_token)):
+async def logout(request: Request, response: Response, rt: str = Depends(get_refresh_token), _csrf: None = Depends(_require_custom_header)):
     """注销：删除 refresh token，清除 cookie"""
     payload = decode_token(rt, expected_type="refresh")
     jti = payload.get("jti")
@@ -166,20 +189,19 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @router.put("/bank-mode")
 async def update_bank_mode(req: BankModeRequest, current_user: dict = Depends(get_current_user)):
-    if req.bank_mode not in ('public', 'personal', 'mixed'):
-        raise HTTPException(status_code=400, detail="无效的题库模式，可选: public / personal / mixed")
-
     def _update():
         with get_db_connection() as conn:
-            conn.execute("UPDATE users SET bank_mode = ? WHERE id = ?", (req.bank_mode, current_user['id']))
+            conn.execute("UPDATE users SET bank_mode = ? WHERE id = ?", (req.bank_mode.value, current_user['id']))
             conn.commit()
 
     await run_db(_update)
-    return {"status": "success", "bank_mode": req.bank_mode}
+    return {"status": "success", "bank_mode": req.bank_mode.value}
 
 
 @router.post("/login-form")
+@limiter.limit("10/minute")
 async def login_form(
+    request: Request,
     response: Response,
     username: str = Form(...),
     password: str = Form(...),
