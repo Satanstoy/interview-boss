@@ -1,12 +1,7 @@
-import os
 import json
-import csv
 import logging
-import tempfile
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
-from fastapi.responses import FileResponse
-from app.core.config import DATA_DIR, ALLOWED_UPDATE_COLUMNS
+from fastapi import APIRouter, HTTPException, Query, Depends
+from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
@@ -54,53 +49,6 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
         elif table_name == 'questions_detail':
             result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "题目": d['question'], "一级大类": d['cat1'], "二级子类": d['cat2'], "考点标签": d['tags'], "难度标签": d['diff_tag']})
     return {"items": result, "total": total, "page": page, "page_size": page_size}
-
-
-@router.get("/api/download/{file_type}")
-async def download_csv(file_type: str, user: dict = Depends(get_current_user)):
-    table_map = {
-        "jd": ("jd", ["来源链接", "公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"]),
-        "interview": ("interview", ["来源链接", "公司", "面试轮次", "考察重点", "具体题目清单", "难易程度", "招聘季"]),
-        "tagged": ("questions_detail", ["来源链接", "公司", "面试轮次", "题目", "一级大类", "二级子类", "考点标签", "难度标签"])
-    }
-    if file_type not in table_map:
-        raise HTTPException(status_code=404, detail="未知文件类型")
-    table_name, headers = table_map[file_type]
-
-    # 使用唯一临时文件避免并发冲突
-    fd, temp_file_path = tempfile.mkstemp(suffix=".csv", dir=DATA_DIR)
-    os.close(fd)
-
-    def _export():
-        safe_name = _safe_table_name(table_name)
-        with get_db_connection() as conn:
-            rows = conn.execute(f"SELECT * FROM {safe_name} ORDER BY id ASC").fetchall()
-        with open(temp_file_path, 'w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for r in rows:
-                d = dict(r)
-                if table_name == 'jd':
-                    writer.writerow([d['url'], d['company'], d['job_title'], d['salary'], d['tech_stack'], d['bonus']])
-                elif table_name == 'interview':
-                    writer.writerow([d['url'], d['company'], d['round'], d['focus'], d['questions_list'], d['difficulty'], d.get('season', '')])
-                elif table_name == 'questions_detail':
-                    writer.writerow([d['url'], d['company'], d['round'], d['question'], d['cat1'], d['cat2'], d['tags'], d['diff_tag']])
-
-    await run_db(_export)
-    # 使用 BackgroundTasks 在响应发送后清理临时文件
-    bg_cleanup = BackgroundTasks()
-    bg_cleanup.add_task(_cleanup_temp_file, temp_file_path)
-    return FileResponse(path=temp_file_path, filename=f"{file_type}_data.csv", media_type='text/csv', background=bg_cleanup)
-
-
-def _cleanup_temp_file(path: str):
-    """清理临时文件"""
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception as e:
-        logger.warning(f"清理临时文件失败: {path} → {e}")
 
 
 @router.delete("/api/data/{file_type}/{record_id}")

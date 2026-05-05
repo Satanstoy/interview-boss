@@ -11,7 +11,7 @@ from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
 from app.services.llm import client, _should_use_response_format, _extract_json
-from app.services.utils import encode_image, normalize_category, format_array_for_csv
+from app.services.utils import encode_image, normalize_category
 
 logger = logging.getLogger("interview-boss")
 
@@ -248,12 +248,14 @@ async def submit_data(
                 raise HTTPException(status_code=422, detail="大模型未能从内容中提取到面试题目，请确认提交的是面经内容而非其他类型。")
 
         if doc_type == "JD":
-            tech_stack = format_array_for_csv(data.get("核心技术要求", []))
+            _ts = data.get("核心技术要求", [])
+            tech_stack = "\n".join(f"{i+1}. {item}" for i, item in enumerate(_ts)) if _ts else "未提供"
             await run_db(lambda: _insert_jd(saved_url, data, tech_stack))
             return {"status": "success", "type": "JD", "saved_data": data}
 
         elif doc_type == "Interview":
-            questions = format_array_for_csv(data.get("具体题目清单", []))
+            _ql = data.get("具体题目清单", [])
+            questions = "\n".join(f"{i+1}. {item}" for i, item in enumerate(_ql)) if _ql else "未提供"
             await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip()))
 
             q_list = data.get("具体题目清单", [])

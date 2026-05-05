@@ -156,10 +156,6 @@
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                 {{ isDataLoading ? '加载中...' : '刷新数据' }}
               </button>
-              <button v-if="activeTab === 'JD' || activeTab === 'Interview'" @click="downloadCSV" class="btn-secondary text-sm">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                导出 CSV
-              </button>
             </div>
           </div>
 
@@ -769,8 +765,6 @@ const triggerBuildMasterBank = async () => {
   } catch (e) { toast.error('重建失败：' + e.message) }
   finally { isBuilding.value = false }
 }
-
-const downloadCSV = () => { window.open(api.getDownloadUrl(activeTab.value.toLowerCase()), '_blank') }
 
 // ── Lifecycle ──
 const initAuth = async () => {

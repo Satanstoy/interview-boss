@@ -18,12 +18,6 @@ def normalize_category(text: str) -> str:
     return text
 
 
-def format_array_for_csv(data_array: list) -> str:
-    if not isinstance(data_array, list) or not data_array:
-        return str(data_array) if data_array else "未提供"
-    return "\n".join([f"{i+1}. {item}" for i, item in enumerate(data_array)])
-
-
 def _extract_url_signature(url: str) -> str:
     """从 URL 中提取帖子唯一标识，用于增强去重"""
     if not url:

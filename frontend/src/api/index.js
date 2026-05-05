@@ -59,9 +59,6 @@ export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
 export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
 
-// ── Download ──
-export const getDownloadUrl = (type) => `${API}/download/${type}`
-
 // ── Knowledge Graph ──
 export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)
 
