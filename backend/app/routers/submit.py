@@ -1,5 +1,6 @@
 import json
 import logging
+import openai
 
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
@@ -8,7 +9,7 @@ from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
-from app.services.llm import client
+from app.services.llm import client, _should_use_response_format, _extract_json
 from app.services.embedding import find_best_match
 from app.services.utils import encode_image, normalize_category, format_array_for_csv
 
@@ -22,17 +23,19 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     q_json = json.dumps(input_data, ensure_ascii=False)
     user_msg = TAGGING_PROMPT.replace("{questions}", q_json)
 
-    response = await client.chat.completions.create(
+    kwargs = dict(
         model=LLM_MODEL,
         messages=[
             {"role": "system", "content": "你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。必须输出输入数据中每一项对应的 \"id\" 字段，以便于与原输入一一对应。"},
             {"role": "user", "content": user_msg}
         ],
         temperature=0.0,
-        response_format={"type": "json_object"}
     )
+    if _should_use_response_format():
+        kwargs["response_format"] = {"type": "json_object"}
+    response = await client.chat.completions.create(**kwargs)
     try:
-        raw_items = json.loads(response.choices[0].message.content.strip()).get("questions", [])
+        raw_items = _extract_json(response.choices[0].message.content).get("questions", [])
         result_map = {}
         for item in raw_items:
             if isinstance(item, dict) and "id" in item:
@@ -206,13 +209,15 @@ async def submit_data(
                         "image_url": {"url": f"data:{file.content_type};base64,{base64_img}"}
                     })
 
-        response = await client.chat.completions.create(
+        llm_kwargs = dict(
             model=LLM_MODEL,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_content}],
             temperature=0.1,
-            response_format={"type": "json_object"}
         )
-        parsed_data = json.loads(response.choices[0].message.content.strip())
+        if _should_use_response_format():
+            llm_kwargs["response_format"] = {"type": "json_object"}
+        response = await client.chat.completions.create(**llm_kwargs)
+        parsed_data = _extract_json(response.choices[0].message.content)
         doc_type = parsed_data.get("type")
         data = parsed_data.get("data", {})
         saved_url = url if url else "未提供链接"
@@ -253,16 +258,18 @@ async def submit_data(
 对于面试轮次，请从内容中推断（如一面、二面、HR面等）。"""
 
                 try:
-                    retry_response = await client.chat.completions.create(
+                    retry_kwargs = dict(
                         model=LLM_MODEL,
                         messages=[
                             {"role": "system", "content": "你是一个信息补全助手。根据已有信息推断缺失字段，返回JSON。"},
                             {"role": "user", "content": retry_prompt}
                         ],
                         temperature=0.2,
-                        response_format={"type": "json_object"}
                     )
-                    retry_data = json.loads(retry_response.choices[0].message.content.strip())
+                    if _should_use_response_format():
+                        retry_kwargs["response_format"] = {"type": "json_object"}
+                    retry_response = await client.chat.completions.create(**retry_kwargs)
+                    retry_data = _extract_json(retry_response.choices[0].message.content)
                     for field in missing_fields:
                         val = retry_data.get(field, "未提供")
                         if val and val != "未提供":
@@ -293,6 +300,20 @@ async def submit_data(
             return {"status": "success", "type": "Interview", "saved_data": data}
         else:
             raise HTTPException(status_code=500, detail="模型返回了未知的分类类型: " + str(doc_type))
+    except HTTPException:
+        raise
+    except openai.AuthenticationError:
+        logger.error("LLM API Key 无效")
+        raise HTTPException(status_code=500, detail="API Key 无效或已过期，请在系统配置中检查并更新 API Key。")
+    except openai.APIConnectionError:
+        logger.error("LLM 连接失败")
+        raise HTTPException(status_code=500, detail="无法连接 LLM 服务，请检查 Base URL 是否正确以及网络是否可达。")
+    except openai.APITimeoutError:
+        logger.error("LLM 调用超时")
+        raise HTTPException(status_code=500, detail="LLM 服务响应超时，请在系统配置中增大超时时间或稍后重试。")
+    except openai.APIStatusError as e:
+        logger.error(f"LLM API 错误: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM 接口返回错误（{e.status_code}）: {str(e)[:200]}")
     except Exception as e:
         logger.exception("提交处理失败")
-        raise HTTPException(status_code=500, detail="提交处理失败，请查看服务端日志")
+        raise HTTPException(status_code=500, detail=f"提交处理失败: {str(e)[:200]}")

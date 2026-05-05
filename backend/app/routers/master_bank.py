@@ -5,6 +5,7 @@ import random as _random
 import shutil
 import logging
 import asyncio
+import openai
 import numpy as np
 from collections import Counter
 from typing import Optional
@@ -15,7 +16,7 @@ from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest
-from app.services.llm import client, client_of_embedding, _call_llm_with_retry
+from app.services.llm import client, client_of_embedding, _call_llm_with_retry, _extract_json, _should_use_response_format
 from app.services.embedding import cosine_similarity, cosine_similarity_batch
 from app.services.utils import normalize_category
 
@@ -260,9 +261,15 @@ async def generate_master_answer(question_id: int, user: dict = Depends(get_curr
 
         await run_db(_update)
         return {"status": "success", "answer": answer}
+    except openai.AuthenticationError:
+        raise HTTPException(status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。")
+    except openai.APIConnectionError:
+        raise HTTPException(status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL。")
+    except openai.APITimeoutError:
+        raise HTTPException(status_code=500, detail="LLM 服务响应超时，请增大超时时间或稍后重试。")
     except Exception as e:
         logger.error(f"手动生成答案失败（已重试3次）[ID:{question_id}]: {e}")
-        raise HTTPException(status_code=500, detail="生成答案失败，请稍后重试")
+        raise HTTPException(status_code=500, detail=f"生成答案失败: {str(e)[:200]}")
 
 
 @router.delete("/api/master-bank/{question_id}")
@@ -458,10 +465,9 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_curre
                 {"role": "user", "content": user_msg}
             ],
             temperature=0.2,
-            response_format={"type": "json_object"}
         )
 
-        parsed_result = json.loads(response.choices[0].message.content.strip())
+        parsed_result = _extract_json(response.choices[0].message.content)
         items = parsed_result.get("questions", [])
 
         if not items:
@@ -493,9 +499,15 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_curre
             "data": {"cat1": cat1, "cat2": cat2, "tags": tags, "difficulty": diff}
         }
 
+    except openai.AuthenticationError:
+        raise HTTPException(status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。")
+    except openai.APIConnectionError:
+        raise HTTPException(status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL。")
+    except openai.APITimeoutError:
+        raise HTTPException(status_code=500, detail="LLM 服务响应超时，请增大超时时间或稍后重试。")
     except Exception as e:
         logger.exception("重新打标失败")
-        raise HTTPException(status_code=500, detail="重新打标失败，请查看服务端日志")
+        raise HTTPException(status_code=500, detail=f"重新打标失败: {str(e)[:200]}")
 
 
 @router.get("/api/master-bank/random")
@@ -634,9 +646,8 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
         raw = await _call_llm_with_retry(
             prompt=prompt,
             system_msg="你是一名专业的技术面试评估专家。",
-            response_format={"type": "json_object"}
         )
-        result = json.loads(raw)
+        result = _extract_json(raw)
 
         # 防御性解析：确保必要字段存在
         result.setdefault("overall_score", 0)
@@ -671,10 +682,19 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
 
     except json.JSONDecodeError as e:
         logger.error(f"评估结果 JSON 解析失败: {e}")
-        raise HTTPException(status_code=500, detail="评估结果解析失败，请重试")
+        raise HTTPException(status_code=500, detail="评估结果解析失败，LLM 未返回有效 JSON，请重试")
+    except openai.AuthenticationError:
+        logger.error("评估失败: API Key 无效")
+        raise HTTPException(status_code=500, detail="API Key 无效或已过期，请在系统配置中更新 API Key。")
+    except openai.APIConnectionError:
+        logger.error("评估失败: LLM 连接失败")
+        raise HTTPException(status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL 是否正确。")
+    except openai.APITimeoutError:
+        logger.error("评估失败: LLM 调用超时")
+        raise HTTPException(status_code=500, detail="LLM 服务响应超时，请在系统配置中增大超时时间或稍后重试。")
     except Exception as e:
         logger.exception("答案评估失败")
-        raise HTTPException(status_code=500, detail="评估失败，请稍后重试")
+        raise HTTPException(status_code=500, detail=f"评估失败: {str(e)[:200]}")
 
 
 @router.get("/api/practice-history/{question_id}")

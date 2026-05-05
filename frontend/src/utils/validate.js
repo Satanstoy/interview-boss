@@ -145,6 +145,19 @@ export function validateApiKey(value, maxLen = 500) {
 }
 
 /**
+ * 验证 LLM Base URL（必填，必须是合法 HTTP(S) URL）
+ */
+export function validateBaseUrl(value, fieldName = 'Base URL') {
+  const s = sanitizeText(value, 500)
+  if (!s) return { valid: false, error: `${fieldName} 不能为空`, value: '' }
+  if (!URL_RE.test(s)) return { valid: false, error: `${fieldName} 格式无效，必须以 http:// 或 https:// 开头`, value: '' }
+  if (containsSqlInjection(s)) return { valid: false, error: `${fieldName} 包含非法字符`, value: '' }
+  // 提示常见错误：用户可能误填 API Key 或模型名
+  if (s.startsWith('sk-') || s.startsWith('eyJ')) return { valid: false, error: `${fieldName} 看起来像 API Key 而非 URL，请检查`, value: '' }
+  return { valid: true, value: s }
+}
+
+/**
  * 验证文件大小和数量
  */
 export function validateFiles(files, { maxCount = 20, maxSizeMB = 10 } = {}) {

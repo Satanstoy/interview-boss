@@ -1,4 +1,6 @@
 import os
+import re
+import json
 import asyncio
 import logging
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APITimeoutError
@@ -31,6 +33,48 @@ def rebuild_clients():
     logger.info("LLM 客户端已重建")
 
 
+# --------------- 提供商检测 ---------------
+
+def _detect_provider(base_url: str) -> str:
+    """根据 base_url 判断 LLM 提供商类型：'anthropic' 或 'openai'"""
+    if not base_url:
+        return "openai"
+    lower = base_url.lower()
+    if "anthropic" in lower:
+        return "anthropic"
+    return "openai"
+
+
+def _should_use_response_format() -> bool:
+    """判断当前配置的 LLM 端点是否支持 response_format 参数"""
+    from app.core.config import LLM_BASE_URL
+    return _detect_provider(LLM_BASE_URL) == "openai"
+
+
+# --------------- JSON 提取 ---------------
+
+def _extract_json(text: str) -> dict:
+    """从 LLM 响应中提取 JSON，兼容 markdown 代码块包裹的情况"""
+    text = text.strip()
+    # 尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # 尝试提取 ```json ... ``` 代码块
+    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if m:
+        return json.loads(m.group(1).strip())
+    # 尝试找到第一个 { 到最后一个 }
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start:end + 1])
+    raise json.JSONDecodeError("无法从 LLM 响应中提取 JSON", text, 0)
+
+
+# --------------- LLM 调用 ---------------
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -47,7 +91,7 @@ async def _call_llm_with_retry(prompt: str, system_msg: str = "你是一个后�
         ],
         temperature=0.3
     )
-    if response_format:
+    if response_format and _should_use_response_format():
         kwargs["response_format"] = response_format
 
     response = await asyncio.wait_for(

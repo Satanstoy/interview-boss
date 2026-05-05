@@ -148,7 +148,7 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { fetchProfile, updateProfile } from '../api/index.js'
-import { validateSeason, validateNumber, validateSettingsField, validateApiKey } from '../utils/validate.js'
+import { validateSeason, validateNumber, validateSettingsField, validateApiKey, validateBaseUrl } from '../utils/validate.js'
 import { useToast } from '../composables/useNotification.js'
 
 const toast = useToast()
@@ -230,6 +230,16 @@ const saveProfile = async () => {
     const result = validateSettingsField(form[key], label)
     if (!result.valid) {
       saveMessage.value = result.error
+      saveSuccess.value = false
+      return
+    }
+  }
+
+  // 验证 Base URL 格式
+  for (const [key, label] of [['llm_base_url', '主模型 Base URL'], ['embedding_base_url', 'Embedding Base URL']]) {
+    const urlResult = validateBaseUrl(form[key], label)
+    if (!urlResult.valid) {
+      saveMessage.value = urlResult.error
       saveSuccess.value = false
       return
     }

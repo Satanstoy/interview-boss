@@ -1,3 +1,4 @@
+import re
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
@@ -101,6 +102,14 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
         }
         names = "、".join(labels.get(k, k) for k in empty_required)
         raise HTTPException(status_code=400, detail=f"{names} 不能为空")
+
+    # URL 格式校验
+    _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
+    for k, v in filtered.items():
+        if k.endswith('_base_url') and v:
+            if not _URL_RE.match(v.strip()):
+                url_labels = {"llm_base_url": "主模型 Base URL", "embedding_base_url": "Embedding Base URL"}
+                raise HTTPException(status_code=400, detail=f"{url_labels.get(k, k)} 格式无效，URL 必须以 http:// 或 https:// 开头")
 
     if not filtered:
         return {"status": "success", "message": "无需更新"}
