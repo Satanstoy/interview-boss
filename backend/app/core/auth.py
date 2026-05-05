@@ -10,7 +10,7 @@ from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
 
-# ── Secret Key: 优先读环境变量，否则自动生成 64 字节随机密钥 ──
+# ── Secret Key: 优先读环境变量，否则自动生成并持久化到 .env ──
 _env_secret = os.getenv("JWT_SECRET")
 if _env_secret:
     SECRET_KEY = _env_secret
@@ -18,10 +18,15 @@ if _env_secret:
         logger.warning("JWT_SECRET 长度不足 32 字节，建议使用 64 字节以上的随机字符串")
 else:
     SECRET_KEY = os.urandom(64).hex()
-    logger.warning(
-        "未设置 JWT_SECRET 环境变量，已自动生成随机密钥。"
-        "重启后旧 refresh token 将失效，建议在 .env 中设置固定值。"
-    )
+    # 自动持久化到 .env，避免重启后所有会话失效
+    try:
+        from pathlib import Path
+        _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+        from dotenv import set_key
+        set_key(str(_env_path), "JWT_SECRET", SECRET_KEY)
+        logger.info("JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）")
+    except Exception as e:
+        logger.warning(f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
@@ -124,13 +129,13 @@ async def get_refresh_token(request: Request) -> str:
     return token
 
 
-def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS):
+def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False):
     """存储 refresh token 的 jti 到数据库"""
     with get_db_connection() as conn:
         expires = datetime.now(timezone.utc) + timedelta(days=days)
         conn.execute(
-            "INSERT INTO refresh_tokens (user_id, jti, expires_at) VALUES (?, ?, ?)",
-            (user_id, jti, expires.isoformat())
+            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember) VALUES (?, ?, ?, ?)",
+            (user_id, jti, expires.isoformat(), 1 if remember else 0)
         )
         conn.commit()
 

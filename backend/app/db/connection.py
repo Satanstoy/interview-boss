@@ -156,6 +156,11 @@ def init_db():
         if "idx_rt_user" not in rt_indexes:
             conn.execute("CREATE INDEX idx_rt_user ON refresh_tokens(user_id)")
 
+        # 迁移：添加 remember 列（标记是否为 remember-me 登录）
+        rt_columns = {row[1] for row in cursor.execute("PRAGMA table_info('refresh_tokens')").fetchall()}
+        if "remember" not in rt_columns:
+            conn.execute("ALTER TABLE refresh_tokens ADD COLUMN remember INTEGER DEFAULT 0")
+
         # ── 种子管理员 ──
         from passlib.context import CryptContext
         import os

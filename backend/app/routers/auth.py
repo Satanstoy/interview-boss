@@ -77,7 +77,7 @@ def _issue_token_pair(user: dict, response: Response, remember: bool = False) ->
     token_data = {"user_id": user['id'], "username": user['username']}
     access_token = create_access_token(token_data)
     refresh_token, jti = create_refresh_token(token_data, days=days)
-    store_refresh_token(user['id'], jti, days=days)
+    store_refresh_token(user['id'], jti, days=days, remember=remember)
     _set_refresh_cookie(response, refresh_token, remember=remember)
     return {
         "token": access_token,
@@ -157,6 +157,8 @@ async def refresh_token(request: Request, response: Response, rt: str = Depends(
     if not record or record['user_id'] != user_id:
         raise HTTPException(status_code=401, detail="refresh token 已失效，请重新登录")
 
+    remember = bool(record.get('remember', 0))
+
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
@@ -168,7 +170,7 @@ async def refresh_token(request: Request, response: Response, rt: str = Depends(
         raise HTTPException(status_code=401, detail="用户不存在")
 
     delete_refresh_token(jti)
-    return _issue_token_pair(dict(user), response)
+    return _issue_token_pair(dict(user), response, remember=remember)
 
 
 @router.post("/logout")

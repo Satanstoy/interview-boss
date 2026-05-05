@@ -56,6 +56,7 @@ async function tryRefreshToken() {
       const res = await fetch('/api/auth/refresh', {
         method: 'POST',
         credentials: 'include', // 关键：发送 HttpOnly refresh cookie
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
       if (!res.ok) return null
       const data = await res.json()
