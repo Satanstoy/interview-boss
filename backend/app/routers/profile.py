@@ -12,14 +12,14 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
 ALLOWED_PROFILE_KEYS = {
-    "active_season", "llm_model", "embedding_model", "similarity_threshold",
-    "llm_api_key", "llm_base_url", "embedding_api_key", "embedding_base_url", "llm_timeout"
+    "active_season", "llm_model",
+    "llm_api_key", "llm_base_url", "llm_timeout"
 }
 
-_SENSITIVE_KEYS = {"llm_api_key", "embedding_api_key"}
+_SENSITIVE_KEYS = {"llm_api_key"}
 
 # 必填字段：不允许提交空值
-_REQUIRED_NON_EMPTY = {"llm_model", "embedding_model", "llm_base_url", "embedding_base_url"}
+_REQUIRED_NON_EMPTY = {"llm_model", "llm_base_url"}
 
 
 def _mask_key(value: str) -> str:
@@ -53,9 +53,6 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     _FALLBACK = {
         "llm_model": app_config.LLM_MODEL or "gpt-4o",
         "llm_base_url": app_config.LLM_BASE_URL or "",
-        "embedding_model": app_config.EMBEDDING_MODEL or "text-embedding-3-small",
-        "embedding_base_url": app_config.EMBEDDING_BASE_URL or "",
-        "similarity_threshold": str(app_config.SIMILARITY_THRESHOLD or "0.85"),
         "llm_timeout": str(app_config.LLM_TIMEOUT or "120"),
     }
     for k, fallback in _FALLBACK.items():
@@ -65,7 +62,6 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     # 敏感字段：DB 为空时检查 .env 中是否有值
     _ENV_FALLBACK = {
         "llm_api_key": app_config.LLM_API_KEY,
-        "embedding_api_key": app_config.EMBEDDING_API_KEY,
     }
 
     # 掩码处理 API Key
@@ -103,9 +99,7 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
     if empty_required:
         labels = {
             "llm_model": "主模型名称",
-            "embedding_model": "Embedding 模型名称",
             "llm_base_url": "主模型 Base URL",
-            "embedding_base_url": "Embedding Base URL"
         }
         names = "、".join(labels.get(k, k) for k in empty_required)
         raise HTTPException(status_code=400, detail=f"{names} 不能为空")
@@ -115,8 +109,7 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
     for k, v in filtered.items():
         if k.endswith('_base_url') and v:
             if not _URL_RE.match(v.strip()):
-                url_labels = {"llm_base_url": "主模型 Base URL", "embedding_base_url": "Embedding Base URL"}
-                raise HTTPException(status_code=400, detail=f"{url_labels.get(k, k)} 格式无效，URL 必须以 http:// 或 https:// 开头")
+                raise HTTPException(status_code=400, detail=f"Base URL 格式无效，URL 必须以 http:// 或 https:// 开头")
 
     if not filtered:
         return {"status": "success", "message": "无需更新"}

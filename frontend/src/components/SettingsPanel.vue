@@ -22,89 +22,46 @@
 
           <!-- Body -->
           <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-6">
-            <!-- Model config: two columns -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <!-- Main LLM -->
-              <div class="space-y-3.5 p-5 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
-                <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                  主模型 (LLM)
-                </h3>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">API Key</label>
-                  <div v-if="llmKeySet && !editLlmKey" class="flex items-center gap-2">
-                    <span class="flex-1 border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-500 dark:text-gray-400 select-none">{{ llmMasked }}</span>
-                    <button @click="editLlmKey = true; form.llm_api_key = ''" type="button" class="text-xs text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300 whitespace-nowrap font-medium">更换</button>
-                  </div>
-                  <div v-else class="relative">
-                    <input
-                      v-model="form.llm_api_key"
-                      :type="showLlmKey ? 'text' : 'password'"
-                      class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 pr-10 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200"
-                      placeholder="输入 API Key"
-                    />
-                    <button @click="showLlmKey = !showLlmKey" type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">
-                      <svg v-if="showLlmKey" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"/></svg>
-                      <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                    </button>
-                  </div>
+            <!-- Model config -->
+            <div class="space-y-3.5 p-5 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
+              <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                主模型 (LLM)
+              </h3>
+              <div>
+                <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">API Key</label>
+                <div v-if="llmKeySet && !editLlmKey" class="flex items-center gap-2">
+                  <span class="flex-1 border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-500 dark:text-gray-400 select-none">{{ llmMasked }}</span>
+                  <button @click="editLlmKey = true; form.llm_api_key = ''" type="button" class="text-xs text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300 whitespace-nowrap font-medium">更换</button>
                 </div>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Base URL</label>
-                  <input v-model="form.llm_base_url" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" placeholder="https://api.openai.com/v1" />
-                </div>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">模型名称</label>
-                  <input v-model="form.llm_model" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" placeholder="如 gpt-4o" />
+                <div v-else class="relative">
+                  <input
+                    v-model="form.llm_api_key"
+                    :type="showLlmKey ? 'text' : 'password'"
+                    class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 pr-10 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200"
+                    placeholder="输入 API Key"
+                  />
+                  <button @click="showLlmKey = !showLlmKey" type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">
+                    <svg v-if="showLlmKey" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"/></svg>
+                    <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  </button>
                 </div>
               </div>
-
-              <!-- Embedding -->
-              <div class="space-y-3.5 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800 bg-gradient-to-b from-emerald-50/50 to-white dark:from-emerald-900/20 dark:to-surface-800">
-                <h3 class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/></svg>
-                  Embedding 模型
-                </h3>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">API Key</label>
-                  <div v-if="embKeySet && !editEmbKey" class="flex items-center gap-2">
-                    <span class="flex-1 border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-500 dark:text-gray-400 select-none">{{ embMasked }}</span>
-                    <button @click="editEmbKey = true; form.embedding_api_key = ''" type="button" class="text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 whitespace-nowrap font-medium">更换</button>
-                  </div>
-                  <div v-else class="relative">
-                    <input
-                      v-model="form.embedding_api_key"
-                      :type="showEmbKey ? 'text' : 'password'"
-                      class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 pr-10 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-800 focus:border-emerald-400 transition-all duration-200"
-                      placeholder="输入 API Key"
-                    />
-                    <button @click="showEmbKey = !showEmbKey" type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">
-                      <svg v-if="showEmbKey" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"/></svg>
-                      <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Base URL</label>
-                  <input v-model="form.embedding_base_url" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-800 focus:border-emerald-400 transition-all duration-200" placeholder="https://api.openai.com/v1" />
-                </div>
-                <div>
-                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">模型名称</label>
-                  <input v-model="form.embedding_model" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-emerald-200 dark:focus:ring-emerald-800 focus:border-emerald-400 transition-all duration-200" placeholder="如 text-embedding-3-small" />
-                </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">Base URL</label>
+                <input v-model="form.llm_base_url" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" placeholder="https://api.openai.com/v1" />
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">模型名称</label>
+                <input v-model="form.llm_model" type="text" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm font-mono bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" placeholder="如 gpt-4o" />
               </div>
             </div>
 
             <!-- General settings -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">LLM 超时 (秒)</label>
                 <input v-model="form.llm_timeout" type="number" min="10" max="600" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
-              </div>
-              <div>
-                <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">相似度阈值</label>
-                <input v-model="form.similarity_threshold" type="number" step="0.01" min="0" max="1" class="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3.5 py-2.5 text-sm bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
-                <p class="text-xs text-gray-400 dark:text-gray-500 mt-1.5">题目聚类阈值 (0-1)</p>
               </div>
               <div>
                 <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">当前招聘季</label>
@@ -166,23 +123,15 @@ const saveMessage = ref('')
 const saveSuccess = ref(false)
 const newSeason = ref('')
 const showLlmKey = ref(false)
-const showEmbKey = ref(false)
 const llmKeySet = ref(false)
-const embKeySet = ref(false)
 const llmMasked = ref('')
-const embMasked = ref('')
 const editLlmKey = ref(false)
-const editEmbKey = ref(false)
 
 const form = reactive({
   active_season: '',
   llm_model: '',
   llm_api_key: '',
   llm_base_url: '',
-  embedding_model: '',
-  embedding_api_key: '',
-  embedding_base_url: '',
-  similarity_threshold: 0.85,
   llm_timeout: 120
 })
 
@@ -193,18 +142,11 @@ const loadProfile = async () => {
     form.active_season = s.active_season || ''
     form.llm_model = s.llm_model || ''
     form.llm_base_url = s.llm_base_url || ''
-    form.embedding_model = s.embedding_model || ''
-    form.embedding_base_url = s.embedding_base_url || ''
-    form.similarity_threshold = parseFloat(s.similarity_threshold) || 0.85
     form.llm_timeout = parseInt(s.llm_timeout) || 120
     llmKeySet.value = !!s.llm_api_key_set
-    embKeySet.value = !!s.embedding_api_key_set
     llmMasked.value = s.llm_api_key || ''
-    embMasked.value = s.embedding_api_key || ''
     editLlmKey.value = false
-    editEmbKey.value = false
     form.llm_api_key = ''
-    form.embedding_api_key = ''
     seasons.value = data.available_seasons || []
   } catch (e) {
     console.error('加载配置失败', e)
@@ -223,8 +165,6 @@ const saveProfile = async () => {
   const requiredFields = {
     llm_model: '主模型名称',
     llm_base_url: '主模型 Base URL',
-    embedding_model: 'Embedding 模型名称',
-    embedding_base_url: 'Embedding Base URL'
   }
   for (const [key, label] of Object.entries(requiredFields)) {
     const result = validateSettingsField(form[key], label)
@@ -236,13 +176,11 @@ const saveProfile = async () => {
   }
 
   // 验证 Base URL 格式
-  for (const [key, label] of [['llm_base_url', '主模型 Base URL'], ['embedding_base_url', 'Embedding Base URL']]) {
-    const urlResult = validateBaseUrl(form[key], label)
-    if (!urlResult.valid) {
-      saveMessage.value = urlResult.error
-      saveSuccess.value = false
-      return
-    }
+  const urlResult = validateBaseUrl(form.llm_base_url, '主模型 Base URL')
+  if (!urlResult.valid) {
+    saveMessage.value = urlResult.error
+    saveSuccess.value = false
+    return
   }
 
   // 验证数字字段
@@ -252,24 +190,10 @@ const saveProfile = async () => {
     saveSuccess.value = false
     return
   }
-  const thresholdResult = validateNumber(form.similarity_threshold, 0, 1, '相似度阈值')
-  if (!thresholdResult.valid) {
-    saveMessage.value = thresholdResult.error
-    saveSuccess.value = false
-    return
-  }
 
   // 验证可选 API Key
   if (form.llm_api_key) {
     const keyResult = validateApiKey(form.llm_api_key)
-    if (!keyResult.valid) {
-      saveMessage.value = keyResult.error
-      saveSuccess.value = false
-      return
-    }
-  }
-  if (form.embedding_api_key) {
-    const keyResult = validateApiKey(form.embedding_api_key)
     if (!keyResult.valid) {
       saveMessage.value = keyResult.error
       saveSuccess.value = false
@@ -284,23 +208,16 @@ const saveProfile = async () => {
       active_season: form.active_season,
       llm_model: form.llm_model.trim(),
       llm_base_url: form.llm_base_url.trim(),
-      embedding_model: form.embedding_model.trim(),
-      embedding_base_url: form.embedding_base_url.trim(),
-      similarity_threshold: String(form.similarity_threshold),
       llm_timeout: String(form.llm_timeout)
     }
     if (form.llm_api_key) payload.llm_api_key = form.llm_api_key.trim()
-    if (form.embedding_api_key) payload.embedding_api_key = form.embedding_api_key.trim()
 
     await updateProfile(payload)
     saveMessage.value = '配置已保存（已同步到 .env）'
     saveSuccess.value = true
     llmKeySet.value = llmKeySet.value || !!form.llm_api_key
-    embKeySet.value = embKeySet.value || !!form.embedding_api_key
     editLlmKey.value = false
-    editEmbKey.value = false
     form.llm_api_key = ''
-    form.embedding_api_key = ''
     emit('update:activeSeason', form.active_season)
     setTimeout(() => { saveMessage.value = '' }, 3000)
   } catch (e) {

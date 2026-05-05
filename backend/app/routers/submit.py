@@ -11,7 +11,6 @@ from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
 from app.services.llm import client, _should_use_response_format, _extract_json
-from app.services.embedding import find_best_match
 from app.services.utils import encode_image, normalize_category, format_array_for_csv
 
 logger = logging.getLogger("interview-boss")
@@ -66,45 +65,54 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
 
 
 async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks):
-    from app.services.llm import client_of_embedding
-    from app.core.config import EMBEDDING_MODEL
+    from app.services.clustering import match_new_questions
 
     if not new_tagged_rows:
         return
 
-    # 过滤掉空文本的行，同时保留原始索引映射
-    valid_rows = [(idx, row) for idx, row in enumerate(new_tagged_rows) if row[3].strip()]
+    # 过滤掉空文本的行
+    valid_rows = [row for row in new_tagged_rows if row[3].strip()]
     if not valid_rows:
         return
 
-    texts = [row[3] for _, row in valid_rows]
-    batch_texts = [t.replace("\n", " ") for t in texts]
-    try:
-        resp = await client_of_embedding.embeddings.create(input=batch_texts, model=EMBEDDING_MODEL)
-        embeddings = [d.embedding for d in resp.data]
-    except Exception as e:
-        logger.error(f"向量提取失败，跳过增量更新: {e}")
-        return
-
+    # 加载已有公共题库，按 cat2 构建聚类上下文
     def _load_existing():
         with get_db_connection() as conn:
-            return conn.execute("SELECT id, question, vector, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved'").fetchall()
+            rows = conn.execute(
+                "SELECT id, question, cat2, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved'"
+            ).fetchall()
+            return [dict(r) for r in rows]
 
-    existing_masters = await run_db(_load_existing)
+    existing_bank = await run_db(_load_existing)
 
-    master_vecs = []
-    for m in existing_masters:
-        if m['vector']:
-            try:
-                parsed_sources = json.loads(m['sources']) if m['sources'] else []
-                master_vecs.append({
-                    "id": m['id'],
-                    "question": m['question'],
-                    "vector": json.loads(m['vector']),
-                    "sources": parsed_sources
-                })
-            except Exception:
-                pass
+    # 按 cat2 分组已有题库，构建聚类上下文
+    existing_by_cat2 = {}
+    for r in existing_bank:
+        cat2 = r.get('cat2') or ''
+        if cat2 not in existing_by_cat2:
+            existing_by_cat2[cat2] = []
+        existing_by_cat2[cat2].append({
+            "question_bank_id": r['id'],
+            "question": r['question'],
+            "all_questions": [r['question']],  # 每个聚类目前只有1个代表题
+        })
+
+    # 构建新题目列表（带 id 用于匹配结果映射）
+    new_rows_for_match = []
+    for idx, row in enumerate(valid_rows):
+        new_rows_for_match.append({
+            "id": idx,  # 临时 id，用于匹配结果
+            "question": row[3],
+            "cat2": row[5] if len(row) > 5 else '',  # cat2 在 row[5]
+        })
+
+    # LLM 增量匹配
+    match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
+    matched = match_result["matched"]
+    unmatched_rows = match_result["unmatched"]
+
+    # 构建 idx → row 映射
+    idx_to_row = {idx: row for idx, row in enumerate(valid_rows)}
 
     async def background_generate_answer(question_id: int, question_text: str):
         from app.core.prompts import ANSWER_PROMPT
@@ -122,7 +130,6 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
             logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
         except Exception as e:
             logger.error(f"自动解答生成失败（已重试3次）[ID:{question_id}]: {e}")
-            # 标记失败状态，前端可识别并支持手动重试
             def _mark_failed():
                 with get_db_connection() as conn:
                     conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
@@ -135,44 +142,52 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     def _update_db():
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # 获取管理员 ID 作为默认 submitted_by
             admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
             admin_id = admin_row[0] if admin_row else None
 
-            for emb_idx, (orig_idx, row) in enumerate(valid_rows):
-                new_vec = embeddings[emb_idx]
-                url, company, round_, q_text = row[0], row[1], row[2], row[3]
-                cat1 = normalize_category(row[4])
-                tags = row[6]
-                diff_tag = row[7]
+            # 处理匹配到的题目：更新 frequency 和 sources
+            for m in matched:
+                new_idx = m["new_id"]
+                qb_id = m["question_bank_id"]
+                row = idx_to_row.get(new_idx)
+                if not row:
+                    continue
 
+                url, company, round_ = row[0], row[1], row[2]
                 new_source = {"url": url, "company": company, "round": round_}
 
-                best_match, best_score = find_best_match(new_vec, master_vecs)
-
-                if best_match:
-                    if new_source not in best_match['sources']:
-                        best_match['sources'].append(new_source)
-
+                existing = cursor.execute("SELECT sources FROM question_bank WHERE id = ?", (qb_id,)).fetchone()
+                if existing:
+                    try:
+                        sources = json.loads(existing['sources']) if existing['sources'] else []
+                    except Exception:
+                        sources = []
+                    if new_source not in sources:
+                        sources.append(new_source)
                     cursor.execute(
                         "UPDATE question_bank SET frequency = frequency + 1, sources = ? WHERE id = ?",
-                        (json.dumps(best_match['sources']), best_match['id'])
+                        (json.dumps(sources, ensure_ascii=False), qb_id)
                     )
-                    best_match['frequency'] = best_match.get('frequency', 1) + 1
-                else:
-                    sources_json = json.dumps([new_source])
-                    cursor.execute(
-                        "INSERT INTO question_bank (question, cat1, tags, difficulty, vector, sources, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
-                        (q_text, cat1, tags, diff_tag, json.dumps(new_vec), sources_json, admin_id)
-                    )
-                    new_id = cursor.lastrowid
-                    master_vecs.append({"id": new_id, "question": q_text, "vector": new_vec, "sources": [new_source]})
 
-                    bg_tasks.add_task(background_generate_answer, new_id, q_text)
+            # 处理未匹配的题目：新增到题库
+            for row in unmatched_rows:
+                url, company, round_, q_text = row[0], row[1], row[2], row[3]
+                cat1 = normalize_category(row[4])
+                tags = row[6] if len(row) > 6 else ''
+                diff_tag = row[7] if len(row) > 7 else '未知'
+
+                sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
+                cursor.execute(
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'approved')",
+                    (q_text, cat1, tags, diff_tag, sources_json, admin_id)
+                )
+                new_id = cursor.lastrowid
+                bg_tasks.add_task(background_generate_answer, new_id, q_text)
 
             conn.commit()
 
     await run_db(_update_db)
+    logger.info(f"增量更新完成: 匹配 {len(matched)} 题, 新增 {len(unmatched_rows)} 题")
 
 
 @router.post("/api/submit")

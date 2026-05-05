@@ -6,18 +6,17 @@ import shutil
 import logging
 import asyncio
 import openai
-import numpy as np
 from collections import Counter
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
-from app.core.config import DB_PATH, LLM_MODEL, EMBEDDING_MODEL, SIMILARITY_THRESHOLD
+from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest
-from app.services.llm import client, client_of_embedding, _call_llm_with_retry, _extract_json, _should_use_response_format
-from app.services.embedding import cosine_similarity, cosine_similarity_batch
+from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format
+from app.services.clustering import cluster_all_questions
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
@@ -77,7 +76,7 @@ async def get_master_bank(
 
 @router.post("/api/master-bank/build")
 async def build_master_bank(admin: dict = Depends(get_admin_user)):
-    """全量重建题库：保留已有的 AI 答案，使用 Embedding 语义聚类"""
+    """全量重建题库：保留已有的 AI 答案，使用 LLM 聚类去重"""
     # 重建前自动备份数据库
     backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
     try:
@@ -88,131 +87,97 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
     def _load():
         with get_db_connection() as conn:
-            raw = conn.execute("SELECT * FROM questions_detail").fetchall()
-            # 保留已有的 ai_answer 及其向量，用于重建后按语义匹配恢复
-            existing = conn.execute(
-                "SELECT question, ai_answer, vector FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != ''"
+            raw = conn.execute(
+                "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
+                "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != ''"
             ).fetchall()
-            existing_answers_map = {}
-            for r in existing:
-                vec = None
-                if r['vector']:
-                    try:
-                        vec = json.loads(r['vector'])
-                    except Exception:
-                        pass
-                existing_answers_map[r['question']] = {
-                    "ai_answer": r['ai_answer'],
-                    "vector": vec
-                }
+            # 保留已有的 ai_answer（纯文本精确匹配恢复）
+            existing = conn.execute(
+                "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != ''"
+            ).fetchall()
+            existing_answers_map = {r['question']: r['ai_answer'] for r in existing}
             return raw, existing_answers_map
 
     raw_questions, existing_answers_map = await run_db(_load)
 
     if not raw_questions:
         return {"status": "error", "detail": "没有数据"}
-    texts = [q['question'] for q in raw_questions if q['question'].strip()]
 
-    logger.info(f"全量重建: 正在提取 {len(texts)} 道题目特征...")
-    semaphore = asyncio.Semaphore(5)
+    logger.info(f"全量重建: 正在对 {len(raw_questions)} 道题目进行 LLM 聚类...")
+    all_clusters = await cluster_all_questions(raw_questions)
 
-    async def _fetch_batch(batch_texts):
-        async with semaphore:
-            resp = await client_of_embedding.embeddings.create(input=batch_texts, model=EMBEDDING_MODEL)
-            return [d.embedding for d in resp.data]
+    # 构建聚类结果的详细信息
+    id_map = {r['id']: dict(r) for r in raw_questions}
+    cluster_details = []
+    for c in all_clusters:
+        ids = c.get("ids", [])
+        rows_in_cluster = [id_map[qid] for qid in ids if qid in id_map]
+        if not rows_in_cluster:
+            continue
 
-    batches = []
-    for i in range(0, len(texts), 100):
-        batch_texts = [t.replace("\n", " ") for t in texts[i:i+100]]
-        batches.append(_fetch_batch(batch_texts))
+        # 代表题 = 最长的原始题目文本
+        representative = max(rows_in_cluster, key=lambda r: len(r['question']))
+        question_text = representative['question']
 
-    batch_results = await asyncio.gather(*batches)
-    embeddings = [emb for batch in batch_results for emb in batch]
+        # 合并来源
+        sources = []
+        seen_sources = set()
+        for r in rows_in_cluster:
+            src = {"url": r.get('url', ''), "company": r.get('company', ''), "round": r.get('round', '')}
+            src_key = (src['url'], src['company'], src['round'])
+            if src_key not in seen_sources:
+                seen_sources.add(src_key)
+                sources.append(src)
 
-    clusters = []
-    cluster_matrix = None  # numpy matrix of cluster vectors, built incrementally
-
-    for idx, text in enumerate(texts):
-        vec = embeddings[idx]
-        row = raw_questions[idx]
-        new_source = {"url": row['url'], "company": row['company'], "round": row['round']}
-
-        best_cluster = None
-        best_score = 0.0
-
-        if cluster_matrix is not None and len(clusters) > 0:
-            query = np.asarray(vec)
-            scores = cosine_similarity_batch(query, cluster_matrix)
-            best_idx = int(np.argmax(scores))
-            best_score = float(scores[best_idx])
-            if best_score >= SIMILARITY_THRESHOLD:
-                best_cluster = clusters[best_idx]
-
-        if best_cluster:
-            best_cluster['frequency'] += 1
-            if row['cat1']:
-                best_cluster['cat1'].add(normalize_category(row['cat1']))
-            if row['tags']:
-                for t in str(row['tags']).split(','):
+        # 合并分类和标签
+        cat1_set = set()
+        tags_set = set()
+        diffs = []
+        for r in rows_in_cluster:
+            if r.get('cat1'):
+                cat1_set.add(normalize_category(r['cat1']))
+            if r.get('tags'):
+                for t in str(r['tags']).split(','):
                     if t.strip():
-                        best_cluster['tags'].add(t.strip())
-            if row['diff_tag']:
-                best_cluster['diffs'].append(row['diff_tag'])
-            if len(text) > len(best_cluster['question']):
-                best_cluster['question'] = text
-                best_cluster['vector'] = vec
-                # Update cluster_matrix row
-                cluster_matrix[clusters.index(best_cluster)] = np.asarray(vec)
-            if new_source not in best_cluster['sources']:
-                best_cluster['sources'].append(new_source)
-        else:
-            clusters.append({
-                'question': text, 'cat1': {normalize_category(row['cat1'])} if row['cat1'] else set(),
-                'tags': {t.strip() for t in str(row['tags']).split(',') if t.strip()},
-                'diffs': [row['diff_tag']] if row['diff_tag'] else [],
-                'frequency': 1, 'vector': vec,
-                'sources': [new_source]
-            })
-            new_row = np.asarray(vec).reshape(1, -1)
-            cluster_matrix = new_row if cluster_matrix is None else np.vstack([cluster_matrix, new_row])
+                        tags_set.add(t.strip())
+            if r.get('diff_tag'):
+                diffs.append(r['diff_tag'])
 
-    # 预构建旧答案向量矩阵，用于批量语义匹配恢复
-    old_answer_items = [(q, info) for q, info in existing_answers_map.items() if info['vector']]
-    old_answer_matrix = np.array([info['vector'] for _, info in old_answer_items]) if old_answer_items else None
+        diff_str = Counter(diffs).most_common(1)[0][0] if diffs else "未知"
+
+        cluster_details.append({
+            'question': question_text,
+            'cat1': cat1_set,
+            'tags': tags_set,
+            'difficulty': diff_str,
+            'frequency': len(rows_in_cluster),
+            'sources': sources,
+        })
 
     def _save():
         with get_db_connection() as conn:
-            # 获取管理员 ID
             admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
             admin_id = admin_id[0] if admin_id else None
 
             conn.execute("DELETE FROM question_bank")
             restored_count = 0
-            for c in clusters:
-                diff_str = Counter(c['diffs']).most_common(1)[0][0] if c['diffs'] else "未知"
-                ai_answer = None
-                if c['question'] in existing_answers_map:
-                    ai_answer = existing_answers_map[c['question']]['ai_answer']
-                elif old_answer_matrix is not None and c['vector']:
-                    query = np.asarray(c['vector'])
-                    scores = cosine_similarity_batch(query, old_answer_matrix)
-                    best_idx = int(np.argmax(scores))
-                    best_sim = float(scores[best_idx])
-                    if best_sim >= 0.95:
-                        ai_answer = old_answer_items[best_idx][1]['ai_answer']
-                        restored_count += 1
-                        logger.info(f"通过向量匹配恢复答案 (sim={best_sim:.4f}): {c['question'][:40]}...")
+            for c in cluster_details:
+                # 精确文本匹配恢复答案
+                ai_answer = existing_answers_map.get(c['question'])
+                if ai_answer:
+                    restored_count += 1
 
                 conn.execute(
-                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, vector, sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
-                    (c['question'], ",".join(c['cat1']), ",".join(c['tags']), diff_str, c['frequency'], json.dumps(c['vector']), json.dumps(c['sources']), ai_answer, admin_id)
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
+                    (c['question'], ",".join(c['cat1']), ",".join(c['tags']), c['difficulty'],
+                     c['frequency'], json.dumps(c['sources'], ensure_ascii=False), ai_answer, admin_id)
                 )
             conn.commit()
-            logger.info(f"答案恢复统计: 精确匹配 {len(clusters) - restored_count} 条, 向量匹配恢复 {restored_count} 条")
+            logger.info(f"答案恢复: 精确匹配 {restored_count} 条")
 
     await run_db(_save)
-    logger.info(f"全量重建完成: {len(clusters)} 道核心真题")
-    return {"status": "success", "total_unique": len(clusters)}
+    logger.info(f"全量重建完成: {len(cluster_details)} 道核心真题")
+    return {"status": "success", "total_unique": len(cluster_details)}
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
