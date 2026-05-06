@@ -27,7 +27,7 @@
             v-model="password"
             type="password"
             name="password"
-            placeholder="至少 6 位"
+            placeholder="至少 8 位"
             class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
             :disabled="loading"
             autocomplete="current-password"
@@ -48,7 +48,7 @@
 
       <button
         type="submit"
-        :disabled="loading || !username.trim() || password.length < (isRegister ? 6 : 1)"
+        :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)"
         class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
       >
         <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
@@ -114,7 +114,7 @@
                   v-model="password"
                   type="password"
                   name="password"
-                  placeholder="至少 6 位"
+                  placeholder="至少 8 位"
                   class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
                   :disabled="loading"
                   autocomplete="current-password"
@@ -137,7 +137,7 @@
             <!-- Submit -->
             <button
               type="submit"
-              :disabled="loading || !username.trim() || password.length < (isRegister ? 6 : 1)"
+              :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)"
               class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
             >
               <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>

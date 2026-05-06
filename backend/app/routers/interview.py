@@ -2,7 +2,7 @@ import re
 import json
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _cleanup_old_sources, _replace_details
 from app.routers.submit import tag_questions_batch, incremental_update_master_bank
@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.post("/api/interview/{interview_id}/re-process")
-async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user: dict = Depends(get_admin_user)):
     def _load():
         with get_db_connection() as conn:
             return conn.execute("SELECT * FROM interview WHERE id = ?", (interview_id,)).fetchone()

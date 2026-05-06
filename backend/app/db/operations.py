@@ -16,35 +16,45 @@ def _check_duplicate_url_sync(url: str) -> bool:
         cursor.execute("SELECT 1 FROM interview WHERE url = ?", (url,))
         if cursor.fetchone():
             return True
-        # 再按 URL 签名匹配（只取 url 列，减少数据传输）
+        # Bug #11: 按 URL 签名匹配（使用数据库索引，避免全表扫描）
         if sig:
-            cursor.execute("SELECT url FROM jd")
-            for row in cursor.fetchall():
-                if _extract_url_signature(row['url']) == sig:
-                    return True
-            cursor.execute("SELECT url FROM interview")
-            for row in cursor.fetchall():
-                if _extract_url_signature(row['url']) == sig:
-                    return True
+            cursor.execute("SELECT 1 FROM jd WHERE url_signature = ?", (sig,))
+            if cursor.fetchone():
+                return True
+            cursor.execute("SELECT 1 FROM interview WHERE url_signature = ?", (sig,))
+            if cursor.fetchone():
+                return True
     return False
 
 
-def _insert_jd(saved_url: str, data: dict, tech_stack: str, season: str = ""):
+def _insert_jd(saved_url: str, data: dict, tech_stack: str, season: str = "", owner_id: int = None, status: str = "approved"):
     with get_db_connection() as conn:
-        conn.execute(
-            "INSERT INTO jd (url, company, job_title, salary, tech_stack, bonus, season) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (saved_url, data.get("公司", "未提供"), data.get("岗位名称", "未提供"), data.get("薪资范围", "未提供"), tech_stack, data.get("加分项", "未提供"), season)
-        )
-        conn.commit()
+        sig = _extract_url_signature(saved_url)
+        try:
+            conn.execute(
+                "INSERT INTO jd (url, company, job_title, salary, tech_stack, bonus, season, owner_id, status, url_signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (saved_url, data.get("公司", "未提供"), data.get("岗位名称", "未提供"), data.get("薪资范围", "未提供"), tech_stack, data.get("加分项", "未提供"), season, owner_id, status, sig)
+            )
+            conn.commit()
+        except Exception as e:
+            if "UNIQUE" in str(e):
+                raise ValueError("该 URL 已存在，不可重复上传")
+            raise
 
 
-def _insert_interview(saved_url: str, data: dict, questions: str, season: str = ""):
+def _insert_interview(saved_url: str, data: dict, questions: str, season: str = "", owner_id: int = None, status: str = "approved"):
     with get_db_connection() as conn:
-        conn.execute(
-            "INSERT INTO interview (url, company, round, focus, questions_list, difficulty, season) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), data.get("考察重点", "未提供"), questions, data.get("难易程度", "未提供"), season)
-        )
-        conn.commit()
+        sig = _extract_url_signature(saved_url)
+        try:
+            conn.execute(
+                "INSERT INTO interview (url, company, round, focus, questions_list, difficulty, season, owner_id, status, url_signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), data.get("考察重点", "未提供"), questions, data.get("难易程度", "未提供"), season, owner_id, status, sig)
+            )
+            conn.commit()
+        except Exception as e:
+            if "UNIQUE" in str(e):
+                raise ValueError("该 URL 已存在，不可重复上传")
+            raise
 
 
 def _insert_details(tagged_rows: list):
@@ -66,9 +76,9 @@ def _cleanup_old_sources(url: str):
                 sources = json.loads(mr['sources']) if mr['sources'] else []
             except Exception:
                 sources = []
-            match_count = sum(1 for s in sources if s.get('url') == url)
-            if match_count > 0:
-                new_sources = [s for s in sources if s.get('url') != url]
+            new_sources = [s for s in sources if s.get('url') != url]
+            if len(new_sources) != len(sources):
+                # Bug #16: 使用实际 sources 数组长度作为 frequency
                 cursor.execute(
                     "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
                     (len(new_sources), json.dumps(new_sources), mr['id'])

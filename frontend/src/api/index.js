@@ -38,7 +38,9 @@ export const updateRecord = (data) => put(`${API}/data/update`, data)
 export const reprocessInterview = (id) => post(`${API}/interview/${id}/re-process`)
 
 // ── Master bank ──
-export const buildMasterBank = () => post(`${API}/master-bank/build`, null, { timeout: 300_000, noRetry: true })
+export const buildMasterBank = () => post(`${API}/master-bank/build`, null, { timeout: 600_000, noRetry: true })
+export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build`, null, onEvent)
+export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`)
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`)
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data)

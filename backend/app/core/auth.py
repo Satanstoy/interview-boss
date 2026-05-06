@@ -144,13 +144,13 @@ async def get_refresh_token(request: Request) -> str:
     return token
 
 
-def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False):
+def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False, ip_address: str = "", user_agent: str = ""):
     """存储 refresh token 的 jti 到数据库"""
     with get_db_connection() as conn:
         expires = datetime.now(timezone.utc) + timedelta(days=days)
         conn.execute(
-            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember) VALUES (?, ?, ?, ?)",
-            (user_id, jti, expires.isoformat(), 1 if remember else 0)
+            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, jti, expires.isoformat(), 1 if remember else 0, ip_address, user_agent)
         )
         conn.commit()
 

@@ -96,7 +96,7 @@
                     class="px-3 py-1.5 text-xs rounded-lg border transition-all font-medium"
                   >{{ pos }}</button>
                 </div>
-                <div class="flex gap-2">
+                <div v-if="isAdmin" class="flex gap-2">
                   <input v-model="newPositionInput" placeholder="新增岗位" class="flex-1 border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2 text-xs bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-accent-200 dark:focus:ring-accent-800 focus:border-accent-400 transition-all duration-200" />
                   <button @click="addPosition" class="text-xs bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 px-3 py-2 rounded-xl hover:bg-accent-100 dark:hover:bg-accent-900/50 transition font-medium whitespace-nowrap border border-accent-200 dark:border-accent-800">添加</button>
                 </div>
@@ -106,7 +106,7 @@
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
                   <label class="text-xs font-semibold text-gray-600 dark:text-gray-400">一级大类 / 二级子类</label>
-                  <button @click="addCat1" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium flex items-center gap-1">
+                  <button v-if="isAdmin" @click="addCat1" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium flex items-center gap-1">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
                     添加大类
                   </button>
@@ -120,10 +120,12 @@
                       <svg :class="{'rotate-90': cat._open}" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
                     </button>
                     <input v-model="cat.cat1"
+                      :readonly="!isAdmin"
                       class="flex-1 text-sm font-semibold bg-transparent border-none outline-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      :class="{ 'cursor-default': !isAdmin }"
                       placeholder="如 A.项目经验与设计" />
                     <span class="text-xs text-gray-400 dark:text-gray-500">{{ cat.children.length }} 个子类</span>
-                    <button @click="removeCat1(ci)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-1">
+                    <button v-if="isAdmin" @click="removeCat1(ci)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-1">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                     </button>
                   </div>
@@ -132,13 +134,15 @@
                     <div v-for="(child, ci2) in cat.children" :key="ci2" class="flex items-center gap-2">
                       <span class="text-gray-300 dark:text-gray-600 text-xs">-</span>
                       <input v-model="cat.children[ci2]"
+                        :readonly="!isAdmin"
                         class="flex-1 text-sm bg-transparent border-none outline-none text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+                        :class="{ 'cursor-default': !isAdmin }"
                         placeholder="如 A1.系统设计" />
-                      <button @click="cat.children.splice(ci2, 1)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-0.5">
+                      <button v-if="isAdmin" @click="cat.children.splice(ci2, 1)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-0.5">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                       </button>
                     </div>
-                    <button @click="cat.children.push('')" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium mt-1 flex items-center gap-1">
+                    <button v-if="isAdmin" @click="cat.children.push('')" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium mt-1 flex items-center gap-1">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
                       添加子类
                     </button>
@@ -183,7 +187,8 @@ const toast = useToast()
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  activeSeason: { type: String, default: '' }
+  activeSeason: { type: String, default: '' },
+  isAdmin: { type: Boolean, default: false }
 })
 
 const availablePositions = ref([])
@@ -194,7 +199,7 @@ const taxonomy = reactive({
   categories: []
 })
 
-const emit = defineEmits(['close', 'update:activeSeason'])
+const emit = defineEmits(['close', 'update:activeSeason', 'settings-saved', 'position-changed'])
 
 const seasons = ref([])
 const isSaving = ref(false)
@@ -206,6 +211,7 @@ const llmKeySet = ref(false)
 const llmMasked = ref('')
 const editLlmKey = ref(false)
 const originalPosition = ref('')
+const positionOnlyChanged = ref(false)
 
 const addCat1 = () => {
   taxonomy.categories.push({ cat1: '', children: [''], _open: true })
@@ -220,6 +226,11 @@ const onSwitchPosition = async (pos) => {
     await switchPosition(pos)
     taxonomy.job_position = pos
     originalPosition.value = pos
+    positionOnlyChanged.value = true
+    // 新岗位立即加入可选列表（后端也会同步）
+    if (!availablePositions.value.includes(pos)) {
+      availablePositions.value.push(pos)
+    }
     // 重新加载该岗位的分类
     const data = await fetchProfile()
     const s = data.settings
@@ -231,7 +242,7 @@ const onSwitchPosition = async (pos) => {
     } else {
       taxonomy.categories = []
     }
-    availablePositions.value = data.settings.available_positions || [pos]
+    availablePositions.value = data.settings.available_positions || availablePositions.value
     toast.success(`已切换到岗位：${pos}`)
   } catch (e) {
     toast.error(`切换失败: ${e.message}`)
@@ -289,6 +300,7 @@ const loadProfile = async () => {
 watch(() => props.visible, (val) => {
   if (val) {
     saveMessage.value = ''
+    positionOnlyChanged.value = false
     loadProfile()
   }
 })
@@ -359,9 +371,18 @@ const saveProfile = async () => {
     form.llm_api_key = ''
     emit('update:activeSeason', form.active_season)
 
+    // 重新加载配置，刷新岗位列表和分类
+    await loadProfile()
+
     saveMessage.value = '配置已保存'
     saveSuccess.value = true
     originalPosition.value = taxonomy.job_position
+    if (positionOnlyChanged.value) {
+      emit('position-changed')
+    } else {
+      emit('settings-saved')
+    }
+    positionOnlyChanged.value = false
     setTimeout(() => { saveMessage.value = '' }, 3000)
   } catch (e) {
     saveMessage.value = `保存失败: ${e.message}`

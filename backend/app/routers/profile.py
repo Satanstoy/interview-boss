@@ -25,25 +25,22 @@ _SENSITIVE_KEYS = {"llm_api_key"}
 _REQUIRED_NON_EMPTY = {"llm_model", "llm_base_url"}
 
 
-def _get_available_positions(settings: dict) -> list:
-    """从 user_profile 中提取所有已配置的岗位列表"""
-    positions = set()
-    for key in settings:
-        if key.startswith("taxonomy_config_") and key != "taxonomy_config":
-            pos = key[len("taxonomy_config_"):]
-            if pos:
-                positions.add(pos)
-    # 兼容旧的单一 key
-    if "taxonomy_config" in settings:
-        try:
-            tc = json.loads(settings["taxonomy_config"])
-            if tc.get("job_position"):
-                positions.add(tc["job_position"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-    if not positions:
-        positions.add(DEFAULT_TAXONOMY["job_position"])
-    return sorted(positions)
+def _get_available_positions() -> list:
+    """从 taxonomy + job_positions 合并读取所有岗位列表"""
+    with get_db_connection() as conn:
+        tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
+        pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+        seen = set()
+        result = []
+        for r in tax_rows:
+            if r['position_name'] not in seen:
+                seen.add(r['position_name'])
+                result.append(r['position_name'])
+        for r in pos_rows:
+            if r['name'] not in seen:
+                seen.add(r['name'])
+                result.append(r['name'])
+        return result if result else [DEFAULT_TAXONOMY["job_position"]]
 
 
 def _mask_key(value: str) -> str:
@@ -104,19 +101,20 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
                 display_settings[k] = _mask_key(env_val)
                 display_settings[f"{k}_set"] = True
 
-    # 多岗位支持
-    current_pos = settings.get('current_job_position', DEFAULT_TAXONOMY['job_position'])
-    available_positions = _get_available_positions(settings)
-    # 读取当前岗位的分类配置
-    pos_taxonomy_key = f"taxonomy_config_{current_pos}"
-    taxonomy_raw = settings.get(pos_taxonomy_key)
-    if not taxonomy_raw:
-        taxonomy_raw = settings.get('taxonomy_config')  # 兼容旧 key
+    # 多岗位支持：优先从 users 表读取当前用户的岗位，fallback 到全局设置
+    available_positions = _get_available_positions()
+    with get_db_connection() as conn:
+        user_row = conn.execute(
+            "SELECT jp.name FROM users u LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+            (admin['id'],)
+        ).fetchone()
+    current_pos = (user_row['name'] if user_row and user_row['name'] else None) or settings.get('current_job_position') or DEFAULT_TAXONOMY['job_position']
+    # 从 taxonomy 表读取当前岗位的分类配置
+    taxonomy_data = get_taxonomy_for_position(current_pos)
 
     display_settings['current_job_position'] = current_pos
     display_settings['available_positions'] = available_positions
-    if taxonomy_raw:
-        display_settings['taxonomy_config'] = taxonomy_raw
+    display_settings['taxonomy_config'] = json.dumps(taxonomy_data, ensure_ascii=False)
 
     return {"settings": display_settings, "available_seasons": used_seasons}
 
@@ -142,17 +140,16 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
         names = "、".join(labels.get(k, k) for k in empty_required)
         raise HTTPException(status_code=400, detail=f"{names} 不能为空")
 
-    # taxonomy_config JSON 格式校验 + 按岗位存储
+    # taxonomy_config JSON 格式校验 + 写入 taxonomy 表
     if "taxonomy_config" in filtered:
         try:
             tc = json.loads(filtered["taxonomy_config"]) if isinstance(filtered["taxonomy_config"], str) else filtered["taxonomy_config"]
             if not isinstance(tc.get("categories"), list):
                 raise ValueError("categories 字段必须是数组")
-            # 按岗位存储为 taxonomy_config_{position}
             position = tc.get("job_position", get_current_job_position())
-            pos_key = f"taxonomy_config_{position}"
-            filtered[pos_key] = json.dumps(tc, ensure_ascii=False)
-            del filtered["taxonomy_config"]
+            from app.db.connection import save_taxonomy_for_position
+            await run_db(lambda: save_taxonomy_for_position(position, tc["categories"]))
+            del filtered["taxonomy_config"]  # 不写入 user_profile
         except (json.JSONDecodeError, ValueError, AttributeError) as e:
             raise HTTPException(status_code=400, detail=f"taxonomy_config 格式无效: {e}")
 
@@ -205,11 +202,11 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                 if not row:
                     raise HTTPException(status_code=404, detail="岗位不存在")
                 conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (row['id'], admin['id']))
-                # 同步更新旧的 user_profile（兼容）
+                # 同步全局 fallback
                 conn.execute(
-                    "INSERT INTO user_profile (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    ("current_job_position", row['name'])
+                    (row['name'],)
                 )
                 conn.commit()
                 return row['name']
@@ -220,11 +217,20 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                     conn.execute("INSERT INTO job_positions (name) VALUES (?)", (position_name,))
                     pos_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                     row = {'id': pos_id, 'name': position_name}
+                    # 同时在 taxonomy 表创建空分类条目，使岗位出现在可选列表中
+                    import json as _json
+                    conn.execute(
+                        "INSERT INTO taxonomy (position_name, categories_json, updated_at) "
+                        "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(position_name) DO NOTHING",
+                        (position_name, _json.dumps([], ensure_ascii=False))
+                    )
                 conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (row['id'], admin['id']))
+                # 同步全局 fallback
                 conn.execute(
-                    "INSERT INTO user_profile (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    ("current_job_position", row['name'])
+                    (row['name'],)
                 )
                 conn.commit()
                 return row['name']

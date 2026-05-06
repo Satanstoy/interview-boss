@@ -65,6 +65,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+
+# ── CSRF 中间件：在中间件层面拦截缺少自定义头的跨域请求 ──
+_CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/register', '/api/auth/login-form', '/api/health'}
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 只检查状态变更方法
+        if request.method in ('POST', 'PUT', 'DELETE'):
+            if request.url.path not in _CSRF_EXEMPT_PATHS:
+                has_custom_header = bool(request.headers.get("X-Requested-With"))
+                has_json_content = "application/json" in request.headers.get("content-type", "")
+                if not has_custom_header and not has_json_content:
+                    return JSONResponse(status_code=403, content={"detail": "缺少必要的请求头，请通过前端发起请求"})
+        return await call_next(request)
+
+
+app.add_middleware(CSRFMiddleware)
+
 app.middleware("http")(log_requests)
 
 

@@ -30,8 +30,8 @@
         <div class="flex justify-between items-center mb-2">
           <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">图片 ({{ stagedFiles.length }} 张)</label>
           <div>
-            <input type="file" multiple class="hidden" ref="fileInput" @change="handleFileSelect" accept="image/*" />
-            <button @click="$refs.fileInput.click()" class="text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+            <input type="file" multiple class="hidden" ref="fileInput" @change="handleFileSelect" accept="image/*" capture="environment" />
+            <button @click="$refs.fileInput.click()" class="text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-4 py-2.5 min-h-[44px] rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">
               + 选择图片
             </button>
           </div>
@@ -42,7 +42,7 @@
             <svg class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <p class="text-sm">拖拽图片到此处，或使用 Ctrl+V 粘贴</p>
+            <p class="text-sm">拖拽图片到此处，或使用 Ctrl+V 粘贴（移动端点击上方按钮选择）</p>
           </div>
 
           <div v-else class="flex flex-wrap gap-3">
@@ -86,6 +86,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { submitData } from '../api/index.js'
 import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '../utils/validate.js'
+import { getFriendlyError } from '../utils/http.js'
 
 const emit = defineEmits(['submitted'])
 
@@ -199,7 +200,7 @@ const submitAll = async () => {
     stagedText.value = ''
     emit('submitted')
   } catch (err) {
-    uploadError.value = err.message
+    uploadError.value = getFriendlyError(err, '提交失败，请稍后重试')
   } finally {
     isUploading.value = false
   }

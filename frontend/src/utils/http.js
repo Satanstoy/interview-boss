@@ -110,10 +110,14 @@ function isRetryableStatus(status) {
  */
 function getStatusMessage(status) {
   const map = {
+    400: '请求格式有误，请检查输入',
     401: '未授权，请重新登录',
     403: '权限不足',
     404: '请求的资源不存在',
+    408: '请求超时，请稍后重试',
     409: '数据冲突（可能重复录入）',
+    413: '上传内容过大，请压缩后重试',
+    415: '不支持的文件格式',
     422: '请求参数有误',
     429: '请求过于频繁，请稍后重试',
     500: '服务器内部错误',
@@ -121,7 +125,20 @@ function getStatusMessage(status) {
     503: '服务维护中，请稍后重试',
     504: '服务响应超时',
   }
-  return map[status] || `请求失败 (${status})`
+  return map[status] || '操作失败，请稍后重试'
+}
+
+/**
+ * 友好错误消息提取
+ */
+export function getFriendlyError(err, fallback = '操作失败，请稍后重试') {
+  if (!err) return fallback
+  if (err.status) return getStatusMessage(err.status)
+  if (err.message?.includes('Failed to fetch')) return '网络连接失败，请检查网络'
+  if (err.message?.includes('超时')) return '请求超时，请稍后重试'
+  const msg = err.message || ''
+  if (msg && !msg.includes('HTTP') && !/\d{3}/.test(msg) && /[一-鿿]/.test(msg)) return msg
+  return fallback
 }
 
 /**
@@ -294,15 +311,43 @@ export function del(url, options = {}) {
 }
 
 /**
- * 文件上传（FormData，60s 超时，不自动重试）
+ * 文件上传（FormData，60s 超时，不自动重试，支持进度回调）
  */
 export function upload(url, formData, options = {}) {
-  return request(url, {
-    ...options,
-    method: 'POST',
-    body: formData,
-    timeout: options.timeout || UPLOAD_TIMEOUT,
-    noRetry: true,
+  const { onProgress, ...restOptions } = options
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+
+    const token = getAuthToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    xhr.timeout = restOptions.timeout || UPLOAD_TIMEOUT
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress({ loaded: e.loaded, total: e.total, percent: Math.round(e.loaded / e.total * 100) })
+        }
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)) } catch { resolve(xhr.responseText) }
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText)
+          reject(new Error(data.detail || getStatusMessage(xhr.status)))
+        } catch {
+          reject(new Error(getStatusMessage(xhr.status)))
+        }
+      }
+    }
+
+    xhr.onerror = () => reject(new Error('网络请求失败'))
+    xhr.ontimeout = () => reject(new Error('请求超时'))
+    xhr.send(formData)
   })
 }
 
@@ -328,7 +373,7 @@ export async function postSSE(url, body, onEvent) {
 
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(`HTTP ${res.status}: ${text}`)
+      throw new Error(getStatusMessage(res.status))
     }
 
     const reader = res.body.getReader()

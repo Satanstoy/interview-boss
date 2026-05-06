@@ -1,9 +1,10 @@
 import logging
+import re
 import time
 from enum import Enum
 from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.core.auth import (
@@ -87,9 +88,34 @@ def _require_custom_header(request: Request):
     raise HTTPException(status_code=403, detail="缺少必要的请求头，请通过前端发起请求")
 
 
+RESERVED_USERNAMES = {'admin', 'root', 'system', 'null', 'undefined', 'superuser', 'moderator', 'guest', 'test'}
+
+
+_USERNAME_RE = re.compile(r'^[a-zA-Z0-9_一-鿿]{2,32}$')
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=32)
     password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('username')
+    @classmethod
+    def username_format(cls, v):
+        if not _USERNAME_RE.match(v):
+            raise ValueError('用户名仅允许 2-32 个字母、数字、下划线或中文')
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def password_complexity(cls, v):
+        categories = 0
+        if any(c.isupper() for c in v): categories += 1
+        if any(c.islower() for c in v): categories += 1
+        if any(c.isdigit() for c in v): categories += 1
+        if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
+        if categories < 2:
+            raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -125,13 +151,13 @@ def _clear_refresh_cookie(response: Response):
     response.delete_cookie(key="refresh_token", path="/")
 
 
-def _issue_token_pair(user: dict, response: Response, remember: bool = False) -> dict:
+def _issue_token_pair(user: dict, response: Response, remember: bool = False, ip_address: str = "", user_agent: str = "") -> dict:
     """签发 access + refresh token，设置 cookie，返回响应体"""
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
     token_data = {"user_id": user['id'], "username": user['username']}
     access_token = create_access_token(token_data)
     refresh_token, jti = create_refresh_token(token_data, days=days)
-    store_refresh_token(user['id'], jti, days=days, remember=remember)
+    store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent)
     _set_refresh_cookie(response, refresh_token, remember=remember)
     # 获取岗位名称
     pos_name = ""
@@ -160,6 +186,8 @@ def _issue_token_pair(user: dict, response: Response, remember: bool = False) ->
 @router.post("/register")
 @limiter.limit("5/minute")
 async def register(request: Request, req: RegisterRequest, response: Response):
+    if req.username.lower() in RESERVED_USERNAMES:
+        raise HTTPException(status_code=400, detail="该用户名为系统保留，请更换")
     password_hash = hash_password(req.password)
 
     def _create():
@@ -182,7 +210,12 @@ async def register(request: Request, req: RegisterRequest, response: Response):
         logger.exception("注册失败")
         raise HTTPException(status_code=500, detail="注册失败")
 
-    return _issue_token_pair({"id": user_id, "username": req.username, "is_admin": False, "bank_mode": "public"}, response, remember=False)
+    return _issue_token_pair(
+        {"id": user_id, "username": req.username, "is_admin": False, "bank_mode": "public"},
+        response, remember=False,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )
 
 
 @router.post("/login")
@@ -203,12 +236,16 @@ async def login(request: Request, req: LoginRequest, response: Response):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     _clear_failures(req.username)
-    return _issue_token_pair(dict(user), response, remember=req.remember_me)
+    return _issue_token_pair(
+        dict(user), response, remember=req.remember_me,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )
 
 
 @router.post("/refresh")
 @limiter.limit("30/minute")
-async def refresh_token(request: Request, response: Response, rt: str = Depends(get_refresh_token), _csrf: None = Depends(_require_custom_header)):
+async def refresh_token(request: Request, response: Response, _csrf: None = Depends(_require_custom_header), rt: str = Depends(get_refresh_token)):
     """
     用 HttpOnly cookie 中的 refresh token 换取新 token pair。
     不依赖 access token（页面刷新后 access token 已在内存中丢失，但 cookie 仍有效）。
@@ -240,7 +277,11 @@ async def refresh_token(request: Request, response: Response, rt: str = Depends(
         raise HTTPException(status_code=401, detail="用户不存在")
 
     delete_refresh_token(jti)
-    return _issue_token_pair(dict(user), response, remember=remember)
+    return _issue_token_pair(
+        dict(user), response, remember=remember,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )
 
 
 @router.post("/logout")

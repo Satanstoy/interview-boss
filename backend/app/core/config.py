@@ -14,6 +14,7 @@ ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__
 LLM_MODEL = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "120"))
 MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE_MB", "10")) * 1024 * 1024  # 默认 10MB
+MAX_TOTAL_UPLOAD_SIZE = int(os.environ.get("MAX_TOTAL_UPLOAD_SIZE_MB", "50")) * 1024 * 1024  # 默认 50MB
 
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
@@ -21,7 +22,7 @@ LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 # 字段白名单（用于 GenericUpdateRequest 安全校验）
 ALLOWED_UPDATE_COLUMNS = {
     "master_question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred"},
-    "question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred", "original_questions", "original_question_sources"},
+    "question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "original_questions", "original_question_sources"},
     "jd": {"url", "company", "job_title", "salary", "tech_stack", "bonus"},
     "interview": {"url", "company", "round", "focus", "questions_list", "difficulty", "season"},
     "questions_detail": {"url", "company", "round", "question", "cat1", "cat2", "tags", "diff_tag"},

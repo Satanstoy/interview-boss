@@ -2,7 +2,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
 
@@ -33,8 +33,33 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
     def _query():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
-            total = conn.execute(f"SELECT COUNT(*) FROM {safe_name}").fetchone()[0]
-            rows = conn.execute(f"SELECT * FROM {safe_name} ORDER BY id ASC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            if table_name in ('jd', 'interview'):
+                # 根据用户的 bank_mode 过滤可见范围（管理员也遵守）
+                bank_mode = user.get('bank_mode', 'public')
+                if bank_mode == 'personal':
+                    where = "owner_id = ?"
+                    params = (user['id'],)
+                elif bank_mode == 'mixed':
+                    where = "(owner_id = ? OR (owner_id IS NULL AND status = 'approved'))"
+                    params = (user['id'],)
+                else:  # public
+                    where = "owner_id IS NULL AND status = 'approved'"
+                    params = ()
+                total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} WHERE {where}", params).fetchone()[0]
+                rows = conn.execute(f"SELECT * FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+            else:  # questions_detail
+                bank_mode = user.get('bank_mode', 'public')
+                if bank_mode == 'personal':
+                    where = "qd.url IN (SELECT url FROM interview WHERE owner_id = ?)"
+                    params = (user['id'],)
+                elif bank_mode == 'mixed':
+                    where = "(qd.url IN (SELECT url FROM interview WHERE owner_id = ?) OR qd.url IN (SELECT url FROM interview WHERE owner_id IS NULL AND status = 'approved'))"
+                    params = (user['id'],)
+                else:  # public
+                    where = "qd.url IN (SELECT url FROM interview WHERE owner_id IS NULL AND status = 'approved')"
+                    params = ()
+                total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} qd WHERE {where}", params).fetchone()[0]
+                rows = conn.execute(f"SELECT * FROM {safe_name} qd WHERE {where} ORDER BY qd.id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
             return total, rows
 
     total, rows = await run_db(_query)
@@ -52,7 +77,7 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
 
 
 @router.delete("/api/data/{file_type}/{record_id}")
-async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_current_user)):
+async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_admin_user)):
     """通过 record_id 直接删除记录，避免行号偏移导致删错"""
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
@@ -66,6 +91,30 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_c
             target_row = cursor.execute(f"SELECT id, url, questions_list FROM {safe_name} WHERE id = ?", (record_id,)).fetchone()
             if not target_row:
                 raise HTTPException(status_code=404, detail="未找到该记录，可能已被删除")
+
+            if table_name == 'jd':
+                url = target_row['url']
+                if url:
+                    # 清理关联的 interview
+                    cursor.execute("DELETE FROM interview WHERE url = ?", (url,))
+                    # 清理关联的 questions_detail
+                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+                    # 清理 question_bank 中的来源引用
+                    affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
+                    for mr in affected_rows:
+                        try:
+                            sources = json.loads(mr['sources']) if mr['sources'] else []
+                        except Exception:
+                            sources = []
+                        new_sources = [s for s in sources if s.get('url') != url]
+                        if len(new_sources) != len(sources):
+                            cursor.execute(
+                                "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                                (len(new_sources), json.dumps(new_sources), mr['id'])
+                            )
+                    cursor.execute(
+                        "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
+                    )
 
             if table_name == 'interview':
                 url = target_row['url']
@@ -104,7 +153,7 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_c
 
 
 @router.post("/api/data/batch-delete")
-async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(get_current_user)):
+async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(get_admin_user)):
     """批量删除记录，单事务完成"""
     table_map = {"jd": "jd", "interview": "interview"}
     table_name = table_map.get(req.file_type.lower())
@@ -161,7 +210,7 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
 
 
 @router.put("/api/data/update")
-async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(get_current_user)):
+async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(get_admin_user)):
     try:
         _safe_table_name(req.table_name)
     except ValueError:
@@ -175,6 +224,15 @@ async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(ge
     for col in req.update_data.keys():
         if col not in allowed_cols:
             raise HTTPException(status_code=400, detail=f"安全拦截：不允许更新字段 '{col}'，允许的字段: {allowed_cols}")
+
+    # Bug #5: 通用更新接口添加所有权校验 — admin 不能修改个人题目
+    if req.table_name == "question_bank":
+        def _check_owner():
+            with get_db_connection() as conn:
+                row = conn.execute("SELECT owner_id FROM question_bank WHERE id = ?", (req.record_id,)).fetchone()
+                if row and row['owner_id'] is not None:
+                    raise HTTPException(status_code=403, detail="不能通过此接口修改个人题目，请使用题目编辑功能")
+        await run_db(_check_owner)
 
     # 防止通过通用更新接口意外清空 ai_answer
     if req.table_name == "question_bank" and "ai_answer" in req.update_data:

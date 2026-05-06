@@ -2,11 +2,14 @@ import asyncio
 import json
 import logging
 import openai
+import magic as _magic
 
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
-from app.core.config import LLM_MODEL, MAX_FILE_SIZE
-from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT, build_tagging_prompt
+from app.core.config import LLM_MODEL, MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
+
+ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'}
+from app.core.prompts import SYSTEM_PROMPT, JD_PROMPT, INTERVIEW_PROMPT, TAGGING_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
@@ -65,7 +68,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     return standardized
 
 
-async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks):
+async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False):
     from app.services.clustering import match_new_questions
 
     if not new_tagged_rows:
@@ -76,8 +79,58 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     if not valid_rows:
         return
 
-    # 加载已有公共题库，按 cat2 构建聚类上下文
     current_pos = get_current_job_position()
+
+    async def background_generate_answer(question_id: int, question_text: str):
+        from app.core.prompts import ANSWER_PROMPT
+        from app.services.llm import _call_llm_with_retry
+        try:
+            prompt = ANSWER_PROMPT.replace("{question}", question_text)
+            answer = await _call_llm_with_retry(prompt)
+
+            def _update():
+                with get_db_connection() as conn:
+                    conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
+                    conn.commit()
+
+            await run_db(_update)
+            logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
+        except Exception as e:
+            logger.error(f"自动解答生成失败（已重试3次）[ID:{question_id}]: {e}")
+            def _mark_failed():
+                with get_db_connection() as conn:
+                    conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
+                    conn.commit()
+            try:
+                await run_db(_mark_failed)
+            except Exception:
+                pass
+
+    # 个人题库：直接插入，不做公共聚类
+    if is_personal:
+        def _insert_personal():
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                for row in valid_rows:
+                    url, company, round_, q_text = row[0], row[1], row[2], row[3]
+                    cat1 = normalize_category(row[4])
+                    cat2 = normalize_category(row[5]) if len(row) > 5 else ''
+                    tags = row[6] if len(row) > 6 else ''
+                    diff_tag = row[7] if len(row) > 7 else '未知'
+                    sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
+                    cursor.execute(
+                        "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'approved', ?)",
+                        (q_text, cat1, cat2, tags, diff_tag, sources_json, user_id, user_id, current_pos)
+                    )
+                    new_id = cursor.lastrowid
+                    bg_tasks.add_task(background_generate_answer, new_id, q_text)
+                conn.commit()
+
+        await run_db(_insert_personal)
+        logger.info(f"个人题库新增 {len(valid_rows)} 题")
+        return
+
+    # 公共题库：走聚类匹配流程
     def _load_existing():
         with get_db_connection() as conn:
             rows = conn.execute(
@@ -107,6 +160,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
             "id": idx,  # 临时 id，用于匹配结果
             "question": row[3],
             "cat2": row[5] if len(row) > 5 else '',  # cat2 在 row[5]
+            "_orig_row": row,  # 保留原始行数据，用于未匹配时写入题库
         })
 
     # LLM 增量匹配
@@ -117,36 +171,14 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     # 构建 idx → row 映射
     idx_to_row = {idx: row for idx, row in enumerate(valid_rows)}
 
-    async def background_generate_answer(question_id: int, question_text: str):
-        from app.core.prompts import ANSWER_PROMPT
-        from app.services.llm import _call_llm_with_retry
-        try:
-            prompt = ANSWER_PROMPT.replace("{question}", question_text)
-            answer = await _call_llm_with_retry(prompt)
-
-            def _update():
-                with get_db_connection() as conn:
-                    conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
-                    conn.commit()
-
-            await run_db(_update)
-            logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
-        except Exception as e:
-            logger.error(f"自动解答生成失败（已重试3次）[ID:{question_id}]: {e}")
-            def _mark_failed():
-                with get_db_connection() as conn:
-                    conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
-                    conn.commit()
-            try:
-                await run_db(_mark_failed)
-            except Exception:
-                pass
-
     def _update_db():
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
-            admin_id = admin_row[0] if admin_row else None
+            submitter_id = user_id
+            if not submitter_id:
+                admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+                submitter_id = admin_row[0] if admin_row else None
+            status = 'approved' if submitter_is_admin else 'pending'
 
             # 处理匹配到的题目：更新 frequency 和 sources
             for m in matched:
@@ -173,19 +205,22 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
                     )
 
             # 处理未匹配的题目：新增到题库
-            for row in unmatched_rows:
+            for item in unmatched_rows:
+                row = item.get("_orig_row") if isinstance(item, dict) else item
                 url, company, round_, q_text = row[0], row[1], row[2], row[3]
                 cat1 = normalize_category(row[4])
+                cat2 = normalize_category(row[5]) if len(row) > 5 else ''
                 tags = row[6] if len(row) > 6 else ''
                 diff_tag = row[7] if len(row) > 7 else '未知'
 
                 sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
                 cursor.execute(
-                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'approved', ?)",
-                    (q_text, cat1, tags, diff_tag, sources_json, admin_id, current_pos)
+                    "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)",
+                    (q_text, cat1, cat2, tags, diff_tag, sources_json, submitter_id, status, current_pos)
                 )
                 new_id = cursor.lastrowid
-                bg_tasks.add_task(background_generate_answer, new_id, q_text)
+                if status == 'approved':
+                    bg_tasks.add_task(background_generate_answer, new_id, q_text)
 
             conn.commit()
 
@@ -200,6 +235,8 @@ async def submit_data(
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
     season: Optional[str] = Form(""),
+    content_type: Optional[str] = Form(""),
+    target: Optional[str] = Form(""),
     files: List[UploadFile] = File(default=[])
 ):
     # 输入长度限制
@@ -212,16 +249,41 @@ async def submit_data(
         raise HTTPException(status_code=400, detail="提交内容不能为空，必须提供纯文本或至少一张图片。")
 
     try:
+        # 确定内容类型和目标
+        doc_type = content_type.lower() if content_type else ""
+        submit_target = target.lower() if target else "personal"
+        if doc_type not in ("jd", "interview"):
+            doc_type = ""  # 后续由 LLM 判断
+        if submit_target not in ("personal", "public"):
+            submit_target = "personal"
+
+        # 根据类型选择 prompt
+        if doc_type == "jd":
+            system_prompt = JD_PROMPT
+        elif doc_type == "interview":
+            system_prompt = INTERVIEW_PROMPT
+        else:
+            system_prompt = SYSTEM_PROMPT  # fallback：LLM 自行判断类型
+
         user_content = [{"type": "text", "text": "请分析以下联合内容，保持信息连贯性，并综合整理后严格按照 JSON Schema 返回："}]
         if text.strip():
             user_content.append({"type": "text", "text": f"\n【文本内容】:\n{text}\n"})
         if files and files[0].filename:
+            total_size = 0
             for file in files:
                 if file.content_type.startswith("image/"):
                     content = await file.read()
-                    # 文件大小限制
+                    total_size += len(content)
+                    # 总上传大小限制
+                    if total_size > MAX_TOTAL_UPLOAD_SIZE:
+                        raise HTTPException(status_code=413, detail=f"上传文件总大小超过限制（最大 {MAX_TOTAL_UPLOAD_SIZE // 1024 // 1024}MB）")
+                    # 单文件大小限制
                     if len(content) > MAX_FILE_SIZE:
                         raise HTTPException(status_code=413, detail=f"图片 {file.filename} 超过大小限制（最大 {MAX_FILE_SIZE // 1024 // 1024}MB）")
+                    # 校验真实 MIME 类型（基于文件魔数）
+                    real_mime = _magic.from_buffer(content[:2048], mime=True)
+                    if real_mime not in ALLOWED_MIME_TYPES:
+                        raise HTTPException(status_code=400, detail=f"文件 {file.filename} 不是有效的图片文件（检测到: {real_mime}）")
                     base64_img = encode_image(content)
                     user_content.append({
                         "type": "image_url",
@@ -230,14 +292,17 @@ async def submit_data(
 
         llm_kwargs = dict(
             model=LLM_MODEL,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_content}],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
             temperature=0.1,
         )
         if _should_use_response_format():
             llm_kwargs["response_format"] = {"type": "json_object"}
         response = await client.chat.completions.create(**llm_kwargs)
         parsed_data = _extract_json(response.choices[0].message.content)
-        doc_type = parsed_data.get("type")
+
+        # 兼容两种返回格式：{type, data} 或 {data}
+        if not doc_type:
+            doc_type = (parsed_data.get("type") or "").lower()
         data = parsed_data.get("data", {})
         saved_url = url if url else "未提供链接"
 
@@ -245,21 +310,30 @@ async def submit_data(
         if not doc_type or not data:
             raise HTTPException(status_code=422, detail="大模型未能从内容中提取有效信息，请检查提交的内容是否包含足够的文本或图片。")
 
-        if doc_type == "Interview":
+        if doc_type == "interview":
             q_list = data.get("具体题目清单", [])
             if not q_list or all(not q.strip() for q in q_list):
                 raise HTTPException(status_code=422, detail="大模型未能从内容中提取到面试题目，请确认提交的是面经内容而非其他类型。")
 
-        if doc_type == "JD":
+        # 计算 owner_id 和 status
+        is_admin = user.get('is_admin', 0)
+        if submit_target == 'personal':
+            record_owner_id = user['id']
+            record_status = 'approved'
+        else:
+            record_owner_id = None
+            record_status = 'approved' if is_admin else 'pending'
+
+        if doc_type == "jd":
             _ts = data.get("核心技术要求", [])
             tech_stack = "\n".join(f"{i+1}. {item}" for i, item in enumerate(_ts)) if _ts else "未提供"
-            await run_db(lambda: _insert_jd(saved_url, data, tech_stack, season.strip()))
-            return {"status": "success", "type": "JD", "saved_data": data}
+            await run_db(lambda: _insert_jd(saved_url, data, tech_stack, season.strip(), owner_id=record_owner_id, status=record_status))
+            return {"status": "success", "type": "JD", "target": submit_target, "saved_data": data}
 
-        elif doc_type == "Interview":
+        elif doc_type == "interview":
             _ql = data.get("具体题目清单", [])
             questions = "\n".join(f"{i+1}. {item}" for i, item in enumerate(_ql)) if _ql else "未提供"
-            await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip()))
+            await run_db(lambda: _insert_interview(saved_url, data, questions, season.strip(), owner_id=record_owner_id, status=record_status))
 
             q_list = data.get("具体题目清单", [])
             if q_list:
@@ -330,12 +404,17 @@ async def submit_data(
                             row[2] = updated_round
 
                     await run_db(lambda: _insert_details(tagged_rows))
-                    await incremental_update_master_bank(tagged_rows, bg_tasks)
+                    await incremental_update_master_bank(
+                        tagged_rows, bg_tasks,
+                        submitter_is_admin=bool(is_admin),
+                        user_id=user['id'],
+                        is_personal=(submit_target == 'personal')
+                    )
 
                 except Exception as e:
                     logger.error(f"题目标签化及更新题库失败: {e}")
 
-            return {"status": "success", "type": "Interview", "saved_data": data}
+            return {"status": "success", "type": "Interview", "target": submit_target, "saved_data": data}
         else:
             raise HTTPException(status_code=500, detail="模型返回了未知的分类类型: " + str(doc_type))
     except HTTPException:

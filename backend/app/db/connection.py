@@ -54,6 +54,12 @@ def init_db():
         interview_cols = [info[1] for info in cursor.fetchall()]
         if "season" not in interview_cols:
             conn.execute("ALTER TABLE interview ADD COLUMN season TEXT DEFAULT ''")
+        # ── 迁移：interview 表添加 owner_id 和 status 列（个人/公共管理）──
+        interview_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('interview')").fetchall()}
+        if "owner_id" not in interview_col_set:
+            conn.execute("ALTER TABLE interview ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+        if "status" not in interview_col_set:
+            conn.execute("ALTER TABLE interview ADD COLUMN status TEXT DEFAULT 'approved'")
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
@@ -184,16 +190,36 @@ def init_db():
             conn.execute("ALTER TABLE jd ADD COLUMN season TEXT DEFAULT ''")
             conn.execute("UPDATE jd SET season = '2027届暑期实习' WHERE season IS NULL OR season = ''")
             logger.info("已为 jd 表添加 season 列并回填默认招聘季")
+        # ── 迁移：jd 表添加 owner_id 和 status 列（个人/公共管理）──
+        if "owner_id" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+        if "status" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN status TEXT DEFAULT 'approved'")
 
         cursor.execute("PRAGMA index_list('jd')")
         jd_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_jd_url" not in jd_indexes:
             conn.execute("CREATE INDEX idx_jd_url ON jd(url)")
+        if "idx_jd_owner_status" not in jd_indexes:
+            conn.execute("CREATE INDEX idx_jd_owner_status ON jd(owner_id, status)")
+        # Bug #11: jd 表添加 url_signature 列用于高效去重
+        if "url_signature" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN url_signature TEXT DEFAULT ''")
+        if "idx_jd_url_sig" not in jd_indexes:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jd_url_sig ON jd(url_signature)")
 
         cursor.execute("PRAGMA index_list('interview')")
         iv_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_interview_url" not in iv_indexes:
             conn.execute("CREATE INDEX idx_interview_url ON interview(url)")
+        if "idx_interview_owner_status" not in iv_indexes:
+            conn.execute("CREATE INDEX idx_interview_owner_status ON interview(owner_id, status)")
+        # Bug #11: interview 表添加 url_signature 列用于高效去重
+        iv_columns = {row[1] for row in cursor.execute("PRAGMA table_info('interview')").fetchall()}
+        if "url_signature" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN url_signature TEXT DEFAULT ''")
+        if "idx_interview_url_sig" not in iv_indexes:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_interview_url_sig ON interview(url_signature)")
 
         cursor.execute("PRAGMA index_list('questions_detail')")
         qd_indexes = [row[1] for row in cursor.fetchall()]
@@ -209,6 +235,11 @@ def init_db():
         rt_columns = {row[1] for row in cursor.execute("PRAGMA table_info('refresh_tokens')").fetchall()}
         if "remember" not in rt_columns:
             conn.execute("ALTER TABLE refresh_tokens ADD COLUMN remember INTEGER DEFAULT 0")
+        # Bug #9: refresh_tokens 添加客户端指纹列
+        if "ip_address" not in rt_columns:
+            conn.execute("ALTER TABLE refresh_tokens ADD COLUMN ip_address TEXT DEFAULT ''")
+        if "user_agent" not in rt_columns:
+            conn.execute("ALTER TABLE refresh_tokens ADD COLUMN user_agent TEXT DEFAULT ''")
 
         # ── 迁移：添加 original_questions 和 original_question_sources 列 ──
         qb_columns = {row[1] for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()}
@@ -272,6 +303,44 @@ def init_db():
         if "idx_qp_position" not in qp_indexes:
             conn.execute("CREATE INDEX idx_qp_position ON question_position(position_id)")
 
+        # ── taxonomy 表（岗位分类体系，取代 user_profile 中的 taxonomy_config JSON）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS taxonomy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                position_name TEXT NOT NULL,
+                categories_json TEXT NOT NULL,
+                is_default INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('taxonomy')")
+        tx_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_taxonomy_position" not in tx_indexes:
+            conn.execute("CREATE UNIQUE INDEX idx_taxonomy_position ON taxonomy(position_name)")
+
+        # ── user_question_view 表（用户个人标注：收藏/标签/笔记）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_question_view (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                question_bank_id INTEGER NOT NULL,
+                is_starred INTEGER DEFAULT 0,
+                personal_tags TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('user_question_view')")
+        uqv_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_uqv_user_question" not in uqv_indexes:
+            conn.execute("CREATE UNIQUE INDEX idx_uqv_user_question ON user_question_view(user_id, question_bank_id)")
+        if "idx_uqv_user_starred" not in uqv_indexes:
+            conn.execute("CREATE INDEX idx_uqv_user_starred ON user_question_view(user_id, is_starred)")
+
         # ── users 表增加 current_position_id 列 ──
         users_columns = {row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()}
         if "current_position_id" not in users_columns:
@@ -320,6 +389,49 @@ def init_db():
                 "INSERT INTO user_profile (key, value, updated_at) VALUES ('active_season', '2027届暑期实习', CURRENT_TIMESTAMP) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
             )
+
+        # ── 迁移：taxonomy 从 user_profile JSON → taxonomy 表 ──
+        import json as _json
+        from app.core.prompts import DEFAULT_TAXONOMY
+        tx_count = conn.execute("SELECT COUNT(*) FROM taxonomy").fetchone()[0]
+        if tx_count == 0:
+            # seed 默认 taxonomy
+            conn.execute(
+                "INSERT OR IGNORE INTO taxonomy (position_name, categories_json, is_default) VALUES (?, ?, 1)",
+                (DEFAULT_TAXONOMY["job_position"], _json.dumps(DEFAULT_TAXONOMY["categories"], ensure_ascii=False))
+            )
+            # 从 user_profile 迁移已有的 taxonomy 配置
+            tx_rows = conn.execute("SELECT key, value FROM user_profile WHERE key LIKE 'taxonomy_config%'").fetchall()
+            for tx_row in tx_rows:
+                try:
+                    tc = _json.loads(tx_row['value'])
+                    pos = tc.get('job_position', '')
+                    cats = tc.get('categories', [])
+                    if pos and cats:
+                        conn.execute(
+                            "INSERT OR REPLACE INTO taxonomy (position_name, categories_json) VALUES (?, ?)",
+                            (pos, _json.dumps(cats, ensure_ascii=False))
+                        )
+                except Exception:
+                    pass
+            migrated_tx = conn.execute("SELECT COUNT(*) FROM taxonomy").fetchone()[0]
+            logger.info(f"已迁移 {migrated_tx} 个岗位的 taxonomy 配置到 taxonomy 表")
+
+        # ── 迁移：question_bank.is_starred → user_question_view ──
+        uqv_count = conn.execute("SELECT COUNT(*) FROM user_question_view").fetchone()[0]
+        starred_count = conn.execute("SELECT COUNT(*) FROM question_bank WHERE is_starred = 1").fetchone()[0]
+        if uqv_count == 0 and starred_count > 0:
+            from passlib.context import CryptContext
+            import os
+            admin_username = os.getenv("ADMIN_USERNAME", "sj")
+            admin_row = conn.execute("SELECT id FROM users WHERE username = ?", (admin_username,)).fetchone()
+            if admin_row:
+                conn.execute(
+                    "INSERT INTO user_question_view (user_id, question_bank_id, is_starred) "
+                    "SELECT ?, id, 1 FROM question_bank WHERE is_starred = 1",
+                    (admin_row[0],)
+                )
+                logger.info(f"已迁移 {starred_count} 条收藏记录到 user_question_view（归属管理员）")
 
         # ── 种子管理员 ──
         from passlib.context import CryptContext
@@ -444,25 +556,44 @@ def set_user_job_position(user_id: int, position_id: int):
 
 
 def get_taxonomy_for_position(position: str = None) -> dict:
-    """读取指定岗位的分类配置，fallback 到默认分类"""
+    """从 taxonomy 表读取岗位分类配置，fallback 链: position 行 → default 行 → 常量"""
     import json as _json
     from app.core.prompts import DEFAULT_TAXONOMY
     if position is None:
         position = get_current_job_position()
     try:
         with get_db_connection() as conn:
-            # 按岗位存储的 key: taxonomy_config_{position}
-            safe_key = f"taxonomy_config_{position}"
-            row = conn.execute("SELECT value FROM user_profile WHERE key = ?", (safe_key,)).fetchone()
-            if row and row['value']:
-                return _json.loads(row['value'])
-            # fallback: 兼容旧的单一 key
-            row2 = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
-            if row2 and row2['value']:
-                return _json.loads(row2['value'])
+            # 1. 按岗位名查找
+            row = conn.execute(
+                "SELECT categories_json FROM taxonomy WHERE position_name = ?", (position,)
+            ).fetchone()
+            if row and row['categories_json']:
+                return {"job_position": position, "categories": _json.loads(row['categories_json'])}
+            # 2. fallback 到默认行
+            row2 = conn.execute(
+                "SELECT position_name, categories_json FROM taxonomy WHERE is_default = 1"
+            ).fetchone()
+            if row2 and row2['categories_json']:
+                return {"job_position": row2['position_name'], "categories": _json.loads(row2['categories_json'])}
     except Exception:
         pass
+    # 3. 最终 fallback 到代码常量
     return DEFAULT_TAXONOMY
+
+
+def save_taxonomy_for_position(position_name: str, categories: list):
+    """UPSERT taxonomy 到 taxonomy 表"""
+    import json as _json
+    with get_db_connection() as conn:
+        categories_json = _json.dumps(categories, ensure_ascii=False)
+        conn.execute(
+            "INSERT INTO taxonomy (position_name, categories_json, updated_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(position_name) DO UPDATE SET "
+            "categories_json = excluded.categories_json, updated_at = CURRENT_TIMESTAMP",
+            (position_name, categories_json)
+        )
+        conn.commit()
 
 
 async def run_db(func):

@@ -57,6 +57,7 @@ export function escapeHtml(str) {
 // ── 特定字段验证 ──
 
 const USERNAME_RE = /^[a-zA-Z0-9_一-龥]{2,32}$/
+const RESERVED_USERNAMES = ['admin', 'root', 'system', 'null', 'undefined', 'superuser', 'moderator', 'guest', 'test']
 const URL_RE = /^https?:\/\/[^\s"'<>]+$/i
 const SEASON_RE = /^[一-龥a-zA-Z0-9\s\-_()（）]{1,50}$/
 
@@ -67,6 +68,7 @@ export function validateUsername(username) {
   const s = sanitizeText(username, 32)
   if (!s) return { valid: false, error: '用户名不能为空', value: '' }
   if (!USERNAME_RE.test(s)) return { valid: false, error: '用户名仅允许 2-32 个字母、数字、下划线或中文', value: '' }
+  if (RESERVED_USERNAMES.includes(s.toLowerCase())) return { valid: false, error: '该用户名为系统保留，请更换', value: '' }
   if (containsSqlInjection(s)) return { valid: false, error: '用户名包含非法字符', value: '' }
   return { valid: true, value: s }
 }
@@ -163,6 +165,9 @@ export function validateBaseUrl(value, fieldName = 'Base URL') {
 export function validateFiles(files, { maxCount = 20, maxSizeMB = 10 } = {}) {
   if (files.length > maxCount) return { valid: false, error: `最多上传 ${maxCount} 张图片` }
   for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      return { valid: false, error: `文件 "${file.name}" 不是图片格式，请选择图片文件` }
+    }
     if (file.size > maxSizeMB * 1024 * 1024) {
       return { valid: false, error: `图片 "${file.name}" 超过 ${maxSizeMB}MB 限制` }
     }

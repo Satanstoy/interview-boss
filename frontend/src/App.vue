@@ -410,7 +410,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken } from './utils/http.js'
+import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError } from './utils/http.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 import { useTheme } from './composables/useTheme.js'
@@ -597,7 +597,7 @@ const jdBatchActions = computed(() => [
         const result = await api.batchDeleteData('jd', ids)
         onProgress(result.deleted, ids.length)
         toast.success(`已成功删除 ${result.deleted} 条记录！`)
-      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
       jdSelection.clearSelection()
       fetchTableData()
       fetchAnalytics()
@@ -637,7 +637,7 @@ const interviewBatchActions = computed(() => [
         const result = await api.batchDeleteData('interview', ids)
         onProgress(result.deleted, ids.length)
         toast.success(`已成功删除 ${result.deleted} 条记录！`)
-      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
       interviewSelection.clearSelection()
       fetchTableData()
       fetchAnalytics()
@@ -672,7 +672,7 @@ const masterBatchActions = computed(() => [
           if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
           toast.success(parts.length ? `生成完成：${parts.join('，')}` : '生成完成')
         }
-      } catch (e) { toast.error(`批量生成答案失败: ${e.message}`) }
+      } catch (e) { toast.error('批量生成答案失败：' + getFriendlyError(e)) }
       fetchTableData()
     }
   },
@@ -688,7 +688,7 @@ const masterBatchActions = computed(() => [
         const result = await api.batchDeleteMasterBank(ids)
         onProgress(result.deleted, ids.length)
         toast.success(`已成功删除 ${result.deleted} 道题目！`)
-      } catch (e) { toast.error(`批量删除失败: ${e.message}`) }
+      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
       fetchTableData()
     }
   }
@@ -711,7 +711,7 @@ const fetchTableData = async () => {
     jdSelection.clearSelection()
     interviewSelection.clearSelection()
   } catch (e) {
-    dataLoadError.value = e.message || '数据加载失败，请刷新重试'
+    dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
   } finally {
     isDataLoading.value = false
   }
@@ -780,7 +780,7 @@ const deleteDataRow = async (type, recordId) => {
     toast.success('删除成功')
     fetchTableData()
     fetchAnalytics()
-  } catch (err) { toast.error(`删除失败: ${err.message}`) }
+  } catch (err) { toast.error('删除失败：' + getFriendlyError(err)) }
 }
 
 const reprocessInterview = async (id) => {
@@ -791,7 +791,7 @@ const reprocessInterview = async (id) => {
     toast.success('重新解析完成')
     fetchTableData()
     fetchAnalytics()
-  } catch (e) { toast.error(`失败：${e.message}`) }
+  } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
   finally { reprocessingIds.value[id] = false }
 }
 
@@ -806,7 +806,7 @@ const retagQuestion = async (question) => {
     question.difficulty = data.data.difficulty
     toast.success('分类成功')
     fetchAnalytics()
-  } catch (e) { toast.error(`失败：${e.message}`) }
+  } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
   finally { question._isRetagging = false }
 }
 
@@ -816,7 +816,7 @@ const saveField = async (tableName, recordId, dbColumn, newValue, rowObj, editSt
     rowObj[frontendKey] = newValue
     rowObj[editStateKey] = false
     toast.success('保存成功')
-  } catch (err) { toast.error(`保存失败: ${err.message}`) }
+  } catch (err) { toast.error('保存失败：' + getFriendlyError(err)) }
 }
 
 const saveFieldFromEvent = ({ tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey }) => {
@@ -827,7 +827,7 @@ const toggleStar = async (question) => {
   try {
     const data = await api.toggleStar(question.id)
     question.is_starred = data.is_starred
-  } catch (e) { toast.error(`操作失败：${e.message}`) }
+  } catch (e) { toast.error('操作失败：' + getFriendlyError(e)) }
 }
 
 const generateAnswer = async (question) => {
@@ -836,7 +836,7 @@ const generateAnswer = async (question) => {
     const data = await api.generateAnswer(question.id)
     question.ai_answer = data.answer
     toast.success('答案生成成功')
-  } catch (e) { toast.error(`生成失败：${e.message}`) }
+  } catch (e) { toast.error('生成失败：' + getFriendlyError(e)) }
   finally { question._isLoadingAnswer = false }
 }
 
@@ -848,7 +848,7 @@ const splitQuestion = async ({ question, originalQuestion }) => {
     await api.splitQuestion(question.id, originalQuestion)
     toast.success('题目已拆分为独立题目')
     fetchTableData()
-  } catch (e) { toast.error(`拆分失败：${e.message}`) }
+  } catch (e) { toast.error('拆分失败：' + getFriendlyError(e)) }
 }
 
 const mergeDialogVisible = ref(false)
@@ -871,7 +871,7 @@ const doMergeSearch = async () => {
   try {
     const data = await api.searchMasterBank(mergeSearchQuery.value, mergeSourceQuestionId.value)
     mergeSearchResults.value = data.items || []
-  } catch (e) { toast.error(`搜索失败：${e.message}`) }
+  } catch (e) { toast.error('搜索失败：' + getFriendlyError(e)) }
   finally { mergeSearching.value = false }
 }
 
@@ -884,7 +884,7 @@ const confirmMerge = async (target) => {
     toast.success('题目已合并到目标聚类')
     mergeDialogVisible.value = false
     fetchTableData()
-  } catch (e) { toast.error(`合并失败：${e.message}`) }
+  } catch (e) { toast.error('合并失败：' + getFriendlyError(e)) }
 }
 
 const splitAsNew = async () => {
@@ -895,7 +895,7 @@ const splitAsNew = async () => {
     toast.success('题目已拆分为独立题目')
     mergeDialogVisible.value = false
     fetchTableData()
-  } catch (e) { toast.error(`拆分失败：${e.message}`) }
+  } catch (e) { toast.error('拆分失败：' + getFriendlyError(e)) }
 }
 
 const triggerBuildMasterBank = async () => {
@@ -906,7 +906,7 @@ const triggerBuildMasterBank = async () => {
     toast.success(`重建完成，共 ${data.total_unique} 道题目`)
     fetchTableData()
     fetchAnalytics()
-  } catch (e) { toast.error('重建失败：' + e.message) }
+  } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
   finally { isBuilding.value = false }
 }
 
