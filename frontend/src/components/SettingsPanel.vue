@@ -86,15 +86,19 @@
               <!-- Job position -->
               <div>
                 <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">目标岗位</label>
-                <div class="flex gap-2 flex-wrap">
+                <div class="flex gap-2 flex-wrap mb-2">
                   <button
-                    v-for="pos in defaultPositions" :key="pos"
-                    @click="taxonomy.job_position = pos"
+                    v-for="pos in availablePositions" :key="pos"
+                    @click="onSwitchPosition(pos)"
                     :class="taxonomy.job_position === pos
                       ? 'bg-accent-100 dark:bg-accent-900/40 text-accent-700 dark:text-accent-300 border-accent-300 dark:border-accent-700'
                       : 'bg-white dark:bg-surface-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-accent-300 dark:hover:border-accent-700'"
                     class="px-3 py-1.5 text-xs rounded-lg border transition-all font-medium"
                   >{{ pos }}</button>
+                </div>
+                <div class="flex gap-2">
+                  <input v-model="newPositionInput" placeholder="新增岗位" class="flex-1 border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2 text-xs bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-accent-200 dark:focus:ring-accent-800 focus:border-accent-400 transition-all duration-200" />
+                  <button @click="addPosition" class="text-xs bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 px-3 py-2 rounded-xl hover:bg-accent-100 dark:hover:bg-accent-900/50 transition font-medium whitespace-nowrap border border-accent-200 dark:border-accent-800">添加</button>
                 </div>
               </div>
 
@@ -146,24 +150,20 @@
 
           <!-- Footer -->
           <div class="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-surface-900/80 shrink-0">
-            <div v-if="retagProgress" class="flex items-center gap-2 text-xs">
-              <svg class="w-4 h-4 animate-spin text-accent-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              <span class="text-accent-600 dark:text-accent-400 font-medium">正在重标题库分类... {{ retagProgress.current }}/{{ retagProgress.total }}</span>
-            </div>
-            <p v-else-if="saveMessage" class="text-xs font-medium flex items-center gap-1.5" :class="saveSuccess ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
+            <p v-if="saveMessage" class="text-xs font-medium flex items-center gap-1.5" :class="saveSuccess ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
               <svg v-if="saveSuccess" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               {{ saveMessage }}
             </p>
             <span v-else></span>
             <div class="flex gap-3">
-              <button @click="emit('close')" :disabled="isSaving || !!retagProgress" class="btn-secondary px-5">取消</button>
+              <button @click="emit('close')" :disabled="isSaving" class="btn-secondary px-5">取消</button>
               <button
                 @click="saveProfile"
-                :disabled="isSaving || !!retagProgress"
+                :disabled="isSaving"
                 class="btn-primary px-6"
               >
-                {{ retagProgress ? '重标中...' : isSaving ? '保存中...' : '保存配置' }}
+                {{ isSaving ? '保存中...' : '保存配置' }}
               </button>
             </div>
           </div>
@@ -175,7 +175,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { fetchProfile, updateProfile, batchRetag } from '../api/index.js'
+import { fetchProfile, updateProfile, switchPosition } from '../api/index.js'
 import { validateSeason, validateNumber, validateSettingsField, validateApiKey, validateBaseUrl } from '../utils/validate.js'
 import { useToast } from '../composables/useNotification.js'
 
@@ -186,7 +186,8 @@ const props = defineProps({
   activeSeason: { type: String, default: '' }
 })
 
-const defaultPositions = ['agent开发/大模型应用开发/大模型开发']
+const availablePositions = ref([])
+const newPositionInput = ref('')
 
 const taxonomy = reactive({
   job_position: 'agent开发/大模型应用开发/大模型开发',
@@ -204,7 +205,6 @@ const showLlmKey = ref(false)
 const llmKeySet = ref(false)
 const llmMasked = ref('')
 const editLlmKey = ref(false)
-const retagProgress = ref(null)
 const originalPosition = ref('')
 
 const addCat1 = () => {
@@ -212,6 +212,41 @@ const addCat1 = () => {
 }
 const removeCat1 = (index) => {
   taxonomy.categories.splice(index, 1)
+}
+
+const onSwitchPosition = async (pos) => {
+  if (pos === taxonomy.job_position) return
+  try {
+    await switchPosition(pos)
+    taxonomy.job_position = pos
+    originalPosition.value = pos
+    // 重新加载该岗位的分类
+    const data = await fetchProfile()
+    const s = data.settings
+    if (s.taxonomy_config) {
+      try {
+        const tc = typeof s.taxonomy_config === 'string' ? JSON.parse(s.taxonomy_config) : s.taxonomy_config
+        taxonomy.categories = (tc.categories || []).map(c => ({ ...c, _open: false }))
+      } catch { taxonomy.categories = [] }
+    } else {
+      taxonomy.categories = []
+    }
+    availablePositions.value = data.settings.available_positions || [pos]
+    toast.success(`已切换到岗位：${pos}`)
+  } catch (e) {
+    toast.error(`切换失败: ${e.message}`)
+  }
+}
+
+const addPosition = async () => {
+  const pos = newPositionInput.value.trim()
+  if (!pos) return
+  if (availablePositions.value.includes(pos)) {
+    toast.warning('该岗位已存在')
+    return
+  }
+  newPositionInput.value = ''
+  await onSwitchPosition(pos)
 }
 
 const form = reactive({
@@ -236,11 +271,12 @@ const loadProfile = async () => {
     form.llm_api_key = ''
     seasons.value = data.available_seasons || []
 
-    // 加载分类体系
+    // 加载分类体系和岗位列表
+    availablePositions.value = s.available_positions || ['agent开发/大模型应用开发/大模型开发']
     if (s.taxonomy_config) {
       try {
         const tc = typeof s.taxonomy_config === 'string' ? JSON.parse(s.taxonomy_config) : s.taxonomy_config
-        taxonomy.job_position = tc.job_position || 'agent开发/大模型应用开发/大模型开发'
+        taxonomy.job_position = tc.job_position || s.current_job_position || 'agent开发/大模型应用开发/大模型开发'
         taxonomy.categories = (tc.categories || []).map(c => ({ ...c, _open: false }))
         originalPosition.value = taxonomy.job_position
       } catch { /* ignore parse error */ }
@@ -323,38 +359,9 @@ const saveProfile = async () => {
     form.llm_api_key = ''
     emit('update:activeSeason', form.active_season)
 
-    // 检测岗位变更 → 触发全库重标
-    const positionChanged = taxonomy.job_position !== originalPosition.value
-    if (positionChanged && validCategories.length > 0) {
-      saveMessage.value = '岗位已变更，正在重标题库分类...'
-      saveSuccess.value = true
-      const taxonomyConfig = { job_position: taxonomy.job_position, categories: validCategories }
-      retagProgress.value = { current: 0, total: 0 }
-      try {
-        await new Promise((resolve, reject) => {
-          batchRetag(taxonomyConfig, (event) => {
-            if (event.type === 'init') {
-              retagProgress.value = { current: 0, total: event.total }
-            } else if (event.type === 'progress') {
-              retagProgress.value = { current: event.current, total: event.total }
-            } else if (event.type === 'done') {
-              retagProgress.value = null
-              saveMessage.value = `分类体系已更新，已重标 ${event.retagged} 道题目`
-              originalPosition.value = taxonomy.job_position
-              resolve()
-            }
-          }).catch(reject)
-        })
-      } catch (e) {
-        retagProgress.value = null
-        saveMessage.value = `重标失败: ${e.message}`
-        saveSuccess.value = false
-      }
-    } else {
-      saveMessage.value = '配置已保存'
-      saveSuccess.value = true
-      originalPosition.value = taxonomy.job_position
-    }
+    saveMessage.value = '配置已保存'
+    saveSuccess.value = true
+    originalPosition.value = taxonomy.job_position
     setTimeout(() => { saveMessage.value = '' }, 3000)
   } catch (e) {
     saveMessage.value = `保存失败: ${e.message}`

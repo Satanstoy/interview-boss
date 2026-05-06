@@ -30,3 +30,12 @@ class EvaluateAnswerRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     settings: Dict[str, str]
+
+
+class SplitQuestionRequest(BaseModel):
+    original_question: str
+
+
+class MergeOriginalQuestionRequest(BaseModel):
+    original_question: str
+    target_id: int

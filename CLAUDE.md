@@ -10,7 +10,7 @@ InterviewBoss is a Chinese-language AI-powered interview prep platform. It inges
 
 ### Backend (Python / FastAPI)
 ```bash
-cd /root/sj/multimodal-parser
+cd /root/sj/interview-boss
 uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000
 ```
 

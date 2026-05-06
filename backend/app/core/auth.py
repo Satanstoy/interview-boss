@@ -122,7 +122,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
     def _query():
         with get_db_connection() as conn:
-            return conn.execute("SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)).fetchone()
+            return conn.execute("SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE id = ?", (user_id,)).fetchone()
 
     user = await run_db(_query)
     if not user:

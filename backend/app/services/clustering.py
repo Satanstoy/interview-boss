@@ -14,6 +14,8 @@ FORBIDDEN_PATTERNS = [
     ("badcase", "幻觉"),           # 修具体bug ≠ 防模型编造
     ("海量数据", "高并发"),         # 数据量级 ≠ Agent并发场景
     ("bean的生命周期", "循环依赖"),  # 生命周期 ≠ 三级缓存
+    ("b 树", "b+ 树"),             # B树 ≠ B+树（不同数据结构）
+    ("b树", "b+树"),               # 无空格变体
 ]
 
 # ── 聚类 prompt（cat2 内部使用） ──
@@ -113,19 +115,39 @@ MATCH_PROMPT = """你是一个面试题分析专家。以下是一个细分领�
 {{"matches": [{{"new_id": 新题号, "cluster_idx": 匹配的聚类序号（从0开始）}}], "unmatched": [无匹配的新题号]}}"""
 
 # ── 统一问题生成 prompt ──
-UNIFIED_QUESTION_PROMPT = """你是一个面试题分析专家。以下是一组**考察同一个知识点**的面试题目，请生成一个**统一的、清晰的**问题来概括这组题目。
+UNIFIED_QUESTION_PROMPT = """你是一个面试题分析专家。以下是一组**考察同一个知识点**的面试题目及其来源背景。
+
+**第一步：分析核心考察点**
+这些题目虽然问法不同，但面试官真正想考察的技术知识点是什么？用一句话概括。
+
+**第二步：生成统一问题**
+基于上述考察点，生成一个规范的面试题。
 
 要求：
-1. 统一问题应该能让候选人清楚知道要回答什么
-2. 保留关键的技术术语和上下文
-3. 不要太笼统（如"介绍一下RAG"），也不要太具体（如某个项目的细节）
-4. 长度控制在15-40字
+1. 必须以"请…"或"如何…"开头，是一道独立完整的面试题
+2. 保留关键技术术语，让候选人清楚知道要回答什么
+3. 长度控制在15-40字
 
-题目列表：
-{questions}
+禁止：
+✗ 口语化追问："你有没有…""这些处理完之后…""能不能讲讲…"
+✗ 太笼统："介绍一下RAG""说说你的项目"
+✗ 包含第一/二人称代词："你""我"
+
+好的示例：
+✓ "请说明RAG系统中chunking策略的选择与优化方法"
+✓ "请解释Agent记忆系统的架构设计与管理方式"
+✓ "如何评估RAG系统的效果，有哪些量化指标"
+
+坏的示例：
+✗ "这些处理完成后，你有验证过RAG的准确度吗？"（口语追问，不是独立题目）
+✗ "介绍一下Memory？"（太笼统）
+✗ "有没有系统的评估你的项目"（口语化，缺少技术指向）
+
+题目列表（含来源背景）：
+{questions_with_sources}
 
 请严格按以下 JSON 格式返回，不要有任何其他文字：
-{{"unified_question": "统一的问题文本"}}"""
+{{"core_point": "核心考察点", "unified_question": "统一的问题文本"}}"""
 
 
 def _format_questions(rows):
@@ -138,12 +160,30 @@ async def _cluster_batch(rows, prompt_template, merged_refs=""):
     return _extract_json(content).get("clusters", [])
 
 
-async def generate_unified_question(questions: list[str]) -> str:
-    """为一组同义问题生成统一的代表问题"""
+async def generate_unified_question(questions: list[str], sources_context: list[dict] | None = None) -> str:
+    """为一组同义问题生成统一的代表问题
+
+    Args:
+        questions: 题目文本列表
+        sources_context: 可选的来源上下文，每个 dict 含 question/company/round
+    """
     if len(questions) == 1:
         return questions[0]
-    questions_text = "\n".join(f"- {q}" for q in questions)
-    prompt = UNIFIED_QUESTION_PROMPT.format(questions=questions_text)
+
+    # 构建带来源的题目文本
+    if sources_context:
+        lines = []
+        for sc in sources_context:
+            q = sc.get("question", "")
+            company = sc.get("company", "")
+            round_ = sc.get("round", "")
+            suffix = f"（{company} / {round_}）" if company else ""
+            lines.append(f"- {q}{suffix}")
+        questions_with_sources = "\n".join(lines)
+    else:
+        questions_with_sources = "\n".join(f"- {q}" for q in questions)
+
+    prompt = UNIFIED_QUESTION_PROMPT.format(questions_with_sources=questions_with_sources)
     try:
         content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"})
         result = _extract_json(content)

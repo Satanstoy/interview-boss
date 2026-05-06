@@ -5,7 +5,7 @@
       <div class="max-w-[1440px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <h1 class="text-lg lg:text-xl font-extrabold bg-gradient-to-r from-primary-600 via-accent-600 to-primary-500 bg-clip-text text-transparent tracking-tight">InterviewBoss</h1>
         <div class="flex items-center gap-3">
-          <span v-if="activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 px-3 py-1">
+          <span v-if="currentUser && activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 px-3 py-1">
             {{ activeSeason }}
           </span>
           <UserMenu
@@ -16,11 +16,6 @@
             @bank-mode-changed="handleBankModeChanged"
             @show-review="showReviewPanel = true"
           />
-          <button
-            v-else
-            @click="showLoginModal = true"
-            class="btn-primary text-sm"
-          >登录</button>
           <!-- Dark mode toggle -->
           <button
             @click="toggleDark()"
@@ -35,6 +30,7 @@
             </svg>
           </button>
           <button
+            v-if="currentUser"
             @click="showSettings = true"
             class="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
             title="系统配置"
@@ -53,43 +49,48 @@
       @update:active-season="activeSeason = $event"
     />
 
-    <!-- Login gate: modernized welcome screen -->
-    <div v-if="!currentUser" class="relative min-h-[calc(100vh-56px)] flex items-center justify-center overflow-hidden">
+    <!-- Login gate: split layout -->
+    <div v-if="!currentUser" class="relative min-h-[calc(100vh-56px)] overflow-hidden">
       <div class="absolute inset-0 overflow-hidden pointer-events-none">
         <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-200/30 dark:bg-primary-900/20 rounded-full blur-3xl animate-pulse-slow"></div>
         <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-accent-200/30 dark:bg-accent-900/20 rounded-full blur-3xl animate-pulse-slow" style="animation-delay: 1.5s"></div>
       </div>
 
-      <div class="relative text-center max-w-lg mx-auto px-4 animate-fade-in">
-        <div class="w-24 h-24 mx-auto mb-8 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow transform hover:scale-105 transition-transform duration-300">
-          <svg class="w-12 h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-          </svg>
-        </div>
-
-        <h2 class="text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-3">
-          欢迎使用 InterviewBoss
-        </h2>
-        <p class="text-gray-500 dark:text-gray-400 mb-10 leading-relaxed text-lg">
-          AI 驱动的面试准备平台
-        </p>
-
-        <div class="grid grid-cols-3 gap-4 mb-10">
-          <div v-for="feature in loginFeatures" :key="feature.label"
-            class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/60 dark:bg-surface-800/60 backdrop-blur-sm border border-gray-100 dark:border-gray-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
-              <span class="text-lg">{{ feature.icon }}</span>
+      <div class="relative flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
+        <!-- Left: brand showcase -->
+        <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0 animate-fade-in">
+          <div class="max-w-md mx-auto lg:mx-0">
+            <div class="w-20 h-20 mb-8 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow transform hover:scale-105 transition-transform duration-300">
+              <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
             </div>
-            <span class="text-xs font-semibold text-gray-600 dark:text-gray-400">{{ feature.label }}</span>
+
+            <h2 class="text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-3">
+              欢迎使用 InterviewBoss
+            </h2>
+            <p class="text-gray-500 dark:text-gray-400 mb-10 leading-relaxed text-lg">
+              AI 驱动的面试准备平台
+            </p>
+
+            <div class="grid grid-cols-3 gap-4">
+              <div v-for="feature in loginFeatures" :key="feature.label"
+                class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/60 dark:bg-surface-800/60 backdrop-blur-sm border border-gray-100 dark:border-gray-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
+                  <span class="text-lg">{{ feature.icon }}</span>
+                </div>
+                <span class="text-xs font-semibold text-gray-600 dark:text-gray-400">{{ feature.label }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <button
-          @click="showLoginModal = true"
-          class="btn-primary px-12 py-3.5 text-base hover:shadow-glow transform hover:scale-[1.03] transition-all duration-300"
-        >立即登录</button>
-
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-4">登录后即可使用全部功能</p>
+        <!-- Right: login form -->
+        <div class="flex items-center justify-center px-8 lg:px-16 py-12 lg:py-0 lg:w-[440px] xl:w-[480px]">
+          <div class="w-full max-w-sm animate-fade-in">
+            <LoginModal embedded @login-success="handleLoginSuccess" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -205,14 +206,25 @@
                 :selected-count="jdSelection.selectedCount.value"
                 :is-selected="(id) => jdSelection.selectedIds.value.has(id)"
                 :batch-actions="jdBatchActions"
+                :current-page="jdCurrentPage"
+                :page-size="jdPageSize"
                 @toggle-select-all="jdSelection.toggleSelectAll()"
                 @invert-selection="jdSelection.invertSelection()"
                 @toggle-item="jdSelection.toggleItem($event)"
+                @update:current-page="jdCurrentPage = $event"
+                @update:page-size="jdPageSize = $event"
               >
                 <template #actions="{ row }">
-                  <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
-                  <span v-else class="text-gray-300 dark:text-gray-600 mr-3">-</span>
-                  <button @click="deleteDataRow('jd', row.id)" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">删除</button>
+                  <div class="flex items-center justify-center gap-1">
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                      <span class="text-[10px] leading-tight">链接</span>
+                    </a>
+                    <button @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                      <span class="text-[10px] leading-tight">删除</span>
+                    </button>
+                  </div>
                 </template>
                 <template #cell-company="{ row }">
                   <InlineEdit :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
@@ -246,21 +258,36 @@
                 :selected-count="interviewSelection.selectedCount.value"
                 :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
                 :batch-actions="interviewBatchActions"
+                :current-page="interviewCurrentPage"
+                :page-size="interviewPageSize"
                 @toggle-select-all="interviewSelection.toggleSelectAll()"
                 @invert-selection="interviewSelection.invertSelection()"
                 @toggle-item="interviewSelection.toggleItem($event)"
+                @update:current-page="interviewCurrentPage = $event"
+                @update:page-size="interviewPageSize = $event"
               >
                 <template #actions="{ row }">
-                  <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-bold mr-2 disabled:opacity-50" title="重新提取并打标">
-                    <svg v-if="reprocessingIds[row.id]" class="animate-spin inline-block w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    <span v-else>重新分析</span>
-                  </button>
-                  <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="text-blue-500 hover:underline mr-3">链接</a>
-                  <span v-else class="text-gray-300 dark:text-gray-600 mr-3">-</span>
-                  <button @click="deleteDataRow('interview', row.id)" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">删除</button>
+                  <div class="flex items-center justify-center gap-1">
+                    <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1 disabled:opacity-50" title="重新提取并打标">
+                      <svg v-if="reprocessingIds[row.id]" class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                      <span class="text-[10px] leading-tight">分析</span>
+                    </button>
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                      <span class="text-[10px] leading-tight">链接</span>
+                    </a>
+                    <button @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                      <span class="text-[10px] leading-tight">删除</span>
+                    </button>
+                  </div>
                 </template>
                 <template #cell-company="{ row }">
                   <InlineEdit :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
+                </template>
+                <template #cell-season="{ row }">
+                  <InlineEdit :row="row" field="season" db-column="season" table-name="interview" @save="saveField" />
                 </template>
                 <template #cell-round="{ row }">
                   <InlineEdit :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
@@ -301,6 +328,7 @@
                 :is-selected="isMasterSelected"
                 :batch-actions="masterBatchActions"
                 :practiced-questions="practicedQuestions"
+                :bank-mode="currentUser?.bank_mode"
                 @toggle-select-all="masterSelection.toggleSelectAll()"
                 @invert-selection="masterSelection.invertSelection()"
                 @toggle-item="masterSelection.toggleItem($event)"
@@ -311,6 +339,8 @@
                 @expand-all=""
                 @collapse-all=""
                 @practice="practiceQuestion = $event"
+                @split-question="splitQuestion"
+                @start-merge="startMerge"
               />
             </div>
           </Transition>
@@ -324,6 +354,57 @@
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" />
+
+    <!-- Merge Question Dialog -->
+    <Teleport to="body">
+      <div v-if="mergeDialogVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="mergeDialogVisible = false">
+        <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+          <div class="p-5 border-b border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100">移动题目到目标聚类</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">选择要移动到的目标题目，或独立为新聚类</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 bg-gray-50 dark:bg-surface-700 rounded-lg p-2 truncate">
+              <span class="font-medium">当前题目：</span>{{ mergeSourceOriginalQ }}
+            </p>
+          </div>
+          <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+            <button @click="splitAsNew" class="w-full text-left p-3 rounded-xl border-2 border-dashed border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 hover:border-orange-400 dark:hover:border-orange-600 transition-all duration-200">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+                <span class="text-sm font-medium text-orange-700 dark:text-orange-400">成为新的独立聚类</span>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-6">从当前聚类中拆出，作为独立题目</p>
+            </button>
+          </div>
+          <div class="p-5 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex gap-2">
+              <input v-model="mergeSearchQuery" @keyup.enter="doMergeSearch"
+                class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-surface-900 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                placeholder="搜索目标题目..." />
+              <button @click="doMergeSearch" :disabled="mergeSearching"
+                class="btn-primary px-4 py-2 text-sm disabled:opacity-50">
+                {{ mergeSearching ? '搜索中...' : '搜索' }}
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 overflow-y-auto p-5 custom-scrollbar">
+            <div v-if="mergeSearchResults.length === 0" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+              {{ mergeSearching ? '搜索中...' : '输入关键词搜索目标题目' }}
+            </div>
+            <div v-else class="space-y-2">
+              <button v-for="item in mergeSearchResults" :key="item.id"
+                @click="confirmMerge(item)"
+                class="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 transition-all duration-200">
+                <div class="text-sm font-medium text-gray-800 dark:text-gray-200 line-clamp-2">{{ item.question }}</div>
+                <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">频率: {{ item.frequency }} | ID: {{ item.id }}</div>
+              </button>
+            </div>
+          </div>
+          <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+            <button @click="mergeDialogVisible = false" class="btn-secondary px-4 py-2 text-sm">取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -373,6 +454,10 @@ const showStarredOnly = ref(false)
 const filterSeason = ref('')
 const reprocessingIds = ref({})
 const mockInterviewRef = ref(null)
+const jdCurrentPage = ref(1)
+const jdPageSize = ref(20)
+const interviewCurrentPage = ref(1)
+const interviewPageSize = ref(20)
 const activeSeason = ref('')
 const showSettings = ref(false)
 const practiceStats = ref({})
@@ -409,20 +494,21 @@ const skeletonCards = [
 
 // ── Column definitions ──
 const jdColumns = [
-  { key: 'company', label: '公司', frontendKey: '公司' },
-  { key: 'job_title', label: '岗位名称', frontendKey: '岗位名称' },
-  { key: 'salary', label: '薪资范围', frontendKey: '薪资范围' },
-  { key: 'tech_stack', label: '核心技术', frontendKey: '核心技术要求', cellClass: 'whitespace-pre-wrap break-words min-w-[200px]' },
-  { key: 'bonus', label: '加分项', frontendKey: '加分项' }
+  { key: 'company', label: '公司', frontendKey: '公司', width: '12%' },
+  { key: 'job_title', label: '岗位名称', frontendKey: '岗位名称', width: '15%' },
+  { key: 'salary', label: '薪资范围', frontendKey: '薪资范围', width: '10%' },
+  { key: 'tech_stack', label: '核心技术', frontendKey: '核心技术要求', width: '28%', cellClass: 'whitespace-pre-wrap' },
+  { key: 'bonus', label: '加分项', frontendKey: '加分项', width: '22%' },
+  { key: 'season', label: '招聘季', frontendKey: 'season', width: '8%' }
 ]
 
 const interviewColumns = [
-  { key: 'company', label: '公司', frontendKey: '公司' },
-  { key: 'round', label: '面试轮次', frontendKey: '面试轮次' },
-  { key: 'focus', label: '考察重点', frontendKey: '考察重点', cellClass: 'whitespace-pre-wrap break-words min-w-[120px]' },
-  { key: 'questions_list', label: '具体题目清单', frontendKey: '具体题目清单', cellClass: 'whitespace-pre-wrap break-words min-w-[300px]' },
-  { key: 'difficulty', label: '难度', frontendKey: '难易程度' },
-  { key: 'season', label: '招聘季', frontendKey: 'season' }
+  { key: 'company', label: '公司', frontendKey: '公司', width: '10%' },
+  { key: 'season', label: '招聘季', frontendKey: 'season', width: '8%' },
+  { key: 'round', label: '面试轮次', frontendKey: '面试轮次', width: '8%' },
+  { key: 'focus', label: '考察重点', frontendKey: '考察重点', width: '18%', cellClass: 'whitespace-pre-wrap' },
+  { key: 'questions_list', label: '具体题目清单', frontendKey: '具体题目清单', width: '40%', cellClass: 'whitespace-pre-wrap' },
+  { key: 'difficulty', label: '难度', frontendKey: '难易程度', width: '11%' }
 ]
 
 // ── Computed ──
@@ -754,6 +840,64 @@ const generateAnswer = async (question) => {
   finally { question._isLoadingAnswer = false }
 }
 
+// ── Cluster editing (per original question) ──
+const splitQuestion = async ({ question, originalQuestion }) => {
+  const shortQ = originalQuestion.length > 30 ? originalQuestion.slice(0, 30) + '...' : originalQuestion
+  if (!await showConfirm(`确定要将「${shortQ}」从当前聚类中拆出为独立题目吗？`, { title: '拆分为独立题目' })) return
+  try {
+    await api.splitQuestion(question.id, originalQuestion)
+    toast.success('题目已拆分为独立题目')
+    fetchTableData()
+  } catch (e) { toast.error(`拆分失败：${e.message}`) }
+}
+
+const mergeDialogVisible = ref(false)
+const mergeSourceQuestionId = ref(null)
+const mergeSourceOriginalQ = ref('')
+const mergeSearchQuery = ref('')
+const mergeSearchResults = ref([])
+const mergeSearching = ref(false)
+
+const startMerge = ({ question, originalQuestion }) => {
+  mergeSourceQuestionId.value = question.id
+  mergeSourceOriginalQ.value = originalQuestion
+  mergeSearchQuery.value = ''
+  mergeSearchResults.value = []
+  mergeDialogVisible.value = true
+}
+
+const doMergeSearch = async () => {
+  mergeSearching.value = true
+  try {
+    const data = await api.searchMasterBank(mergeSearchQuery.value, mergeSourceQuestionId.value)
+    mergeSearchResults.value = data.items || []
+  } catch (e) { toast.error(`搜索失败：${e.message}`) }
+  finally { mergeSearching.value = false }
+}
+
+const confirmMerge = async (target) => {
+  const shortQ = mergeSourceOriginalQ.value.length > 20 ? mergeSourceOriginalQ.value.slice(0, 20) + '...' : mergeSourceOriginalQ.value
+  const shortT = target.question.length > 20 ? target.question.slice(0, 20) + '...' : target.question
+  if (!await showConfirm(`确定将「${shortQ}」合并到「${shortT}」吗？`, { title: '确认合并', variant: 'danger' })) return
+  try {
+    await api.mergeQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value, target.id)
+    toast.success('题目已合并到目标聚类')
+    mergeDialogVisible.value = false
+    fetchTableData()
+  } catch (e) { toast.error(`合并失败：${e.message}`) }
+}
+
+const splitAsNew = async () => {
+  const shortQ = mergeSourceOriginalQ.value.length > 30 ? mergeSourceOriginalQ.value.slice(0, 30) + '...' : mergeSourceOriginalQ.value
+  if (!await showConfirm(`确定要将「${shortQ}」从当前聚类中拆出为独立题目吗？`, { title: '拆分为独立题目' })) return
+  try {
+    await api.splitQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value)
+    toast.success('题目已拆分为独立题目')
+    mergeDialogVisible.value = false
+    fetchTableData()
+  } catch (e) { toast.error(`拆分失败：${e.message}`) }
+}
+
 const triggerBuildMasterBank = async () => {
   if (!await showConfirm('将重新整理全部题目，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
@@ -774,8 +918,6 @@ const initAuth = async () => {
     currentUser.value = refreshResult.user
     loadAllData()
     loadPendingCount()
-  } else {
-    showLoginModal.value = true
   }
 }
 

@@ -29,11 +29,11 @@ def _check_duplicate_url_sync(url: str) -> bool:
     return False
 
 
-def _insert_jd(saved_url: str, data: dict, tech_stack: str):
+def _insert_jd(saved_url: str, data: dict, tech_stack: str, season: str = ""):
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO jd (url, company, job_title, salary, tech_stack, bonus) VALUES (?, ?, ?, ?, ?, ?)",
-            (saved_url, data.get("公司", "未提供"), data.get("岗位名称", "未提供"), data.get("薪资范围", "未提供"), tech_stack, data.get("加分项", "未提供"))
+            "INSERT INTO jd (url, company, job_title, salary, tech_stack, bonus, season) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (saved_url, data.get("公司", "未提供"), data.get("岗位名称", "未提供"), data.get("薪资范围", "未提供"), tech_stack, data.get("加分项", "未提供"), season)
         )
         conn.commit()
 

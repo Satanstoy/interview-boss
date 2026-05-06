@@ -4,13 +4,44 @@ from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db, get_user_job_position
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 
+
+def _build_analytics_bank_filter(user: dict):
+    """构建 analytics 查询的题库过滤条件（复用 bank_mode + job_position 逻辑）
+
+    Returns:
+        (join_clause, where_clause, params)
+    """
+    mode = user.get('bank_mode', 'public')
+    uid = user['id']
+    pos_id, pos_name = get_user_job_position(uid)
+
+    # 使用 question_position 关联表
+    join_clause = "JOIN question_position qp ON qb.id = qp.question_id AND qp.position_id = ?"
+    join_params = [pos_id] if pos_id else []
+
+    if not pos_id:
+        # fallback: 旧的 job_position 列
+        join_clause = ""
+        if mode == 'personal':
+            return "", "WHERE qb.owner_id = ? AND qb.job_position = ?", [uid, pos_name]
+        elif mode == 'mixed':
+            return "", "WHERE (qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ? AND qb.job_position = ?", [uid, pos_name]
+        else:
+            return "", "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.job_position = ?", [pos_name]
+
+    if mode == 'personal':
+        return join_clause, "WHERE qb.owner_id = ?", join_params + [uid]
+    elif mode == 'mixed':
+        return join_clause, "WHERE (qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?", join_params + [uid]
+    else:
+        return join_clause, "WHERE qb.owner_id IS NULL AND qb.status = 'approved'", join_params
 
 @router.get("/api/analytics")
 async def get_analytics(user: dict = Depends(get_current_user)):
@@ -39,22 +70,13 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
 
     def _query():
         with get_db_connection() as conn:
-            # 根据用户 bank_mode 决定题库范围
-            mode = user.get('bank_mode', 'public')
-            if mode == 'personal':
-                bank_where = "WHERE owner_id = ?"
-                bank_params = [uid]
-            elif mode == 'mixed':
-                bank_where = "WHERE (owner_id IS NULL AND status = 'approved') OR owner_id = ?"
-                bank_params = [uid]
-            else:
-                bank_where = "WHERE owner_id IS NULL AND status = 'approved'"
-                bank_params = []
+            # 根据用户 bank_mode + job_position 决定题库范围
+            join_clause, bank_where, bank_params = _build_analytics_bank_filter(user)
 
             # Master bank difficulty distribution
             diff_counts = {}
             for r in conn.execute(
-                f"SELECT difficulty, COUNT(*) as cnt FROM question_bank {bank_where} GROUP BY difficulty", bank_params
+                f"SELECT qb.difficulty, COUNT(*) as cnt FROM question_bank qb {join_clause} {bank_where} GROUP BY qb.difficulty", bank_params
             ).fetchall():
                 diff_counts[r['difficulty'] or '未标注'] = r['cnt']
 
@@ -220,8 +242,10 @@ async def get_knowledge_graph(user: dict = Depends(get_current_user)):
 
     def _query():
         with get_db_connection() as conn:
+            join_clause, bank_where, bank_params = _build_analytics_bank_filter(user)
             rows = conn.execute(
-                "SELECT cat1, cat2, tags FROM question_bank WHERE tags IS NOT NULL AND tags != '' AND (owner_id IS NULL AND status = 'approved')"
+                f"SELECT qb.cat1, qb.cat2, qb.tags FROM question_bank qb {join_clause} {bank_where} AND qb.tags IS NOT NULL AND qb.tags != ''",
+                bank_params
             ).fetchall()
         return [dict(r) for r in rows]
 

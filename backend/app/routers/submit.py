@@ -8,7 +8,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Background
 from app.core.config import LLM_MODEL, MAX_FILE_SIZE
 from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
 from app.services.llm import client, _should_use_response_format, _extract_json
 from app.services.utils import encode_image, normalize_category
@@ -77,10 +77,12 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
         return
 
     # 加载已有公共题库，按 cat2 构建聚类上下文
+    current_pos = get_current_job_position()
     def _load_existing():
         with get_db_connection() as conn:
             rows = conn.execute(
-                "SELECT id, question, cat2, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved'"
+                "SELECT id, question, cat2, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved' AND job_position = ?",
+                (current_pos,)
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -179,8 +181,8 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
 
                 sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
                 cursor.execute(
-                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'approved')",
-                    (q_text, cat1, tags, diff_tag, sources_json, admin_id)
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'approved', ?)",
+                    (q_text, cat1, tags, diff_tag, sources_json, admin_id, current_pos)
                 )
                 new_id = cursor.lastrowid
                 bg_tasks.add_task(background_generate_answer, new_id, q_text)
@@ -251,7 +253,7 @@ async def submit_data(
         if doc_type == "JD":
             _ts = data.get("核心技术要求", [])
             tech_stack = "\n".join(f"{i+1}. {item}" for i, item in enumerate(_ts)) if _ts else "未提供"
-            await run_db(lambda: _insert_jd(saved_url, data, tech_stack))
+            await run_db(lambda: _insert_jd(saved_url, data, tech_stack, season.strip()))
             return {"status": "success", "type": "JD", "saved_data": data}
 
         elif doc_type == "Interview":
@@ -310,18 +312,8 @@ async def submit_data(
                         except Exception as e:
                             logger.warning(f"字段补全重试失败: {e}")
 
-                    # 读取用户自定义分类体系
-                    def _get_taxonomy():
-                        with get_db_connection() as conn:
-                            row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
-                            if row and row['value']:
-                                try:
-                                    return json.loads(row['value'])
-                                except json.JSONDecodeError:
-                                    pass
-                            return None
-
-                    taxonomy_config = await run_db(_get_taxonomy)
+                    # 读取当前岗位的分类体系
+                    taxonomy_config = await run_db(get_taxonomy_for_position)
 
                     # 并行执行：重试补全 + 题目标签化
                     _, tagged_rows = await asyncio.gather(

@@ -133,13 +133,26 @@ def _issue_token_pair(user: dict, response: Response, remember: bool = False) ->
     refresh_token, jti = create_refresh_token(token_data, days=days)
     store_refresh_token(user['id'], jti, days=days, remember=remember)
     _set_refresh_cookie(response, refresh_token, remember=remember)
+    # 获取岗位名称
+    pos_name = ""
+    pos_id = user.get('current_position_id')
+    if pos_id:
+        with get_db_connection() as conn:
+            jp = conn.execute("SELECT name FROM job_positions WHERE id = ?", (pos_id,)).fetchone()
+            if jp:
+                pos_name = jp['name']
+    if not pos_name:
+        from app.db.connection import get_current_job_position
+        pos_name = get_current_job_position()
     return {
         "token": access_token,
         "user": {
             "id": user['id'],
             "username": user['username'],
             "is_admin": bool(user.get('is_admin', False)),
-            "bank_mode": user.get('bank_mode', 'public') or 'public'
+            "bank_mode": user.get('bank_mode', 'public') or 'public',
+            "current_position_id": pos_id,
+            "current_position": pos_name
         }
     }
 
@@ -180,7 +193,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, password_hash, is_admin, bank_mode FROM users WHERE username = ?",
+                "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id FROM users WHERE username = ?",
                 (req.username,)
             ).fetchone()
 
@@ -219,7 +232,7 @@ async def refresh_token(request: Request, response: Response, rt: str = Depends(
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, is_admin, bank_mode FROM users WHERE id = ?", (user_id,)
+                "SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE id = ?", (user_id,)
             ).fetchone()
 
     user = await run_db(_query)

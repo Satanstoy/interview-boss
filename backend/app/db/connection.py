@@ -178,6 +178,13 @@ def init_db():
         ''')
 
         # ── 性能索引 ──
+        # ── 迁移：jd 表添加 season 列 ──
+        jd_columns = {row[1] for row in cursor.execute("PRAGMA table_info('jd')").fetchall()}
+        if "season" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN season TEXT DEFAULT ''")
+            conn.execute("UPDATE jd SET season = '2027届暑期实习' WHERE season IS NULL OR season = ''")
+            logger.info("已为 jd 表添加 season 列并回填默认招聘季")
+
         cursor.execute("PRAGMA index_list('jd')")
         jd_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_jd_url" not in jd_indexes:
@@ -210,9 +217,109 @@ def init_db():
         if "original_question_sources" not in qb_columns:
             conn.execute("ALTER TABLE question_bank ADD COLUMN original_question_sources TEXT DEFAULT '[]'")
 
+        # ── 迁移：添加 job_position 列（多岗位隔离）──
+        if "job_position" not in qb_columns:
+            conn.execute("ALTER TABLE question_bank ADD COLUMN job_position TEXT DEFAULT ''")
+            # 回填现有数据为当前岗位
+            from app.core.prompts import DEFAULT_TAXONOMY
+            current_pos = DEFAULT_TAXONOMY["job_position"]
+            pos_row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+            if pos_row and pos_row[0]:
+                try:
+                    import json as _json
+                    tc = _json.loads(pos_row[0])
+                    current_pos = tc.get("job_position", current_pos)
+                except Exception:
+                    pass
+            conn.execute("UPDATE question_bank SET job_position = ? WHERE job_position IS NULL OR job_position = ''", (current_pos,))
+            logger.info(f"已为 question_bank 表添加 job_position 列并回填为 {current_pos}")
+        cursor.execute("PRAGMA index_list('question_bank')")
+        qb_idx = [row[1] for row in cursor.fetchall()]
+        if "idx_qb_job_position" not in qb_idx:
+            conn.execute("CREATE INDEX idx_qb_job_position ON question_bank(job_position)")
+
+        # ── 初始化 current_job_position ──
+        pos_exists = conn.execute("SELECT 1 FROM user_profile WHERE key = 'current_job_position'").fetchone()
+        if not pos_exists:
+            from app.core.prompts import DEFAULT_TAXONOMY
+            conn.execute(
+                "INSERT INTO user_profile (key, value) VALUES (?, ?)",
+                ("current_job_position", DEFAULT_TAXONOMY["job_position"])
+            )
+
+        # ── job_positions 表（岗位实体）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS job_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # ── question_position 关联表（题目-岗位多对多）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS question_position (
+                question_id INTEGER NOT NULL,
+                position_id INTEGER NOT NULL,
+                PRIMARY KEY (question_id, position_id),
+                FOREIGN KEY (question_id) REFERENCES question_bank(id) ON DELETE CASCADE,
+                FOREIGN KEY (position_id) REFERENCES job_positions(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute("PRAGMA index_list('question_position')")
+        qp_indexes = [row[1] for row in cursor.fetchall()]
+        if "idx_qp_position" not in qp_indexes:
+            conn.execute("CREATE INDEX idx_qp_position ON question_position(position_id)")
+
+        # ── users 表增加 current_position_id 列 ──
+        users_columns = {row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()}
+        if "current_position_id" not in users_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN current_position_id INTEGER REFERENCES job_positions(id)")
+
+        # ── 数据迁移：question_bank.job_position → job_positions + question_position ──
+        jp_count = conn.execute("SELECT COUNT(*) FROM job_positions").fetchone()[0]
+        if jp_count == 0:
+            # 从 question_bank 提取所有不重复的岗位
+            positions = conn.execute(
+                "SELECT DISTINCT job_position FROM question_bank WHERE job_position IS NOT NULL AND job_position != ''"
+            ).fetchall()
+            for row in positions:
+                pos_name = row[0]
+                conn.execute("INSERT OR IGNORE INTO job_positions (name) VALUES (?)", (pos_name,))
+                pos_id = conn.execute("SELECT id FROM job_positions WHERE name = ?", (pos_name,)).fetchone()[0]
+                # 为属于该岗位的所有题目建立关联
+                conn.execute(
+                    "INSERT OR IGNORE INTO question_position (question_id, position_id) "
+                    "SELECT id, ? FROM question_bank WHERE job_position = ?", (pos_id, pos_name)
+                )
+            migrated_count = conn.execute("SELECT COUNT(*) FROM question_position").fetchone()[0]
+            logger.info(f"已迁移 {len(positions)} 个岗位、{migrated_count} 条题目-岗位关联到 job_positions/question_position 表")
+
+        # ── 迁移：user_profile.current_job_position → users.current_position_id ──
+        users_without_pos = conn.execute("SELECT id FROM users WHERE current_position_id IS NULL").fetchall()
+        if users_without_pos:
+            cur_pos_row = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+            if cur_pos_row and cur_pos_row[0]:
+                pos_id_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (cur_pos_row[0],)).fetchone()
+                if pos_id_row:
+                    conn.execute("UPDATE users SET current_position_id = ? WHERE current_position_id IS NULL", (pos_id_row[0],))
+                    logger.info(f"已将 {len(users_without_pos)} 个用户的 current_position_id 迁移为 {cur_pos_row[0]}")
+
         # ── 迁移：清理 embedding 相关数据 ──
         conn.execute("UPDATE question_bank SET vector = NULL WHERE vector IS NOT NULL")
         conn.execute("DELETE FROM user_profile WHERE key IN ('embedding_model', 'similarity_threshold', 'embedding_api_key', 'embedding_base_url')")
+
+        # ── 迁移：回填空 season 为默认招聘季 ──
+        empty_season_count = conn.execute("SELECT COUNT(*) FROM interview WHERE season IS NULL OR season = ''").fetchone()[0]
+        if empty_season_count > 0:
+            conn.execute("UPDATE interview SET season = '2027届暑期实习' WHERE season IS NULL OR season = ''")
+            logger.info(f"已将 {empty_season_count} 条面经的招聘季回填为 2027届暑期实习")
+            # 同步设置 active_season
+            conn.execute(
+                "INSERT INTO user_profile (key, value, updated_at) VALUES ('active_season', '2027届暑期实习', CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
+            )
 
         # ── 种子管理员 ──
         from passlib.context import CryptContext
@@ -287,6 +394,75 @@ def get_db_connection():
     conn.execute("PRAGMA busy_timeout=10000")
     _local.conn = conn
     return conn
+
+
+def get_current_job_position() -> str:
+    """从 user_profile 读取当前岗位（全局 fallback），fallback 到默认值"""
+    from app.core.prompts import DEFAULT_TAXONOMY
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+            if row and row['value']:
+                return row['value']
+    except Exception:
+        pass
+    return DEFAULT_TAXONOMY["job_position"]
+
+
+def get_user_job_position(user_id: int) -> tuple[int | None, str]:
+    """获取用户的当前岗位：返回 (position_id, position_name)
+
+    优先从 users.current_position_id 读取，fallback 到全局 current_job_position。
+    """
+    from app.core.prompts import DEFAULT_TAXONOMY
+    default_name = DEFAULT_TAXONOMY["job_position"]
+    try:
+        with get_db_connection() as conn:
+            # 优先读 users 表的 per-user 设置
+            row = conn.execute(
+                "SELECT u.current_position_id, jp.name FROM users u "
+                "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
+                "WHERE u.id = ?", (user_id,)
+            ).fetchone()
+            if row and row['current_position_id'] and row['name']:
+                return row['current_position_id'], row['name']
+            # fallback: 全局设置
+            pos_row = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+            if pos_row and pos_row[0]:
+                jp_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (pos_row[0],)).fetchone()
+                return (jp_row[0] if jp_row else None), pos_row[0]
+    except Exception:
+        pass
+    return None, default_name
+
+
+def set_user_job_position(user_id: int, position_id: int):
+    """设置用户的当前岗位"""
+    with get_db_connection() as conn:
+        conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (position_id, user_id))
+        conn.commit()
+
+
+def get_taxonomy_for_position(position: str = None) -> dict:
+    """读取指定岗位的分类配置，fallback 到默认分类"""
+    import json as _json
+    from app.core.prompts import DEFAULT_TAXONOMY
+    if position is None:
+        position = get_current_job_position()
+    try:
+        with get_db_connection() as conn:
+            # 按岗位存储的 key: taxonomy_config_{position}
+            safe_key = f"taxonomy_config_{position}"
+            row = conn.execute("SELECT value FROM user_profile WHERE key = ?", (safe_key,)).fetchone()
+            if row and row['value']:
+                return _json.loads(row['value'])
+            # fallback: 兼容旧的单一 key
+            row2 = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+            if row2 and row2['value']:
+                return _json.loads(row2['value'])
+    except Exception:
+        pass
+    return DEFAULT_TAXONOMY
 
 
 async def run_db(func):

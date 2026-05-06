@@ -17,7 +17,7 @@ export const authLogout = async () => {
 // ── Data fetching ──
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
 export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
-export const fetchMasterBank = (page = 1, pageSize = 100) => get(`${API}/master-bank?page=${page}&page_size=${pageSize}`)
+export const fetchMasterBank = (page = 1, pageSize = 500) => get(`${API}/master-bank?page=${page}&page_size=${pageSize}`)
 export const fetchAnalytics = () => get(`${API}/analytics`)
 export const fetchPracticeStats = () => get(`${API}/practice-stats`)
 export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {
@@ -38,7 +38,7 @@ export const updateRecord = (data) => put(`${API}/data/update`, data)
 export const reprocessInterview = (id) => post(`${API}/interview/${id}/re-process`)
 
 // ── Master bank ──
-export const buildMasterBank = () => post(`${API}/master-bank/build`)
+export const buildMasterBank = () => post(`${API}/master-bank/build`, null, { timeout: 300_000, noRetry: true })
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`)
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`)
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data)
@@ -65,7 +65,6 @@ export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete`, { file_type: fileType, ids })
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
 export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
-export const batchRetag = (taxonomyConfig, onEvent) => postSSE(`${API}/master-bank/batch-retag`, { taxonomy_config: taxonomyConfig }, onEvent)
 
 // ── Knowledge Graph ──
 export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)
@@ -73,6 +72,10 @@ export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)
 // ── Profile ──
 export const fetchProfile = () => get(`${API}/profile`)
 export const updateProfile = (settings) => put(`${API}/profile`, { settings })
+export const switchPosition = (position) => put(`${API}/profile/position`, { position })
+export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })
+export const fetchPositions = () => get(`${API}/positions`)
+export const createPosition = (name, description = '') => post(`${API}/positions`, { name, description })
 
 // ── Practice History ──
 export const fetchPracticeHistory = (questionId) => get(`${API}/practice-history/${questionId}`)

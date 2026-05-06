@@ -6,9 +6,9 @@ load_dotenv()
 
 logger = logging.getLogger("interview-boss")
 
-DATA_DIR = "/root/sj/multimodal-parser/backend/data"
+DATA_DIR = "/root/sj/interview-boss/backend/data"
 os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "multimodal.db")
+DB_PATH = os.path.join(DATA_DIR, "interview-boss.db")
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
 
 LLM_MODEL = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
@@ -21,7 +21,7 @@ LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 # 字段白名单（用于 GenericUpdateRequest 安全校验）
 ALLOWED_UPDATE_COLUMNS = {
     "master_question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred"},
-    "question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred"},
+    "question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred", "original_questions", "original_question_sources"},
     "jd": {"url", "company", "job_title", "salary", "tech_stack", "bonus"},
     "interview": {"url", "company", "round", "focus", "questions_list", "difficulty", "season"},
     "questions_detail": {"url", "company", "round", "question", "cat1", "cat2", "tags", "diff_tag"},

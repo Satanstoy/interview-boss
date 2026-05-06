@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format
 from app.services.clustering import cluster_all_questions, generate_unified_question
@@ -25,17 +25,41 @@ router = APIRouter()
 
 
 def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
-    """根据用户 bank_mode 构建 WHERE 子句"""
+    """根据用户 bank_mode 和当前岗位构建查询子句
+
+    Returns:
+        (from_clause, where_clause, params)
+        - from_clause: 含 question_position JOIN 的 FROM 子句
+        - where_clause: 含 bank_mode 过滤的 WHERE 子句
+        - params: 参数列表
+    """
+    from app.db.connection import get_user_job_position
     prefix = f"{table_alias}." if table_alias else ""
     mode = user.get('bank_mode', 'public')
     uid = user['id']
+    pos_id, pos_name = get_user_job_position(uid)
+
+    # 使用 question_position 关联表进行岗位过滤
+    from_clause = f"FROM question_bank {table_alias} JOIN question_position qp ON {prefix}id = qp.question_id AND qp.position_id = ?"
+    from_params = [pos_id] if pos_id else []
+
+    if not pos_id:
+        # fallback: 如果没有 position_id，用旧的 job_position 列
+        from_clause = f"FROM question_bank {table_alias}"
+        pos_fallback = pos_name
+        if mode == 'personal':
+            return from_clause, f"WHERE {prefix}owner_id = ? AND {prefix}job_position = ?", [uid, pos_fallback]
+        elif mode == 'mixed':
+            return from_clause, f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?) AND {prefix}job_position = ?", [uid, pos_fallback]
+        else:
+            return from_clause, f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {prefix}job_position = ?", [pos_fallback]
 
     if mode == 'personal':
-        return f"WHERE {prefix}owner_id = ?", [uid]
+        return from_clause, f"WHERE {prefix}owner_id = ?", from_params + [uid]
     elif mode == 'mixed':
-        return f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?", [uid]
+        return from_clause, f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?", from_params + [uid]
     else:  # 'public'
-        return f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", []
+        return from_clause, f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", from_params
 
 
 @router.get("/api/master-bank")
@@ -47,14 +71,14 @@ async def get_master_bank(
 ):
     order_clause = "ORDER BY frequency DESC" if sort != "recent" else "ORDER BY id DESC"
     offset = (page - 1) * page_size
-    where_clause, params = _build_bank_where_clause(user)
+    from_clause, where_clause, params = _build_bank_where_clause(user)
 
     def _query():
         with get_db_connection() as conn:
-            total = conn.execute(f"SELECT COUNT(*) FROM question_bank qb {where_clause}", params).fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) {from_clause} {where_clause}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, qb.is_starred, qb.owner_id, qb.status "
-                f"FROM question_bank qb {where_clause} {order_clause} LIMIT ? OFFSET ?",
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, qb.is_starred, qb.owner_id, qb.status, qb.job_position "
+                f"{from_clause} {where_clause} {order_clause} LIMIT ? OFFSET ?",
                 params + [page_size, offset]
             ).fetchall()
             return total, rows
@@ -90,7 +114,7 @@ async def search_master_bank(
     user: dict = Depends(get_current_user)
 ):
     """搜索题库（用于合并时选择目标题目）"""
-    where_clause, params = _build_bank_where_clause(user)
+    from_clause, where_clause, params = _build_bank_where_clause(user)
     conditions = []
     search_params = list(params)
 
@@ -109,7 +133,7 @@ async def search_master_bank(
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.frequency FROM question_bank qb {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
+                f"SELECT qb.id, qb.question, qb.frequency {from_clause} {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
                 search_params + [limit]
             ).fetchall()
             return [dict(r) for r in rows]
@@ -129,15 +153,18 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
     except Exception as e:
         logger.warning(f"创建备份失败（不影响重建流程）: {e}")
 
+    current_pos = get_current_job_position()
+
     def _load():
         with get_db_connection() as conn:
             raw = conn.execute(
                 "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
                 "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != ''"
             ).fetchall()
-            # 保留已有的 ai_answer（纯文本精确匹配恢复）
+            # 保留已有的 ai_answer（纯文本精确匹配恢复），仅当前岗位
             existing = conn.execute(
-                "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != ''"
+                "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
+                (current_pos,)
             ).fetchall()
             existing_answers_map = {r['question']: r['ai_answer'] for r in existing}
             return raw, existing_answers_map
@@ -209,19 +236,21 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
         cluster_details.append(detail)
 
         if len(rows_in_cluster) >= 2:
-            merge_groups.append((len(cluster_details) - 1, original_qs))
+            # 构建来源上下文（公司/轮次），用于生成更精准的代表题
+            src_ctx = [{"question": r['question'], "company": r.get('company', ''), "round": r.get('round', '')} for r in rows_in_cluster]
+            merge_groups.append((len(cluster_details) - 1, original_qs, src_ctx))
 
     # 为合并组生成统一问题（限流并发，避免 429）
     if merge_groups:
         logger.info(f"正在为 {len(merge_groups)} 个合并组生成统一问题...")
         sem = asyncio.Semaphore(8)
 
-        async def _gen_unified(idx, questions):
+        async def _gen_unified(idx, questions, sources_ctx=None):
             async with sem:
-                unified = await generate_unified_question(questions)
+                unified = await generate_unified_question(questions, sources_context=sources_ctx)
                 return idx, unified
 
-        tasks = [_gen_unified(idx, qs) for idx, qs in merge_groups]
+        tasks = [_gen_unified(idx, qs, src) for idx, qs, src in merge_groups]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
@@ -243,7 +272,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             admin_id = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
             admin_id = admin_id[0] if admin_id else None
 
-            conn.execute("DELETE FROM question_bank")
+            conn.execute("DELETE FROM question_bank WHERE job_position = ?", (current_pos,))
             restored_count = 0
             for c in cluster_details:
                 # 精确文本匹配恢复答案（统一问题 or 原始题目）
@@ -259,9 +288,9 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 orig_qs_json = json.dumps(c.get('original_questions', []), ensure_ascii=False)
                 orig_qs_src_json = json.dumps(c.get('original_question_sources', []), ensure_ascii=False)
                 conn.execute(
-                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved', ?)",
                     (c['question'], ",".join(c['cat1']), ",".join(c['tags']), c['difficulty'],
-                     c['frequency'], json.dumps(c['sources'], ensure_ascii=False), orig_qs_json, orig_qs_src_json, ai_answer, admin_id)
+                     c['frequency'], json.dumps(c['sources'], ensure_ascii=False), orig_qs_json, orig_qs_src_json, ai_answer, admin_id, current_pos)
                 )
             conn.commit()
             logger.info(f"答案恢复: 精确匹配 {restored_count} 条")
@@ -273,12 +302,17 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
 async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
-    """切换题目收藏状态"""
+    """切换题目收藏状态（仅限可见范围内的题目）"""
     def _toggle():
         with get_db_connection() as conn:
-            row = conn.execute("SELECT is_starred FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            # 检查题目是否在用户可见范围内
+            from_clause, where_clause, params = _build_bank_where_clause(user)
+            row = conn.execute(
+                f"SELECT qb.is_starred {from_clause} {where_clause} AND qb.id = ?",
+                params + [question_id]
+            ).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="未找到该题目")
+                raise HTTPException(status_code=404, detail="未找到该题目或无权操作")
             new_val = 0 if row['is_starred'] else 1
             conn.execute("UPDATE question_bank SET is_starred = ? WHERE id = ?", (new_val, question_id))
             conn.commit()
@@ -364,15 +398,20 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 )
 
             conn.commit()
-            return new_id, new_orig, question_id
+            return new_id, new_orig, new_orig_src, question_id
 
     try:
-        new_id, remaining_orig, old_id = await run_db(_split)
+        new_id, remaining_orig, remaining_orig_src, old_id = await run_db(_split)
 
         # 如果原聚类还有多题，重新生成统一问题
         if len(remaining_orig) >= 2:
             try:
-                unified = await generate_unified_question(remaining_orig)
+                # 构建来源上下文
+                sources_ctx = []
+                for item in remaining_orig_src:
+                    s = item.get("sources", [{}])[0] if item.get("sources") else {}
+                    sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
+                unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx)
                 def _update_unified():
                     with get_db_connection() as conn:
                         conn.execute(
@@ -481,15 +520,24 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 )
 
             conn.commit()
-            return new_src_orig, question_id, tgt_orig, req.target_id
+            return new_src_orig, new_src_orig_src, question_id, tgt_orig, tgt_orig_src, req.target_id
+
+    def _build_sources_ctx(orig_src_list):
+        """从 original_question_sources 格式构建 generate_unified_question 所需的 sources_context"""
+        ctx = []
+        for item in orig_src_list:
+            s = item.get("sources", [{}])[0] if item.get("sources") else {}
+            ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
+        return ctx
 
     try:
-        src_remaining, src_id, tgt_all, tgt_id = await run_db(_merge)
+        src_remaining, src_remaining_src, src_id, tgt_all, tgt_all_src, tgt_id = await run_db(_merge)
 
         # 重新生成源聚类的统一问题
         if len(src_remaining) >= 2:
             try:
-                unified = await generate_unified_question(src_remaining)
+                sources_ctx = _build_sources_ctx(src_remaining_src)
+                unified = await generate_unified_question(src_remaining, sources_context=sources_ctx)
                 def _update_src():
                     with get_db_connection() as conn:
                         conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
@@ -501,7 +549,8 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
         # 重新生成目标聚类的统一问题
         if len(tgt_all) >= 2:
             try:
-                unified = await generate_unified_question(tgt_all)
+                sources_ctx = _build_sources_ctx(tgt_all_src)
+                unified = await generate_unified_question(tgt_all, sources_context=sources_ctx)
                 def _update_tgt():
                     with get_db_connection() as conn:
                         conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
@@ -558,9 +607,16 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
     def _delete():
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            row = cursor.execute("SELECT id, question, sources FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            row = cursor.execute("SELECT id, question, sources, owner_id FROM question_bank WHERE id = ?", (question_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该题目，可能已被删除")
+
+            # 权限检查：公共题目仅管理员可删，个人题目仅本人可删
+            is_admin = user.get('is_admin', 0)
+            if row['owner_id'] is None and not is_admin:
+                raise HTTPException(status_code=403, detail="无权删除公共题目")
+            if row['owner_id'] is not None and row['owner_id'] != user['id'] and not is_admin:
+                raise HTTPException(status_code=403, detail="无权删除他人的个人题目")
 
             # 联动清理 questions_detail 中对应的记录
             question_text = row['question']
@@ -591,10 +647,18 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, question FROM question_bank WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, question, owner_id FROM question_bank WHERE id IN ({placeholders})", req.ids
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
+
+            # 权限检查
+            is_admin = user.get('is_admin', 0)
+            for r in rows:
+                if r['owner_id'] is None and not is_admin:
+                    raise HTTPException(status_code=403, detail=f"无权删除公共题目 (id={r['id']})")
+                if r['owner_id'] is not None and r['owner_id'] != user['id'] and not is_admin:
+                    raise HTTPException(status_code=403, detail=f"无权删除他人的个人题目 (id={r['id']})")
 
             question_texts = [r["question"] for r in rows if r["question"]]
             if question_texts:
@@ -718,18 +782,8 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_curre
     current_tags = row['tags'] or ''
     current_diff = row['difficulty'] or '未知'
 
-    # 读取用户自定义分类体系
-    def _get_taxonomy():
-        with get_db_connection() as conn:
-            row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
-            if row and row['value']:
-                try:
-                    return json.loads(row['value'])
-                except json.JSONDecodeError:
-                    pass
-            return None
-
-    taxonomy_config = await run_db(_get_taxonomy)
+    # 读取当前岗位的分类体系
+    taxonomy_config = await run_db(get_taxonomy_for_position)
 
     # 在 prompt 中告知当前分类，要求 LLM 重新审视并给出更准确的分类
     input_data = [{"id": question_id, "题目": question_text}]
@@ -814,7 +868,7 @@ async def get_random_questions(
 ):
     """加权随机抽题，避免重复抽取近期练过的题目"""
 
-    where_clause, base_params = _build_bank_where_clause(user, "qb")
+    from_clause, where_clause, base_params = _build_bank_where_clause(user, "qb")
 
     def _query():
         with get_db_connection() as conn:
@@ -833,7 +887,7 @@ async def get_random_questions(
                 where_with_extra = where_clause
 
             candidates = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources FROM question_bank qb {where_with_extra}",
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources {from_clause} {where_with_extra}",
                 params
             ).fetchall()
 
@@ -1101,103 +1155,3 @@ async def reject_question(question_id: int, admin: dict = Depends(get_admin_user
 
     await run_db(_reject)
     return {"status": "success", "message": "已拒绝"}
-
-
-@router.post("/api/master-bank/batch-retag")
-async def batch_retag(req: dict, user: dict = Depends(get_current_user)):
-    """批量重新标注所有题目（岗位/分类体系变更后使用），SSE 流式返回进度"""
-
-    taxonomy_config = req.get("taxonomy_config")
-    if not taxonomy_config or not isinstance(taxonomy_config.get("categories"), list):
-        raise HTTPException(status_code=400, detail="taxonomy_config 无效")
-
-    # 先保存新的分类体系
-    def _save_taxonomy():
-        with get_db_connection() as conn:
-            conn.execute(
-                "INSERT INTO user_profile (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                ("taxonomy_config", json.dumps(taxonomy_config, ensure_ascii=False))
-            )
-            conn.commit()
-
-    await run_db(_save_taxonomy)
-
-    # 获取所有题目
-    def _get_questions():
-        with get_db_connection() as conn:
-            return conn.execute("SELECT id, question FROM question_bank WHERE question IS NOT NULL AND question != ''").fetchall()
-
-    rows = await run_db(_get_questions)
-    prompt = build_tagging_prompt(taxonomy_config)
-
-    async def event_stream():
-        if not rows:
-            yield f"data: {json.dumps({'type': 'done', 'retagged': 0, 'failed': 0})}\n\n"
-            return
-
-        total = len(rows)
-        retagged = 0
-        failed = 0
-        done_count = 0
-        results_lock = asyncio.Lock()
-        semaphore = asyncio.Semaphore(3)
-
-        yield f"data: {json.dumps({'type': 'init', 'total': total})}\n\n"
-
-        async def _retag_one(idx, qid, question_text):
-            nonlocal retagged, failed, done_count
-            async with semaphore:
-                try:
-                    input_data = [{"id": 0, "题目": question_text}]
-                    q_json = json.dumps(input_data, ensure_ascii=False)
-                    user_msg = prompt.replace("{questions}", q_json)
-
-                    kwargs = dict(
-                        model=LLM_MODEL,
-                        messages=[
-                            {"role": "system", "content": "你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。"},
-                            {"role": "user", "content": user_msg}
-                        ],
-                        temperature=0.0,
-                    )
-                    if _should_use_response_format():
-                        kwargs["response_format"] = {"type": "json_object"}
-                    response = await client.chat.completions.create(**kwargs)
-                    items = _extract_json(response.choices[0].message.content).get("questions", [])
-                    if items:
-                        item = items[0]
-                        cat1 = normalize_category(item.get("一级大类", "未分类"))
-                        cat2 = normalize_category(item.get("二级子类", "未分类"))
-                        tags = item.get("考点标签", "")
-                        diff = item.get("难度标签", "未知")
-
-                        def _update():
-                            with get_db_connection() as conn:
-                                conn.execute(
-                                    "UPDATE question_bank SET cat1 = ?, cat2 = ?, tags = ?, difficulty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (cat1, cat2, tags, diff, qid)
-                                )
-                                conn.commit()
-                        await run_db(_update)
-                        async with results_lock:
-                            retagged += 1
-                            done_count += 1
-                        return json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'cat1': cat1, 'success': True})
-                    else:
-                        raise ValueError("LLM 未返回有效数据")
-                except Exception as e:
-                    logger.error(f"批量重标失败 [ID:{qid}]: {e}")
-                    async with results_lock:
-                        failed += 1
-                        done_count += 1
-                    return json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'success': False})
-
-        tasks = [_retag_one(i, r['id'], r['question']) for i, r in enumerate(rows)]
-        for coro in asyncio.as_completed(tasks):
-            event_data = await coro
-            yield f"data: {event_data}\n\n"
-
-        yield f"data: {json.dumps({'type': 'done', 'retagged': retagged, 'failed': failed})}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")

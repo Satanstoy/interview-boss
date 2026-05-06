@@ -1,5 +1,73 @@
 <template>
-  <Teleport to="body">
+  <!-- Embedded mode: inline form without overlay -->
+  <div v-if="embedded">
+    <div class="mb-8">
+      <h3 class="text-xl font-bold text-gray-800 dark:text-gray-100">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
+    </div>
+    <form ref="formEl" @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">用户名</label>
+          <input
+            ref="usernameInput"
+            v-model="username"
+            type="text"
+            name="username"
+            placeholder="2-32 个字符"
+            maxlength="32"
+            class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+            :disabled="loading"
+            autocomplete="username"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">密码</label>
+          <input
+            v-model="password"
+            type="password"
+            name="password"
+            placeholder="至少 6 位"
+            class="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+            :disabled="loading"
+            autocomplete="current-password"
+          />
+        </div>
+      </div>
+
+      <label v-if="!isRegister" class="flex items-center gap-2 mt-3 cursor-pointer group">
+        <input v-model="rememberMe" type="checkbox" class="w-4 h-4 rounded-md border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 transition" />
+        <span class="text-sm text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition">记住我（30 天免登录）</span>
+      </label>
+      <Transition name="fade">
+        <p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {{ error }}
+        </p>
+      </Transition>
+
+      <button
+        type="submit"
+        :disabled="loading || !username.trim() || password.length < (isRegister ? 6 : 1)"
+        class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
+      >
+        <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
+        <span v-if="loading" class="absolute inset-0 flex items-center justify-center">
+          <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        </span>
+      </button>
+    </form>
+
+    <div class="mt-4 text-center">
+      <span class="text-sm text-gray-500 dark:text-gray-400">{{ isRegister ? '已有账号？' : '没有账号？' }}</span>
+      <button @click="isRegister = !isRegister; error = ''" class="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold ml-1 transition">
+        {{ isRegister ? '去登录' : '注册一个' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal mode: overlay dialog (for 401 re-login etc.) -->
+  <Teleport v-else to="body">
     <Transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="$emit('close')">
         <div class="bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden animate-slide-up">
@@ -24,7 +92,7 @@
           </div>
 
           <!-- Form -->
-          <form @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post" class="px-6 pb-2 pt-4">
+          <form ref="formEl" @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post" class="px-6 pb-2 pt-4">
             <div class="space-y-4">
               <div>
                 <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">用户名</label>
@@ -93,15 +161,19 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { authLogin, authRegister } from '../api/index.js'
 import { setAuthToken } from '../utils/http.js'
 import { validateUsername, validatePassword } from '../utils/validate.js'
 
-const props = defineProps({ visible: Boolean })
+const props = defineProps({
+  visible: Boolean,
+  embedded: { type: Boolean, default: false }
+})
 const emit = defineEmits(['close', 'login-success'])
 
 const usernameInput = ref(null)
+const formEl = ref(null)
 const isRegister = ref(false)
 const username = ref('')
 const password = ref('')
@@ -113,6 +185,12 @@ watch(() => props.visible, (v) => {
   if (v) {
     error.value = ''
     isRegister.value = false
+    nextTick(() => usernameInput.value?.focus())
+  }
+})
+
+onMounted(() => {
+  if (props.embedded) {
     nextTick(() => usernameInput.value?.focus())
   }
 })
@@ -134,7 +212,7 @@ async function handleSubmit() {
       : [userResult.value, passResult.value, rememberMe.value]
     const data = await fn(...args)
     setAuthToken(data.token)
-    triggerBrowserSavePassword(userResult.value, passResult.value)
+    triggerBrowserSavePassword()
     emit('login-success', data.user)
     emit('close')
     username.value = ''
@@ -146,40 +224,17 @@ async function handleSubmit() {
   }
 }
 
-function triggerBrowserSavePassword(user, pass) {
-  try {
-    if (window.PasswordCredential) {
-      const cred = new PasswordCredential({ id: user, password: pass, name: user })
+function triggerBrowserSavePassword() {
+  // Use Credential Management API with the actual form element
+  if (window.PasswordCredential && formEl.value) {
+    try {
+      const cred = new PasswordCredential(formEl.value)
       navigator.credentials.store(cred)
       return
-    }
-  } catch { /* fallback below */ }
-
-  const iframe = document.createElement('iframe')
-  iframe.name = 'pw-save-frame'
-  iframe.style.display = 'none'
-  document.body.appendChild(iframe)
-
-  const form = document.createElement('form')
-  form.action = '/api/auth/login-form'
-  form.method = 'POST'
-  form.target = 'pw-save-frame'
-  form.style.display = 'none'
-
-  const uInput = document.createElement('input')
-  uInput.name = 'username'
-  uInput.value = user
-  const pInput = document.createElement('input')
-  pInput.name = 'password'
-  pInput.type = 'password'
-  pInput.value = pass
-
-  form.appendChild(uInput)
-  form.appendChild(pInput)
-  document.body.appendChild(form)
-  form.submit()
-
-  setTimeout(() => { form.remove(); iframe.remove() }, 2000)
+    } catch { /* fallback below */ }
+  }
+  // Fallback: history.pushState simulates navigation to trigger browser save prompt
+  try { history.pushState(null, '', location.href) } catch {}
 }
 </script>
 

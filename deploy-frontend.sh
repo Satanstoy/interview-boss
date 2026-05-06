@@ -6,7 +6,7 @@
 set -euo pipefail
 
 DEPLOY_DIR="/var/www/interview-boss/dist"
-DIST_DIR="/root/sj/multimodal-parser/frontend/dist"
+DIST_DIR="/root/sj/interview-boss/frontend/dist"
 
 if [ ! -d "$DIST_DIR" ] || [ -z "$(ls -A "$DIST_DIR" 2>/dev/null)" ]; then
   echo "错误: $DIST_DIR 为空，请先执行 npm run build"

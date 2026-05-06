@@ -27,7 +27,7 @@
       :items="items"
       :min-item-size="130"
       key-field="id"
-      class="virtual-scroller"
+      class="virtual-scroller custom-scrollbar"
     >
       <template #default="{ item, index, active }">
         <DynamicScrollerItem
@@ -41,6 +41,7 @@
             :question="item"
             :is-selected="isSelected"
             :practice-info="practicedQuestions[item.id] || null"
+            :bank-mode="bankMode"
             @toggle-answer="toggleAnswer"
             @toggle-star="$emit('toggle-star', $event)"
             @retag="$emit('retag', $event)"
@@ -48,6 +49,8 @@
             @save-field="$emit('save-field', $event)"
             @toggle-item="$emit('toggle-item', $event)"
             @practice="$emit('practice', $event)"
+            @split-question="$emit('split-question', $event)"
+            @start-merge="$emit('start-merge', $event)"
           />
         </DynamicScrollerItem>
       </template>
@@ -64,10 +67,11 @@ const props = defineProps({
   selectedCount: { type: Number, default: 0 },
   isSelected: { type: Function, default: () => false },
   batchActions: { type: Array, default: () => [] },
-  practicedQuestions: { type: Object, default: () => ({}) }
+  practicedQuestions: { type: Object, default: () => ({}) },
+  bankMode: { type: String, default: 'public' }
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge'])
 
 const toggleAnswer = (question) => {
   question._showAnswer = !question._showAnswer

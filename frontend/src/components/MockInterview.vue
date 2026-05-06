@@ -206,7 +206,7 @@
             <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             {{ q._showHistory ? '收起练习记录' : `查看练习记录 (${q.attempt_count}次)` }}
           </button>
-          <div v-if="q._showHistory" class="px-5 py-4 bg-gray-50 dark:bg-gray-800 border-t border-orange-100 dark:border-orange-800/50 space-y-2 max-h-64 overflow-y-auto">
+          <div v-if="q._showHistory" class="px-5 py-4 bg-gray-50 dark:bg-gray-800 border-t border-orange-100 dark:border-orange-800/50 space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
             <div v-if="q._historyLoading" class="text-center py-3 text-xs text-gray-400 dark:text-gray-500">加载中...</div>
             <div v-else-if="q._history && q._history.length > 0">
               <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-gray-100 dark:border-gray-700 last:border-b-0">

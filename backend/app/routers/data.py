@@ -43,7 +43,7 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
     for r in rows:
         d = dict(r)
         if table_name == 'jd':
-            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus']})
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus'], "season": d.get('season', '')})
         elif table_name == 'interview':
             result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty'], "season": d.get('season', '')})
         elif table_name == 'questions_detail':
