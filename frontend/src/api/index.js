@@ -44,6 +44,13 @@ export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/$
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data)
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
+export const splitQuestion = (id, originalQuestion) => post(`${API}/master-bank/split-question/${id}`, { original_question: originalQuestion })
+export const mergeQuestion = (id, originalQuestion, targetId) => post(`${API}/master-bank/merge-question/${id}`, { original_question: originalQuestion, target_id: targetId })
+export const searchMasterBank = (q, excludeId) => {
+  const params = new URLSearchParams({ q: q || '', limit: '20' })
+  if (excludeId) params.append('exclude_id', String(excludeId))
+  return get(`${API}/master-bank/search?${params}`)
+}
 
 // ── Bank upload & review ──
 export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) => {
@@ -58,6 +65,7 @@ export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete`, { file_type: fileType, ids })
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
 export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
+export const batchRetag = (taxonomyConfig, onEvent) => postSSE(`${API}/master-bank/batch-retag`, { taxonomy_config: taxonomyConfig }, onEvent)
 
 // ── Knowledge Graph ──
 export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)

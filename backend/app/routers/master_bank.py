@@ -1101,3 +1101,103 @@ async def reject_question(question_id: int, admin: dict = Depends(get_admin_user
 
     await run_db(_reject)
     return {"status": "success", "message": "已拒绝"}
+
+
+@router.post("/api/master-bank/batch-retag")
+async def batch_retag(req: dict, user: dict = Depends(get_current_user)):
+    """批量重新标注所有题目（岗位/分类体系变更后使用），SSE 流式返回进度"""
+
+    taxonomy_config = req.get("taxonomy_config")
+    if not taxonomy_config or not isinstance(taxonomy_config.get("categories"), list):
+        raise HTTPException(status_code=400, detail="taxonomy_config 无效")
+
+    # 先保存新的分类体系
+    def _save_taxonomy():
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO user_profile (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                ("taxonomy_config", json.dumps(taxonomy_config, ensure_ascii=False))
+            )
+            conn.commit()
+
+    await run_db(_save_taxonomy)
+
+    # 获取所有题目
+    def _get_questions():
+        with get_db_connection() as conn:
+            return conn.execute("SELECT id, question FROM question_bank WHERE question IS NOT NULL AND question != ''").fetchall()
+
+    rows = await run_db(_get_questions)
+    prompt = build_tagging_prompt(taxonomy_config)
+
+    async def event_stream():
+        if not rows:
+            yield f"data: {json.dumps({'type': 'done', 'retagged': 0, 'failed': 0})}\n\n"
+            return
+
+        total = len(rows)
+        retagged = 0
+        failed = 0
+        done_count = 0
+        results_lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(3)
+
+        yield f"data: {json.dumps({'type': 'init', 'total': total})}\n\n"
+
+        async def _retag_one(idx, qid, question_text):
+            nonlocal retagged, failed, done_count
+            async with semaphore:
+                try:
+                    input_data = [{"id": 0, "题目": question_text}]
+                    q_json = json.dumps(input_data, ensure_ascii=False)
+                    user_msg = prompt.replace("{questions}", q_json)
+
+                    kwargs = dict(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": "你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。"},
+                            {"role": "user", "content": user_msg}
+                        ],
+                        temperature=0.0,
+                    )
+                    if _should_use_response_format():
+                        kwargs["response_format"] = {"type": "json_object"}
+                    response = await client.chat.completions.create(**kwargs)
+                    items = _extract_json(response.choices[0].message.content).get("questions", [])
+                    if items:
+                        item = items[0]
+                        cat1 = normalize_category(item.get("一级大类", "未分类"))
+                        cat2 = normalize_category(item.get("二级子类", "未分类"))
+                        tags = item.get("考点标签", "")
+                        diff = item.get("难度标签", "未知")
+
+                        def _update():
+                            with get_db_connection() as conn:
+                                conn.execute(
+                                    "UPDATE question_bank SET cat1 = ?, cat2 = ?, tags = ?, difficulty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    (cat1, cat2, tags, diff, qid)
+                                )
+                                conn.commit()
+                        await run_db(_update)
+                        async with results_lock:
+                            retagged += 1
+                            done_count += 1
+                        return json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'cat1': cat1, 'success': True})
+                    else:
+                        raise ValueError("LLM 未返回有效数据")
+                except Exception as e:
+                    logger.error(f"批量重标失败 [ID:{qid}]: {e}")
+                    async with results_lock:
+                        failed += 1
+                        done_count += 1
+                    return json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': qid, 'success': False})
+
+        tasks = [_retag_one(i, r['id'], r['question']) for i, r in enumerate(rows)]
+        for coro in asyncio.as_completed(tasks):
+            event_data = await coro
+            yield f"data: {event_data}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'retagged': retagged, 'failed': failed})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

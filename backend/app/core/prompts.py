@@ -38,7 +38,7 @@ SYSTEM_PROMPT = """你是一名顶级的信息提取专家。请从用户提供�
 """
 
 DEFAULT_TAXONOMY = {
-    "job_position": "大模型应用开发",
+    "job_position": "agent开发/大模型应用开发/大模型开发",
     "categories": [
         {"cat1": "A.项目经验与设计", "children": ["A1.项目介绍与背景", "A2.系统架构设计", "A3.难点攻关与优化", "A4.反思与改进"]},
         {"cat1": "B.Agent与LLM应用", "children": ["B1.Agent架构设计", "B2.记忆管理", "B3.检索增强生成/RAG", "B4.工具调用与集成", "B5.Prompt工程", "B6.推理与规划范式", "B7.上下文管理", "B8.监控与评估"]},
@@ -110,7 +110,7 @@ def _build_examples(categories: list) -> str:
 def build_tagging_prompt(taxonomy_config: dict | None = None) -> str:
     """根据用户自定义分类体系构建 TAGGING_PROMPT，fallback 到默认分类"""
     config = taxonomy_config or DEFAULT_TAXONOMY
-    categories = config.get("categories", DEFAULT_TAXONOMY["categories"])
+    categories = config.get("categories") or DEFAULT_TAXONOMY["categories"]
     taxonomy_text = _format_taxonomy_text(categories)
     examples_text = _build_examples(categories)
     return _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text).replace("{examples}", examples_text)
