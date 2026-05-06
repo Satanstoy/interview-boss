@@ -1,7 +1,9 @@
 import re
+import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_admin_user
+from app.core.auth import get_admin_user, get_current_user
+from app.core.prompts import DEFAULT_TAXONOMY
 from app.db.connection import get_db_connection, run_db
 from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
@@ -13,7 +15,8 @@ router = APIRouter()
 
 ALLOWED_PROFILE_KEYS = {
     "active_season", "llm_model",
-    "llm_api_key", "llm_base_url", "llm_timeout"
+    "llm_api_key", "llm_base_url", "llm_timeout",
+    "taxonomy_config"
 }
 
 _SENSITIVE_KEYS = {"llm_api_key"}
@@ -104,6 +107,16 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
         names = "、".join(labels.get(k, k) for k in empty_required)
         raise HTTPException(status_code=400, detail=f"{names} 不能为空")
 
+    # taxonomy_config JSON 格式校验
+    if "taxonomy_config" in filtered:
+        try:
+            tc = json.loads(filtered["taxonomy_config"]) if isinstance(filtered["taxonomy_config"], str) else filtered["taxonomy_config"]
+            if not isinstance(tc.get("categories"), list):
+                raise ValueError("categories 字段必须是数组")
+            filtered["taxonomy_config"] = json.dumps(tc, ensure_ascii=False) if isinstance(tc, dict) else filtered["taxonomy_config"]
+        except (json.JSONDecodeError, ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail=f"taxonomy_config 格式无效: {e}")
+
     # URL 格式校验
     _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
     for k, v in filtered.items():
@@ -132,3 +145,21 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
     except Exception as e:
         logger.exception("保存配置失败")
         raise HTTPException(status_code=500, detail="保存配置失败，请查看服务端日志")
+
+
+@router.get("/api/profile/taxonomy")
+async def get_taxonomy(user: dict = Depends(get_current_user)):
+    """获取当前用户的分类体系配置（登录即可访问，不需要 admin）"""
+
+    def _query():
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+            return row['value'] if row else None
+
+    raw = await run_db(_query)
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+    return DEFAULT_TAXONOMY

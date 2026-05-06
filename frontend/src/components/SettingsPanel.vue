@@ -75,6 +75,73 @@
                 </div>
               </div>
             </div>
+
+            <!-- Taxonomy config -->
+            <div class="space-y-3.5 p-5 rounded-2xl border border-accent-100 dark:border-accent-800 bg-gradient-to-b from-accent-50/50 to-white dark:from-accent-900/20 dark:to-surface-800">
+              <h3 class="text-xs font-bold text-accent-600 dark:text-accent-400 uppercase tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+                分类管理
+              </h3>
+
+              <!-- Job position -->
+              <div>
+                <label class="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 block">目标岗位</label>
+                <div class="flex gap-2 flex-wrap">
+                  <button
+                    v-for="pos in defaultPositions" :key="pos"
+                    @click="taxonomy.job_position = pos"
+                    :class="taxonomy.job_position === pos
+                      ? 'bg-accent-100 dark:bg-accent-900/40 text-accent-700 dark:text-accent-300 border-accent-300 dark:border-accent-700'
+                      : 'bg-white dark:bg-surface-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:border-accent-300 dark:hover:border-accent-700'"
+                    class="px-3 py-1.5 text-xs rounded-lg border transition-all font-medium"
+                  >{{ pos }}</button>
+                </div>
+              </div>
+
+              <!-- Category list -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-xs font-semibold text-gray-600 dark:text-gray-400">一级大类 / 二级子类</label>
+                  <button @click="addCat1" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                    添加大类
+                  </button>
+                </div>
+
+                <div v-for="(cat, ci) in taxonomy.categories" :key="ci"
+                  class="rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-surface-900 overflow-hidden">
+                  <!-- cat1 header -->
+                  <div class="flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-surface-800 border-b border-gray-100 dark:border-gray-700">
+                    <button @click="cat._open = !cat._open" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">
+                      <svg :class="{'rotate-90': cat._open}" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                    </button>
+                    <input v-model="cat.cat1"
+                      class="flex-1 text-sm font-semibold bg-transparent border-none outline-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      placeholder="如 A.项目经验与设计" />
+                    <span class="text-xs text-gray-400 dark:text-gray-500">{{ cat.children.length }} 个子类</span>
+                    <button @click="removeCat1(ci)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-1">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                  </div>
+                  <!-- cat2 children -->
+                  <div v-if="cat._open" class="p-3 space-y-1.5">
+                    <div v-for="(child, ci2) in cat.children" :key="ci2" class="flex items-center gap-2">
+                      <span class="text-gray-300 dark:text-gray-600 text-xs">-</span>
+                      <input v-model="cat.children[ci2]"
+                        class="flex-1 text-sm bg-transparent border-none outline-none text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+                        placeholder="如 A1.系统设计" />
+                      <button @click="cat.children.splice(ci2, 1)" class="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition p-0.5">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                    <button @click="cat.children.push('')" class="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300 font-medium mt-1 flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                      添加子类
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Footer -->
@@ -115,6 +182,13 @@ const props = defineProps({
   activeSeason: { type: String, default: '' }
 })
 
+const defaultPositions = ['agent开发', '大模型应用开发', '大模型开发']
+
+const taxonomy = reactive({
+  job_position: '大模型应用开发',
+  categories: []
+})
+
 const emit = defineEmits(['close', 'update:activeSeason'])
 
 const seasons = ref([])
@@ -126,6 +200,13 @@ const showLlmKey = ref(false)
 const llmKeySet = ref(false)
 const llmMasked = ref('')
 const editLlmKey = ref(false)
+
+const addCat1 = () => {
+  taxonomy.categories.push({ cat1: '', children: [''], _open: true })
+}
+const removeCat1 = (index) => {
+  taxonomy.categories.splice(index, 1)
+}
 
 const form = reactive({
   active_season: '',
@@ -148,6 +229,15 @@ const loadProfile = async () => {
     editLlmKey.value = false
     form.llm_api_key = ''
     seasons.value = data.available_seasons || []
+
+    // 加载分类体系
+    if (s.taxonomy_config) {
+      try {
+        const tc = typeof s.taxonomy_config === 'string' ? JSON.parse(s.taxonomy_config) : s.taxonomy_config
+        taxonomy.job_position = tc.job_position || '大模型应用开发'
+        taxonomy.categories = (tc.categories || []).map(c => ({ ...c, _open: false }))
+      } catch { /* ignore parse error */ }
+    }
   } catch (e) {
     console.error('加载配置失败', e)
   }
@@ -211,6 +301,14 @@ const saveProfile = async () => {
       llm_timeout: String(form.llm_timeout)
     }
     if (form.llm_api_key) payload.llm_api_key = form.llm_api_key.trim()
+
+    // 分类体系
+    const validCategories = taxonomy.categories
+      .filter(c => c.cat1.trim())
+      .map(c => ({ cat1: c.cat1.trim(), children: c.children.filter(x => x.trim()) }))
+    if (validCategories.length > 0) {
+      payload.taxonomy_config = JSON.stringify({ job_position: taxonomy.job_position, categories: validCategories })
+    }
 
     await updateProfile(payload)
     saveMessage.value = '配置已保存（已同步到 .env）'

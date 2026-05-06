@@ -6,7 +6,7 @@ import openai
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from app.core.config import LLM_MODEL, MAX_FILE_SIZE
-from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT
+from app.core.prompts import SYSTEM_PROMPT, TAGGING_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
@@ -18,10 +18,11 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
 
-async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str]) -> List[List[str]]:
+async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None) -> List[List[str]]:
     input_data = [{"id": idx, "题目": q} for idx, q in enumerate(questions)]
     q_json = json.dumps(input_data, ensure_ascii=False)
-    user_msg = TAGGING_PROMPT.replace("{questions}", q_json)
+    prompt = build_tagging_prompt(taxonomy_config) if taxonomy_config else TAGGING_PROMPT
+    user_msg = prompt.replace("{questions}", q_json)
 
     kwargs = dict(
         model=LLM_MODEL,
@@ -309,10 +310,23 @@ async def submit_data(
                         except Exception as e:
                             logger.warning(f"字段补全重试失败: {e}")
 
+                    # 读取用户自定义分类体系
+                    def _get_taxonomy():
+                        with get_db_connection() as conn:
+                            row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+                            if row and row['value']:
+                                try:
+                                    return json.loads(row['value'])
+                                except json.JSONDecodeError:
+                                    pass
+                            return None
+
+                    taxonomy_config = await run_db(_get_taxonomy)
+
                     # 并行执行：重试补全 + 题目标签化
                     _, tagged_rows = await asyncio.gather(
                         retry_fill_fields(),
-                        tag_questions_batch(saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), q_list)
+                        tag_questions_batch(saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), q_list, taxonomy_config)
                     )
 
                     # 重试可能更新了公司/轮次，同步到已标签化的行

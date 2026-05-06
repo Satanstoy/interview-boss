@@ -14,7 +14,7 @@ def normalize_category(text: str) -> str:
     # 处理逗号分隔的多分类：取第一个
     if ',' in text:
         text = text.split(',')[0].strip()
-    text = re.sub(r'^([A-Fa-f]\d?)\.\s+', r'\1.', text)
+    text = re.sub(r'^([A-Za-z]+\d*)\.\s+', r'\1.', text)
     return text
 
 

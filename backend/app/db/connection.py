@@ -66,6 +66,14 @@ def init_db():
                      ("llm_api_key", ""), ("llm_base_url", ""), ("llm_timeout", "")]:
             conn.execute("INSERT OR IGNORE INTO user_profile (key, value) VALUES (?, ?)", (k, v))
 
+        # seed 默认分类体系（仅首次）
+        import json as _json
+        from app.core.prompts import DEFAULT_TAXONOMY
+        conn.execute(
+            "INSERT OR IGNORE INTO user_profile (key, value) VALUES (?, ?)",
+            ("taxonomy_config", _json.dumps(DEFAULT_TAXONOMY, ensure_ascii=False))
+        )
+
         conn.execute('''
             CREATE TABLE IF NOT EXISTS practice_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +114,8 @@ def init_db():
                 ai_answer TEXT,
                 vector TEXT,
                 sources TEXT DEFAULT '[]',
+                original_questions TEXT DEFAULT '[]',
+                original_question_sources TEXT DEFAULT '[]',
                 is_starred INTEGER DEFAULT 0,
                 owner_id INTEGER,
                 submitted_by INTEGER,
@@ -192,6 +202,13 @@ def init_db():
         rt_columns = {row[1] for row in cursor.execute("PRAGMA table_info('refresh_tokens')").fetchall()}
         if "remember" not in rt_columns:
             conn.execute("ALTER TABLE refresh_tokens ADD COLUMN remember INTEGER DEFAULT 0")
+
+        # ── 迁移：添加 original_questions 和 original_question_sources 列 ──
+        qb_columns = {row[1] for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()}
+        if "original_questions" not in qb_columns:
+            conn.execute("ALTER TABLE question_bank ADD COLUMN original_questions TEXT DEFAULT '[]'")
+        if "original_question_sources" not in qb_columns:
+            conn.execute("ALTER TABLE question_bank ADD COLUMN original_question_sources TEXT DEFAULT '[]'")
 
         # ── 迁移：清理 embedding 相关数据 ──
         conn.execute("UPDATE question_bank SET vector = NULL WHERE vector IS NOT NULL")

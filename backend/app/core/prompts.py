@@ -37,36 +37,22 @@ SYSTEM_PROMPT = """你是一名顶级的信息提取专家。请从用户提供�
 - 具体题目清单中的每道题应保持原样，不进行缩写或改写。
 """
 
-TAGGING_PROMPT = """你是一名面试题结构化分类专家。请将下列每道面试题精确分配到分类体系中，并按要求输出JSON。
+DEFAULT_TAXONOMY = {
+    "job_position": "大模型应用开发",
+    "categories": [
+        {"cat1": "A.项目经验与设计", "children": ["A1.项目介绍与背景", "A2.系统架构设计", "A3.难点攻关与优化", "A4.反思与改进"]},
+        {"cat1": "B.Agent与LLM应用", "children": ["B1.Agent架构设计", "B2.记忆管理", "B3.检索增强生成/RAG", "B4.工具调用与集成", "B5.Prompt工程", "B6.推理与规划范式", "B7.上下文管理", "B8.监控与评估"]},
+        {"cat1": "C.基础工程能力", "children": ["C1.编程语言基础", "C2.框架与中间件", "C3.数据库基础", "C4.操作系统与网络"]},
+        {"cat1": "D.分布式系统与高并发", "children": ["D1.分布式一致性", "D2.高并发策略", "D3.链路与排障"]},
+        {"cat1": "E.算法与数据结构", "children": ["E1.算法手撕与数据结构"]},
+        {"cat1": "F.模型训练与评估", "children": ["F1.微调与评估"]},
+    ],
+}
+
+_TAGGING_TEMPLATE = """你是一名面试题结构化分类专家。请将下列每道面试题精确分配到分类体系中，并按要求输出JSON。
 
 ## 分类体系（严格遵循层级）
-- **A. 项目经验与设计**
-   A1. 项目介绍与背景
-   A2. 系统架构设计
-   A3. 难点攻关与优化
-   A4. 反思与改进
-- **B. Agent与LLM应用**
-   B1. Agent架构设计
-   B2. 记忆管理
-   B3. 检索增强生成/RAG
-   B4. 工具调用与集成
-   B5. Prompt工程
-   B6. 推理与规划范式
-   B7. 上下文管理
-   B8. 监控与评估
-- **C. 基础工程能力**
-   C1. 编程语言基础
-   C2. 框架与中间件
-   C3. 数据库基础
-   C4. 操作系统与网络
-- **D. 分布式系统与高并发**
-   D1. 分布式一致性
-   D2. 高并发策略
-   D3. 链路与排障
-- **E. 算法与数据结构**
-   E1. 算法手撕与数据结构
-- **F. 模型训练与评估**
-   F1. 微调与评估
+{taxonomy}
 - **其他** (仅当确实无法归入以上任何一类时使用)
 
 ## 考点标签（可多选，从下方选择，用逗号分隔）
@@ -83,21 +69,54 @@ Agent架构设计, 记忆管理, RAG设计, 工具调用, Prompt工程, ReAct/�
 3. 如果题目包含多个子问题，请拆分后作为独立题目分别标注。
 4. 返回的结果中必须包含输入的 `id` 字段。
 
-## Few-Shot 示例
-输入题目列表：[{"id": 0, "题目": "请介绍你做过的一个项目，并说明其中遇到的难点"}]
-输出：
-{"questions": [{"id": 0, "题目": "请介绍你做过的一个项目，并说明其中遇到的难点", "一级大类": "A.项目经验与设计", "二级子类": "A3.难点攻关与优化", "考点标签": "系统设计", "难度标签": "L2-中等"}]}
-
-输入题目列表：[{"id": 0, "题目": "Redis持久化机制有哪些？"}, {"id": 1, "题目": "如何设计一个分布式锁？"}]
-输出：
-{"questions": [
-  {"id": 0, "题目": "Redis持久化机制有哪些？", "一级大类": "C.基础工程能力", "二级子类": "C2.框架与中间件", "考点标签": "Redis", "难度标签": "L1-基础"},
-  {"id": 1, "题目": "如何设计一个分布式锁？", "一级大类": "D.分布式系统与高并发", "二级子类": "D2.高并发策略", "考点标签": "分布式事务, Redis", "难度标签": "L2-中等"}]}
+{examples}
 
 ## 任务
 现在请为以下题目列表标记：
 {questions}
 """
+
+
+def _format_taxonomy_text(categories: list) -> str:
+    """将分类列表格式化为 prompt 中的层级文本"""
+    lines = []
+    for cat in categories:
+        lines.append(f"- **{cat['cat1']}**")
+        for child in cat["children"]:
+            lines.append(f"   {child}")
+    return "\n".join(lines)
+
+
+def _build_examples(categories: list) -> str:
+    """从前两个分类中各取一个子类生成 few-shot 示例"""
+    if len(categories) < 2:
+        return ""
+    cat1_name = categories[0]["cat1"]
+    cat1_child = categories[0]["children"][0] if categories[0]["children"] else ""
+    cat2_name = categories[1]["cat1"]
+    cat2_child = categories[1]["children"][0] if categories[1]["children"] else ""
+    return f"""## Few-Shot 示例
+输入题目列表：[{{"id": 0, "题目": "请介绍你做过的一个项目，并说明其中遇到的难点"}}]
+输出：
+{{"questions": [{{"id": 0, "题目": "请介绍你做过的一个项目，并说明其中遇到的难点", "一级大类": "{cat1_name}", "二级子类": "{cat1_child}", "考点标签": "系统设计", "难度标签": "L2-中等"}}]}}
+
+输入题目列表：[{{"id": 0, "题目": "Redis持久化机制有哪些？"}}, {{"id": 1, "题目": "如何设计一个分布式锁？"}}]
+输出：
+{{"questions": [
+  {{"id": 0, "题目": "Redis持久化机制有哪些？", "一级大类": "{cat2_name}", "二级子类": "{cat2_child}", "考点标签": "Redis", "难度标签": "L1-基础"}},
+  {{"id": 1, "题目": "如何设计一个分布式锁？", "一级大类": "{cat2_name}", "二级子类": "{cat2_child}", "考点标签": "分布式事务, Redis", "难度标签": "L2-中等"}}]}}"""
+
+
+def build_tagging_prompt(taxonomy_config: dict | None = None) -> str:
+    """根据用户自定义分类体系构建 TAGGING_PROMPT，fallback 到默认分类"""
+    config = taxonomy_config or DEFAULT_TAXONOMY
+    categories = config.get("categories", DEFAULT_TAXONOMY["categories"])
+    taxonomy_text = _format_taxonomy_text(categories)
+    examples_text = _build_examples(categories)
+    return _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text).replace("{examples}", examples_text)
+
+
+TAGGING_PROMPT = build_tagging_prompt(DEFAULT_TAXONOMY)
 
 ANSWER_PROMPT = """你是一名资深后端与算法面试官。请根据【面试题】，给出一份**极易口述背诵**的高质量面试回答。
 

@@ -11,12 +11,12 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
-from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT
+from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
-from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest
+from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format
-from app.services.clustering import cluster_all_questions
+from app.services.clustering import cluster_all_questions, generate_unified_question
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
@@ -53,7 +53,7 @@ async def get_master_bank(
         with get_db_connection() as conn:
             total = conn.execute(f"SELECT COUNT(*) FROM question_bank qb {where_clause}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.is_starred, qb.owner_id, qb.status "
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, qb.is_starred, qb.owner_id, qb.status "
                 f"FROM question_bank qb {where_clause} {order_clause} LIMIT ? OFFSET ?",
                 params + [page_size, offset]
             ).fetchall()
@@ -68,10 +68,54 @@ async def get_master_bank(
             d['sources'] = json.loads(d['sources']) if d['sources'] else []
         except Exception:
             d['sources'] = []
+        try:
+            d['original_questions'] = json.loads(d['original_questions']) if d['original_questions'] else []
+        except Exception:
+            d['original_questions'] = []
+        try:
+            d['original_question_sources'] = json.loads(d['original_question_sources']) if d['original_question_sources'] else []
+        except Exception:
+            d['original_question_sources'] = []
         d['is_personal'] = d.get('owner_id') is not None
         result.append(d)
 
     return {"items": result, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/api/master-bank/search")
+async def search_master_bank(
+    q: str = Query("", min_length=0, max_length=200),
+    exclude_id: int = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user)
+):
+    """搜索题库（用于合并时选择目标题目）"""
+    where_clause, params = _build_bank_where_clause(user)
+    conditions = []
+    search_params = list(params)
+
+    if q.strip():
+        conditions.append("qb.question LIKE ?")
+        search_params.append(f"%{q.strip()}%")
+    if exclude_id is not None:
+        conditions.append("qb.id != ?")
+        search_params.append(exclude_id)
+
+    if conditions:
+        where_with_extra = f"{where_clause} AND {' AND '.join(conditions)}"
+    else:
+        where_with_extra = where_clause
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                f"SELECT qb.id, qb.question, qb.frequency FROM question_bank qb {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
+                search_params + [limit]
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    items = await run_db(_query)
+    return {"items": items}
 
 
 @router.post("/api/master-bank/build")
@@ -109,17 +153,16 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
     # 构建聚类结果的详细信息
     id_map = {r['id']: dict(r) for r in raw_questions}
     cluster_details = []
+
+    # 先收集所有聚类的基本信息，合并组需要生成统一问题
+    merge_groups = []  # (index, questions_list)
     for c in all_clusters:
         ids = c.get("ids", [])
         rows_in_cluster = [id_map[qid] for qid in ids if qid in id_map]
         if not rows_in_cluster:
             continue
 
-        # 代表题 = 最长的原始题目文本
-        representative = max(rows_in_cluster, key=lambda r: len(r['question']))
-        question_text = representative['question']
-
-        # 合并来源
+        # 合并来源（聚类级别）
         sources = []
         seen_sources = set()
         for r in rows_in_cluster:
@@ -128,6 +171,12 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             if src_key not in seen_sources:
                 seen_sources.add(src_key)
                 sources.append(src)
+
+        # 每个原始题目的来源（per-question sources）
+        orig_q_sources = []
+        for r in rows_in_cluster:
+            src = {"url": r.get('url', ''), "company": r.get('company', ''), "round": r.get('round', '')}
+            orig_q_sources.append({"question": r['question'], "sources": [src]})
 
         # 合并分类和标签
         cat1_set = set()
@@ -145,14 +194,49 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
         diff_str = Counter(diffs).most_common(1)[0][0] if diffs else "未知"
 
-        cluster_details.append({
-            'question': question_text,
+        original_qs = [r['question'] for r in rows_in_cluster]
+
+        detail = {
+            'question': '',  # 稍后填充
+            'original_questions': original_qs,
+            'original_question_sources': orig_q_sources,
             'cat1': cat1_set,
             'tags': tags_set,
             'difficulty': diff_str,
             'frequency': len(rows_in_cluster),
             'sources': sources,
-        })
+        }
+        cluster_details.append(detail)
+
+        if len(rows_in_cluster) >= 2:
+            merge_groups.append((len(cluster_details) - 1, original_qs))
+
+    # 为合并组生成统一问题（限流并发，避免 429）
+    if merge_groups:
+        logger.info(f"正在为 {len(merge_groups)} 个合并组生成统一问题...")
+        sem = asyncio.Semaphore(8)
+
+        async def _gen_unified(idx, questions):
+            async with sem:
+                unified = await generate_unified_question(questions)
+                return idx, unified
+
+        tasks = [_gen_unified(idx, qs) for idx, qs in merge_groups]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"生成统一问题失败: {result}")
+                continue
+            idx, unified = result
+            cluster_details[idx]['question'] = unified
+
+    # 单题聚类：直接用原始题目，original_questions 为空
+    for detail in cluster_details:
+        if not detail['question']:
+            # 单题聚类，question = 唯一的原始题目
+            detail['question'] = detail['original_questions'][0] if detail['original_questions'] else ''
+            detail['original_questions'] = []
+            detail['original_question_sources'] = []
 
     def _save():
         with get_db_connection() as conn:
@@ -162,15 +246,22 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             conn.execute("DELETE FROM question_bank")
             restored_count = 0
             for c in cluster_details:
-                # 精确文本匹配恢复答案
+                # 精确文本匹配恢复答案（统一问题 or 原始题目）
                 ai_answer = existing_answers_map.get(c['question'])
+                if not ai_answer:
+                    for oq in c.get('original_questions', []):
+                        ai_answer = existing_answers_map.get(oq)
+                        if ai_answer:
+                            break
                 if ai_answer:
                     restored_count += 1
 
+                orig_qs_json = json.dumps(c.get('original_questions', []), ensure_ascii=False)
+                orig_qs_src_json = json.dumps(c.get('original_question_sources', []), ensure_ascii=False)
                 conn.execute(
-                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
+                    "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved')",
                     (c['question'], ",".join(c['cat1']), ",".join(c['tags']), c['difficulty'],
-                     c['frequency'], json.dumps(c['sources'], ensure_ascii=False), ai_answer, admin_id)
+                     c['frequency'], json.dumps(c['sources'], ensure_ascii=False), orig_qs_json, orig_qs_src_json, ai_answer, admin_id)
                 )
             conn.commit()
             logger.info(f"答案恢复: 精确匹配 {restored_count} 条")
@@ -200,6 +291,231 @@ async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
+
+
+@router.post("/api/master-bank/split-question/{question_id}")
+async def split_question(question_id: int, req: SplitQuestionRequest, admin: dict = Depends(get_admin_user)):
+    """从聚类中拆出指定的原始题目，成为独立题目"""
+    from app.services.clustering import generate_unified_question
+
+    original_q = req.original_question.strip()
+    if not original_q:
+        raise HTTPException(status_code=400, detail="original_question 不能为空")
+
+    def _split():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT id, question, sources, original_questions, original_question_sources, cat1, tags, difficulty FROM question_bank WHERE id = ?",
+                (question_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到该题目")
+
+            orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
+            orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
+
+            if not orig_qs:
+                raise HTTPException(status_code=400, detail="该题目是独立题目，无需拆分")
+
+            if original_q not in orig_qs:
+                raise HTTPException(status_code=400, detail="该原始题目不在此聚类中")
+
+            # 找到该题的来源
+            split_sources = []
+            for item in orig_qs_src:
+                if item.get('question') == original_q:
+                    split_sources = item.get('sources', [])
+                    break
+
+            # 创建新的独立题目
+            conn.execute(
+                "INSERT INTO question_bank (question, cat1, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status) VALUES (?, ?, ?, ?, 1, ?, '[]', '[]', NULL, NULL, ?, 'approved')",
+                (original_q, row['cat1'], row['tags'], row['difficulty'],
+                 json.dumps(split_sources, ensure_ascii=False), admin.id if hasattr(admin, 'id') else None)
+            )
+            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+            # 从原聚类中移除该题
+            new_orig = [q for q in orig_qs if q != original_q]
+            new_orig_src = [item for item in orig_qs_src if item.get('question') != original_q]
+
+            # 重新计算原聚类的 sources
+            remaining_sources = []
+            seen = set()
+            for item in new_orig_src:
+                for s in item.get('sources', []):
+                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    if key not in seen:
+                        seen.add(key)
+                        remaining_sources.append(s)
+
+            if len(new_orig) == 0:
+                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+            elif len(new_orig) == 1:
+                conn.execute(
+                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
+                     len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                )
+
+            conn.commit()
+            return new_id, new_orig, question_id
+
+    try:
+        new_id, remaining_orig, old_id = await run_db(_split)
+
+        # 如果原聚类还有多题，重新生成统一问题
+        if len(remaining_orig) >= 2:
+            try:
+                unified = await generate_unified_question(remaining_orig)
+                def _update_unified():
+                    with get_db_connection() as conn:
+                        conn.execute(
+                            "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (unified, old_id)
+                        )
+                        conn.commit()
+                await run_db(_update_unified)
+            except Exception as e:
+                logger.warning(f"拆分后重新生成统一问题失败: {e}")
+
+        return {"status": "success", "new_id": new_id, "message": "题目已拆分为独立题目"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("拆分题目失败")
+        raise HTTPException(status_code=500, detail=f"拆分失败: {str(e)[:200]}")
+
+
+@router.post("/api/master-bank/merge-question/{question_id}")
+async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, admin: dict = Depends(get_admin_user)):
+    """将指定的原始题目从一个聚类移动到另一个聚类"""
+    from app.services.clustering import generate_unified_question
+
+    original_q = req.original_question.strip()
+    if not original_q:
+        raise HTTPException(status_code=400, detail="original_question 不能为空")
+    if question_id == req.target_id:
+        raise HTTPException(status_code=400, detail="不能合并到同一个聚类")
+
+    def _merge():
+        with get_db_connection() as conn:
+            source = conn.execute(
+                "SELECT id, question, sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+                (question_id,)
+            ).fetchone()
+            target = conn.execute(
+                "SELECT id, question, sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+                (req.target_id,)
+            ).fetchone()
+            if not source:
+                raise HTTPException(status_code=404, detail="未找到源聚类")
+            if not target:
+                raise HTTPException(status_code=404, detail="未找到目标聚类")
+
+            src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
+            src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []
+
+            if original_q not in src_orig:
+                raise HTTPException(status_code=400, detail="该原始题目不在源聚类中")
+
+            # 找到要移动的题目的来源
+            moving_src = []
+            for item in src_orig_src:
+                if item.get('question') == original_q:
+                    moving_src = item.get('sources', [])
+                    break
+
+            # 更新目标聚类
+            tgt_orig = json.loads(target['original_questions']) if target['original_questions'] else []
+            tgt_orig_src = json.loads(target['original_question_sources']) if target['original_question_sources'] else []
+            tgt_sources = json.loads(target['sources']) if target['sources'] else []
+
+            tgt_orig.append(original_q)
+            tgt_orig_src.append({"question": original_q, "sources": moving_src})
+
+            # 更新目标的 sources
+            seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
+            for s in moving_src:
+                key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                if key not in seen:
+                    seen.add(key)
+                    tgt_sources.append(s)
+
+            conn.execute(
+                "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
+                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), req.target_id)
+            )
+
+            # 从源聚类中移除
+            new_src_orig = [q for q in src_orig if q != original_q]
+            new_src_orig_src = [item for item in src_orig_src if item.get('question') != original_q]
+
+            remaining_sources = []
+            seen2 = set()
+            for item in new_src_orig_src:
+                for s in item.get('sources', []):
+                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    if key not in seen2:
+                        seen2.add(key)
+                        remaining_sources.append(s)
+
+            if len(new_src_orig) == 0:
+                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+            elif len(new_src_orig) == 1:
+                conn.execute(
+                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_src_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
+                     len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                )
+
+            conn.commit()
+            return new_src_orig, question_id, tgt_orig, req.target_id
+
+    try:
+        src_remaining, src_id, tgt_all, tgt_id = await run_db(_merge)
+
+        # 重新生成源聚类的统一问题
+        if len(src_remaining) >= 2:
+            try:
+                unified = await generate_unified_question(src_remaining)
+                def _update_src():
+                    with get_db_connection() as conn:
+                        conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
+                        conn.commit()
+                await run_db(_update_src)
+            except Exception as e:
+                logger.warning(f"合并后重新生成源聚类统一问题失败: {e}")
+
+        # 重新生成目标聚类的统一问题
+        if len(tgt_all) >= 2:
+            try:
+                unified = await generate_unified_question(tgt_all)
+                def _update_tgt():
+                    with get_db_connection() as conn:
+                        conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
+                        conn.commit()
+                await run_db(_update_tgt)
+            except Exception as e:
+                logger.warning(f"合并后重新生成目标聚类统一问题失败: {e}")
+
+        return {"status": "success", "message": "题目已移动到目标聚类"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("合并题目失败")
+        raise HTTPException(status_code=500, detail=f"合并失败: {str(e)[:200]}")
 
 
 @router.post("/api/master-bank/generate-answer/{question_id}")
@@ -402,10 +718,24 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_curre
     current_tags = row['tags'] or ''
     current_diff = row['difficulty'] or '未知'
 
+    # 读取用户自定义分类体系
+    def _get_taxonomy():
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+            if row and row['value']:
+                try:
+                    return json.loads(row['value'])
+                except json.JSONDecodeError:
+                    pass
+            return None
+
+    taxonomy_config = await run_db(_get_taxonomy)
+
     # 在 prompt 中告知当前分类，要求 LLM 重新审视并给出更准确的分类
     input_data = [{"id": question_id, "题目": question_text}]
     q_json = json.dumps(input_data, ensure_ascii=False)
-    user_msg = TAGGING_PROMPT.replace("{questions}", q_json)
+    prompt = build_tagging_prompt(taxonomy_config) if taxonomy_config else TAGGING_PROMPT
+    user_msg = prompt.replace("{questions}", q_json)
     user_msg += f"""
 
 ## ⚠️ 重要：重新审视请求
