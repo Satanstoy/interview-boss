@@ -1,11 +1,13 @@
 <template>
-  <div class="min-h-screen bg-slate-50 dark:bg-surface-900">
+  <div class="min-h-screen bg-surface-50 dark:bg-surface-900">
     <!-- Top bar -->
-    <nav class="sticky top-0 z-50 bg-white/80 dark:bg-surface-900/80 backdrop-blur-xl border-b border-gray-100/80 dark:border-gray-800/80 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
+    <nav class="sticky top-0 z-50 bg-white/85 dark:bg-surface-900/85 backdrop-blur-xl border-b border-surface-200/60 dark:border-ink-700/40 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
       <div class="max-w-[1440px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
-        <h1 class="text-lg lg:text-xl font-extrabold bg-gradient-to-r from-primary-600 via-accent-600 to-primary-500 bg-clip-text text-transparent tracking-tight">InterviewBoss</h1>
+        <h1 class="text-lg lg:text-xl font-serif font-normal tracking-tight text-ink-900 dark:text-ink-100">
+          Interview<span class="text-primary-600 dark:text-primary-400">Boss</span>
+        </h1>
         <div class="flex items-center gap-3">
-          <span v-if="currentUser && activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 px-3 py-1">
+          <span v-if="currentUser && activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-200 dark:border-primary-800 px-3 py-1">
             {{ activeSeason }}
           </span>
           <UserMenu
@@ -19,7 +21,7 @@
           <!-- Dark mode toggle -->
           <button
             @click="toggleDark()"
-            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
+            class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
             :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
           >
             <svg v-if="isDark" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -32,7 +34,7 @@
           <button
             v-if="currentUser"
             @click="showSettings = true"
-            class="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-200"
+            class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
             title="系统配置"
           >
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -45,6 +47,7 @@
     <SettingsPanel
       :visible="showSettings"
       :active-season="activeSeason"
+      :is-admin="currentUser?.is_admin"
       @close="showSettings = false"
       @update:active-season="activeSeason = $event"
     />
@@ -52,34 +55,35 @@
     <!-- Login gate: split layout -->
     <div v-if="!currentUser" class="relative min-h-[calc(100vh-56px)] overflow-hidden">
       <div class="absolute inset-0 overflow-hidden pointer-events-none">
-        <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-200/30 dark:bg-primary-900/20 rounded-full blur-3xl animate-pulse-slow"></div>
-        <div class="absolute -bottom-40 -left-40 w-96 h-96 bg-accent-200/30 dark:bg-accent-900/20 rounded-full blur-3xl animate-pulse-slow" style="animation-delay: 1.5s"></div>
+        <div class="absolute -top-40 -right-40 w-[500px] h-[500px] bg-primary-200/20 dark:bg-primary-900/15 rounded-full blur-[100px] animate-pulse-slow"></div>
+        <div class="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-accent-200/20 dark:bg-accent-900/15 rounded-full blur-[100px] animate-pulse-slow" style="animation-delay: 1.5s"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary-100/10 rounded-full blur-[80px] animate-float"></div>
       </div>
 
       <div class="relative flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
         <!-- Left: brand showcase -->
         <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0 animate-fade-in">
           <div class="max-w-md mx-auto lg:mx-0">
-            <div class="w-20 h-20 mb-8 rounded-3xl bg-gradient-brand flex items-center justify-center shadow-glow transform hover:scale-105 transition-transform duration-300">
+            <div class="w-20 h-20 mb-8 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-warm transform hover:scale-105 transition-transform duration-300">
               <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
               </svg>
             </div>
 
-            <h2 class="text-3xl lg:text-4xl font-extrabold bg-gradient-to-r from-gray-800 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-3">
+            <h2 class="font-serif text-3xl lg:text-[2.5rem] text-ink-900 dark:text-ink-100 mb-3 leading-tight">
               欢迎使用 InterviewBoss
             </h2>
-            <p class="text-gray-500 dark:text-gray-400 mb-10 leading-relaxed text-lg">
+            <p class="text-ink-400 dark:text-ink-400 mb-10 leading-relaxed text-lg font-light">
               AI 驱动的面试准备平台
             </p>
 
             <div class="grid grid-cols-3 gap-4">
               <div v-for="feature in loginFeatures" :key="feature.label"
-                class="flex flex-col items-center gap-2 p-4 rounded-2xl bg-white/60 dark:bg-surface-800/60 backdrop-blur-sm border border-gray-100 dark:border-gray-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
+                class="flex flex-col items-center gap-2.5 p-4 rounded-2xl bg-white/70 dark:bg-surface-800/70 backdrop-blur-sm border border-surface-200/80 dark:border-ink-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
                   <span class="text-lg">{{ feature.icon }}</span>
                 </div>
-                <span class="text-xs font-semibold text-gray-600 dark:text-gray-400">{{ feature.label }}</span>
+                <span class="text-xs font-semibold text-ink-600 dark:text-ink-400">{{ feature.label }}</span>
               </div>
             </div>
           </div>
@@ -109,7 +113,7 @@
         @refresh-recommend="recommendSeed++"
       />
 
-      <div class="lg:col-span-3 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-gray-100/80 dark:border-gray-700/50 overflow-hidden">
+      <div class="lg:col-span-3 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden">
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
         <div class="p-4 lg:p-6">
@@ -126,15 +130,15 @@
 
           <!-- Sub-tag filter chips -->
           <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-4">
-            <span class="text-xs text-gray-400 dark:text-gray-500 self-center mr-1 font-medium">子标签：</span>
+            <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
             <button
               v-for="st in availableSubTags"
               :key="st.tag"
               @click="toggleSubTag(st.tag)"
               class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
               :class="selectedSubTags.includes(st.tag)
-                ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-700 font-semibold shadow-sm'
-                : 'bg-white dark:bg-surface-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 hover:border-gray-300 dark:hover:border-gray-500'"
+                ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
+                : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
             >
               {{ st.tag }}
               <span class="ml-1 opacity-50">{{ st.count }}</span>
@@ -143,14 +147,14 @@
 
           <!-- Action bar -->
           <div class="flex flex-wrap justify-between items-center mb-5 gap-3">
-            <h2 class="text-lg lg:text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+            <h2 class="text-lg lg:text-xl font-bold text-ink-800 dark:text-ink-100 flex items-center gap-2">
               {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : activeTab === 'KnowledgeGraph' ? '知识图谱' : '高频题库' }}
-              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs px-3 py-1">
+              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border border-sage-200 dark:border-sage-800 text-xs px-3 py-1">
                 筛选: {{ selectedTag }}
               </span>
             </h2>
             <div class="flex flex-wrap gap-2">
-              <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="btn-primary text-sm bg-gradient-to-r from-accent-600 to-primary-600">
+              <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="btn-primary text-sm">
                 {{ isBuilding ? '重建中...' : '重建题库' }}
               </button>
               <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-sm">
@@ -161,12 +165,12 @@
           </div>
 
           <!-- Error banner -->
-          <div v-if="dataLoadError" class="mb-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
+          <div v-if="dataLoadError" class="mb-4 bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
             <span class="flex items-center gap-2 text-sm">
               <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               {{ dataLoadError }}
             </span>
-            <button @click="fetchTableData" class="text-sm bg-red-100 dark:bg-red-900/50 hover:bg-red-200 dark:hover:bg-red-800/50 px-3 py-1 rounded-lg transition font-medium">重试</button>
+            <button @click="fetchTableData" class="text-sm bg-red-100/80 dark:bg-red-900/40 hover:bg-red-200 dark:hover:bg-red-800/40 px-3 py-1 rounded-lg transition font-medium">重试</button>
           </div>
 
           <!-- Loading skeleton -->
@@ -216,7 +220,7 @@
               >
                 <template #actions="{ row }">
                   <div class="flex items-center justify-center gap-1">
-                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="safeUrl(row['来源链接'])" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1" title="打开链接">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
@@ -233,7 +237,7 @@
                   <InlineEdit :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
                 </template>
                 <template #cell-salary="{ row }">
-                  <span class="text-red-600 dark:text-red-400">{{ row['薪资范围'] }}</span>
+                  <span class="text-red-600 dark:text-red-400 font-medium">{{ row['薪资范围'] }}</span>
                 </template>
                 <template #cell-tech_stack="{ row }">
                   <span class="whitespace-pre-wrap break-words min-w-[200px]">{{ row['核心技术要求'] }}</span>
@@ -245,8 +249,8 @@
 
               <!-- Interview Tab -->
               <div v-if="activeTab === 'Interview' && interviewSeasons.length > 0" class="flex items-center gap-2 mb-4">
-                <label class="text-xs text-gray-500 dark:text-gray-400">招聘季筛选：</label>
-                <select v-model="filterSeason" class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-gray-800 dark:text-gray-200 focus:ring-blue-500 focus:border-blue-500">
+                <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
+                <select v-model="filterSeason" class="border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-200 focus:ring-primary-400 focus:border-primary-400">
                   <option value="">全部</option>
                   <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
                 </select>
@@ -268,12 +272,12 @@
               >
                 <template #actions="{ row }">
                   <div class="flex items-center justify-center gap-1">
-                    <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1 disabled:opacity-50" title="重新提取并打标">
+                    <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1 disabled:opacity-50" title="重新提取并打标">
                       <svg v-if="reprocessingIds[row.id]" class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                       <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                       <span class="text-[10px] leading-tight">分析</span>
                     </button>
-                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="safeUrl(row['来源链接'])" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1" title="打开链接">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
@@ -358,27 +362,27 @@
     <!-- Merge Question Dialog -->
     <Teleport to="body">
       <div v-if="mergeDialogVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="mergeDialogVisible = false">
-        <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-          <div class="p-5 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100">移动题目到目标聚类</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">选择要移动到的目标题目，或独立为新聚类</p>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 bg-gray-50 dark:bg-surface-700 rounded-lg p-2 truncate">
+        <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col border border-surface-200 dark:border-ink-700">
+          <div class="p-5 border-b border-surface-200 dark:border-ink-700">
+            <h3 class="text-lg font-bold text-ink-800 dark:text-ink-100 font-serif">移动题目到目标聚类</h3>
+            <p class="text-sm text-ink-400 dark:text-ink-400 mt-1">选择要移动到的目标题目，或独立为新聚类</p>
+            <p class="text-xs text-ink-400 dark:text-ink-500 mt-2 bg-surface-50 dark:bg-surface-700 rounded-lg p-2 truncate">
               <span class="font-medium">当前题目：</span>{{ mergeSourceOriginalQ }}
             </p>
           </div>
-          <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <button @click="splitAsNew" class="w-full text-left p-3 rounded-xl border-2 border-dashed border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20 hover:border-orange-400 dark:hover:border-orange-600 transition-all duration-200">
+          <div class="p-4 border-b border-surface-200 dark:border-ink-700">
+            <button @click="splitAsNew" class="w-full text-left p-3 rounded-xl border-2 border-dashed border-primary-300 dark:border-primary-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-400 dark:hover:border-primary-600 transition-all duration-200">
               <div class="flex items-center gap-2">
-                <svg class="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-                <span class="text-sm font-medium text-orange-700 dark:text-orange-400">成为新的独立聚类</span>
+                <svg class="w-4 h-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+                <span class="text-sm font-medium text-primary-700 dark:text-primary-400">成为新的独立聚类</span>
               </div>
-              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1 ml-6">从当前聚类中拆出，作为独立题目</p>
+              <p class="text-xs text-ink-400 dark:text-ink-500 mt-1 ml-6">从当前聚类中拆出，作为独立题目</p>
             </button>
           </div>
-          <div class="p-5 border-b border-gray-200 dark:border-gray-700">
+          <div class="p-5 border-b border-surface-200 dark:border-ink-700">
             <div class="flex gap-2">
               <input v-model="mergeSearchQuery" @keyup.enter="doMergeSearch"
-                class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-surface-900 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                class="flex-1 px-3 py-2 border border-surface-300 dark:border-ink-600 rounded-lg text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200 focus:ring-2 focus:ring-primary-400 focus:border-primary-400"
                 placeholder="搜索目标题目..." />
               <button @click="doMergeSearch" :disabled="mergeSearching"
                 class="btn-primary px-4 py-2 text-sm disabled:opacity-50">
@@ -387,19 +391,19 @@
             </div>
           </div>
           <div class="flex-1 overflow-y-auto p-5 custom-scrollbar">
-            <div v-if="mergeSearchResults.length === 0" class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
+            <div v-if="mergeSearchResults.length === 0" class="text-center py-8 text-ink-400 dark:text-ink-500 text-sm">
               {{ mergeSearching ? '搜索中...' : '输入关键词搜索目标题目' }}
             </div>
             <div v-else class="space-y-2">
               <button v-for="item in mergeSearchResults" :key="item.id"
                 @click="confirmMerge(item)"
-                class="w-full text-left p-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 transition-all duration-200">
-                <div class="text-sm font-medium text-gray-800 dark:text-gray-200 line-clamp-2">{{ item.question }}</div>
-                <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">频率: {{ item.frequency }} | ID: {{ item.id }}</div>
+                class="w-full text-left p-3 rounded-xl border border-surface-200 dark:border-ink-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 transition-all duration-200">
+                <div class="text-sm font-medium text-ink-800 dark:text-ink-200 line-clamp-2">{{ item.question }}</div>
+                <div class="text-xs text-ink-400 dark:text-ink-500 mt-1">频率: {{ item.frequency }} | ID: {{ item.id }}</div>
               </button>
             </div>
           </div>
-          <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+          <div class="p-4 border-t border-surface-200 dark:border-ink-700 flex justify-end">
             <button @click="mergeDialogVisible = false" class="btn-secondary px-4 py-2 text-sm">取消</button>
           </div>
         </div>
@@ -411,6 +415,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError } from './utils/http.js'
+import { safeUrl } from './utils/validate.js'
 import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 import { useTheme } from './composables/useTheme.js'
@@ -478,9 +483,9 @@ const isMasterSelected = (id) => masterSelection.selectedIds.value.has(id)
 
 // ── Login features ──
 const loginFeatures = [
-  { icon: '📚', label: '智能题库', iconBg: 'bg-blue-100 dark:bg-blue-900/30' },
-  { icon: '🤖', label: 'AI 刷题', iconBg: 'bg-violet-100 dark:bg-violet-900/30' },
-  { icon: '🎯', label: '模拟面试', iconBg: 'bg-orange-100 dark:bg-orange-900/30' },
+  { icon: '📚', label: '智能题库', iconBg: 'bg-primary-100 dark:bg-primary-900/30' },
+  { icon: '🤖', label: 'AI 刷题', iconBg: 'bg-sage-100 dark:bg-sage-700/30' },
+  { icon: '🎯', label: '模拟面试', iconBg: 'bg-accent-100 dark:bg-accent-700/30' },
 ]
 
 // ── Skeleton data ──
@@ -900,7 +905,7 @@ const splitAsNew = async () => {
 }
 
 const triggerBuildMasterBank = async () => {
-  if (!await showConfirm('将重新整理全部题目，确定继续？', { title: '重建题库', variant: 'danger' })) return
+  if (!await showConfirm('将重新整理全部题目并调用 LLM 重新分类聚类，会消耗大量 API Token，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
   try {
     const result = await api.buildMasterBankSSE(() => {})
@@ -975,17 +980,17 @@ onUnmounted(() => cancelAllRequests())
 </script>
 
 <style scoped>
-:deep(pre) { background-color: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
+:deep(pre) { background-color: #2d2a27; color: #faf9f7; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
 :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em; }
-:deep(p code) { @apply bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
+:deep(p code) { @apply bg-surface-100 dark:bg-ink-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
-:deep(strong) { font-weight: 700; @apply text-gray-900 dark:text-gray-100; }
-:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-gray-900 dark:text-gray-100; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+:deep(strong) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; }
+:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; margin-top: 1.5rem; margin-bottom: 0.5rem; }
 :deep(h3) { font-size: 1.125rem; }
 
-.tab-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.tab-fade-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
 .tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.tab-fade-enter-from { opacity: 0; transform: translateY(8px); }
+.tab-fade-enter-from { opacity: 0; transform: translateY(10px); }
 .tab-fade-leave-to { opacity: 0; transform: translateY(-4px); }
 </style>

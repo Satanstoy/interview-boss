@@ -15,7 +15,7 @@ from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_t
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest
-from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format
+from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user
 from app.services.clustering import cluster_all_questions, generate_unified_question, match_new_questions
 from app.services.utils import normalize_category
 
@@ -168,7 +168,8 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 with get_db_connection() as conn:
                     raw = conn.execute(
                         "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
-                        "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != ''"
+                        "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.job_position = ?",
+                        (current_pos,)
                     ).fetchall()
                     existing = conn.execute(
                         "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
@@ -184,7 +185,8 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             # ── LLM 重标注 ──
             taxonomy_config = await run_db(get_taxonomy_for_position)
             prompt_template = build_tagging_prompt(taxonomy_config)
-            use_rf = _should_use_response_format()
+            _, _, _, _admin_bu = get_llm_client_for_user(admin['id'])
+            use_rf = _should_use_response_format(_admin_bu)
 
             TAG_BATCH = 30
             total = len(raw_questions)
@@ -197,10 +199,11 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 async with sem:
                     questions_input = [{"id": r['id'], "题目": r['question']} for r in batch]
                     prompt = prompt_template.replace("{questions}", json.dumps(questions_input, ensure_ascii=False))
-                    kwargs = {"model": LLM_MODEL, "messages": [{"role": "system", "content": "严格输出 JSON 对象，格式必须为 {\"questions\": [...]}"}, {"role": "user", "content": prompt}], "temperature": 0.0}
-                    if use_rf:
+                    _c, _m, _t, _bu = get_llm_client_for_user(admin['id'])
+                    kwargs = {"model": _m, "messages": [{"role": "system", "content": "严格输出 JSON 对象，格式必须为 {\"questions\": [...]}"}, {"role": "user", "content": prompt}], "temperature": 0.0}
+                    if _should_use_response_format(_bu):
                         kwargs["response_format"] = {"type": "json_object"}
-                    response = await client.chat.completions.create(**kwargs)
+                    response = await _c.chat.completions.create(**kwargs)
                     result = _extract_json(response.choices[0].message.content)
                     result_map = {}
                     for item in result.get("questions", []):
@@ -241,7 +244,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             raw_questions, existing_answers_map = await run_db(_load)
             yield f"data: {json.dumps({'type': 'progress', 'step': 'cluster', 'current': 0, 'total': 0, 'message': f'LLM 聚类去重中 ({len(raw_questions)} 道)...'})}\n\n"
             logger.info(f"全量重建: 正在对 {len(raw_questions)} 道题目进行 LLM 聚类...")
-            all_clusters = await cluster_all_questions(raw_questions)
+            all_clusters = await cluster_all_questions(raw_questions, user_id=admin['id'])
 
             # ── 构建聚类详情 ──
             id_map = {r['id']: dict(r) for r in raw_questions}
@@ -285,7 +288,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
                 async def _gen_unified(idx, questions, sources_ctx=None):
                     async with merge_sem:
-                        unified = await generate_unified_question(questions, sources_context=sources_ctx)
+                        unified = await generate_unified_question(questions, sources_context=sources_ctx, user_id=admin['id'])
                         return idx, unified
 
                 merge_tasks = [_gen_unified(idx, qs, src) for idx, qs, src in merge_groups]
@@ -417,7 +420,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
 
             yield f"data: {json.dumps({'type': 'progress', 'step': 'match', 'current': 0, 'total': 1, 'message': 'LLM 匹配中...'})}\n\n"
 
-            match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
+            match_result = await match_new_questions(new_rows_for_match, existing_by_cat2, user_id=admin['id'])
             matched = match_result["matched"]
             unmatched = match_result["unmatched"]
 
@@ -608,7 +611,7 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 for item in remaining_orig_src:
                     s = item.get("sources", [{}])[0] if item.get("sources") else {}
                     sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
-                unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx)
+                unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx, user_id=admin['id'])
                 def _update_unified():
                     with get_db_connection() as conn:
                         conn.execute(
@@ -734,7 +737,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
         if len(src_remaining) >= 2:
             try:
                 sources_ctx = _build_sources_ctx(src_remaining_src)
-                unified = await generate_unified_question(src_remaining, sources_context=sources_ctx)
+                unified = await generate_unified_question(src_remaining, sources_context=sources_ctx, user_id=admin['id'])
                 def _update_src():
                     with get_db_connection() as conn:
                         conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
@@ -747,7 +750,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
         if len(tgt_all) >= 2:
             try:
                 sources_ctx = _build_sources_ctx(tgt_all_src)
-                unified = await generate_unified_question(tgt_all, sources_context=sources_ctx)
+                unified = await generate_unified_question(tgt_all, sources_context=sources_ctx, user_id=admin['id'])
                 def _update_tgt():
                     with get_db_connection() as conn:
                         conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
@@ -779,7 +782,7 @@ async def generate_master_answer(question_id: int, user: dict = Depends(get_curr
 
     try:
         prompt = ANSWER_PROMPT.replace("{question}", row['question'])
-        answer = await _call_llm_with_retry(prompt)
+        answer = await _call_llm_with_retry(prompt, user_id=user['id'])
 
         def _update():
             with get_db_connection() as conn:
@@ -928,7 +931,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest, user: dict = 
                 async with semaphore:
                     try:
                         prompt = ANSWER_PROMPT.replace("{question}", question_text)
-                        answer = await _call_llm_with_retry(prompt)
+                        answer = await _call_llm_with_retry(prompt, user_id=user['id'])
                         def _update():
                             with get_db_connection() as conn:
                                 conn.execute(
@@ -1014,8 +1017,9 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
 """
 
     try:
-        response = await client.chat.completions.create(
-            model=LLM_MODEL,
+        _c, _m, _t, _bu = get_llm_client_for_user(admin['id'])
+        response = await _c.chat.completions.create(
+            model=_m,
             messages=[
                 {"role": "system", "content": "你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。必须输出输入数据中每一项对应的 \"id\" 字段，以便于与原输入一一对应。请仔细分析题目内容，给出最准确的分类。"},
                 {"role": "user", "content": user_msg}
@@ -1202,6 +1206,7 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
         raw = await _call_llm_with_retry(
             prompt=prompt,
             system_msg="你是一名专业的技术面试评估专家。",
+            user_id=user['id'],
         )
         result = _extract_json(raw)
 

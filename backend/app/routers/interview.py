@@ -3,7 +3,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.db.operations import _cleanup_old_sources, _replace_details
 from app.routers.submit import tag_questions_batch, incremental_update_master_bank
 
@@ -47,7 +47,8 @@ async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user
 
         tagged_rows = await tag_questions_batch(url, company, round_, q_list)
 
-        await run_db(lambda: _replace_details(url, tagged_rows))
+        current_pos = get_current_job_position()
+        await run_db(lambda: _replace_details(url, tagged_rows, job_position=current_pos))
         original_owner_id = row['owner_id']
         await incremental_update_master_bank(
             tagged_rows, bg_tasks,

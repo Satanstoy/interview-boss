@@ -60,6 +60,8 @@ def init_db():
             conn.execute("ALTER TABLE interview ADD COLUMN owner_id INTEGER REFERENCES users(id)")
         if "status" not in interview_col_set:
             conn.execute("ALTER TABLE interview ADD COLUMN status TEXT DEFAULT 'approved'")
+        if "job_position" not in interview_col_set:
+            conn.execute("ALTER TABLE interview ADD COLUMN job_position TEXT DEFAULT ''")
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_profile (
@@ -191,6 +193,18 @@ def init_db():
             )
         ''')
 
+        # ── user_llm_config 表（per-user LLM 配置，与 .env 解耦）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_llm_config (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                api_key TEXT NOT NULL DEFAULT '',
+                base_url TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT 'gpt-4o',
+                timeout INTEGER NOT NULL DEFAULT 120,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # ── 性能索引 ──
         # ── 迁移：jd 表添加 season 列 ──
         jd_columns = {row[1] for row in cursor.execute("PRAGMA table_info('jd')").fetchall()}
@@ -220,6 +234,8 @@ def init_db():
         if "updated_at" not in jd_columns:
             conn.execute("ALTER TABLE jd ADD COLUMN updated_at TIMESTAMP")
             conn.execute("UPDATE jd SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
+        if "deleted_at" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN deleted_at TIMESTAMP")
 
         cursor.execute("PRAGMA index_list('interview')")
         iv_indexes = [row[1] for row in cursor.fetchall()]
@@ -238,6 +254,8 @@ def init_db():
         if "updated_at" not in iv_columns:
             conn.execute("ALTER TABLE interview ADD COLUMN updated_at TIMESTAMP")
             conn.execute("UPDATE interview SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
+        if "deleted_at" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN deleted_at TIMESTAMP")
 
         cursor.execute("PRAGMA index_list('questions_detail')")
         qd_indexes = [row[1] for row in cursor.fetchall()]
@@ -247,6 +265,36 @@ def init_db():
         if "updated_at" not in qd_col_set:
             conn.execute("ALTER TABLE questions_detail ADD COLUMN updated_at TIMESTAMP")
             conn.execute("UPDATE questions_detail SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
+        if "deleted_at" not in qd_col_set:
+            conn.execute("ALTER TABLE questions_detail ADD COLUMN deleted_at TIMESTAMP")
+        # 刷新列集合
+        qd_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('questions_detail')").fetchall()}
+        if "job_position" not in qd_col_set:
+            conn.execute("ALTER TABLE questions_detail ADD COLUMN job_position TEXT DEFAULT ''")
+            # 回填：通过 question_bank 中已有的匹配题目获取 job_position
+            conn.execute("""
+                UPDATE questions_detail SET job_position = (
+                    SELECT qb.job_position FROM question_bank qb
+                    WHERE qb.original_questions LIKE '%' || questions_detail.question || '%'
+                    AND qb.job_position IS NOT NULL AND qb.job_position != ''
+                    LIMIT 1
+                ) WHERE job_position IS NULL OR job_position = ''
+            """)
+            from app.core.prompts import DEFAULT_TAXONOMY
+            _default_pos = DEFAULT_TAXONOMY["job_position"]
+            _pos_row = conn.execute("SELECT value FROM user_profile WHERE key = 'taxonomy_config'").fetchone()
+            if _pos_row and _pos_row[0]:
+                try:
+                    import json as _json
+                    _tc = _json.loads(_pos_row[0])
+                    _default_pos = _tc.get("job_position", _default_pos)
+                except Exception:
+                    pass
+            conn.execute(
+                "UPDATE questions_detail SET job_position = ? WHERE job_position IS NULL OR job_position = ''",
+                (_default_pos,)
+            )
+            logger.info(f"已为 questions_detail 表添加 job_position 列并回填为 {_default_pos}")
 
         cursor.execute("PRAGMA index_list('question_bank')")
         qb_indexes = [row[1] for row in cursor.fetchall()]
