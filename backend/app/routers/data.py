@@ -46,20 +46,30 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
                     where = "owner_id IS NULL AND status = 'approved'"
                     params = ()
                 total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} WHERE {where}", params).fetchone()[0]
-                rows = conn.execute(f"SELECT * FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+                if table_name == 'jd':
+                    rows = conn.execute(f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+                else:
+                    rows = conn.execute(f"SELECT id, url, company, round, focus, questions_list, difficulty, season FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
             else:  # questions_detail
                 bank_mode = user.get('bank_mode', 'public')
                 if bank_mode == 'personal':
-                    where = "qd.url IN (SELECT url FROM interview WHERE owner_id = ?)"
+                    join_where = "iv.owner_id = ?"
                     params = (user['id'],)
                 elif bank_mode == 'mixed':
-                    where = "(qd.url IN (SELECT url FROM interview WHERE owner_id = ?) OR qd.url IN (SELECT url FROM interview WHERE owner_id IS NULL AND status = 'approved'))"
+                    join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved'))"
                     params = (user['id'],)
                 else:  # public
-                    where = "qd.url IN (SELECT url FROM interview WHERE owner_id IS NULL AND status = 'approved')"
+                    join_where = "iv.owner_id IS NULL AND iv.status = 'approved'"
                     params = ()
-                total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} qd WHERE {where}", params).fetchone()[0]
-                rows = conn.execute(f"SELECT * FROM {safe_name} qd WHERE {where} ORDER BY qd.id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.url = iv.url WHERE {join_where}", params
+                ).fetchone()[0]
+                rows = conn.execute(
+                    f"SELECT qd.id, qd.url, qd.company, qd.round, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag "
+                    f"FROM {safe_name} qd JOIN interview iv ON qd.url = iv.url "
+                    f"WHERE {join_where} ORDER BY qd.id ASC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset)
+                ).fetchall()
             return total, rows
 
     total, rows = await run_db(_query)
@@ -99,8 +109,10 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_a
                     cursor.execute("DELETE FROM interview WHERE url = ?", (url,))
                     # 清理关联的 questions_detail
                     cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
-                    # 清理 question_bank 中的来源引用
-                    affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
+                    # 清理 question_bank 中的来源引用（用 LIKE 预筛选减少扫描范围）
+                    affected_rows = cursor.execute(
+                        "SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)
+                    ).fetchall()
                     for mr in affected_rows:
                         try:
                             sources = json.loads(mr['sources']) if mr['sources'] else []
@@ -109,7 +121,7 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_a
                         new_sources = [s for s in sources if s.get('url') != url]
                         if len(new_sources) != len(sources):
                             cursor.execute(
-                                "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (len(new_sources), json.dumps(new_sources), mr['id'])
                             )
                     cursor.execute(
@@ -118,8 +130,10 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_a
 
             if table_name == 'interview':
                 url = target_row['url']
-                # 通过 sources 字段中的 URL 追溯受影响的 question_bank 记录
-                affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
+                # 通过 sources 字段中的 URL 追溯受影响的 question_bank 记录（用 LIKE 预筛选）
+                affected_rows = cursor.execute(
+                    "SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)
+                ).fetchall()
                 for mr in affected_rows:
                     try:
                         sources = json.loads(mr['sources']) if mr['sources'] else []
@@ -129,7 +143,7 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_a
                     if match_count > 0:
                         new_sources = [s for s in sources if s.get('url') != url]
                         cursor.execute(
-                            "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                             (len(new_sources), json.dumps(new_sources), mr['id'])
                         )
 
@@ -173,9 +187,25 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
+            urls_to_delete = {r["url"] for r in rows if r["url"]}
+
+            if table_name == "jd":
+                # N1: JD 批量删除级联清理关联的 interview、questions_detail、question_bank
+                for url in urls_to_delete:
+                    cursor.execute("DELETE FROM interview WHERE url = ?", (url,))
+                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+
             if table_name == "interview":
-                urls_to_delete = {r["url"] for r in rows if r["url"]}
-                all_master = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
+                for url in urls_to_delete:
+                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+
+            # 两种类型都需要清理 question_bank 中的来源引用（用 LIKE 预筛选）
+            if urls_to_delete:
+                like_conditions = " OR ".join(["sources LIKE ?" for _ in urls_to_delete])
+                like_params = [f"%{u}%" for u in urls_to_delete]
+                all_master = cursor.execute(
+                    f"SELECT id, sources FROM question_bank WHERE {like_conditions}", like_params
+                ).fetchall()
                 for mr in all_master:
                     try:
                         sources = json.loads(mr["sources"]) if mr["sources"] else []
@@ -184,14 +214,12 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
                     if any(s.get("url") in urls_to_delete for s in sources):
                         new_sources = [s for s in sources if s.get("url") not in urls_to_delete]
                         cursor.execute(
-                            "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                            "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                             (len(new_sources), json.dumps(new_sources), mr["id"])
                         )
                 cursor.execute(
                     "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
                 )
-                for url in urls_to_delete:
-                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
 
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))

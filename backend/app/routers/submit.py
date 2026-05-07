@@ -13,7 +13,7 @@ from app.core.prompts import SYSTEM_PROMPT, JD_PROMPT, INTERVIEW_PROMPT, TAGGING
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.db.operations import _check_duplicate_url_sync, _insert_jd, _insert_interview, _insert_details
-from app.services.llm import client, _should_use_response_format, _extract_json
+from app.services.llm import client, _should_use_response_format, _extract_json, _call_llm_with_retry_messages
 from app.services.utils import encode_image, normalize_category
 
 logger = logging.getLogger("interview-boss")
@@ -37,9 +37,14 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     )
     if _should_use_response_format():
         kwargs["response_format"] = {"type": "json_object"}
-    response = await client.chat.completions.create(**kwargs)
+    from app.services.llm import _call_llm_with_retry
+    raw_content = await _call_llm_with_retry(
+        prompt=user_msg,
+        system_msg="你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。必须输出输入数据中每一项对应的 \"id\" 字段，以便于与原输入一一对应。",
+        response_format=kwargs.get("response_format"),
+    )
     try:
-        raw_items = _extract_json(response.choices[0].message.content).get("questions", [])
+        raw_items = _extract_json(raw_content).get("questions", [])
         result_map = {}
         for item in raw_items:
             if isinstance(item, dict) and "id" in item:
@@ -176,7 +181,9 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
             cursor = conn.cursor()
             submitter_id = user_id
             if not submitter_id:
-                admin_row = conn.execute("SELECT id FROM users WHERE username = 'sj'").fetchone()
+                import os
+                admin_username = os.getenv("ADMIN_USERNAME", "sj")
+                admin_row = conn.execute("SELECT id FROM users WHERE username = ?", (admin_username,)).fetchone()
                 submitter_id = admin_row[0] if admin_row else None
             status = 'approved' if submitter_is_admin else 'pending'
 
@@ -200,7 +207,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
                     if new_source not in sources:
                         sources.append(new_source)
                     cursor.execute(
-                        "UPDATE question_bank SET frequency = frequency + 1, sources = ? WHERE id = ?",
+                        "UPDATE question_bank SET frequency = frequency + 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (json.dumps(sources, ensure_ascii=False), qb_id)
                     )
 
@@ -269,6 +276,9 @@ async def submit_data(
         if text.strip():
             user_content.append({"type": "text", "text": f"\n【文本内容】:\n{text}\n"})
         if files and files[0].filename:
+            MAX_FILE_COUNT = 20
+            if len(files) > MAX_FILE_COUNT:
+                raise HTTPException(status_code=400, detail=f"最多上传 {MAX_FILE_COUNT} 个文件")
             total_size = 0
             for file in files:
                 if file.content_type.startswith("image/"):
@@ -287,24 +297,24 @@ async def submit_data(
                     base64_img = encode_image(content)
                     user_content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:{file.content_type};base64,{base64_img}"}
+                        "image_url": {"url": f"data:{real_mime};base64,{base64_img}"}
                     })
 
         llm_kwargs = dict(
             model=LLM_MODEL,
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
             temperature=0.1,
         )
         if _should_use_response_format():
             llm_kwargs["response_format"] = {"type": "json_object"}
-        response = await client.chat.completions.create(**llm_kwargs)
-        parsed_data = _extract_json(response.choices[0].message.content)
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
+        response_text = await _call_llm_with_retry_messages(messages, **llm_kwargs)
+        parsed_data = _extract_json(response_text)
 
         # 兼容两种返回格式：{type, data} 或 {data}
         if not doc_type:
             doc_type = (parsed_data.get("type") or "").lower()
         data = parsed_data.get("data", {})
-        saved_url = url if url else "未提供链接"
+        saved_url = url if url else f"internal://{__import__('secrets').token_urlsafe(16)}"
 
         # 校验 LLM 返回的数据是否有效
         if not doc_type or not data:
@@ -430,7 +440,7 @@ async def submit_data(
         raise HTTPException(status_code=500, detail="LLM 服务响应超时，请在系统配置中增大超时时间或稍后重试。")
     except openai.APIStatusError as e:
         logger.error(f"LLM API 错误: {e}")
-        raise HTTPException(status_code=500, detail=f"LLM 接口返回错误（{e.status_code}）: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="LLM 接口返回错误，请查看服务端日志")
     except Exception as e:
         logger.exception("提交处理失败")
-        raise HTTPException(status_code=500, detail=f"提交处理失败: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")

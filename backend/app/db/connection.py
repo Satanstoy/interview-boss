@@ -106,6 +106,10 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        users_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()}
+        if "updated_at" not in users_col_set:
+            conn.execute("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         # ── question_bank 表（统一题库，取代 master_question_bank）──
         conn.execute('''
@@ -153,6 +157,10 @@ def init_db():
             conn.execute("CREATE INDEX idx_uph_user ON user_practice_history(user_id)")
         if "idx_uph_question" not in uph_indexes:
             conn.execute("CREATE INDEX idx_uph_question ON user_practice_history(question_bank_id)")
+        uph_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('user_practice_history')").fetchall()}
+        if "updated_at" not in uph_col_set:
+            conn.execute("ALTER TABLE user_practice_history ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE user_practice_history SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         # ── refresh_tokens 表（用于双 token 机制的服务端校验）──
         conn.execute('''
@@ -188,7 +196,7 @@ def init_db():
         jd_columns = {row[1] for row in cursor.execute("PRAGMA table_info('jd')").fetchall()}
         if "season" not in jd_columns:
             conn.execute("ALTER TABLE jd ADD COLUMN season TEXT DEFAULT ''")
-            conn.execute("UPDATE jd SET season = '2027届暑期实习' WHERE season IS NULL OR season = ''")
+            conn.execute("UPDATE jd SET season = '2027届暑期实习', updated_at = CURRENT_TIMESTAMP WHERE season IS NULL OR season = ''")
             logger.info("已为 jd 表添加 season 列并回填默认招聘季")
         # ── 迁移：jd 表添加 owner_id 和 status 列（个人/公共管理）──
         if "owner_id" not in jd_columns:
@@ -200,6 +208,8 @@ def init_db():
         jd_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_jd_url" not in jd_indexes:
             conn.execute("CREATE INDEX idx_jd_url ON jd(url)")
+        if "idx_jd_url_unique" not in jd_indexes:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jd_url_unique ON jd(url) WHERE url IS NOT NULL AND url != ''")
         if "idx_jd_owner_status" not in jd_indexes:
             conn.execute("CREATE INDEX idx_jd_owner_status ON jd(owner_id, status)")
         # Bug #11: jd 表添加 url_signature 列用于高效去重
@@ -207,11 +217,16 @@ def init_db():
             conn.execute("ALTER TABLE jd ADD COLUMN url_signature TEXT DEFAULT ''")
         if "idx_jd_url_sig" not in jd_indexes:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jd_url_sig ON jd(url_signature)")
+        if "updated_at" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE jd SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         cursor.execute("PRAGMA index_list('interview')")
         iv_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_interview_url" not in iv_indexes:
             conn.execute("CREATE INDEX idx_interview_url ON interview(url)")
+        if "idx_interview_url_unique" not in iv_indexes:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_url_unique ON interview(url) WHERE url IS NOT NULL AND url != ''")
         if "idx_interview_owner_status" not in iv_indexes:
             conn.execute("CREATE INDEX idx_interview_owner_status ON interview(owner_id, status)")
         # Bug #11: interview 表添加 url_signature 列用于高效去重
@@ -220,11 +235,18 @@ def init_db():
             conn.execute("ALTER TABLE interview ADD COLUMN url_signature TEXT DEFAULT ''")
         if "idx_interview_url_sig" not in iv_indexes:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_interview_url_sig ON interview(url_signature)")
+        if "updated_at" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE interview SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         cursor.execute("PRAGMA index_list('questions_detail')")
         qd_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_qd_url" not in qd_indexes:
             conn.execute("CREATE INDEX idx_qd_url ON questions_detail(url)")
+        qd_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('questions_detail')").fetchall()}
+        if "updated_at" not in qd_col_set:
+            conn.execute("ALTER TABLE questions_detail ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE questions_detail SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         cursor.execute("PRAGMA index_list('question_bank')")
         qb_indexes = [row[1] for row in cursor.fetchall()]
@@ -240,6 +262,19 @@ def init_db():
             conn.execute("ALTER TABLE refresh_tokens ADD COLUMN ip_address TEXT DEFAULT ''")
         if "user_agent" not in rt_columns:
             conn.execute("ALTER TABLE refresh_tokens ADD COLUMN user_agent TEXT DEFAULT ''")
+        # Bug #1: refresh_tokens 添加 family_id 列（token 重放检测）
+        if "family_id" not in rt_columns:
+            conn.execute("ALTER TABLE refresh_tokens ADD COLUMN family_id TEXT")
+        if "idx_rt_family" not in rt_indexes:
+            conn.execute("CREATE INDEX idx_rt_family ON refresh_tokens(family_id)")
+
+        # ── invalidated_families 表（记录被撤销的 token family）──
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS invalidated_families (
+                family_id TEXT PRIMARY KEY,
+                invalidated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
         # ── 迁移：添加 original_questions 和 original_question_sources 列 ──
         qb_columns = {row[1] for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()}
@@ -262,7 +297,7 @@ def init_db():
                     current_pos = tc.get("job_position", current_pos)
                 except Exception:
                     pass
-            conn.execute("UPDATE question_bank SET job_position = ? WHERE job_position IS NULL OR job_position = ''", (current_pos,))
+            conn.execute("UPDATE question_bank SET job_position = ?, updated_at = CURRENT_TIMESTAMP WHERE job_position IS NULL OR job_position = ''", (current_pos,))
             logger.info(f"已为 question_bank 表添加 job_position 列并回填为 {current_pos}")
         cursor.execute("PRAGMA index_list('question_bank')")
         qb_idx = [row[1] for row in cursor.fetchall()]
@@ -287,6 +322,10 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        jp_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('job_positions')").fetchall()}
+        if "updated_at" not in jp_col_set:
+            conn.execute("ALTER TABLE job_positions ADD COLUMN updated_at TIMESTAMP")
+            conn.execute("UPDATE job_positions SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
 
         # ── question_position 关联表（题目-岗位多对多）──
         conn.execute('''
@@ -372,17 +411,17 @@ def init_db():
             if cur_pos_row and cur_pos_row[0]:
                 pos_id_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (cur_pos_row[0],)).fetchone()
                 if pos_id_row:
-                    conn.execute("UPDATE users SET current_position_id = ? WHERE current_position_id IS NULL", (pos_id_row[0],))
+                    conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE current_position_id IS NULL", (pos_id_row[0],))
                     logger.info(f"已将 {len(users_without_pos)} 个用户的 current_position_id 迁移为 {cur_pos_row[0]}")
 
         # ── 迁移：清理 embedding 相关数据 ──
-        conn.execute("UPDATE question_bank SET vector = NULL WHERE vector IS NOT NULL")
+        conn.execute("UPDATE question_bank SET vector = NULL, updated_at = CURRENT_TIMESTAMP WHERE vector IS NOT NULL")
         conn.execute("DELETE FROM user_profile WHERE key IN ('embedding_model', 'similarity_threshold', 'embedding_api_key', 'embedding_base_url')")
 
         # ── 迁移：回填空 season 为默认招聘季 ──
         empty_season_count = conn.execute("SELECT COUNT(*) FROM interview WHERE season IS NULL OR season = ''").fetchone()[0]
         if empty_season_count > 0:
-            conn.execute("UPDATE interview SET season = '2027届暑期实习' WHERE season IS NULL OR season = ''")
+            conn.execute("UPDATE interview SET season = '2027届暑期实习', updated_at = CURRENT_TIMESTAMP WHERE season IS NULL OR season = ''")
             logger.info(f"已将 {empty_season_count} 条面经的招聘季回填为 2027届暑期实习")
             # 同步设置 active_season
             conn.execute(
@@ -483,6 +522,10 @@ def init_db():
                 migrated = conn.execute("SELECT changes()").fetchone()[0]
                 logger.info(f"已迁移 {migrated} 条练习记录到 user_practice_history 表")
 
+        # ── 清理遗留旧表（数据已迁移到 question_bank / user_practice_history）──
+        conn.execute("DROP TABLE IF EXISTS master_question_bank")
+        conn.execute("DROP TABLE IF EXISTS practice_history")
+
         conn.commit()
 
 
@@ -551,7 +594,7 @@ def get_user_job_position(user_id: int) -> tuple[int | None, str]:
 def set_user_job_position(user_id: int, position_id: int):
     """设置用户的当前岗位"""
     with get_db_connection() as conn:
-        conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (position_id, user_id))
+        conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (position_id, user_id))
         conn.commit()
 
 

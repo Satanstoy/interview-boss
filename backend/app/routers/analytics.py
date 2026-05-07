@@ -32,7 +32,7 @@ def _build_analytics_bank_filter(user: dict):
         if mode == 'personal':
             return "", "WHERE qb.owner_id = ? AND qb.job_position = ?", [uid, pos_name]
         elif mode == 'mixed':
-            return "", "WHERE (qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ? AND qb.job_position = ?", [uid, pos_name]
+            return "", "WHERE ((qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?) AND qb.job_position = ?", [uid, pos_name]
         else:
             return "", "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.job_position = ?", [pos_name]
 
@@ -172,7 +172,7 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
                 new_cat1 = normalize_category(r['cat1'])
                 new_cat2 = normalize_category(r['cat2'])
                 if new_cat1 != r['cat1'] or new_cat2 != r['cat2']:
-                    cursor.execute("UPDATE questions_detail SET cat1 = ?, cat2 = ? WHERE id = ?", (new_cat1, new_cat2, r['id']))
+                    cursor.execute("UPDATE questions_detail SET cat1 = ?, cat2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_cat1, new_cat2, r['id']))
                     updated_detail += 1
             rows = cursor.execute("SELECT id, cat1, cat2 FROM question_bank").fetchall()
             for r in rows:
@@ -214,6 +214,8 @@ async def clear_db(admin: dict = Depends(get_admin_user)):
             cursor.execute("DELETE FROM questions_detail")
             cursor.execute("DELETE FROM question_bank")
             cursor.execute("DELETE FROM user_practice_history")
+            cursor.execute("DELETE FROM user_question_view")
+            cursor.execute("DELETE FROM question_position")
             cursor.execute("DELETE FROM sqlite_sequence")
             conn.commit()
 

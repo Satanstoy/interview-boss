@@ -49,9 +49,62 @@ def _mask_key(value: str) -> str:
     return value[:4] + "****"
 
 
+@router.get("/api/profile/public")
+async def get_public_profile(user: dict = Depends(get_current_user)):
+    """公开配置（普通用户可访问）：岗位列表、分类配置、招聘季"""
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute("SELECT key, value FROM user_profile").fetchall()
+            settings_map = {r['key']: r['value'] for r in rows}
+            seasons = conn.execute(
+                "SELECT DISTINCT season FROM interview WHERE season IS NOT NULL AND season != '' ORDER BY season"
+            ).fetchall()
+            season_list = [r['season'] for r in seasons]
+            active = settings_map.get('active_season', '')
+            if active and active not in season_list:
+                season_list.append(active)
+                season_list.sort()
+            # 合并岗位列表查询（避免在 async 上下文中阻塞）
+            tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
+            pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+            seen = set()
+            positions = []
+            for r in tax_rows:
+                if r['position_name'] not in seen:
+                    seen.add(r['position_name'])
+                    positions.append(r['position_name'])
+            for r in pos_rows:
+                if r['name'] not in seen:
+                    seen.add(r['name'])
+                    positions.append(r['name'])
+            if not positions:
+                positions = [DEFAULT_TAXONOMY["job_position"]]
+            # 用户当前岗位
+            user_row = conn.execute(
+                "SELECT jp.name FROM users u LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+                (user['id'],)
+            ).fetchone()
+        return settings_map, season_list, positions, user_row
+
+    settings, used_seasons, available_positions, user_row = await run_db(_query)
+    current_pos = (user_row['name'] if user_row and user_row['name'] else None) or settings.get('current_job_position') or DEFAULT_TAXONOMY['job_position']
+    taxonomy_data = await run_db(lambda: get_taxonomy_for_position(current_pos))
+
+    return {
+        "settings": {
+            "current_job_position": current_pos,
+            "available_positions": available_positions,
+            "taxonomy_config": json.dumps(taxonomy_data, ensure_ascii=False),
+            "active_season": settings.get('active_season', ''),
+        },
+        "available_seasons": used_seasons,
+    }
+
+
 @router.get("/api/profile")
 async def get_profile(admin: dict = Depends(get_admin_user)):
-    """读取全部用户配置（API Key 掩码返回）"""
+    """读取全部用户配置（API Key 掩码返回）— 仅管理员"""
 
     def _query():
         with get_db_connection() as conn:
@@ -195,13 +248,21 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
     position_id = req.get("position_id")
     position_name = req.get("position", "").strip()
 
+    # 输入验证：岗位名称长度和字符限制
+    if position_name:
+        if len(position_name) > 100:
+            raise HTTPException(status_code=400, detail="岗位名称不能超过 100 个字符")
+        import re
+        if not re.match(r'^[一-龥a-zA-Z0-9\s/\-_()（）]+$', position_name):
+            raise HTTPException(status_code=400, detail="岗位名称仅允许中英文、数字、空格、斜杠、连字符和括号")
+
     def _switch():
         with get_db_connection() as conn:
             if position_id:
                 row = conn.execute("SELECT id, name FROM job_positions WHERE id = ?", (position_id,)).fetchone()
                 if not row:
                     raise HTTPException(status_code=404, detail="岗位不存在")
-                conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (row['id'], admin['id']))
+                conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 # 同步全局 fallback
                 conn.execute(
                     "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
@@ -225,7 +286,7 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                         "ON CONFLICT(position_name) DO NOTHING",
                         (position_name, _json.dumps([], ensure_ascii=False))
                     )
-                conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (row['id'], admin['id']))
+                conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 # 同步全局 fallback
                 conn.execute(
                     "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
@@ -259,6 +320,11 @@ async def create_position(req: dict, admin: dict = Depends(get_admin_user)):
     description = req.get("description", "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="岗位名称不能为空")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="岗位名称不能超过 100 个字符")
+    import re
+    if not re.match(r'^[一-龥a-zA-Z0-9\s/\-_()（）]+$', name):
+        raise HTTPException(status_code=400, detail="岗位名称仅允许中英文、数字、空格、斜杠、连字符和括号")
 
     def _create():
         with get_db_connection() as conn:

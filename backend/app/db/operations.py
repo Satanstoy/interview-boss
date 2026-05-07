@@ -70,7 +70,11 @@ def _insert_details(tagged_rows: list):
 def _cleanup_old_sources(url: str):
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        affected_rows = cursor.execute("SELECT id, sources FROM question_bank").fetchall()
+        # A8: 使用 WHERE sources LIKE 预过滤，避免全表扫描
+        affected_rows = cursor.execute(
+            "SELECT id, sources FROM question_bank WHERE sources LIKE ?",
+            (f"%{url}%",)
+        ).fetchall()
         for mr in affected_rows:
             try:
                 sources = json.loads(mr['sources']) if mr['sources'] else []
@@ -80,7 +84,7 @@ def _cleanup_old_sources(url: str):
             if len(new_sources) != len(sources):
                 # Bug #16: 使用实际 sources 数组长度作为 frequency
                 cursor.execute(
-                    "UPDATE question_bank SET frequency = ?, sources = ? WHERE id = ?",
+                    "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (len(new_sources), json.dumps(new_sources), mr['id'])
                 )
         # 保留有 AI 答案的记录，即使 frequency 降为 0（避免答案丢失）

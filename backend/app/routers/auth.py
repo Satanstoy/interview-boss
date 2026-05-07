@@ -11,6 +11,7 @@ from app.core.auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_current_user, get_refresh_token,
     store_refresh_token, get_refresh_token_jti, delete_refresh_token,
+    is_family_invalidated, invalidate_family,
     REFRESH_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_REMEMBER_DAYS,
 )
 from app.db.connection import get_db_connection, run_db
@@ -148,16 +149,19 @@ def _set_refresh_cookie(response: Response, token: str, remember: bool = False):
 
 
 def _clear_refresh_cookie(response: Response):
-    response.delete_cookie(key="refresh_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/", httponly=True, secure=True, samesite="strict")
 
 
-def _issue_token_pair(user: dict, response: Response, remember: bool = False, ip_address: str = "", user_agent: str = "") -> dict:
+def _issue_token_pair(user: dict, response: Response, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = "") -> dict:
     """签发 access + refresh token，设置 cookie，返回响应体"""
+    import secrets
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
     token_data = {"user_id": user['id'], "username": user['username']}
     access_token = create_access_token(token_data)
-    refresh_token, jti = create_refresh_token(token_data, days=days)
-    store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent)
+    if not family_id:
+        family_id = secrets.token_urlsafe(16)
+    refresh_token, jti = create_refresh_token(token_data, days=days, family_id=family_id)
+    store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent, family_id=family_id)
     _set_refresh_cookie(response, refresh_token, remember=remember)
     # 获取岗位名称
     pos_name = ""
@@ -231,7 +235,12 @@ async def login(request: Request, req: LoginRequest, response: Response):
             ).fetchone()
 
     user = await run_db(_query)
-    if not user or not verify_password(req.password, user['password_hash']):
+    if not user:
+        # Dummy bcrypt to prevent timing oracle (user enumeration)
+        verify_password(req.password, "$2b$12$eiMGPX1FDYPSJnrbi.E9Ee6eXtF/sNWWAxyCmK5Al2yYy4/wj0QAm")
+        _record_failure(req.username)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not verify_password(req.password, user['password_hash']):
         _record_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -260,11 +269,35 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
     if not user_id:
         raise HTTPException(status_code=401, detail="无效的 refresh token")
 
+    family_id = payload.get("family_id", "")
+
+    # 检查 family 是否已被撤销（重放攻击响应）
+    if family_id and is_family_invalidated(family_id):
+        _clear_refresh_cookie(response)
+        raise HTTPException(status_code=401, detail="token 已失效，请重新登录")
+
     record = get_refresh_token_jti(jti)
     if not record or record['user_id'] != user_id:
+        # JTI 不在数据库中 — 可能是重放攻击
+        if family_id:
+            invalidate_family(family_id)
+            logger.warning(f"检测到可能的 token 重放攻击: user_id={user_id}, family_id={family_id}")
+        _clear_refresh_cookie(response)
         raise HTTPException(status_code=401, detail="refresh token 已失效，请重新登录")
 
     remember = bool(record.get('remember', 0))
+    # 使用已有的 family_id（如果 DB 中有则优先用 DB 中的）
+    db_family_id = record.get('family_id', '') or family_id
+
+    # B2: IP/UA 异常检测 — 记录安全日志但不阻断（避免误伤移动用户）
+    current_ip = request.client.host if request.client else ""
+    current_ua = request.headers.get("user-agent", "")
+    stored_ip = record.get('ip_address', '')
+    stored_ua = record.get('user_agent', '')
+    if stored_ip and current_ip and stored_ip != current_ip:
+        logger.warning(f"Refresh Token IP 不一致: user_id={user_id}, 存储IP={stored_ip}, 当前IP={current_ip}")
+    if stored_ua and current_ua and stored_ua != current_ua:
+        logger.warning(f"Refresh Token UA 不一致: user_id={user_id}")
 
     def _query():
         with get_db_connection() as conn:
@@ -280,17 +313,21 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
     return _issue_token_pair(
         dict(user), response, remember=remember,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
+        family_id=db_family_id
     )
 
 
 @router.post("/logout")
 async def logout(request: Request, response: Response, rt: str = Depends(get_refresh_token), _csrf: None = Depends(_require_custom_header)):
     """注销：删除 refresh token，清除 cookie"""
-    payload = decode_token(rt, expected_type="refresh")
-    jti = payload.get("jti")
-    if jti:
-        delete_refresh_token(jti)
+    try:
+        payload = decode_token(rt, expected_type="refresh")
+        jti = payload.get("jti")
+        if jti:
+            delete_refresh_token(jti)
+    except HTTPException:
+        pass  # Token 可能已过期，仍需清除 cookie
     _clear_refresh_cookie(response)
     return {"status": "success"}
 
@@ -304,7 +341,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 async def update_bank_mode(req: BankModeRequest, current_user: dict = Depends(get_current_user)):
     def _update():
         with get_db_connection() as conn:
-            conn.execute("UPDATE users SET bank_mode = ? WHERE id = ?", (req.bank_mode.value, current_user['id']))
+            conn.execute("UPDATE users SET bank_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (req.bank_mode.value, current_user['id']))
             conn.commit()
 
     await run_db(_update)
