@@ -39,3 +39,12 @@ class SplitQuestionRequest(BaseModel):
 class MergeOriginalQuestionRequest(BaseModel):
     original_question: str
     target_id: int
+
+
+class UploadToBankRequest(BaseModel):
+    question_text: str = Field(..., max_length=5000)
+    cat1: str = ""
+    cat2: str = ""
+    tags: str = ""
+    difficulty: str = ""
+    target: str = "public"

@@ -38,7 +38,7 @@ async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user
         raise HTTPException(status_code=400, detail="解析题目清单失败，未能提取到有效题目")
 
     try:
-        url = row['url'] or "未提供链接"
+        url = row['url'] or f"internal://{row['id']}"
         company = row['company'] or "未提供"
         round_ = row['round'] or "未提供"
 
@@ -48,7 +48,13 @@ async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user
         tagged_rows = await tag_questions_batch(url, company, round_, q_list)
 
         await run_db(lambda: _replace_details(url, tagged_rows))
-        await incremental_update_master_bank(tagged_rows, bg_tasks)
+        original_owner_id = row['owner_id']
+        await incremental_update_master_bank(
+            tagged_rows, bg_tasks,
+            submitter_is_admin=True,
+            user_id=original_owner_id,
+            is_personal=(original_owner_id is not None)
+        )
 
         return {
             "status": "success",
@@ -58,4 +64,4 @@ async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user
 
     except Exception as e:
         logger.exception("重新分析失败")
-        raise HTTPException(status_code=500, detail=f"重新分析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
