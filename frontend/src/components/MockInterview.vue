@@ -305,9 +305,10 @@ import { ref, computed } from 'vue'
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '../api/index.js'
 import { sanitizeAgainstInjection, validateNumber } from '../utils/validate.js'
-import { useToast } from '../composables/useNotification.js'
+import { useToast, useConfirm } from '../composables/useNotification.js'
 
 const toast = useToast()
+const { confirm: showConfirm } = useConfirm()
 
 const props = defineProps({
   popularTags: { type: Object, default: () => ({}) }
@@ -340,6 +341,12 @@ const startQuiz = () => {
 }
 
 const loadQuestions = async () => {
+  // 检查是否有未保存的输入
+  const hasInput = mockQuestions.value.some(q => q._userAnswer.trim())
+  if (hasInput) {
+    const confirmed = await showConfirm('当前有未提交的答案，确定要换一批吗？')
+    if (!confirmed) return
+  }
   const countResult = validateNumber(questionCount.value, 1, 50, '题目数量')
   if (!countResult.valid) {
     toast.warning(countResult.error)

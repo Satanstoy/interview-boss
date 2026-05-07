@@ -37,7 +37,7 @@
             :class="difficultyClass">
             {{ question.difficulty || '-' }}
           </span>
-          <button @click.stop="$emit('toggle-star', question)" class="ml-1 transition-all duration-200 hover:scale-125 star-btn" :title="question.is_starred ? '取消收藏' : '收藏'">
+          <button @click.stop="$emit('toggle-star', question)" class="ml-1 p-1.5 -m-1.5 transition-all duration-200 hover:scale-125 star-btn" :title="question.is_starred ? '取消收藏' : '收藏'">
             <svg class="w-5 h-5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-gray-300 dark:text-gray-600 hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
             </svg>
@@ -87,10 +87,10 @@
         <div v-else>
           <div v-if="question.ai_answer && !isFailedAnswer(question.ai_answer)" class="relative">
             <div class="absolute top-0 right-0 flex gap-1.5 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = question.ai_answer" class="bg-white dark:bg-surface-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-0 group-hover:opacity-100 hover:opacity-100 shadow-sm">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = question.ai_answer" class="bg-white dark:bg-surface-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm">
                 编辑
               </button>
-              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white dark:bg-surface-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-0 group-hover:opacity-100 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
+              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white dark:bg-surface-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-surface-600 text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
             </div>
@@ -146,7 +146,7 @@
                     {{ src.company === '未提供' ? '未知' : src.company }}
                     <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
                     {{ src.round === '未提供' ? '未知' : src.round }}
-                    <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" class="ml-1 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
+                    <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
                   </span>
                   <button @click.stop="$emit('split-question', { question, originalQuestion: oq })"
                     class="text-[11px] bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800/50 hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-all">
@@ -169,7 +169,7 @@
               {{ src.company === '未提供' ? '未知' : src.company }}
               <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
               {{ src.round === '未提供' ? '未知轮次' : src.round }}
-              <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" class="ml-1.5 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
+              <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
             </span>
           </div>
         </div>

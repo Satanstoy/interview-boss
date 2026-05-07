@@ -19,3 +19,9 @@ dependencies = [
     "slowapi>=0.1.9",
     "python-magic>=0.4.27",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]

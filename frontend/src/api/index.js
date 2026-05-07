@@ -55,10 +55,8 @@ export const searchMasterBank = (q, excludeId) => {
 }
 
 // ── Bank upload & review ──
-export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) => {
-  const params = new URLSearchParams({ question_text, cat1: cat1 || '', cat2: cat2 || '', tags: tags || '', difficulty: difficulty || '', target: target || 'public' })
-  return post(`${API}/master-bank/upload?${params}`, null, { headers: {} })
-}
+export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) =>
+  post(`${API}/master-bank/upload`, { question_text, cat1: cat1 || '', cat2: cat2 || '', tags: tags || '', difficulty: difficulty || '', target: target || 'public' })
 export const fetchPendingQuestions = () => get(`${API}/master-bank/pending`)
 export const approveQuestion = (id) => post(`${API}/master-bank/approve/${id}`)
 export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
@@ -73,6 +71,7 @@ export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)
 
 // ── Profile ──
 export const fetchProfile = () => get(`${API}/profile`)
+export const fetchPublicProfile = () => get(`${API}/profile/public`)
 export const updateProfile = (settings) => put(`${API}/profile`, { settings })
 export const switchPosition = (position) => put(`${API}/profile/position`, { position })
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })

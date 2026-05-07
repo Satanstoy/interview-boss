@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 export function useToast() {
   const success = (msg, options) => toast.success(msg, options)
-  const error = (msg, options) => toast.error(msg, { duration: 8000, ...options })
+  const error = (msg, options) => toast.error(msg, { duration: 5000, ...options })
   const info = (msg, options) => toast.info(msg, options)
   const warning = (msg, options) => toast.warning(msg, { duration: 4000, ...options })
   return { success, error, info, warning }

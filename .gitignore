@@ -29,3 +29,10 @@ node_modules/
 
 # Claude Code local settings (may contain tokens)
 .claude/settings.local.json
+
+docs/
+
+.pytest_cache/
+.playwright-mcp/
+backend/tests
+backend/data

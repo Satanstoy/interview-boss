@@ -7,9 +7,19 @@
       <input
         v-model="localQuery"
         type="text"
-        class="w-full border border-gray-200 dark:border-gray-600 rounded-xl pl-10 pr-4 py-2.5 text-sm bg-white dark:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 shadow-card focus:shadow-card-hover focus:border-primary-300 dark:focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:focus:ring-primary-900 transition-all duration-200"
+        class="w-full border border-gray-200 dark:border-gray-600 rounded-xl pl-10 pr-10 py-2.5 text-sm bg-white dark:bg-surface-800 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500 shadow-card focus:shadow-card-hover focus:border-primary-300 dark:focus:border-primary-500 focus:ring-2 focus:ring-primary-100 dark:focus:ring-primary-900 transition-all duration-200"
         placeholder="搜索题目关键词..."
       />
+      <button
+        v-if="localQuery"
+        @click="localQuery = ''"
+        class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+        aria-label="清除搜索"
+      >
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     <select
       :value="filterDifficulty"

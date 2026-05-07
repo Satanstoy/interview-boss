@@ -5,33 +5,14 @@
  * - 所有用户输入在发送 API 前必须经过验证
  */
 
-// ── SQL 注入关键词检测 ──
-const SQL_INJECTION_PATTERNS = [
-  /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|EXEC|EXECUTE|UNION)\b\s)/i,
-  /(--|#|\/\*|\*\/)/,
-  /(\b(OR|AND)\b\s+\d+\s*=\s*\d+)/i,
-  /['"]\s*;\s*(DROP|DELETE|INSERT|UPDATE|ALTER)/i,
-  /(\bSLEEP\s*\(|\bBENCHMARK\s*\(|\bWAITFOR\s+DELAY)/i,
-  /(0x[0-9a-fA-F]+)/,
-]
+// ── SQL 注入检测已移除 ──
+// 后端使用参数化查询，无需客户端 SQL 注入过滤。
+// 之前的正则过于宽泛，会误判合法的中文面试题文本（如包含"SELECT"的数据库八股文）。
 
 /**
- * 检测字符串是否包含疑似 SQL 注入
+ * 输入消毒占位函数（SQL 注入检测已移除，后端使用参数化查询）
  */
-export function containsSqlInjection(str) {
-  if (typeof str !== 'string') return false
-  return SQL_INJECTION_PATTERNS.some(pattern => pattern.test(str))
-}
-
-/**
- * 检测并拒绝 SQL 注入，返回安全字符串
- * @throws 如果检测到注入攻击
- */
-export function sanitizeAgainstInjection(str, fieldName = '输入') {
-  if (typeof str !== 'string') return str
-  if (containsSqlInjection(str)) {
-    throw new Error(`${fieldName} 包含非法字符，请移除特殊 SQL 关键词`)
-  }
+export function sanitizeAgainstInjection(str, _fieldName = '输入') {
   return str
 }
 
@@ -69,7 +50,6 @@ export function validateUsername(username) {
   if (!s) return { valid: false, error: '用户名不能为空', value: '' }
   if (!USERNAME_RE.test(s)) return { valid: false, error: '用户名仅允许 2-32 个字母、数字、下划线或中文', value: '' }
   if (RESERVED_USERNAMES.includes(s.toLowerCase())) return { valid: false, error: '该用户名为系统保留，请更换', value: '' }
-  if (containsSqlInjection(s)) return { valid: false, error: '用户名包含非法字符', value: '' }
   return { valid: true, value: s }
 }
 
@@ -90,7 +70,6 @@ export function validateUrl(url) {
   if (!url || !url.trim()) return { valid: true, value: '' } // URL 通常可选
   const s = sanitizeText(url, 2048)
   if (!URL_RE.test(s)) return { valid: false, error: '请输入有效的 URL（以 http:// 或 https:// 开头）', value: '' }
-  if (containsSqlInjection(s)) return { valid: false, error: 'URL 包含非法字符', value: '' }
   return { valid: true, value: s }
 }
 
@@ -111,7 +90,6 @@ export function validateSeason(season) {
   const s = sanitizeText(season, 50)
   if (!s) return { valid: false, error: '招聘季名称不能为空', value: '' }
   if (!SEASON_RE.test(s)) return { valid: false, error: '招聘季名称仅允许中英文、数字、括号和连字符', value: '' }
-  if (containsSqlInjection(s)) return { valid: false, error: '招聘季名称包含非法字符', value: '' }
   return { valid: true, value: s }
 }
 
@@ -121,7 +99,6 @@ export function validateSeason(season) {
 export function validateTextField(value, fieldName, maxLen = 5000) {
   if (typeof value !== 'string') return { valid: true, value: '' }
   const s = sanitizeText(value, maxLen)
-  if (containsSqlInjection(s)) return { valid: false, error: `${fieldName} 包含非法字符`, value: '' }
   return { valid: true, value: s }
 }
 
@@ -131,18 +108,15 @@ export function validateTextField(value, fieldName, maxLen = 5000) {
 export function validateSettingsField(value, fieldName, maxLen = 500) {
   const s = sanitizeText(value, maxLen)
   if (!s) return { valid: false, error: `${fieldName} 不能为空`, value: '' }
-  if (containsSqlInjection(s)) return { valid: false, error: `${fieldName} 包含非法字符`, value: '' }
   return { valid: true, value: s }
 }
 
 /**
- * 验证 API Key（允许更多字符，但仍需防注入）
+ * 验证 API Key（允许更多字符）
  */
 export function validateApiKey(value, maxLen = 500) {
-  if (!value || !value.trim()) return { valid: true, value: '' } // API Key 通常可选
+  if (!value || !value.trim()) return { valid: true, value: '' }
   const s = value.trim().slice(0, maxLen)
-  // API Key 可能包含特殊字符如 sk-xxx，只检测明确的 SQL 注入模式
-  if (containsSqlInjection(s)) return { valid: false, error: 'API Key 包含非法字符', value: '' }
   return { valid: true, value: s }
 }
 
@@ -153,8 +127,6 @@ export function validateBaseUrl(value, fieldName = 'Base URL') {
   const s = sanitizeText(value, 500)
   if (!s) return { valid: false, error: `${fieldName} 不能为空`, value: '' }
   if (!URL_RE.test(s)) return { valid: false, error: `${fieldName} 格式无效，必须以 http:// 或 https:// 开头`, value: '' }
-  if (containsSqlInjection(s)) return { valid: false, error: `${fieldName} 包含非法字符`, value: '' }
-  // 提示常见错误：用户可能误填 API Key 或模型名
   if (s.startsWith('sk-') || s.startsWith('eyJ')) return { valid: false, error: `${fieldName} 看起来像 API Key 而非 URL，请检查`, value: '' }
   return { valid: true, value: s }
 }

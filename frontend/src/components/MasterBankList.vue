@@ -91,4 +91,9 @@ const collapseAll = () => {
   height: calc(100vh - 280px);
   overflow-y: auto;
 }
+@media (max-width: 1024px) {
+  .virtual-scroller {
+    height: calc(100vh - 400px);
+  }
+}
 </style>

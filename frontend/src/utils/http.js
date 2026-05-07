@@ -365,7 +365,7 @@ export async function postSSE(url, body, onEvent) {
 
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...authHeaders },
       body: JSON.stringify(body),
       signal: controller.signal,
       credentials: 'same-origin',

@@ -23,9 +23,9 @@
           </div>
 
           <!-- Main content: left + right panels -->
-          <div class="flex-1 flex overflow-hidden">
+          <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
             <!-- LEFT PANEL -->
-            <div class="w-1/2 flex flex-col border-r border-gray-200 dark:border-gray-600">
+            <div class="w-full lg:w-1/2 flex flex-col border-r border-gray-200 dark:border-gray-600">
               <!-- Tabs -->
               <div class="flex border-b border-gray-200 dark:border-gray-600 shrink-0 bg-white dark:bg-surface-800">
                 <button v-for="tab in leftTabs" :key="tab.key"
@@ -59,7 +59,7 @@
                         {{ src.company === '未提供' ? '未知' : src.company }}
                         <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
                         {{ src.round === '未提供' ? '未知轮次' : src.round }}
-                        <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold">[原文]</a>
+                        <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold">[原文]</a>
                       </span>
                     </div>
                   </div>
@@ -146,7 +146,7 @@
             </div>
 
             <!-- RIGHT PANEL -->
-            <div class="w-1/2 flex flex-col">
+            <div class="w-full lg:w-1/2 flex flex-col">
               <!-- Answer input area -->
               <div class="flex-1 flex flex-col overflow-hidden">
                 <div class="px-5 pt-4 pb-2 shrink-0">

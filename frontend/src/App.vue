@@ -216,7 +216,7 @@
               >
                 <template #actions="{ row }">
                   <div class="flex items-center justify-center gap-1">
-                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
@@ -273,7 +273,7 @@
                       <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                       <span class="text-[10px] leading-tight">分析</span>
                     </button>
-                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
+                    <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="row['来源链接']" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-1" title="打开链接">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
@@ -734,6 +734,7 @@ const onSubmitted = () => {
 
 const onTabChange = (tab) => {
   activeTab.value = tab
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 const onSelectTag = (tag) => {
@@ -902,8 +903,8 @@ const triggerBuildMasterBank = async () => {
   if (!await showConfirm('将重新整理全部题目，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
   try {
-    const data = await api.buildMasterBank()
-    toast.success(`重建完成，共 ${data.total_unique} 道题目`)
+    const result = await api.buildMasterBankSSE(() => {})
+    toast.success(`重建完成，共 ${result?.total_unique || 0} 道题目`)
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
@@ -962,7 +963,7 @@ const loadAllData = () => {
 
 const loadActiveSeason = async () => {
   try {
-    const data = await api.fetchProfile()
+    const data = await api.fetchPublicProfile()
     activeSeason.value = data.settings?.active_season || ''
   } catch { /* ignore */ }
 }
