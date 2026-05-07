@@ -86,8 +86,19 @@ async def _call_llm_with_retry(prompt: str, system_msg: str = "你是一个后�
     if response_format and _should_use_response_format():
         kwargs["response_format"] = response_format
 
-    response = await asyncio.wait_for(
-        client.chat.completions.create(**kwargs),
-        timeout=LLM_TIMEOUT
-    )
+    # B11: 仅使用客户端超时，移除多余的 asyncio.wait_for 双重超时
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content.strip()
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((APIConnectionError, RateLimitError, APITimeoutError, asyncio.TimeoutError)),
+    before_sleep=lambda retry_state: logger.warning(f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}")
+)
+async def _call_llm_with_retry_messages(messages: list, **kwargs) -> str:
+    """带重试的 LLM 调用，支持 multimodal messages（图片+文本）"""
+    kwargs.setdefault('model', LLM_MODEL)
+    response = await client.chat.completions.create(messages=messages, **kwargs)
     return response.choices[0].message.content.strip()

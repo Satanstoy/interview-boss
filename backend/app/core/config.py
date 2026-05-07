@@ -56,7 +56,9 @@ def _reload_from_db():
         LLM_MODEL = db_llm
     if db_timeout:
         try:
-            LLM_TIMEOUT = int(db_timeout)
+            val = int(db_timeout)
+            # B10: 超时范围验证，防止极端值
+            LLM_TIMEOUT = max(5, min(val, 600))
         except ValueError:
             pass
     if db_llm_key:
@@ -71,7 +73,7 @@ def _reload_from_db():
         from app.services.llm import rebuild_clients
         rebuild_clients()
     except Exception as e:
-        logger.warning(f"重建 LLM 客户端失败: {e}")
+        logger.error(f"重建 LLM 客户端失败: {e}", exc_info=True)
 
 
 # user_profile key → .env 变量名的映射
@@ -90,6 +92,7 @@ def _sync_env_file(settings: dict):
             if profile_key in settings:
                 val = str(settings[profile_key]).strip()
                 if val:  # 安全防护：绝不写入空值到 .env
+                    val = val.replace('\n', '').replace('\r', '').replace('\0', '')
                     set_key(ENV_PATH, env_key, val)
         logger.info("配置已同步到 .env 文件")
     except Exception as e:

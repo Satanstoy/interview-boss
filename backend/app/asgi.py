@@ -76,8 +76,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if request.method in ('POST', 'PUT', 'DELETE'):
             if request.url.path not in _CSRF_EXEMPT_PATHS:
                 has_custom_header = bool(request.headers.get("X-Requested-With"))
-                has_json_content = "application/json" in request.headers.get("content-type", "")
-                if not has_custom_header and not has_json_content:
+                ct = request.headers.get("content-type", "")
+                has_json_content_type = "application/json" in ct
+                if not has_custom_header and not has_json_content_type:
                     return JSONResponse(status_code=403, content={"detail": "缺少必要的请求头，请通过前端发起请求"})
         return await call_next(request)
 

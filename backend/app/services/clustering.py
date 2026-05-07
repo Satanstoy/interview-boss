@@ -210,7 +210,8 @@ async def _verify_group(ids, id_map):
         splits = result.get("split", [[qid] for qid in ids])
         return splits, False
     except Exception:
-        return [ids], True
+        # A9: 验证失败时采用保守策略 — 拆分为独立题，避免错误合并
+        return [[qid] for qid in ids], False
 
 
 async def cluster_cat2_group(rows, id_map):

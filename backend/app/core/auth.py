@@ -79,7 +79,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict, jti: Optional[str] = None, days: int = REFRESH_TOKEN_EXPIRE_DAYS) -> tuple[str, str]:
+def create_refresh_token(data: dict, jti: Optional[str] = None, days: int = REFRESH_TOKEN_EXPIRE_DAYS, family_id: str = "") -> tuple[str, str]:
     """返回 (token, jti) 二元组，方便调用方直接拿到 jti 做服务端记录"""
     now = datetime.now(timezone.utc)
     _jti = jti or _generate_jti()
@@ -92,6 +92,8 @@ def create_refresh_token(data: dict, jti: Optional[str] = None, days: int = REFR
         "jti": _jti,
         "iat": now,
     }
+    if family_id:
+        to_encode["family_id"] = family_id
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM), _jti
 
 
@@ -144,15 +146,31 @@ async def get_refresh_token(request: Request) -> str:
     return token
 
 
-def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False, ip_address: str = "", user_agent: str = ""):
+MAX_REFRESH_TOKENS_PER_USER = 10
+
+
+def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = ""):
     """存储 refresh token 的 jti 到数据库"""
+    if not family_id:
+        import secrets
+        family_id = secrets.token_urlsafe(16)
     with get_db_connection() as conn:
+        # Per-user token limit: evict oldest if exceeded
+        count = conn.execute("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", (user_id,)).fetchone()[0]
+        if count >= MAX_REFRESH_TOKENS_PER_USER:
+            oldest = conn.execute(
+                "SELECT jti FROM refresh_tokens WHERE user_id = ? ORDER BY created_at ASC LIMIT ?",
+                (user_id, count - MAX_REFRESH_TOKENS_PER_USER + 1)
+            ).fetchall()
+            for row in oldest:
+                conn.execute("DELETE FROM refresh_tokens WHERE jti = ?", (row[0],))
         expires = datetime.now(timezone.utc) + timedelta(days=days)
         conn.execute(
-            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, jti, expires.isoformat(), 1 if remember else 0, ip_address, user_agent)
+            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember, ip_address, user_agent, family_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, jti, expires.isoformat(), 1 if remember else 0, ip_address, user_agent, family_id)
         )
         conn.commit()
+    return family_id
 
 
 def get_refresh_token_jti(jti: str) -> Optional[dict]:
@@ -178,5 +196,27 @@ def cleanup_expired_refresh_tokens():
         conn.execute(
             "DELETE FROM refresh_tokens WHERE expires_at < ?",
             (datetime.now(timezone.utc).isoformat(),)
+        )
+        conn.commit()
+
+
+def is_family_invalidated(family_id: str) -> bool:
+    """检查 token family 是否已被撤销"""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM invalidated_families WHERE family_id = ?", (family_id,)
+        ).fetchone()
+        return row is not None
+
+
+def invalidate_family(family_id: str):
+    """撤销整个 token family（重放攻击响应）"""
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO invalidated_families (family_id) VALUES (?)",
+            (family_id,)
+        )
+        conn.execute(
+            "DELETE FROM refresh_tokens WHERE family_id = ?", (family_id,)
         )
         conn.commit()
