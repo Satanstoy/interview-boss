@@ -48,8 +48,10 @@
       :visible="showSettings"
       :active-season="activeSeason"
       :is-admin="currentUser?.is_admin"
+      :is-building="isBuilding"
       @close="showSettings = false"
       @update:active-season="activeSeason = $event"
+      @build-master-bank="triggerBuildMasterBank"
     />
 
     <!-- Login gate: split layout -->
@@ -154,8 +156,39 @@
               </span>
             </h2>
             <div class="flex flex-wrap gap-2">
-              <button v-if="activeTab === 'MasterBank'" @click="triggerBuildMasterBank" class="btn-primary text-sm">
-                {{ isBuilding ? '重建中...' : '重建题库' }}
+              <div v-if="activeTab === 'MasterBank'" class="flex items-center gap-2">
+                <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-sm">
+                  {{ isBuilding ? '重建中...' : '重建个人题库' }}
+                </button>
+                <div v-if="isBuilding" class="flex items-center gap-3">
+                  <div class="flex items-center gap-1.5">
+                    <template v-for="s in buildStepList" :key="s.key">
+                      <span
+                        class="inline-block w-2 h-2 rounded-full transition-colors duration-300"
+                        :class="s.active ? 'bg-primary-500 animate-pulse-slow' : s.done ? 'bg-primary-300 dark:bg-primary-600' : 'bg-surface-300 dark:bg-ink-600'"
+                        :title="s.label"
+                      ></span>
+                    </template>
+                  </div>
+                  <div class="w-40 h-2 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
+                    <div
+                      class="h-full bg-primary-500 rounded-full"
+                      :class="buildProgress.total > 0 ? 'transition-all duration-500 ease-out' : (buildProgress.message ? 'indeterminate-bar' : '')"
+                      :style="buildProgress.total > 0 ? { width: Math.round((buildProgress.current / buildProgress.total) * 100) + '%' } : { width: buildProgress.message ? undefined : '15%' }"
+                    ></div>
+                  </div>
+                  <span class="text-sm font-medium text-primary-600 dark:text-primary-400 whitespace-nowrap tabular-nums">
+                    <template v-if="buildProgress.total > 0">
+                      {{ buildProgress.message }} ({{ Math.round((buildProgress.current / buildProgress.total) * 100) }}%)
+                    </template>
+                    <template v-else-if="buildProgress.message">{{ buildProgress.message }}</template>
+                    <template v-else>准备中...</template>
+                  </span>
+                </div>
+              </div>
+              <button v-if="activeTab === 'MasterBank' && filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-sm">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                刷题模式
               </button>
               <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-sm">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -224,17 +257,19 @@
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
-                    <button @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                    <button v-if="currentUser?.is_admin || row.owner_id === currentUser?.id" @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       <span class="text-[10px] leading-tight">删除</span>
                     </button>
                   </div>
                 </template>
                 <template #cell-company="{ row }">
-                  <InlineEdit :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
+                  <span v-else>{{ row['公司'] }}</span>
                 </template>
                 <template #cell-job_title="{ row }">
-                  <InlineEdit :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
+                  <span v-else>{{ row['岗位名称'] }}</span>
                 </template>
                 <template #cell-salary="{ row }">
                   <span class="text-red-600 dark:text-red-400 font-medium">{{ row['薪资范围'] }}</span>
@@ -248,12 +283,26 @@
               </DataTable>
 
               <!-- Interview Tab -->
-              <div v-if="activeTab === 'Interview' && interviewSeasons.length > 0" class="flex items-center gap-2 mb-4">
-                <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
-                <select v-model="filterSeason" class="border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-200 focus:ring-primary-400 focus:border-primary-400">
-                  <option value="">全部</option>
-                  <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
-                </select>
+              <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-4">
+                <template v-if="interviewSeasons.length > 0">
+                  <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
+                  <select v-model="filterSeason" class="border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-200 focus:ring-primary-400 focus:border-primary-400">
+                    <option value="">全部</option>
+                    <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                  <span class="text-surface-300 dark:text-ink-600">|</span>
+                </template>
+                <button
+                  @click="interviewSortOrder = interviewSortOrder === 'desc' ? 'asc' : 'desc'"
+                  class="inline-flex items-center gap-1 border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-700 dark:text-ink-200 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                  :title="interviewSortOrder === 'desc' ? '当前：最新在前，点击切换' : '当前：最旧在前，点击切换'"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path v-if="interviewSortOrder === 'desc'" stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9M3 12h5m4 0l4-4m0 0l4 4m-4-4v12" />
+                    <path v-else stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                  </svg>
+                  上传日期 {{ interviewSortOrder === 'desc' ? '↓' : '↑' }}
+                </button>
               </div>
               <DataTable
                 v-if="activeTab === 'Interview'"
@@ -264,6 +313,7 @@
                 :batch-actions="interviewBatchActions"
                 :current-page="interviewCurrentPage"
                 :page-size="interviewPageSize"
+                :highlight-id="highlightInterviewId"
                 @toggle-select-all="interviewSelection.toggleSelectAll()"
                 @invert-selection="interviewSelection.invertSelection()"
                 @toggle-item="interviewSelection.toggleItem($event)"
@@ -272,38 +322,49 @@
               >
                 <template #actions="{ row }">
                   <div class="flex items-center justify-center gap-1">
-                    <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1 disabled:opacity-50" title="重新提取并打标">
-                      <svg v-if="reprocessingIds[row.id]" class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                      <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                      <span class="text-[10px] leading-tight">分析</span>
-                    </button>
+                    <div v-if="currentUser?.is_admin" class="relative flex flex-col items-center">
+                      <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1 disabled:opacity-50" title="重新提取并打标">
+                        <svg v-if="reprocessingIds[row.id]" class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        <span class="text-[10px] leading-tight">{{ reprocessingIds[row.id] ? (reprocessProgress[row.id]?.step === 'tag' ? '标注中' : reprocessProgress[row.id]?.step === 'match' ? '聚类中' : reprocessProgress[row.id]?.step === 'save' ? '保存中' : '分析中') : '分析' }}</span>
+                      </button>
+                    </div>
                     <a v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" :href="safeUrl(row['来源链接'])" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1" title="打开链接">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
-                    <button @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                    <button v-if="currentUser?.is_admin || row.owner_id === currentUser?.id" @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       <span class="text-[10px] leading-tight">删除</span>
                     </button>
                   </div>
                 </template>
                 <template #cell-company="{ row }">
-                  <InlineEdit :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
+                  <span v-else>{{ row['公司'] }}</span>
                 </template>
                 <template #cell-season="{ row }">
-                  <InlineEdit :row="row" field="season" db-column="season" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="season" db-column="season" table-name="interview" @save="saveField" />
+                  <span v-else>{{ row['season'] }}</span>
                 </template>
                 <template #cell-round="{ row }">
-                  <InlineEdit :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
+                  <span v-else>{{ row['面试轮次'] }}</span>
                 </template>
                 <template #cell-focus="{ row }">
-                  <InlineEdit :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
+                  <span v-else>{{ row['考察重点'] }}</span>
                 </template>
                 <template #cell-questions_list="{ row }">
-                  <InlineEdit :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
+                  <span v-else>{{ row['具体题目清单'] }}</span>
                 </template>
                 <template #cell-difficulty="{ row }">
-                  <InlineEdit :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
+                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
+                  <span v-else>{{ row['难易程度'] }}</span>
+                </template>
+                <template #cell-created_at="{ row }">
+                  <span class="text-xs text-ink-500 dark:text-ink-400 whitespace-nowrap">{{ formatDate(row.created_at) }}</span>
                 </template>
               </DataTable>
 
@@ -322,7 +383,7 @@
               />
 
               <!-- Import Tab -->
-              <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" @submitted="onSubmitted" />
+              <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" :available-seasons="availableSeasons" :is-admin="currentUser?.is_admin" @submitted="onSubmitted" />
 
               <!-- MasterBank Tab -->
               <MasterBankList
@@ -333,6 +394,8 @@
                 :batch-actions="masterBatchActions"
                 :practiced-questions="practicedQuestions"
                 :bank-mode="currentUser?.bank_mode"
+                :is-admin="currentUser?.is_admin"
+                :current-user-id="currentUser?.id"
                 @toggle-select-all="masterSelection.toggleSelectAll()"
                 @invert-selection="masterSelection.invertSelection()"
                 @toggle-item="masterSelection.toggleItem($event)"
@@ -345,6 +408,8 @@
                 @practice="practiceQuestion = $event"
                 @split-question="splitQuestion"
                 @start-merge="startMerge"
+                @navigate-to-interview="onNavigateToInterview"
+                @delete="deleteQuestion"
               />
             </div>
           </Transition>
@@ -357,7 +422,18 @@
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
-    <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" />
+    <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" @navigate-to-interview="onNavigateToInterview" />
+    <PracticeMode
+      v-if="showPracticeMode"
+      :questions="filteredMasterBank"
+      :start-index="practiceModeIndex"
+      :bank-mode="currentUser?.bank_mode"
+      :is-admin="currentUser?.is_admin"
+      @close="handlePracticeModeClose"
+      @answer-evaluated="handlePracticeModeEvaluated"
+      @toggle-star="toggleStar"
+      @navigate-to-interview="onNavigateToInterview"
+    />
 
     <!-- Merge Question Dialog -->
     <Teleport to="body">
@@ -436,6 +512,7 @@ import LoginModal from './components/LoginModal.vue'
 import UserMenu from './components/UserMenu.vue'
 import AdminReview from './components/AdminReview.vue'
 import PracticePanel from './components/PracticePanel.vue'
+import PracticeMode from './components/PracticeMode.vue'
 import { useToast, useConfirm } from './composables/useNotification.js'
 
 const toast = useToast()
@@ -448,6 +525,21 @@ const jdData = ref([])
 const interviewData = ref([])
 const masterBank = ref([])
 const isBuilding = ref(false)
+const buildProgress = ref({ step: '', current: 0, total: 0, message: '' })
+const buildStepsDef = [
+  { key: 'tag', label: 'LLM 标注' },
+  { key: 'cluster', label: '聚类去重' },
+  { key: 'merge', label: '统一问题' },
+  { key: 'save', label: '写入题库' },
+]
+const buildStepList = computed(() => {
+  const curIdx = buildStepsDef.findIndex(s => s.key === buildProgress.value.step)
+  return buildStepsDef.map((s, i) => ({
+    ...s,
+    active: i === curIdx,
+    done: curIdx >= 0 && i < curIdx,
+  }))
+})
 const isDataLoading = ref(false)
 const dataLoadError = ref(null)
 const analytics = ref({ tech_trends: {} })
@@ -457,13 +549,16 @@ const searchQuery = ref('')
 const filterDifficulty = ref('')
 const showStarredOnly = ref(false)
 const filterSeason = ref('')
+const interviewSortOrder = ref('desc')  // desc = newest first, asc = oldest first
 const reprocessingIds = ref({})
+const reprocessProgress = ref({})  // { [id]: { step, message } }
 const mockInterviewRef = ref(null)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
 const interviewPageSize = ref(20)
 const activeSeason = ref('')
+const availableSeasons = ref([])
 const showSettings = ref(false)
 const practiceStats = ref({})
 const recommendSeed = ref(0)
@@ -474,6 +569,9 @@ const showLoginModal = ref(false)
 const showReviewPanel = ref(false)
 const pendingReviewCount = ref(0)
 const practiceQuestion = ref(null)
+const showPracticeMode = ref(false)
+const practiceModeIndex = ref(0)
+const highlightInterviewId = ref(null)
 
 // ── Selection composables ──
 const jdSelection = useSelection(() => jdData.value)
@@ -511,9 +609,10 @@ const interviewColumns = [
   { key: 'company', label: '公司', frontendKey: '公司', width: '10%' },
   { key: 'season', label: '招聘季', frontendKey: 'season', width: '8%' },
   { key: 'round', label: '面试轮次', frontendKey: '面试轮次', width: '8%' },
-  { key: 'focus', label: '考察重点', frontendKey: '考察重点', width: '18%', cellClass: 'whitespace-pre-wrap' },
-  { key: 'questions_list', label: '具体题目清单', frontendKey: '具体题目清单', width: '40%', cellClass: 'whitespace-pre-wrap' },
-  { key: 'difficulty', label: '难度', frontendKey: '难易程度', width: '11%' }
+  { key: 'focus', label: '考察重点', frontendKey: '考察重点', width: '14%', cellClass: 'whitespace-pre-wrap' },
+  { key: 'questions_list', label: '具体题目清单', frontendKey: '具体题目清单', width: '32%', cellClass: 'whitespace-pre-wrap' },
+  { key: 'difficulty', label: '难度', frontendKey: '难易程度', width: '8%' },
+  { key: 'created_at', label: '上传日期', frontendKey: '上传日期', width: '10%' }
 ]
 
 // ── Computed ──
@@ -568,9 +667,23 @@ const interviewSeasons = computed(() => {
 })
 
 const filteredInterviewData = computed(() => {
-  if (!filterSeason.value) return interviewData.value
-  return interviewData.value.filter(d => d.season === filterSeason.value)
+  let data = filterSeason.value
+    ? interviewData.value.filter(d => d.season === filterSeason.value)
+    : [...interviewData.value]
+  data.sort((a, b) => {
+    const da = a.created_at || ''
+    const db = b.created_at || ''
+    return interviewSortOrder.value === 'desc'
+      ? db.localeCompare(da)
+      : da.localeCompare(db)
+  })
+  return data
 })
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-'
+  return dateStr.replace('T', ' ').slice(0, 16)
+}
 
 const practicedQuestions = computed(() => {
   const stats = practiceStats.value
@@ -582,6 +695,24 @@ const handlePracticeEvaluated = async ({ questionId, score }) => {
   await fetchPracticeStats()
 }
 
+const enterPracticeMode = () => {
+  if (filteredMasterBank.value.length === 0) {
+    toast.warning('当前筛选条件下没有题目')
+    return
+  }
+  practiceModeIndex.value = 0
+  showPracticeMode.value = true
+}
+
+const handlePracticeModeClose = () => {
+  showPracticeMode.value = false
+  fetchPracticeStats()
+}
+
+const handlePracticeModeEvaluated = async ({ questionId, score }) => {
+  await fetchPracticeStats()
+}
+
 watch(activeTab, (newTab, oldTab) => {
   if (oldTab === 'MockInterview' && newTab === 'MasterBank') {
     fetchPracticeStats()
@@ -589,7 +720,9 @@ watch(activeTab, (newTab, oldTab) => {
 })
 
 // ── Batch action definitions ──
-const jdBatchActions = computed(() => [
+const jdBatchActions = computed(() => {
+  if (!currentUser.value?.is_admin) return []
+  return [
   {
     key: 'batch-delete',
     label: '批量删除',
@@ -608,9 +741,12 @@ const jdBatchActions = computed(() => [
       fetchAnalytics()
     }
   }
-])
+  ]
+})
 
-const interviewBatchActions = computed(() => [
+const interviewBatchActions = computed(() => {
+  if (!currentUser.value?.is_admin) return []
+  return [
   {
     key: 'batch-reprocess',
     label: '批量重新分析',
@@ -648,7 +784,8 @@ const interviewBatchActions = computed(() => [
       fetchAnalytics()
     }
   }
-])
+  ]
+})
 
 const masterBatchActions = computed(() => [
   {
@@ -732,14 +869,13 @@ const fetchPracticeStats = async () => {
 
 // ── Actions ──
 const onSubmitted = () => {
-  activeTab.value = 'MasterBank'
+  // 保持在导入界面，让用户看到成功反馈（StagingPanel 的绿色提示）
   fetchTableData()
   fetchAnalytics()
 }
 
 const onTabChange = (tab) => {
   activeTab.value = tab
-  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 const onSelectTag = (tag) => {
@@ -770,6 +906,38 @@ const onGoToQuestion = (question) => {
   selectedSubTags.value = []
 }
 
+const onNavigateToInterview = async (source) => {
+  const targetUrl = source.url || ''
+  if (!targetUrl) return
+
+  // 在全量数据中查找（不受筛选条件限制）
+  const match = interviewData.value.find(row => (row['来源链接'] || row.url) === targetUrl)
+  if (!match) {
+    toast.warning('未找到该面经记录')
+    return
+  }
+
+  // 切换到面经库 tab
+  activeTab.value = 'Interview'
+
+  // 计算目标行在全量数据中的页码（清除筛选确保可见）
+  filterSeason.value = ''
+  const idx = interviewData.value.indexOf(match)
+  interviewCurrentPage.value = Math.floor(idx / interviewPageSize.value) + 1
+
+  // 设置高亮
+  highlightInterviewId.value = match.id
+
+  // 等待 DOM 渲染完成后滚动
+  await nextTick()
+  await new Promise(r => setTimeout(r, 200))
+  const el = document.querySelector(`[data-row-id="${match.id}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+  setTimeout(() => { highlightInterviewId.value = null }, 3000)
+}
+
 const toggleSubTag = (tag) => {
   const idx = selectedSubTags.value.indexOf(tag)
   if (idx === -1) {
@@ -792,13 +960,22 @@ const deleteDataRow = async (type, recordId) => {
 const reprocessInterview = async (id) => {
   if (!await showConfirm('确定要重新解析该面经？')) return
   reprocessingIds.value[id] = true
+  reprocessProgress.value[id] = { step: '', message: '准备中...' }
   try {
-    const data = await api.reprocessInterview(id)
+    await api.reprocessInterviewSSE(id, (evt) => {
+      if (evt.type === 'progress' || evt.type === 'done') {
+        reprocessProgress.value[id] = { step: evt.step, message: evt.message || '' }
+      }
+      if (evt.type === 'error') throw new Error(evt.message)
+    })
     toast.success('重新解析完成')
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
-  finally { reprocessingIds.value[id] = false }
+  finally {
+    reprocessingIds.value[id] = false
+    reprocessProgress.value[id] = null
+  }
 }
 
 const retagQuestion = async (question) => {
@@ -844,6 +1021,17 @@ const generateAnswer = async (question) => {
     toast.success('答案生成成功')
   } catch (e) { toast.error('生成失败：' + getFriendlyError(e)) }
   finally { question._isLoadingAnswer = false }
+}
+
+const deleteQuestion = async (question) => {
+  const shortQ = question.question.length > 30 ? question.question.slice(0, 30) + '...' : question.question
+  if (!await showConfirm(`确定要删除题目「${shortQ}」吗？此操作不可撤销。`, { title: '确认删除', variant: 'danger' })) return
+  try {
+    await api.deleteMasterQuestion(question.id)
+    toast.success('题目已删除')
+    fetchTableData()
+    fetchAnalytics()
+  } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
 }
 
 // ── Cluster editing (per original question) ──
@@ -907,13 +1095,42 @@ const splitAsNew = async () => {
 const triggerBuildMasterBank = async () => {
   if (!await showConfirm('将重新整理全部题目并调用 LLM 重新分类聚类，会消耗大量 API Token，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
+  buildProgress.value = { step: '', current: 0, total: 0, message: '' }
   try {
-    const result = await api.buildMasterBankSSE(() => {})
+    const result = await api.buildMasterBankSSE((event) => {
+      if (event.type === 'init') {
+        buildProgress.value = { step: event.step, current: 0, total: event.total, message: event.message }
+      } else if (event.type === 'progress') {
+        buildProgress.value = { step: event.step, current: event.current, total: event.total, message: event.message }
+      } else if (event.type === 'error') {
+        throw new Error(event.message)
+      }
+    })
     toast.success(`重建完成，共 ${result?.total_unique || 0} 道题目`)
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
-  finally { isBuilding.value = false }
+  finally { isBuilding.value = false; buildProgress.value = { step: '', current: 0, total: 0, message: '' } }
+}
+
+const triggerBuildPersonalBank = async () => {
+  if (!await showConfirm('将把你的个人题目与公共题库进行聚类合并，匹配到的题目会并入公共题库，确定继续？', { title: '重建个人题库' })) return
+  isBuilding.value = true
+  buildProgress.value = { step: '', current: 0, total: 0, message: '' }
+  try {
+    const result = await api.buildPersonalBankSSE((event) => {
+      if (event.type === 'init') {
+        buildProgress.value = { step: 'match', current: 0, total: event.total, message: event.message }
+      } else if (event.type === 'progress') {
+        buildProgress.value = { step: event.step, current: event.current, total: event.total, message: event.message }
+      } else if (event.type === 'error') {
+        throw new Error(event.message)
+      }
+    })
+    toast.success(`个人题库重建完成，合并 ${result?.merged || 0} 题，保留 ${result?.kept || 0} 题`)
+    fetchTableData()
+  } catch (e) { toast.error('重建个人题库失败：' + getFriendlyError(e)) }
+  finally { isBuilding.value = false; buildProgress.value = { step: '', current: 0, total: 0, message: '' } }
 }
 
 // ── Lifecycle ──
@@ -970,6 +1187,7 @@ const loadActiveSeason = async () => {
   try {
     const data = await api.fetchPublicProfile()
     activeSeason.value = data.settings?.active_season || ''
+    availableSeasons.value = data.available_seasons || []
   } catch { /* ignore */ }
 }
 
@@ -988,6 +1206,15 @@ onUnmounted(() => cancelAllRequests())
 :deep(strong) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; }
 :deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; margin-top: 1.5rem; margin-bottom: 0.5rem; }
 :deep(h3) { font-size: 1.125rem; }
+
+@keyframes indeterminate-slide {
+  0% { margin-left: 0%; width: 15%; }
+  50% { margin-left: 40%; width: 50%; }
+  100% { margin-left: 85%; width: 15%; }
+}
+.indeterminate-bar {
+  animation: indeterminate-slide 1.8s ease-in-out infinite;
+}
 
 .tab-fade-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
 .tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }

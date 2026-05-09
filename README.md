@@ -94,7 +94,13 @@ ECharts 6 知识点关联网络、技术栈热度趋势、考点分布、难度�
 <details>
 <summary><strong>系统配置热更新</strong> — LLM / Embedding 参数在线修改</summary>
 
-API 地址、模型名称、超时时间、相似度阈值等均可通过界面修改，自动持久化到数据库和 `.env` 文件。
+API 地址、模型名称、超时时间、相似度阈值等均可通过界面修改，自动持久化到数据库和 `.env` 文件。支持个人 LLM 配置独立管理。
+</details>
+
+<details>
+<summary><strong>数据安全</strong> — 软删除 + 回收站机制</summary>
+
+题库题目删除后进入回收站，支持单条/批量恢复。JD、面经、题目详情均支持软删除，防止数据误删丢失。
 </details>
 
 ## 技术栈
@@ -438,6 +444,11 @@ sudo systemctl reload nginx
 | POST | `/api/master-bank/batch-generate` | 批量生成答案 |
 | POST | `/api/master-bank/random` | 随机抽题（模拟面试） |
 | POST | `/api/evaluate-answer` | AI 评估答题质量 |
+| DELETE | `/api/master-bank/{id}` | 软删除题目（移至回收站） |
+| POST | `/api/master-bank/batch-delete` | 批量软删除题目 |
+| GET | `/api/master-bank/trash` | 获取回收站列表 |
+| POST | `/api/master-bank/restore/{id}` | 恢复已删除题目 |
+| POST | `/api/master-bank/batch-restore` | 批量恢复题目 |
 
 </details>
 
@@ -460,6 +471,9 @@ sudo systemctl reload nginx
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/profile` | 读取系统配置 |
 | PUT | `/api/profile` | 更新系统配置 |
+| GET | `/api/profile/llm` | 读取个人 LLM 配置 |
+| PUT | `/api/profile/llm` | 更新个人 LLM 配置 |
+| DELETE | `/api/profile/llm` | 删除个人 LLM 配置 |
 
 </details>
 
@@ -481,6 +495,8 @@ sudo systemctl reload nginx
 - JWT Refresh Token 使用 HttpOnly Cookie，防止 XSS 窃取。
 - 全局速率限制（200 次/分钟）。
 - 密码使用 bcrypt 加密存储。
+- 题库操作（生成答案、批量生成、答题评估）均校验用户可见范围（`bank_mode` + `owner_id`），防止权限提升。
+- 分析数据按用户 `bank_mode` 隔离，普通用户仅可见公共/个人数据。
 
 ### 开发者须知
 

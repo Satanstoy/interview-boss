@@ -133,12 +133,10 @@ function getStatusMessage(status) {
  */
 export function getFriendlyError(err, fallback = '操作失败，请稍后重试') {
   if (!err) return fallback
-  if (err.status) return getStatusMessage(err.status)
+  if (err.status && !err.message) return getStatusMessage(err.status)
   if (err.message?.includes('Failed to fetch')) return '网络连接失败，请检查网络'
-  if (err.message?.includes('超时')) return '请求超时，请稍后重试'
-  const msg = err.message || ''
-  if (msg && !msg.includes('HTTP') && !/\d{3}/.test(msg) && /[一-鿿]/.test(msg)) return msg
-  return fallback
+  if (err.message?.includes('超时') || err.message?.includes('timeout')) return '请求超时，请稍后重试'
+  return err.message || fallback
 }
 
 /**
@@ -167,7 +165,7 @@ async function request(url, options = {}) {
 
     try {
       // 自动附加 Authorization header
-      const authHeaders = {}
+      const authHeaders = { 'X-Requested-With': 'XMLHttpRequest' }
       const token = getAuthToken()
       if (token) authHeaders['Authorization'] = `Bearer ${token}`
 
@@ -321,6 +319,7 @@ export function upload(url, formData, options = {}) {
 
     const token = getAuthToken()
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest')
 
     xhr.timeout = restOptions.timeout || UPLOAD_TIMEOUT
 
@@ -373,7 +372,9 @@ export async function postSSE(url, body, onEvent) {
 
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(getStatusMessage(res.status))
+      let detail
+      try { detail = JSON.parse(text).detail } catch { detail = text }
+      throw new Error(detail || getStatusMessage(res.status))
     }
 
     const reader = res.body.getReader()
@@ -415,6 +416,77 @@ export async function postSSE(url, body, onEvent) {
 }
 
 /**
+ * 上传 FormData，返回 SSE 流式响应
+ */
+export async function uploadSSE(url, formData, onEvent) {
+  const controller = new AbortController()
+  pendingControllers.add(controller)
+
+  try {
+    const authHeaders = {}
+    const token = getAuthToken()
+    if (token) authHeaders['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders },
+      body: formData,
+      signal: controller.signal,
+      credentials: 'same-origin',
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      let detail
+      try { detail = JSON.parse(text).detail } catch { detail = text }
+      throw new Error(detail || getStatusMessage(res.status))
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalResult = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(trimmed.slice(6))
+          if (onEvent) onEvent(data)
+          if (data.type === 'done') finalResult = data
+          if (data.type === 'error') throw new Error(data.message)
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e
+        }
+      }
+    }
+
+    if (buffer.trim().startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.trim().slice(6))
+        if (onEvent) onEvent(data)
+        if (data.type === 'done') finalResult = data
+        if (data.type === 'error') throw new Error(data.message)
+      } catch (e) {
+        if (e.message && !e.message.includes('JSON')) throw e
+      }
+    }
+
+    return finalResult
+  } finally {
+    pendingControllers.delete(controller)
+  }
+}
+
+/**
  * 带 cookie 的 fetch（用于 logout 等需要 HttpOnly cookie 的操作）
  */
 export async function fetchWithCredentials(url, options = {}) {
@@ -428,4 +500,4 @@ export async function fetchWithCredentials(url, options = {}) {
   })
 }
 
-export default { get, post, put, del, upload, cancelAllRequests }
+export default { get, post, put, del, upload, uploadSSE, cancelAllRequests }

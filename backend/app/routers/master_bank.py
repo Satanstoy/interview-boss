@@ -13,9 +13,9 @@ from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest
-from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user
+from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user, raw_llm_call
 from app.services.clustering import cluster_all_questions, generate_unified_question, match_new_questions
 from app.services.utils import normalize_category
 
@@ -69,7 +69,9 @@ async def get_master_bank(
     page_size: int = Query(50, ge=1, le=1000),
     user: dict = Depends(get_current_user)
 ):
-    order_clause = "ORDER BY frequency DESC" if sort != "recent" else "ORDER BY id DESC"
+    bank_mode = user.get('bank_mode', 'public')
+    dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user['id'])
+    order_clause = f"ORDER BY ({dyn_freq_sql}) DESC" if sort != "recent" else "ORDER BY qb.id DESC"
     offset = (page - 1) * page_size
     from_clause, where_clause, params = _build_bank_where_clause(user)
 
@@ -77,7 +79,7 @@ async def get_master_bank(
         with get_db_connection() as conn:
             total = conn.execute(f"SELECT COUNT(*) {from_clause} {where_clause}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, qb.owner_id, qb.status, qb.job_position "
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, qb.owner_id, qb.status, qb.job_position "
                 f"{from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?",
                 params + [user['id'], page_size, offset]
             ).fetchall()
@@ -88,10 +90,12 @@ async def get_master_bank(
     result = []
     for r in rows:
         d = dict(r)
+        d['frequency'] = d.pop('dyn_frequency', d.get('frequency', 0))
         try:
-            d['sources'] = json.loads(d['sources']) if d['sources'] else []
+            raw_sources = json.loads(d['sources']) if d['sources'] else []
         except Exception:
-            d['sources'] = []
+            raw_sources = []
+        d['sources'] = filter_sources_by_mode(raw_sources, bank_mode, user['id'])
         try:
             d['original_questions'] = json.loads(d['original_questions']) if d['original_questions'] else []
         except Exception:
@@ -148,6 +152,9 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
     async def event_stream():
         try:
+            # ── 立即反馈，避免前端长时间显示"准备中" ──
+            yield f"data: {json.dumps({'type': 'init', 'total': 0, 'step': 'prepare', 'message': '正在备份数据库...'})}\n\n"
+
             # ── 备份 ──
             backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
             try:
@@ -168,7 +175,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 with get_db_connection() as conn:
                     raw = conn.execute(
                         "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
-                        "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.job_position = ?",
+                        "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL AND qd.job_position = ?",
                         (current_pos,)
                     ).fetchall()
                     existing = conn.execute(
@@ -185,7 +192,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             # ── LLM 重标注 ──
             taxonomy_config = await run_db(get_taxonomy_for_position)
             prompt_template = build_tagging_prompt(taxonomy_config)
-            _, _, _, _admin_bu = get_llm_client_for_user(admin['id'])
+            _, _, _, _admin_bu, _admin_provider = get_llm_client_for_user(admin['id'])
             use_rf = _should_use_response_format(_admin_bu)
 
             TAG_BATCH = 30
@@ -199,12 +206,12 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 async with sem:
                     questions_input = [{"id": r['id'], "题目": r['question']} for r in batch]
                     prompt = prompt_template.replace("{questions}", json.dumps(questions_input, ensure_ascii=False))
-                    _c, _m, _t, _bu = get_llm_client_for_user(admin['id'])
+                    _c, _m, _t, _bu, _provider = get_llm_client_for_user(admin['id'])
                     kwargs = {"model": _m, "messages": [{"role": "system", "content": "严格输出 JSON 对象，格式必须为 {\"questions\": [...]}"}, {"role": "user", "content": prompt}], "temperature": 0.0}
                     if _should_use_response_format(_bu):
                         kwargs["response_format"] = {"type": "json_object"}
-                    response = await _c.chat.completions.create(**kwargs)
-                    result = _extract_json(response.choices[0].message.content)
+                    response_text = await raw_llm_call(admin['id'], **kwargs)
+                    result = _extract_json(response_text)
                     result_map = {}
                     for item in result.get("questions", []):
                         q_text = item.get("题目", "")
@@ -256,12 +263,21 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 if not rows_in_cluster:
                     continue
                 sources = []
-                seen_sources = set()
+                seen_urls = set()
                 for r in rows_in_cluster:
-                    src = {"url": r.get('url', ''), "company": r.get('company', ''), "round": r.get('round', '')}
-                    src_key = (src['url'], src['company'], src['round'])
-                    if src_key not in seen_sources:
-                        seen_sources.add(src_key)
+                    url = r.get('url', '')
+                    src = {"url": url, "company": r.get('company', ''), "round": r.get('round', '')}
+                    if url in seen_urls:
+                        # 同一 URL 已有 source，补充更具体的 company/round 信息
+                        for existing in sources:
+                            if existing['url'] == url:
+                                if existing['company'] in ('', '未提供') and src['company'] not in ('', '未提供'):
+                                    existing['company'] = src['company']
+                                if existing['round'] in ('', '未提供') and src['round'] not in ('', '未提供'):
+                                    existing['round'] = src['round']
+                                break
+                    else:
+                        seen_urls.add(url)
                         sources.append(src)
                 orig_q_sources = [{"question": r['question'], "sources": [{"url": r.get('url', ''), "company": r.get('company', ''), "round": r.get('round', '')}]} for r in rows_in_cluster]
                 cat1_set, cat2_set, tags_set, diffs = set(), set(), set(), []
@@ -274,7 +290,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                     if r.get('diff_tag'): diffs.append(r['diff_tag'])
                 diff_str = Counter(diffs).most_common(1)[0][0] if diffs else "未知"
                 original_qs = [r['question'] for r in rows_in_cluster]
-                detail = {'question': '', 'original_questions': original_qs, 'original_question_sources': orig_q_sources, 'cat1': cat1_set, 'cat2': cat2_set, 'tags': tags_set, 'difficulty': diff_str, 'frequency': len(rows_in_cluster), 'sources': sources}
+                detail = {'question': '', 'original_questions': original_qs, 'original_question_sources': orig_q_sources, 'cat1': cat1_set, 'cat2': cat2_set, 'tags': tags_set, 'difficulty': diff_str, 'frequency': len(sources), 'sources': sources}
                 cluster_details.append(detail)
                 if len(rows_in_cluster) >= 2:
                     src_ctx = [{"question": r['question'], "company": r.get('company', ''), "round": r.get('round', '')} for r in rows_in_cluster]
@@ -364,6 +380,8 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
     async def event_stream():
         try:
             uid = user['id']
+            yield f"data: {json.dumps({'type': 'init', 'total': 0, 'step': 'prepare', 'message': '正在加载数据...'})}\n\n"
+
             from app.db.connection import get_user_job_position
             _, current_pos = get_user_job_position(uid)
             if not current_pos:
@@ -377,9 +395,9 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                         "FROM question_bank WHERE owner_id = ? AND job_position = ?",
                         (uid, current_pos)
                     ).fetchall()
-                    # 加载公共题库
+                    # 加载公共题库（含 original_questions 用于匹配上下文）
                     public = conn.execute(
-                        "SELECT id, question, cat2, sources FROM question_bank "
+                        "SELECT id, question, cat2, sources, original_questions FROM question_bank "
                         "WHERE owner_id IS NULL AND status = 'approved' AND job_position = ?",
                         (current_pos,)
                     ).fetchall()
@@ -403,10 +421,16 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                 cat2 = r.get('cat2') or ''
                 if cat2 not in existing_by_cat2:
                     existing_by_cat2[cat2] = []
+                all_qs = [r['question']]
+                try:
+                    orig = json.loads(r.get('original_questions') or '[]')
+                    all_qs.extend([q for q in orig if q and q != r['question']])
+                except Exception:
+                    pass
                 existing_by_cat2[cat2].append({
                     "question_bank_id": r['id'],
                     "question": r['question'],
-                    "all_questions": [r['question']],
+                    "all_questions": all_qs,
                 })
 
             # 为个人题目分配临时 id 用于匹配
@@ -420,7 +444,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
 
             yield f"data: {json.dumps({'type': 'progress', 'step': 'match', 'current': 0, 'total': 1, 'message': 'LLM 匹配中...'})}\n\n"
 
-            match_result = await match_new_questions(new_rows_for_match, existing_by_cat2, user_id=admin['id'])
+            match_result = await match_new_questions(new_rows_for_match, existing_by_cat2, user_id=user['id'])
             matched = match_result["matched"]
             unmatched = match_result["unmatched"]
 
@@ -434,13 +458,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                         new_id = m["new_id"]
                         qb_id = m["question_bank_id"]
                         personal_row = personal_rows[new_id]
-                        # 增加公共题目的 frequency
-                        conn.execute(
-                            "UPDATE question_bank SET frequency = frequency + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (personal_row.get('frequency', 1), qb_id)
-                        )
-                        # 追加 sources
-                        existing = conn.execute("SELECT sources FROM question_bank WHERE id = ?", (qb_id,)).fetchone()
+                        existing = conn.execute("SELECT sources, original_questions, original_question_sources FROM question_bank WHERE id = ?", (qb_id,)).fetchone()
                         if existing:
                             try:
                                 sources = json.loads(existing['sources']) if existing['sources'] else []
@@ -451,12 +469,25 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                 personal_sources = json.loads(personal_row.get('sources', '[]')) if personal_row.get('sources') else []
                             except (json.JSONDecodeError, TypeError):
                                 pass
+                            # BUG-012: URL-based 去重
+                            existing_urls = {s.get('url') for s in sources}
                             for s in personal_sources:
-                                if s not in sources:
+                                if s.get('url') not in existing_urls:
                                     sources.append(s)
+                                    existing_urls.add(s.get('url'))
+                            # BUG-013: 回写 original_questions
+                            try:
+                                orig_qs = json.loads(existing['original_questions']) if existing['original_questions'] else []
+                                orig_qs_src = json.loads(existing['original_question_sources']) if existing['original_question_sources'] else []
+                            except (json.JSONDecodeError, TypeError):
+                                orig_qs, orig_qs_src = [], []
+                            personal_q_text = personal_row['question']
+                            if personal_q_text and personal_q_text not in orig_qs:
+                                orig_qs.append(personal_q_text)
+                                orig_qs_src.append({"question": personal_q_text, "sources": personal_sources})
                             conn.execute(
-                                "UPDATE question_bank SET sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (json.dumps(sources, ensure_ascii=False), qb_id)
+                                "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (len(sources), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
                             )
                         merged_count += 1
                         # 删除已合并的个人题目
@@ -587,14 +618,14 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
             elif len(new_orig) == 1:
                 conn.execute(
-                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
             else:
                 conn.execute(
                     "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
-                     len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                     len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
 
             conn.commit()
@@ -660,15 +691,19 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
             src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []
 
-            if original_q not in src_orig:
+            is_standalone_merge = not src_orig and original_q == source['question']
+            if not is_standalone_merge and original_q not in src_orig:
                 raise HTTPException(status_code=400, detail="该原始题目不在源聚类中")
 
             # 找到要移动的题目的来源
             moving_src = []
-            for item in src_orig_src:
-                if item.get('question') == original_q:
-                    moving_src = item.get('sources', [])
-                    break
+            if is_standalone_merge:
+                moving_src = json.loads(source['sources']) if source['sources'] else []
+            else:
+                for item in src_orig_src:
+                    if item.get('question') == original_q:
+                        moving_src = item.get('sources', [])
+                        break
 
             # 更新目标聚类
             tgt_orig = json.loads(target['original_questions']) if target['original_questions'] else []
@@ -689,7 +724,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             conn.execute(
                 "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
-                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), req.target_id)
+                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_sources), req.target_id)
             )
 
             # 从源聚类中移除
@@ -709,14 +744,14 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
             elif len(new_src_orig) == 1:
                 conn.execute(
-                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_src_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_src_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
             else:
                 conn.execute(
                     "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
-                     len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                     len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
 
             conn.commit()
@@ -822,6 +857,26 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
             question_text = row['question']
             if question_text:
                 cursor.execute("DELETE FROM questions_detail WHERE question = ?", (question_text,))
+
+            # BUG-020: 清理其他 QB 记录中对该题目文本的 stale original_questions 引用
+            if question_text:
+                other_qb = cursor.execute(
+                    "SELECT id, original_questions, original_question_sources FROM question_bank WHERE id != ? AND original_questions LIKE ?",
+                    (question_id, f'%{question_text[:80]}%')
+                ).fetchall()
+                for qb in other_qb:
+                    try:
+                        oq = json.loads(qb['original_questions']) if qb['original_questions'] else []
+                        oqs = json.loads(qb['original_question_sources']) if qb['original_question_sources'] else []
+                    except Exception:
+                        continue
+                    if question_text in oq:
+                        oq = [q for q in oq if q != question_text]
+                        oqs = [item for item in oqs if item.get('question') != question_text]
+                        cursor.execute(
+                            "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (json.dumps(oq, ensure_ascii=False), json.dumps(oqs, ensure_ascii=False), qb['id'])
+                        )
 
             # Bug #14: 级联清理 user_question_view 和 question_position
             cursor.execute("DELETE FROM user_question_view WHERE question_bank_id = ?", (question_id,))
@@ -1017,8 +1072,9 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
 """
 
     try:
-        _c, _m, _t, _bu = get_llm_client_for_user(admin['id'])
-        response = await _c.chat.completions.create(
+        _c, _m, _t, _bu, _provider = get_llm_client_for_user(admin['id'])
+        response_text = await raw_llm_call(
+            admin['id'],
             model=_m,
             messages=[
                 {"role": "system", "content": "你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。必须输出输入数据中每一项对应的 \"id\" 字段，以便于与原输入一一对应。请仔细分析题目内容，给出最准确的分类。"},
@@ -1027,7 +1083,7 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
             temperature=0.2,
         )
 
-        parsed_result = _extract_json(response.choices[0].message.content)
+        parsed_result = _extract_json(response_text)
         items = parsed_result.get("questions", [])
 
         if not items:

@@ -223,7 +223,7 @@ def init_db():
         if "idx_jd_url" not in jd_indexes:
             conn.execute("CREATE INDEX idx_jd_url ON jd(url)")
         if "idx_jd_url_unique" not in jd_indexes:
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jd_url_unique ON jd(url) WHERE url IS NOT NULL AND url != ''")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jd_url_unique ON jd(url, owner_id) WHERE url IS NOT NULL AND url != ''")
         if "idx_jd_owner_status" not in jd_indexes:
             conn.execute("CREATE INDEX idx_jd_owner_status ON jd(owner_id, status)")
         # Bug #11: jd 表添加 url_signature 列用于高效去重
@@ -236,13 +236,35 @@ def init_db():
             conn.execute("UPDATE jd SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL")
         if "deleted_at" not in jd_columns:
             conn.execute("ALTER TABLE jd ADD COLUMN deleted_at TIMESTAMP")
+        # ── 迁移：jd 表添加 job_position 列（岗位隔离）──
+        jd_columns = {row[1] for row in cursor.execute("PRAGMA table_info('jd')").fetchall()}
+        if "job_position" not in jd_columns:
+            conn.execute("ALTER TABLE jd ADD COLUMN job_position TEXT DEFAULT ''")
+            # 回填已有 JD 记录的 job_position 为当前全局岗位
+            try:
+                current_pos = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+                if current_pos and current_pos[0]:
+                    conn.execute("UPDATE jd SET job_position = ?, updated_at = CURRENT_TIMESTAMP WHERE job_position IS NULL OR job_position = ''", (current_pos[0],))
+                    logger.info(f"已为 jd 表添加 job_position 列并回填为 {current_pos[0]}")
+            except Exception:
+                pass
+        # ── 迁移：修复 interview 表中空 job_position 的历史数据 ──
+        empty_pos_count = conn.execute("SELECT COUNT(*) FROM interview WHERE job_position IS NULL OR job_position = ''").fetchone()[0]
+        if empty_pos_count > 0:
+            try:
+                current_pos = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+                if current_pos and current_pos[0]:
+                    conn.execute("UPDATE interview SET job_position = ?, updated_at = CURRENT_TIMESTAMP WHERE job_position IS NULL OR job_position = ''", (current_pos[0],))
+                    logger.info(f"已将 {empty_pos_count} 条面经记录的 job_position 回填为 {current_pos[0]}")
+            except Exception:
+                pass
 
         cursor.execute("PRAGMA index_list('interview')")
         iv_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_interview_url" not in iv_indexes:
             conn.execute("CREATE INDEX idx_interview_url ON interview(url)")
         if "idx_interview_url_unique" not in iv_indexes:
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_url_unique ON interview(url) WHERE url IS NOT NULL AND url != ''")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_url_unique ON interview(url, owner_id) WHERE url IS NOT NULL AND url != ''")
         if "idx_interview_owner_status" not in iv_indexes:
             conn.execute("CREATE INDEX idx_interview_owner_status ON interview(owner_id, status)")
         # Bug #11: interview 表添加 url_signature 列用于高效去重
@@ -330,6 +352,27 @@ def init_db():
             conn.execute("ALTER TABLE question_bank ADD COLUMN original_questions TEXT DEFAULT '[]'")
         if "original_question_sources" not in qb_columns:
             conn.execute("ALTER TABLE question_bank ADD COLUMN original_question_sources TEXT DEFAULT '[]'")
+
+        # ── 迁移：添加 deleted_at 列（软删除支持）──
+        qb_columns = {row[1] for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()}
+        if "deleted_at" not in qb_columns:
+            conn.execute("ALTER TABLE question_bank ADD COLUMN deleted_at TIMESTAMP")
+            logger.info("已为 question_bank 表添加 deleted_at 列（软删除支持）")
+
+        # ── 清理脏数据：job_positions 表中的无效岗位 ──
+        invalid_positions = conn.execute(
+            "SELECT id, name FROM job_positions WHERE name LIKE '%test%' OR name LIKE '%测试%' OR LENGTH(name) > 30 OR name LIKE '%!@#$%' OR name LIKE '%AAAA%'"
+        ).fetchall()
+        if invalid_positions:
+            for pos in invalid_positions:
+                conn.execute("DELETE FROM question_position WHERE position_id = ?", (pos[0],))
+                conn.execute("DELETE FROM taxonomy WHERE position_name = ?", (pos[1],))
+                conn.execute("DELETE FROM job_positions WHERE id = ?", (pos[0],))
+            logger.info(f"已清理 {len(invalid_positions)} 个无效岗位数据")
+
+        # ── 清理脏数据：question_bank 表中的无效分类 ──
+        conn.execute("UPDATE question_bank SET cat1 = '' WHERE cat1 = 'test' AND deleted_at IS NULL")
+        logger.info("已清理 question_bank 表中的无效分类数据")
 
         # ── 迁移：添加 job_position 列（多岗位隔离）──
         if "job_position" not in qb_columns:
@@ -432,6 +475,8 @@ def init_db():
         users_columns = {row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()}
         if "current_position_id" not in users_columns:
             conn.execute("ALTER TABLE users ADD COLUMN current_position_id INTEGER REFERENCES job_positions(id)")
+        if "personal_position" not in users_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN personal_position TEXT")
 
         # ── 数据迁移：question_bank.job_position → job_positions + question_position ──
         jp_count = conn.execute("SELECT COUNT(*) FROM job_positions").fetchone()[0]
@@ -574,6 +619,23 @@ def init_db():
         conn.execute("DROP TABLE IF EXISTS master_question_bank")
         conn.execute("DROP TABLE IF EXISTS practice_history")
 
+        # ── 修复: question_bank.frequency 与 sources 数组长度不一致 ──
+        import json as _fix_json
+        _fix_rows = conn.execute("SELECT id, frequency, sources FROM question_bank").fetchall()
+        _fix_count = 0
+        for _r in _fix_rows:
+            _qb_id, _freq, _sources_raw = _r[0], _r[1], _r[2]
+            try:
+                _srcs = _fix_json.loads(_sources_raw) if _sources_raw else []
+            except Exception:
+                _srcs = []
+            _actual = len(_srcs)
+            if _freq != _actual and _actual > 0:
+                conn.execute("UPDATE question_bank SET frequency = ? WHERE id = ?", (_actual, _qb_id))
+                _fix_count += 1
+        if _fix_count > 0:
+            logger.info(f"已修复 {_fix_count} 条 question_bank 记录的 frequency 字段")
+
         conn.commit()
 
 
@@ -615,13 +677,20 @@ def get_current_job_position() -> str:
 def get_user_job_position(user_id: int) -> tuple[int | None, str]:
     """获取用户的当前岗位：返回 (position_id, position_name)
 
-    优先从 users.current_position_id 读取，fallback 到全局 current_job_position。
+    优先级：users.personal_position → users.current_position_id → 全局 fallback
     """
     from app.core.prompts import DEFAULT_TAXONOMY
     default_name = DEFAULT_TAXONOMY["job_position"]
     try:
         with get_db_connection() as conn:
-            # 优先读 users 表的 per-user 设置
+            # 最高优先：用户个人岗位（不关联 job_positions 表）
+            row = conn.execute(
+                "SELECT personal_position FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row and row['personal_position']:
+                return None, row['personal_position']
+
+            # 次优先：users.current_position_id → job_positions.name
             row = conn.execute(
                 "SELECT u.current_position_id, jp.name FROM users u "
                 "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
@@ -629,6 +698,7 @@ def get_user_job_position(user_id: int) -> tuple[int | None, str]:
             ).fetchone()
             if row and row['current_position_id'] and row['name']:
                 return row['current_position_id'], row['name']
+
             # fallback: 全局设置
             pos_row = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
             if pos_row and pos_row[0]:
@@ -644,6 +714,60 @@ def set_user_job_position(user_id: int, position_id: int):
     with get_db_connection() as conn:
         conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (position_id, user_id))
         conn.commit()
+
+
+def get_dynamic_frequency_sql(bank_mode: str, user_id: int, table_alias: str = "qb") -> str:
+    """根据 bank_mode 返回动态计算频率的 SQL 子查询片段。
+
+    频率 = sources JSON 中匹配当前模式的面试记录数量。
+    - public:  只统计 owner_id IS NULL 的面试
+    - personal: 只统计 owner_id = user_id 的面试
+    - mixed:   统计 owner_id IS NULL 或 owner_id = user_id 的面试
+    """
+    if bank_mode == 'personal':
+        return (
+            f"(SELECT COUNT(*) FROM json_each({table_alias}.sources) je "
+            f"JOIN interview i ON json_extract(je.value, '$.url') = i.url "
+            f"WHERE i.deleted_at IS NULL AND i.owner_id = {user_id})"
+        )
+    elif bank_mode == 'mixed':
+        return (
+            f"(SELECT COUNT(*) FROM json_each({table_alias}.sources) je "
+            f"JOIN interview i ON json_extract(je.value, '$.url') = i.url "
+            f"WHERE i.deleted_at IS NULL AND (i.owner_id IS NULL OR i.owner_id = {user_id}))"
+        )
+    else:  # public
+        return (
+            f"(SELECT COUNT(*) FROM json_each({table_alias}.sources) je "
+            f"JOIN interview i ON json_extract(je.value, '$.url') = i.url "
+            f"WHERE i.deleted_at IS NULL AND i.owner_id IS NULL)"
+        )
+
+
+def filter_sources_by_mode(sources_list: list, bank_mode: str, user_id: int) -> list:
+    """根据 bank_mode 过滤 sources 列表，只保留当前模式可见的来源。"""
+    if not sources_list:
+        return []
+    urls = [s.get('url') for s in sources_list if s.get('url')]
+    if not urls:
+        return sources_list
+    with get_db_connection() as conn:
+        placeholders = ','.join(['?'] * len(urls))
+        rows = conn.execute(
+            f"SELECT url, owner_id FROM interview WHERE url IN ({placeholders}) AND deleted_at IS NULL",
+            urls
+        ).fetchall()
+    url_owner = {r['url']: r['owner_id'] for r in rows}
+    result = []
+    for s in sources_list:
+        owner = url_owner.get(s.get('url'))
+        if bank_mode == 'personal' and owner == user_id:
+            result.append(s)
+        elif bank_mode == 'public' and owner is None:
+            result.append(s)
+        elif bank_mode == 'mixed' and (owner is None or owner == user_id):
+            result.append(s)
+    return result
 
 
 def get_taxonomy_for_position(position: str = None) -> dict:

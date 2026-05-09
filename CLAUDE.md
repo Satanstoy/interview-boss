@@ -32,6 +32,21 @@ uv add <package>           # 添加新依赖
 
 **重要：本项目所有 Python 依赖操作必须使用 uv，不要用 pip/pip3。**
 
+### 部署
+
+```bash
+# 一键部署（前端构建+部署+后端重启）
+./deploy.sh
+
+# 仅部署前端
+./deploy.sh frontend
+
+# 仅重启后端
+./deploy.sh backend
+```
+
+**重要：部署脚本内部使用 sudo 执行 systemctl 和文件复制，`claude_runner` 用户已配置 NOPASSWD: ALL，可直接运行。**
+
 ## Architecture
 
 ### 后端 (`backend/app/`)

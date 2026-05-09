@@ -1,9 +1,10 @@
 import json
+import re
 import logging
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
 
 logger = logging.getLogger("interview-boss")
@@ -21,6 +22,52 @@ def _safe_table_name(name: str) -> str:
     return name
 
 
+def _cleanup_sources_for_url(cursor, url: str):
+    """清理 question_bank.sources 中指向指定 URL 的条目，同步更新 frequency"""
+    affected = cursor.execute("SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)).fetchall()
+    for r in affected:
+        try:
+            sources = json.loads(r['sources']) if r['sources'] else []
+        except Exception:
+            sources = []
+        new_sources = [s for s in sources if s.get('url') != url]
+        if len(new_sources) != len(sources):
+            cursor.execute(
+                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (len(new_sources), json.dumps(new_sources, ensure_ascii=False), r['id'])
+            )
+    cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
+
+
+def _restore_sources_for_url(cursor, url: str):
+    """恢复面经时，从 original_question_sources 中找回被清理的 source 条目，重新加入 sources。"""
+    # 查找 original_question_sources 中包含该 URL 的 QB 记录
+    affected = cursor.execute(
+        "SELECT id, sources, original_question_sources FROM question_bank WHERE original_question_sources LIKE ?",
+        (f'%{url}%',)
+    ).fetchall()
+    for r in affected:
+        try:
+            sources = json.loads(r['sources']) if r['sources'] else []
+            orig_qs_src = json.loads(r['original_question_sources']) if r['original_question_sources'] else []
+        except Exception:
+            continue
+        existing_urls = {s.get('url') for s in sources}
+        if url in existing_urls:
+            continue  # source 已存在，无需恢复
+        # 从 original_question_sources 中找到该 URL 对应的 source 条目
+        for item in orig_qs_src:
+            for s in item.get('sources', []):
+                if s.get('url') == url and url not in existing_urls:
+                    sources.append(s)
+                    existing_urls.add(url)
+        if len(sources) > len(json.loads(r['sources']) if r['sources'] else []):
+            cursor.execute(
+                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (len(sources), json.dumps(sources, ensure_ascii=False), r['id'])
+            )
+
+
 @router.get("/api/data/{file_type}")
 async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500), user: dict = Depends(get_current_user)):
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
@@ -36,30 +83,33 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
             if table_name in ('jd', 'interview'):
                 # 根据用户的 bank_mode 过滤可见范围（管理员也遵守）
                 bank_mode = user.get('bank_mode', 'public')
+                # 获取当前岗位用于过滤
+                from app.db.connection import get_current_job_position
+                current_pos = get_current_job_position()
                 if bank_mode == 'personal':
-                    where = "owner_id = ?"
-                    params = (user['id'],)
+                    where = "owner_id = ? AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
+                    params = (user['id'], current_pos)
                 elif bank_mode == 'mixed':
-                    where = "(owner_id = ? OR (owner_id IS NULL AND status = 'approved'))"
-                    params = (user['id'],)
+                    where = "(owner_id = ? OR (owner_id IS NULL AND status = 'approved')) AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
+                    params = (user['id'], current_pos)
                 else:  # public
-                    where = "owner_id IS NULL AND status = 'approved'"
-                    params = ()
+                    where = "owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
+                    params = (current_pos,)
                 total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} WHERE {where}", params).fetchone()[0]
                 if table_name == 'jd':
-                    rows = conn.execute(f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+                    rows = conn.execute(f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, owner_id FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
                 else:
-                    rows = conn.execute(f"SELECT id, url, company, round, focus, questions_list, difficulty, season FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
+                    rows = conn.execute(f"SELECT id, url, company, round, focus, questions_list, difficulty, season, owner_id, created_at FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?", (*params, page_size, offset)).fetchall()
             else:  # questions_detail
                 bank_mode = user.get('bank_mode', 'public')
                 if bank_mode == 'personal':
-                    join_where = "iv.owner_id = ?"
+                    join_where = "iv.owner_id = ? AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
                     params = (user['id'],)
                 elif bank_mode == 'mixed':
-                    join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved'))"
+                    join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
                     params = (user['id'],)
                 else:  # public
-                    join_where = "iv.owner_id IS NULL AND iv.status = 'approved'"
+                    join_where = "iv.owner_id IS NULL AND iv.status = 'approved' AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
                     params = ()
                 total = conn.execute(
                     f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.url = iv.url WHERE {join_where}", params
@@ -78,86 +128,65 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
     for r in rows:
         d = dict(r)
         if table_name == 'jd':
-            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus'], "season": d.get('season', '')})
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus'], "season": d.get('season', ''), "owner_id": d.get('owner_id')})
         elif table_name == 'interview':
-            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty'], "season": d.get('season', '')})
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty'], "season": d.get('season', ''), "owner_id": d.get('owner_id'), "created_at": d.get('created_at', '')})
         elif table_name == 'questions_detail':
             result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "题目": d['question'], "一级大类": d['cat1'], "二级子类": d['cat2'], "考点标签": d['tags'], "难度标签": d['diff_tag']})
     return {"items": result, "total": total, "page": page, "page_size": page_size}
 
 
 @router.delete("/api/data/{file_type}/{record_id}")
-async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_admin_user)):
-    """通过 record_id 直接删除记录，避免行号偏移导致删错"""
+async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_current_user)):
+    """软删除记录：设置 deleted_at 而非物理删除。管理员可删任何记录，普通用户可删自己的个人记录。"""
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
         raise HTTPException(status_code=400, detail="不支持的表类型")
 
-    def _delete():
+    def _soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            target_row = cursor.execute(f"SELECT id, url, questions_list FROM {safe_name} WHERE id = ?", (record_id,)).fetchone()
+            target_row = cursor.execute(f"SELECT id, url, owner_id FROM {safe_name} WHERE id = ? AND deleted_at IS NULL", (record_id,)).fetchone()
             if not target_row:
                 raise HTTPException(status_code=404, detail="未找到该记录，可能已被删除")
 
+            # 权限检查：admin 可删任何，普通用户只能删自己的
+            is_admin = user.get('is_admin', 0)
+            if not is_admin and target_row['owner_id'] is not None and target_row['owner_id'] != user['id']:
+                raise HTTPException(status_code=403, detail="无权删除他人的记录")
+            if not is_admin and target_row['owner_id'] is None:
+                raise HTTPException(status_code=403, detail="无权删除公共记录")
+
+            url = target_row['url']
+
             if table_name == 'jd':
-                url = target_row['url']
                 if url:
-                    # 清理关联的 interview
-                    cursor.execute("DELETE FROM interview WHERE url = ?", (url,))
-                    # 清理关联的 questions_detail
-                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
-                    # 清理 question_bank 中的来源引用（用 LIKE 预筛选减少扫描范围）
-                    affected_rows = cursor.execute(
-                        "SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)
+                    # BUG-017: 先清理关联面经在 question_bank 中的 sources
+                    interview_urls = cursor.execute(
+                        "SELECT DISTINCT url FROM interview WHERE url = ? AND deleted_at IS NULL", (url,)
                     ).fetchall()
-                    for mr in affected_rows:
-                        try:
-                            sources = json.loads(mr['sources']) if mr['sources'] else []
-                        except Exception:
-                            sources = []
-                        new_sources = [s for s in sources if s.get('url') != url]
-                        if len(new_sources) != len(sources):
-                            cursor.execute(
-                                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (len(new_sources), json.dumps(new_sources), mr['id'])
-                            )
-                    cursor.execute(
-                        "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
-                    )
+                    for iu in interview_urls:
+                        if iu['url']:
+                            _cleanup_sources_for_url(cursor, iu['url'])
+                    # 级联软删除关联的 interview 和 questions_detail
+                    cursor.execute("UPDATE interview SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
+                    cursor.execute("UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
 
             if table_name == 'interview':
-                url = target_row['url']
-                # 通过 sources 字段中的 URL 追溯受影响的 question_bank 记录（用 LIKE 预筛选）
-                affected_rows = cursor.execute(
-                    "SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)
-                ).fetchall()
-                for mr in affected_rows:
-                    try:
-                        sources = json.loads(mr['sources']) if mr['sources'] else []
-                    except Exception:
-                        sources = []
-                    match_count = sum(1 for s in sources if s.get('url') == url)
-                    if match_count > 0:
-                        new_sources = [s for s in sources if s.get('url') != url]
-                        cursor.execute(
-                            "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (len(new_sources), json.dumps(new_sources), mr['id'])
-                        )
+                if url:
+                    # 级联软删除关联的 questions_detail
+                    cursor.execute("UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
+                    # 清理 question_bank.sources 中该 URL 的条目
+                    _cleanup_sources_for_url(cursor, url)
 
-                # 保留有 AI 答案的记录，即使 frequency 降为 0（避免答案丢失）
-                cursor.execute(
-                    "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
-                )
-                cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
-
-            cursor.execute(f"DELETE FROM {safe_name} WHERE id = ?", (record_id,))
+            # 软删除目标记录本身
+            cursor.execute(f"UPDATE {safe_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL", (record_id,))
             conn.commit()
 
     try:
-        await run_db(_delete)
+        await run_db(_soft_delete)
         return {"status": "success"}
     except HTTPException:
         raise
@@ -168,7 +197,7 @@ async def delete_data(file_type: str, record_id: int, user: dict = Depends(get_a
 
 @router.post("/api/data/batch-delete")
 async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(get_admin_user)):
-    """批量删除记录，单事务完成"""
+    """批量软删除记录"""
     table_map = {"jd": "jd", "interview": "interview"}
     table_name = table_map.get(req.file_type.lower())
     if not table_name:
@@ -176,13 +205,13 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
     if not req.ids:
         raise HTTPException(status_code=400, detail="ids 不能为空")
 
-    def _batch_delete():
+    def _batch_soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, url FROM {safe_name} WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, url FROM {safe_name} WHERE id IN ({placeholders}) AND deleted_at IS NULL", req.ids
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
@@ -190,45 +219,26 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
             urls_to_delete = {r["url"] for r in rows if r["url"]}
 
             if table_name == "jd":
-                # N1: JD 批量删除级联清理关联的 interview、questions_detail、question_bank
                 for url in urls_to_delete:
-                    cursor.execute("DELETE FROM interview WHERE url = ?", (url,))
-                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+                    # BUG-017: 先清理关联面经在 question_bank 中的 sources
+                    _cleanup_sources_for_url(cursor, url)
+                    cursor.execute("UPDATE interview SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
+                    cursor.execute("UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
 
             if table_name == "interview":
                 for url in urls_to_delete:
-                    cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+                    cursor.execute("UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL", (url,))
+                    _cleanup_sources_for_url(cursor, url)
 
-            # 两种类型都需要清理 question_bank 中的来源引用（用 LIKE 预筛选）
-            if urls_to_delete:
-                like_conditions = " OR ".join(["sources LIKE ?" for _ in urls_to_delete])
-                like_params = [f"%{u}%" for u in urls_to_delete]
-                all_master = cursor.execute(
-                    f"SELECT id, sources FROM question_bank WHERE {like_conditions}", like_params
-                ).fetchall()
-                for mr in all_master:
-                    try:
-                        sources = json.loads(mr["sources"]) if mr["sources"] else []
-                    except Exception:
-                        sources = []
-                    if any(s.get("url") in urls_to_delete for s in sources):
-                        new_sources = [s for s in sources if s.get("url") not in urls_to_delete]
-                        cursor.execute(
-                            "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (len(new_sources), json.dumps(new_sources), mr["id"])
-                        )
-                cursor.execute(
-                    "DELETE FROM question_bank WHERE frequency <= 0 AND (ai_answer IS NULL OR ai_answer = '' OR ai_answer = '[生成失败，请手动重试]')"
-                )
-
+            # 软删除主记录
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))
-            cursor.execute(f"DELETE FROM {safe_name} WHERE id IN ({ph2})", found_ids)
+            cursor.execute(f"UPDATE {safe_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id IN ({ph2}) AND deleted_at IS NULL", found_ids)
             conn.commit()
             return len(found_ids)
 
     try:
-        deleted = await run_db(_batch_delete)
+        deleted = await run_db(_batch_soft_delete)
         return {"status": "success", "deleted": deleted}
     except HTTPException:
         raise
@@ -237,8 +247,98 @@ async def batch_delete_data(req: BatchDataDeleteRequest, user: dict = Depends(ge
         raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
 
+@router.post("/api/data/restore/{file_type}/{record_id}")
+async def restore_data(file_type: str, record_id: int, user: dict = Depends(get_admin_user)):
+    """恢复软删除的记录"""
+    table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
+    table_name = table_map.get(file_type.lower())
+    if not table_name:
+        raise HTTPException(status_code=400, detail="不支持的表类型")
+
+    def _restore():
+        safe_name = _safe_table_name(table_name)
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            target_row = cursor.execute(f"SELECT id, url FROM {safe_name} WHERE id = ? AND deleted_at IS NOT NULL", (record_id,)).fetchone()
+            if not target_row:
+                raise HTTPException(status_code=404, detail="未找到该已删除记录")
+
+            url = target_row['url']
+
+            # 恢复目标记录
+            cursor.execute(f"UPDATE {safe_name} SET deleted_at = NULL WHERE id = ?", (record_id,))
+
+            if table_name == 'jd' and url:
+                # JD 恢复时级联恢复关联的 interview 和 questions_detail
+                cursor.execute("UPDATE interview SET deleted_at = NULL WHERE url = ?", (url,))
+                cursor.execute("UPDATE questions_detail SET deleted_at = NULL WHERE url = ?", (url,))
+
+            if table_name == 'interview' and url:
+                # interview 恢复时级联恢复关联的 questions_detail
+                cursor.execute("UPDATE questions_detail SET deleted_at = NULL WHERE url = ?", (url,))
+                # BUG-018: 从 original_question_sources 中恢复该 URL 对应的 source 条目
+                _restore_sources_for_url(cursor, url)
+
+            if table_name == 'jd' and url:
+                # JD 恢复时级联恢复关联面经的 sources
+                interview_urls = cursor.execute(
+                    "SELECT DISTINCT url FROM interview WHERE url = ? AND deleted_at IS NULL", (url,)
+                ).fetchall()
+                for iu in interview_urls:
+                    if iu['url']:
+                        _restore_sources_for_url(cursor, iu['url'])
+
+            conn.commit()
+
+    try:
+        await run_db(_restore)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("恢复失败")
+        raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
+
+
+@router.get("/api/data/{file_type}/trash")
+async def get_trash(file_type: str, page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500), user: dict = Depends(get_admin_user)):
+    """获取已软删除的记录（回收站）"""
+    table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
+    table_name = table_map.get(file_type.lower())
+    if not table_name:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    offset = (page - 1) * page_size
+
+    def _query():
+        safe_name = _safe_table_name(table_name)
+        with get_db_connection() as conn:
+            where = "deleted_at IS NOT NULL"
+            total = conn.execute(f"SELECT COUNT(*) FROM {safe_name} WHERE {where}").fetchone()[0]
+            if table_name == 'jd':
+                rows = conn.execute(f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            elif table_name == 'interview':
+                rows = conn.execute(f"SELECT id, url, company, round, focus, questions_list, difficulty, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            else:
+                rows = conn.execute(f"SELECT id, url, company, round, question, cat1, cat2, tags, diff_tag, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?", (page_size, offset)).fetchall()
+            return total, rows
+
+    total, rows = await run_db(_query)
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        if table_name == 'jd':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "岗位名称": d['job_title'], "薪资范围": d['salary'], "核心技术要求": d['tech_stack'], "加分项": d['bonus'], "season": d.get('season', ''), "deleted_at": d.get('deleted_at', '')})
+        elif table_name == 'interview':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "考察重点": d['focus'], "具体题目清单": d['questions_list'], "难易程度": d['difficulty'], "season": d.get('season', ''), "deleted_at": d.get('deleted_at', '')})
+        elif table_name == 'questions_detail':
+            result.append({"id": d['id'], "来源链接": d['url'], "公司": d['company'], "面试轮次": d['round'], "题目": d['question'], "一级大类": d['cat1'], "二级子类": d['cat2'], "考点标签": d['tags'], "难度标签": d['diff_tag'], "deleted_at": d.get('deleted_at', '')})
+    return {"items": result, "total": total, "page": page, "page_size": page_size}
+
+
 @router.put("/api/data/update")
-async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(get_admin_user)):
+async def update_generic_data(req: GenericUpdateRequest, bg_tasks: BackgroundTasks, user: dict = Depends(get_admin_user)):
     try:
         _safe_table_name(req.table_name)
     except ValueError:
@@ -269,7 +369,6 @@ async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(ge
             raise HTTPException(status_code=400, detail="不允许将 ai_answer 设置为空值，请使用 /api/master-bank/generate-answer 接口重新生成答案")
 
     # 安全校验：列名必须只含 [a-z_0-9]，防止 SQL 注入
-    import re
     _COL_RE = re.compile(r'^[a-z_][a-z_0-9]*$')
     for col in req.update_data.keys():
         if not _COL_RE.match(col):
@@ -295,6 +394,52 @@ async def update_generic_data(req: GenericUpdateRequest, user: dict = Depends(ge
 
     try:
         await run_db(_update)
+
+        # ── 面经 questions_list 变更时，自动同步 questions_detail ──
+        if req.table_name == "interview" and "questions_list" in req.update_data:
+            async def _sync_details():
+                try:
+                    from app.routers.submit import tag_questions_batch
+                    from app.db.operations import _replace_details_txn
+
+                    def _load_interview():
+                        with get_db_connection() as conn:
+                            return conn.execute("SELECT * FROM interview WHERE id = ?", (req.record_id,)).fetchone()
+
+                    row = await run_db(_load_interview)
+                    if not row:
+                        return
+
+                    questions_str = row['questions_list'] or ""
+                    raw_lines = [line.strip() for line in questions_str.split('\n') if line.strip()]
+                    q_list = [re.sub(r'^\d+[\.\)\]、-]\s*', '', line).strip() for line in raw_lines]
+                    q_list = [q for q in q_list if q]
+                    if not q_list:
+                        return
+
+                    url = row['url'] or f"internal://{row['id']}"
+                    company = row['company'] or "未提供"
+                    round_ = row['round'] or "未提供"
+                    current_pos = get_current_job_position()
+
+                    # LLM 打标（事务外）
+                    tagged_rows = await tag_questions_batch(url, company, round_, q_list)
+
+                    # 单事务：只替换 questions_detail，不碰 question_bank
+                    def _txn():
+                        with get_db_connection() as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("BEGIN")
+                            _replace_details_txn(cursor, url, tagged_rows, current_pos)
+                            conn.commit()
+
+                    await run_db(_txn)
+                    logger.info(f"面经 ID={req.record_id} questions_list 变更，已同步 {len(tagged_rows)} 道题目到 questions_detail")
+                except Exception as e:
+                    logger.error(f"面经 questions_list 同步失败 (ID={req.record_id}): {e}")
+
+            bg_tasks.add_task(_sync_details)
+
         return {"status": "success", "message": f"{req.table_name} 表数据更新成功"}
     except HTTPException:
         raise
