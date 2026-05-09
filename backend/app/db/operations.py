@@ -189,6 +189,14 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
                 if new_q_text and new_q_text not in orig_qs:
                     orig_qs.append(new_q_text)
                     orig_qs_src.append({"question": new_q_text, "sources": [new_source]})
+                elif new_q_text:
+                    # 问题文本已存在：将新 URL 合并到对应条目的 sources 中
+                    for _oqs_item in orig_qs_src:
+                        if _oqs_item.get("question") == new_q_text:
+                            _oqs_urls = {s.get("url") for s in _oqs_item.get("sources", [])}
+                            if url not in _oqs_urls:
+                                _oqs_item.setdefault("sources", []).append(new_source)
+                            break
                 cursor.execute(
                     "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (len(sources), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)

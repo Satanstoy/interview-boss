@@ -137,63 +137,31 @@
         </button>
 
         <div v-if="showSources" class="px-6 pb-5 space-y-2.5">
-          <!-- Multi-question cluster (has original_questions) -->
-          <template v-if="question.original_questions && question.original_questions.length > 0">
-            <div v-for="(oq, idx) in question.original_questions" :key="idx"
-              class="bg-surface-50 dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-xl p-3 flex items-start gap-3">
-              <span class="text-ink-400 dark:text-ink-500 font-mono text-xs shrink-0 mt-0.5">{{ idx + 1 }}.</span>
-              <div class="flex-1 min-w-0">
-                <div class="text-sm text-ink-700 dark:text-ink-300 mb-1.5">{{ oq }}</div>
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span v-for="(src, sIdx) in getOrigSources(oq)" :key="sIdx"
-                    @click="$emit('navigate-to-interview', src)"
-                    class="text-[11px] bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/40 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-md inline-flex items-center cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
-                    <svg class="w-3 h-3 mr-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                    {{ src.company === '未提供' ? '未知' : src.company }}
-                    <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
-                    {{ src.round === '未提供' ? '未知' : src.round }}
-                    <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
-                  </span>
-                  <button v-if="isAdmin" @click.stop="$emit('split-question', { question, originalQuestion: oq })"
-                    class="text-[11px] bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800/50 hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-all">
-                    独立
-                  </button>
-                  <button v-if="isAdmin" @click.stop="$emit('start-merge', { question, originalQuestion: oq })"
-                    class="text-[11px] bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/50 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-all">
-                    合并到
-                  </button>
-                </div>
+          <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
+            class="bg-surface-50 dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-xl p-3 flex items-start gap-3">
+            <span class="text-ink-400 dark:text-ink-500 font-mono text-xs shrink-0 mt-0.5">{{ idx + 1 }}.</span>
+            <div class="flex-1 min-w-0">
+              <div v-if="src._origQuestion" class="text-xs text-ink-400 dark:text-ink-500 mb-1 truncate">{{ src._origQuestion }}</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span @click="$emit('navigate-to-interview', src)"
+                  class="text-[11px] bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/40 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-md inline-flex items-center cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
+                  <svg class="w-3 h-3 mr-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                  {{ src.company === '未提供' ? '未知' : src.company }}
+                  <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
+                  {{ src.round === '未提供' ? '未知' : src.round }}
+                  <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
+                </span>
+                <button v-if="isAdmin" @click.stop="$emit('split-question', { question, originalQuestion: src._origQuestion || question.question })"
+                  class="text-[11px] bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800/50 hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-all">
+                  独立
+                </button>
+                <button v-if="isAdmin" @click.stop="$emit('start-merge', { question, originalQuestion: src._origQuestion || question.question })"
+                  class="text-[11px] bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/50 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-all">
+                  合并到
+                </button>
               </div>
             </div>
-          </template>
-
-          <!-- Single-question sources (no original_questions) -->
-          <template v-else-if="question.sources && question.sources.length > 0">
-            <div v-for="(src, idx) in question.sources" :key="idx"
-              class="bg-surface-50 dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-xl p-3 flex items-start gap-3">
-              <span class="text-ink-400 dark:text-ink-500 font-mono text-xs shrink-0 mt-0.5">{{ idx + 1 }}.</span>
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span @click="$emit('navigate-to-interview', src)"
-                    class="text-[11px] bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/40 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-md inline-flex items-center cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
-                    <svg class="w-3 h-3 mr-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                    {{ src.company === '未提供' ? '未知' : src.company }}
-                    <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
-                    {{ src.round === '未提供' ? '未知' : src.round }}
-                    <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary-500 hover:text-primary-700 dark:text-primary-300 font-bold" title="查看原文">[原文]</a>
-                  </span>
-                  <button v-if="isAdmin" @click.stop="$emit('split-question', { question, originalQuestion: question.question })"
-                    class="text-[11px] bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800/50 hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-all">
-                    独立
-                  </button>
-                  <button v-if="isAdmin" @click.stop="$emit('start-merge', { question, originalQuestion: question.question })"
-                    class="text-[11px] bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/50 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-all">
-                    合并到
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
+          </div>
         </div>
       </div>
     </div>
@@ -263,17 +231,24 @@ const showOwnership = computed(() => props.bankMode === 'mixed')
 
 const formatPosition = (pos) => {
   if (!pos) return ''
-  // 取第一段作为简称，如 "agent开发/大模型应用开发" → "Agent开发"
   const first = pos.split('/')[0].trim()
   return first.charAt(0).toUpperCase() + first.slice(1)
 }
 
-const getOrigSources = (questionText) => {
-  const oqs = props.question.original_question_sources
-  if (!oqs || !Array.isArray(oqs)) return []
-  const found = oqs.find(item => item.question === questionText)
-  return found ? (found.sources || []) : []
-}
+// 按 URL 去重的来源列表，确保展开数量 = badge 数量
+const dedupedSources = computed(() => {
+  const q = props.question
+  const sources = q.sources || []
+  if (!q.original_question_sources || !q.original_question_sources.length) return sources
+  // 建立 url -> 原始问题文本 的映射
+  const urlToOq = {}
+  for (const item of q.original_question_sources) {
+    for (const s of (item.sources || [])) {
+      if (s.url && !urlToOq[s.url]) urlToOq[s.url] = item.question
+    }
+  }
+  return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '' }))
+})
 </script>
 
 <style scoped>
