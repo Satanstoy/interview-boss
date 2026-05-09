@@ -770,6 +770,40 @@ def filter_sources_by_mode(sources_list: list, bank_mode: str, user_id: int) -> 
     return result
 
 
+def filter_original_question_sources_by_mode(oqs_list: list, bank_mode: str, user_id: int) -> list:
+    """根据 bank_mode 过滤 original_question_sources 中每条记录的 sources 子列表。"""
+    if not oqs_list:
+        return []
+    all_urls = set()
+    for item in oqs_list:
+        for s in item.get('sources', []):
+            if s.get('url'):
+                all_urls.add(s['url'])
+    if not all_urls:
+        return oqs_list
+    with get_db_connection() as conn:
+        placeholders = ','.join(['?'] * len(all_urls))
+        rows = conn.execute(
+            f"SELECT url, owner_id FROM interview WHERE url IN ({placeholders}) AND deleted_at IS NULL",
+            list(all_urls)
+        ).fetchall()
+    url_owner = {r['url']: r['owner_id'] for r in rows}
+    result = []
+    for item in oqs_list:
+        filtered_sources = []
+        for s in item.get('sources', []):
+            owner = url_owner.get(s.get('url'))
+            if bank_mode == 'personal' and owner == user_id:
+                filtered_sources.append(s)
+            elif bank_mode == 'public' and owner is None:
+                filtered_sources.append(s)
+            elif bank_mode == 'mixed' and (owner is None or owner == user_id):
+                filtered_sources.append(s)
+        if filtered_sources:
+            result.append({**item, 'sources': filtered_sources})
+    return result
+
+
 def get_taxonomy_for_position(position: str = None) -> dict:
     """从 taxonomy 表读取岗位分类配置，fallback 链: position 行 → default 行 → 常量"""
     import json as _json

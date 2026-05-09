@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode, filter_original_question_sources_by_mode
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user, raw_llm_call
 from app.services.clustering import cluster_all_questions, generate_unified_question, match_new_questions
@@ -101,9 +101,10 @@ async def get_master_bank(
         except Exception:
             d['original_questions'] = []
         try:
-            d['original_question_sources'] = json.loads(d['original_question_sources']) if d['original_question_sources'] else []
+            raw_oqs = json.loads(d['original_question_sources']) if d['original_question_sources'] else []
         except Exception:
-            d['original_question_sources'] = []
+            raw_oqs = []
+        d['original_question_sources'] = filter_original_question_sources_by_mode(raw_oqs, bank_mode, user['id'])
         d['is_personal'] = d.get('owner_id') is not None
         result.append(d)
 
