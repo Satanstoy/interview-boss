@@ -636,6 +636,30 @@ def init_db():
         if _fix_count > 0:
             logger.info(f"已修复 {_fix_count} 条 question_bank 记录的 frequency 字段")
 
+        # ── 修复: original_question_sources 中包含 sources 中不存在的 URL ──
+        _oqs_rows = conn.execute("SELECT id, sources, original_question_sources FROM question_bank WHERE original_question_sources != '[]' AND original_question_sources IS NOT NULL").fetchall()
+        _oqs_fix = 0
+        for _r in _oqs_rows:
+            _qb_id, _src_raw, _oqs_raw = _r[0], _r[1], _r[2]
+            try:
+                _srcs = _fix_json.loads(_src_raw) if _src_raw else []
+                _oqs = _fix_json.loads(_oqs_raw) if _oqs_raw else []
+            except Exception:
+                continue
+            _src_urls = {s.get('url') for s in _srcs if s.get('url')}
+            _changed = False
+            for _item in _oqs:
+                _before = len(_item.get('sources', []))
+                _item['sources'] = [s for s in _item.get('sources', []) if s.get('url') in _src_urls]
+                if len(_item['sources']) != _before:
+                    _changed = True
+            if _changed:
+                conn.execute("UPDATE question_bank SET original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                             (_fix_json.dumps(_oqs, ensure_ascii=False), _qb_id))
+                _oqs_fix += 1
+        if _oqs_fix > 0:
+            logger.info(f"已修复 {_oqs_fix} 条 original_question_sources 中的孤立 URL")
+
         conn.commit()
 
 
