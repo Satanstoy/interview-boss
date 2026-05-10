@@ -211,17 +211,48 @@ async def cluster_batch(batch: List[Dict], user_id: int = None) -> int:
     if not new_rows:
         return 0
 
-    # 2. 加载已有 question_bank 聚类（公共，未删除）
+    # 2. 保存旧 AI 答案，然后清理当前批次 URL 的旧 QB 贡献
+    saved_answers = {}
+    for url in urls:
+        rows = conn.execute(
+            "SELECT question, original_questions, ai_answer FROM question_bank "
+            "WHERE sources LIKE ? AND ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
+            (f"%{url}%", job_position)
+        ).fetchall()
+        for r in rows:
+            if r['ai_answer']:
+                saved_answers[r['question']] = r['ai_answer']
+                try:
+                    for oq in json.loads(r['original_questions'] or '[]'):
+                        if oq and oq not in saved_answers:
+                            saved_answers[oq] = r['ai_answer']
+                except Exception:
+                    pass
+
+    def _pre_clean():
+        c = get_db_connection()
+        c.execute("BEGIN")
+        try:
+            for url in urls:
+                _cleanup_old_sources_txn_v2(c.cursor(), url, job_position)
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+
+    await run_db(_pre_clean)
+
+    # 3. 加载已有 question_bank 聚类（公共，未删除）
     existing_rows = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
-        "sources, original_questions, original_question_sources "
+        "ai_answer, sources, original_questions, original_question_sources "
         "FROM question_bank "
         "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL AND job_position = ?",
         (job_position,)
     ).fetchall()
     existing_rows = [dict(r) for r in existing_rows]
 
-    # 3. 合并：已有聚类 + 新题，一起做聚类
+    # 4. 合并：已有聚类 + 新题，一起做聚类
     # 已有聚类用 question_bank.id 作为 id，新题用 questions_detail.id（加前缀区分）
     all_items = []
     id_map = {}  # item_id -> {"is_existing": bool, "qb_id" or "qd_id": int}
@@ -236,13 +267,13 @@ async def cluster_batch(batch: List[Dict], user_id: int = None) -> int:
         all_items.append({"id": item_id, "question": nr['question'], "cat2": nr['cat2'] or ""})
         id_map[item_id] = {"is_existing": False, "qd_id": nr['id'], "data": nr}
 
-    # 4. 执行聚类
+    # 5. 执行聚类
     clusters = await cluster_all_questions(all_items, user_id=user_id)
 
-    # 5. 构建聚类详情并原子写入
+    # 6. 构建聚类详情
     cluster_details = _build_cluster_details(clusters, id_map, urls, job_position)
 
-    # 6. 生成 unified questions
+    # 7. 生成 unified questions
     semaphore = asyncio.Semaphore(8)
 
     async def gen_uq(detail):
@@ -258,18 +289,11 @@ async def cluster_batch(batch: List[Dict], user_id: int = None) -> int:
 
     await asyncio.gather(*(gen_uq(d) for d in cluster_details))
 
-    # 7. 原子写入：清理旧的 + 插入新的
+    # 8. 原子写入：插入新的聚类记录（旧贡献已在步骤2清理）
     def _atomic_write():
         conn = get_db_connection()
         conn.execute("BEGIN")
         try:
-            # 清理这批面经对 question_bank 的旧贡献（彻底清理）
-            for url in urls:
-                _cleanup_old_sources_txn_v2(conn.cursor(), url, job_position)
-
-            # 删除旧的 questions_detail（已被新的替换）
-            # 注意：tag_interview 已经替换了 questions_detail，这里不需要再删
-
             # 插入新的聚类记录
             qb_ids = []
             for detail in cluster_details:
@@ -297,11 +321,17 @@ async def cluster_batch(batch: List[Dict], user_id: int = None) -> int:
                         (new_id, pr['id'])
                     )
 
-                # 恢复已有 AI 答案
-                if detail.get('existing_ai_answer'):
+                # 恢复已有 AI 答案（优先从聚类合并获取，fallback 到 pre-clean 前保存的）
+                ai_answer = detail.get('existing_ai_answer')
+                if not ai_answer:
+                    for oq in detail.get('original_questions', []):
+                        if oq in saved_answers:
+                            ai_answer = saved_answers[oq]
+                            break
+                if ai_answer:
                     conn.execute(
                         "UPDATE question_bank SET ai_answer = ? WHERE id = ?",
-                        (detail['existing_ai_answer'], new_id)
+                        (ai_answer, new_id)
                     )
 
             conn.execute("COMMIT")
@@ -312,7 +342,7 @@ async def cluster_batch(batch: List[Dict], user_id: int = None) -> int:
 
     qb_ids = await run_db(_atomic_write)
 
-    # 8. 后台生成 AI 答案（对没有答案的新聚类）
+    # 9. 后台生成 AI 答案（对没有答案的新聚类）
     from app.routers.submit import background_generate_answer
     answer_tasks = []
     for i, detail in enumerate(cluster_details):

@@ -23,20 +23,58 @@ def _safe_table_name(name: str) -> str:
 
 
 def _cleanup_sources_for_url(cursor, url: str):
-    """清理 question_bank.sources 中指向指定 URL 的条目，同步更新 frequency。
-    original_question_sources 保留作为恢复时的数据来源，GET 端点通过 filter_original_question_sources_by_mode 自动过滤已删除面经。"""
-    affected = cursor.execute("SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)).fetchall()
+    """清理 question_bank 中指向指定 URL 的所有贡献：sources、original_questions、original_question_sources。
+    frequency=0 的公共 QB 及其 question_position 一并删除。"""
+    affected = cursor.execute(
+        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
+        (f'%{url}%',)
+    ).fetchall()
+
+    ids_to_delete = []
     for r in affected:
         try:
             sources = json.loads(r['sources']) if r['sources'] else []
         except Exception:
             sources = []
+        try:
+            oqs = json.loads(r['original_questions']) if r['original_questions'] else []
+        except Exception:
+            oqs = []
+        try:
+            oqs_sources = json.loads(r['original_question_sources']) if r['original_question_sources'] else []
+        except Exception:
+            oqs_sources = []
+
         new_sources = [s for s in sources if s.get('url') != url]
+        # oqs_sources 结构: [{question, sources: [{url, ...}]}]
+        new_oqs_sources = [item for item in oqs_sources
+                           if not any(s.get('url') == url for s in item.get('sources', []))]
+        removed_questions = {item['question'] for item in oqs_sources
+                             if any(s.get('url') == url for s in item.get('sources', []))}
+        new_oqs = [q for q in oqs if q not in removed_questions]
+
         if len(new_sources) != len(sources):
-            cursor.execute(
-                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (len(new_sources), json.dumps(new_sources, ensure_ascii=False), r['id'])
-            )
+            if len(new_sources) == 0:
+                ids_to_delete.append(r['id'])
+            else:
+                cursor.execute(
+                    "UPDATE question_bank SET frequency = ?, sources = ?, "
+                    "original_questions = ?, original_question_sources = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (len(new_sources),
+                     json.dumps(new_sources, ensure_ascii=False),
+                     json.dumps(new_oqs, ensure_ascii=False),
+                     json.dumps(new_oqs_sources, ensure_ascii=False),
+                     r['id'])
+                )
+
+    if ids_to_delete:
+        placeholders = ','.join('?' * len(ids_to_delete))
+        cursor.execute(f"DELETE FROM question_position WHERE question_id IN ({placeholders})", ids_to_delete)
+        cursor.execute(f"DELETE FROM question_bank WHERE id IN ({placeholders})", ids_to_delete)
+
+    cursor.execute("DELETE FROM question_position WHERE question_id IN "
+                   "(SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL)")
     cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
 
 
