@@ -18,7 +18,14 @@ wheels/
 *.db-shm
 *.db-wal
 *.db.bak.*
-backend/data/*.db
+*.db
+*.sqlite
+
+# Sensitive files
+*.pem
+*.key
+credentials.*
+backend/data/
 
 # Node
 node_modules/
@@ -35,4 +42,3 @@ docs/
 .pytest_cache/
 .playwright-mcp/
 backend/tests
-backend/data
