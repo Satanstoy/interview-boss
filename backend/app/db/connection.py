@@ -471,23 +471,30 @@ def init_db():
         if "idx_uqv_user_starred" not in uqv_indexes:
             conn.execute("CREATE INDEX idx_uqv_user_starred ON user_question_view(user_id, is_starred)")
 
-        # ── 两阶段流水线队列表 ──
+        # ── 两阶段流水线队列表（基本单位：单个问题） ──
         conn.execute('''
             CREATE TABLE IF NOT EXISTS analysis_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 interview_id INTEGER NOT NULL,
+                question_detail_id INTEGER,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processed_at TIMESTAMP,
                 FOREIGN KEY (interview_id) REFERENCES interview(id)
             )
         ''')
+        # 迁移：为旧表添加 question_detail_id 列（必须在创建索引之前）
+        aq_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()}
+        if "question_detail_id" not in aq_col_set:
+            conn.execute("ALTER TABLE analysis_queue ADD COLUMN question_detail_id INTEGER")
         cursor.execute("PRAGMA index_list('analysis_queue')")
         aq_indexes = [row[1] for row in cursor.fetchall()]
         if "idx_aq_status" not in aq_indexes:
             conn.execute("CREATE INDEX idx_aq_status ON analysis_queue(status)")
         if "idx_aq_interview" not in aq_indexes:
             conn.execute("CREATE INDEX idx_aq_interview ON analysis_queue(interview_id)")
+        if "idx_aq_question_detail" not in aq_indexes:
+            conn.execute("CREATE INDEX idx_aq_question_detail ON analysis_queue(question_detail_id)")
 
         # ── users 表增加 current_position_id 列 ──
         users_columns = {row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()}

@@ -18,7 +18,7 @@
 
     <div v-else-if="nodeCount === 0" class="text-center py-16 text-ink-400 dark:text-ink-500 border-2 border-dashed border-surface-200 dark:border-ink-600 rounded-xl">
       <p class="text-lg mb-1">暂无数据</p>
-      <p class="text-sm">请先导入面经数据并重建题库。</p>
+      <p class="text-sm">请先导入面经数据并完成聚类。</p>
     </div>
 
     <div v-show="nodeCount > 0" ref="chartRef" class="w-full bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-600" style="height: 640px;"></div>

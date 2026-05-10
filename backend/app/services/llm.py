@@ -247,8 +247,8 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
 # --------------- LLM 调用 ---------------
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=2, min=3, max=30),
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}")
 )
@@ -280,8 +280,8 @@ async def _call_llm_with_retry(prompt: str, system_msg: str = "你是一个后�
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=2, min=3, max=30),
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}")
 )

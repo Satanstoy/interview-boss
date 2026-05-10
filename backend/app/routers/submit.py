@@ -133,8 +133,8 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
 
     # ── 公共题库：入队等待聚类 ──
     if interview_id:
-        from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
-        enqueue_interview(interview_id)
+        from app.services.pipeline import enqueue_questions, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
+        enqueue_questions(interview_id)
         logger.info(f"面经 {interview_id} 已入队等待聚类")
 
         # 检查是否触发聚类
@@ -384,14 +384,14 @@ async def submit_data(
                     else:
                         # 公共题库：只写 interview + questions_detail，入队等待聚类
                         from app.db.operations import submit_interview_txn_tag_only
-                        from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
+                        from app.services.pipeline import enqueue_questions, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
 
                         interview_id = await run_db(lambda: submit_interview_txn_tag_only(
                             saved_url, data, questions, season.strip(),
                             record_owner_id, record_status, current_pos,
                             tagged_rows
                         ))
-                        enqueue_interview(interview_id)
+                        enqueue_questions(interview_id)
 
                         # 检查是否触发聚类
                         if should_trigger_clustering():
@@ -663,32 +663,32 @@ async def submit_data_stream(
                 else:
                     # 公共题库：只写 interview + questions_detail，入队等待聚类
                     from app.db.operations import submit_interview_txn_tag_only
-                    from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
+                    from app.services.pipeline import enqueue_questions, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
 
-                    yield f"data: {json.dumps({'step': 'save', 'message': '正在保存面经...', 'type': 'progress'})}\n\n"
+                    yield f"data: {json.dumps({'step': 'match', 'message': '正在保存面经...', 'type': 'progress'})}\n\n"
                     interview_id = await run_db(lambda: submit_interview_txn_tag_only(
                         saved_url, data, questions, _season.strip(),
                         record_owner_id, record_status, current_pos,
                         tagged_rows
                     ))
-                    enqueue_interview(interview_id)
-                    yield f"data: {json.dumps({'step': 'queue', 'message': '已加入聚类队列', 'type': 'progress'})}\n\n"
+                    enqueue_questions(interview_id)
+                    yield f"data: {json.dumps({'step': 'match', 'message': '已加入聚类队列', 'type': 'progress'})}\n\n"
 
                     # 检查是否触发聚类
                     if should_trigger_clustering():
-                        yield f"data: {json.dumps({'step': 'cluster', 'message': '触发批量聚类...', 'type': 'progress'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'save', 'message': '触发批量聚类...', 'type': 'progress'})}\n\n"
                         batch = dequeue_batch()
                         if batch:
                             try:
                                 new_count = await cluster_batch(batch, user_id=_user['id'])
                                 queue_ids = [item['queue_id'] for item in batch]
                                 mark_batch_done(queue_ids)
-                                yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类完成，新增 {new_count} 个聚类', 'type': 'progress', 'new_qb_count': new_count}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'step': 'save', 'message': f'聚类完成，新增 {new_count} 个聚类', 'type': 'progress', 'new_qb_count': new_count}, ensure_ascii=False)}\n\n"
                             except Exception as e:
                                 logger.error(f"聚类失败，回退队列状态: {e}")
                                 queue_ids = [item['queue_id'] for item in batch]
                                 mark_batch_failed(queue_ids)
-                                yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类失败: {str(e)}', 'type': 'error'}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'step': 'save', 'message': f'聚类失败: {str(e)}', 'type': 'error'}, ensure_ascii=False)}\n\n"
 
             except Exception as e:
                 logger.error(f"题目标签化及更新题库失败: {e}")

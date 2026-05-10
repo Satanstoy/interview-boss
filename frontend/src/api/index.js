@@ -50,6 +50,7 @@ export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/$
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
+export const updateQuestion = (id, data) => put(`${API}/master-bank/${id}`, data)
 export const splitQuestion = (id, originalQuestion) => post(`${API}/master-bank/split-question/${id}`, { original_question: originalQuestion })
 export const mergeQuestion = (id, originalQuestion, targetId, targetCat1 = '', targetCat2 = '') => post(`${API}/master-bank/merge-question/${id}`, { original_question: originalQuestion, target_id: targetId, target_cat1: targetCat1, target_cat2: targetCat2 })
 export const searchMasterBank = (q, excludeId) => {

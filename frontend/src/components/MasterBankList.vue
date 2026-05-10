@@ -55,6 +55,7 @@
             @start-merge="$emit('start-merge', $event)"
             @navigate-to-interview="$emit('navigate-to-interview', $event)"
             @delete="$emit('delete', $event)"
+            @edit-question="$emit('edit-question', $event)"
           />
         </DynamicScrollerItem>
       </template>
@@ -77,7 +78,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question'])
 
 const toggleAnswer = (question) => {
   question._showAnswer = !question._showAnswer

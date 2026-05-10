@@ -8,7 +8,7 @@ from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.routers.submit import background_generate_answer
 from app.services.pipeline import (
-    tag_interview, enqueue_interview, should_trigger_clustering,
+    tag_interview, enqueue_questions, should_trigger_clustering,
     dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed,
     process_interview_tag_then_maybe_cluster
 )
@@ -107,7 +107,7 @@ async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get
             yield f"data: {json.dumps({'step': 'tag', 'message': f'标注完成，共 {len(tagged_rows)} 道题', 'type': 'progress', 'details': tag_details}, ensure_ascii=False)}\n\n"
 
             # ── 入队 ──
-            enqueue_interview(interview_id)
+            enqueue_questions(interview_id)
             yield f"data: {json.dumps({'step': 'queue', 'message': '已加入聚类队列', 'type': 'progress'}, ensure_ascii=False)}\n\n"
 
             # ── 检查是否触发聚类 ──
@@ -188,7 +188,7 @@ async def batch_reprocess_stream(user: dict = Depends(get_admin_user)):
                     iv['questions_list'], job_position=iv.get('job_position', ''),
                     user_id=user['id']
                 )
-                enqueue_interview(iv['id'])
+                enqueue_questions(iv['id'])
                 tagged_total += len(tagged_rows)
 
                 yield f"data: {json.dumps({'step': 'tag', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'tagged_count': len(tagged_rows), 'type': 'progress'}, ensure_ascii=False)}\n\n"

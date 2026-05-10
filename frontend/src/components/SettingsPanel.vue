@@ -209,14 +209,14 @@
                 危险操作
               </h3>
               <p class="text-xs text-ink-500 dark:text-ink-400 leading-relaxed">
-                重建题库将对所有题目重新进行 LLM 分类和聚类，会消耗大量 API Token。仅在题库数据需要大规模修复时使用。
+                基于现有分类重新聚类，不会重新打标。仅在题库聚类结果需要修复时使用。
               </p>
               <button
                 @click="emit('build-master-bank')"
                 :disabled="isBuilding"
                 class="btn-danger text-sm"
               >
-                {{ isBuilding ? '重建中...' : '重建题库（消耗大量 Token）' }}
+                {{ isBuilding ? '聚类中...' : '重新聚类' }}
               </button>
             </div>
           </div>

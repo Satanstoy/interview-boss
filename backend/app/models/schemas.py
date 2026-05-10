@@ -50,3 +50,11 @@ class UploadToBankRequest(BaseModel):
     tags: str = ""
     difficulty: str = ""
     target: str = "public"
+
+
+class UpdateQuestionRequest(BaseModel):
+    question: str = Field(None, max_length=5000)
+    cat1: str = Field(None, max_length=200)
+    cat2: str = Field(None, max_length=200)
+    tags: str = Field(None, max_length=500)
+    difficulty: str = Field(None, max_length=50)

@@ -172,9 +172,18 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
 
         # 移除属于该 URL 的 source
         new_sources = [s for s in sources if s.get('url') != url]
-        # 移除属于该 URL 的 original_question_sources，并同步移除对应的 original_questions
-        new_oqs_sources = [s for s in oqs_sources if s.get('url') != url]
-        removed_questions = {s['question'] for s in oqs_sources if s.get('url') == url}
+        # 移除属于该 URL 的 original_question_sources（嵌套格式：{"question":"...","sources":[{"url":"..."}]}），并同步移除对应的 original_questions
+        new_oqs_sources = []
+        removed_questions = set()
+        for item in oqs_sources:
+            item_sources = item.get('sources', [])
+            # 过滤掉属于该 URL 的 source
+            remaining_sources = [s for s in item_sources if s.get('url') != url]
+            if remaining_sources:
+                new_oqs_sources.append({**item, 'sources': remaining_sources})
+            else:
+                # 该条目的所有 source 都被移除，标记其 question 为待移除
+                removed_questions.add(item.get('question', ''))
         new_oqs = [q for q in oqs if q not in removed_questions]
 
         if len(new_sources) != len(sources):

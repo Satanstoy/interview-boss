@@ -410,6 +410,7 @@
                 @start-merge="startMerge"
                 @navigate-to-interview="onNavigateToInterview"
                 @delete="deleteQuestion"
+                @edit-question="editQuestion"
               />
             </div>
           </Transition>
@@ -776,12 +777,16 @@ const interviewBatchActions = computed(() => {
       const failed = []  // { id, error }
       for (let i = 0; i < ids.length; i++) {
         try {
-          await api.reprocessInterview(ids[i])
+          await api.reprocessInterviewSSE(ids[i], (evt) => {
+            if (evt.type === 'error') throw new Error(evt.message)
+          })
           ok++
         } catch (e) {
           // 首次失败，重试一次
           try {
-            await api.reprocessInterview(ids[i])
+            await api.reprocessInterviewSSE(ids[i], (evt) => {
+              if (evt.type === 'error') throw new Error(evt.message)
+            })
             ok++
           } catch (e2) {
             failed.push({ id: ids[i], error: getFriendlyError(e2) })
@@ -798,7 +803,7 @@ const interviewBatchActions = computed(() => {
         console.warn('批量分析失败详情:', failed)
         // 弹窗展示失败详情
         const failList = failed.map(f => `ID ${f.id}: ${f.error}`).join('\n')
-        await showConfirm(`${failed.length} 条面经分析失败（已重试一次）：\n\n${failList}\\n\n请检查这些问题后重试。`, { title: '分析失败详情', variant: 'danger' })
+        await showConfirm(`${failed.length} 条面经分析失败（已重试一次）：\n\n${failList}\n\n请检查这些问题后重试。`, { title: '分析失败详情', variant: 'danger' })
       }
       interviewSelection.clearSelection()
       fetchTableData()
@@ -1084,6 +1089,16 @@ const deleteQuestion = async (question) => {
   } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
 }
 
+const editQuestion = async ({ question, newValue }) => {
+  try {
+    const data = await api.updateQuestion(question.id, { question: newValue })
+    question.question = data.data.question
+    question._isEditingQuestion = false
+    question._editQuestion = ''
+    toast.success('题目已更新')
+  } catch (e) { toast.error('编辑失败：' + getFriendlyError(e)) }
+}
+
 // ── Cluster editing (per original question) ──
 const splitQuestion = async ({ question, originalQuestion }) => {
   const shortQ = originalQuestion.length > 30 ? originalQuestion.slice(0, 30) + '...' : originalQuestion
@@ -1188,7 +1203,7 @@ const triggerBuildMasterBank = async () => {
     console.warn('检查分析状态失败，继续重建:', e)
   }
 
-  if (!await showConfirm('将重新整理全部题目并调用 LLM 重新分类聚类，会消耗大量 API Token，确定继续？', { title: '重建题库', variant: 'danger' })) return
+  if (!await showConfirm('将基于现有分类重新聚类（不会重新打标），确定继续？', { title: '重新聚类', variant: 'danger' })) return
   isBuilding.value = true
   buildProgress.value = { step: '', current: 0, total: 0, message: '' }
   try {

@@ -65,7 +65,23 @@
             {{ question._isRetagging ? '分类中...' : '重新分类' }}
           </button>
         </div>
-        <h3 class="text-base font-bold text-ink-800 dark:text-ink-100 leading-snug">{{ question.question }}</h3>
+        <!-- 题目文本（显示/编辑模式切换） -->
+        <div v-if="question._isEditingQuestion" class="flex flex-col gap-2">
+          <textarea v-model="question._editQuestion" rows="2"
+            class="w-full border border-primary-200 dark:border-primary-700/50 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-bold bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200 transition-all duration-200"></textarea>
+          <div class="flex gap-2 justify-end">
+            <button @click.stop="cancelEditQuestion" class="text-xs px-3 py-1.5 rounded-lg border border-surface-200 dark:border-ink-600 text-ink-500 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors">取消</button>
+            <button @click.stop="saveEditQuestion" class="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors">保存</button>
+          </div>
+        </div>
+        <div v-else class="flex items-start gap-2 group">
+          <h3 class="text-base font-bold text-ink-800 dark:text-ink-100 leading-snug flex-1">{{ question.question }}</h3>
+          <button v-if="canEdit" @click.stop="startEditQuestion"
+            class="opacity-0 group-hover:opacity-100 p-1 -m-1 rounded transition-all duration-200 hover:bg-surface-100 dark:hover:bg-surface-700 text-ink-400 hover:text-primary-600 dark:hover:text-primary-400 shrink-0"
+            title="编辑题目">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          </button>
+        </div>
       </div>
 
       <div class="text-ink-300 dark:text-ink-600 mt-1 flex-shrink-0">
@@ -190,7 +206,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete'])
+const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question'])
 
 const parsedTags = computed(() => {
   const tags = props.question.tags
@@ -202,6 +218,28 @@ const canDelete = computed(() => {
   if (props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)) return true
   return false
 })
+
+const canEdit = computed(() => {
+  if (props.isAdmin) return true
+  if (props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)) return true
+  return false
+})
+
+const startEditQuestion = () => {
+  props.question._isEditingQuestion = true
+  props.question._editQuestion = props.question.question
+}
+
+const cancelEditQuestion = () => {
+  props.question._isEditingQuestion = false
+  props.question._editQuestion = ''
+}
+
+const saveEditQuestion = () => {
+  const newValue = (props.question._editQuestion || '').trim()
+  if (!newValue) return
+  emit('edit-question', { question: props.question, newValue })
+}
 
 const difficultyClass = computed(() => {
   const d = String(props.question.difficulty || '')

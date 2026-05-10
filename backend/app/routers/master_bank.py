@@ -14,9 +14,9 @@ from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode, filter_original_question_sources_by_mode
-from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest
+from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest, UpdateQuestionRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user, raw_llm_call
-from app.services.clustering import cluster_all_questions, generate_unified_question, match_new_questions
+from app.services.clustering import generate_unified_question, match_new_questions
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
@@ -172,11 +172,11 @@ async def analysis_status(user: dict = Depends(get_admin_user)):
 
 @router.post("/api/master-bank/build")
 async def build_master_bank(admin: dict = Depends(get_admin_user)):
-    """全量重建题库（SSE 流式推送进度）"""
+    """基于现有分类重新聚类（SSE 流式推送进度）"""
 
     async def event_stream():
         try:
-            # ── 立即反馈，避免前端长时间显示"准备中" ──
+            # ── 立即反馈 ──
             yield f"data: {json.dumps({'type': 'init', 'total': 0, 'step': 'prepare', 'message': '正在备份数据库...'})}\n\n"
 
             # ── 备份 ──
@@ -213,66 +213,10 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 yield f"data: {json.dumps({'type': 'done', 'error': '没有数据'})}\n\n"
                 return
 
-            # ── LLM 重标注 ──
-            taxonomy_config = await run_db(get_taxonomy_for_position)
-            prompt_template = build_tagging_prompt(taxonomy_config)
-            _, _, _, _admin_bu, _admin_provider = get_llm_client_for_user(admin['id'])
-            use_rf = _should_use_response_format(_admin_bu)
-
-            TAG_BATCH = 30
             total = len(raw_questions)
-            batches = [raw_questions[i:i + TAG_BATCH] for i in range(0, total, TAG_BATCH)]
-            yield f"data: {json.dumps({'type': 'init', 'total': len(batches), 'step': 'tag', 'message': f'开始重建: {total} 道原始题目, {len(batches)} 批标注'})}\n\n"
+            yield f"data: {json.dumps({'type': 'init', 'total': total, 'step': 'prepare', 'message': f'共 {total} 道题目，准备聚类...'})}\n\n"
 
-            sem = asyncio.Semaphore(3)
-
-            async def _tag_batch(batch_idx, batch):
-                async with sem:
-                    questions_input = [{"id": r['id'], "题目": r['question']} for r in batch]
-                    prompt = prompt_template.replace("{questions}", json.dumps(questions_input, ensure_ascii=False))
-                    _c, _m, _t, _bu, _provider = get_llm_client_for_user(admin['id'])
-                    kwargs = {"model": _m, "messages": [{"role": "system", "content": "严格输出 JSON 对象，格式必须为 {\"questions\": [...]}"}, {"role": "user", "content": prompt}], "temperature": 0.0}
-                    if _should_use_response_format(_bu):
-                        kwargs["response_format"] = {"type": "json_object"}
-                    response_text = await raw_llm_call(admin['id'], **kwargs)
-                    result = _extract_json(response_text)
-                    result_map = {}
-                    for item in result.get("questions", []):
-                        q_text = item.get("题目", "")
-                        cat1 = normalize_category(item.get("一级大类", ""))
-                        cat2 = normalize_category(item.get("二级子类", ""))
-                        result_map[q_text] = {"cat1": cat1, "cat2": cat2, "tags": item.get("考点标签", ""), "diff_tag": item.get("难度标签", "")}
-                    return batch_idx, batch, result_map
-
-            logger.info(f"重标注: {total} 题，分 {len(batches)} 批并发处理（并发度 3）")
-            tag_tasks = [_tag_batch(i, b) for i, b in enumerate(batches)]
-            all_updates = {}
-            re_tagged = 0
-            tag_done = 0
-            for coro in asyncio.as_completed(tag_tasks):
-                try:
-                    batch_idx, batch, result_map = await coro
-                    for row in batch:
-                        info = result_map.get(row['question'])
-                        if info:
-                            all_updates[row['id']] = (info['cat1'], info['cat2'], info['tags'], info['diff_tag'])
-                    re_tagged += len(batch)
-                except Exception as e:
-                    logger.warning(f"重标批次失败: {e}")
-                tag_done += 1
-                yield f"data: {json.dumps({'type': 'progress', 'step': 'tag', 'current': tag_done, 'total': len(batches), 'message': f'LLM 标注 {tag_done}/{len(batches)} 批'})}\n\n"
-
-            def _apply_updates():
-                with get_db_connection() as conn:
-                    for qid, (cat1, cat2, tags, diff_tag) in all_updates.items():
-                        conn.execute("UPDATE questions_detail SET cat1=?, cat2=?, tags=?, diff_tag=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (cat1, cat2, tags, diff_tag, qid))
-                    conn.commit()
-
-            await run_db(_apply_updates)
-            logger.info(f"重标完成: {re_tagged}/{total}")
-
-            # ── 保存已有 AI 答案 ──
-            _, existing_answers_map = await run_db(_load)
+            # ── 保存已有 AI 答案（跳过重标注，直接使用现有分类） ──
 
             # ── 清空公共题库 + 关联数据 ──
             yield f"data: {json.dumps({'type': 'progress', 'step': 'save', 'current': 0, 'total': 0, 'message': '清空旧题库...'})}\n\n"
@@ -305,29 +249,29 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
 
             await run_db(_clear_bank)
 
-            # ── 入队所有有题目的面经 ──
+            # ── 入队所有问题（基本单位：单个问题） ──
             def _enqueue_all():
                 with get_db_connection() as conn:
-                    # 清空旧队列
-                    conn.execute("DELETE FROM analysis_queue WHERE status IN ('pending', 'done', 'failed')")
-                    # 获取所有有 questions_detail 的面经
-                    interview_ids = conn.execute(
-                        "SELECT DISTINCT i.id FROM interview i "
-                        "JOIN questions_detail qd ON qd.url = i.url "
-                        "WHERE i.deleted_at IS NULL AND qd.deleted_at IS NULL AND qd.job_position = ?",
+                    # 清空旧队列（包括 processing，因为全量重建会清空 question_bank，旧的 processing 无意义）
+                    conn.execute("DELETE FROM analysis_queue")
+                    # 获取所有 questions_detail（每题一条队列记录）
+                    qd_rows = conn.execute(
+                        "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
+                        "JOIN interview i ON qd.url = i.url "
+                        "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL AND qd.job_position = ?",
                         (current_pos,)
                     ).fetchall()
-                    for row in interview_ids:
+                    for row in qd_rows:
                         conn.execute(
-                            "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
-                            (row[0],)
+                            "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status) VALUES (?, ?, 'pending')",
+                            (row['interview_id'], row['id'])
                         )
                     conn.commit()
-                    return len(interview_ids)
+                    return len(qd_rows)
 
             enqueued = await run_db(_enqueue_all)
-            yield f"data: {json.dumps({'type': 'progress', 'step': 'cluster', 'current': 0, 'total': enqueued, 'message': f'已入队 {enqueued} 条面经，开始批量聚类...'})}\n\n"
-            logger.info(f"重建题库: 已入队 {enqueued} 条面经")
+            yield f"data: {json.dumps({'type': 'progress', 'step': 'cluster', 'current': 0, 'total': enqueued, 'message': f'已入队 {enqueued} 道题目，开始批量聚类...'})}\n\n"
+            logger.info(f"重建题库: 已入队 {enqueued} 道题目")
 
             # ── 分批聚类（复用 pipeline） ──
             from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
@@ -340,7 +284,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                     break
                 batch_num += 1
                 try:
-                    new_count = await cluster_batch(batch, user_id=admin['id'])
+                    new_count = await cluster_batch(batch, user_id=admin['id'], skip_clean=True)
                     queue_ids = [item['queue_id'] for item in batch]
                     mark_batch_done(queue_ids)
                     total_new += new_count
@@ -386,6 +330,90 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             yield f"data: {json.dumps({'type': 'error', 'message': f'重建失败: {str(e)[:200]}'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/api/master-bank/compact")
+async def compact_singletons(admin: dict = Depends(get_admin_user)):
+    """孤岛碎片整理：对独立题做二次合并（SSE 流式推送）"""
+    async def event_stream():
+        try:
+            from app.services.pipeline import compact_singletons_in_db
+            yield f"data: {json.dumps({'type': 'init', 'step': 'compact', 'message': '开始孤岛碎片整理...'})}\n\n"
+            result = await compact_singletons_in_db(user_id=admin['id'])
+            yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
+        except Exception as e:
+            logger.exception("孤岛碎片整理失败")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'整理失败: {str(e)[:200]}'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.put("/api/master-bank/{question_id}")
+async def edit_question(question_id: int, req: UpdateQuestionRequest, user: dict = Depends(get_current_user)):
+    """编辑题目内容（question, cat1, cat2, tags, difficulty）"""
+
+    def _edit():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT id, question, cat1, cat2, tags, difficulty, owner_id, job_position "
+                "FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+                (question_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到该题目")
+
+            # 权限校验
+            is_admin = user.get('is_admin', 0)
+            if row['owner_id'] is None and not is_admin:
+                raise HTTPException(status_code=403, detail="无权编辑公共题目")
+            if row['owner_id'] is not None and row['owner_id'] != user['id'] and not is_admin:
+                raise HTTPException(status_code=403, detail="无权编辑他人的个人题目")
+
+            # 构建更新字段（只更新非 None 的字段）
+            updates = {}
+            if req.question is not None:
+                updates['question'] = req.question
+            if req.cat1 is not None:
+                updates['cat1'] = req.cat1
+            if req.cat2 is not None:
+                updates['cat2'] = req.cat2
+            if req.tags is not None:
+                updates['tags'] = req.tags
+            if req.difficulty is not None:
+                updates['difficulty'] = req.difficulty
+
+            if not updates:
+                return dict(row)
+
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [question_id]
+            conn.execute(
+                f"UPDATE question_bank SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                values
+            )
+
+            # 同步 questions_detail
+            if 'question' in updates:
+                conn.execute(
+                    "UPDATE questions_detail SET question = ? WHERE question = ?",
+                    (updates['question'], row['question'])
+                )
+
+            conn.commit()
+
+            # 返回更新后的数据
+            updated = dict(row)
+            updated.update(updates)
+            return updated
+
+    try:
+        result = await run_db(_edit)
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("编辑题目失败")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
 @router.post("/api/master-bank/build-personal")
@@ -599,6 +627,21 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                     if item.get('question') == original_q:
                         split_sources = item.get('sources', [])
                         break
+
+                # 如果来源为空，从 questions_detail 查询原始来源
+                if not split_sources:
+                    qd_row = cursor.execute(
+                        "SELECT url, company, round, cat1, cat2, tags, diff_tag FROM questions_detail WHERE question = ? AND deleted_at IS NULL LIMIT 1",
+                        (original_q,)
+                    ).fetchone()
+                    if qd_row:
+                        split_sources = [{"url": qd_row['url'], "company": qd_row['company'], "round": qd_row['round']}]
+                        # 如果分类也为空，使用 questions_detail 的分类
+                        if not row['cat1'] and qd_row['cat1']:
+                            row = dict(row)
+                            row['cat1'] = qd_row['cat1']
+                            row['cat2'] = qd_row['cat2']
+                            row['tags'] = qd_row['tags'] or row['tags']
 
                 # 创建新的独立题目（继承原题的 job_position）
                 admin_id = admin['id'] if isinstance(admin, dict) else admin.id
@@ -958,7 +1001,28 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
                 qph = ",".join("?" * len(question_texts))
                 cursor.execute(f"DELETE FROM questions_detail WHERE question IN ({qph})", question_texts)
 
+            # 清理其他 QB 记录中对被删除题目的 stale oqs/oqs_sources 引用
             found_ids = [r["id"] for r in rows]
+            if question_texts:
+                for q_text in question_texts:
+                    others = cursor.execute(
+                        "SELECT id, original_questions, original_question_sources FROM question_bank "
+                        "WHERE id NOT IN ({}) AND original_questions LIKE ?".format(",".join("?" * len(found_ids))),
+                        [*found_ids, f'%{q_text}%']
+                    ).fetchall()
+                    for qb in others:
+                        try:
+                            oq = json.loads(qb['original_questions']) if qb['original_questions'] else []
+                            oqs_src = json.loads(qb['original_question_sources']) if qb['original_question_sources'] else []
+                        except Exception:
+                            continue
+                        if q_text in oq:
+                            oq = [q for q in oq if q != q_text]
+                            oqs_src = [item for item in oqs_src if item.get('question') != q_text]
+                            cursor.execute(
+                                "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (json.dumps(oq, ensure_ascii=False), json.dumps(oqs_src, ensure_ascii=False), qb['id'])
+                            )
             ph2 = ",".join("?" * len(found_ids))
             # Bug #14: 级联清理 user_question_view 和 question_position
             cursor.execute(f"DELETE FROM user_question_view WHERE question_bank_id IN ({ph2})", found_ids)
