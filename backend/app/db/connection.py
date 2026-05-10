@@ -660,6 +660,133 @@ def init_db():
         if _oqs_fix > 0:
             logger.info(f"已修复 {_oqs_fix} 条 original_question_sources 中的孤立 URL")
 
+        # ── 修复: original_question_sources 为空但 sources 非空的题目 ──
+        _empty_oqs_rows = conn.execute(
+            "SELECT id, question, sources FROM question_bank "
+            "WHERE (original_question_sources IS NULL OR original_question_sources = '' OR original_question_sources = '[]') "
+            "AND sources IS NOT NULL AND sources != '' AND sources != '[]' AND frequency > 0"
+        ).fetchall()
+        _backfill_count = 0
+        # 预加载 questions_detail 的 url -> question 映射
+        _qd_map = {}  # url -> [(question, company, round), ...]
+        for _qd in conn.execute("SELECT question, url, company, round FROM questions_detail WHERE deleted_at IS NULL AND url IS NOT NULL AND url != ''"):
+            _qd_map.setdefault(_qd[1], []).append((_qd[0], _qd[2], _qd[3]))
+        for _r in _empty_oqs_rows:
+            _qb_id, _qb_question, _src_raw = _r[0], _r[1], _r[2]
+            try:
+                _srcs = _fix_json.loads(_src_raw) if _src_raw else []
+            except Exception:
+                continue
+            _new_oqs = []
+            for _s in _srcs:
+                _url = _s.get('url', '')
+                _company = _s.get('company', '')
+                _round = _s.get('round', '')
+                # 尝试从 questions_detail 找到原始题目文本
+                _oq_text = _qb_question  # fallback
+                if _url in _qd_map:
+                    for _qd_q, _qd_c, _qd_r in _qd_map[_url]:
+                        if _qd_q and _qd_q != _qb_question:
+                            _oq_text = _qd_q
+                            break
+                _new_oqs.append({"question": _oq_text, "sources": [{"url": _url, "company": _company, "round": _round}]})
+            if _new_oqs:
+                conn.execute("UPDATE question_bank SET original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                             (_fix_json.dumps(_new_oqs, ensure_ascii=False), _qb_id))
+                _backfill_count += 1
+        if _backfill_count > 0:
+            logger.info(f"已回填 {_backfill_count} 条题目的 original_question_sources")
+
+        # ── 修复: original_question_sources 中 sources 为空数组的条目 ──
+        _empty_src_oqs_rows = conn.execute(
+            "SELECT id, sources, original_question_sources FROM question_bank "
+            "WHERE original_question_sources LIKE '%\"sources\": []%' AND frequency > 0"
+        ).fetchall()
+        _fix_empty_src = 0
+        for _r in _empty_src_oqs_rows:
+            _qb_id, _src_raw, _oqs_raw = _r[0], _r[1], _r[2]
+            try:
+                _srcs = _fix_json.loads(_src_raw) if _src_raw else []
+                _oqs = _fix_json.loads(_oqs_raw) if _oqs_raw else []
+            except Exception:
+                continue
+            _src_urls = {s.get('url') for s in _srcs if s.get('url')}
+            _changed = False
+            for _item in _oqs:
+                if _item.get('sources'):
+                    continue  # 已有 sources，跳过
+                _oq_text = _item.get('question', '')
+                if not _oq_text:
+                    continue
+                # 从 questions_detail 查找匹配的 URL
+                for _url in _src_urls:
+                    if _url in _qd_map:
+                        for _qd_q, _qd_c, _qd_r in _qd_map[_url]:
+                            if _qd_q == _oq_text:
+                                _item['sources'] = [{"url": _url, "company": _qd_c or '', "round": _qd_r or ''}]
+                                _changed = True
+                                break
+                    if _changed:
+                        break
+                # 仍然没有 sources 的条目，使用第一个 source URL 作为 fallback
+                if not _item.get('sources') and _srcs:
+                    _s = _srcs[0]
+                    _item['sources'] = [{"url": _s.get('url', ''), "company": _s.get('company', ''), "round": _s.get('round', '')}]
+                    _changed = True
+            if _changed:
+                conn.execute("UPDATE question_bank SET original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                             (_fix_json.dumps(_oqs, ensure_ascii=False), _qb_id))
+                _fix_empty_src += 1
+        if _fix_empty_src > 0:
+            logger.info(f"已修复 {_fix_empty_src} 条 original_question_sources 中空 sources 条目")
+
+        # ── 修复: sources 中有 URL 但 oqs 中缺失对应条目的题目 ──
+        _gap_rows = conn.execute(
+            "SELECT id, question, sources, original_question_sources FROM question_bank "
+            "WHERE original_question_sources IS NOT NULL AND original_question_sources != '' AND original_question_sources != '[]' "
+            "AND sources IS NOT NULL AND sources != '' AND sources != '[]' AND frequency > 0"
+        ).fetchall()
+        _gap_fix = 0
+        for _r in _gap_rows:
+            _qb_id, _qb_question, _src_raw, _oqs_raw = _r[0], _r[1], _r[2], _r[3]
+            try:
+                _srcs = _fix_json.loads(_src_raw) if _src_raw else []
+                _oqs = _fix_json.loads(_oqs_raw) if _oqs_raw else []
+            except Exception:
+                continue
+            _oqs_urls = {s.get('url') for item in _oqs for s in item.get('sources', []) if s.get('url')}
+            _changed = False
+            for _s in _srcs:
+                _url = _s.get('url', '')
+                if _url and _url not in _oqs_urls:
+                    # 从 questions_detail 查找原始题目文本
+                    _oq_text = _qb_question
+                    if _url in _qd_map:
+                        for _qd_q, _qd_c, _qd_r in _qd_map[_url]:
+                            if _qd_q and _qd_q != _qb_question:
+                                _oq_text = _qd_q
+                                break
+                    _oqs.append({"question": _oq_text, "sources": [{"url": _url, "company": _s.get('company', ''), "round": _s.get('round', '')}]})
+                    _oqs_urls.add(_url)
+                    _changed = True
+            if _changed:
+                conn.execute("UPDATE question_bank SET original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                             (_fix_json.dumps(_oqs, ensure_ascii=False), _qb_id))
+                _gap_fix += 1
+        if _gap_fix > 0:
+            logger.info(f"已修复 {_gap_fix} 条 original_question_sources 中缺失的 URL 条目")
+
+        # ── 迁移：interview 表添加分析状态追踪列（断点续传）──
+        iv_columns = {row[1] for row in cursor.execute("PRAGMA table_info('interview')").fetchall()}
+        if "analysis_status" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN analysis_status TEXT DEFAULT 'idle'")
+        if "analysis_stage" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN analysis_stage TEXT")
+        if "analysis_result" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN analysis_result TEXT")
+        if "analysis_updated_at" not in iv_columns:
+            conn.execute("ALTER TABLE interview ADD COLUMN analysis_updated_at TIMESTAMP")
+
         conn.commit()
 
 

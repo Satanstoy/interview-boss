@@ -6,171 +6,128 @@ from app.services.llm import _call_llm_with_retry, _extract_json
 
 logger = logging.getLogger("interview-boss")
 
-BATCH_SIZE = 30
-
-# 禁止合并的题目对（基于文本关键词匹配）
-# 格式: [(关键词A, 关键词B), ...] — 如果两道题分别命中不同关键词，则禁止合并
-FORBIDDEN_PATTERNS = [
-    ("badcase", "幻觉"),           # 修具体bug ≠ 防模型编造
-    ("海量数据", "高并发"),         # 数据量级 ≠ Agent并发场景
-    ("bean的生命周期", "循环依赖"),  # 生命周期 ≠ 三级缓存
-    ("b 树", "b+ 树"),             # B树 ≠ B+树（不同数据结构）
-    ("b树", "b+树"),               # 无空格变体
-]
-
-# ── 聚类 prompt（cat2 内部使用） ──
-CLUSTER_PROMPT = """你是一个面试题分析专家。以下是一批**同一细分领域**的面试题目，请你将**问的是完全相同的那一件事**的题目归为一组。
-
-核心判定标准（极其严格）：
-两道题只有在面试中**用完全相同的答案就能同时回答**时，才应该合并。
-如果回答了题A之后，面试官还会追问题B → 说明这是两个不同的考察点，不能合并。
-
-正确合并的例子：
-✓ "介绍一下Agent" 和 "Agent的整体架构是什么" → 换了个问法
-✓ "RAG是怎么做的" 和 "RAG各个部分怎么做（端到端设计）" → 同一个整体问题
-✓ "Skill和MCP的区别" 和 "展开讲讲mcp和skills" → 同一件事
-✓ "RRF融合算法" 和 "RRF的权重怎么设计" → 同一技术的细节追问
-
-错误合并的例子（相关但不同环节/方面）：
-✗ "RAG的分块策略" 和 "RAG的召回策略" → 分块≠召回
-✗ "RRF融合算法" 和 "重排序" → 融合≠重排
-✗ "badcase处理" 和 "幻觉应对" → 不同问题类型
-✗ "记忆压缩" 和 "记忆检索" → 记忆管理的不同环节
-✗ "有没有做过X" 和 "X的技术细节" → 问经验≠问技术
-✗ "ReAct范式" 和 "Claude Code主循环" → 通用框架 vs 具体工具
-✗ "记忆压缩" 和 "上下文过长怎么办" → 压缩记忆 ≠ 处理上下文窗口
-✗ "代码沙箱是怎么执行的" 和 "把mcp改成skills怎么改" → 运行环境 ≠ 技术方案迁移
-✗ "海量数据下怎么设计" 和 "Agent高并发怎么处理" → 数据量级 ≠ Agent并发场景
-✗ "badcase怎么处理" 和 "幻觉怎么应对" → 修具体bug ≠ 防模型编造（被动修复 ≠ 主动预防）
-
-合并前检查（对每一对候选题）：
-1. 答案是否完全重叠？（不是"相关"，是"重叠"）
-2. 回答A后面试官会不会追问B？如果会 → 不合并
-
-规则：
-1. 宁可漏合并10道题，也不要错合并1道题。精度优先
-2. 独立的题目不要放入任何组
-3. 每组选一道最完整/最长的题目作为代表题
-4. 每组至少2道题
-
-请严格按以下 JSON 格式返回，不要有任何其他文字：
-{{"clusters": [{{"ids": [题号1, 题号2, ...], "representative": "最完整的题目文本"}}]}}
-
-题目列表：
-{questions}"""
-
-# ── 第二遍 prompt（对独立题补漏，带已合并参考） ──
-CLUSTER_PROMPT_PASS2 = """你是一个面试题分析专家。以下是**同一细分领域**的面试题目。
-
-**已确认的合并组（供参考，不要再拆开）：**
-{merged_refs}
-
-**以下是第一轮判定为独立的题目：**
-{questions}
-
-请仔细检查这些独立题，找出其中**确实是同一件事、只是换了问法**的题目对。
-
-判定标准（与上面已合并的例子同等严格）：
-- 用同一份答案就能同时回答 → 合并
-- 回答了A之后面试官还会追问题B → 不合并
-- 共享关键词但不同环节/方面 → 不合并
-
-规则：
-1. 只合并你非常确定的，**不确定就保持独立**
-2. 参照上面已合并组的严格程度——如果两道题的区分度比已合并组还大，就不要合并
-3. 每组至少2道题，每组选最完整的题目作为代表
-
-请严格按以下 JSON 格式返回，不要有任何其他文字：
-{{"clusters": [{{"ids": [题号1, 题号2, ...], "representative": "最完整的题目文本"}}]}}
-如果没有发现可以合并的，返回 {{"clusters": []}}"""
-
-# ── 验证 prompt ──
-VERIFY_PROMPT = """以下是一组被归为"同一道题"的面试题目，请判断它们是否真的应该合并。
-
-判断标准：只有用**完全相同的答案就能同时回答**的题目才应该合并。
-如果回答了题A之后，面试官还会追问题B → 不能合并。
-
-题目列表：
-{questions}
-
-请返回JSON：{{"merge": true}} 或 {{"merge": false, "split": [[子组1的ids], [子组2的ids]]}}"""
-
-# ── 增量匹配 prompt ──
-MATCH_PROMPT = """你是一个面试题分析专家。以下是一个细分领域中**已有的题目聚类**和一批**新题目**。
-
-**已有的聚类（每个聚类列出所有题目）：**
-{existing_clusters}
-
-**新题目：**
-{new_questions}
-
-请判断每道新题目是否属于上面某个已有聚类（即用完全相同的答案就能同时回答）。
-
-判定标准：
-- 新题目和某个聚类的题目问的是同一件事 → 归入该聚类
-- 相关但不同环节/方面 → 不归入
-- 没有匹配的聚类 → 标记为新题
-
-请严格按以下 JSON 格式返回，不要有任何其他文字：
-{{"matches": [{{"new_id": 新题号, "cluster_idx": 匹配的聚类序号（从0开始）}}], "unmatched": [无匹配的新题号]}}"""
-
-# ── 统一问题生成 prompt ──
-UNIFIED_QUESTION_PROMPT = """你是一个面试题分析专家。以下是一组**考察同一个知识点**的面试题目及其来源背景。
-
-**第一步：分析核心考察点**
-这些题目虽然问法不同，但面试官真正想考察的技术知识点是什么？用一句话概括。
-
-**第二步：生成统一问题**
-基于上述考察点，生成一个规范的面试题。
-
-要求：
-1. 必须以"请…"或"如何…"开头，是一道独立完整的面试题
-2. 保留关键技术术语，让候选人清楚知道要回答什么
-3. 长度控制在15-40字
-
-禁止：
-✗ 口语化追问："你有没有…""这些处理完之后…""能不能讲讲…"
-✗ 太笼统："介绍一下RAG""说说你的项目"
-✗ 包含第一/二人称代词："你""我"
-
-好的示例：
-✓ "请说明RAG系统中chunking策略的选择与优化方法"
-✓ "请解释Agent记忆系统的架构设计与管理方式"
-✓ "如何评估RAG系统的效果，有哪些量化指标"
-
-坏的示例：
-✗ "这些处理完成后，你有验证过RAG的准确度吗？"（口语追问，不是独立题目）
-✗ "介绍一下Memory？"（太笼统）
-✗ "有没有系统的评估你的项目"（口语化，缺少技术指向）
-
-题目列表（含来源背景）：
-{questions_with_sources}
-
-请严格按以下 JSON 格式返回，不要有任何其他文字：
-{{"core_point": "核心考察点", "unified_question": "统一的问题文本"}}"""
+BATCH_SIZE = 15
 
 
 def _format_questions(rows):
     return "\n".join(f"[{r['id']}] {r['question']}" for r in rows)
 
 
-async def _cluster_batch(rows, prompt_template, merged_refs=""):
+# --------------- Prompts ---------------
+
+CLUSTER_PROMPT = """你是一个面试题聚类专家。请将以下面试题分组——**只有问的是同一道题**的才能归为一组。
+
+严格合并标准（必须同时满足）：
+1. 两道题问的是**完全相同的知识点或操作**
+2. 候选人如果能回答其中一道，必然能回答另一道
+3. 只是"属于同一个话题"不够，必须是"同一道题的不同说法"
+
+可以合并的例子：
+- "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
+- "TCP 三次握手的过程？" ≈ "描述一下 TCP 建立连接的过程"
+- "什么是 RAG？" ≈ "介绍一下 RAG 技术"
+
+不能合并的例子（考察点不同）：
+- "RAG 的 embedding 怎么设计？" ≠ "RAG 的检索召回率怎么提升？"（embedding ≠ 召回率）
+- "限流怎么做？" ≠ "Redis 是单线程吗？"（限流 ≠ Redis 架构）
+- "Java 线程池原理" ≠ "计算机网络 IO 多路复用"（线程池 ≠ IO）
+- "介绍你的 Agent 项目" ≠ "Agent 的记忆系统怎么做的？"（项目介绍 ≠ 记忆系统）
+- "LRU Cache 怎么实现？" ≠ "滑动窗口最大值"（两道不同的算法题）
+
+原则：**宁可少合并，不要错合并。不确定时就不要合并。**
+
+{questions}
+
+{merged_refs}
+
+输出 JSON 格式：
+{{"clusters": [{{"ids": [题号1, 题号2], "representative": "代表题"}}]}}
+只有确实重复的才放入 clusters。独立的题目不需要输出。只输出 JSON，不要解释。"""
+
+CLUSTER_PROMPT_PASS2 = """你是一个面试题聚类专家。以下题目在第一遍聚类中被判定为独立题。
+请再次检查，是否有**真正重复**的题目可以合并（同一道题的不同说法）。
+
+注意：仅仅"属于同一话题"不算重复！必须是候选人答其中一道就能答另一道的程度。
+
+已确认的合并组参考：
+{merged_refs}
+
+待检查的独立题：
+{questions}
+
+输出 JSON 格式：
+{{"clusters": [{{"ids": [题号1, 题号2], "representative": "代表题"}}]}}
+只有确实重复的才合并。只输出 JSON，不要解释。"""
+
+VERIFY_PROMPT = """请判断以下面试题是否是**同一道题的不同表述**。
+
+判断标准：候选人如果准备了其中一道题的答案，能否直接用同一份答案回答其他题？
+- 如果能 → 合并（返回 {{"merge": true}}）
+- 如果不能（需要额外准备不同知识点）→ 不合并（返回 {{"merge": false, "split": [[题号1], [题号2], ...]}}）
+
+{questions}
+
+只输出 JSON，不要解释。"""
+
+UNIFIED_QUESTION_PROMPT = """请为以下一组同义面试题生成一个统一的代表问题。
+要求：保留所有题目的核心考点，去除冗余的公司/轮次信息，生成简洁专业的面试题。
+
+题目列表：
+{questions_with_sources}
+
+输出 JSON 格式：
+{{"unified_question": "统一后的题目"}}
+只输出 JSON，不要解释。"""
+
+MATCH_PROMPT = """你是一个面试题匹配专家。请判断以下新题目是否与已有聚类中的题目**真正重复**。
+
+严格标准：只有新题和聚类中的题是"同一道题的不同说法"才算匹配。仅仅"属于同一话题"不算匹配。
+
+已有聚类：
+{existing_clusters}
+
+新题目：
+{new_questions}
+
+对每个新题目，判断是否与某个已有聚类真正重复。不确定时不要匹配。
+
+输出 JSON 格式：
+{{"matches": [{{"new_id": 新题号, "cluster_idx": 聚类索引}}]}}
+只输出 JSON，不要解释。"""
+
+CROSS_CAT_MERGE_PROMPT = """你是一个面试题聚类专家。以下题目来自不同的分类，但在各自分类内未找到同义题。
+请判断这些题目中是否有**真正重复**的题（同一道题的不同说法，候选人答其中一道就能答另一道）。
+
+注意：仅仅"属于同一话题"不算重复！
+
+{questions}
+
+输出 JSON 格式：
+{{"clusters": [{{"ids": [题号1, 题号2], "representative": "代表题"}}]}}
+只有确实重复的才合并。只输出 JSON，不要解释。"""
+
+FORBIDDEN_PATTERNS = [
+    ("操作系统", "数据库"),
+    ("计算机网络", "数据库"),
+    ("操作系统", "计算机网络"),
+    ("redis", "mysql"),
+    ("linux", "mysql"),
+]
+
+
+# --------------- Clustering functions ---------------
+
+async def _cluster_batch(rows, prompt_template, merged_refs="", user_id=None):
     prompt = prompt_template.format(questions=_format_questions(rows), merged_refs=merged_refs)
-    content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"})
+    content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
     return _extract_json(content).get("clusters", [])
 
 
-async def generate_unified_question(questions: list[str], sources_context: list[dict] | None = None) -> str:
-    """为一组同义问题生成统一的代表问题
-
-    Args:
-        questions: 题目文本列表
-        sources_context: 可选的来源上下文，每个 dict 含 question/company/round
-    """
+async def generate_unified_question(questions: list[str], sources_context: list[dict] | None = None, user_id=None) -> str:
+    """为一组同义问题生成统一的代表问题"""
     if len(questions) == 1:
         return questions[0]
 
-    # 构建带来源的题目文本
     if sources_context:
         lines = []
         for sc in sources_context:
@@ -185,36 +142,34 @@ async def generate_unified_question(questions: list[str], sources_context: list[
 
     prompt = UNIFIED_QUESTION_PROMPT.format(questions_with_sources=questions_with_sources)
     try:
-        content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"})
+        content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
         result = _extract_json(content)
         unified = result.get("unified_question", "")
         if unified and len(unified) > 5:
             return unified
     except Exception as e:
         logger.warning(f"生成统一问题失败: {e}")
-    # 回退：返回最长的问题
     return max(questions, key=len)
 
 
-async def _verify_group(ids, id_map):
+async def _verify_group(ids, id_map, user_id=None):
     """验证一个合并组（3题以上）是否应该合并"""
     if len(ids) <= 2:
         return [ids], True
     questions = "\n".join(f"[{qid}] {id_map.get(qid, '?')}" for qid in ids)
     prompt = VERIFY_PROMPT.format(questions=questions)
     try:
-        content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"})
+        content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
         result = _extract_json(content)
         if result.get("merge", True):
             return [ids], True
         splits = result.get("split", [[qid] for qid in ids])
         return splits, False
     except Exception:
-        # A9: 验证失败时采用保守策略 — 拆分为独立题，避免错误合并
         return [[qid] for qid in ids], False
 
 
-async def cluster_cat2_group(rows, id_map):
+async def cluster_cat2_group(rows, id_map, user_id=None):
     """对一个 cat2 分组进行两遍聚类 + 验证"""
     if len(rows) <= 1:
         return []
@@ -224,10 +179,9 @@ async def cluster_cat2_group(rows, id_map):
             return [rows_list]
         return [rows_list[i:i+BATCH_SIZE] for i in range(0, len(rows_list), BATCH_SIZE)]
 
-    # 第一遍：严格聚类
     pass1_clusters = []
     for batch in make_batches(rows):
-        clusters = await _cluster_batch(batch, CLUSTER_PROMPT)
+        clusters = await _cluster_batch(batch, CLUSTER_PROMPT, user_id=user_id)
         pass1_clusters.extend(clusters)
 
     merged_ids = set()
@@ -237,7 +191,6 @@ async def cluster_cat2_group(rows, id_map):
     independent_rows = [r for r in rows if r['id'] not in merged_ids]
     logger.info(f"    第一遍: {len(pass1_clusters)} 个组, 独立 {len(independent_rows)} 题")
 
-    # 第二遍：对独立题补漏（带已合并参考）
     pass2_clusters = []
     if len(independent_rows) >= 2:
         merged_refs_lines = []
@@ -249,15 +202,13 @@ async def cluster_cat2_group(rows, id_map):
         merged_refs = "\n".join(merged_refs_lines) if merged_refs_lines else "  （无）"
 
         for batch in make_batches(independent_rows):
-            clusters = await _cluster_batch(batch, CLUSTER_PROMPT_PASS2, merged_refs=merged_refs)
+            clusters = await _cluster_batch(batch, CLUSTER_PROMPT_PASS2, merged_refs=merged_refs, user_id=user_id)
             pass2_clusters.extend(clusters)
         merge2 = sum(1 for c in pass2_clusters if len(c.get("ids", [])) > 1)
         logger.info(f"    第二遍: 从独立题中发现 {merge2} 个额外合并组")
 
-    # 合并两遍结果
     all_clusters = pass1_clusters + pass2_clusters
 
-    # 验证所有 3+ 题的合并组，并去重
     verified = []
     used_ids = set()
     for c in all_clusters:
@@ -266,7 +217,7 @@ async def cluster_cat2_group(rows, id_map):
             continue
         rep = c.get("representative", "")
         if len(ids) >= 3:
-            splits, ok = await _verify_group(ids, id_map)
+            splits, ok = await _verify_group(ids, id_map, user_id=user_id)
             if ok:
                 verified.append({"ids": ids, "representative": rep})
                 used_ids.update(ids)
@@ -281,14 +232,12 @@ async def cluster_cat2_group(rows, id_map):
             verified.append({"ids": ids, "representative": rep})
             used_ids.update(ids)
 
-    # 禁止合并过滤（基于文本关键词）
     def _is_forbidden(ids):
         if len(ids) != 2:
             return False
         q1 = id_map.get(ids[0], "").lower()
         q2 = id_map.get(ids[1], "").lower()
         for kw_a, kw_b in FORBIDDEN_PATTERNS:
-            # 两道题分别命中不同关键词 → 禁止合并
             if (kw_a in q1 and kw_b in q2) or (kw_a in q2 and kw_b in q1):
                 return True
         return False
@@ -303,7 +252,6 @@ async def cluster_cat2_group(rows, id_map):
         final.append(c)
         final_used_ids.update(ids)
 
-    # 补充独立题（未被任何合并组使用的题目）
     for row in rows:
         if row['id'] not in final_used_ids:
             final.append({"ids": [row['id']], "representative": row['question']})
@@ -311,15 +259,8 @@ async def cluster_cat2_group(rows, id_map):
     return final
 
 
-async def cluster_all_questions(rows):
-    """全量聚类入口：按 cat2 分组后逐组聚类
-
-    Args:
-        rows: questions_detail 行列表，需包含 id, question, cat2 字段
-
-    Returns:
-        list of cluster dicts: [{"ids": [...], "representative": "..."}]
-    """
+async def cluster_all_questions(rows, user_id=None):
+    """全量聚类入口：按 cat2 分组后逐组聚类 + 跨分类合并"""
     cat2_groups = {}
     no_cat2 = []
     for r in rows:
@@ -334,15 +275,18 @@ async def cluster_all_questions(rows):
 
     for cat2, group in sorted(cat2_groups.items(), key=lambda x: -len(x[1])):
         logger.info(f"聚类 {cat2} ({len(group)} 题)")
-        clusters = await cluster_cat2_group(group, id_map)
+        clusters = await cluster_cat2_group(group, id_map, user_id=user_id)
         merge_count = sum(1 for c in clusters if len(c.get("ids", [])) > 1)
         logger.info(f"  结果: {merge_count} 个合并组")
         all_clusters.extend(clusters)
 
     if no_cat2:
         logger.info(f"聚类 无分类 ({len(no_cat2)} 题)")
-        clusters = await cluster_cat2_group(no_cat2, id_map)
+        clusters = await cluster_cat2_group(no_cat2, id_map, user_id=user_id)
         all_clusters.extend(clusters)
+
+    # ── 跨分类合并：不同 cat2 中语义相同的单题互相比较 ──
+    all_clusters = await _cross_cat2_merge(all_clusters, id_map, user_id=user_id)
 
     clustered_ids = set()
     merge_groups = []
@@ -360,38 +304,71 @@ async def cluster_all_questions(rows):
     return all_clusters
 
 
-async def match_new_questions(new_rows, existing_clusters_by_cat2):
-    """增量匹配：将新题目与已有聚类匹配
+async def _cross_cat2_merge(all_clusters, id_map, user_id=None):
+    """跨 cat2 合并：不同 cat2 分组中的单题互相比较"""
+    singletons = [c for c in all_clusters if len(c.get("ids", [])) == 1]
+    multi = [c for c in all_clusters if len(c.get("ids", [])) > 1]
 
-    Args:
-        new_rows: 新题目列表，需包含 id, question, cat2 字段
-        existing_clusters_by_cat2: dict[cat2] -> list of cluster dicts
-            每个 cluster: {"question_bank_id": int, "question": str, "all_questions": [str, ...]}
+    if len(singletons) < 2:
+        return all_clusters
 
-    Returns:
-        dict with:
-            "matched": list of {"new_id": int, "question_bank_id": int}
-            "unmatched": list of new_rows that have no match
-    """
+    rows_for_merge = [{"id": c["ids"][0], "question": id_map.get(c["ids"][0], "")} for c in singletons]
+
+    # 按 BATCH_SIZE 分批
+    cross_clusters = []
+    for i in range(0, len(rows_for_merge), BATCH_SIZE):
+        batch = rows_for_merge[i:i + BATCH_SIZE]
+        if len(batch) < 2:
+            cross_clusters.append({"ids": [batch[0]["id"]], "representative": batch[0]["question"]})
+            continue
+        try:
+            clusters = await _cluster_batch(batch, CROSS_CAT_MERGE_PROMPT, user_id=user_id)
+            cross_clusters.extend(clusters)
+        except Exception as e:
+            logger.warning(f"跨分类合并批次失败: {e}")
+            for r in batch:
+                cross_clusters.append({"ids": [r["id"]], "representative": r["question"]})
+
+    # 合并结果
+    merged_ids = set()
+    new_multi = []
+    remaining_singletons = []
+    for c in cross_clusters:
+        ids = c.get("ids", [])
+        if len(ids) > 1:
+            new_multi.append({"ids": ids, "representative": c.get("representative", "")})
+            merged_ids.update(ids)
+    for c in singletons:
+        if c["ids"][0] not in merged_ids:
+            remaining_singletons.append(c)
+
+    cross_merge_count = len(new_multi)
+    if cross_merge_count:
+        logger.info(f"跨分类合并: 发现 {cross_merge_count} 个跨分类重复组")
+
+    return multi + new_multi + remaining_singletons
+
+
+async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None):
+    """增量匹配：将新题目与已有聚类匹配（先同 cat2，再跨 cat2）"""
     if not new_rows:
         return {"matched": [], "unmatched": []}
 
-    # 按 cat2 分组
     cat2_groups = {}
     for r in new_rows:
         cat2 = r.get('cat2') or ''
         cat2_groups.setdefault(cat2, []).append(r)
 
     matched = []
-    unmatched = []
+    still_unmatched = []
 
+    # ── 第一遍：同 cat2 匹配 ──
     for cat2, group in cat2_groups.items():
         existing = existing_clusters_by_cat2.get(cat2, [])
         if not existing:
-            unmatched.extend(group)
+            still_unmatched.extend(group)
             continue
 
-        # 构建已有聚类描述
         cluster_lines = []
         for idx, c in enumerate(existing):
             all_qs = c.get("all_questions", [c["question"]])
@@ -402,24 +379,50 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2):
         prompt = MATCH_PROMPT.format(existing_clusters=existing_text, new_questions=new_lines)
 
         try:
-            content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"})
+            content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
             result = _extract_json(content)
 
+            group_matched_ids = set()
             for m in result.get("matches", []):
                 new_id = m.get("new_id")
                 cluster_idx = m.get("cluster_idx")
                 if new_id is not None and cluster_idx is not None and 0 <= cluster_idx < len(existing):
-                    matched.append({
-                        "new_id": new_id,
-                        "question_bank_id": existing[cluster_idx]["question_bank_id"],
-                    })
-
-            matched_ids = {m["new_id"] for m in matched}
+                    matched.append({"new_id": new_id, "question_bank_id": existing[cluster_idx]["question_bank_id"]})
+                    group_matched_ids.add(new_id)
             for r in group:
-                if r['id'] not in matched_ids:
-                    unmatched.append(r)
+                if r['id'] not in group_matched_ids:
+                    still_unmatched.append(r)
         except Exception as e:
-            logger.error(f"增量匹配失败 (cat2={cat2}): {e}")
-            unmatched.extend(group)
+            logger.warning(f"同分类增量匹配失败: {e}")
+            still_unmatched.extend(group)
 
-    return {"matched": matched, "unmatched": unmatched}
+    # ── 第二遍：跨 cat2 匹配（仅当有未匹配题且有其他 cat2 的聚类时） ──
+    if still_unmatched:
+        all_existing = []
+        for cat2, clusters in existing_clusters_by_cat2.items():
+            all_existing.extend(clusters)
+        if all_existing:
+            cluster_lines = []
+            for idx, c in enumerate(all_existing):
+                all_qs = c.get("all_questions", [c["question"]])
+                cluster_lines.append(f"聚类{idx}: " + " | ".join(all_qs))
+            existing_text = "\n".join(cluster_lines)
+            new_lines = "\n".join(f"[{r['id']}] {r['question']}" for r in still_unmatched)
+            prompt = MATCH_PROMPT.format(existing_clusters=existing_text, new_questions=new_lines)
+            try:
+                content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
+                result = _extract_json(content)
+                cross_matched_ids = set()
+                for m in result.get("matches", []):
+                    new_id = m.get("new_id")
+                    cluster_idx = m.get("cluster_idx")
+                    if new_id is not None and cluster_idx is not None and 0 <= cluster_idx < len(all_existing):
+                        matched.append({"new_id": new_id, "question_bank_id": all_existing[cluster_idx]["question_bank_id"]})
+                        cross_matched_ids.add(new_id)
+                if cross_matched_ids:
+                    logger.info(f"跨分类增量匹配: 额外匹配 {len(cross_matched_ids)} 题")
+                still_unmatched = [r for r in still_unmatched if r['id'] not in cross_matched_ids]
+            except Exception as e:
+                logger.warning(f"跨分类增量匹配失败: {e}")
+
+    return {"matched": matched, "unmatched": still_unmatched}

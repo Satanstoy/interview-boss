@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, postSSE, fetchWithCredentials } from '../utils/http.js'
+import { get, post, put, del, upload, uploadSSE, postSSE, fetchWithCredentials } from '../utils/http.js'
 
 const API = '/api'
 
@@ -29,30 +29,35 @@ export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {
 
 // ── Submit ──
 export const submitData = (formData) => upload(`${API}/submit`, formData)
+export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-stream`, formData, onEvent)
 
 // ── Data mutations ──
 export const deleteRecord = (type, id) => del(`${API}/data/${type}/${id}`)
 export const updateRecord = (data) => put(`${API}/data/update`, data)
+export const restoreRecord = (type, id) => post(`${API}/data/restore/${type}/${id}`)
+export const fetchTrash = (type, page = 1, pageSize = 100) => get(`${API}/data/${type}/trash?page=${page}&page_size=${pageSize}`)
 
 // ── Interview ──
 export const reprocessInterview = (id) => post(`${API}/interview/${id}/re-process`)
+export const reprocessInterviewSSE = (id, onEvent) => postSSE(`${API}/interview/${id}/re-process-stream`, null, onEvent)
 
 // ── Master bank ──
 export const buildMasterBank = () => post(`${API}/master-bank/build`, null, { timeout: 600_000, noRetry: true })
 export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build`, null, onEvent)
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
-export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`)
-export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`)
-export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data)
+export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
+export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`, null, { timeout: 180_000 })
+export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
 export const splitQuestion = (id, originalQuestion) => post(`${API}/master-bank/split-question/${id}`, { original_question: originalQuestion })
-export const mergeQuestion = (id, originalQuestion, targetId) => post(`${API}/master-bank/merge-question/${id}`, { original_question: originalQuestion, target_id: targetId })
+export const mergeQuestion = (id, originalQuestion, targetId, targetCat1 = '', targetCat2 = '') => post(`${API}/master-bank/merge-question/${id}`, { original_question: originalQuestion, target_id: targetId, target_cat1: targetCat1, target_cat2: targetCat2 })
 export const searchMasterBank = (q, excludeId) => {
   const params = new URLSearchParams({ q: q || '', limit: '20' })
   if (excludeId) params.append('exclude_id', String(excludeId))
   return get(`${API}/master-bank/search?${params}`)
 }
+export const getAnalysisStatus = () => get(`${API}/master-bank/analysis-status`)
 
 // ── Bank upload & review ──
 export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) =>
@@ -66,6 +71,11 @@ export const batchDeleteData = (fileType, ids) => post(`${API}/data/batch-delete
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
 export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
 
+// ── Trash & Restore ──
+export const fetchMasterBankTrash = (page = 1, pageSize = 50) => get(`${API}/master-bank/trash?page=${page}&page_size=${pageSize}`)
+export const restoreQuestion = (id) => post(`${API}/master-bank/restore/${id}`)
+export const batchRestoreMasterBank = (ids) => post(`${API}/master-bank/batch-restore`, { ids })
+
 // ── Knowledge Graph ──
 export const fetchKnowledgeGraph = () => get(`${API}/knowledge-graph`)
 
@@ -75,8 +85,14 @@ export const fetchPublicProfile = () => get(`${API}/profile/public`)
 export const updateProfile = (settings) => put(`${API}/profile`, { settings })
 export const switchPosition = (position) => put(`${API}/profile/position`, { position })
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })
+export const switchMyPosition = (position) => put(`${API}/profile/my-position`, { position })
 export const fetchPositions = () => get(`${API}/positions`)
 export const createPosition = (name, description = '') => post(`${API}/positions`, { name, description })
+
+// ── Per-user LLM Config ──
+export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)
+export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, settings)
+export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 
 // ── Practice History ──
 export const fetchPracticeHistory = (questionId) => get(`${API}/practice-history/${questionId}`)

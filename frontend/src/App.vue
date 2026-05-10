@@ -475,7 +475,7 @@
                 @click="confirmMerge(item)"
                 class="w-full text-left p-3 rounded-xl border border-surface-200 dark:border-ink-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 transition-all duration-200">
                 <div class="text-sm font-medium text-ink-800 dark:text-ink-200 line-clamp-2">{{ item.question }}</div>
-                <div class="text-xs text-ink-400 dark:text-ink-500 mt-1">频率: {{ item.frequency }} | ID: {{ item.id }}</div>
+                <div class="text-xs text-ink-400 dark:text-ink-500 mt-1">频率: {{ item.frequency }} | {{ item.cat1 || '未分类' }} / {{ item.cat2 || '未分类' }}</div>
               </button>
             </div>
           </div>
@@ -485,6 +485,23 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- 全局分析进度提示（切换 Tab 后仍可见） -->
+    <Transition name="tab-fade">
+      <div v-if="Object.keys(activeReprocessing).length > 0"
+           class="fixed bottom-4 right-4 z-50 bg-white dark:bg-surface-800 rounded-xl shadow-lg border border-surface-200 dark:border-ink-700 p-4 max-w-sm">
+        <div class="flex items-center gap-3">
+          <div class="animate-spin w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full flex-shrink-0"></div>
+          <div>
+            <p class="text-sm font-medium text-ink-900 dark:text-ink-100">正在分析面经...</p>
+            <p v-for="(info, id) in activeReprocessing" :key="id"
+               class="text-xs text-ink-500 dark:text-ink-400 mt-0.5">
+              {{ info.message || '准备中...' }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -756,11 +773,33 @@ const interviewBatchActions = computed(() => {
       if (!await showConfirm(`确定要重新分析选中的 ${ids.length} 条面经？`)) return
       onProgress(0, ids.length)
       let ok = 0
+      const failed = []  // { id, error }
       for (let i = 0; i < ids.length; i++) {
-        try { await api.reprocessInterview(ids[i]); ok++ } catch (e) { console.error(e) }
+        try {
+          await api.reprocessInterview(ids[i])
+          ok++
+        } catch (e) {
+          // 首次失败，重试一次
+          try {
+            await api.reprocessInterview(ids[i])
+            ok++
+          } catch (e2) {
+            failed.push({ id: ids[i], error: getFriendlyError(e2) })
+          }
+        }
         onProgress(i + 1, ids.length)
       }
-      toast.success(`批量重新分析完成，成功解析 ${ok} 条记录！`)
+      // 报告结果
+      if (failed.length === 0) {
+        toast.success(`全部 ${ok} 条面经分析完成！`)
+      } else {
+        toast.error(`完成 ${ok}/${ids.length} 条，${failed.length} 条失败（已重试一次）`)
+        // 在控制台打印失败详情，方便排查
+        console.warn('批量分析失败详情:', failed)
+        // 弹窗展示失败详情
+        const failList = failed.map(f => `ID ${f.id}: ${f.error}`).join('\n')
+        await showConfirm(`${failed.length} 条面经分析失败（已重试一次）：\n\n${failList}\\n\n请检查这些问题后重试。`, { title: '分析失败详情', variant: 'danger' })
+      }
       interviewSelection.clearSelection()
       fetchTableData()
       fetchAnalytics()
@@ -835,6 +874,17 @@ const masterBatchActions = computed(() => [
     }
   }
 ])
+
+// ── Global reprocessing progress (visible across all tabs) ──
+const activeReprocessing = computed(() => {
+  const active = {}
+  for (const [id, isProcessing] of Object.entries(reprocessingIds.value)) {
+    if (isProcessing && reprocessProgress.value[id]) {
+      active[id] = reprocessProgress.value[id]
+    }
+  }
+  return active
+})
 
 // ── Data fetching ──
 const fetchTableData = async () => {
@@ -1048,6 +1098,8 @@ const splitQuestion = async ({ question, originalQuestion }) => {
 const mergeDialogVisible = ref(false)
 const mergeSourceQuestionId = ref(null)
 const mergeSourceOriginalQ = ref('')
+const mergeSourceCat1 = ref('')
+const mergeSourceCat2 = ref('')
 const mergeSearchQuery = ref('')
 const mergeSearchResults = ref([])
 const mergeSearching = ref(false)
@@ -1055,6 +1107,8 @@ const mergeSearching = ref(false)
 const startMerge = ({ question, originalQuestion }) => {
   mergeSourceQuestionId.value = question.id
   mergeSourceOriginalQ.value = originalQuestion
+  mergeSourceCat1.value = question.cat1 || ''
+  mergeSourceCat2.value = question.cat2 || ''
   mergeSearchQuery.value = ''
   mergeSearchResults.value = []
   mergeDialogVisible.value = true
@@ -1072,9 +1126,27 @@ const doMergeSearch = async () => {
 const confirmMerge = async (target) => {
   const shortQ = mergeSourceOriginalQ.value.length > 20 ? mergeSourceOriginalQ.value.slice(0, 20) + '...' : mergeSourceOriginalQ.value
   const shortT = target.question.length > 20 ? target.question.slice(0, 20) + '...' : target.question
+
+  let targetCat1 = ''
+  let targetCat2 = ''
+
+  // 跨类别合并时让用户选择类别
+  const srcCat = `${mergeSourceCat1.value}/${mergeSourceCat2.value}`
+  const tgtCat = `${target.cat1 || '未分类'}/${target.cat2 || '未分类'}`
+  if (srcCat !== tgtCat && (mergeSourceCat1.value || target.cat1)) {
+    const choice = await showConfirm(
+      `源类别：${srcCat}\n目标类别：${tgtCat}\n\n是否将目标聚类的类别更新为源类别？\n（取消则保留目标类别）`,
+      { title: '选择类别', confirmLabel: '更新为源类别', cancelLabel: '保留目标类别' }
+    )
+    if (choice) {
+      targetCat1 = mergeSourceCat1.value
+      targetCat2 = mergeSourceCat2.value
+    }
+  }
+
   if (!await showConfirm(`确定将「${shortQ}」合并到「${shortT}」吗？`, { title: '确认合并', variant: 'danger' })) return
   try {
-    await api.mergeQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value, target.id)
+    await api.mergeQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value, target.id, targetCat1, targetCat2)
     toast.success('题目已合并到目标聚类')
     mergeDialogVisible.value = false
     fetchTableData()
@@ -1093,6 +1165,29 @@ const splitAsNew = async () => {
 }
 
 const triggerBuildMasterBank = async () => {
+  // 先检查是否有未分析的面经
+  try {
+    const status = await api.getAnalysisStatus()
+    if (status.unanalyzed_count > 0) {
+      const hasContent = status.unanalyzed.filter(u => u.has_content)
+      const noContent = status.unanalyzed.filter(u => !u.has_content)
+      let warnMsg = `当前有 ${status.unanalyzed_count} 条面经尚未分析：`
+      if (hasContent.length > 0) {
+        warnMsg += `\n\n有内容但未分析（${hasContent.length} 条）：`
+        warnMsg += hasContent.slice(0, 5).map(u => `\n  · ${u.company} - ${u.round}`).join('')
+        if (hasContent.length > 5) warnMsg += `\n  ...等共 ${hasContent.length} 条`
+      }
+      if (noContent.length > 0) {
+        warnMsg += `\n\n无题目内容（${noContent.length} 条），将被跳过`
+      }
+      warnMsg += '\n\n未分析的面经不会被纳入题库。是否继续重建？'
+      if (!await showConfirm(warnMsg, { title: '存在未分析的面经', variant: 'warning' })) return
+    }
+  } catch (e) {
+    // 检查失败不阻塞重建，仅记录
+    console.warn('检查分析状态失败，继续重建:', e)
+  }
+
   if (!await showConfirm('将重新整理全部题目并调用 LLM 重新分类聚类，会消耗大量 API Token，确定继续？', { title: '重建题库', variant: 'danger' })) return
   isBuilding.value = true
   buildProgress.value = { step: '', current: 0, total: 0, message: '' }

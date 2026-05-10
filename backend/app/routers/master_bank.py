@@ -138,13 +138,36 @@ async def search_master_bank(
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.frequency {from_clause} {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
+                f"SELECT qb.id, qb.question, qb.frequency, qb.cat1, qb.cat2 {from_clause} {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
                 search_params + [limit]
             ).fetchall()
             return [dict(r) for r in rows]
 
     items = await run_db(_query)
     return {"items": items}
+
+
+@router.get("/api/master-bank/analysis-status")
+async def analysis_status(user: dict = Depends(get_admin_user)):
+    """检查面经分析完整性：返回已分析和未分析的面经数量及详情。"""
+    def _check():
+        with get_db_connection() as conn:
+            # 已分析：有 detail 记录的面经
+            analyzed = conn.execute(
+                "SELECT i.id, i.company, i.round FROM interview i "
+                "WHERE i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.url = i.url)"
+            ).fetchall()
+            # 未分析：没有 detail 记录的面经
+            unanalyzed = conn.execute(
+                "SELECT i.id, i.company, i.round, LENGTH(i.questions_list) as ql_len FROM interview i "
+                "WHERE i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.url = i.url)"
+            ).fetchall()
+            return {
+                "analyzed_count": len(analyzed),
+                "unanalyzed_count": len(unanalyzed),
+                "unanalyzed": [{"id": r['id'], "company": r['company'], "round": r['round'], "has_content": (r['ql_len'] or 0) > 10} for r in unanalyzed]
+            }
+    return await run_db(_check)
 
 
 @router.post("/api/master-bank/build")
@@ -323,7 +346,7 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
                 if not detail['question']:
                     detail['question'] = detail['original_questions'][0] if detail['original_questions'] else ''
                     detail['original_questions'] = []
-                    detail['original_question_sources'] = []
+                    # 保留 original_question_sources 以便前端显示来源对应的原始题目文本
 
             # ── 写入题库 ──
             yield f"data: {json.dumps({'type': 'progress', 'step': 'save', 'current': 0, 'total': 0, 'message': '写入题库...'})}\n\n"
@@ -331,38 +354,44 @@ async def build_master_bank(admin: dict = Depends(get_admin_user)):
             def _save():
                 with get_db_connection() as conn:
                     admin_id = admin['id']
-                    # Bug #15: 重建前先清理关联的 user_question_view 和 question_position
-                    conn.execute(
-                        "DELETE FROM user_question_view WHERE question_bank_id IN "
-                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
-                    )
-                    conn.execute(
-                        "DELETE FROM question_position WHERE question_id IN "
-                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
-                    )
-                    conn.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
-                    restored_count = 0
-                    for c in cluster_details:
-                        ai_answer = existing_answers_map.get(c['question'])
-                        if not ai_answer:
-                            for oq in c.get('original_questions', []):
-                                ai_answer = existing_answers_map.get(oq)
-                                if ai_answer: break
-                        if ai_answer: restored_count += 1
-                        orig_qs_json = json.dumps(c.get('original_questions', []), ensure_ascii=False)
-                        orig_qs_src_json = json.dumps(c.get('original_question_sources', []), ensure_ascii=False)
-                        conn.execute(
-                            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved', ?)",
-                            (c['question'], ",".join(c['cat1']), ",".join(c['cat2']), ",".join(c['tags']), c['difficulty'],
-                            c['frequency'], json.dumps(c['sources'], ensure_ascii=False), orig_qs_json, orig_qs_src_json, ai_answer, admin_id, current_pos))
-                    pos_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
-                    if pos_row:
-                        conn.execute("DELETE FROM question_position WHERE position_id = ?", (pos_row[0],))
-                        conn.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) SELECT id, ? FROM question_bank WHERE job_position = ?", (pos_row[0], current_pos))
-                    conn.commit()
-                    return restored_count
+                    cursor = conn.cursor()
+                    cursor.execute("BEGIN")
+                    try:
+                        # Bug #15: 重建前先清理关联的 user_question_view 和 question_position
+                        cursor.execute(
+                            "DELETE FROM user_question_view WHERE question_bank_id IN "
+                            "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
+                            (current_pos,)
+                        )
+                        cursor.execute(
+                            "DELETE FROM question_position WHERE question_id IN "
+                            "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
+                            (current_pos,)
+                        )
+                        cursor.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
+                        restored_count = 0
+                        for c in cluster_details:
+                            ai_answer = existing_answers_map.get(c['question'])
+                            if not ai_answer:
+                                for oq in c.get('original_questions', []):
+                                    ai_answer = existing_answers_map.get(oq)
+                                    if ai_answer: break
+                            if ai_answer: restored_count += 1
+                            orig_qs_json = json.dumps(c.get('original_questions', []), ensure_ascii=False)
+                            orig_qs_src_json = json.dumps(c.get('original_question_sources', []), ensure_ascii=False)
+                            cursor.execute(
+                                "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'approved', ?)",
+                                (c['question'], ",".join(c['cat1']), ",".join(c['cat2']), ",".join(c['tags']), c['difficulty'],
+                                c['frequency'], json.dumps(c['sources'], ensure_ascii=False), orig_qs_json, orig_qs_src_json, ai_answer, admin_id, current_pos))
+                        pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
+                        if pos_row:
+                            cursor.execute("DELETE FROM question_position WHERE position_id = ?", (pos_row[0],))
+                            cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) SELECT id, ? FROM question_bank WHERE job_position = ?", (pos_row[0], current_pos))
+                        conn.commit()
+                        return restored_count
+                    except Exception:
+                        conn.rollback()
+                        raise
 
             restored = await run_db(_save)
             logger.info(f"全量重建完成: {len(cluster_details)} 道核心真题")
@@ -560,77 +589,83 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
 
     def _split():
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT id, question, sources, original_questions, original_question_sources, cat1, cat2, tags, difficulty, job_position FROM question_bank WHERE id = ?",
-                (question_id,)
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="未找到该题目")
+            cursor = conn.cursor()
+            cursor.execute("BEGIN")
+            try:
+                row = cursor.execute(
+                    "SELECT id, question, sources, original_questions, original_question_sources, cat1, cat2, tags, difficulty, job_position FROM question_bank WHERE id = ?",
+                    (question_id,)
+                ).fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="未找到该题目")
 
-            orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
-            orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
+                orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
+                orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
 
-            if not orig_qs:
-                raise HTTPException(status_code=400, detail="该题目是独立题目，无需拆分")
+                if not orig_qs:
+                    raise HTTPException(status_code=400, detail="该题目是独立题目，无需拆分")
 
-            if original_q not in orig_qs:
-                raise HTTPException(status_code=400, detail="该原始题目不在此聚类中")
+                if original_q not in orig_qs:
+                    raise HTTPException(status_code=400, detail="该原始题目不在此聚类中")
 
-            # 找到该题的来源
-            split_sources = []
-            for item in orig_qs_src:
-                if item.get('question') == original_q:
-                    split_sources = item.get('sources', [])
-                    break
+                # 找到该题的来源
+                split_sources = []
+                for item in orig_qs_src:
+                    if item.get('question') == original_q:
+                        split_sources = item.get('sources', [])
+                        break
 
-            # 创建新的独立题目（继承原题的 job_position）
-            admin_id = admin['id'] if isinstance(admin, dict) else admin.id
-            orig_job_position = row['job_position'] if 'job_position' in row.keys() else get_current_job_position()
-            conn.execute(
-                "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, '[]', '[]', NULL, ?, ?, 'approved', ?)",
-                (original_q, row['cat1'], row['cat2'], row['tags'], row['difficulty'],
-                 json.dumps(split_sources, ensure_ascii=False), admin_id, admin_id, orig_job_position)
-            )
-            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-            # 同步 question_position 关联表
-            pos_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (orig_job_position,)).fetchone()
-            if pos_row:
-                conn.execute(
-                    "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
-                    (new_id, pos_row[0])
+                # 创建新的独立题目（继承原题的 job_position）
+                admin_id = admin['id'] if isinstance(admin, dict) else admin.id
+                orig_job_position = row['job_position'] if 'job_position' in row.keys() else get_current_job_position()
+                cursor.execute(
+                    "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, '[]', '[]', NULL, ?, ?, 'approved', ?)",
+                    (original_q, row['cat1'], row['cat2'], row['tags'], row['difficulty'],
+                     json.dumps(split_sources, ensure_ascii=False), admin_id, admin_id, orig_job_position)
                 )
+                new_id = cursor.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-            # 从原聚类中移除该题
-            new_orig = [q for q in orig_qs if q != original_q]
-            new_orig_src = [item for item in orig_qs_src if item.get('question') != original_q]
+                # 同步 question_position 关联表
+                pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (orig_job_position,)).fetchone()
+                if pos_row:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
+                        (new_id, pos_row[0])
+                    )
 
-            # 重新计算原聚类的 sources
-            remaining_sources = []
-            seen = set()
-            for item in new_orig_src:
-                for s in item.get('sources', []):
-                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                    if key not in seen:
-                        seen.add(key)
-                        remaining_sources.append(s)
+                # 从原聚类中移除该题
+                new_orig = [q for q in orig_qs if q != original_q]
+                new_orig_src = [item for item in orig_qs_src if item.get('question') != original_q]
 
-            if len(new_orig) == 0:
-                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
-            elif len(new_orig) == 1:
-                conn.execute(
-                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
-                )
-            else:
-                conn.execute(
-                    "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
-                     len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
-                )
+                # 重新计算原聚类的 sources
+                remaining_sources = []
+                seen = set()
+                for item in new_orig_src:
+                    for s in item.get('sources', []):
+                        key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                        if key not in seen:
+                            seen.add(key)
+                            remaining_sources.append(s)
 
-            conn.commit()
-            return new_id, new_orig, new_orig_src, question_id
+                if len(new_orig) == 0:
+                    cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                elif len(new_orig) == 1:
+                    cursor.execute(
+                        "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (new_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
+                         len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+
+                conn.commit()
+                return new_id, new_orig, new_orig_src, question_id
+            except Exception:
+                conn.rollback()
+                raise
 
     try:
         new_id, remaining_orig, remaining_orig_src, old_id = await run_db(_split)
@@ -714,18 +749,29 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             tgt_orig.append(original_q)
             tgt_orig_src.append({"question": original_q, "sources": moving_src})
 
-            # 更新目标的 sources
-            seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
-            for s in moving_src:
-                key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                if key not in seen:
-                    seen.add(key)
-                    tgt_sources.append(s)
+            # 更新目标的 sources（独立题合并时跳过，避免源 URL 重复）
+            if not is_standalone_merge:
+                seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
+                for s in moving_src:
+                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    if key not in seen:
+                        seen.add(key)
+                        tgt_sources.append(s)
+
+            # 可选：更新目标聚类类别
+            cat_set = ""
+            cat_params = []
+            if req.target_cat1:
+                cat_set += ", cat1 = ?"
+                cat_params.append(req.target_cat1)
+            if req.target_cat2:
+                cat_set += ", cat2 = ?"
+                cat_params.append(req.target_cat2)
 
             conn.execute(
-                "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
-                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_sources), req.target_id)
+                f"UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP{cat_set} WHERE id = ?",
+                [json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
+                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_sources), *cat_params, req.target_id]
             )
 
             # 从源聚类中移除
@@ -741,7 +787,10 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                         seen2.add(key)
                         remaining_sources.append(s)
 
-            if len(new_src_orig) == 0:
+            if is_standalone_merge:
+                # 独立题合并后保留为独立题，不删除
+                pass
+            elif len(new_src_orig) == 0:
                 conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
             elif len(new_src_orig) == 1:
                 conn.execute(
