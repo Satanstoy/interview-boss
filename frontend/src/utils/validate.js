@@ -10,10 +10,28 @@
 // 之前的正则过于宽泛，会误判合法的中文面试题文本（如包含"SELECT"的数据库八股文）。
 
 /**
- * 输入消毒占位函数（SQL 注入检测已移除，后端使用参数化查询）
+ * 输入消毒（XSS 防护）
+ * 移除了 SQL 注入检测（后端使用参数化查询），保留 XSS 消毒
  */
 export function sanitizeAgainstInjection(str, _fieldName = '输入') {
+  if (typeof str !== 'string') return ''
   return str
+    .replace(/<[^>]*>/g, '')           // 移除 HTML 标签
+    .replace(/javascript:/gi, '')       // 移除 javascript: 协议
+    .replace(/on\w+\s*=/gi, '')         // 移除事件处理器
+    .replace(/data:/gi, '')             // 移除 data: 协议
+}
+
+// ── URL 安全化 ──
+
+/**
+ * 安全化 URL：仅允许 http/https 协议，阻止 javascript: / data: 等
+ */
+export function safeUrl(url) {
+  if (!url || typeof url !== 'string') return ''
+  const trimmed = url.trim()
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return ''
 }
 
 // ── 通用输入消毒 ──

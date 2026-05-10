@@ -37,21 +37,50 @@ def _build_analytics_bank_filter(user: dict):
             return "", "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.job_position = ?", [pos_name]
 
     if mode == 'personal':
-        return join_clause, "WHERE qb.owner_id = ?", join_params + [uid]
+        return join_clause, "WHERE qb.owner_id = ? AND qb.deleted_at IS NULL", join_params + [uid]
     elif mode == 'mixed':
-        return join_clause, "WHERE (qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?", join_params + [uid]
+        return join_clause, "WHERE ((qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?) AND qb.deleted_at IS NULL", join_params + [uid]
     else:
-        return join_clause, "WHERE qb.owner_id IS NULL AND qb.status = 'approved'", join_params
+        return join_clause, "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL", join_params
 
 @router.get("/api/analytics")
 async def get_analytics(user: dict = Depends(get_current_user)):
+    mode = user.get('bank_mode', 'public')
+    uid = user['id']
+
     def _query():
         tech_counter, tag_counter, level_counter = Counter(), Counter(), Counter()
         with get_db_connection() as conn:
-            for r in conn.execute("SELECT tech_stack FROM jd").fetchall():
+            # 按 bank_mode 过滤 JD 数据
+            if mode == 'personal':
+                jd_where = "WHERE deleted_at IS NULL AND owner_id = ?"
+                jd_params = (uid,)
+            elif mode == 'mixed':
+                jd_where = "WHERE deleted_at IS NULL AND ((owner_id IS NULL AND status = 'approved') OR owner_id = ?)"
+                jd_params = (uid,)
+            else:
+                jd_where = "WHERE deleted_at IS NULL AND owner_id IS NULL AND status = 'approved'"
+                jd_params = ()
+
+            for r in conn.execute(f"SELECT tech_stack FROM jd {jd_where}", jd_params).fetchall():
                 if r['tech_stack']:
                     tech_counter.update([t.strip().lstrip('0123456789. ') for t in r['tech_stack'].split('\n') if t.strip()])
-            for r in conn.execute("SELECT tags, diff_tag FROM questions_detail").fetchall():
+
+            # 按 bank_mode 过滤 questions_detail 数据（通过关联 interview 表）
+            if mode == 'personal':
+                qd_where = "WHERE qd.deleted_at IS NULL AND iv.owner_id = ?"
+                qd_params = (uid,)
+            elif mode == 'mixed':
+                qd_where = "WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?)"
+                qd_params = (uid,)
+            else:
+                qd_where = "WHERE qd.deleted_at IS NULL AND iv.owner_id IS NULL AND iv.status = 'approved'"
+                qd_params = ()
+
+            for r in conn.execute(
+                f"SELECT qd.tags, qd.diff_tag FROM questions_detail qd JOIN interview iv ON qd.url = iv.url {qd_where}",
+                qd_params
+            ).fetchall():
                 if r['tags']:
                     tag_counter.update([t.strip() for t in r['tags'].split(",") if t.strip()])
                 if r['diff_tag']:
@@ -167,7 +196,7 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
         updated_master = 0
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            rows = cursor.execute("SELECT id, cat1, cat2 FROM questions_detail").fetchall()
+            rows = cursor.execute("SELECT id, cat1, cat2 FROM questions_detail WHERE deleted_at IS NULL").fetchall()
             for r in rows:
                 new_cat1 = normalize_category(r['cat1'])
                 new_cat2 = normalize_category(r['cat2'])

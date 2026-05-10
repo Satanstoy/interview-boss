@@ -23,7 +23,8 @@ def _safe_table_name(name: str) -> str:
 
 
 def _cleanup_sources_for_url(cursor, url: str):
-    """清理 question_bank.sources 中指向指定 URL 的条目，同步更新 frequency"""
+    """清理 question_bank.sources 中指向指定 URL 的条目，同步更新 frequency。
+    original_question_sources 保留作为恢复时的数据来源，GET 端点通过 filter_original_question_sources_by_mode 自动过滤已删除面经。"""
     affected = cursor.execute("SELECT id, sources FROM question_bank WHERE sources LIKE ?", (f'%{url}%',)).fetchall()
     for r in affected:
         try:

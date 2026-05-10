@@ -8,16 +8,16 @@
         <!-- Modal -->
         <div class="relative bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden animate-slide-up">
           <!-- Top bar -->
-          <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-600 shrink-0 bg-gray-50 dark:bg-surface-900">
+          <div class="flex items-center justify-between px-5 py-3 border-b border-surface-200 dark:border-ink-600 shrink-0 bg-surface-50 dark:bg-surface-900">
             <div class="flex items-center gap-3 min-w-0">
-              <h2 class="text-sm font-bold text-gray-800 dark:text-gray-100 truncate max-w-md">{{ question.question }}</h2>
+              <h2 class="text-sm font-bold text-ink-800 dark:text-ink-100 truncate max-w-md">{{ question.question }}</h2>
               <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 text-[10px] shrink-0">{{ question.cat1 || '未分类' }}</span>
               <span class="badge text-[10px] shrink-0"
                 :class="String(question.difficulty).includes('L3') ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800' : String(question.difficulty).includes('L2') ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800'">
                 {{ question.difficulty || '-' }}
               </span>
             </div>
-            <button @click="emit('close')" class="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition shrink-0">
+            <button @click="emit('close')" class="p-1.5 rounded-lg text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-200 dark:hover:bg-ink-700 transition shrink-0">
               <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
@@ -25,16 +25,16 @@
           <!-- Main content: left + right panels -->
           <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
             <!-- LEFT PANEL -->
-            <div class="w-full lg:w-1/2 flex flex-col border-r border-gray-200 dark:border-gray-600">
+            <div class="w-full lg:w-1/2 flex flex-col border-r border-surface-200 dark:border-ink-600">
               <!-- Tabs -->
-              <div class="flex border-b border-gray-200 dark:border-gray-600 shrink-0 bg-white dark:bg-surface-800">
+              <div class="flex border-b border-surface-200 dark:border-ink-600 shrink-0 bg-white dark:bg-surface-800">
                 <button v-for="tab in leftTabs" :key="tab.key"
                   @click="leftTab = tab.key"
                   class="px-4 py-2.5 text-xs font-semibold transition-colors relative"
-                  :class="leftTab === tab.key ? 'text-primary-700 dark:text-primary-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'">
+                  :class="leftTab === tab.key ? 'text-primary-700 dark:text-primary-400' : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300'">
                   {{ tab.label }}
                   <span v-if="tab.key === 'answer' && !question.ai_answer" class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-400 dark:bg-red-400"></span>
-                  <span v-if="tab.key === 'history' && question.attempt_count" class="ml-1 text-[10px] text-gray-400 dark:text-gray-500">({{ question.attempt_count }})</span>
+                  <span v-if="tab.key === 'history' && question.attempt_count" class="ml-1 text-[10px] text-ink-400 dark:text-ink-500">({{ question.attempt_count }})</span>
                   <div v-if="leftTab === tab.key" class="absolute bottom-0 left-2 right-2 h-0.5 bg-primary-500 dark:bg-primary-500 rounded-full"></div>
                 </button>
               </div>
@@ -44,9 +44,9 @@
                 <!-- Description tab -->
                 <div v-if="leftTab === 'description'" class="p-5 space-y-4">
                   <div class="flex gap-1.5 flex-wrap">
-                    <span v-for="tag in (question.tags ? question.tags.split(',') : [])" :key="tag" class="badge bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200/80 dark:border-gray-700 text-[10px]">{{ tag }}</span>
+                    <span v-for="tag in (question.tags ? question.tags.split(',') : [])" :key="tag" class="badge bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200/80 dark:border-ink-700 text-[10px]">{{ tag }}</span>
                   </div>
-                  <div class="text-sm text-gray-800 dark:text-gray-100 leading-relaxed font-medium">{{ question.question }}</div>
+                  <div class="text-sm text-ink-800 dark:text-ink-100 leading-relaxed font-medium">{{ question.question }}</div>
 
                   <!-- Sources -->
                   <div v-if="question.sources && question.sources.length > 0" class="bg-primary-50/40 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 rounded-xl p-4">
@@ -55,11 +55,13 @@
                       出处追溯 ({{ question.sources.length }} 次出现)
                     </h4>
                     <div class="flex flex-wrap gap-1.5 text-[11px]">
-                      <span v-for="(src, idx) in question.sources" :key="idx" class="bg-white dark:bg-gray-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center">
+                      <span v-for="(src, idx) in question.sources" :key="idx"
+                        @click="emit('navigate-to-interview', src)"
+                        class="bg-white dark:bg-ink-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center cursor-pointer hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors">
                         {{ src.company === '未提供' ? '未知' : src.company }}
                         <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
                         {{ src.round === '未提供' ? '未知轮次' : src.round }}
-                        <a v-if="src.url && src.url !== '未提供链接'" :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold">[原文]</a>
+                        <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold">[原文]</a>
                       </span>
                     </div>
                   </div>
@@ -68,9 +70,9 @@
                 <!-- Answer/Solution tab -->
                 <div v-else-if="leftTab === 'answer'" class="p-5">
                   <div v-if="qState._isEditingAnswer" class="flex flex-col gap-3">
-                    <textarea v-model="qState._editAnswer" rows="12" class="w-full border border-primary-200 dark:border-primary-800 rounded-xl p-3 text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-mono resize-y"></textarea>
+                    <textarea v-model="qState._editAnswer" rows="12" class="w-full border border-primary-200 dark:border-primary-800 rounded-xl p-3 text-sm bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-mono resize-y"></textarea>
                     <div class="flex gap-2 justify-end">
-                      <button @click="qState._isEditingAnswer = false" class="px-4 py-1.5 text-xs text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">取消</button>
+                      <button @click="qState._isEditingAnswer = false" class="px-4 py-1.5 text-xs text-ink-600 dark:text-ink-400 border border-surface-300 dark:border-ink-600 rounded-lg hover:bg-surface-100 dark:hover:bg-ink-700 transition">取消</button>
                       <button @click="handleSaveAnswer" :disabled="qState._isSavingAnswer" class="px-4 py-1.5 text-xs text-white bg-primary-600 dark:bg-primary-600 rounded-lg hover:bg-primary-700 dark:hover:bg-primary-700 transition disabled:opacity-50">
                         {{ qState._isSavingAnswer ? '保存中...' : '保存' }}
                       </button>
@@ -79,13 +81,13 @@
 
                   <div v-else-if="question.ai_answer && !isFailedAnswer(question.ai_answer)">
                     <div class="flex items-center justify-between mb-3">
-                      <span class="text-xs font-semibold text-gray-500 dark:text-gray-400">AI 参考答案</span>
+                      <span class="text-xs font-semibold text-ink-500 dark:text-ink-400">AI 参考答案</span>
                       <div class="flex gap-1.5">
                         <button @click="qState._isEditingAnswer = true; qState._editAnswer = question.ai_answer" class="text-[10px] text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-800 transition">编辑</button>
-                        <button @click="handleGenerate" :disabled="qState._isLoadingAnswer" class="text-[10px] text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-0.5 rounded border border-gray-200 dark:border-gray-600 transition disabled:opacity-30">重新生成</button>
+                        <button @click="handleGenerate" :disabled="qState._isLoadingAnswer" class="text-[10px] text-ink-600 dark:text-ink-400 hover:text-ink-800 dark:hover:text-ink-300 bg-surface-50 dark:bg-ink-800 hover:bg-surface-100 dark:hover:bg-ink-700 px-2 py-0.5 rounded border border-surface-200 dark:border-ink-600 transition disabled:opacity-30">重新生成</button>
                       </div>
                     </div>
-                    <div class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed answer-content" v-html="renderMarkdown(question.ai_answer)"></div>
+                    <div class="text-sm text-ink-700 dark:text-ink-300 leading-relaxed answer-content" v-html="renderMarkdown(question.ai_answer)"></div>
                   </div>
 
                   <div v-else-if="qState._isLoadingAnswer" class="flex flex-col items-center justify-center py-12 text-primary-600 dark:text-primary-400 gap-3">
@@ -95,7 +97,7 @@
 
                   <div v-else class="text-center py-12">
                     <p v-if="isFailedAnswer(question.ai_answer)" class="text-red-500 dark:text-red-400 mb-3 text-sm">上次生成失败，请重试</p>
-                    <p v-else class="text-gray-400 dark:text-gray-500 mb-4 text-sm">暂无参考答案</p>
+                    <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">暂无参考答案</p>
                     <button @click="handleGenerate" class="btn-primary px-5 py-2 text-sm">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                       AI 生成答案
@@ -105,40 +107,40 @@
 
                 <!-- History tab -->
                 <div v-else-if="leftTab === 'history'" class="p-5">
-                  <div v-if="qState._historyLoading" class="text-center py-8 text-xs text-gray-400 dark:text-gray-500">加载中...</div>
+                  <div v-if="qState._historyLoading" class="text-center py-8 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
                   <div v-else-if="qState._history && qState._history.length > 0" class="space-y-2">
-                    <div v-for="(h, hIdx) in qState._history" :key="h.id" class="border border-gray-200 dark:border-gray-600 rounded-xl overflow-hidden">
-                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition" @click="h._expanded = !h._expanded">
-                        <span class="text-[10px] text-gray-400 dark:text-gray-500 w-6 text-right shrink-0">#{{ qState._history.length - hIdx }}</span>
+                    <div v-for="(h, hIdx) in qState._history" :key="h.id" class="border border-surface-200 dark:border-ink-600 rounded-xl overflow-hidden">
+                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-50 dark:hover:bg-ink-800 transition" @click="h._expanded = !h._expanded">
+                        <span class="text-[10px] text-ink-400 dark:text-ink-500 w-6 text-right shrink-0">#{{ qState._history.length - hIdx }}</span>
                         <span class="text-xs font-bold" :class="scoreTextColor(h.score)">{{ h.score }}分</span>
-                        <span class="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">{{ h.created_at?.slice(0, 16)?.replace('T', ' ') }}</span>
+                        <span class="text-[10px] text-ink-400 dark:text-ink-500 ml-auto">{{ h.created_at?.slice(0, 16)?.replace('T', ' ') }}</span>
                         <div class="w-16 shrink-0">
-                          <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                          <div class="bg-surface-200 dark:bg-ink-700 rounded-full h-1.5 overflow-hidden">
                             <div class="h-full rounded-full" :class="scoreColor(h.score)" :style="{ width: h.score + '%' }"></div>
                           </div>
                         </div>
-                        <svg class="w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <svg class="w-3 h-3 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                       </div>
-                      <div v-if="h._expanded" class="px-3 pb-3 space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2">
+                      <div v-if="h._expanded" class="px-3 pb-3 space-y-2 border-t border-surface-100 dark:border-ink-700 pt-2">
                         <div>
-                          <p class="text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">我的回答</p>
-                          <p class="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-2 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
+                          <p class="text-[10px] font-semibold text-ink-500 dark:text-ink-400 mb-1">我的回答</p>
+                          <p class="text-xs text-ink-600 dark:text-ink-400 bg-surface-50 dark:bg-ink-800 rounded-lg p-2 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
                         </div>
                         <div v-if="h.evaluation_result">
                           <div class="flex items-center gap-2 flex-wrap mb-1">
-                            <span v-for="(val, key) in h.evaluation_result.dimensions" :key="key" class="text-[10px] text-gray-500 dark:text-gray-400">
+                            <span v-for="(val, key) in h.evaluation_result.dimensions" :key="key" class="text-[10px] text-ink-500 dark:text-ink-400">
                               {{ dimLabel[key] || key }} <span class="font-bold" :class="scoreTextColor(val.score)">{{ val.score }}</span>
                             </span>
                           </div>
-                          <p v-if="h.evaluation_result.suggestions" class="text-[10px] text-gray-500 dark:text-gray-400">
+                          <p v-if="h.evaluation_result.suggestions" class="text-[10px] text-ink-500 dark:text-ink-400">
                             <span class="font-semibold">建议：</span>{{ h.evaluation_result.suggestions?.slice(0, 150) }}{{ h.evaluation_result.suggestions?.length > 150 ? '...' : '' }}
                           </p>
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div v-else class="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
-                    <svg class="w-10 h-10 mx-auto mb-2 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <div v-else class="text-center py-12 text-ink-400 dark:text-ink-500 text-sm">
+                    <svg class="w-10 h-10 mx-auto mb-2 text-ink-300 dark:text-ink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     暂无练习记录
                   </div>
                 </div>
@@ -150,7 +152,7 @@
               <!-- Answer input area -->
               <div class="flex-1 flex flex-col overflow-hidden">
                 <div class="px-5 pt-4 pb-2 shrink-0">
-                  <h3 class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 uppercase tracking-wider flex items-center gap-1.5">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                     我的回答
                   </h3>
@@ -158,7 +160,7 @@
                 <div class="flex-1 px-5 pb-3 overflow-hidden">
                   <textarea
                     v-model="qState._userAnswer"
-                    class="w-full h-full border border-gray-200 dark:border-gray-600 rounded-xl p-3.5 text-sm leading-relaxed focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 resize-none transition-all duration-200 bg-gray-50 dark:bg-surface-900 text-gray-800 dark:text-gray-100 focus:bg-white dark:focus:bg-surface-800"
+                    class="w-full h-full border border-surface-200 dark:border-ink-600 rounded-xl p-3.5 text-sm leading-relaxed focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 resize-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800"
                     placeholder="在此输入你的回答，完成后点击下方「提交评估」..."
                   ></textarea>
                 </div>
@@ -172,53 +174,53 @@
                     {{ qState._isEvaluating ? '评估中...' : '提交评估' }}
                   </button>
                   <button v-if="qState._userAnswer" @click="qState._userAnswer = ''; qState._evaluation = null"
-                    class="text-sm text-gray-500 dark:text-gray-400 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition">清空</button>
-                  <span v-if="question.attempt_count" class="text-[10px] text-gray-400 dark:text-gray-500 ml-auto">已练习 {{ question.attempt_count }} 次</span>
+                    class="text-sm text-ink-500 dark:text-ink-400 px-3 py-2 rounded-lg border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700 transition">清空</button>
+                  <span v-if="question.attempt_count" class="text-[10px] text-ink-400 dark:text-ink-500 ml-auto">已练习 {{ question.attempt_count }} 次</span>
                 </div>
               </div>
 
               <!-- Evaluation result -->
-              <div v-if="qState._evaluation" class="border-t border-gray-200 dark:border-gray-600 bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-surface-800 overflow-y-auto custom-scrollbar" style="max-height: 55%;">
+              <div v-if="qState._evaluation" class="border-t border-surface-200 dark:border-ink-600 bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-surface-800 overflow-y-auto custom-scrollbar" style="max-height: 55%;">
                 <div class="p-5 space-y-4">
                   <!-- Overall score -->
                   <div class="flex items-center gap-4">
                     <span class="text-4xl font-extrabold" :class="scoreTextColor(qState._evaluation.overall_score)">{{ qState._evaluation.overall_score }}</span>
                     <div class="flex-1">
-                      <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                      <div class="bg-surface-200 dark:bg-ink-700 rounded-full h-3 overflow-hidden">
                         <div class="h-full rounded-full transition-all duration-700" :class="scoreColor(qState._evaluation.overall_score)" :style="{ width: qState._evaluation.overall_score + '%' }"></div>
                       </div>
-                      <p class="text-[10px] text-gray-400 dark:text-gray-500 mt-1">加权总分（准确性 35%、完整性 30%、深度 20%、逻辑性 15%）</p>
+                      <p class="text-[10px] text-ink-400 dark:text-ink-500 mt-1">加权总分（准确性 35%、完整性 30%、深度 20%、逻辑性 15%）</p>
                     </div>
                   </div>
 
                   <!-- Dimension scores -->
                   <div class="grid grid-cols-2 gap-2.5">
-                    <div v-for="(val, key) in qState._evaluation.dimensions" :key="key" class="bg-white dark:bg-gray-800 rounded-xl p-2.5 border border-gray-100 dark:border-gray-700">
+                    <div v-for="(val, key) in qState._evaluation.dimensions" :key="key" class="bg-white dark:bg-ink-800 rounded-xl p-2.5 border border-surface-100 dark:border-ink-700">
                       <div class="flex items-center justify-between mb-1">
-                        <span class="text-[10px] font-semibold text-gray-600 dark:text-gray-400">{{ dimLabel[key] || key }}</span>
+                        <span class="text-[10px] font-semibold text-ink-600 dark:text-ink-400">{{ dimLabel[key] || key }}</span>
                         <span class="text-sm font-bold" :class="scoreTextColor(val.score)">{{ val.score }}</span>
                       </div>
-                      <div class="bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden mb-1">
+                      <div class="bg-surface-100 dark:bg-ink-700 rounded-full h-1.5 overflow-hidden mb-1">
                         <div class="h-full rounded-full transition-all duration-500" :class="scoreColor(val.score)" :style="{ width: val.score + '%' }"></div>
                       </div>
-                      <p v-if="val.comment" class="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">{{ val.comment }}</p>
+                      <p v-if="val.comment" class="text-[10px] text-ink-400 dark:text-ink-500 leading-snug">{{ val.comment }}</p>
                     </div>
                   </div>
 
                   <!-- Strengths & Weaknesses -->
                   <div class="grid grid-cols-2 gap-3">
-                    <div v-if="qState._evaluation.strengths?.length" class="bg-white dark:bg-gray-800 rounded-xl p-2.5 border border-green-100 dark:border-green-800">
+                    <div v-if="qState._evaluation.strengths?.length" class="bg-white dark:bg-ink-800 rounded-xl p-2.5 border border-green-100 dark:border-green-800">
                       <p class="text-[10px] font-semibold text-green-700 dark:text-green-400 mb-1.5">亮点</p>
                       <ul class="space-y-0.5">
-                        <li v-for="s in qState._evaluation.strengths" :key="s" class="text-[11px] text-gray-600 dark:text-gray-400 flex gap-1">
+                        <li v-for="s in qState._evaluation.strengths" :key="s" class="text-[11px] text-ink-600 dark:text-ink-400 flex gap-1">
                           <span class="text-green-500 dark:text-green-400 shrink-0">+</span>{{ s }}
                         </li>
                       </ul>
                     </div>
-                    <div v-if="qState._evaluation.weaknesses?.length" class="bg-white dark:bg-gray-800 rounded-xl p-2.5 border border-red-100 dark:border-red-800">
+                    <div v-if="qState._evaluation.weaknesses?.length" class="bg-white dark:bg-ink-800 rounded-xl p-2.5 border border-red-100 dark:border-red-800">
                       <p class="text-[10px] font-semibold text-red-700 dark:text-red-400 mb-1.5">不足</p>
                       <ul class="space-y-0.5">
-                        <li v-for="w in qState._evaluation.weaknesses" :key="w" class="text-[11px] text-gray-600 dark:text-gray-400 flex gap-1">
+                        <li v-for="w in qState._evaluation.weaknesses" :key="w" class="text-[11px] text-ink-600 dark:text-ink-400 flex gap-1">
                           <span class="text-red-500 dark:text-red-400 shrink-0">-</span>{{ w }}
                         </li>
                       </ul>
@@ -226,9 +228,9 @@
                   </div>
 
                   <!-- Suggestions -->
-                  <div v-if="qState._evaluation.suggestions" class="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-100 dark:border-gray-700">
-                    <p class="text-[10px] font-semibold text-gray-700 dark:text-gray-300 mb-1">改进建议</p>
-                    <div class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed answer-content" v-html="renderMarkdown(qState._evaluation.suggestions)"></div>
+                  <div v-if="qState._evaluation.suggestions" class="bg-white dark:bg-ink-800 rounded-xl p-3 border border-surface-100 dark:border-ink-700">
+                    <p class="text-[10px] font-semibold text-ink-700 dark:text-ink-300 mb-1">改进建议</p>
+                    <div class="text-xs text-ink-600 dark:text-ink-400 leading-relaxed answer-content" v-html="renderMarkdown(qState._evaluation.suggestions)"></div>
                   </div>
                 </div>
               </div>
@@ -254,7 +256,7 @@ const props = defineProps({
   question: { type: Object, default: null }
 })
 
-const emit = defineEmits(['close', 'answer-evaluated'])
+const emit = defineEmits(['close', 'answer-evaluated', 'navigate-to-interview'])
 
 const dimLabel = { completeness: '完整性', depth: '深度', accuracy: '准确性', logic: '逻辑性' }
 

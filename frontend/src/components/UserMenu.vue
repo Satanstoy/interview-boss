@@ -1,32 +1,32 @@
 <template>
   <div class="relative">
     <!-- User button -->
-    <button @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-white/10 dark:hover:bg-white/5 transition-all duration-200 text-white group">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-white/30 to-white/10 flex items-center justify-center text-sm font-bold backdrop-blur-sm border border-white/20 group-hover:from-white/40 group-hover:to-white/20 transition">
+    <button @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5 transition-all duration-200 text-ink-700 dark:text-white group">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 dark:from-white/30 dark:to-white/10 flex items-center justify-center text-sm font-bold text-white backdrop-blur-sm border border-primary-400/30 dark:border-white/20 group-hover:from-primary-600 group-hover:to-primary-800 dark:group-hover:from-white/40 dark:group-hover:to-white/20 transition">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
       <span class="text-sm font-medium hidden sm:inline">{{ user?.username }}</span>
-      <svg class="w-4 h-4 transition-transform duration-200" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
+      <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
         <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
       </svg>
     </button>
 
     <!-- Dropdown -->
     <Transition name="menu">
-      <div v-if="showMenu" class="absolute right-0 top-full mt-2 w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 py-1.5 z-50 overflow-hidden">
+      <div v-if="showMenu" class="absolute right-0 top-full mt-2 w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-surface-100 dark:border-ink-700 py-1.5 z-50 overflow-hidden">
         <!-- User info -->
-        <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <p class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ user?.username }}</p>
-          <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
+        <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
+          <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
+          <p class="text-xs text-ink-400 dark:text-ink-500 mt-0.5 flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
             {{ user?.is_admin ? '管理员' : '普通用户' }}
           </p>
         </div>
 
         <!-- Bank mode -->
-        <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <p class="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium uppercase tracking-wider">题库模式</p>
-          <div class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+        <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
+          <p class="text-xs text-ink-400 dark:text-ink-500 mb-2 font-medium uppercase tracking-wider">题库模式</p>
+          <div class="flex gap-1 bg-surface-100 dark:bg-ink-800 rounded-lg p-0.5">
             <button
               v-for="mode in bankModes"
               :key="mode.value"
@@ -35,7 +35,7 @@
                 'flex-1 px-2 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
                 user?.bank_mode === mode.value
                   ? 'bg-white dark:bg-surface-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300'
               ]"
             >{{ mode.label }}</button>
           </div>
@@ -45,7 +45,7 @@
         <button
           v-if="user?.is_admin"
           @click="$emit('show-review'); showMenu = false"
-          class="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
         >
           <div class="w-7 h-7 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
             <svg class="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

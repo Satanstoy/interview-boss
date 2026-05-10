@@ -1,7 +1,7 @@
 <template>
   <div v-if="totalPages > 1" class="flex items-center justify-between gap-3 mt-4 px-1">
     <!-- Left: info -->
-    <div class="text-xs text-gray-400 dark:text-gray-500 tabular-nums">
+    <div class="text-xs text-ink-400 dark:text-ink-500 tabular-nums">
       共 {{ total }} 条，第 {{ currentPage }}/{{ totalPages }} 页
     </div>
 
@@ -11,20 +11,20 @@
         :disabled="currentPage <= 1"
         @click="go(currentPage - 1)"
         class="page-btn"
-        :class="currentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'"
+        :class="currentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-100 dark:hover:bg-ink-700'"
       >
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
       </button>
 
       <template v-for="p in visiblePages" :key="p">
-        <span v-if="p === '...'" class="px-1 text-gray-300 dark:text-gray-600 text-sm select-none">...</span>
+        <span v-if="p === '...'" class="px-1 text-ink-300 dark:text-ink-600 text-sm select-none">...</span>
         <button
           v-else
           @click="go(p)"
           class="page-btn min-w-[32px] text-xs font-medium tabular-nums"
           :class="p === currentPage
             ? 'bg-primary-500 text-white shadow-sm'
-            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+            : 'text-ink-600 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700'"
         >
           {{ p }}
         </button>
@@ -34,19 +34,19 @@
         :disabled="currentPage >= totalPages"
         @click="go(currentPage + 1)"
         class="page-btn"
-        :class="currentPage >= totalPages ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'"
+        :class="currentPage >= totalPages ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-100 dark:hover:bg-ink-700'"
       >
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
       </button>
     </div>
 
     <!-- Right: page size selector -->
-    <div class="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+    <div class="flex items-center gap-2 text-xs text-ink-400 dark:text-ink-500">
       <span>每页</span>
       <select
         :value="pageSize"
         @change="$emit('update:pageSize', Number($event.target.value)); $emit('update:currentPage', 1)"
-        class="bg-white dark:bg-surface-700 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-primary-400 focus:border-primary-400 cursor-pointer"
+        class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-lg px-2 py-1 text-xs text-ink-700 dark:text-ink-300 focus:ring-1 focus:ring-primary-400 focus:border-primary-400 cursor-pointer"
       >
         <option v-for="s in pageSizeOptions" :key="s" :value="s">{{ s }}</option>
       </select>

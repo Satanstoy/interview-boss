@@ -9,16 +9,16 @@
     />
 
     <div v-if="items.length > 0" class="flex gap-2 mb-2">
-      <button @click="expandAll" class="btn-ghost text-xs border border-gray-200 dark:border-gray-700 rounded-lg">全部展开</button>
-      <button @click="collapseAll" class="btn-ghost text-xs border border-gray-200 dark:border-gray-700 rounded-lg">全部收起</button>
+      <button @click="expandAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部展开</button>
+      <button @click="collapseAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部收起</button>
     </div>
 
-    <div v-if="items.length === 0" class="text-center py-16 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-surface-800/50">
-      <svg class="w-14 h-14 text-gray-300 dark:text-gray-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <div v-if="items.length === 0" class="text-center py-16 rounded-2xl border-2 border-dashed border-surface-200 dark:border-ink-700 bg-surface-50/50 dark:bg-surface-800/50">
+      <svg class="w-14 h-14 text-ink-300 dark:text-ink-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
         <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
       </svg>
-      <p class="text-gray-500 dark:text-gray-400 font-medium mb-1">暂无符合条件的题目</p>
-      <p class="text-sm text-gray-400 dark:text-gray-500">点击左侧「全部」查看所有题目，或录入更多面经自动扩充。</p>
+      <p class="text-ink-500 dark:text-ink-400 font-medium mb-1">暂无符合条件的题目</p>
+      <p class="text-sm text-ink-400 dark:text-ink-500">点击左侧「全部」查看所有题目，或录入更多面经自动扩充。</p>
     </div>
 
     <!-- Virtual scroller: only renders visible cards in DOM -->
@@ -42,6 +42,8 @@
             :is-selected="isSelected"
             :practice-info="practicedQuestions[item.id] || null"
             :bank-mode="bankMode"
+            :is-admin="isAdmin"
+            :current-user-id="currentUserId"
             @toggle-answer="toggleAnswer"
             @toggle-star="$emit('toggle-star', $event)"
             @retag="$emit('retag', $event)"
@@ -51,6 +53,8 @@
             @practice="$emit('practice', $event)"
             @split-question="$emit('split-question', $event)"
             @start-merge="$emit('start-merge', $event)"
+            @navigate-to-interview="$emit('navigate-to-interview', $event)"
+            @delete="$emit('delete', $event)"
           />
         </DynamicScrollerItem>
       </template>
@@ -68,10 +72,12 @@ const props = defineProps({
   isSelected: { type: Function, default: () => false },
   batchActions: { type: Array, default: () => [] },
   practicedQuestions: { type: Object, default: () => ({}) },
-  bankMode: { type: String, default: 'public' }
+  bankMode: { type: String, default: 'public' },
+  isAdmin: { type: Boolean, default: false },
+  currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete'])
 
 const toggleAnswer = (question) => {
   question._showAnswer = !question._showAnswer

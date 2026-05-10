@@ -18,68 +18,45 @@ from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 
 
 class TestBug004DeletedBankExcluded:
-    """BUG-004: 加载 question_bank 时未过滤 deleted_at IS NULL"""
+    """BUG-004: 聚类时未过滤 deleted_at IS NULL（已迁移到 pipeline.py）"""
 
-    def test_bug004_query_must_filter_deleted_at(self):
-        """修复后：SQL 查询必须包含 deleted_at IS NULL 条件"""
+    def test_bug004_pipeline_filters_deleted_at(self):
+        """修复后：pipeline.py 的 cluster_batch 查询必须包含 deleted_at IS NULL"""
         import inspect
-        from app.routers.interview import reprocess_interview_stream
-        source = inspect.getsource(reprocess_interview_stream)
+        from app.services.pipeline import cluster_batch
+        source = inspect.getsource(cluster_batch)
         assert "deleted_at IS NULL" in source, (
-            "BUG-004: reprocess_interview_stream 中加载 question_bank 的查询"
-            "缺少 'deleted_at IS NULL' 条件，已软删除的记录会参与聚类匹配"
+            "BUG-004: pipeline.py cluster_batch 中加载 questions_detail 的查询"
+            "缺少 'deleted_at IS NULL' 条件，已软删除的记录会参与聚类"
         )
 
-    def test_bug004_non_stream_query_must_filter_deleted_at(self):
-        """修复后：非 SSE 版本的 SQL 查询也必须包含 deleted_at IS NULL"""
+    def test_bug004_pipeline_qb_query_filters_deleted(self):
+        """修复后：pipeline.py 加载已有 question_bank 时必须过滤 deleted_at"""
         import inspect
-        from app.routers.interview import reprocess_interview
-        source = inspect.getsource(reprocess_interview)
-        assert "deleted_at IS NULL" in source, (
-            "BUG-004: reprocess_interview（非 SSE 版）中加载 question_bank 的查询"
-            "缺少 'deleted_at IS NULL' 条件"
+        from app.services.pipeline import cluster_batch
+        source = inspect.getsource(cluster_batch)
+        # 检查加载已有 QB 的查询也包含 deleted_at IS NULL
+        assert source.count("deleted_at IS NULL") >= 2, (
+            "BUG-004: pipeline.py cluster_batch 应同时过滤 questions_detail 和 question_bank 的 deleted_at"
         )
 
 
 class TestBug004QueryBehavior:
-    """BUG-004: 验证查询行为——已删除记录不参与匹配"""
+    """BUG-004: 验证查询行为——已删除记录不参与聚类（已迁移到 pipeline.py）"""
 
-    @pytest.mark.asyncio
-    async def test_bug004_deleted_records_excluded_from_existing_bank(self):
-        """修复后：existing_bank 不应包含 deleted_at IS NOT NULL 的记录"""
-        mock_conn = MagicMock()
-        # 模拟数据库返回：包含一条已删除和一条正常记录
-        mock_conn.execute.return_value.fetchall.return_value = [
-            {"id": 1, "question": "Redis 持久化方式？", "cat2": "Redis",
-             "sources": '[{"url":"u1","company":"腾讯","round":"一面"}]',
-             "original_questions": '[]', "original_question_sources": '[]'},
-            # 注意：id=2 是已删除记录（deleted_at IS NOT NULL），不应该被返回
-            # 修复后的 SQL 会过滤掉它，这里只返回 deleted_at IS NULL 的记录
-        ]
+    def test_bug004_pipeline_cluster_batch_has_proper_filters(self):
+        """修复后：pipeline.py cluster_batch 的查询必须包含所有必要过滤条件"""
+        import inspect
+        from app.services.pipeline import cluster_batch
+        src = inspect.getsource(cluster_batch)
 
-        with patch('app.routers.interview.get_db_connection') as mock_get_conn, \
-             patch('app.routers.interview.run_db', new_callable=AsyncMock) as mock_run_db:
-            mock_get_conn.return_value.__enter__ = MagicMock(return_value=mock_conn)
-            mock_get_conn.return_value.__exit__ = MagicMock(return_value=False)
+        # 验证 questions_detail 查询
+        assert "deleted_at IS NULL" in src
+        assert "job_position" in src
 
-            # 模拟 run_db 执行查询函数并返回结果
-            async def fake_run_db(fn):
-                return fn()
-            mock_run_db.side_effect = fake_run_db
-
-            # 验证查询包含 deleted_at IS NULL
-            from app.db.connection import get_db_connection
-
-            # 直接检查 interview.py 中的查询文本
-            import inspect
-            from app.routers.interview import reprocess_interview_stream
-            src = inspect.getsource(reprocess_interview_stream)
-
-            # 验证 WHERE 子句包含三个必要条件
-            assert "owner_id IS NULL" in src
-            assert "status = 'approved'" in src
-            assert "deleted_at IS NULL" in src
-            assert "job_position = ?" in src
+        # 验证 question_bank 查询
+        assert "owner_id IS NULL" in src
+        assert "status = 'approved'" in src
 
 
 # ═══════════════════════════════════════════════════════
@@ -102,18 +79,16 @@ class TestBug003SSEEventsIncludeDetails:
             "前端无法显示每道题的分类信息"
         )
 
-    def test_bug003_match_event_has_question_lists(self):
-        """修复后：匹配完成事件应包含具体题目列表"""
+    def test_bug003_tag_event_has_details_field(self):
+        """修复后：标注完成事件应包含 details 字段（新架构保留了此特性）"""
         import inspect
         from app.routers.interview import reprocess_interview_stream
         source = inspect.getsource(reprocess_interview_stream)
 
-        has_matched_qs = "'matched_questions'" in source or '"matched_questions"' in source
-        has_new_qs = "'new_questions'" in source or '"new_questions"' in source
-
-        assert has_matched_qs and has_new_qs, (
-            "BUG-003: 匹配完成的 SSE 事件中缺少 'matched_questions' 或 'new_questions' 字段，"
-            "前端无法显示具体匹配了哪些题目"
+        # 检查标注完成事件包含 details
+        assert "'details'" in source or '"details"' in source, (
+            "BUG-003: 标注完成的 SSE 事件中缺少 'details' 字段，"
+            "前端无法显示每道题的分类信息"
         )
 
 

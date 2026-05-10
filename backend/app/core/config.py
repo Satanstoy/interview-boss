@@ -42,6 +42,26 @@ def get_profile_setting(key: str, default: str = "") -> str:
     return default
 
 
+def get_user_llm_config(user_id: int) -> dict | None:
+    """从 user_llm_config 表读取用户的 LLM 配置。未配置时返回 None。"""
+    try:
+        from app.db.connection import get_db_connection
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT api_key, base_url, model, timeout FROM user_llm_config WHERE user_id = ?",
+                (user_id,)
+            ).fetchone()
+            if row:
+                cfg = dict(row)
+                # 未配置 api_key 视为未配置
+                if not cfg.get("api_key"):
+                    return None
+                return cfg
+    except Exception:
+        pass
+    return None
+
+
 def _reload_from_db():
     """从数据库加载用户配置，覆盖模块级常量（启动时 + 配置更新后调用）"""
     global LLM_MODEL, LLM_TIMEOUT
@@ -86,9 +106,12 @@ _ENV_KEY_MAP = {
 
 
 def _sync_env_file(settings: dict):
-    """将用户配置同步写入 .env 文件（保留注释和未管理变量，跳过空值）"""
+    """将非敏感配置同步写入 .env 文件（LLM 密钥等敏感字段已迁移到 per-user 存储，不再同步）"""
     try:
         for profile_key, env_key in _ENV_KEY_MAP.items():
+            # 跳过 LLM 敏感字段 — 已迁移到 user_llm_config 表
+            if profile_key in ("llm_api_key", "llm_base_url", "llm_model", "llm_timeout"):
+                continue
             if profile_key in settings:
                 val = str(settings[profile_key]).strip()
                 if val:  # 安全防护：绝不写入空值到 .env

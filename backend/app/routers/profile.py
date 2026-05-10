@@ -25,6 +25,9 @@ _SENSITIVE_KEYS = {"llm_api_key"}
 _REQUIRED_NON_EMPTY = {"llm_model", "llm_base_url"}
 
 
+_MAX_POSITION_LEN = 30
+
+
 def _get_available_positions() -> list:
     """从 taxonomy + job_positions 合并读取所有岗位列表"""
     with get_db_connection() as conn:
@@ -33,20 +36,24 @@ def _get_available_positions() -> list:
         seen = set()
         result = []
         for r in tax_rows:
-            if r['position_name'] not in seen:
-                seen.add(r['position_name'])
-                result.append(r['position_name'])
+            name = r['position_name']
+            if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
+                seen.add(name)
+                result.append(name)
         for r in pos_rows:
-            if r['name'] not in seen:
-                seen.add(r['name'])
-                result.append(r['name'])
+            name = r['name']
+            if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
+                seen.add(name)
+                result.append(name)
         return result if result else [DEFAULT_TAXONOMY["job_position"]]
 
 
 def _mask_key(value: str) -> str:
-    if not value or len(value) <= 4:
+    if not value:
+        return ""
+    if len(value) <= 8:
         return "****"
-    return value[:4] + "****"
+    return value[:4] + "*" * (len(value) - 8) + value[-4:]
 
 
 @router.get("/api/profile/public")
@@ -71,24 +78,32 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
             seen = set()
             positions = []
             for r in tax_rows:
-                if r['position_name'] not in seen:
-                    seen.add(r['position_name'])
-                    positions.append(r['position_name'])
+                name = r['position_name']
+                if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
+                    seen.add(name)
+                    positions.append(name)
             for r in pos_rows:
-                if r['name'] not in seen:
-                    seen.add(r['name'])
-                    positions.append(r['name'])
+                name = r['name']
+                if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
+                    seen.add(name)
+                    positions.append(name)
             if not positions:
                 positions = [DEFAULT_TAXONOMY["job_position"]]
-            # 用户当前岗位
+            # 用户当前岗位（优先 personal_position）
             user_row = conn.execute(
-                "SELECT jp.name FROM users u LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+                "SELECT u.personal_position, jp.name as position_name FROM users u "
+                "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
                 (user['id'],)
             ).fetchone()
         return settings_map, season_list, positions, user_row
 
     settings, used_seasons, available_positions, user_row = await run_db(_query)
-    current_pos = (user_row['name'] if user_row and user_row['name'] else None) or settings.get('current_job_position') or DEFAULT_TAXONOMY['job_position']
+    current_pos = (
+        (user_row['personal_position'] if user_row and user_row['personal_position'] else None)
+        or (user_row['position_name'] if user_row and user_row['position_name'] else None)
+        or settings.get('current_job_position')
+        or DEFAULT_TAXONOMY['job_position']
+    )
     taxonomy_data = await run_db(lambda: get_taxonomy_for_position(current_pos))
 
     return {
@@ -100,6 +115,113 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
         },
         "available_seasons": used_seasons,
     }
+
+
+@router.get("/api/profile/llm")
+async def get_my_llm_config(user: dict = Depends(get_current_user)):
+    """读取当前用户的 LLM 配置（密钥掩码返回）"""
+
+    def _query():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT api_key, base_url, model, timeout FROM user_llm_config WHERE user_id = ?",
+                (user['id'],)
+            ).fetchone()
+            return dict(row) if row else None
+
+    cfg = await run_db(_query)
+    if not cfg:
+        return {"configured": False, "settings": {}}
+
+    return {
+        "configured": True,
+        "settings": {
+            "llm_api_key": _mask_key(cfg["api_key"]) if cfg["api_key"] else "",
+            "llm_api_key_set": bool(cfg["api_key"]),
+            "llm_base_url": cfg["base_url"] or "",
+            "llm_model": cfg["model"] or "gpt-4o",
+            "llm_timeout": cfg["timeout"] or 120,
+        }
+    }
+
+
+@router.put("/api/profile/llm")
+async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)):
+    """更新当前用户的 LLM 配置"""
+
+    api_key = (req.get("llm_api_key") or "").strip()
+    base_url = (req.get("llm_base_url") or "").strip()
+    model = (req.get("llm_model") or "").strip()
+    timeout = req.get("llm_timeout")
+
+    # 验证必填字段
+    if not model:
+        raise HTTPException(status_code=400, detail="模型名称不能为空")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Base URL 不能为空")
+
+    # URL 格式校验
+    import re
+    _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
+    if not _URL_RE.match(base_url):
+        raise HTTPException(status_code=400, detail="Base URL 格式无效，必须以 http:// 或 https:// 开头")
+
+    # 超时范围校验
+    if timeout is not None:
+        try:
+            timeout = int(timeout)
+            timeout = max(5, min(timeout, 600))
+        except (ValueError, TypeError):
+            timeout = 120
+    else:
+        timeout = 120
+
+    def _upsert():
+        with get_db_connection() as conn:
+            # 如果 api_key 为空，保留原有值
+            existing = conn.execute(
+                "SELECT api_key FROM user_llm_config WHERE user_id = ?",
+                (user['id'],)
+            ).fetchone()
+            if not api_key and existing and existing['api_key']:
+                final_key = existing['api_key']
+            else:
+                final_key = api_key
+
+            conn.execute(
+                "INSERT INTO user_llm_config (user_id, api_key, base_url, model, timeout, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id) DO UPDATE SET api_key = excluded.api_key, base_url = excluded.base_url, "
+                "model = excluded.model, timeout = excluded.timeout, updated_at = CURRENT_TIMESTAMP",
+                (user['id'], final_key, base_url, model, timeout)
+            )
+            conn.commit()
+
+    await run_db(_upsert)
+
+    # 清除该用户的 client 缓存
+    from app.services.llm import clear_user_client_cache
+    clear_user_client_cache(user['id'])
+
+    return {"status": "success", "message": "LLM 配置已保存"}
+
+
+@router.delete("/api/profile/llm")
+async def delete_my_llm_config(user: dict = Depends(get_current_user)):
+    """删除当前用户的 LLM 配置"""
+
+    def _delete():
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM user_llm_config WHERE user_id = ?", (user['id'],))
+            conn.commit()
+
+    await run_db(_delete)
+
+    # 清除该用户的 client 缓存
+    from app.services.llm import clear_user_client_cache
+    clear_user_client_cache(user['id'])
+
+    return {"status": "success", "message": "LLM 配置已清除"}
 
 
 @router.get("/api/profile")
@@ -158,10 +280,16 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     available_positions = _get_available_positions()
     with get_db_connection() as conn:
         user_row = conn.execute(
-            "SELECT jp.name FROM users u LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+            "SELECT u.personal_position, jp.name as position_name FROM users u "
+            "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
             (admin['id'],)
         ).fetchone()
-    current_pos = (user_row['name'] if user_row and user_row['name'] else None) or settings.get('current_job_position') or DEFAULT_TAXONOMY['job_position']
+    current_pos = (
+        (user_row['personal_position'] if user_row and user_row['personal_position'] else None)
+        or (user_row['position_name'] if user_row and user_row['position_name'] else None)
+        or settings.get('current_job_position')
+        or DEFAULT_TAXONOMY['job_position']
+    )
     # 从 taxonomy 表读取当前岗位的分类配置
     taxonomy_data = get_taxonomy_for_position(current_pos)
 
@@ -242,6 +370,31 @@ async def get_taxonomy(user: dict = Depends(get_current_user)):
     return await run_db(lambda: get_taxonomy_for_position())
 
 
+@router.put("/api/profile/my-position")
+async def switch_my_position(req: dict, user: dict = Depends(get_current_user)):
+    """普通用户切换个人岗位（仅对自己生效，不写入公共 job_positions 表）"""
+    position_name = req.get("position", "").strip()
+    if not position_name:
+        raise HTTPException(status_code=400, detail="需要提供 position")
+    if len(position_name) > 30:
+        raise HTTPException(status_code=400, detail="岗位名称不能超过 30 个字符")
+    import re
+    if not re.match(r'^[一-龥a-zA-Z0-9\s/\-_()（）]+$', position_name):
+        raise HTTPException(status_code=400, detail="岗位名称仅允许中英文、数字、空格、斜杠、连字符和括号")
+
+    def _switch():
+        with get_db_connection() as conn:
+            # 仅更新 users.personal_position，不触碰 job_positions 表
+            conn.execute(
+                "UPDATE users SET personal_position = ?, current_position_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (position_name, user['id'])
+            )
+            conn.commit()
+
+    await run_db(_switch)
+    return {"status": "success", "current_job_position": position_name}
+
+
 @router.put("/api/profile/position")
 async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
     """切换当前岗位（支持 position_id 或 position 名称）"""
@@ -262,13 +415,7 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                 row = conn.execute("SELECT id, name FROM job_positions WHERE id = ?", (position_id,)).fetchone()
                 if not row:
                     raise HTTPException(status_code=404, detail="岗位不存在")
-                conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
-                # 同步全局 fallback
-                conn.execute(
-                    "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    (row['name'],)
-                )
+                conn.execute("UPDATE users SET current_position_id = ?, personal_position = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 conn.commit()
                 return row['name']
             elif position_name:
@@ -286,13 +433,7 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                         "ON CONFLICT(position_name) DO NOTHING",
                         (position_name, _json.dumps([], ensure_ascii=False))
                     )
-                conn.execute("UPDATE users SET current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
-                # 同步全局 fallback
-                conn.execute(
-                    "INSERT INTO user_profile (key, value, updated_at) VALUES ('current_job_position', ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    (row['name'],)
-                )
+                conn.execute("UPDATE users SET current_position_id = ?, personal_position = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 conn.commit()
                 return row['name']
             else:

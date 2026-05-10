@@ -142,6 +142,69 @@ def _cleanup_old_sources_txn(cursor, url: str):
     cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
 
 
+def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
+    """彻底移除某面经对 question_bank 的所有贡献。
+
+    比 v1 多清理：
+    - original_questions 中属于该 URL 的条目
+    - original_question_sources 中属于该 URL 的条目
+    - 被删除 QB 记录的 question_position 映射
+    """
+    affected_rows = cursor.execute(
+        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
+        (f"%{url}%",)
+    ).fetchall()
+
+    ids_to_delete = []
+    for mr in affected_rows:
+        try:
+            sources = json.loads(mr['sources']) if mr['sources'] else []
+        except Exception:
+            sources = []
+        try:
+            oqs = json.loads(mr['original_questions']) if mr['original_questions'] else []
+        except Exception:
+            oqs = []
+        try:
+            oqs_sources = json.loads(mr['original_question_sources']) if mr['original_question_sources'] else []
+        except Exception:
+            oqs_sources = []
+
+        # 移除属于该 URL 的 source
+        new_sources = [s for s in sources if s.get('url') != url]
+        # 移除属于该 URL 的 original_question_sources，并同步移除对应的 original_questions
+        new_oqs_sources = [s for s in oqs_sources if s.get('url') != url]
+        removed_questions = {s['question'] for s in oqs_sources if s.get('url') == url}
+        new_oqs = [q for q in oqs if q not in removed_questions]
+
+        if len(new_sources) != len(sources):
+            if len(new_sources) == 0:
+                # 所有来源都被移除，标记删除
+                ids_to_delete.append(mr['id'])
+            else:
+                cursor.execute(
+                    "UPDATE question_bank SET frequency = ?, sources = ?, "
+                    "original_questions = ?, original_question_sources = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (len(new_sources),
+                     json.dumps(new_sources, ensure_ascii=False),
+                     json.dumps(new_oqs, ensure_ascii=False),
+                     json.dumps(new_oqs_sources, ensure_ascii=False),
+                     mr['id'])
+                )
+
+    # 删除 frequency=0 的公共 QB 记录及其关联数据
+    if ids_to_delete:
+        placeholders = ','.join('?' * len(ids_to_delete))
+        cursor.execute(f"DELETE FROM question_position WHERE question_id IN ({placeholders})", ids_to_delete)
+        cursor.execute(f"DELETE FROM question_bank WHERE id IN ({placeholders})", ids_to_delete)
+
+    # 兜底：清理 frequency<=0 的公共记录
+    cursor.execute("DELETE FROM question_position WHERE question_id IN "
+                   "(SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL)")
+    cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
+
+
 def _replace_details_txn(cursor, url, tagged_rows, job_position=""):
     cursor.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
     _insert_details_txn(cursor, tagged_rows, job_position)
@@ -191,12 +254,21 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
                     orig_qs_src.append({"question": new_q_text, "sources": [new_source]})
                 elif new_q_text:
                     # 问题文本已存在：将新 URL 合并到对应条目的 sources 中
+                    _merged = False
                     for _oqs_item in orig_qs_src:
                         if _oqs_item.get("question") == new_q_text:
                             _oqs_urls = {s.get("url") for s in _oqs_item.get("sources", [])}
                             if url not in _oqs_urls:
                                 _oqs_item.setdefault("sources", []).append(new_source)
+                            _merged = True
                             break
+                    if not _merged:
+                        # question text 匹配但 oqs 中没有对应条目，新建一个
+                        orig_qs_src.append({"question": new_q_text, "sources": [new_source]})
+                # 安全网：确保每个 source URL 至少在 oqs 中有一个条目
+                _oqs_all_urls = {s.get("url") for item in orig_qs_src for s in item.get("sources", [])}
+                if url not in _oqs_all_urls:
+                    orig_qs_src.append({"question": new_q_text or "", "sources": [new_source]})
                 cursor.execute(
                     "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (len(sources), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
@@ -210,9 +282,10 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
         tags = row[6] if len(row) > 6 else ''
         diff_tag = row[7] if len(row) > 7 else '未知'
         sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
+        oqs_json = json.dumps([{"question": q_text, "sources": [{"url": url, "company": company, "round": round_}]}], ensure_ascii=False)
         cursor.execute(
-            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
-            (q_text, cat1, cat2, tags, diff_tag, sources_json, owner_id, submitter_id, status, current_pos)
+            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_question_sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+            (q_text, cat1, cat2, tags, diff_tag, sources_json, oqs_json, owner_id, submitter_id, status, current_pos)
         )
         new_id = cursor.lastrowid
         # BUG-008: 同步 question_position 关联表，否则新题在主库 INNER JOIN 查询中不可见
@@ -252,6 +325,29 @@ def submit_interview_txn(saved_url, data, questions, season, owner_id, status,
             )
             conn.commit()
             return answer_tasks, interview_id
+        except Exception as e:
+            conn.rollback()
+            if "UNIQUE" in str(e):
+                raise ValueError("该 URL 已存在，不可重复上传")
+            raise
+
+
+def submit_interview_txn_tag_only(saved_url, data, questions, season, owner_id, status,
+                                  job_position, tagged_rows):
+    """提交新面经（仅打标签）：insert_interview + insert_details，不做聚类。
+
+    聚类由两阶段流水线的阶段2负责。
+    单事务，返回 interview_id。
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN")
+            _insert_interview_txn(cursor, saved_url, data, questions, season, owner_id, status, job_position)
+            interview_id = cursor.lastrowid
+            _insert_details_txn(cursor, tagged_rows, job_position)
+            conn.commit()
+            return interview_id
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):

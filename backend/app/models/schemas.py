@@ -39,6 +39,8 @@ class SplitQuestionRequest(BaseModel):
 class MergeOriginalQuestionRequest(BaseModel):
     original_question: str
     target_id: int
+    target_cat1: str = ""
+    target_cat2: str = ""
 
 
 class UploadToBankRequest(BaseModel):

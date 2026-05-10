@@ -108,13 +108,12 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     return standardized
 
 
-async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False):
-    """对一批已打标题目做增量聚类，写入 question_bank。
+async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False, interview_id: int = None):
+    """对一批已打标题目做处理。
 
-    LLM 匹配在事务外完成，DB 操作通过事务编排器原子写入。
+    个人题库：直接插入 question_bank。
+    公共题库：写入 questions_detail + 入队，由流水线阶段2负责聚类。
     """
-    from app.services.clustering import match_new_questions
-
     if not new_tagged_rows:
         return
 
@@ -132,62 +131,27 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
         logger.info(f"个人题库新增 {len(valid_rows)} 题")
         return
 
-    # ── 公共题库：LLM 匹配（事务外） ──
-    def _load_existing():
-        with get_db_connection() as conn:
-            rows = conn.execute(
-                "SELECT id, question, cat2, sources FROM question_bank WHERE owner_id IS NULL AND status = 'approved' AND job_position = ?",
-                (current_pos,)
-            ).fetchall()
-            return [dict(r) for r in rows]
+    # ── 公共题库：入队等待聚类 ──
+    if interview_id:
+        from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
+        enqueue_interview(interview_id)
+        logger.info(f"面经 {interview_id} 已入队等待聚类")
 
-    existing_bank = await run_db(_load_existing)
-    existing_by_cat2 = {}
-    for r in existing_bank:
-        cat2 = r.get('cat2') or ''
-        if cat2 not in existing_by_cat2:
-            existing_by_cat2[cat2] = []
-        existing_by_cat2[cat2].append({
-            "question_bank_id": r['id'],
-            "question": r['question'],
-            "all_questions": [r['question']],
-        })
-
-    new_rows_for_match = []
-    for idx, row in enumerate(valid_rows):
-        new_rows_for_match.append({
-            "id": idx,
-            "question": row[3],
-            "cat2": row[5] if len(row) > 5 else '',
-            "_orig_row": row,
-        })
-
-    match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
-    matched = match_result["matched"]
-    unmatched_rows = match_result["unmatched"]
-    idx_to_row = {idx: row for idx, row in enumerate(valid_rows)}
-
-    # ── DB 事务写入（不含 cleanup，新面经没有旧数据需要清理） ──
-    from app.db.operations import _apply_incremental_txn
-    def _txn():
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute("BEGIN")
-                tasks = _apply_incremental_txn(
-                    cursor, matched, unmatched_rows, idx_to_row,
-                    submitter_is_admin, user_id, current_pos
-                )
-                conn.commit()
-                return tasks
-            except Exception:
-                conn.rollback()
-                raise
-
-    answer_tasks = await run_db(_txn)
-    for qid, qtext in answer_tasks:
-        bg_tasks.add_task(background_generate_answer, qid, qtext, user_id)
-    logger.info(f"增量更新完成: 匹配 {len(matched)} 题, 新增 {len(unmatched_rows)} 题")
+        # 检查是否触发聚类
+        if should_trigger_clustering():
+            batch = dequeue_batch()
+            if batch:
+                try:
+                    new_count = await cluster_batch(batch, user_id=user_id)
+                    queue_ids = [item['queue_id'] for item in batch]
+                    mark_batch_done(queue_ids)
+                    logger.info(f"触发聚类完成，新增 {new_count} 个聚类")
+                except Exception as e:
+                    logger.error(f"聚类失败，回退队列状态: {e}")
+                    queue_ids = [item['queue_id'] for item in batch]
+                    mark_batch_failed(queue_ids)
+    else:
+        logger.warning("公共题库提交但无 interview_id，跳过入队")
 
 
 @router.post("/api/submit")
@@ -374,56 +338,74 @@ async def submit_data(
                         q_list, taxonomy_config, user_id=user['id']
                     )
 
-                    # ── 阶段 3：单事务写入（个人/公共统一走聚类流程） ──
-                    from app.services.clustering import match_new_questions
-
-                    # 加载已有题目：个人题库加载自己的，公共题库加载公共的
+                    # ── 阶段 3：单事务写入 ──
                     if submit_target == 'personal':
-                        _where = "owner_id = ? AND job_position = ?"
-                        _params = (user['id'], current_pos)
+                        # 个人题库：走原有的匹配流程
+                        from app.services.clustering import match_new_questions
+
+                        def _load_existing_bank():
+                            with get_db_connection() as conn:
+                                rows = conn.execute(
+                                    "SELECT id, question, cat2, sources, original_questions, original_question_sources FROM question_bank WHERE owner_id = ? AND job_position = ?",
+                                    (user['id'], current_pos)
+                                ).fetchall()
+                                return [dict(r) for r in rows]
+
+                        existing_bank = await run_db(_load_existing_bank)
+                        existing_by_cat2 = {}
+                        for r in existing_bank:
+                            cat2 = r.get('cat2') or ''
+                            if cat2 not in existing_by_cat2:
+                                existing_by_cat2[cat2] = []
+                            all_qs = [r['question']]
+                            try:
+                                orig = json.loads(r.get('original_questions') or '[]')
+                                all_qs.extend([q for q in orig if q and q != r['question']])
+                            except Exception:
+                                pass
+                            existing_by_cat2[cat2].append({
+                                "question_bank_id": r['id'], "question": r['question'],
+                                "all_questions": all_qs,
+                            })
+                        valid_rows = [r for r in tagged_rows if r[3].strip()]
+                        new_rows_for_match = [{"id": idx, "question": r[3], "cat2": r[5] if len(r) > 5 else '', "_orig_row": r} for idx, r in enumerate(valid_rows)]
+                        match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
+                        idx_to_row = {idx: r for idx, r in enumerate(valid_rows)}
+
+                        answer_tasks, _ = await run_db(lambda: submit_interview_txn(
+                            saved_url, data, questions, season.strip(),
+                            record_owner_id, record_status, current_pos,
+                            tagged_rows, match_result["matched"], match_result["unmatched"],
+                            idx_to_row, bool(is_admin), user['id'],
+                            qb_owner_id=user['id']
+                        ))
+                        for qid, qtext in answer_tasks:
+                            bg_tasks.add_task(background_generate_answer, qid, qtext, user['id'])
                     else:
-                        _where = "owner_id IS NULL AND status = 'approved' AND job_position = ?"
-                        _params = (current_pos,)
+                        # 公共题库：只写 interview + questions_detail，入队等待聚类
+                        from app.db.operations import submit_interview_txn_tag_only
+                        from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
 
-                    def _load_existing_bank():
-                        with get_db_connection() as conn:
-                            rows = conn.execute(
-                                f"SELECT id, question, cat2, sources, original_questions, original_question_sources FROM question_bank WHERE {_where}", _params
-                            ).fetchall()
-                            return [dict(r) for r in rows]
+                        interview_id = await run_db(lambda: submit_interview_txn_tag_only(
+                            saved_url, data, questions, season.strip(),
+                            record_owner_id, record_status, current_pos,
+                            tagged_rows
+                        ))
+                        enqueue_interview(interview_id)
 
-                    existing_bank = await run_db(_load_existing_bank)
-                    existing_by_cat2 = {}
-                    for r in existing_bank:
-                        cat2 = r.get('cat2') or ''
-                        if cat2 not in existing_by_cat2:
-                            existing_by_cat2[cat2] = []
-                        all_qs = [r['question']]
-                        try:
-                            orig = json.loads(r.get('original_questions') or '[]')
-                            all_qs.extend([q for q in orig if q and q != r['question']])
-                        except Exception:
-                            pass
-                        existing_by_cat2[cat2].append({
-                            "question_bank_id": r['id'], "question": r['question'],
-                            "all_questions": all_qs,
-                        })
-                    valid_rows = [r for r in tagged_rows if r[3].strip()]
-                    new_rows_for_match = [{"id": idx, "question": r[3], "cat2": r[5] if len(r) > 5 else '', "_orig_row": r} for idx, r in enumerate(valid_rows)]
-                    match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
-                    idx_to_row = {idx: r for idx, r in enumerate(valid_rows)}
-
-                    # 单事务：insert_interview + insert_details + incremental_update
-                    answer_tasks, _ = await run_db(lambda: submit_interview_txn(
-                        saved_url, data, questions, season.strip(),
-                        record_owner_id, record_status, current_pos,
-                        tagged_rows, match_result["matched"], match_result["unmatched"],
-                        idx_to_row, bool(is_admin), user['id'],
-                        qb_owner_id=user['id'] if submit_target == 'personal' else None
-                    ))
-
-                    for qid, qtext in answer_tasks:
-                        bg_tasks.add_task(background_generate_answer, qid, qtext, user['id'])
+                        # 检查是否触发聚类
+                        if should_trigger_clustering():
+                            batch = dequeue_batch()
+                            if batch:
+                                try:
+                                    new_count = await cluster_batch(batch, user_id=user['id'])
+                                    queue_ids = [item['queue_id'] for item in batch]
+                                    mark_batch_done(queue_ids)
+                                    logger.info(f"提交触发聚类完成，新增 {new_count} 个聚类")
+                                except Exception as e:
+                                    logger.error(f"聚类失败，回退队列状态: {e}")
+                                    queue_ids = [item['queue_id'] for item in batch]
+                                    mark_batch_failed(queue_ids)
 
                 except Exception as e:
                     logger.error(f"题目标签化及更新题库失败: {e}")
@@ -636,51 +618,77 @@ async def submit_data_stream(
                 tagged_rows = await tag_questions_batch(saved_url, data.get("公司", "未提供"), data.get("面试轮次", "未提供"), q_list, taxonomy_config, user_id=_user['id'])
                 yield f"data: {json.dumps({'step': 'tag', 'message': f'标注完成，共 {len(tagged_rows)} 道题', 'type': 'progress'})}\n\n"
 
-                # ── 阶段 4：聚类匹配 / 写入（个人/公共统一走聚类流程） ──
-                from app.services.clustering import match_new_questions
-
+                # ── 阶段 4：写入 ──
                 if submit_target == 'personal':
-                    _where = "owner_id = ? AND job_position = ?"
-                    _params = (_user['id'], current_pos)
+                    # 个人题库：走原有匹配流程
+                    from app.services.clustering import match_new_questions
+
+                    def _load_existing_bank():
+                        with get_db_connection() as conn:
+                            rows = conn.execute(
+                                "SELECT id, question, cat2, sources, original_questions, original_question_sources FROM question_bank WHERE owner_id = ? AND job_position = ?",
+                                (_user['id'], current_pos)
+                            ).fetchall()
+                            return [dict(r) for r in rows]
+                    existing_bank = await run_db(_load_existing_bank)
+                    existing_by_cat2 = {}
+                    for r in existing_bank:
+                        cat2 = r.get('cat2') or ''
+                        if cat2 not in existing_by_cat2: existing_by_cat2[cat2] = []
+                        all_qs = [r['question']]
+                        try:
+                            orig = json.loads(r.get('original_questions') or '[]')
+                            all_qs.extend([q for q in orig if q and q != r['question']])
+                        except Exception:
+                            pass
+                        existing_by_cat2[cat2].append({"question_bank_id": r['id'], "question": r['question'], "all_questions": all_qs})
+                    valid_rows = [r for r in tagged_rows if r[3].strip()]
+                    new_rows_for_match = [{"id": idx, "question": r[3], "cat2": r[5] if len(r) > 5 else '', "_orig_row": r} for idx, r in enumerate(valid_rows)]
+                    match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
+                    idx_to_row = {idx: r for idx, r in enumerate(valid_rows)}
+                    matched_count = len(match_result["matched"])
+                    unmatched_count = len(match_result["unmatched"])
+                    yield f"data: {json.dumps({'step': 'match', 'message': f'匹配完成：{matched_count} 道已有题目，{unmatched_count} 道新题', 'type': 'progress'})}\n\n"
+
+                    yield f"data: {json.dumps({'step': 'save', 'message': '正在写入题库...', 'type': 'progress'})}\n\n"
+                    answer_tasks, _ = await run_db(lambda: submit_interview_txn(
+                        saved_url, data, questions, _season.strip(),
+                        record_owner_id, record_status, current_pos,
+                        tagged_rows, match_result['matched'], match_result['unmatched'],
+                        idx_to_row, bool(is_admin), _user['id'],
+                        qb_owner_id=_user['id']
+                    ))
+                    for qid, qtext in answer_tasks:
+                        bg_tasks.add_task(background_generate_answer, qid, qtext, _user['id'])
                 else:
-                    _where = "owner_id IS NULL AND status = 'approved' AND job_position = ?"
-                    _params = (current_pos,)
+                    # 公共题库：只写 interview + questions_detail，入队等待聚类
+                    from app.db.operations import submit_interview_txn_tag_only
+                    from app.services.pipeline import enqueue_interview, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
 
-                def _load_existing_bank():
-                    with get_db_connection() as conn:
-                        rows = conn.execute(f"SELECT id, question, cat2, sources, original_questions, original_question_sources FROM question_bank WHERE {_where}", _params).fetchall()
-                        return [dict(r) for r in rows]
-                existing_bank = await run_db(_load_existing_bank)
-                existing_by_cat2 = {}
-                for r in existing_bank:
-                    cat2 = r.get('cat2') or ''
-                    if cat2 not in existing_by_cat2: existing_by_cat2[cat2] = []
-                    all_qs = [r['question']]
-                    try:
-                        orig = json.loads(r.get('original_questions') or '[]')
-                        all_qs.extend([q for q in orig if q and q != r['question']])
-                    except Exception:
-                        pass
-                    existing_by_cat2[cat2].append({"question_bank_id": r['id'], "question": r['question'], "all_questions": all_qs})
-                valid_rows = [r for r in tagged_rows if r[3].strip()]
-                new_rows_for_match = [{"id": idx, "question": r[3], "cat2": r[5] if len(r) > 5 else '', "_orig_row": r} for idx, r in enumerate(valid_rows)]
-                match_result = await match_new_questions(new_rows_for_match, existing_by_cat2)
-                idx_to_row = {idx: r for idx, r in enumerate(valid_rows)}
-                matched_count = len(match_result["matched"])
-                unmatched_count = len(match_result["unmatched"])
-                yield f"data: {json.dumps({'step': 'match', 'message': f'匹配完成：{matched_count} 道已有题目，{unmatched_count} 道新题', 'type': 'progress'})}\n\n"
+                    yield f"data: {json.dumps({'step': 'save', 'message': '正在保存面经...', 'type': 'progress'})}\n\n"
+                    interview_id = await run_db(lambda: submit_interview_txn_tag_only(
+                        saved_url, data, questions, _season.strip(),
+                        record_owner_id, record_status, current_pos,
+                        tagged_rows
+                    ))
+                    enqueue_interview(interview_id)
+                    yield f"data: {json.dumps({'step': 'queue', 'message': '已加入聚类队列', 'type': 'progress'})}\n\n"
 
-                yield f"data: {json.dumps({'step': 'save', 'message': '正在写入题库...', 'type': 'progress'})}\n\n"
-                answer_tasks, _ = await run_db(lambda: submit_interview_txn(
-                    saved_url, data, questions, _season.strip(),
-                    record_owner_id, record_status, current_pos,
-                    tagged_rows, match_result['matched'], match_result['unmatched'],
-                    idx_to_row, bool(is_admin), _user['id'],
-                    qb_owner_id=_user['id'] if submit_target == 'personal' else None
-                ))
-
-                for qid, qtext in answer_tasks:
-                    bg_tasks.add_task(background_generate_answer, qid, qtext, _user['id'])
+                    # 检查是否触发聚类
+                    if should_trigger_clustering():
+                        yield f"data: {json.dumps({'step': 'cluster', 'message': '触发批量聚类...', 'type': 'progress'})}\n\n"
+                        batch = dequeue_batch()
+                        if batch:
+                            try:
+                                new_count = await cluster_batch(batch, user_id=_user['id'])
+                                queue_ids = [item['queue_id'] for item in batch]
+                                mark_batch_done(queue_ids)
+                                yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类完成，新增 {new_count} 个聚类', 'type': 'progress', 'new_qb_count': new_count}, ensure_ascii=False)}\n\n"
+                            except Exception as e:
+                                logger.error(f"聚类失败，回退队列状态: {e}")
+                                queue_ids = [item['queue_id'] for item in batch]
+                                mark_batch_failed(queue_ids)
+                                yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类失败: {str(e)}', 'type': 'error'}, ensure_ascii=False)}\n\n"
 
             except Exception as e:
                 logger.error(f"题目标签化及更新题库失败: {e}")

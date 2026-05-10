@@ -20,8 +20,8 @@
               </svg>
             </div>
             <div>
-              <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">{{ confirmState.title }}</h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mt-1">{{ confirmState.message }}</p>
+              <h3 class="text-lg font-bold text-gray-900 dark:text-ink-100">{{ confirmState.title }}</h3>
+              <p class="text-sm text-ink-500 dark:text-ink-400 leading-relaxed mt-1 whitespace-pre-line">{{ confirmState.message }}</p>
             </div>
           </div>
           <div class="flex justify-end gap-3">

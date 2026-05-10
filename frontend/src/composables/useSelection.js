@@ -1,29 +1,41 @@
 import { ref, computed } from 'vue'
 
-export function useSelection(getList) {
+export function useSelection(getList, getFilteredList) {
   const selectedIds = ref(new Set())
 
   const selectedCount = computed(() => selectedIds.value.size)
 
   const allSelected = computed(() => {
-    const list = getList()
+    const list = getFilteredList ? getFilteredList() : getList()
     return list.length > 0 && list.every(item => selectedIds.value.has(item.id))
   })
 
   const toggleSelectAll = () => {
-    const list = getList()
+    // 按当前筛选列表全选/取消，不影响筛选外的已选项
+    const list = getFilteredList ? getFilteredList() : getList()
     if (allSelected.value) {
-      selectedIds.value.clear()
+      // 取消当前筛选列表的选中
+      const newSet = new Set(selectedIds.value)
+      list.forEach(item => newSet.delete(item.id))
+      selectedIds.value = newSet
     } else {
-      selectedIds.value = new Set(list.map(item => item.id))
+      // 选中当前筛选列表（保留已有的其他选中项）
+      const newSet = new Set(selectedIds.value)
+      list.forEach(item => newSet.add(item.id))
+      selectedIds.value = newSet
     }
   }
 
   const invertSelection = () => {
-    const list = getList()
-    const newSet = new Set()
+    // 在当前筛选列表范围内反选
+    const list = getFilteredList ? getFilteredList() : getList()
+    const newSet = new Set(selectedIds.value)
     list.forEach(item => {
-      if (!selectedIds.value.has(item.id)) newSet.add(item.id)
+      if (newSet.has(item.id)) {
+        newSet.delete(item.id)
+      } else {
+        newSet.add(item.id)
+      }
     })
     selectedIds.value = newSet
   }
