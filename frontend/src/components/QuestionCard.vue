@@ -6,12 +6,12 @@
     ]"
   >
     <!-- Card header -->
-    <div class="p-5 flex gap-4 items-start cursor-pointer hover:bg-slate-50/50 dark:hover:bg-surface-700/50 transition-colors duration-200" @click="$emit('toggle-answer', question)">
+    <div class="p-3.5 flex gap-4 items-start cursor-pointer hover:bg-slate-50/50 dark:hover:bg-surface-700/50 transition-colors duration-200" @click="$emit('toggle-answer', question)">
       <div class="flex items-center h-full pt-1" @click.stop>
         <input type="checkbox" :checked="isSelected(question.id)" @change="$emit('toggle-item', question.id)"
           class="w-[18px] h-[18px] text-primary-600 rounded-md border-surface-300 dark:border-ink-600 focus:ring-primary-500 cursor-pointer transition bg-white dark:bg-surface-900">
       </div>
-      <div class="flex flex-col items-center justify-center bg-gradient-to-b from-red-50 to-red-100/50 dark:from-red-900/30 dark:to-red-900/10 text-red-600 dark:text-red-400 font-bold rounded-xl p-3 min-w-[56px] border border-red-100 dark:border-red-800/50">
+      <div class="flex flex-col items-center justify-center bg-gradient-to-b from-red-50 to-red-100/50 dark:from-red-900/30 dark:to-red-900/10 text-red-600 dark:text-red-400 font-bold rounded-xl p-2 min-w-[44px] border border-red-100 dark:border-red-800/50">
         <span class="text-[10px] font-medium text-red-400 dark:text-red-500 mb-0.5 uppercase tracking-wider">频率</span>
         <span class="text-xl leading-none">{{ question.frequency }}</span>
       </div>
@@ -157,7 +157,7 @@
             class="bg-surface-50 dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-xl p-3 flex items-start gap-3">
             <span class="text-ink-400 dark:text-ink-500 font-mono text-xs shrink-0 mt-0.5">{{ idx + 1 }}.</span>
             <div class="flex-1 min-w-0">
-              <div v-if="src._origQuestion" class="text-xs text-ink-400 dark:text-ink-500 mb-1 truncate">{{ src._origQuestion }}</div>
+              <div v-if="src._origQuestion" class="text-xs text-ink-400 dark:text-ink-500 mb-1 whitespace-pre-line">{{ src._origQuestion }}</div>
               <div class="flex flex-wrap items-center gap-1.5">
                 <span @click="$emit('navigate-to-interview', src)"
                   class="text-[11px] bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/40 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-md inline-flex items-center cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
@@ -278,11 +278,14 @@ const dedupedSources = computed(() => {
   const q = props.question
   const sources = q.sources || []
   if (!q.original_question_sources || !q.original_question_sources.length) return sources
-  // 建立 url -> 原始问题文本 的映射
+  // 建立 url -> 原始问题文本 的映射（支持同一 URL 多个题目）
   const urlToOq = {}
   for (const item of q.original_question_sources) {
     for (const s of (item.sources || [])) {
-      if (s.url && !urlToOq[s.url]) urlToOq[s.url] = item.question
+      if (s.url) {
+        if (!urlToOq[s.url]) urlToOq[s.url] = item.question
+        else if (!urlToOq[s.url].includes(item.question)) urlToOq[s.url] += '\n' + item.question
+      }
     }
   }
   return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '' }))

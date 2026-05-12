@@ -100,9 +100,10 @@
       </div>
     </div>
 
-    <main v-else class="p-5 lg:p-8 max-w-[1440px] mx-auto">
+    <main v-else class="p-3 lg:p-5 max-w-[1440px] mx-auto">
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
       <AnalyticsSidebar
+        v-show="!sidebarCollapsed"
         :analytics="analytics"
         :master-bank="masterBank"
         :popular-tags="popularTags"
@@ -113,12 +114,18 @@
         @select-tag="onSelectTag($event)"
         @go-to-question="onGoToQuestion"
         @refresh-recommend="recommendSeed++"
+        @toggle-collapse="toggleSidebar"
       />
 
-      <div class="lg:col-span-3 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden">
+      <div :class="sidebarCollapsed ? 'lg:col-span-4' : 'lg:col-span-3'" class="min-w-0 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden flex flex-col h-[calc(100vh-88px)]">
+        <div v-if="sidebarCollapsed" class="hidden lg:flex items-center border-b border-surface-200/80 dark:border-ink-700/60 px-2 py-1.5">
+          <button @click="toggleSidebar" class="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-colors" title="展开侧边栏">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+          </button>
+        </div>
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="p-4 lg:p-6">
+        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
           <SearchFilterBar
             v-if="activeTab === 'MasterBank'"
             :search-query="searchQuery"
@@ -580,6 +587,11 @@ const availableSeasons = ref([])
 const showSettings = ref(false)
 const practiceStats = ref({})
 const recommendSeed = ref(0)
+const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('sidebar-collapsed', sidebarCollapsed.value)
+}
 
 // ── Auth state ──
 const currentUser = ref(null)

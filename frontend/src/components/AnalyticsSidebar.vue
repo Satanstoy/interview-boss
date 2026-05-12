@@ -1,6 +1,17 @@
 <template>
   <div class="lg:col-span-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 h-fit lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto custom-scrollbar">
 
+    <!-- Collapse toggle -->
+    <button
+      @click="$emit('toggle-collapse')"
+      class="w-full flex items-center justify-center p-2 text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors border-b border-surface-200/80 dark:border-ink-700/60"
+      title="收起侧边栏"
+    >
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+      </svg>
+    </button>
+
     <!-- Learning Progress -->
     <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
       <div class="flex items-center justify-between mb-3">
@@ -206,7 +217,7 @@ const props = defineProps({
   recommendSeed: { type: Number, default: 0 }
 })
 
-defineEmits(['refresh', 'select-tag', 'go-to-question', 'refresh-recommend'])
+defineEmits(['refresh', 'select-tag', 'go-to-question', 'refresh-recommend', 'toggle-collapse'])
 
 const chartRef = ref(null)
 let myChart = null

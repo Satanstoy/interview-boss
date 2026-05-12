@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4 flex flex-col">
+  <div ref="containerRef" class="flex flex-col flex-1 min-h-0 gap-4">
     <BatchActionPanel
       :selected-count="selectedCount"
       :total-count="items.length"
@@ -8,7 +8,7 @@
       @invert-selection="$emit('invert-selection')"
     />
 
-    <div v-if="items.length > 0" class="flex gap-2 mb-2">
+    <div v-if="items.length > 0" class="flex gap-2">
       <button @click="expandAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部展开</button>
       <button @click="collapseAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部收起</button>
     </div>
@@ -24,6 +24,7 @@
     <!-- Virtual scroller: only renders visible cards in DOM -->
     <DynamicScroller
       v-if="items.length > 0"
+      ref="scrollerRef"
       :items="items"
       :min-item-size="130"
       key-field="id"
@@ -64,6 +65,7 @@
 </template>
 
 <script setup>
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import BatchActionPanel from './BatchActionPanel.vue'
 import QuestionCard from './QuestionCard.vue'
 
@@ -80,6 +82,61 @@ const props = defineProps({
 
 const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question'])
 
+const containerRef = ref(null)
+let resizeObserver = null
+let lastHeight = 0
+
+const updateScrollerHeight = () => {
+  const container = containerRef.value
+  if (!container) return
+  const scroller = container.querySelector('.vue-recycle-scroller')
+  if (!scroller) return
+
+  // Sum heights of siblings above the scroller (these are stable)
+  let aboveH = 0
+  for (const child of container.children) {
+    if (child === scroller) break
+    aboveH += child.offsetHeight
+  }
+
+  // Container gap (gap-4 = 16px between each pair of children above scroller)
+  const idx = Array.from(container.children).indexOf(scroller)
+  const gapPx = idx > 0 ? idx * 16 : 0
+
+  // Navigate up: container → wrapper → panel (fixed height via CSS)
+  const wrapper = container.parentElement
+  const panel = wrapper?.parentElement
+  if (!panel) return
+
+  const panelH = panel.clientHeight
+  const wrapperPad = parseFloat(getComputedStyle(wrapper).paddingTop) + parseFloat(getComputedStyle(wrapper).paddingBottom)
+  const h = panelH - wrapperPad - aboveH - gapPx - 8
+
+  if (Math.abs(h - lastHeight) > 2) {
+    lastHeight = h
+    scroller.style.height = Math.max(Math.round(h), 200) + 'px'
+  }
+}
+
+onMounted(() => {
+  nextTick(() => {
+    updateScrollerHeight()
+    setTimeout(updateScrollerHeight, 300)
+  })
+
+  // Observe panel for size changes (window resize, sidebar toggle)
+  const container = containerRef.value
+  const panel = container?.parentElement?.parentElement
+  if (panel) {
+    resizeObserver = new ResizeObserver(updateScrollerHeight)
+    resizeObserver.observe(panel)
+  }
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+})
+
 const toggleAnswer = (question) => {
   question._showAnswer = !question._showAnswer
 }
@@ -95,12 +152,6 @@ const collapseAll = () => {
 
 <style scoped>
 .virtual-scroller {
-  height: calc(100vh - 280px);
   overflow-y: auto;
-}
-@media (max-width: 1024px) {
-  .virtual-scroller {
-    height: calc(100vh - 400px);
-  }
 }
 </style>
