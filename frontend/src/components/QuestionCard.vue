@@ -90,7 +90,7 @@
     </div>
 
     <!-- Answer section: v-if instead of v-show for performance -->
-    <div v-if="question._showAnswer" class="border-t border-surface-100 dark:border-ink-700 bg-gradient-to-b from-gray-50/80 to-white dark:from-surface-700/80 dark:to-surface-800 relative group answer-section">
+    <div v-if="question._showAnswer" class="border-t border-surface-100 dark:border-ink-700 bg-gradient-to-b from-gray-50/80 to-white dark:bg-surface-800 relative group answer-section">
 
       <!-- Answer (primary content — shown first) -->
       <div class="p-6 pb-0">
@@ -108,10 +108,10 @@
         <div v-else>
           <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative">
             <div class="absolute top-0 right-0 flex gap-1.5 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white dark:bg-surface-700/60 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600/80 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm">
                 编辑
               </button>
-              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
+              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white dark:bg-surface-700/60 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600/80 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
             </div>
@@ -161,7 +161,7 @@
 
         <div v-if="showSources" class="px-6 pb-5 space-y-2.5">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
-            class="bg-surface-50 dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-xl p-3 flex items-start gap-3">
+            class="bg-surface-50 dark:bg-surface-700/40 border border-surface-200 dark:border-ink-600/50 rounded-xl p-3 flex items-start gap-3">
             <span class="text-ink-400 dark:text-ink-500 font-mono text-xs shrink-0 mt-0.5">{{ idx + 1 }}.</span>
             <div class="flex-1 min-w-0">
               <div v-if="src._origQuestion" class="text-xs text-ink-400 dark:text-ink-500 mb-1 whitespace-pre-line">{{ src._origQuestion }}</div>

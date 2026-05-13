@@ -16,7 +16,7 @@
       <div class="flex items-center gap-1">
         <input v-if="type === 'text'" v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200" @keyup.enter="save" />
         <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200"></textarea>
-        <select v-else-if="type === 'select'" v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200">
+        <select v-else-if="type === 'select'" v-model="editValue" class="select-styled px-2 py-1 text-sm">
           <option value="">未提供</option>
           <option v-for="opt in options" :key="opt" :value="opt">{{ opt }}</option>
         </select>
@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { validateTextField } from '../utils/validate.js'
 
 const props = defineProps({
@@ -51,8 +51,7 @@ const editing = ref(false)
 const editValue = ref('')
 const validationError = ref('')
 
-const displayValue = ref(props.row[props.field])
-const displayRef = displayValue
+const displayValue = computed(() => props.row[props.field])
 
 const startEdit = () => {
   editValue.value = props.row[props.field] || ''

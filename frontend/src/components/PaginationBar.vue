@@ -46,7 +46,7 @@
       <select
         :value="pageSize"
         @change="$emit('update:pageSize', Number($event.target.value)); $emit('update:currentPage', 1)"
-        class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 rounded-lg px-2 py-1 text-xs text-ink-700 dark:text-ink-300 focus:ring-1 focus:ring-primary-400 focus:border-primary-400 cursor-pointer"
+        class="select-styled px-2 py-1 text-xs cursor-pointer"
       >
         <option v-for="s in pageSizeOptions" :key="s" :value="s">{{ s }}</option>
       </select>

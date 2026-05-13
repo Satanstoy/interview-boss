@@ -1,17 +1,30 @@
 <template>
-  <div class="bg-white dark:bg-surface-800 rounded-xl shadow-md border border-surface-200 dark:border-ink-600 mb-6 lg:mb-10 overflow-hidden">
-    <div class="bg-surface-50 dark:bg-surface-900 p-4 border-b border-surface-200 dark:border-ink-600 flex items-center gap-4">
-      <label class="font-semibold text-ink-700 dark:text-ink-300 whitespace-nowrap">来源链接 (URL):</label>
+  <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-md border border-surface-200 dark:border-ink-600 mb-4 overflow-hidden">
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 px-5 py-3 border-b border-surface-200 dark:border-ink-600">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+          <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">导入面经 / JD</h3>
+          <p class="text-xs text-ink-500 dark:text-ink-400">粘贴文本或拖拽图片，AI 自动识别提取面试题</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-surface-50/50 dark:bg-surface-900/50 p-4 border-b border-surface-200 dark:border-ink-600 flex items-center gap-4">
+      <label class="font-semibold text-ink-700 dark:text-ink-300 whitespace-nowrap text-sm">来源链接</label>
       <input
         v-model="sourceUrl"
         type="text"
-        class="flex-1 border border-surface-300 dark:border-ink-600 rounded-lg p-2 bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400"
-        placeholder="粘贴小红书/牛客网帖子链接 (用于去重，避免重复录入)"
+        class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
+        placeholder="粘贴小红书/牛客网帖子链接（可选，用于去重）"
       />
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100 dark:divide-gray-700">
-      <div class="p-4 lg:p-6 flex flex-col">
+      <div class="p-3 lg:p-4 flex flex-col">
         <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-2">文本内容</label>
         <textarea
           v-model="stagedText"
@@ -21,7 +34,7 @@
       </div>
 
       <div
-        class="p-4 lg:p-6 flex flex-col transition-colors relative"
+        class="p-3 lg:p-4 flex flex-col transition-colors relative"
         :class="isDragging ? 'bg-blue-50 dark:bg-blue-900/30' : ''"
         @dragover.prevent="isDragging = true"
         @dragleave.prevent="isDragging = false"
@@ -57,12 +70,12 @@
       </div>
     </div>
 
-    <div class="bg-surface-50 dark:bg-surface-900 border-t border-surface-200 dark:border-ink-600 p-4 flex flex-col items-center">
+    <div class="bg-surface-50/80 dark:bg-surface-900/80 border-t border-surface-200 dark:border-ink-600 p-4 flex flex-col items-center">
       <!-- 类型和季节选择 -->
       <div class="flex gap-4 w-full mb-4">
         <div class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">导入类型</label>
-          <select v-model="importType" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200">
+          <select v-model="importType" class="select-styled w-full px-3.5 py-2.5">
             <option value="auto">自动识别</option>
             <option value="jd">JD (职位描述)</option>
             <option value="interview">面经</option>
@@ -70,7 +83,7 @@
         </div>
         <div class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">招聘季节</label>
-          <select v-model="selectedSeason" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200">
+          <select v-model="selectedSeason" class="select-styled w-full px-3.5 py-2.5">
             <option v-for="s in availableSeasons" :key="s" :value="s">{{ s }}</option>
             <option value="custom">自定义...</option>
           </select>
@@ -78,7 +91,7 @@
         </div>
         <div v-if="isAdmin" class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">提交到</label>
-          <select v-model="importTarget" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200">
+          <select v-model="importTarget" class="select-styled w-full px-3.5 py-2.5">
             <option value="personal">个人题库</option>
             <option value="public">公共题库</option>
           </select>
@@ -86,13 +99,13 @@
       </div>
 
       <div class="flex gap-4 w-full justify-end mb-4">
-        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2 rounded-lg text-ink-600 dark:text-ink-400 hover:bg-surface-200 dark:hover:bg-ink-700 transition">
+        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-ink-600 dark:text-ink-400 hover:bg-surface-200 dark:hover:bg-ink-700 transition border border-surface-200 dark:border-ink-600">
           清空
         </button>
         <button
           @click="submitAll"
           :disabled="isUploading || (!stagedText.trim() && stagedFiles.length === 0)"
-          class="bg-blue-600 text-white font-bold px-8 py-2 rounded-lg hover:bg-blue-700 transition shadow-md disabled:bg-blue-300 dark:disabled:bg-blue-800 disabled:cursor-not-allowed flex items-center gap-2"
+          class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold px-8 py-2.5 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:from-blue-300 disabled:to-indigo-300 dark:disabled:from-blue-800 dark:disabled:to-indigo-800 disabled:cursor-not-allowed flex items-center gap-2 active:scale-[0.98]"
         >
           <svg v-if="isUploading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
           {{ isUploading ? '处理中...' : '提交解析' }}

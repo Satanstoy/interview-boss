@@ -1,54 +1,81 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-4">
     <!-- Config panel -->
-    <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-xl border border-orange-200 dark:border-orange-800/50 p-6 space-y-6">
-      <h2 class="text-lg font-bold text-ink-800 dark:text-ink-100">配置抽测</h2>
+    <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-2xl border border-orange-200 dark:border-orange-800/50 shadow-sm overflow-hidden">
 
-      <!-- Category selection -->
-      <div>
-        <label class="text-sm font-semibold text-ink-600 dark:text-ink-400 mb-2 block">选择领域</label>
-        <div class="flex flex-wrap gap-2">
-          <button
-            @click="selectedCat = ''"
-            class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-            :class="selectedCat === '' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
-          >全部领域</button>
-          <button
-            v-for="(cnt, cat) in popularTags" :key="cat"
-            @click="selectedCat = cat"
-            class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-            :class="selectedCat === cat ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
-          >{{ cat }} <span class="opacity-50 ml-0.5">{{ cnt }}</span></button>
-        </div>
-      </div>
-
-      <!-- Difficulty selection -->
-      <div>
-        <label class="text-sm font-semibold text-ink-600 dark:text-ink-400 mb-2 block">难度</label>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="opt in difficultyOptions" :key="opt.value"
-            @click="selectedDifficulty = opt.value"
-            class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-            :class="selectedDifficulty === opt.value ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
-          >{{ opt.label }}</button>
-        </div>
-      </div>
-
-      <!-- Count -->
-      <div>
-        <label class="text-sm font-semibold text-ink-600 dark:text-ink-400 mb-2 block">题目数量</label>
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 px-5 py-4 border-b border-orange-100 dark:border-orange-800/30">
         <div class="flex items-center gap-3">
-          <button @click="questionCount = Math.max(1, questionCount - 1)" class="w-9 h-9 rounded-lg border border-surface-200 dark:border-ink-600 text-ink-600 dark:text-ink-400 hover:bg-surface-50 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">-</button>
-          <input v-model.number="questionCount" type="number" min="1" max="50" class="w-20 text-center border border-surface-300 dark:border-ink-600 rounded-lg px-2 py-1.5 text-sm bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-orange-500 focus:border-orange-500 dark:focus:ring-orange-400 dark:focus:border-orange-400" />
-          <button @click="questionCount = Math.min(50, questionCount + 1)" class="w-9 h-9 rounded-lg border border-surface-200 dark:border-ink-600 text-ink-600 dark:text-ink-400 hover:bg-surface-50 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">+</button>
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-sm">
+            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">模拟面试</h3>
+            <p class="text-xs text-ink-500 dark:text-ink-400">选择领域和难度，开始练习</p>
+          </div>
         </div>
       </div>
 
-      <!-- Start button -->
-      <button @click="startQuiz" class="w-full bg-orange-600 dark:bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 dark:hover:bg-orange-700 transition text-base shadow-sm">
-        开始抽测
-      </button>
+      <div class="p-5 space-y-5">
+        <!-- Category selection -->
+        <div>
+          <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+            选择领域
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              @click="selectedCat = ''"
+              class="text-xs px-3 py-1.5 rounded-full border transition-colors"
+              :class="selectedCat === '' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+            >全部领域</button>
+            <button
+              v-for="(cnt, cat) in popularTags" :key="cat"
+              @click="selectedCat = cat"
+              class="text-xs px-3 py-1.5 rounded-full border transition-colors"
+              :class="selectedCat === cat ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+            >{{ cat }} <span class="opacity-50 ml-0.5">{{ cnt }}</span></button>
+          </div>
+        </div>
+
+        <!-- Difficulty + Count row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Difficulty selection -->
+          <div>
+            <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              难度
+            </label>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="opt in difficultyOptions" :key="opt.value"
+                @click="selectedDifficulty = opt.value"
+                class="text-xs px-3 py-1.5 rounded-full border transition-colors"
+                :class="selectedDifficulty === opt.value ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+
+          <!-- Count -->
+          <div>
+            <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+              题目数量
+            </label>
+            <div class="inline-flex items-center rounded-xl border border-surface-200 dark:border-ink-600 overflow-hidden bg-white dark:bg-ink-800">
+              <button @click="questionCount = Math.max(1, questionCount - 1)" class="w-10 h-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">-</button>
+              <input v-model.number="questionCount" type="number" min="1" max="50" class="w-14 text-center border-x border-surface-200 dark:border-ink-600 py-2 text-sm bg-transparent text-ink-800 dark:text-ink-100 focus:ring-0 focus:border-orange-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+              <button @click="questionCount = Math.min(50, questionCount + 1)" class="w-10 h-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">+</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Start button -->
+        <button @click="startQuiz" class="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold py-3 rounded-xl hover:from-orange-600 hover:to-amber-600 transition-all text-sm shadow-md hover:shadow-lg active:scale-[0.99] flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          开始抽测
+        </button>
+      </div>
     </div>
 
     <!-- Quiz mode -->
@@ -88,9 +115,9 @@
 
       <!-- Questions -->
       <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-orange-200 dark:border-orange-800/50 rounded-xl overflow-hidden bg-white dark:bg-surface-800 shadow-sm">
-        <div class="p-5 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/30 dark:to-amber-900/30">
-          <div class="flex items-start gap-4">
-            <div class="flex flex-col items-center justify-center bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-bold rounded-lg p-3 min-w-[56px] border border-orange-200 dark:border-orange-800/50">
+        <div class="p-3.5 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/30 dark:to-amber-900/30">
+          <div class="flex items-start gap-3">
+            <div class="flex flex-col items-center justify-center bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-bold rounded-lg p-2 min-w-[44px] border border-orange-200 dark:border-orange-800/50">
               <span class="text-xs font-normal text-orange-400 dark:text-orange-500">第</span>
               <span class="text-xl leading-none">{{ qIdx + 1 }}</span>
               <span class="text-xs font-normal text-orange-400 dark:text-orange-500">题</span>
@@ -114,7 +141,7 @@
         </div>
 
         <!-- User answer input -->
-        <div class="px-5 py-4 border-t border-orange-100 dark:border-orange-800/50 bg-white dark:bg-surface-800">
+        <div class="px-4 py-3 border-t border-orange-100 dark:border-orange-800/50 bg-white dark:bg-surface-800">
           <label class="text-xs font-semibold text-ink-500 dark:text-ink-400 mb-1.5 block">你的回答</label>
           <textarea
             v-model="q._userAnswer"

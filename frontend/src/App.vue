@@ -129,6 +129,7 @@
       </div>
       <!-- Resize handle: positioned via JS to track sidebar edge -->
       <div
+        v-show="!sidebarCollapsed"
         ref="resizeHandleRef"
         class="resize-handle hidden lg:flex"
         :class="{ 'resize-handle--collapsed': sidebarCollapsed, 'resize-handle--dragging': isResizing }"
@@ -288,7 +289,7 @@
               <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-4">
                 <template v-if="interviewSeasons.length > 0">
                   <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
-                  <select v-model="filterSeason" class="border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-200 focus:ring-primary-400 focus:border-primary-400">
+                  <select v-model="filterSeason" class="select-styled px-3 py-1.5 text-xs">
                     <option value="">全部</option>
                     <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
                   </select>

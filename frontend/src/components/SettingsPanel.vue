@@ -239,15 +239,19 @@
             <!-- ═══ Global settings (Admin only) ═══ -->
             <template v-if="isAdmin">
               <!-- General settings -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="space-y-3.5 p-5 rounded-2xl border border-surface-200 dark:border-ink-700 bg-gradient-to-b from-surface-50/50 to-white dark:from-surface-800/50 dark:to-surface-800">
+                <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 uppercase tracking-wider flex items-center gap-2">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                  基础设置
+                </h3>
                 <div>
                   <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">当前招聘季</label>
-                  <select v-model="form.active_season" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200">
+                  <select v-model="form.active_season" class="select-styled w-full px-3.5 py-2.5 bg-surface-50 dark:bg-surface-900">
                     <option value="">未设置</option>
                     <option v-for="s in seasons" :key="s" :value="s">{{ s }}</option>
                   </select>
                   <div class="mt-2 flex gap-2">
-                    <input v-model="newSeason" placeholder="新增招聘季" class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+                    <input v-model="newSeason" placeholder="新增招聘季" class="flex-1 min-w-0 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
                     <button @click="addSeason" class="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-3 py-2 rounded-xl hover:bg-primary-100 dark:hover:bg-primary-900/50 transition font-medium whitespace-nowrap border border-primary-200 dark:border-primary-800">添加</button>
                   </div>
                 </div>
