@@ -289,10 +289,12 @@
               <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-4">
                 <template v-if="interviewSeasons.length > 0">
                   <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
-                  <select v-model="filterSeason" class="select-styled px-3 py-1.5 text-xs">
-                    <option value="">全部</option>
-                    <option v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</option>
-                  </select>
+                  <RoundedSelect
+                    v-model="filterSeason"
+                    :options="[{ value: '', label: '全部' }, ...interviewSeasons.map(s => ({ value: s, label: s }))]"
+                    size="sm"
+                    trigger-class="min-w-[100px]"
+                  />
                   <span class="text-surface-300 dark:text-ink-600">|</span>
                 </template>
                 <button
@@ -576,6 +578,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import AnalyticsSidebar from './components/AnalyticsSidebar.vue'
 import TabBar from './components/TabBar.vue'
 import SearchFilterBar from './components/SearchFilterBar.vue'
+import RoundedSelect from './components/RoundedSelect.vue'
 import DataTable from './components/DataTable.vue'
 import MasterBankList from './components/MasterBankList.vue'
 import MockInterview from './components/MockInterview.vue'

@@ -16,10 +16,14 @@
       <div class="flex items-center gap-1">
         <input v-if="type === 'text'" v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200" @keyup.enter="save" />
         <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200"></textarea>
-        <select v-else-if="type === 'select'" v-model="editValue" class="select-styled px-2 py-1 text-sm">
-          <option value="">未提供</option>
-          <option v-for="opt in options" :key="opt" :value="opt">{{ opt }}</option>
-        </select>
+        <RoundedSelect
+          v-else-if="type === 'select'"
+          v-model="editValue"
+          :options="[{ value: '', label: '未提供' }, ...options.map(opt => ({ value: opt, label: opt }))]"
+          size="sm"
+          wrapper-class="flex-1"
+          trigger-class="w-full"
+        />
         <input v-else v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200" @keyup.enter="save" />
         <div class="flex gap-1 shrink-0">
           <button @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 text-sm font-medium" title="保存">保存</button>
@@ -34,6 +38,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { validateTextField } from '../utils/validate.js'
+import RoundedSelect from './RoundedSelect.vue'
 
 const props = defineProps({
   row: { type: Object, required: true },

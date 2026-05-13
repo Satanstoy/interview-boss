@@ -246,10 +246,12 @@
                 </h3>
                 <div>
                   <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">当前招聘季</label>
-                  <select v-model="form.active_season" class="select-styled w-full px-3.5 py-2.5 bg-surface-50 dark:bg-surface-900">
-                    <option value="">未设置</option>
-                    <option v-for="s in seasons" :key="s" :value="s">{{ s }}</option>
-                  </select>
+                  <RoundedSelect
+                    v-model="form.active_season"
+                    :options="[{ value: '', label: '未设置' }, ...seasons.map(s => ({ value: s, label: s }))]"
+                    wrapper-class="w-full"
+                    trigger-class="w-full bg-surface-50 dark:bg-surface-900"
+                  />
                   <div class="mt-2 flex gap-2">
                     <input v-model="newSeason" placeholder="新增招聘季" class="flex-1 min-w-0 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
                     <button @click="addSeason" class="text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-3 py-2 rounded-xl hover:bg-primary-100 dark:hover:bg-primary-900/50 transition font-medium whitespace-nowrap border border-primary-200 dark:border-primary-800">添加</button>
@@ -378,6 +380,7 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '../api/index.js'
+import RoundedSelect from './RoundedSelect.vue'
 import { validateSeason, validateBaseUrl } from '../utils/validate.js'
 import { useToast } from '../composables/useNotification.js'
 

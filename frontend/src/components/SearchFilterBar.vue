@@ -21,21 +21,27 @@
         </svg>
       </button>
     </div>
-    <select
-      :value="filterDifficulty"
-      @change="$emit('update:filterDifficulty', $event.target.value)"
-      class="select-styled px-4 py-2 shadow-card"
-    >
-      <option value="">全部难度</option>
-      <option value="L1">L1 - 基础</option>
-      <option value="L2">L2 - 中等</option>
-      <option value="L3">L3 - 困难</option>
-    </select>
+    <RoundedSelect
+      :model-value="filterDifficulty"
+      @update:model-value="$emit('update:filterDifficulty', $event)"
+      :options="difficultyOptions"
+      placeholder="全部难度"
+      size="md"
+      trigger-class="shadow-card min-w-[120px]"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
+import RoundedSelect from './RoundedSelect.vue'
+
+const difficultyOptions = [
+  { value: '', label: '全部难度' },
+  { value: 'L1', label: 'L1 - 基础' },
+  { value: 'L2', label: 'L2 - 中等' },
+  { value: 'L3', label: 'L3 - 困难' },
+]
 
 const props = defineProps({
   searchQuery: { type: String, default: '' },
