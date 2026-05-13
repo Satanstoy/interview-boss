@@ -14,6 +14,16 @@ export const authLogout = async () => {
   } catch { /* 忽略网络错误，前端仍会清除本地状态 */ }
 }
 
+// ── Email Auth ──
+export const sendVerifyCode = (email, purpose) => post(`${API}/auth/send-code`, { email, purpose })
+export const authRegisterWithEmail = (email, code, username, password) => post(`${API}/auth/register-with-email`, { email, code, username, password })
+export const authLoginWithEmail = (email, code) => post(`${API}/auth/login-with-email`, { email, code })
+
+// ── Email Binding ──
+export const getMyEmail = () => get(`${API}/profile/email`)
+export const sendBindCode = (email) => post(`${API}/profile/send-bind-code`, { email })
+export const bindEmail = (email, code) => post(`${API}/profile/bind-email`, { email, code })
+
 // ── Data fetching ──
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
 export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
@@ -47,11 +57,14 @@ export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`, null, { timeout: 180_000 })
+export const useReferenceAnswer = (id) => post(`${API}/master-bank/use-reference-answer/${id}`, null, { timeout: 30_000 })
+export const saveUserAnswer = (id, answer) => put(`${API}/master-bank/save-user-answer/${id}`, { answer })
 export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
 export const updateQuestion = (id, data) => put(`${API}/master-bank/${id}`, data)
 export const splitQuestion = (id, originalQuestion) => post(`${API}/master-bank/split-question/${id}`, { original_question: originalQuestion })
+export const deleteOriginalQuestion = (id, originalQuestion) => post(`${API}/master-bank/delete-original-question/${id}`, { original_question: originalQuestion })
 export const mergeQuestion = (id, originalQuestion, targetId, targetCat1 = '', targetCat2 = '') => post(`${API}/master-bank/merge-question/${id}`, { original_question: originalQuestion, target_id: targetId, target_cat1: targetCat1, target_cat2: targetCat2 })
 export const searchMasterBank = (q, excludeId) => {
   const params = new URLSearchParams({ q: q || '', limit: '20' })
@@ -88,7 +101,16 @@ export const switchPosition = (position) => put(`${API}/profile/position`, { pos
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })
 export const switchMyPosition = (position) => put(`${API}/profile/my-position`, { position })
 export const fetchPositions = () => get(`${API}/positions`)
+export const deletePosition = (position) => del(`${API}/profile/position/${encodeURIComponent(position)}`)
 export const createPosition = (name, description = '') => post(`${API}/positions`, { name, description })
+
+// ── Taxonomy AI Suggestion ──
+export const generateTaxonomy = () => post(`${API}/profile/taxonomy/generate`, null, { timeout: 180_000 })
+export const confirmTaxonomy = (categories) => post(`${API}/profile/taxonomy/confirm`, { categories })
+export const savePersonalTaxonomy = (categories) => post(`${API}/profile/taxonomy/save-personal`, { categories })
+export const shareTaxonomy = (taxonomyId) => post(`${API}/profile/taxonomy/${taxonomyId}/share`)
+export const fetchPublicTaxonomies = () => get(`${API}/profile/taxonomy/public`)
+export const deletePublicTaxonomy = (taxonomyId) => del(`${API}/profile/taxonomy/${taxonomyId}/public`)
 
 // ── Per-user LLM Config ──
 export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)

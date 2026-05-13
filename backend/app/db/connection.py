@@ -395,6 +395,11 @@ def init_db():
         if "idx_qb_job_position" not in qb_idx:
             conn.execute("CREATE INDEX idx_qb_job_position ON question_bank(job_position)")
 
+        # ── 迁移：添加 question_manually_edited 标记（防止手动编辑被覆盖）──
+        qb_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()}
+        if "question_manually_edited" not in qb_col_set:
+            conn.execute("ALTER TABLE question_bank ADD COLUMN question_manually_edited INTEGER DEFAULT 0")
+
         # ── 初始化 current_job_position ──
         pos_exists = conn.execute("SELECT 1 FROM user_profile WHERE key = 'current_job_position'").fetchone()
         if not pos_exists:
@@ -444,12 +449,31 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        cursor.execute("PRAGMA index_list('taxonomy')")
-        tx_indexes = [row[1] for row in cursor.fetchall()]
-        if "idx_taxonomy_position" not in tx_indexes:
-            conn.execute("CREATE UNIQUE INDEX idx_taxonomy_position ON taxonomy(position_name)")
+        # 迁移：taxonomy 表增加权限相关字段
+        tx_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('taxonomy')").fetchall()}
+        if "source" not in tx_col_set:
+            conn.execute("ALTER TABLE taxonomy ADD COLUMN source TEXT DEFAULT 'system'")
+        if "owner_id" not in tx_col_set:
+            conn.execute("ALTER TABLE taxonomy ADD COLUMN owner_id INTEGER DEFAULT NULL")
+        if "is_public" not in tx_col_set:
+            conn.execute("ALTER TABLE taxonomy ADD COLUMN is_public INTEGER DEFAULT 0")
 
-        # ── user_question_view 表（用户个人标注：收藏/标签/笔记）──
+        # 更新现有数据的 source 字段
+        conn.execute("UPDATE taxonomy SET source = 'system' WHERE source IS NULL")
+
+        # 重建唯一索引：允许用户有自己的分类副本
+        # 先删除旧索引（如果存在）
+        try:
+            conn.execute("DROP INDEX IF EXISTS idx_taxonomy_position")
+        except Exception:
+            pass
+        # 创建新的复合唯一索引
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_taxonomy_position_owner
+            ON taxonomy(position_name, source, owner_id)
+        """)
+
+        # ── user_question_view 表（用户个人标注：收藏/标签/笔记/个人答案）──
         conn.execute('''
             CREATE TABLE IF NOT EXISTS user_question_view (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -458,6 +482,7 @@ def init_db():
                 is_starred INTEGER DEFAULT 0,
                 personal_tags TEXT DEFAULT '',
                 note TEXT DEFAULT '',
+                user_answer TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -502,6 +527,23 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN current_position_id INTEGER REFERENCES job_positions(id)")
         if "personal_position" not in users_columns:
             conn.execute("ALTER TABLE users ADD COLUMN personal_position TEXT")
+        if "email" not in users_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+
+        # ── 邮箱验证码表 ──
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_verification_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                code TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                user_id INTEGER,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_verification_codes(email, purpose, used)")
 
         # ── 数据迁移：question_bank.job_position → job_positions + question_position ──
         jp_count = conn.execute("SELECT COUNT(*) FROM job_positions").fetchone()[0]
@@ -574,6 +616,12 @@ def init_db():
             migrated_tx = conn.execute("SELECT COUNT(*) FROM taxonomy").fetchone()[0]
             logger.info(f"已迁移 {migrated_tx} 个岗位的 taxonomy 配置到 taxonomy 表")
 
+        # ── 迁移：user_question_view 新增 user_answer 列 ──
+        uqv_columns = [row[1] for row in cursor.execute("PRAGMA table_info(user_question_view)").fetchall()]
+        if "user_answer" not in uqv_columns:
+            conn.execute("ALTER TABLE user_question_view ADD COLUMN user_answer TEXT DEFAULT ''")
+            logger.info("已为 user_question_view 表添加 user_answer 列")
+
         # ── 迁移：question_bank.is_starred → user_question_view ──
         uqv_count = conn.execute("SELECT COUNT(*) FROM user_question_view").fetchone()[0]
         starred_count = conn.execute("SELECT COUNT(*) FROM question_bank WHERE is_starred = 1").fetchone()[0]
@@ -644,22 +692,22 @@ def init_db():
         conn.execute("DROP TABLE IF EXISTS master_question_bank")
         conn.execute("DROP TABLE IF EXISTS practice_history")
 
-        # ── 修复: question_bank.frequency 与 sources 数组长度不一致 ──
+        # ── 修复: question_bank.frequency 应等于 original_questions 数组长度 ──
         import json as _fix_json
-        _fix_rows = conn.execute("SELECT id, frequency, sources FROM question_bank").fetchall()
+        _fix_rows = conn.execute("SELECT id, frequency, original_questions FROM question_bank").fetchall()
         _fix_count = 0
         for _r in _fix_rows:
-            _qb_id, _freq, _sources_raw = _r[0], _r[1], _r[2]
+            _qb_id, _freq, _oqs_raw = _r[0], _r[1], _r[2]
             try:
-                _srcs = _fix_json.loads(_sources_raw) if _sources_raw else []
+                _oqs = _fix_json.loads(_oqs_raw) if _oqs_raw else []
             except Exception:
-                _srcs = []
-            _actual = len(_srcs)
+                _oqs = []
+            _actual = len(_oqs) if _oqs else _freq
             if _freq != _actual and _actual > 0:
                 conn.execute("UPDATE question_bank SET frequency = ? WHERE id = ?", (_actual, _qb_id))
                 _fix_count += 1
         if _fix_count > 0:
-            logger.info(f"已修复 {_fix_count} 条 question_bank 记录的 frequency 字段")
+            logger.info(f"已修复 {_fix_count} 条 question_bank 记录的 frequency 字段（基于 original_questions 计数）")
 
         # ── 修复: original_question_sources 中包含 sources 中不存在的 URL ──
         _oqs_rows = conn.execute("SELECT id, sources, original_question_sources FROM question_bank WHERE original_question_sources != '[]' AND original_question_sources IS NOT NULL").fetchall()
@@ -980,21 +1028,37 @@ def filter_original_question_sources_by_mode(oqs_list: list, bank_mode: str, use
     return result
 
 
-def get_taxonomy_for_position(position: str = None) -> dict:
-    """从 taxonomy 表读取岗位分类配置，fallback 链: position 行 → default 行 → 常量"""
+def get_taxonomy_for_position(position: str = None, user_id: int = None) -> dict:
+    """从 taxonomy 表读取岗位分类配置，fallback 链: 用户个人分类 → 系统默认分类 → 常量
+
+    Args:
+        position: 岗位名称
+        user_id: 用户ID（用于获取个人分类）
+    """
     import json as _json
     from app.core.prompts import DEFAULT_TAXONOMY
     if position is None:
         position = get_current_job_position()
     try:
         with get_db_connection() as conn:
-            # 1. 按岗位名查找
+            # 1. 优先查找用户个人分类
+            if user_id:
+                row = conn.execute(
+                    "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
+                    (position, user_id)
+                ).fetchone()
+                if row and row['categories_json']:
+                    return {"job_position": position, "categories": _json.loads(row['categories_json'])}
+
+            # 2. 查找系统默认分类
             row = conn.execute(
-                "SELECT categories_json FROM taxonomy WHERE position_name = ?", (position,)
+                "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'system'",
+                (position,)
             ).fetchone()
             if row and row['categories_json']:
                 return {"job_position": position, "categories": _json.loads(row['categories_json'])}
-            # 2. fallback 到默认行
+
+            # 3. fallback 到默认行
             row2 = conn.execute(
                 "SELECT position_name, categories_json FROM taxonomy WHERE is_default = 1"
             ).fetchone()
@@ -1002,22 +1066,44 @@ def get_taxonomy_for_position(position: str = None) -> dict:
                 return {"job_position": row2['position_name'], "categories": _json.loads(row2['categories_json'])}
     except Exception:
         pass
-    # 3. 最终 fallback 到代码常量
+    # 4. 最终 fallback 到代码常量
     return DEFAULT_TAXONOMY
 
 
-def save_taxonomy_for_position(position_name: str, categories: list):
-    """UPSERT taxonomy 到 taxonomy 表"""
+def save_taxonomy_for_position(position_name: str, categories: list, source: str = 'system', owner_id: int = None):
+    """UPSERT taxonomy 到 taxonomy 表
+
+    Args:
+        position_name: 岗位名称
+        categories: 分类列表
+        source: 来源 ('system' 或 'user')
+        owner_id: 用户ID (仅 user 来源时需要)
+    """
     import json as _json
     with get_db_connection() as conn:
         categories_json = _json.dumps(categories, ensure_ascii=False)
-        conn.execute(
-            "INSERT INTO taxonomy (position_name, categories_json, updated_at) "
-            "VALUES (?, ?, CURRENT_TIMESTAMP) "
-            "ON CONFLICT(position_name) DO UPDATE SET "
-            "categories_json = excluded.categories_json, updated_at = CURRENT_TIMESTAMP",
-            (position_name, categories_json)
-        )
+        if owner_id is not None:
+            # owner_id 不为 NULL 时，ON CONFLICT 正常工作
+            conn.execute(
+                "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(position_name, source, owner_id) DO UPDATE SET "
+                "categories_json = excluded.categories_json, updated_at = CURRENT_TIMESTAMP",
+                (position_name, categories_json, source, owner_id)
+            )
+        else:
+            # owner_id 为 NULL 时，SQLite 的 ON CONFLICT 不匹配 NULL，需要先 UPDATE 再 INSERT
+            cur = conn.execute(
+                "UPDATE taxonomy SET categories_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE position_name = ? AND source = ? AND owner_id IS NULL",
+                (categories_json, position_name, source)
+            )
+            if cur.rowcount == 0:
+                conn.execute(
+                    "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
+                    "VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP)",
+                    (position_name, categories_json, source)
+                )
         conn.commit()
 
 

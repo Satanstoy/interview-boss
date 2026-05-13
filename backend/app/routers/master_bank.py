@@ -14,7 +14,7 @@ from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode, filter_original_question_sources_by_mode
-from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest, UpdateQuestionRequest
+from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, DeleteOriginalQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest, UpdateQuestionRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user, raw_llm_call
 from app.services.clustering import generate_unified_question, match_new_questions
 from app.services.utils import normalize_category
@@ -79,7 +79,7 @@ async def get_master_bank(
         with get_db_connection() as conn:
             total = conn.execute(f"SELECT COUNT(*) {from_clause} {where_clause}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, qb.owner_id, qb.status, qb.job_position "
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, qb.owner_id, qb.status, qb.job_position "
                 f"{from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?",
                 params + [user['id'], page_size, offset]
             ).fetchall()
@@ -106,6 +106,8 @@ async def get_master_bank(
             raw_oqs = []
         d['original_question_sources'] = filter_original_question_sources_by_mode(raw_oqs, bank_mode, user['id'])
         d['is_personal'] = d.get('owner_id') is not None
+        d['has_reference_answer'] = bool(d.get('ai_answer') and '生成失败' not in d['ai_answer'])
+        d['user_answer'] = d.get('user_answer', '')
         result.append(d)
 
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -387,10 +389,17 @@ async def edit_question(question_id: int, req: UpdateQuestionRequest, user: dict
 
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             values = list(updates.values()) + [question_id]
-            conn.execute(
-                f"UPDATE question_bank SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                values
-            )
+            # 编辑代表题时标记为手动编辑，防止被自动重新生成覆盖
+            if 'question' in updates:
+                conn.execute(
+                    f"UPDATE question_bank SET {set_clause}, question_manually_edited = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values
+                )
+            else:
+                conn.execute(
+                    f"UPDATE question_bank SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values
+                )
 
             # 同步 questions_detail
             if 'question' in updates:
@@ -530,7 +539,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                 orig_qs_src.append({"question": personal_q_text, "sources": personal_sources})
                             conn.execute(
                                 "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (len(sources), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
+                                (len(orig_qs), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
                             )
                         merged_count += 1
                         # 删除已合并的个人题目
@@ -680,13 +689,13 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 elif len(new_orig) == 1:
                     cursor.execute(
                         "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (new_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                        (new_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
                 else:
                     cursor.execute(
                         "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
-                         len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                         len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
 
                 conn.commit()
@@ -698,31 +707,151 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
     try:
         new_id, remaining_orig, remaining_orig_src, old_id = await run_db(_split)
 
-        # 如果原聚类还有多题，重新生成统一问题
+        # 如果原聚类还有多题，重新生成统一问题（跳过手动编辑过的）
         if len(remaining_orig) >= 2:
-            try:
-                # 构建来源上下文
-                sources_ctx = []
-                for item in remaining_orig_src:
-                    s = item.get("sources", [{}])[0] if item.get("sources") else {}
-                    sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
-                unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx, user_id=admin['id'])
-                def _update_unified():
-                    with get_db_connection() as conn:
-                        conn.execute(
-                            "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (unified, old_id)
-                        )
-                        conn.commit()
-                await run_db(_update_unified)
-            except Exception as e:
-                logger.warning(f"拆分后重新生成统一问题失败: {e}")
+            def _check_manual():
+                with get_db_connection() as conn:
+                    row = conn.execute("SELECT question_manually_edited FROM question_bank WHERE id = ?", (old_id,)).fetchone()
+                    return row and row['question_manually_edited']
+            is_manual = await run_db(_check_manual)
+            if is_manual:
+                logger.info(f"聚类 {old_id} 代表题已手动编辑，跳过自动重新生成")
+            else:
+                try:
+                    # 构建来源上下文
+                    sources_ctx = []
+                    for item in remaining_orig_src:
+                        s = item.get("sources", [{}])[0] if item.get("sources") else {}
+                        sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
+                    unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx, user_id=admin['id'])
+                    def _update_unified():
+                        with get_db_connection() as conn:
+                            conn.execute(
+                                "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (unified, old_id)
+                            )
+                            conn.commit()
+                    await run_db(_update_unified)
+                except Exception as e:
+                    logger.warning(f"拆分后重新生成统一问题失败: {e}")
 
         return {"status": "success", "new_id": new_id, "message": "题目已拆分为独立题目"}
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("拆分题目失败")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+
+
+@router.post("/api/master-bank/delete-original-question/{question_id}")
+async def delete_original_question(question_id: int, req: DeleteOriginalQuestionRequest, user: dict = Depends(get_current_user)):
+    """从聚类中删除指定的原始题目（不创建独立题目），并清理相关数据"""
+    original_q = req.original_question.strip()
+    if not original_q:
+        raise HTTPException(status_code=400, detail="original_question 不能为空")
+
+    is_admin = user.get('is_admin', 0)
+    uid = user['id']
+
+    def _delete():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN")
+            try:
+                row = cursor.execute(
+                    "SELECT id, owner_id, original_questions, original_question_sources, sources FROM question_bank WHERE id = ?",
+                    (question_id,)
+                ).fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="未找到该题目")
+
+                # 权限检查：管理员可删任何，普通用户只能删自己的
+                if not is_admin:
+                    if row['owner_id'] is None:
+                        raise HTTPException(status_code=403, detail="无权删除公共题目中的问题")
+                    if str(row['owner_id']) != str(uid):
+                        raise HTTPException(status_code=403, detail="无权删除他人题目中的问题")
+
+                orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
+                orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
+
+                if original_q not in orig_qs:
+                    raise HTTPException(status_code=400, detail="该原始题目不在此聚类中")
+
+                # 从聚类中移除
+                new_orig = [q for q in orig_qs if q != original_q]
+                new_orig_src = [item for item in orig_qs_src if item.get('question') != original_q]
+
+                # 重新计算 sources
+                remaining_sources = []
+                seen = set()
+                for item in new_orig_src:
+                    for s in item.get('sources', []):
+                        key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                        if key not in seen:
+                            seen.add(key)
+                            remaining_sources.append(s)
+
+                # 删除 questions_detail 中对应的记录
+                cursor.execute("DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL", (original_q,))
+
+                if len(new_orig) == 0:
+                    # 聚类清空，删除整个条目
+                    cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                    cursor.execute("DELETE FROM user_question_view WHERE question_bank_id = ?", (question_id,))
+                    cursor.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
+                    cursor.execute("DELETE FROM user_practice_history WHERE question_bank_id = ?", (question_id,))
+                elif len(new_orig) == 1:
+                    # 只剩一个，简化为独立题目
+                    cursor.execute(
+                        "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (new_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
+                         len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+
+                conn.commit()
+                return new_orig, new_orig_src, question_id
+            except Exception:
+                conn.rollback()
+                raise
+
+    try:
+        remaining_orig, remaining_orig_src, old_id = await run_db(_delete)
+
+        # 如果聚类还有多题，重新生成统一问题（跳过手动编辑过的）
+        if len(remaining_orig) >= 2:
+            from app.services.clustering import generate_unified_question
+            def _check_manual():
+                with get_db_connection() as conn:
+                    r = conn.execute("SELECT question_manually_edited FROM question_bank WHERE id = ?", (old_id,)).fetchone()
+                    return r and r['question_manually_edited']
+            is_manual = await run_db(_check_manual)
+            if not is_manual:
+                try:
+                    sources_ctx = []
+                    for item in remaining_orig_src:
+                        s = item.get("sources", [{}])[0] if item.get("sources") else {}
+                        sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
+                    unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx, user_id=uid)
+                    def _update_unified():
+                        with get_db_connection() as conn:
+                            conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, old_id))
+                            conn.commit()
+                    await run_db(_update_unified)
+                except Exception as e:
+                    logger.warning(f"删除后重新生成统一问题失败: {e}")
+
+        msg = "题目已从聚类中删除" if remaining_orig else "聚类已完全删除"
+        return {"status": "success", "message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("删除原始题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 
 
@@ -740,11 +869,11 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
     def _merge():
         with get_db_connection() as conn:
             source = conn.execute(
-                "SELECT id, question, sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+                "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
                 (question_id,)
             ).fetchone()
             target = conn.execute(
-                "SELECT id, question, sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+                "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
                 (req.target_id,)
             ).fetchone()
             if not source:
@@ -777,14 +906,13 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             tgt_orig.append(original_q)
             tgt_orig_src.append({"question": original_q, "sources": moving_src})
 
-            # 更新目标的 sources（独立题合并时跳过，避免源 URL 重复）
-            if not is_standalone_merge:
-                seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
-                for s in moving_src:
-                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                    if key not in seen:
-                        seen.add(key)
-                        tgt_sources.append(s)
+            # 更新目标的 sources
+            seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
+            for s in moving_src:
+                key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                if key not in seen:
+                    seen.add(key)
+                    tgt_sources.append(s)
 
             # 可选：更新目标聚类类别
             cat_set = ""
@@ -799,7 +927,29 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             conn.execute(
                 f"UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP{cat_set} WHERE id = ?",
                 [json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
-                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_sources), *cat_params, req.target_id]
+                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), *cat_params, req.target_id]
+            )
+
+            # 转移 ai_answer（目标没有答案时才转移）
+            if source['ai_answer'] and not target['ai_answer']:
+                conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (source['ai_answer'], req.target_id))
+
+            # 转移收藏记录（跳过用户已在目标题目上的记录）
+            conn.execute(
+                "INSERT INTO user_question_view (user_id, question_bank_id, is_starred, personal_tags, note) "
+                "SELECT uqv.user_id, ?, uqv.is_starred, uqv.personal_tags, uqv.note "
+                "FROM user_question_view uqv WHERE uqv.question_bank_id = ? "
+                "AND NOT EXISTS (SELECT 1 FROM user_question_view t WHERE t.user_id = uqv.user_id AND t.question_bank_id = ?)",
+                (req.target_id, question_id, req.target_id)
+            )
+
+            # 转移练习记录（跳过用户已在目标题目上的记录）
+            conn.execute(
+                "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score, created_at) "
+                "SELECT uph.user_id, ?, uph.user_answer, uph.evaluation_result, uph.score, uph.created_at "
+                "FROM user_practice_history uph WHERE uph.question_bank_id = ? "
+                "AND NOT EXISTS (SELECT 1 FROM user_practice_history t WHERE t.user_id = uph.user_id AND t.question_bank_id = ?)",
+                (req.target_id, question_id, req.target_id)
             )
 
             # 从源聚类中移除
@@ -816,20 +966,22 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                         remaining_sources.append(s)
 
             if is_standalone_merge:
-                # 独立题合并后保留为独立题，不删除
-                pass
+                # 独立题合并后删除源（已完整并入目标）
+                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
             elif len(new_src_orig) == 0:
                 conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
             elif len(new_src_orig) == 1:
                 conn.execute(
                     "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_src_orig[0], len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    (new_src_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
             else:
                 conn.execute(
                     "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
-                     len(remaining_sources), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                     len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
 
             conn.commit()
@@ -846,31 +998,47 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
     try:
         src_remaining, src_remaining_src, src_id, tgt_all, tgt_all_src, tgt_id = await run_db(_merge)
 
-        # 重新生成源聚类的统一问题
-        if len(src_remaining) >= 2:
-            try:
-                sources_ctx = _build_sources_ctx(src_remaining_src)
-                unified = await generate_unified_question(src_remaining, sources_context=sources_ctx, user_id=admin['id'])
-                def _update_src():
-                    with get_db_connection() as conn:
-                        conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
-                        conn.commit()
-                await run_db(_update_src)
-            except Exception as e:
-                logger.warning(f"合并后重新生成源聚类统一问题失败: {e}")
+        # 检查哪些聚类被手动编辑过
+        def _check_manual_flags():
+            with get_db_connection() as conn:
+                flags = {}
+                for qid in [src_id, tgt_id]:
+                    row = conn.execute("SELECT question_manually_edited FROM question_bank WHERE id = ?", (qid,)).fetchone()
+                    flags[qid] = bool(row and row['question_manually_edited'])
+                return flags
+        manual_flags = await run_db(_check_manual_flags)
 
-        # 重新生成目标聚类的统一问题
+        # 重新生成源聚类的统一问题（跳过手动编辑过的）
+        if len(src_remaining) >= 2:
+            if manual_flags.get(src_id):
+                logger.info(f"源聚类 {src_id} 代表题已手动编辑，跳过自动重新生成")
+            else:
+                try:
+                    sources_ctx = _build_sources_ctx(src_remaining_src)
+                    unified = await generate_unified_question(src_remaining, sources_context=sources_ctx, user_id=admin['id'])
+                    def _update_src():
+                        with get_db_connection() as conn:
+                            conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
+                            conn.commit()
+                    await run_db(_update_src)
+                except Exception as e:
+                    logger.warning(f"合并后重新生成源聚类统一问题失败: {e}")
+
+        # 重新生成目标聚类的统一问题（跳过手动编辑过的）
         if len(tgt_all) >= 2:
-            try:
-                sources_ctx = _build_sources_ctx(tgt_all_src)
-                unified = await generate_unified_question(tgt_all, sources_context=sources_ctx, user_id=admin['id'])
-                def _update_tgt():
-                    with get_db_connection() as conn:
-                        conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
-                        conn.commit()
-                await run_db(_update_tgt)
-            except Exception as e:
-                logger.warning(f"合并后重新生成目标聚类统一问题失败: {e}")
+            if manual_flags.get(tgt_id):
+                logger.info(f"目标聚类 {tgt_id} 代表题已手动编辑，跳过自动重新生成")
+            else:
+                try:
+                    sources_ctx = _build_sources_ctx(tgt_all_src)
+                    unified = await generate_unified_question(tgt_all, sources_context=sources_ctx, user_id=admin['id'])
+                    def _update_tgt():
+                        with get_db_connection() as conn:
+                            conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
+                            conn.commit()
+                    await run_db(_update_tgt)
+                except Exception as e:
+                    logger.warning(f"合并后重新生成目标聚类统一问题失败: {e}")
 
         return {"status": "success", "message": "题目已移动到目标聚类"}
     except HTTPException:
@@ -878,6 +1046,50 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
     except Exception as e:
         logger.exception("合并题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+
+
+@router.post("/api/master-bank/use-reference-answer/{question_id}")
+async def use_reference_answer(question_id: int, user: dict = Depends(get_current_user)):
+    """将管理员的参考答案复制为用户的个人答案"""
+    def _get_question():
+        with get_db_connection() as conn:
+            return conn.execute("SELECT id, question, ai_answer FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+
+    row = await run_db(_get_question)
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    if not row['ai_answer'] or '生成失败' in row['ai_answer']:
+        raise HTTPException(status_code=404, detail="该题目暂无参考答案")
+
+    def _upsert_user_answer():
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
+                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
+                (user['id'], question_id, row['ai_answer'], row['ai_answer'])
+            )
+            conn.commit()
+
+    await run_db(_upsert_user_answer)
+    return {"status": "success", "answer": row['ai_answer']}
+
+
+@router.put("/api/master-bank/save-user-answer/{question_id}")
+async def save_user_answer(question_id: int, body: dict, user: dict = Depends(get_current_user)):
+    """保存用户的个人答案（手动编辑）"""
+    answer = body.get("answer", "")
+    def _upsert():
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
+                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
+                (user['id'], question_id, answer, answer)
+            )
+            conn.commit()
+    await run_db(_upsert)
+    return {"status": "success"}
 
 
 @router.post("/api/master-bank/generate-answer/{question_id}")
@@ -889,20 +1101,37 @@ async def generate_master_answer(question_id: int, user: dict = Depends(get_curr
     row = await run_db(_get)
     if not row:
         raise HTTPException(status_code=404)
-    # 如果已有有效答案（非失败标记），直接返回
-    if row['ai_answer'] and '生成失败' not in row['ai_answer']:
+
+    is_admin = user.get('is_admin', False)
+
+    # 管理员：如果已有有效答案，直接返回（兼容旧行为）
+    if is_admin and row['ai_answer'] and '生成失败' not in row['ai_answer']:
         return {"status": "success", "answer": row['ai_answer']}
 
     try:
         prompt = ANSWER_PROMPT.replace("{question}", row['question'])
         answer = await _call_llm_with_retry(prompt, user_id=user['id'])
 
-        def _update():
-            with get_db_connection() as conn:
-                conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
-                conn.commit()
+        if is_admin:
+            # 管理员：存入 question_bank.ai_answer（全局）
+            def _update():
+                with get_db_connection() as conn:
+                    conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
+                    conn.commit()
+            await run_db(_update)
+        else:
+            # 普通用户：存入 user_question_view.user_answer（个人）
+            def _upsert():
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
+                        "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
+                        (user['id'], question_id, answer, answer)
+                    )
+                    conn.commit()
+            await run_db(_upsert)
 
-        await run_db(_update)
         return {"status": "success", "answer": answer}
     except openai.AuthenticationError:
         raise HTTPException(status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。")

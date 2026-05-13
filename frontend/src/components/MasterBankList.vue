@@ -1,17 +1,21 @@
 <template>
-  <div ref="containerRef" class="flex flex-col flex-1 min-h-0 gap-4">
+  <div ref="containerRef" class="flex flex-col flex-1 min-h-0 gap-2">
     <BatchActionPanel
       :selected-count="selectedCount"
       :total-count="items.length"
       :actions="batchActions"
       @toggle-select-all="$emit('toggle-select-all')"
       @invert-selection="$emit('invert-selection')"
-    />
-
-    <div v-if="items.length > 0" class="flex gap-2">
-      <button @click="expandAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部展开</button>
-      <button @click="collapseAll" class="btn-ghost text-xs border border-surface-200 dark:border-ink-700 rounded-lg">全部收起</button>
-    </div>
+    >
+      <template v-if="items.length > 0" #default>
+        <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
+        <button @click="expandAll" class="btn-ghost text-xs">全部展开</button>
+        <button @click="collapseAll" class="btn-ghost text-xs">全部收起</button>
+      </template>
+      <template #right>
+        <slot name="actions" />
+      </template>
+    </BatchActionPanel>
 
     <div v-if="items.length === 0" class="text-center py-16 rounded-2xl border-2 border-dashed border-surface-200 dark:border-ink-700 bg-surface-50/50 dark:bg-surface-800/50">
       <svg class="w-14 h-14 text-ink-300 dark:text-ink-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -49,6 +53,8 @@
             @toggle-star="$emit('toggle-star', $event)"
             @retag="$emit('retag', $event)"
             @generate-answer="$emit('generate-answer', $event)"
+            @use-reference-answer="$emit('use-reference-answer', $event)"
+            @save-user-answer="$emit('save-user-answer', $event)"
             @save-field="$emit('save-field', $event)"
             @toggle-item="$emit('toggle-item', $event)"
             @practice="$emit('practice', $event)"
@@ -57,6 +63,7 @@
             @navigate-to-interview="$emit('navigate-to-interview', $event)"
             @delete="$emit('delete', $event)"
             @edit-question="$emit('edit-question', $event)"
+            @delete-original-question="$emit('delete-original-question', $event)"
           />
         </DynamicScrollerItem>
       </template>
@@ -80,7 +87,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question'])
 
 const containerRef = ref(null)
 let resizeObserver = null
@@ -99,9 +106,9 @@ const updateScrollerHeight = () => {
     aboveH += child.offsetHeight
   }
 
-  // Container gap (gap-4 = 16px between each pair of children above scroller)
+  // Container gap (gap-2 = 8px between each pair of children above scroller)
   const idx = Array.from(container.children).indexOf(scroller)
-  const gapPx = idx > 0 ? idx * 16 : 0
+  const gapPx = idx > 0 ? idx * 8 : 0
 
   // Navigate up: container → wrapper → panel (fixed height via CSS)
   const wrapper = container.parentElement

@@ -1,0 +1,182 @@
+<template>
+  <teleport to="body">
+    <transition name="fade">
+      <div v-if="visible" class="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4">
+        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')"></div>
+        <div class="relative bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-md max-h-[84vh] flex flex-col overflow-hidden animate-slide-up">
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-ink-700 shrink-0 bg-gradient-to-r from-primary-50/50 to-accent-50/30 dark:from-primary-900/20 dark:to-accent-900/10">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center">
+                <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              </div>
+              <h2 class="text-lg font-bold text-ink-800 dark:text-ink-100">个人信息</h2>
+            </div>
+            <button @click="emit('close')" class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-700 transition">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
+
+            <!-- 基本信息 -->
+            <div class="space-y-3 p-4 rounded-2xl border border-surface-200 dark:border-ink-700 bg-surface-50 dark:bg-surface-900">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-lg font-bold text-white">
+                  {{ user?.username?.[0]?.toUpperCase() || '?' }}
+                </div>
+                <div>
+                  <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
+                  <p class="text-xs text-ink-400 dark:text-ink-500 flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
+                    {{ user?.is_admin ? '管理员' : '普通用户' }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- 邮箱绑定 -->
+            <div class="space-y-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
+              <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                邮箱绑定
+              </h3>
+
+              <!-- 已绑定 -->
+              <div v-if="myEmail && !emailBinding.editing" class="flex items-center gap-3">
+                <span class="text-sm text-ink-700 dark:text-ink-200 font-mono">{{ myEmail }}</span>
+                <span class="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-lg">已绑定</span>
+                <button @click="startEmailBinding" class="ml-auto text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">更换</button>
+              </div>
+
+              <!-- 未绑定 -->
+              <div v-if="!myEmail && !emailBinding.editing" class="flex items-center gap-3">
+                <span class="text-sm text-ink-400 dark:text-ink-500">未绑定邮箱</span>
+                <button @click="startEmailBinding" class="ml-auto text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-3 py-1.5 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/50 transition font-medium border border-primary-200 dark:border-primary-800">立即绑定</button>
+              </div>
+
+              <!-- 绑定表单 -->
+              <div v-if="emailBinding.editing" class="space-y-3">
+                <div>
+                  <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">邮箱地址</label>
+                  <div class="flex gap-2">
+                    <input v-model="emailBinding.email" type="email" placeholder="your@email.com" class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+                    <button @click="onSendBindCode" :disabled="emailBinding.cooldown > 0 || !emailBinding.email.trim()" class="px-3 py-2.5 text-xs font-medium rounded-xl border border-primary-200 dark:border-primary-800 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition disabled:opacity-50 whitespace-nowrap">
+                      {{ emailBinding.cooldown > 0 ? `${emailBinding.cooldown}s` : '发送验证码' }}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">验证码</label>
+                  <input v-model="emailBinding.code" type="text" placeholder="6位数字" maxlength="6" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+                </div>
+                <div class="flex gap-2 pt-1">
+                  <button @click="onConfirmBindEmail" :disabled="emailBinding.saving || !emailBinding.code.trim()" class="btn-primary px-4 text-sm">
+                    {{ emailBinding.saving ? '绑定中...' : '确认绑定' }}
+                  </button>
+                  <button @click="emailBinding.editing = false" class="btn-secondary px-4 text-sm">取消</button>
+                </div>
+                <p v-if="emailBinding.error" class="text-xs text-red-500 dark:text-red-400">{{ emailBinding.error }}</p>
+              </div>
+
+              <p class="text-xs text-ink-400 dark:text-ink-500">绑定邮箱后可使用邮箱验证码登录</p>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="flex items-center justify-end px-6 py-4 border-t border-surface-100 dark:border-ink-700 bg-surface-50/80 dark:bg-surface-900/80 shrink-0">
+            <button @click="emit('close')" class="btn-secondary px-5">关闭</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+  </teleport>
+</template>
+
+<script setup>
+import { ref, reactive, watch } from 'vue'
+import { getMyEmail, sendBindCode, bindEmail } from '../api/index.js'
+import { useToast } from '../composables/useNotification.js'
+
+const toast = useToast()
+
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  user: { type: Object, default: null }
+})
+
+const emit = defineEmits(['close'])
+
+const myEmail = ref('')
+const emailBinding = reactive({
+  editing: false,
+  email: '',
+  code: '',
+  cooldown: 0,
+  saving: false,
+  error: ''
+})
+let emailCooldownTimer = null
+
+const loadMyEmail = async () => {
+  try {
+    const data = await getMyEmail()
+    myEmail.value = data.email || ''
+  } catch { /* ignore */ }
+}
+
+const startEmailBinding = () => {
+  emailBinding.editing = true
+  emailBinding.email = ''
+  emailBinding.code = ''
+  emailBinding.error = ''
+}
+
+const onSendBindCode = async () => {
+  if (emailBinding.cooldown > 0 || !emailBinding.email.trim()) return
+  emailBinding.error = ''
+  try {
+    await sendBindCode(emailBinding.email.trim())
+    emailBinding.cooldown = 60
+    emailCooldownTimer = setInterval(() => {
+      emailBinding.cooldown--
+      if (emailBinding.cooldown <= 0) {
+        clearInterval(emailCooldownTimer)
+        emailCooldownTimer = null
+      }
+    }, 1000)
+  } catch (e) {
+    emailBinding.error = e.message || '发送失败'
+  }
+}
+
+const onConfirmBindEmail = async () => {
+  if (emailBinding.saving || !emailBinding.code.trim()) return
+  emailBinding.error = ''
+  emailBinding.saving = true
+  try {
+    const result = await bindEmail(emailBinding.email.trim(), emailBinding.code)
+    myEmail.value = result.email
+    emailBinding.editing = false
+    toast.success('邮箱绑定成功')
+  } catch (e) {
+    emailBinding.error = e.message || '绑定失败'
+  } finally {
+    emailBinding.saving = false
+  }
+}
+
+watch(() => props.visible, (val) => {
+  if (val) {
+    loadMyEmail()
+    emailBinding.editing = false
+    emailBinding.error = ''
+  }
+})
+</script>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>

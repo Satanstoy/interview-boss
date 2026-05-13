@@ -2,7 +2,7 @@
   <div class="min-h-screen bg-surface-50 dark:bg-surface-900">
     <!-- Top bar -->
     <nav class="sticky top-0 z-50 bg-white/85 dark:bg-surface-900/85 backdrop-blur-xl border-b border-surface-200/60 dark:border-ink-700/40 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
-      <div class="max-w-[1440px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
+      <div class="max-w-[1920px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
         <h1 class="text-lg lg:text-xl font-serif font-normal tracking-tight text-ink-900 dark:text-ink-100">
           Interview<span class="text-primary-600 dark:text-primary-400">Boss</span>
         </h1>
@@ -17,6 +17,7 @@
             @logout="handleLogout"
             @bank-mode-changed="handleBankModeChanged"
             @show-review="showReviewPanel = true"
+            @show-profile="showProfile = true"
           />
           <!-- Dark mode toggle -->
           <button
@@ -49,8 +50,10 @@
       :active-season="activeSeason"
       :is-admin="currentUser?.is_admin"
       :is-building="isBuilding"
-      @close="showSettings = false"
+      @close="onSettingsClose"
       @update:active-season="activeSeason = $event"
+      @settings-saved="onSettingsSaved"
+      @position-changed="onPositionChanged"
       @build-master-bank="triggerBuildMasterBank"
     />
 
@@ -100,45 +103,86 @@
       </div>
     </div>
 
-    <main v-else class="p-3 lg:p-5 max-w-[1440px] mx-auto">
-      <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 lg:gap-8">
-      <AnalyticsSidebar
-        v-show="!sidebarCollapsed"
-        :analytics="analytics"
-        :master-bank="masterBank"
-        :popular-tags="popularTags"
-        :selected-tag="selectedTag"
-        :practice-stats="practiceStats"
-        :recommend-seed="recommendSeed"
-        @refresh="fetchAnalytics"
-        @select-tag="onSelectTag($event)"
-        @go-to-question="onGoToQuestion"
-        @refresh-recommend="recommendSeed++"
-        @toggle-collapse="toggleSidebar"
-      />
-
-      <div :class="sidebarCollapsed ? 'lg:col-span-4' : 'lg:col-span-3'" class="min-w-0 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden flex flex-col h-[calc(100vh-88px)]">
-        <div v-if="sidebarCollapsed" class="hidden lg:flex items-center border-b border-surface-200/80 dark:border-ink-700/60 px-2 py-1.5">
-          <button @click="toggleSidebar" class="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-colors" title="展开侧边栏">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
-          </button>
+    <main v-else class="p-3 lg:p-5 max-w-[1920px] mx-auto">
+      <div class="sidebar-layout flex gap-6 lg:gap-8">
+      <!-- Sidebar + resize handle wrapper -->
+      <div
+        ref="sidebarWrapperRef"
+        class="sidebar-wrapper hidden lg:block"
+        :style="{ width: sidebarCollapsed ? '0px' : sidebarWidth + 'px', flexShrink: 0 }"
+      >
+        <AnalyticsSidebar
+          v-show="!sidebarCollapsed"
+          :sidebar-collapsed="sidebarCollapsed"
+          :sidebar-width="sidebarWidth"
+          :analytics="analytics"
+          :master-bank="masterBank"
+          :popular-tags="popularTags"
+          :selected-tag="selectedTag"
+          :practice-stats="practiceStats"
+          :recommend-seed="recommendSeed"
+          @refresh="fetchAnalytics"
+          @select-tag="onSelectTag($event)"
+          @go-to-question="onGoToQuestion"
+          @refresh-recommend="recommendSeed++"
+        />
+      </div>
+      <!-- Resize handle: positioned via JS to track sidebar edge -->
+      <div
+        ref="resizeHandleRef"
+        class="resize-handle hidden lg:flex"
+        :class="{ 'resize-handle--collapsed': sidebarCollapsed, 'resize-handle--dragging': isResizing }"
+        :style="resizeHandleStyle"
+        @pointerdown="onResizeStart"
+      >
+        <div class="resize-handle__grip">
+          <span></span>
+          <span></span>
+          <span></span>
         </div>
+        <!-- Collapse arrow: click to hide sidebar -->
+        <button
+          v-if="!sidebarCollapsed"
+          class="resize-handle__collapse-btn"
+          @pointerdown.stop
+          @click.stop="sidebarCollapsed = true; localStorage.setItem('sidebar-collapsed', 'true')"
+          title="收起侧栏"
+        >
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Expand button: visible when sidebar is collapsed -->
+      <Transition name="expand-btn-fade">
+        <button
+          v-if="sidebarCollapsed"
+          ref="expandBtnRef"
+          class="sidebar-expand-btn hidden lg:flex"
+          @pointerdown="onExpandBtnDragStart"
+          title="展开侧栏（可拖拽调整宽度）"
+        >
+          <svg class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </Transition>
+
+      <div class="relative min-w-0 flex-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden flex flex-col h-[calc(100vh-88px)]">
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar">
           <SearchFilterBar
             v-if="activeTab === 'MasterBank'"
             :search-query="searchQuery"
             :filter-difficulty="filterDifficulty"
-            :show-starred-only="showStarredOnly"
-            :show-starred-toggle="activeTab === 'MasterBank'"
             @update:search-query="searchQuery = $event"
             @update:filter-difficulty="filterDifficulty = $event"
-            @update:show-starred-only="showStarredOnly = $event"
           />
 
           <!-- Sub-tag filter chips -->
-          <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-4">
+          <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
             <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
             <button
               v-for="st in availableSubTags"
@@ -154,55 +198,6 @@
             </button>
           </div>
 
-          <!-- Action bar -->
-          <div class="flex flex-wrap justify-between items-center mb-5 gap-3">
-            <h2 class="text-lg lg:text-xl font-bold text-ink-800 dark:text-ink-100 flex items-center gap-2">
-              {{ activeTab === 'JD' ? 'JD 筛选' : activeTab === 'Interview' ? '面经记录' : activeTab === 'MockInterview' ? '题目抽测' : activeTab === 'Import' ? '导入数据' : activeTab === 'KnowledgeGraph' ? '知识图谱' : '高频题库' }}
-              <span v-if="activeTab === 'MasterBank' && selectedTag !== '全部'" class="badge bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border border-sage-200 dark:border-sage-800 text-xs px-3 py-1">
-                筛选: {{ selectedTag }}
-              </span>
-            </h2>
-            <div class="flex flex-wrap gap-2">
-              <div v-if="activeTab === 'MasterBank'" class="flex items-center gap-2">
-                <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-sm">
-                  {{ isBuilding ? '重建中...' : '重建个人题库' }}
-                </button>
-                <div v-if="isBuilding" class="flex items-center gap-3">
-                  <div class="flex items-center gap-1.5">
-                    <template v-for="s in buildStepList" :key="s.key">
-                      <span
-                        class="inline-block w-2 h-2 rounded-full transition-colors duration-300"
-                        :class="s.active ? 'bg-primary-500 animate-pulse-slow' : s.done ? 'bg-primary-300 dark:bg-primary-600' : 'bg-surface-300 dark:bg-ink-600'"
-                        :title="s.label"
-                      ></span>
-                    </template>
-                  </div>
-                  <div class="w-40 h-2 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
-                    <div
-                      class="h-full bg-primary-500 rounded-full"
-                      :class="buildProgress.total > 0 ? 'transition-all duration-500 ease-out' : (buildProgress.message ? 'indeterminate-bar' : '')"
-                      :style="buildProgress.total > 0 ? { width: Math.round((buildProgress.current / buildProgress.total) * 100) + '%' } : { width: buildProgress.message ? undefined : '15%' }"
-                    ></div>
-                  </div>
-                  <span class="text-sm font-medium text-primary-600 dark:text-primary-400 whitespace-nowrap tabular-nums">
-                    <template v-if="buildProgress.total > 0">
-                      {{ buildProgress.message }} ({{ Math.round((buildProgress.current / buildProgress.total) * 100) }}%)
-                    </template>
-                    <template v-else-if="buildProgress.message">{{ buildProgress.message }}</template>
-                    <template v-else>准备中...</template>
-                  </span>
-                </div>
-              </div>
-              <button v-if="activeTab === 'MasterBank' && filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-sm">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-                刷题模式
-              </button>
-              <button v-if="!isDataLoading && activeTab !== 'Import'" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-sm">
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                {{ isDataLoading ? '加载中...' : '刷新数据' }}
-              </button>
-            </div>
-          </div>
 
           <!-- Error banner -->
           <div v-if="dataLoadError" class="mb-4 bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
@@ -375,6 +370,23 @@
                 </template>
               </DataTable>
 
+              <!-- Floating return button (appears next to highlighted row) -->
+              <Teleport to="body">
+                <Transition name="float-pop">
+                  <button
+                    v-if="activeTab === 'Interview' && returnTab && highlightInterviewId"
+                    ref="floatingReturnBtn"
+                    @click="handleReturn"
+                    class="fixed z-[200] flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 whitespace-nowrap"
+                    :style="floatingBtnStyle"
+                  >
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                    {{ returnToPracticeMode ? '返回刷题模式' : '返回题库' }}
+                    <svg class="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                </Transition>
+              </Teleport>
+
               <!-- MockInterview Tab -->
               <MockInterview
                 v-if="activeTab === 'MockInterview'"
@@ -409,16 +421,52 @@
                 @toggle-star="toggleStar"
                 @retag="retagQuestion"
                 @generate-answer="generateAnswer"
+                @use-reference-answer="useReferenceAnswer"
+                @save-user-answer="saveUserAnswer"
                 @save-field="saveFieldFromEvent"
-                @expand-all=""
-                @collapse-all=""
                 @practice="practiceQuestion = $event"
                 @split-question="splitQuestion"
                 @start-merge="startMerge"
                 @navigate-to-interview="onNavigateToInterview"
                 @delete="deleteQuestion"
                 @edit-question="editQuestion"
-              />
+                @delete-original-question="deleteOriginalQuestion"
+              >
+                <template #actions>
+                  <div v-if="isBuilding" class="flex items-center gap-2">
+                    <div class="flex items-center gap-1">
+                      <template v-for="s in buildStepList" :key="s.key">
+                        <span
+                          class="inline-block w-1.5 h-1.5 rounded-full transition-colors duration-300"
+                          :class="s.active ? 'bg-primary-500 animate-pulse-slow' : s.done ? 'bg-primary-300 dark:bg-primary-600' : 'bg-surface-300 dark:bg-ink-600'"
+                          :title="s.label"
+                        ></span>
+                      </template>
+                    </div>
+                    <div class="w-24 h-1.5 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
+                      <div
+                        class="h-full bg-primary-500 rounded-full"
+                        :class="buildProgress.total > 0 ? 'transition-all duration-500 ease-out' : (buildProgress.message ? 'indeterminate-bar' : '')"
+                        :style="buildProgress.total > 0 ? { width: Math.round((buildProgress.current / buildProgress.total) * 100) + '%' } : { width: buildProgress.message ? undefined : '15%' }"
+                      ></div>
+                    </div>
+                    <span class="text-xs font-medium text-primary-600 dark:text-primary-400 whitespace-nowrap tabular-nums">
+                      <template v-if="buildProgress.total > 0">{{ buildProgress.message }} ({{ Math.round((buildProgress.current / buildProgress.total) * 100) }}%)</template>
+                      <template v-else-if="buildProgress.message">{{ buildProgress.message }}</template>
+                      <template v-else>准备中...</template>
+                    </span>
+                  </div>
+                  <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
+                    {{ isBuilding ? '重建中...' : '重建题库' }}
+                  </button>
+                  <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
+                    刷题模式
+                  </button>
+                  <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
+                    刷新
+                  </button>
+                </template>
+              </MasterBankList>
             </div>
           </Transition>
         </div>
@@ -429,6 +477,7 @@
     <Toaster position="top-right" richColors closeButton />
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
+    <ProfilePanel :visible="showProfile" :user="currentUser" @close="showProfile = false" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" @navigate-to-interview="onNavigateToInterview" />
     <PracticeMode
@@ -535,6 +584,7 @@ import { Toaster } from 'vue-sonner'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import LoginModal from './components/LoginModal.vue'
 import UserMenu from './components/UserMenu.vue'
+import ProfilePanel from './components/ProfilePanel.vue'
 import AdminReview from './components/AdminReview.vue'
 import PracticePanel from './components/PracticePanel.vue'
 import PracticeMode from './components/PracticeMode.vue'
@@ -585,13 +635,152 @@ const interviewPageSize = ref(20)
 const activeSeason = ref('')
 const availableSeasons = ref([])
 const showSettings = ref(false)
+const showProfile = ref(false)
 const practiceStats = ref({})
 const recommendSeed = ref(0)
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
+const sidebarWidth = ref(Number(localStorage.getItem('sidebar-width')) || 320)
+const isResizing = ref(false)
+const resizeHandleRef = ref(null)
+const expandBtnRef = ref(null)
+const sidebarWrapperRef = ref(null)
+const SIDEBAR_MIN = 200
+const SIDEBAR_MAX = 480
+const SIDEBAR_COLLAPSE_THRESHOLD = 120
+
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
   localStorage.setItem('sidebar-collapsed', sidebarCollapsed.value)
 }
+
+function onResizeStart(e) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  isResizing.value = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+  const wasCollapsed = sidebarCollapsed.value
+
+  const handle = resizeHandleRef.value
+  if (handle) handle.setPointerCapture(e.pointerId)
+
+  const wrapperEl = sidebarWrapperRef.value
+  let rafId = null
+  let finalWidth = startWidth
+  let finalCollapsed = wasCollapsed
+
+  function onMove(ev) {
+    const delta = ev.clientX - startX
+    if (wasCollapsed) {
+      if (delta > 10) {
+        finalCollapsed = false
+        finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, delta))
+      } else {
+        return
+      }
+    } else {
+      const newWidth = startWidth + delta
+      if (newWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+        finalCollapsed = true
+        finalWidth = 0
+      } else {
+        finalCollapsed = false
+        finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, newWidth))
+      }
+    }
+    if (!rafId) {
+      rafId = requestAnimationFrame(() => {
+        rafId = null
+        if (wrapperEl) wrapperEl.style.width = finalWidth + 'px'
+        if (handle) handle.style.left = (finalWidth - 6) + 'px'
+      })
+    }
+  }
+
+  function onUp(ev) {
+    isResizing.value = false
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+    if (handle) handle.releasePointerCapture(ev.pointerId)
+    handle?.removeEventListener('pointermove', onMove)
+    handle?.removeEventListener('pointerup', onUp)
+    handle?.removeEventListener('pointercancel', onUp)
+    // Sync final state to reactive refs (one-time)
+    sidebarCollapsed.value = finalCollapsed
+    if (!finalCollapsed) {
+      sidebarWidth.value = finalWidth
+      localStorage.setItem('sidebar-width', finalWidth)
+    }
+    localStorage.setItem('sidebar-collapsed', finalCollapsed)
+  }
+
+  handle?.addEventListener('pointermove', onMove)
+  handle?.addEventListener('pointerup', onUp)
+  handle?.addEventListener('pointercancel', onUp)
+}
+
+// Drag-to-resize from the expand button when sidebar is collapsed
+function onExpandBtnDragStart(e) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()  // prevent the click handler from firing immediately
+  isResizing.value = true  // disable CSS transition immediately
+  const startX = e.clientX
+  let dragged = false
+
+  const btn = expandBtnRef.value
+  if (btn) btn.setPointerCapture(e.pointerId)
+
+  const wrapperEl = sidebarWrapperRef.value
+  const handle = resizeHandleRef.value
+  let rafId = null
+  let finalWidth = 0
+
+  function onMove(ev) {
+    const delta = ev.clientX - startX
+    if (delta > 10) {
+      dragged = true
+      finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, delta))
+      if (!rafId) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null
+          if (wrapperEl) wrapperEl.style.width = finalWidth + 'px'
+          if (handle) handle.style.left = (finalWidth - 6) + 'px'
+        })
+      }
+    }
+  }
+
+  function onUp(ev) {
+    isResizing.value = false
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+    if (btn) btn.releasePointerCapture(ev.pointerId)
+    btn?.removeEventListener('pointermove', onMove)
+    btn?.removeEventListener('pointerup', onUp)
+    btn?.removeEventListener('pointercancel', onUp)
+    if (!dragged) {
+      // It was a click, not a drag — toggle sidebar
+      toggleSidebar()
+    } else {
+      // Sync final state to reactive refs (one-time)
+      sidebarCollapsed.value = false
+      sidebarWidth.value = finalWidth
+      localStorage.setItem('sidebar-width', finalWidth)
+      localStorage.setItem('sidebar-collapsed', 'false')
+    }
+  }
+
+  btn?.addEventListener('pointermove', onMove)
+  btn?.addEventListener('pointerup', onUp)
+  btn?.addEventListener('pointercancel', onUp)
+}
+
+const resizeHandleStyle = computed(() => {
+  // Position the handle at the sidebar's right edge (centered on the edge)
+  if (sidebarCollapsed.value) {
+    return { left: '0px' }
+  }
+  return { left: (sidebarWidth.value - 6) + 'px' }
+})
 
 // ── Auth state ──
 const currentUser = ref(null)
@@ -602,6 +791,65 @@ const practiceQuestion = ref(null)
 const showPracticeMode = ref(false)
 const practiceModeIndex = ref(0)
 const highlightInterviewId = ref(null)
+const returnTab = ref(null)
+const returnToPracticeMode = ref(false)
+const floatingReturnBtn = ref(null)
+const floatingBtnStyle = ref({ display: 'none' })
+
+const positionFloatingBtn = () => {
+  const row = document.querySelector(`[data-row-id="${highlightInterviewId.value}"]`)
+  if (!row) { floatingBtnStyle.value = { display: 'none' }; return }
+  const rect = row.getBoundingClientRect()
+  const btnW = 140
+  const btnH = 28
+  let top = rect.top + rect.height / 2 - btnH / 2
+  let left = rect.right + 8
+  // 如果右侧放不下，放到行内右侧
+  if (left + btnW > window.innerWidth - 8) {
+    left = window.innerWidth - btnW - 8
+  }
+  // 如果左侧溢出
+  if (left < 8) left = 8
+  // 如果下方放不下
+  if (top + btnH > window.innerHeight - 8) {
+    top = window.innerHeight - btnH - 8
+  }
+  // 如果上方溢出
+  if (top < 8) top = 8
+  floatingBtnStyle.value = {
+    position: 'fixed',
+    top: top + 'px',
+    left: left + 'px',
+    display: 'flex'
+  }
+}
+
+watch(highlightInterviewId, async (id) => {
+  if (id) {
+    await nextTick()
+    await new Promise(r => setTimeout(r, 250))
+    positionFloatingBtn()
+    const onScroll = () => positionFloatingBtn()
+    window.addEventListener('scroll', onScroll, true)
+    setTimeout(() => {
+      window.removeEventListener('scroll', onScroll, true)
+      floatingBtnStyle.value = { display: 'none' }
+    }, 30000)
+  } else {
+    floatingBtnStyle.value = { display: 'none' }
+  }
+})
+
+const handleReturn = () => {
+  floatingBtnStyle.value = { display: 'none' }
+  const target = returnTab.value
+  const practice = returnToPracticeMode.value
+  returnTab.value = null
+  returnToPracticeMode.value = false
+  highlightInterviewId.value = null
+  activeTab.value = target
+  if (practice) showPracticeMode.value = true
+}
 
 // ── Selection composables ──
 const jdSelection = useSelection(() => jdData.value)
@@ -684,7 +932,18 @@ const filteredMasterBank = computed(() => {
   }
   if (searchQuery.value.trim()) {
     const query = searchQuery.value.trim().toLowerCase()
-    result = result.filter(q => (q.question || '').toLowerCase().includes(query) || (q.cat1 || '').toLowerCase().includes(query) || (q.tags || '').toLowerCase().includes(query))
+    result = result.filter(q => {
+      if ((q.question || '').toLowerCase().includes(query)) return true
+      if ((q.cat1 || '').toLowerCase().includes(query)) return true
+      if ((q.tags || '').toLowerCase().includes(query)) return true
+      if (q.original_questions && Array.isArray(q.original_questions)) {
+        return q.original_questions.some(oq => {
+          const text = typeof oq === 'string' ? oq : (oq.question || '')
+          return text.toLowerCase().includes(query)
+        })
+      }
+      return false
+    })
   }
   if (filterDifficulty.value) result = result.filter(q => (q.difficulty || '').includes(filterDifficulty.value))
   if (showStarredOnly.value) result = result.filter(q => q.is_starred)
@@ -943,6 +1202,10 @@ const onSubmitted = () => {
 
 const onTabChange = (tab) => {
   activeTab.value = tab
+  returnTab.value = null
+  returnToPracticeMode.value = false
+  highlightInterviewId.value = null
+  floatingBtnStyle.value = { display: 'none' }
 }
 
 const onSelectTag = (tag) => {
@@ -984,7 +1247,12 @@ const onNavigateToInterview = async (source) => {
     return
   }
 
-  // 切换到面经库 tab
+  // 记录来源 tab 并切换到面经库
+  returnTab.value = activeTab.value
+  if (showPracticeMode.value) {
+    returnToPracticeMode.value = true
+    showPracticeMode.value = false
+  }
   activeTab.value = 'Interview'
 
   // 计算目标行在全量数据中的页码（清除筛选确保可见）
@@ -1002,7 +1270,7 @@ const onNavigateToInterview = async (source) => {
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
-  setTimeout(() => { highlightInterviewId.value = null }, 3000)
+  setTimeout(() => { highlightInterviewId.value = null; floatingBtnStyle.value = { display: 'none' } }, 30000)
 }
 
 const toggleSubTag = (tag) => {
@@ -1046,18 +1314,62 @@ const reprocessInterview = async (id) => {
 }
 
 const retagQuestion = async (question) => {
-  if (!await showConfirm('确定要重新分类该题目？')) return
+  // Find cluster siblings: entries sharing the same original question texts
+  const origTexts = new Set()
+  if (question.original_questions) {
+    question.original_questions.forEach(oq => {
+      const text = typeof oq === 'string' ? oq : (oq.question || '')
+      if (text) origTexts.add(text)
+    })
+  }
+  const siblings = origTexts.size > 0
+    ? masterBank.value.filter(q => q.id !== question.id && q.original_questions?.some(oq => {
+        const text = typeof oq === 'string' ? oq : (oq.question || '')
+        return origTexts.has(text)
+      }))
+    : []
+
+  const totalCount = 1 + siblings.length
+  const msg = siblings.length > 0
+    ? `确定要重新分类该题目及其 ${siblings.length} 个聚类关联题？共 ${totalCount} 题。`
+    : '确定要重新分类该题目？'
+  if (!await showConfirm(msg)) return
+
   question._isRetagging = true
+  siblings.forEach(s => { s._isRetagging = true })
   try {
     const data = await api.retagQuestion(question.id)
-    question.cat1 = data.data.cat1
-    question.cat2 = data.data.cat2
-    question.tags = data.data.tags
-    question.difficulty = data.data.difficulty
-    toast.success('分类成功')
+    const newCat1 = data.data.cat1
+    const newCat2 = data.data.cat2
+    const newTags = data.data.tags
+    const newDiff = data.data.difficulty
+
+    // Apply to the target question
+    question.cat1 = newCat1
+    question.cat2 = newCat2
+    question.tags = newTags
+    question.difficulty = newDiff
+
+    // Propagate to siblings
+    if (siblings.length > 0) {
+      await Promise.all(siblings.map(async (s) => {
+        try {
+          await api.retagQuestion(s.id)
+          s.cat1 = newCat1
+          s.cat2 = newCat2
+          s.tags = newTags
+          s.difficulty = newDiff
+        } catch (e) { /* sibling fail non-fatal */ }
+      }))
+    }
+
+    toast.success(siblings.length > 0 ? `已更新 ${totalCount} 个聚类关联题` : '分类成功')
     fetchAnalytics()
   } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
-  finally { question._isRetagging = false }
+  finally {
+    question._isRetagging = false
+    siblings.forEach(s => { s._isRetagging = false })
+  }
 }
 
 const saveField = async (tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey) => {
@@ -1084,10 +1396,34 @@ const generateAnswer = async (question) => {
   question._isLoadingAnswer = true
   try {
     const data = await api.generateAnswer(question.id)
-    question.ai_answer = data.answer
+    // 普通用户答案存入 user_answer，管理员存入 ai_answer
+    if (currentUser.value?.is_admin) {
+      question.ai_answer = data.answer
+    } else {
+      question.user_answer = data.answer
+    }
     toast.success('答案生成成功')
   } catch (e) { toast.error('生成失败：' + getFriendlyError(e)) }
   finally { question._isLoadingAnswer = false }
+}
+
+const useReferenceAnswer = async (question) => {
+  question._isLoadingAnswer = true
+  try {
+    const data = await api.useReferenceAnswer(question.id)
+    question.user_answer = data.answer
+    toast.success('已使用参考答案')
+  } catch (e) { toast.error('操作失败：' + getFriendlyError(e)) }
+  finally { question._isLoadingAnswer = false }
+}
+
+const saveUserAnswer = async ({ question, answer }) => {
+  try {
+    await api.saveUserAnswer(question.id, answer)
+    question.user_answer = answer
+    question._isEditingAnswer = false
+    toast.success('保存成功')
+  } catch (e) { toast.error('保存失败：' + getFriendlyError(e)) }
 }
 
 const deleteQuestion = async (question) => {
@@ -1096,6 +1432,17 @@ const deleteQuestion = async (question) => {
   try {
     await api.deleteMasterQuestion(question.id)
     toast.success('题目已删除')
+    fetchTableData()
+    fetchAnalytics()
+  } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
+}
+
+const deleteOriginalQuestion = async ({ question, originalQuestion }) => {
+  const shortQ = originalQuestion.length > 30 ? originalQuestion.slice(0, 30) + '...' : originalQuestion
+  if (!await showConfirm(`确定要从聚类中删除「${shortQ}」吗？此操作不可撤销。`, { title: '删除聚类题目', variant: 'danger' })) return
+  try {
+    await api.deleteOriginalQuestion(question.id, originalQuestion)
+    toast.success('已从聚类中删除')
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
@@ -1189,6 +1536,19 @@ const splitAsNew = async () => {
     mergeDialogVisible.value = false
     fetchTableData()
   } catch (e) { toast.error('拆分失败：' + getFriendlyError(e)) }
+}
+
+const onSettingsClose = () => {
+  showSettings.value = false
+  loadAllData()
+}
+
+const onSettingsSaved = () => {
+  loadAllData()
+}
+
+const onPositionChanged = () => {
+  loadAllData()
 }
 
 const triggerBuildMasterBank = async () => {
@@ -1342,4 +1702,201 @@ onUnmounted(() => cancelAllRequests())
 .tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .tab-fade-enter-from { opacity: 0; transform: translateY(10px); }
 .tab-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+
+.fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.fade-slide-enter-from { opacity: 0; transform: translateX(-8px); }
+.fade-slide-leave-to { opacity: 0; transform: translateX(-8px); }
+
+.float-pop-enter-active { transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.float-pop-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.float-pop-enter-from { opacity: 0; transform: scale(0.8) translateX(-8px); }
+.float-pop-leave-to { opacity: 0; transform: scale(0.8) translateX(-8px); }
+
+/* ── Sidebar resize handle ── */
+.sidebar-layout {
+  position: relative;
+}
+.sidebar-wrapper {
+  transition: width 0.15s ease;
+}
+.sidebar-wrapper:has(~ .resize-handle--dragging) {
+  transition: none;
+}
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 12px;
+  cursor: col-resize;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+}
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--color-surface-200);
+}
+:global(.dark) .resize-handle::before {
+  background: var(--color-ink-700);
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  background: transparent;
+  transition: background 0.15s ease;
+  border-radius: 2px;
+}
+.resize-handle:hover::after,
+.resize-handle--dragging::after {
+  background: var(--color-primary-400);
+  opacity: 0.5;
+}
+.resize-handle__grip {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 3px;
+  border-radius: 6px;
+  background: var(--color-white);
+  border: 1px solid var(--color-surface-200);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.resize-handle:hover .resize-handle__grip,
+.resize-handle--dragging .resize-handle__grip {
+  opacity: 1;
+}
+.resize-handle--collapsed .resize-handle__grip {
+  opacity: 1;
+}
+.resize-handle--collapsed:hover .resize-handle__grip,
+.resize-handle--collapsed.resize-handle--dragging .resize-handle__grip {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  transform: scale(1.05);
+}
+:global(.dark) .resize-handle__grip {
+  background: var(--color-surface-800);
+  border-color: var(--color-ink-600);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.resize-handle__grip span {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-surface-400);
+  transition: background 0.15s ease;
+}
+:global(.dark) .resize-handle__grip span {
+  background: var(--color-ink-500);
+}
+.resize-handle:hover .resize-handle__grip span,
+.resize-handle--dragging .resize-handle__grip span {
+  background: var(--color-primary-500);
+}
+
+/* ── Sidebar expand button (visible when collapsed) ── */
+.sidebar-expand-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-white);
+  border: 1px solid var(--color-surface-200);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  color: var(--color-surface-400);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  transition: color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.sidebar-expand-btn:hover {
+  color: var(--color-primary-500);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  transform: translateY(-50%) scale(1.1);
+}
+.sidebar-expand-btn:active {
+  transform: translateY(-50%) scale(0.95);
+}
+:global(.dark) .sidebar-expand-btn {
+  background: var(--color-surface-800);
+  border-color: var(--color-ink-600);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  color: var(--color-ink-400);
+}
+:global(.dark) .sidebar-expand-btn:hover {
+  color: var(--color-primary-400);
+}
+
+/* expand button fade transition */
+.expand-btn-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.expand-btn-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.expand-btn-fade-enter-from { opacity: 0; transform: translateY(-50%) scale(0.8); }
+.expand-btn-fade-leave-to { opacity: 0; transform: translateY(-50%) scale(0.8); }
+
+/* ── Sidebar collapse arrow button ── */
+.resize-handle__collapse-btn {
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 20px;
+  height: 36px;
+  border-radius: 6px 0 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-white);
+  border: 1px solid var(--color-surface-200);
+  border-right: none;
+  box-shadow: -1px 1px 4px rgba(0,0,0,0.06);
+  color: var(--color-surface-400);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease;
+  pointer-events: none;
+}
+.resize-handle:hover .resize-handle__collapse-btn {
+  opacity: 0.7;
+  pointer-events: auto;
+}
+.resize-handle__collapse-btn:hover {
+  opacity: 1 !important;
+  color: var(--color-primary-500);
+  background: var(--color-primary-50);
+}
+:global(.dark) .resize-handle__collapse-btn {
+  background: var(--color-surface-800);
+  border-color: var(--color-ink-600);
+  box-shadow: -1px 1px 4px rgba(0,0,0,0.2);
+  color: var(--color-ink-400);
+}
+:global(.dark) .resize-handle__collapse-btn:hover {
+  color: var(--color-primary-400);
+  background: var(--color-primary-900/30);
+}
 </style>

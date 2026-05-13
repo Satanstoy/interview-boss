@@ -74,6 +74,15 @@ cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并
 </details>
 
 <details>
+<summary><strong>个人答案管理</strong> — 每用户独立维护答案</summary>
+
+- 管理员的参考答案存储在公共题库（`question_bank.ai_answer`）
+- 普通用户拥有独立的个人答案（`user_question_view.user_answer`）
+- 管理员已有参考答案时，普通用户可一键「使用参考答案」复制到个人答案
+- 普通用户生成的答案存入个人表，不影响全局参考答案
+</details>
+
+<details>
 <summary><strong>模拟面试 + 答题评估</strong> — 实战练习闭环</summary>
 
 加权随机抽题（减少近期重复），支持分类和难度筛选。AI 从完整性、深度、准确性、逻辑性 4 个维度评分并给出改进建议。
@@ -440,7 +449,9 @@ sudo systemctl reload nginx
 |------|------|------|
 | GET | `/api/master-bank` | 题库列表（分页、筛选、排序） |
 | POST | `/api/master-bank/build` | 全量重建题库（SSE 进度） |
-| POST | `/api/master-bank/generate-answer/{id}` | AI 生成答案 |
+| POST | `/api/master-bank/generate-answer/{id}` | AI 生成答案（管理员存全局，普通用户存个人） |
+| POST | `/api/master-bank/use-reference-answer/{id}` | 使用参考答案（复制管理员答案到个人） |
+| PUT | `/api/master-bank/save-user-answer/{id}` | 保存用户个人答案 |
 | POST | `/api/master-bank/batch-generate` | 批量生成答案 |
 | POST | `/api/master-bank/random` | 随机抽题（模拟面试） |
 | POST | `/api/evaluate-answer` | AI 评估答题质量 |

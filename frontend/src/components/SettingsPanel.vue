@@ -118,21 +118,123 @@
               </h3>
               <div>
                 <div class="flex gap-2 flex-wrap mb-2">
-                  <button
-                    v-for="pos in availablePositions" :key="pos"
-                    @click="onSwitchPosition(pos)"
-                    :class="taxonomy.job_position === pos
-                      ? 'bg-accent-100 dark:bg-accent-900/40 text-accent-700 dark:text-accent-300 border-accent-300 dark:border-accent-700'
-                      : 'bg-white dark:bg-surface-900 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:border-accent-300 dark:hover:border-accent-700'"
-                    class="px-3 py-1.5 text-xs rounded-lg border transition-all font-medium"
-                  >{{ pos }}</button>
+                  <div v-for="pos in availablePositions" :key="pos" class="flex items-center gap-1">
+                    <button
+                      @click="onSwitchPosition(pos)"
+                      :class="taxonomy.job_position === pos
+                        ? 'bg-accent-100 dark:bg-accent-900/40 text-accent-700 dark:text-accent-300 border-accent-300 dark:border-accent-700'
+                        : 'bg-white dark:bg-surface-900 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:border-accent-300 dark:hover:border-accent-700'"
+                      class="px-3 py-1.5 text-xs rounded-lg border transition-all font-medium"
+                    >{{ pos }}</button>
+                    <button
+                      v-if="isAdmin"
+                      @click="onDeletePosition(pos)"
+                      class="p-1 text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 transition"
+                      title="删除岗位"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
                 </div>
                 <div class="flex gap-2">
                   <input v-model="newPositionInput" placeholder="新增岗位（最多30字）" maxlength="30" class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-accent-200 dark:focus:ring-accent-800 focus:border-accent-400 transition-all duration-200" />
                   <button @click="addPosition" class="text-xs bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 px-3 py-2 rounded-xl hover:bg-accent-100 dark:hover:bg-accent-900/50 transition font-medium whitespace-nowrap border border-accent-200 dark:border-accent-800">添加</button>
                 </div>
+                <!-- AI生成分类按钮 -->
+                <button
+                  @click="onGenerateTaxonomy"
+                  :disabled="aiTaxonomyLoading || !taxonomy.job_position"
+                  class="mt-2 w-full text-xs bg-gradient-to-r from-accent-500 to-primary-500 text-white px-4 py-2.5 rounded-xl hover:from-accent-600 hover:to-primary-600 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  <svg v-if="aiTaxonomyLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  {{ aiTaxonomyLoading ? 'AI 生成中...' : 'AI 智能生成分类' }}
+                </button>
               </div>
             </div>
+
+            <!-- AI分类预览弹窗 -->
+            <Teleport to="body">
+              <div v-if="aiTaxonomyPreview" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+                  <div class="px-6 py-4 border-b border-surface-200 dark:border-ink-700">
+                    <h3 class="text-lg font-bold text-ink-800 dark:text-ink-100">AI 推荐分类体系</h3>
+                    <p class="text-xs text-ink-500 dark:text-ink-400 mt-1">岗位：{{ aiTaxonomyPreview.position }}</p>
+                  </div>
+                  <div class="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                    <div v-for="(cat, i) in aiTaxonomyPreview.categories" :key="i" class="rounded-xl border border-surface-200 dark:border-ink-700 overflow-hidden">
+                      <div class="px-4 py-2.5 bg-accent-50 dark:bg-accent-900/20 font-semibold text-sm text-accent-700 dark:text-accent-300">
+                        {{ cat.cat1 }}
+                      </div>
+                      <div class="px-4 py-2 space-y-1">
+                        <div v-for="(child, j) in cat.children" :key="j" class="text-sm text-ink-600 dark:text-ink-300 pl-4">
+                          {{ child }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="px-6 py-4 border-t border-surface-200 dark:border-ink-700 flex gap-3 justify-end">
+                    <button @click="onCancelTaxonomy" class="px-4 py-2 text-sm rounded-xl border border-surface-300 dark:border-ink-600 text-ink-600 dark:text-ink-300 hover:bg-surface-100 dark:hover:bg-surface-700 transition">
+                      取消
+                    </button>
+                    <button @click="onConfirmTaxonomy" class="px-4 py-2 text-sm rounded-xl bg-accent-500 text-white hover:bg-accent-600 transition font-medium">
+                      采纳此分类
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
+
+            <!-- 公开分类弹窗 -->
+            <Teleport to="body">
+              <div v-if="showPublicTaxonomies" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+                  <div class="px-6 py-4 border-b border-surface-200 dark:border-ink-700 flex items-center justify-between">
+                    <div>
+                      <h3 class="text-lg font-bold text-ink-800 dark:text-ink-100">公开分类体系</h3>
+                      <p class="text-xs text-ink-500 dark:text-ink-400 mt-1">选择一个分类体系应用到当前岗位</p>
+                    </div>
+                    <button @click="showPublicTaxonomies = false" class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-700 transition">
+                      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                  <div class="flex-1 overflow-y-auto px-6 py-4">
+                    <!-- Loading -->
+                    <div v-if="publicTaxonomiesLoading" class="flex items-center justify-center py-8">
+                      <svg class="w-6 h-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </div>
+                    <!-- Empty -->
+                    <div v-else-if="publicTaxonomies.length === 0" class="text-center py-8 text-ink-400 dark:text-ink-500 text-sm">
+                      暂无公开分类
+                    </div>
+                    <!-- List -->
+                    <div v-else class="space-y-3">
+                      <div v-for="tax in publicTaxonomies" :key="tax.id"
+                        class="rounded-xl border border-surface-200 dark:border-ink-700 p-4 hover:border-accent-300 dark:hover:border-accent-700 transition"
+                      >
+                        <div class="flex items-center justify-between mb-2">
+                          <h4 class="text-sm font-semibold text-ink-800 dark:text-ink-100 cursor-pointer" @click="onUsePublicTaxonomy(tax)">{{ tax.position_name }}</h4>
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs text-ink-400 dark:text-ink-500">分享者: {{ tax.owner_name || '匿名' }}</span>
+                            <button v-if="isAdmin" @click.stop="onDeletePublicTaxonomy(tax)"
+                              class="p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+                              title="删除此公开分类">
+                              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5 cursor-pointer" @click="onUsePublicTaxonomy(tax)">
+                          <span v-for="(cat, i) in (tax.categories || [])" :key="i"
+                            class="text-xs bg-surface-100 dark:bg-surface-700 text-ink-600 dark:text-ink-300 px-2 py-0.5 rounded">
+                            {{ cat.cat1 }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
 
             <!-- ═══ Global settings (Admin only) ═══ -->
             <template v-if="isAdmin">
@@ -199,6 +301,28 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- 分类操作按钮 -->
+                <div class="flex gap-2 pt-2">
+                  <button
+                    @click="onSavePersonalTaxonomy"
+                    class="flex-1 text-xs bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-3 py-2 rounded-xl hover:bg-primary-100 dark:hover:bg-primary-900/50 transition font-medium border border-primary-200 dark:border-primary-800"
+                  >
+                    保存为个人分类
+                  </button>
+                  <button
+                    @click="onShareTaxonomy"
+                    class="flex-1 text-xs bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 px-3 py-2 rounded-xl hover:bg-accent-100 dark:hover:bg-accent-900/50 transition font-medium border border-accent-200 dark:border-accent-800"
+                  >
+                    分享分类
+                  </button>
+                  <button
+                    @click="showPublicTaxonomies = true"
+                    class="flex-1 text-xs bg-surface-100 dark:bg-surface-800 text-ink-600 dark:text-ink-400 px-3 py-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition font-medium border border-surface-300 dark:border-ink-600"
+                  >
+                    {{ isAdmin ? '使用与管理公开分类' : '使用公开分类' }}
+                  </button>
+                </div>
               </div>
             </template>
 
@@ -249,7 +373,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig } from '../api/index.js'
+import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '../api/index.js'
 import { validateSeason, validateBaseUrl } from '../utils/validate.js'
 import { useToast } from '../composables/useNotification.js'
 
@@ -269,6 +393,15 @@ const taxonomy = reactive({
   job_position: 'agent开发/大模型应用开发/大模型开发',
   categories: []
 })
+
+// ── AI Taxonomy Suggestion state ──
+const aiTaxonomyLoading = ref(false)
+const aiTaxonomyPreview = ref(null) // { position, categories }
+
+// ── Public Taxonomies state ──
+const showPublicTaxonomies = ref(false)
+const publicTaxonomies = ref([])
+const publicTaxonomiesLoading = ref(false)
 
 const emit = defineEmits(['close', 'update:activeSeason', 'settings-saved', 'position-changed', 'build-master-bank'])
 
@@ -450,6 +583,129 @@ const addPosition = async () => {
   await onSwitchPosition(pos)
 }
 
+const onDeletePosition = async (pos) => {
+  if (!confirm(`确定要删除岗位"${pos}"吗？`)) return
+  try {
+    await deletePosition(pos)
+    // 从列表中移除
+    availablePositions.value = availablePositions.value.filter(p => p !== pos)
+    // 如果删除的是当前岗位，切换到第一个可用岗位
+    if (taxonomy.job_position === pos && availablePositions.value.length > 0) {
+      await onSwitchPosition(availablePositions.value[0])
+    }
+    toast.success(`岗位"${pos}"已删除`)
+  } catch (e) {
+    toast.error(`删除失败: ${e.message}`)
+  }
+}
+
+// ── AI Taxonomy Suggestion ──
+const onGenerateTaxonomy = async () => {
+  if (!taxonomy.job_position) {
+    toast.warning('请先选择目标岗位')
+    return
+  }
+  aiTaxonomyLoading.value = true
+  try {
+    const data = await generateTaxonomy()
+    aiTaxonomyPreview.value = data
+  } catch (e) {
+    toast.error(`AI生成失败: ${e.message}`)
+  } finally {
+    aiTaxonomyLoading.value = false
+  }
+}
+
+const onConfirmTaxonomy = async () => {
+  if (!aiTaxonomyPreview.value) return
+  try {
+    await confirmTaxonomy(aiTaxonomyPreview.value.categories)
+    // 更新本地状态
+    taxonomy.categories = aiTaxonomyPreview.value.categories.map(c => ({ ...c, _open: false }))
+    aiTaxonomyPreview.value = null
+    toast.success('分类体系已更新')
+    emit('settings-saved')
+  } catch (e) {
+    toast.error(`保存失败: ${e.message}`)
+  }
+}
+
+const onCancelTaxonomy = () => {
+  aiTaxonomyPreview.value = null
+}
+
+// ── 保存为个人分类 ──
+const onSavePersonalTaxonomy = async () => {
+  if (!taxonomy.categories || taxonomy.categories.length === 0) {
+    toast.warning('没有可保存的分类')
+    return
+  }
+  try {
+    const validCategories = taxonomy.categories
+      .filter(c => c.cat1.trim())
+      .map(c => ({ cat1: c.cat1.trim(), children: c.children.filter(x => x.trim()) }))
+    await savePersonalTaxonomy(validCategories)
+    toast.success('已保存为个人分类')
+  } catch (e) {
+    toast.error(`保存失败: ${e.message}`)
+  }
+}
+
+// ── 分享分类 ──
+const onShareTaxonomy = async () => {
+  if (!taxonomy.categories || taxonomy.categories.length === 0) {
+    toast.warning('没有可分享的分类')
+    return
+  }
+  try {
+    // 先保存为个人分类
+    const validCategories = taxonomy.categories
+      .filter(c => c.cat1.trim())
+      .map(c => ({ cat1: c.cat1.trim(), children: c.children.filter(x => x.trim()) }))
+    const result = await savePersonalTaxonomy(validCategories)
+
+    // 然后分享
+    if (result.taxonomy && result.taxonomy.id) {
+      await shareTaxonomy(result.taxonomy.id)
+      toast.success('分类已分享')
+    }
+  } catch (e) {
+    toast.error(`分享失败: ${e.message}`)
+  }
+}
+
+// ── 获取公开分类 ──
+const loadPublicTaxonomies = async () => {
+  publicTaxonomiesLoading.value = true
+  try {
+    const data = await fetchPublicTaxonomies()
+    publicTaxonomies.value = data.taxonomies || []
+  } catch (e) {
+    toast.error(`获取公开分类失败: ${e.message}`)
+  } finally {
+    publicTaxonomiesLoading.value = false
+  }
+}
+
+// ── 使用公开分类 ──
+const onUsePublicTaxonomy = (publicTaxonomy) => {
+  taxonomy.categories = publicTaxonomy.categories.map(c => ({ ...c, _open: false }))
+  showPublicTaxonomies.value = false
+  toast.success(`已加载"${publicTaxonomy.position_name}"的分类`)
+}
+
+// ── 删除公开分类（管理员） ──
+const onDeletePublicTaxonomy = async (tax) => {
+  if (!confirm(`确定要删除"${tax.position_name}"的公开分类吗？`)) return
+  try {
+    await deletePublicTaxonomy(tax.id)
+    publicTaxonomies.value = publicTaxonomies.value.filter(t => t.id !== tax.id)
+    toast.success('已删除公开分类')
+  } catch (e) {
+    toast.error(`删除失败: ${e.message}`)
+  }
+}
+
 const form = reactive({
   active_season: '',
 })
@@ -489,6 +745,10 @@ watch(() => props.visible, (val) => {
     loadMyLLM()
     loadProfile()
   }
+})
+
+watch(showPublicTaxonomies, (val) => {
+  if (val) loadPublicTaxonomies()
 })
 
 const saveProfile = async () => {

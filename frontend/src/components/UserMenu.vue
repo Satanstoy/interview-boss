@@ -56,6 +56,19 @@
           <span v-if="pendingCount > 0" class="ml-auto bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs px-2 py-0.5 rounded-full font-bold">{{ pendingCount }}</span>
         </button>
 
+        <!-- Profile -->
+        <button
+          @click="$emit('show-profile'); showMenu = false"
+          class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
+        >
+          <div class="w-7 h-7 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+            <svg class="w-4 h-4 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+          </div>
+          个人信息
+        </button>
+
         <!-- Logout -->
         <button
           @click="handleLogout"
@@ -86,7 +99,7 @@ const props = defineProps({
   pendingCount: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed'])
+const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed', 'show-profile'])
 
 const showMenu = ref(false)
 

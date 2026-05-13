@@ -100,20 +100,23 @@
           <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-primary-200 dark:border-primary-700/50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-mono bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200 transition-all duration-200"></textarea>
           <div class="flex gap-2 justify-end mt-2">
             <button @click="question._isEditingAnswer = false" class="btn-secondary px-5">取消</button>
-            <button @click="$emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' })" class="btn-primary px-5">保存</button>
+            <button @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="btn-primary px-5">保存</button>
           </div>
         </div>
 
         <!-- View answer mode -->
         <div v-else>
-          <div v-if="question.ai_answer && !isFailedAnswer(question.ai_answer)" class="relative">
+          <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative">
             <div class="absolute top-0 right-0 flex gap-1.5 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = question.ai_answer" class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm">
                 编辑
               </button>
               <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white dark:bg-surface-700 border border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 text-ink-600 dark:text-ink-300 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 opacity-60 hover:opacity-100 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
+            </div>
+            <div v-if="question.user_answer && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
+              <span class="text-[10px] font-bold text-primary-500 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-800/50">个人答案</span>
             </div>
             <div class="text-ink-700 dark:text-ink-300 text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
           </div>
@@ -124,12 +127,16 @@
           </div>
 
           <div v-else class="text-center py-6">
-            <p v-if="isFailedAnswer(question.ai_answer)" class="text-red-500 dark:text-red-400 mb-3 text-sm flex items-center justify-center gap-1.5">
+            <p v-if="isFailedAnswer(displayAnswer)" class="text-red-500 dark:text-red-400 mb-3 text-sm flex items-center justify-center gap-1.5">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               上次生成失败，请重试。
             </p>
             <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
+              <button v-if="question.has_reference_answer && !question.user_answer" @click.stop="$emit('use-reference-answer', question)" class="px-6 py-2.5 text-sm font-medium rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all duration-200 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                使用参考答案
+              </button>
               <button @click.stop="$emit('generate-answer', question)" class="btn-primary px-6 py-2.5">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 AI 生成答案
@@ -167,13 +174,17 @@
                   {{ src.round === '未提供' ? '未知' : src.round }}
                   <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 font-bold" title="查看原文">[原文]</a>
                 </span>
-                <button v-if="isAdmin" @click.stop="$emit('split-question', { question, originalQuestion: src._origQuestion || question.question })"
+                <button v-if="isAdmin && dedupedSources.length > 1" @click.stop="$emit('split-question', { question, originalQuestion: src._origQuestion || question.question })"
                   class="text-[11px] bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 px-2 py-0.5 rounded-md border border-orange-200 dark:border-orange-800/50 hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-all">
                   独立
                 </button>
                 <button v-if="isAdmin" @click.stop="$emit('start-merge', { question, originalQuestion: src._origQuestion || question.question })"
                   class="text-[11px] bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/50 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-all">
                   合并到
+                </button>
+                <button v-if="canDelete" @click.stop="$emit('delete-original-question', { question, originalQuestion: src._origQuestion || question.question })"
+                  class="text-[11px] bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-md border border-red-200 dark:border-red-800/50 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all">
+                  删除
                 </button>
               </div>
             </div>
@@ -206,7 +217,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question'])
+const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question'])
 
 const parsedTags = computed(() => {
   const tags = props.question.tags
@@ -248,8 +259,13 @@ const difficultyClass = computed(() => {
   return DIFFICULTY_CLASSES.default
 })
 
+const displayAnswer = computed(() => {
+  // 优先显示个人答案，其次显示全局答案
+  return props.question.user_answer || props.question.ai_answer || ''
+})
+
 const cachedMarkdown = computed(() => {
-  return renderSafeMarkdown(props.question.ai_answer || '')
+  return renderSafeMarkdown(displayAnswer.value)
 })
 
 const hasSources = computed(() => {
