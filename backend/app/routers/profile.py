@@ -1,13 +1,17 @@
 import re
 import json
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from app.core.auth import get_admin_user, get_current_user
 from app.core.prompts import DEFAULT_TAXONOMY
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
 from app.models.schemas import ProfileUpdateRequest
+
+limiter = Limiter(key_func=get_remote_address)
 
 logger = logging.getLogger("interview-boss")
 
@@ -32,7 +36,11 @@ def _get_available_positions() -> list:
     """从 taxonomy + job_positions 合并读取所有岗位列表"""
     with get_db_connection() as conn:
         tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
-        pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+        # 排除已软删除的岗位（兼容 is_deleted 字段不存在的情况）
+        try:
+            pos_rows = conn.execute("SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name").fetchall()
+        except Exception:
+            pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
         seen = set()
         result = []
         for r in tax_rows:
@@ -74,7 +82,10 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
                 season_list.sort()
             # 合并岗位列表查询（避免在 async 上下文中阻塞）
             tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
-            pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+            try:
+                pos_rows = conn.execute("SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name").fetchall()
+            except Exception:
+                pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
             seen = set()
             positions = []
             for r in tax_rows:
@@ -104,7 +115,7 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
         or settings.get('current_job_position')
         or DEFAULT_TAXONOMY['job_position']
     )
-    taxonomy_data = await run_db(lambda: get_taxonomy_for_position(current_pos))
+    taxonomy_data = await run_db(lambda: get_taxonomy_for_position(current_pos, user_id=user['id']))
 
     return {
         "settings": {
@@ -290,8 +301,8 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
         or settings.get('current_job_position')
         or DEFAULT_TAXONOMY['job_position']
     )
-    # 从 taxonomy 表读取当前岗位的分类配置
-    taxonomy_data = get_taxonomy_for_position(current_pos)
+    # 从 taxonomy 表读取当前岗位的分类配置（优先用户个人分类）
+    taxonomy_data = get_taxonomy_for_position(current_pos, user_id=admin['id'])
 
     display_settings['current_job_position'] = current_pos
     display_settings['available_positions'] = available_positions
@@ -329,7 +340,7 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
                 raise ValueError("categories 字段必须是数组")
             position = tc.get("job_position", get_current_job_position())
             from app.db.connection import save_taxonomy_for_position
-            await run_db(lambda: save_taxonomy_for_position(position, tc["categories"]))
+            await run_db(lambda: save_taxonomy_for_position(position, tc["categories"], source='user', owner_id=admin['id']))
             del filtered["taxonomy_config"]  # 不写入 user_profile
         except (json.JSONDecodeError, ValueError, AttributeError) as e:
             raise HTTPException(status_code=400, detail=f"taxonomy_config 格式无效: {e}")
@@ -368,6 +379,130 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
 async def get_taxonomy(user: dict = Depends(get_current_user)):
     """获取当前岗位的分类体系配置（登录即可访问，不需要 admin）"""
     return await run_db(lambda: get_taxonomy_for_position())
+
+
+@router.post("/api/profile/taxonomy/generate")
+async def generate_taxonomy(user: dict = Depends(get_current_user)):
+    """调用LLM生成推荐的分类体系（不自动保存，需用户确认）"""
+    from app.services.taxonomy_suggest import generate_taxonomy_suggestion
+    from app.db.connection import get_user_job_position
+
+    # 获取用户的个人岗位，而不是全局岗位
+    _, position = await run_db(lambda: get_user_job_position(user['id']))
+    if not position:
+        raise HTTPException(status_code=400, detail="请先选择目标岗位")
+
+    try:
+        suggestion = await generate_taxonomy_suggestion(position, user_id=user['id'])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="AI生成超时，请稍后重试")
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"生成分类建议失败: {error_msg}")
+
+        # 区分不同类型的错误
+        if "500" in error_msg and "Internal Server Error" in error_msg:
+            detail = "AI服务暂时不可用，请稍后重试"
+        elif "Connection" in error_msg or "timeout" in error_msg.lower():
+            detail = "网络连接失败，请检查网络后重试"
+        elif "401" in error_msg or "403" in error_msg:
+            detail = "AI服务认证失败，请检查API配置"
+        else:
+            detail = f"AI生成失败: {error_msg[:100]}"
+
+        raise HTTPException(status_code=500, detail=detail)
+
+    return {"position": position, "categories": suggestion}
+
+
+@router.post("/api/profile/taxonomy/confirm")
+async def confirm_taxonomy(req: dict, user: dict = Depends(get_current_user)):
+    """用户确认采纳AI生成的分类体系（保存为用户个人分类）"""
+    from app.db.connection import get_user_job_position, save_taxonomy_for_position
+
+    categories = req.get("categories")
+    if not categories or not isinstance(categories, list):
+        raise HTTPException(status_code=400, detail="需要提供 categories 列表")
+
+    # 获取用户的个人岗位，而不是全局岗位
+    _, position = await run_db(lambda: get_user_job_position(user['id']))
+    if not position:
+        raise HTTPException(status_code=400, detail="请先选择目标岗位")
+
+    # 保存为用户个人分类
+    await run_db(lambda: save_taxonomy_for_position(position, categories, source='user', owner_id=user['id']))
+    return {"status": "success", "position": position}
+
+
+@router.post("/api/profile/taxonomy/save-personal")
+async def save_personal_taxonomy(req: dict, user: dict = Depends(get_current_user)):
+    """保存个人分类体系"""
+    from app.db.operations import create_personal_taxonomy
+    from app.db.connection import get_user_job_position
+
+    categories = req.get("categories")
+    if not categories or not isinstance(categories, list):
+        raise HTTPException(status_code=400, detail="需要提供 categories 列表")
+
+    _, position = await run_db(lambda: get_user_job_position(user['id']))
+    if not position:
+        raise HTTPException(status_code=400, detail="请先选择目标岗位")
+
+    try:
+        result = await create_personal_taxonomy(position, categories, user)
+        return result
+    except Exception as e:
+        logger.error(f"保存个人分类失败: {e}")
+        raise HTTPException(status_code=500, detail="保存失败")
+
+
+@router.post("/api/profile/taxonomy/{taxonomy_id}/share")
+async def share_taxonomy_endpoint(taxonomy_id: int, user: dict = Depends(get_current_user)):
+    """分享分类体系"""
+    from app.db.operations import share_taxonomy
+
+    try:
+        result = await share_taxonomy(taxonomy_id, user)
+        return result
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"分享分类失败: {e}")
+        raise HTTPException(status_code=500, detail="分享失败")
+
+
+@router.get("/api/profile/taxonomy/public")
+async def get_public_taxonomies(user: dict = Depends(get_current_user)):
+    """获取公开分享的分类体系列表"""
+    from app.db.operations import get_public_shared_taxonomies
+
+    try:
+        result = await get_public_shared_taxonomies(user)
+        return {"taxonomies": result}
+    except Exception as e:
+        logger.error(f"获取公开分类失败: {e}")
+        raise HTTPException(status_code=500, detail="获取失败")
+
+
+@router.delete("/api/profile/taxonomy/{taxonomy_id}/public")
+async def delete_public_taxonomy(taxonomy_id: int, admin: dict = Depends(get_admin_user)):
+    """删除公开分类（仅管理员）"""
+    from app.db.operations import delete_taxonomy_by_id
+
+    try:
+        result = delete_taxonomy_by_id(taxonomy_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="分类不存在")
+        return {"status": "success", "message": "已删除公开分类"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除公开分类失败: {e}")
+        raise HTTPException(status_code=500, detail="删除失败")
 
 
 @router.put("/api/profile/my-position")
@@ -419,6 +554,7 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                 conn.commit()
                 return row['name']
             elif position_name:
+                # 查找岗位（包括软删除的）
                 row = conn.execute("SELECT id, name FROM job_positions WHERE name = ?", (position_name,)).fetchone()
                 if not row:
                     # 岗位不存在，自动创建
@@ -428,11 +564,16 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
                     # 同时在 taxonomy 表创建空分类条目，使岗位出现在可选列表中
                     import json as _json
                     conn.execute(
-                        "INSERT INTO taxonomy (position_name, categories_json, updated_at) "
-                        "VALUES (?, ?, CURRENT_TIMESTAMP) "
-                        "ON CONFLICT(position_name) DO NOTHING",
+                        "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
+                        "VALUES (?, ?, 'system', NULL, CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(position_name, source, owner_id) DO NOTHING",
                         (position_name, _json.dumps([], ensure_ascii=False))
                     )
+                else:
+                    # 岗位存在，检查是否被软删除，如果是则重新激活
+                    cols = {r[1] for r in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+                    if 'is_deleted' in cols:
+                        conn.execute("UPDATE job_positions SET is_deleted = 0 WHERE id = ? AND is_deleted = 1", (row['id'],))
                 conn.execute("UPDATE users SET current_position_id = ?, personal_position = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 conn.commit()
                 return row['name']
@@ -479,3 +620,103 @@ async def create_position(req: dict, admin: dict = Depends(get_admin_user)):
 
     pos_id = await run_db(_create)
     return {"status": "success", "id": pos_id, "name": name}
+
+
+@router.delete("/api/profile/position/{position_name}")
+async def delete_position(position_name: str, admin: dict = Depends(get_admin_user)):
+    """软删除岗位（仅管理员）"""
+    def _delete():
+        with get_db_connection() as conn:
+            # 检查岗位是否存在
+            row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (position_name,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="岗位不存在")
+
+            # 确保 is_deleted 字段存在
+            cols = {r[1] for r in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+            if 'is_deleted' not in cols:
+                conn.execute("ALTER TABLE job_positions ADD COLUMN is_deleted INTEGER DEFAULT 0")
+
+            # 软删除
+            conn.execute(
+                "UPDATE job_positions SET is_deleted = 1 WHERE name = ?",
+                (position_name,)
+            )
+            conn.commit()
+            return True
+
+    await run_db(_delete)
+    return {"status": "success", "message": f"岗位 '{position_name}' 已删除"}
+
+
+# ── 邮箱绑定 ──────────────────────────────────────────────────────
+
+from pydantic import BaseModel, Field
+from app.services.email_service import send_verification_code, verify_code
+
+
+class BindEmailRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class SendBindCodeRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+
+
+def _check_email_taken(email: str, exclude_user_id: int = None) -> bool:
+    """检查邮箱是否已被其他用户使用"""
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        if not row:
+            return False
+        if exclude_user_id and row['id'] == exclude_user_id:
+            return False
+        return True
+
+
+def _update_user_email(user_id: int, email: str):
+    """更新用户的邮箱"""
+    with get_db_connection() as conn:
+        conn.execute("UPDATE users SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (email, user_id))
+        conn.commit()
+
+
+@router.post("/api/profile/bind-email")
+async def bind_email(req: BindEmailRequest, user: dict = Depends(get_current_user)):
+    """绑定/更换邮箱"""
+    # 校验验证码
+    valid = await verify_code(req.email, req.code, "bind")
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    # 检查邮箱是否已被其他用户使用
+    if _check_email_taken(req.email, exclude_user_id=user['id']):
+        raise HTTPException(status_code=409, detail="该邮箱已被其他用户绑定")
+
+    # 更新邮箱
+    _update_user_email(user['id'], req.email)
+    return {"success": True, "message": "邮箱绑定成功", "email": req.email}
+
+
+@router.get("/api/profile/email")
+async def get_email(user: dict = Depends(get_current_user)):
+    """获取当前绑定的邮箱"""
+    def _query():
+        with get_db_connection() as conn:
+            row = conn.execute("SELECT email FROM users WHERE id = ?", (user['id'],)).fetchone()
+            return row['email'] if row else None
+
+    email = await run_db(_query)
+    return {"email": email}
+
+
+@router.post("/api/profile/send-bind-code")
+@limiter.limit("3/minute")
+async def send_bind_code(request: Request, req: SendBindCodeRequest, user: dict = Depends(get_current_user)):
+    """发送绑定邮箱的验证码"""
+    result = await send_verification_code(req.email, "bind")
+    if not result["success"]:
+        status = 503 if "未配置" in result["message"] else 429
+        raise HTTPException(status_code=status, detail=result["message"])
+    return result

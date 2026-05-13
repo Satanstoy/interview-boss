@@ -39,22 +39,22 @@
 
               <!-- 已配置：显示摘要 -->
               <div v-if="myLLM.configured && !myLLM.editing" class="space-y-2">
-                <div class="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span class="text-xs text-ink-500 dark:text-ink-400">API Key</span>
-                    <div class="font-mono text-ink-700 dark:text-ink-200">{{ myLLM.settings.llm_api_key || '未设置' }}</div>
+                <div class="space-y-2 text-sm">
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-ink-500 dark:text-ink-400 w-16 shrink-0">API Key</span>
+                    <span class="font-mono text-ink-700 dark:text-ink-200 truncate">{{ myLLM.settings.llm_api_key || '未设置' }}</span>
                   </div>
-                  <div>
-                    <span class="text-xs text-ink-500 dark:text-ink-400">模型</span>
-                    <div class="font-mono text-ink-700 dark:text-ink-200">{{ myLLM.settings.llm_model || '未设置' }}</div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-ink-500 dark:text-ink-400 w-16 shrink-0">模型</span>
+                    <span class="font-mono text-ink-700 dark:text-ink-200 truncate">{{ myLLM.settings.llm_model || '未设置' }}</span>
                   </div>
-                  <div>
-                    <span class="text-xs text-ink-500 dark:text-ink-400">Base URL</span>
-                    <div class="font-mono text-ink-700 dark:text-ink-200 truncate">{{ myLLM.settings.llm_base_url || '未设置' }}</div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-ink-500 dark:text-ink-400 w-16 shrink-0">Base URL</span>
+                    <span class="font-mono text-ink-700 dark:text-ink-200 truncate">{{ myLLM.settings.llm_base_url || '未设置' }}</span>
                   </div>
-                  <div>
-                    <span class="text-xs text-ink-500 dark:text-ink-400">超时</span>
-                    <div class="font-mono text-ink-700 dark:text-ink-200">{{ myLLM.settings.llm_timeout || 120 }}s</div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-ink-500 dark:text-ink-400 w-16 shrink-0">超时</span>
+                    <span class="font-mono text-ink-700 dark:text-ink-200">{{ myLLM.settings.llm_timeout || 120 }}s</span>
                   </div>
                 </div>
                 <div class="flex gap-2">

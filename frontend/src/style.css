@@ -106,7 +106,7 @@
 
   /* Smooth card */
   .card-smooth {
-    @apply bg-white rounded-2xl shadow-card border border-surface-200/80 dark:bg-surface-800 dark:border-ink-700/50 dark:shadow-glass-dark transition-[box-shadow,transform] duration-300;
+    @apply bg-white rounded-2xl shadow-card border border-surface-200/80 dark:bg-surface-800 dark:border-ink-700 dark:shadow-glass-dark transition-[box-shadow,transform] duration-300;
   }
   .card-smooth:hover {
     @apply shadow-card-hover border-surface-300 dark:border-ink-600 -translate-y-0.5;
