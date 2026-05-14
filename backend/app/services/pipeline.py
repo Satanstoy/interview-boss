@@ -356,7 +356,7 @@ def _apply_matched(conn, matched, job_position, saved_answers):
             "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, "
             "original_question_sources = ?, ai_answer = COALESCE(?, ai_answer), "
             "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (len(sources), json.dumps(sources, ensure_ascii=False),
+            (len(oqs), json.dumps(sources, ensure_ascii=False),
              json.dumps(oqs, ensure_ascii=False),
              json.dumps(oqs_src, ensure_ascii=False),
              ai_answer, cluster_id)
@@ -443,7 +443,7 @@ def _build_new_entry(cluster, job_position):
         'cat2': cat2,
         'tags': ', '.join(sorted(all_tags)),
         'difficulty': difficulty,
-        'frequency': len(sources),
+        'frequency': len(original_questions),
         'sources': sources,
         'original_questions': original_questions,
         'original_question_sources': original_question_sources,
@@ -634,7 +634,7 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
                         "UPDATE question_bank SET frequency = ?, sources = ?, "
                         "original_questions = ?, original_question_sources = ?, "
                         "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (len(s_src), json.dumps(s_src, ensure_ascii=False),
+                        (len(s_oqs), json.dumps(s_src, ensure_ascii=False),
                          json.dumps(s_oqs, ensure_ascii=False),
                          json.dumps(s_oqs_src, ensure_ascii=False), s['id'])
                     )

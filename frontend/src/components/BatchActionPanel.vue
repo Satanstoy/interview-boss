@@ -1,5 +1,5 @@
 <template>
-  <div class="mb-4 flex flex-wrap gap-2 items-center bg-white/80 dark:bg-surface-800/80 backdrop-blur-sm p-3 rounded-xl border border-surface-100 dark:border-ink-700 shadow-card">
+  <div class="mb-2 flex flex-wrap gap-2 items-center bg-white/80 dark:bg-surface-800/80 backdrop-blur-sm p-2 rounded-xl border border-surface-100 dark:border-ink-700 shadow-card">
     <button @click="$emit('toggle-select-all')" class="btn-ghost text-xs">
       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
       全选
@@ -19,7 +19,7 @@
       {{ action.label }}
       <span class="bg-white/30 dark:bg-white/10 px-1.5 py-0.5 rounded text-[10px] font-bold">{{ selectedCount }}</span>
     </button>
-    <div v-if="runningAction" class="flex items-center gap-2.5 ml-auto">
+    <div v-if="runningAction" class="flex items-center gap-2.5">
       <div class="w-32 h-1.5 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
         <div
           class="h-full bg-gradient-brand rounded-full transition-all duration-300"
@@ -27,6 +27,10 @@
         ></div>
       </div>
       <span class="text-xs text-ink-500 dark:text-ink-400 tabular-nums font-medium">{{ progress.current }}/{{ progress.total }}</span>
+    </div>
+    <slot />
+    <div v-if="$slots.right" class="ml-auto flex items-center gap-2">
+      <slot name="right" />
     </div>
   </div>
 </template>

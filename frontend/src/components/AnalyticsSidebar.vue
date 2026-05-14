@@ -1,23 +1,12 @@
 <template>
-  <div class="lg:col-span-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 h-fit lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto custom-scrollbar">
-
-    <!-- Collapse toggle -->
-    <button
-      @click="$emit('toggle-collapse')"
-      class="w-full flex items-center justify-center p-2 text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors border-b border-surface-200/80 dark:border-ink-700/60"
-      title="收起侧边栏"
-    >
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-      </svg>
-    </button>
+  <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 h-fit lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto custom-scrollbar">
 
     <!-- Learning Progress -->
-    <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+    <div class="p-4 border-b border-surface-200/80 dark:border-ink-700/60">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-1.5">
+          <div class="w-5 h-5 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+            <svg class="w-3 h-3 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
           </div>
           学习进度
         </h3>
@@ -25,7 +14,7 @@
       </div>
 
       <!-- Overall progress bar -->
-      <div class="w-full bg-surface-200 dark:bg-ink-700 rounded-full h-2 mb-4 overflow-hidden">
+      <div class="w-full bg-surface-200 dark:bg-ink-700 rounded-full h-2 mb-3 overflow-hidden">
         <div
           class="h-2 rounded-full transition-all duration-700 ease-out"
           :class="progressPercent >= 80 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' : progressPercent >= 40 ? 'bg-gradient-to-r from-amber-400 to-amber-500' : 'bg-gradient-to-r from-primary-400 to-primary-500'"
@@ -65,11 +54,11 @@
     </div>
 
     <!-- Daily Recommendation -->
-    <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+    <div class="p-4 border-b border-surface-200/80 dark:border-ink-700/60">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-1.5">
+          <div class="w-5 h-5 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+            <svg class="w-3 h-3 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </div>
           每日推荐
         </h3>
@@ -102,11 +91,11 @@
     </div>
 
     <!-- Starred Quick Access -->
-    <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-2">
-          <div class="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-            <svg class="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+    <div class="p-4 border-b border-surface-200/80 dark:border-ink-700/60">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 flex items-center gap-1.5">
+          <div class="w-5 h-5 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+            <svg class="w-3 h-3 text-amber-500 dark:text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
           </div>
           收藏夹
         </h3>
@@ -129,22 +118,23 @@
     </div>
 
     <!-- Compact Pie Chart -->
-    <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
-      <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 mb-3 flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
+    <div class="p-4 border-b border-surface-200/80 dark:border-ink-700/60">
+      <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 mb-2 flex items-center gap-1.5">
+        <div class="w-5 h-5 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+          <svg class="w-3 h-3 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
         </div>
         考点分布
       </h3>
-      <div v-show="masterBank.length > 0" ref="chartRef" class="w-full h-[200px]"></div>
       <div v-if="masterBank.length === 0" class="w-full h-[120px] flex items-center justify-center text-ink-400 dark:text-ink-500 text-xs">暂无数据</div>
+      <div v-else-if="sidebarWidth < 260" class="w-full h-[60px] flex items-center justify-center text-ink-400 dark:text-ink-500 text-xs">侧栏宽度不足，无法显示图表</div>
+      <div v-show="masterBank.length > 0 && sidebarWidth >= 260" ref="chartRef" class="w-full h-[280px]" style="min-width: 0;"></div>
     </div>
 
     <!-- Category Directory -->
-    <div class="p-5 border-b border-surface-200/80 dark:border-ink-700/60">
-      <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 mb-3 flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+    <div class="p-4 border-b border-surface-200/80 dark:border-ink-700/60">
+      <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 mb-2 flex items-center gap-1.5">
+        <div class="w-5 h-5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+          <svg class="w-3 h-3 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
         </div>
         分类目录
       </h3>
@@ -214,14 +204,16 @@ const props = defineProps({
   popularTags: { type: Object, default: () => ({}) },
   selectedTag: { type: String, default: '全部' },
   practiceStats: { type: Object, default: () => ({}) },
-  recommendSeed: { type: Number, default: 0 }
+  recommendSeed: { type: Number, default: 0 },
+  sidebarCollapsed: { type: Boolean, default: false },
+  sidebarWidth: { type: Number, default: 320 }
 })
 
-defineEmits(['refresh', 'select-tag', 'go-to-question', 'refresh-recommend', 'toggle-collapse'])
+const emit = defineEmits(['refresh', 'select-tag', 'go-to-question', 'refresh-recommend'])
 
 const chartRef = ref(null)
 let myChart = null
-let resizeHandler = null
+let resizeObserver = null
 
 const diffOrder = ['L1-基础', 'L2-中等', 'L3-困难']
 
@@ -371,17 +363,28 @@ watch(isDark, () => {
   if (myChart) updateDistributionChart()
 })
 
+watch(() => props.sidebarCollapsed, (collapsed) => {
+  if (!collapsed && myChart) {
+    nextTick(() => {
+      myChart.resize()
+      updateDistributionChart()
+    })
+  }
+})
+
 onMounted(() => {
   if (chartRef.value) {
     myChart = echarts.init(chartRef.value)
-    resizeHandler = () => myChart && myChart.resize()
-    window.addEventListener('resize', resizeHandler)
+    resizeObserver = new ResizeObserver(() => {
+      if (myChart) myChart.resize()
+    })
+    resizeObserver.observe(chartRef.value)
     nextTick(updateDistributionChart)
   }
 })
 
 onUnmounted(() => {
-  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+  if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   if (myChart) { myChart.dispose(); myChart = null }
 })
 </script>

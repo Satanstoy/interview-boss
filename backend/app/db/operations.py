@@ -125,7 +125,7 @@ def _insert_details_txn(cursor, tagged_rows, job_position=""):
 def _cleanup_old_sources_txn(cursor, url: str):
     """移除某面经对 question_bank 的所有贡献，frequency=0 直接删除。"""
     affected_rows = cursor.execute(
-        "SELECT id, sources FROM question_bank WHERE sources LIKE ?",
+        "SELECT id, sources, original_questions FROM question_bank WHERE sources LIKE ?",
         (f"%{url}%",)
     ).fetchall()
     for mr in affected_rows:
@@ -135,9 +135,13 @@ def _cleanup_old_sources_txn(cursor, url: str):
             sources = []
         new_sources = [s for s in sources if s.get('url') != url]
         if len(new_sources) != len(sources):
+            try:
+                orig_qs = json.loads(mr['original_questions']) if mr['original_questions'] else []
+            except Exception:
+                orig_qs = []
             cursor.execute(
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (len(new_sources), json.dumps(new_sources, ensure_ascii=False), mr['id'])
+                (len(orig_qs), json.dumps(new_sources, ensure_ascii=False), mr['id'])
             )
     cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
 
@@ -195,7 +199,7 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
                     "UPDATE question_bank SET frequency = ?, sources = ?, "
                     "original_questions = ?, original_question_sources = ?, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (len(new_sources),
+                    (len(new_oqs),
                      json.dumps(new_sources, ensure_ascii=False),
                      json.dumps(new_oqs, ensure_ascii=False),
                      json.dumps(new_oqs_sources, ensure_ascii=False),
@@ -280,7 +284,7 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
                     orig_qs_src.append({"question": new_q_text or "", "sources": [new_source]})
                 cursor.execute(
                     "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (len(sources), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
+                    (len(orig_qs), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
                 )
 
     for item in unmatched_rows:
@@ -456,3 +460,183 @@ def _insert_interview(saved_url: str, data: dict, questions: str, season: str = 
             if "UNIQUE" in str(e):
                 raise ValueError("该 URL 已存在，不可重复上传")
             raise
+
+
+# ═══════════════════════════════════════════════════
+#  分类体系权限管理
+# ═══════════════════════════════════════════════════
+
+def get_taxonomy_by_id(taxonomy_id: int) -> dict:
+    """根据ID获取分类体系"""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT id, position_name, categories_json, source, owner_id, is_public FROM taxonomy WHERE id = ?",
+            (taxonomy_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "position_name": row[1],
+            "categories": json.loads(row[2]) if row[2] else [],
+            "source": row[3] or "system",
+            "owner_id": row[4],
+            "is_public": row[5] or 0
+        }
+
+
+async def update_taxonomy_permissions(taxonomy_id: int, categories: list, user: dict) -> dict:
+    """更新分类体系（带权限检查）"""
+    taxonomy = get_taxonomy_by_id(taxonomy_id)
+    if not taxonomy:
+        raise ValueError("分类体系不存在")
+
+    # 权限检查
+    if taxonomy["source"] == "system" and not user.get("is_admin"):
+        raise PermissionError("只有管理员可以编辑系统分类")
+
+    if taxonomy["source"] == "user" and taxonomy["owner_id"] != user["id"]:
+        raise PermissionError("无权编辑此分类")
+
+    # 更新分类
+    categories_json = json.dumps(categories, ensure_ascii=False)
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE taxonomy SET categories_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (categories_json, taxonomy_id)
+        )
+        conn.commit()
+
+    return {
+        "success": True,
+        "taxonomy": {
+            "id": taxonomy_id,
+            "categories": categories,
+            "source": taxonomy["source"],
+            "owner_id": taxonomy["owner_id"]
+        }
+    }
+
+
+async def create_personal_taxonomy(position: str, categories: list, user: dict) -> dict:
+    """创建个人分类体系"""
+    categories_json = json.dumps(categories, ensure_ascii=False)
+    with get_db_connection() as conn:
+        # 检查用户是否已有该岗位的个人分类
+        existing = conn.execute(
+            "SELECT id FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
+            (position, user["id"])
+        ).fetchone()
+
+        if existing:
+            # 更新现有分类
+            conn.execute(
+                "UPDATE taxonomy SET categories_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (categories_json, existing[0])
+            )
+            taxonomy_id = existing[0]
+        else:
+            # 创建新分类
+            cursor = conn.execute(
+                "INSERT INTO taxonomy (position_name, categories_json, source, owner_id) VALUES (?, ?, 'user', ?)",
+                (position, categories_json, user["id"])
+            )
+            taxonomy_id = cursor.lastrowid
+
+        conn.commit()
+
+    return {
+        "success": True,
+        "taxonomy": {
+            "id": taxonomy_id,
+            "position_name": position,
+            "categories": categories,
+            "source": "user",
+            "owner_id": user["id"]
+        }
+    }
+
+
+async def share_taxonomy(taxonomy_id: int, user: dict) -> dict:
+    """分享分类体系（设为公开）"""
+    taxonomy = get_taxonomy_by_id(taxonomy_id)
+    if not taxonomy:
+        raise ValueError("分类体系不存在")
+
+    # 只能分享自己的分类
+    if taxonomy["source"] != "user" or taxonomy["owner_id"] != user["id"]:
+        raise PermissionError("只能分享自己的分类")
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE taxonomy SET is_public = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (taxonomy_id,)
+        )
+        conn.commit()
+
+    return {
+        "success": True,
+        "taxonomy": {
+            "id": taxonomy_id,
+            "is_public": 1
+        }
+    }
+
+
+def delete_taxonomy_by_id(taxonomy_id: int) -> bool:
+    """删除分类体系（管理员用）"""
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT id FROM taxonomy WHERE id = ?", (taxonomy_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM taxonomy WHERE id = ?", (taxonomy_id,))
+        conn.commit()
+        return True
+
+
+async def get_public_shared_taxonomies(user: dict) -> list:
+    """获取公开分享的分类体系列表"""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """SELECT t.id, t.position_name, t.categories_json, t.source, t.owner_id, t.is_public, u.username
+               FROM taxonomy t
+               LEFT JOIN users u ON t.owner_id = u.id
+               WHERE t.is_public = 1"""
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "position_name": row[1],
+            "categories": json.loads(row[2]) if row[2] else [],
+            "source": row[3] or "system",
+            "owner_id": row[4],
+            "is_public": row[5] or 0,
+            "owner_name": row[6] or "匿名"
+        }
+        for row in rows
+    ]
+
+
+def query_public_taxonomies() -> list:
+    """查询公开分享的分类体系"""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """SELECT t.id, t.position_name, t.categories_json, t.source, t.owner_id, t.is_public, u.username
+               FROM taxonomy t
+               LEFT JOIN users u ON t.owner_id = u.id
+               WHERE t.is_public = 1"""
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "position_name": row[1],
+            "categories": json.loads(row[2]) if row[2] else [],
+            "source": row[3] or "system",
+            "owner_id": row[4],
+            "is_public": row[5] or 0,
+            "owner_name": row[6] or "匿名"
+        }
+        for row in rows
+    ]

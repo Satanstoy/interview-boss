@@ -377,3 +377,138 @@ async def login_form(
 
     _clear_failures(username)
     return HTMLResponse(content="<html><body>ok</body></html>")
+
+
+# ── 邮箱验证码登录 / 注册 ──────────────────────────────────────────
+
+from app.services.email_service import send_verification_code, verify_code
+
+
+class SendCodeRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    purpose: str = Field(..., pattern=r'^(register|login|bind)$')
+
+
+class EmailRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    code: str = Field(..., min_length=6, max_length=6)
+    username: str = Field(..., min_length=2, max_length=32)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('username')
+    @classmethod
+    def username_format(cls, v):
+        if not _USERNAME_RE.match(v):
+            raise ValueError('用户名仅允许 2-32 个字母、数字、下划线或中文')
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def password_complexity(cls, v):
+        categories = 0
+        if any(c.isupper() for c in v): categories += 1
+        if any(c.islower() for c in v): categories += 1
+        if any(c.isdigit() for c in v): categories += 1
+        if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
+        if categories < 2:
+            raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
+        return v
+
+
+class EmailLoginRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+def _check_username_available(username: str) -> bool:
+    """检查用户名是否可用"""
+    with get_db_connection() as conn:
+        return conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone() is None
+
+
+def _check_email_exists(email: str) -> bool:
+    """检查邮箱是否已被注册"""
+    with get_db_connection() as conn:
+        return conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone() is not None
+
+
+def _find_user_by_email(email: str):
+    """通过邮箱查找用户"""
+    with get_db_connection() as conn:
+        return conn.execute(
+            "SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+
+
+def _insert_user(username: str, password_hash: str, email: str) -> dict:
+    """创建新用户"""
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (username, password_hash, email, is_admin, bank_mode) VALUES (?, ?, ?, 0, 'public')",
+            (username, password_hash, email)
+        )
+        conn.commit()
+        return {"id": cursor.lastrowid, "username": username, "is_admin": False, "bank_mode": "public"}
+
+
+@router.post("/send-code")
+@limiter.limit("3/minute")
+async def send_code(request: Request, req: SendCodeRequest):
+    """发送邮箱验证码"""
+    result = await send_verification_code(req.email, req.purpose)
+    if not result["success"]:
+        status = 503 if "未配置" in result["message"] else 429
+        raise HTTPException(status_code=status, detail=result["message"])
+    return result
+
+
+@router.post("/register-with-email")
+@limiter.limit("5/minute")
+async def register_with_email(request: Request, req: EmailRegisterRequest, response: Response):
+    """邮箱验证码注册"""
+    # 校验验证码
+    valid = await verify_code(req.email, req.code, "register")
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    # 检查用户名
+    if req.username.lower() in RESERVED_USERNAMES:
+        raise HTTPException(status_code=400, detail="该用户名为系统保留，请更换")
+    if not _check_username_available(req.username):
+        raise HTTPException(status_code=409, detail="用户名已存在")
+
+    # 检查邮箱
+    if _check_email_exists(req.email):
+        raise HTTPException(status_code=409, detail="该邮箱已注册")
+
+    # 创建用户
+    password_hash = hash_password(req.password)
+    user = _insert_user(req.username, password_hash, req.email)
+
+    return _issue_token_pair(
+        user, response, remember=False,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )
+
+
+@router.post("/login-with-email")
+@limiter.limit("10/minute")
+async def login_with_email(request: Request, req: EmailLoginRequest, response: Response):
+    """邮箱验证码登录"""
+    # 校验验证码
+    valid = await verify_code(req.email, req.code, "login")
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    # 查找用户
+    user = _find_user_by_email(req.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="该邮箱未注册")
+
+    return _issue_token_pair(
+        dict(user), response, remember=False,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )

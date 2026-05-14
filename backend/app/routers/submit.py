@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import openai
 import magic as _magic
 
@@ -537,6 +538,9 @@ async def submit_data_stream(
 
             if doc_type == "interview":
                 q_list = data.get("具体题目清单", [])
+                # 过滤 LLM 误提取的非面试题目（自我介绍、反问等）
+                _EXTRACT_BLACKLIST = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职", "优缺点"]
+                q_list = [q for q in q_list if q.strip() and not any(b in q for b in _EXTRACT_BLACKLIST)]
                 if not q_list or all(not q.strip() for q in q_list):
                     yield f"data: {json.dumps({'type': 'error', 'message': '大模型未能从内容中提取到面试题目'})}\n\n"
                     return

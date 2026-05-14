@@ -81,6 +81,9 @@ async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get
     raw_lines = [line.strip() for line in questions_str.split('\n') if line.strip()]
     q_list = [re.sub(r'^\d+[\.\)\]、-]\s*', '', line).strip() for line in raw_lines]
     q_list = [q for q in q_list if q]
+    # 过滤非面试题目
+    _EXTRACT_BLACKLIST = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职", "优缺点"]
+    q_list = [q for q in q_list if not any(b in q for b in _EXTRACT_BLACKLIST)]
 
     if not q_list:
         raise HTTPException(status_code=400, detail="解析题目清单失败，未能提取到有效题目")

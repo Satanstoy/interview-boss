@@ -224,6 +224,11 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
     返回 LLM 输出文本。
     """
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+
+    # 处理 model=None 的情况，使用默认模型
+    if kwargs.get("model") is None:
+        kwargs["model"] = model
+
     if provider == "anthropic":
         messages = kwargs.get("messages", [])
         system_text, anthropic_msgs = _convert_openai_messages_to_anthropic(messages)
@@ -232,7 +237,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         if response_format and response_format.get("type") == "json_object":
             system_msg += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         response = await resolved_client.messages.create(
-            model=kwargs.get("model", model),
+            model=kwargs["model"],
             max_tokens=kwargs.get("max_tokens", 8192),
             system=system_msg,
             messages=anthropic_msgs,

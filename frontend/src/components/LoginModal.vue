@@ -5,56 +5,83 @@
       <h3 class="text-xl font-serif text-ink-800 dark:text-ink-100">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
       <p class="text-sm text-ink-400 dark:text-ink-400 mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
     </div>
-    <form ref="formEl" @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post">
+
+    <!-- 登录方式切换 -->
+    <div class="flex gap-1 mb-5 p-1 bg-surface-100 dark:bg-surface-700 rounded-xl">
+      <button @click="loginMode = 'password'; error = ''" :class="loginMode === 'password' ? 'bg-white dark:bg-surface-800 shadow-sm text-ink-800 dark:text-ink-100' : 'text-ink-500 dark:text-ink-400'" class="flex-1 py-1.5 text-xs font-medium rounded-lg transition-all">
+        密码登录
+      </button>
+      <button @click="loginMode = 'email'; error = ''" :class="loginMode === 'email' ? 'bg-white dark:bg-surface-800 shadow-sm text-ink-800 dark:text-ink-100' : 'text-ink-500 dark:text-ink-400'" class="flex-1 py-1.5 text-xs font-medium rounded-lg transition-all">
+        邮箱验证码
+      </button>
+    </div>
+
+    <!-- 密码模式 -->
+    <form v-if="loginMode === 'password'" ref="formEl" @submit.prevent="handlePasswordSubmit" action="/api/auth/login-form" method="post">
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">用户名</label>
-          <input
-            ref="usernameInput"
-            v-model="username"
-            type="text"
-            name="username"
-            placeholder="2-32 个字符"
-            maxlength="32"
+          <input ref="usernameInput" v-model="username" type="text" name="username" placeholder="2-32 个字符" maxlength="32"
             class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
-            :disabled="loading"
-            autocomplete="username"
-          />
+            :disabled="loading" autocomplete="username" />
         </div>
         <div>
           <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">密码</label>
-          <input
-            v-model="password"
-            type="password"
-            name="password"
-            placeholder="至少 8 位"
+          <input v-model="password" type="password" name="password" placeholder="至少 8 位"
             class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
-            :disabled="loading"
-            autocomplete="current-password"
-          />
+            :disabled="loading" autocomplete="current-password" />
         </div>
       </div>
-
       <label v-if="!isRegister" class="flex items-center gap-2 mt-3 cursor-pointer group">
         <input v-model="rememberMe" type="checkbox" class="w-4 h-4 rounded-md border-surface-300 dark:border-ink-600 text-primary-600 focus:ring-primary-500 transition" />
         <span class="text-sm text-ink-500 dark:text-ink-400 group-hover:text-ink-700 dark:group-hover:text-ink-300 transition">记住我（30 天免登录）</span>
       </label>
-      <Transition name="fade">
-        <p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
-          <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          {{ error }}
-        </p>
-      </Transition>
-
-      <button
-        type="submit"
-        :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)"
-        class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
-      >
+      <ErrorMessage :error="error" />
+      <button type="submit" :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)" class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden">
         <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
-        <span v-if="loading" class="absolute inset-0 flex items-center justify-center">
-          <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-        </span>
+        <Spinner v-if="loading" />
+      </button>
+    </form>
+
+    <!-- 邮箱模式 -->
+    <form v-else @submit.prevent="handleEmailSubmit">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">邮箱</label>
+          <input v-model="email" type="email" placeholder="your@email.com"
+            class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+            :disabled="loading" autocomplete="email" />
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">验证码</label>
+          <div class="flex gap-2">
+            <input v-model="verifyCode" type="text" placeholder="6位数字" maxlength="6" class="flex-1 px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+              :disabled="loading" />
+            <button type="button" @click="handleSendCode" :disabled="codeCooldown > 0 || !email.trim()" class="px-3 py-2.5 text-xs font-medium rounded-xl border border-primary-200 dark:border-primary-800 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition disabled:opacity-50 whitespace-nowrap">
+              {{ codeCooldown > 0 ? `${codeCooldown}s` : '发送验证码' }}
+            </button>
+          </div>
+        </div>
+        <!-- 注册模式额外字段 -->
+        <template v-if="isRegister">
+          <div>
+            <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">用户名</label>
+            <input ref="usernameInput" v-model="username" type="text" placeholder="2-32 个字符" maxlength="32"
+              class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+              :disabled="loading" autocomplete="username" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">密码</label>
+            <input v-model="password" type="password" placeholder="至少 8 位"
+              class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+              :disabled="loading" autocomplete="new-password" />
+          </div>
+        </template>
+      </div>
+      <ErrorMessage :error="error" />
+      <button type="submit" :disabled="loading || !email.trim() || verifyCode.length < 6" class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden">
+        <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
+        <Spinner v-if="loading" />
       </button>
     </form>
 
@@ -91,59 +118,81 @@
             </div>
           </div>
 
-          <!-- Form -->
-          <form ref="formEl" @submit.prevent="handleSubmit" action="/api/auth/login-form" method="post" class="px-6 pb-2 pt-4">
+          <!-- 登录方式切换 -->
+          <div class="mx-6 mt-4 flex gap-1 p-1 bg-surface-100 dark:bg-surface-700 rounded-xl">
+            <button @click="loginMode = 'password'; error = ''" :class="loginMode === 'password' ? 'bg-white dark:bg-surface-800 shadow-sm text-ink-800 dark:text-ink-100' : 'text-ink-500 dark:text-ink-400'" class="flex-1 py-1.5 text-xs font-medium rounded-lg transition-all">
+              密码登录
+            </button>
+            <button @click="loginMode = 'email'; error = ''" :class="loginMode === 'email' ? 'bg-white dark:bg-surface-800 shadow-sm text-ink-800 dark:text-ink-100' : 'text-ink-500 dark:text-ink-400'" class="flex-1 py-1.5 text-xs font-medium rounded-lg transition-all">
+              邮箱验证码
+            </button>
+          </div>
+
+          <!-- 密码模式 Form -->
+          <form v-if="loginMode === 'password'" ref="formEl" @submit.prevent="handlePasswordSubmit" action="/api/auth/login-form" method="post" class="px-6 pb-2 pt-4">
             <div class="space-y-4">
               <div>
                 <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">用户名</label>
-                <input
-                  ref="usernameInput"
-                  v-model="username"
-                  type="text"
-                  name="username"
-                  placeholder="2-32 个字符"
-                  maxlength="32"
+                <input ref="usernameInput" v-model="username" type="text" name="username" placeholder="2-32 个字符" maxlength="32"
                   class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
-                  :disabled="loading"
-                  autocomplete="username"
-                />
+                  :disabled="loading" autocomplete="username" />
               </div>
               <div>
                 <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">密码</label>
-                <input
-                  v-model="password"
-                  type="password"
-                  name="password"
-                  placeholder="至少 8 位"
+                <input v-model="password" type="password" name="password" placeholder="至少 8 位"
                   class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
-                  :disabled="loading"
-                  autocomplete="current-password"
-                />
+                  :disabled="loading" autocomplete="current-password" />
               </div>
             </div>
-
-            <!-- Remember me + Error -->
             <label v-if="!isRegister" class="flex items-center gap-2 mt-3 cursor-pointer group">
               <input v-model="rememberMe" type="checkbox" class="w-4 h-4 rounded-md border-surface-300 dark:border-ink-600 text-primary-600 focus:ring-primary-500 transition" />
               <span class="text-sm text-ink-500 dark:text-ink-400 group-hover:text-ink-700 dark:group-hover:text-ink-300 transition">记住我（30 天免登录）</span>
             </label>
-            <Transition name="fade">
-              <p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                {{ error }}
-              </p>
-            </Transition>
-
-            <!-- Submit -->
-            <button
-              type="submit"
-              :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)"
-              class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden"
-            >
+            <ErrorMessage :error="error" />
+            <button type="submit" :disabled="loading || !username.trim() || password.length < (isRegister ? 8 : 1)" class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden">
               <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
-              <span v-if="loading" class="absolute inset-0 flex items-center justify-center">
-                <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              </span>
+              <Spinner v-if="loading" />
+            </button>
+          </form>
+
+          <!-- 邮箱模式 Form -->
+          <form v-else @submit.prevent="handleEmailSubmit" class="px-6 pb-2 pt-4">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">邮箱</label>
+                <input v-model="email" type="email" placeholder="your@email.com"
+                  class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+                  :disabled="loading" autocomplete="email" />
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">验证码</label>
+                <div class="flex gap-2">
+                  <input v-model="verifyCode" type="text" placeholder="6位数字" maxlength="6" class="flex-1 px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+                    :disabled="loading" />
+                  <button type="button" @click="handleSendCode" :disabled="codeCooldown > 0 || !email.trim()" class="px-3 py-2.5 text-xs font-medium rounded-xl border border-primary-200 dark:border-primary-800 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition disabled:opacity-50 whitespace-nowrap">
+                    {{ codeCooldown > 0 ? `${codeCooldown}s` : '发送验证码' }}
+                  </button>
+                </div>
+              </div>
+              <template v-if="isRegister">
+                <div>
+                  <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">用户名</label>
+                  <input ref="usernameInput" v-model="username" type="text" placeholder="2-32 个字符" maxlength="32"
+                    class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+                    :disabled="loading" autocomplete="username" />
+                </div>
+                <div>
+                  <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-1.5">密码</label>
+                  <input v-model="password" type="password" placeholder="至少 8 位"
+                    class="w-full px-4 py-2.5 border border-surface-200 dark:border-ink-600 rounded-xl text-sm focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 outline-none transition-all duration-200 bg-surface-50 dark:bg-surface-900 focus:bg-white dark:focus:bg-surface-800 text-ink-800 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
+                    :disabled="loading" autocomplete="new-password" />
+                </div>
+              </template>
+            </div>
+            <ErrorMessage :error="error" />
+            <button type="submit" :disabled="loading || !email.trim() || verifyCode.length < 6" class="w-full mt-5 py-2.5 btn-primary text-base relative overflow-hidden">
+              <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
+              <Spinner v-if="loading" />
             </button>
           </form>
 
@@ -162,7 +211,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { authLogin, authRegister } from '../api/index.js'
+import { authLogin, authRegister, authLoginWithEmail, authRegisterWithEmail, sendVerifyCode } from '../api/index.js'
 import { setAuthToken } from '../utils/http.js'
 import { validateUsername, validatePassword } from '../utils/validate.js'
 
@@ -175,16 +224,34 @@ const emit = defineEmits(['close', 'login-success'])
 const usernameInput = ref(null)
 const formEl = ref(null)
 const isRegister = ref(false)
+const loginMode = ref('password') // 'password' | 'email'
 const username = ref('')
 const password = ref('')
+const email = ref('')
+const verifyCode = ref('')
 const rememberMe = ref(true)
 const loading = ref(false)
 const error = ref('')
+const codeCooldown = ref(0)
+let cooldownTimer = null
+
+// 子组件
+const ErrorMessage = {
+  props: ['error'],
+  template: `<Transition name="fade"><p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    {{ error }}
+  </p></Transition>`
+}
+const Spinner = {
+  template: `<span class="absolute inset-0 flex items-center justify-center"><svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span>`
+}
 
 watch(() => props.visible, (v) => {
   if (v) {
     error.value = ''
     isRegister.value = false
+    loginMode.value = 'password'
     nextTick(() => usernameInput.value?.focus())
   }
 })
@@ -195,7 +262,26 @@ onMounted(() => {
   }
 })
 
-async function handleSubmit() {
+async function handleSendCode() {
+  if (codeCooldown.value > 0 || !email.value.trim()) return
+  error.value = ''
+  try {
+    const purpose = isRegister.value ? 'register' : 'login'
+    await sendVerifyCode(email.value.trim(), purpose)
+    codeCooldown.value = 60
+    cooldownTimer = setInterval(() => {
+      codeCooldown.value--
+      if (codeCooldown.value <= 0) {
+        clearInterval(cooldownTimer)
+        cooldownTimer = null
+      }
+    }, 1000)
+  } catch (e) {
+    error.value = e.message || '发送失败'
+  }
+}
+
+async function handlePasswordSubmit() {
   if (loading.value) return
   error.value = ''
 
@@ -224,8 +310,42 @@ async function handleSubmit() {
   }
 }
 
+async function handleEmailSubmit() {
+  if (loading.value) return
+  error.value = ''
+
+  if (!email.value.trim() || verifyCode.value.length < 6) {
+    error.value = '请输入邮箱和验证码'
+    return
+  }
+
+  loading.value = true
+  try {
+    let data
+    if (isRegister.value) {
+      const userResult = validateUsername(username.value)
+      if (!userResult.valid) { error.value = userResult.error; return }
+      const passResult = validatePassword(password.value)
+      if (!passResult.valid) { error.value = passResult.error; return }
+      data = await authRegisterWithEmail(email.value.trim(), verifyCode.value, userResult.value, passResult.value)
+    } else {
+      data = await authLoginWithEmail(email.value.trim(), verifyCode.value)
+    }
+    setAuthToken(data.token)
+    emit('login-success', data.user)
+    emit('close')
+    email.value = ''
+    verifyCode.value = ''
+    username.value = ''
+    password.value = ''
+  } catch (e) {
+    error.value = e.message || '操作失败'
+  } finally {
+    loading.value = false
+  }
+}
+
 function triggerBrowserSavePassword() {
-  // Use Credential Management API with the actual form element
   if (window.PasswordCredential && formEl.value) {
     try {
       const cred = new PasswordCredential(formEl.value)
@@ -233,7 +353,6 @@ function triggerBrowserSavePassword() {
       return
     } catch { /* fallback below */ }
   }
-  // Fallback: history.pushState simulates navigation to trigger browser save prompt
   try { history.pushState(null, '', location.href) } catch {}
 }
 </script>

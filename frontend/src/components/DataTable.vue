@@ -12,11 +12,11 @@
       <table class="w-full text-left border-collapse">
         <thead>
           <tr class="bg-gradient-to-b from-gray-50 to-gray-50/50 dark:from-surface-700 dark:to-surface-700/50 text-ink-500 dark:text-ink-400 text-xs uppercase tracking-wider">
-            <th class="p-3.5 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-10 text-center">选择</th>
-            <th v-for="col in columns" :key="col.key" class="p-3.5 border-b border-surface-100 dark:border-ink-700 font-semibold" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
+            <th class="p-3 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-10 text-center">选择</th>
+            <th v-for="col in columns" :key="col.key" class="p-3 border-b border-surface-100 dark:border-ink-700 font-semibold" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
               {{ col.label }}
             </th>
-            <th class="p-3.5 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-[100px] text-center">操作</th>
+            <th class="p-3 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-[100px] text-center">操作</th>
           </tr>
         </thead>
         <tbody v-auto-animate>
@@ -29,16 +29,16 @@
             ]"
             :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
           >
-            <td class="p-3.5 whitespace-nowrap text-center">
+            <td class="p-3 whitespace-nowrap text-center">
               <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
                 class="w-4 h-4 text-primary-600 rounded-md border-surface-300 dark:border-ink-600 focus:ring-primary-500 cursor-pointer transition">
             </td>
-            <td v-for="col in columns" :key="col.key" class="p-3.5 break-words" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
+            <td v-for="col in columns" :key="col.key" class="p-3 break-words" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
               <slot :name="'cell-' + col.key" :row="row" :value="row[col.frontendKey || col.key]">
                 {{ row[col.frontendKey || col.key] }}
               </slot>
             </td>
-            <td class="p-3.5 whitespace-nowrap text-center">
+            <td class="p-3 whitespace-nowrap text-center">
               <slot name="actions" :row="row" />
             </td>
           </tr>

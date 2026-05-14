@@ -61,7 +61,7 @@ def _cleanup_sources_for_url(cursor, url: str):
                     "UPDATE question_bank SET frequency = ?, sources = ?, "
                     "original_questions = ?, original_question_sources = ?, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (len(new_sources),
+                    (len(new_oqs),
                      json.dumps(new_sources, ensure_ascii=False),
                      json.dumps(new_oqs, ensure_ascii=False),
                      json.dumps(new_oqs_sources, ensure_ascii=False),
@@ -82,7 +82,7 @@ def _restore_sources_for_url(cursor, url: str):
     """恢复面经时，从 original_question_sources 中找回被清理的 source 条目，重新加入 sources。"""
     # 查找 original_question_sources 中包含该 URL 的 QB 记录
     affected = cursor.execute(
-        "SELECT id, sources, original_question_sources FROM question_bank WHERE original_question_sources LIKE ?",
+        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE original_question_sources LIKE ?",
         (f'%{url}%',)
     ).fetchall()
     for r in affected:
@@ -101,9 +101,13 @@ def _restore_sources_for_url(cursor, url: str):
                     sources.append(s)
                     existing_urls.add(url)
         if len(sources) > len(json.loads(r['sources']) if r['sources'] else []):
+            try:
+                orig_qs = json.loads(r['original_questions']) if r['original_questions'] else []
+            except Exception:
+                orig_qs = []
             cursor.execute(
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (len(sources), json.dumps(sources, ensure_ascii=False), r['id'])
+                (len(orig_qs), json.dumps(sources, ensure_ascii=False), r['id'])
             )
 
 

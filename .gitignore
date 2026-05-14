@@ -42,3 +42,4 @@ docs/
 .pytest_cache/
 .playwright-mcp/
 backend/tests
+frontend/tests

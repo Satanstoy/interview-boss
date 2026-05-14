@@ -2,9 +2,9 @@
   <div class="fixed inset-0 z-[90] bg-white dark:bg-surface-900 flex flex-col">
     <!-- TOP BAR -->
     <div class="h-12 flex items-center justify-between px-4 border-b border-surface-200 dark:border-ink-700 bg-surface-50 dark:bg-surface-900 shrink-0">
-      <div class="flex items-center gap-3 min-w-0">
-        <button @click="emit('close')" class="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-200 dark:hover:bg-ink-700 transition shrink-0" title="返回题库 (Esc)">
-          <svg class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      <div class="flex items-center gap-2 min-w-0 flex-1 mr-3">
+        <button @click="showDirectory = !showDirectory" class="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-200 dark:hover:bg-ink-700 transition shrink-0" title="题目目录">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <span class="text-xs font-bold tabular-nums text-primary-600 dark:text-primary-400 shrink-0">{{ currentIndex + 1 }}/{{ questions.length }}</span>
         <h2 class="text-sm font-bold text-ink-800 dark:text-ink-100 truncate">{{ currentQ.question }}</h2>
@@ -13,6 +13,7 @@
           {{ currentQ.difficulty || '-' }}
         </span>
         <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 text-[10px] shrink-0 hidden sm:inline">{{ currentQ.cat1 || '未分类' }}</span>
+        <span v-if="currentQ.cat2" class="text-[10px] text-ink-400 dark:text-ink-500 shrink-0 hidden md:inline">{{ currentQ.cat2 }}</span>
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
         <button @click="toggleStar" class="p-1.5 rounded-lg transition" :class="currentQ.is_starred ? 'text-amber-500' : 'text-ink-300 dark:text-ink-600 hover:text-amber-400'">
@@ -28,13 +29,51 @@
         <button @click="goNext" :disabled="currentIndex >= questions.length - 1" class="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-200 dark:hover:bg-ink-700 transition disabled:opacity-30 disabled:cursor-not-allowed" title="下一题 (Alt+→)">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
         </button>
+        <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
+        <button @click="emit('close')" class="p-1.5 rounded-lg text-ink-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition" title="退出刷题 (Esc)">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
       </div>
     </div>
 
+    <!-- DIRECTORY PANEL -->
+    <Transition name="directory-slide">
+      <div v-if="showDirectory" class="absolute inset-y-12 left-0 z-10 w-80 bg-white dark:bg-surface-800 border-r border-surface-200 dark:border-ink-700 shadow-xl flex flex-col">
+        <div class="p-3 border-b border-surface-200 dark:border-ink-700 flex items-center gap-2">
+          <svg class="w-4 h-4 text-ink-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input v-model="directorySearch" type="text" class="flex-1 text-sm bg-transparent outline-none text-ink-800 dark:text-ink-200 placeholder-ink-400" placeholder="搜索题目..." />
+          <button @click="showDirectory = false; directorySearch = ''" class="p-1 rounded text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 transition">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div ref="directoryRef" class="flex-1 overflow-y-auto custom-scrollbar">
+          <button
+            v-for="(item, idx) in filteredQuestions" :key="item.id"
+            @click="goToDirectoryItem(item)"
+            class="w-full text-left px-3 py-2.5 border-b border-surface-100 dark:border-ink-700/50 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+            :class="item.id === currentQ.id ? 'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-l-primary-500' : ''"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] font-bold tabular-nums w-5 text-center" :class="item.id === currentQ.id ? 'text-primary-600 dark:text-primary-400' : 'text-ink-400'">{{ questions.indexOf(item) + 1 }}</span>
+              <span class="badge text-[9px] shrink-0"
+                :class="String(item.difficulty).includes('L3') ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' : String(item.difficulty).includes('L2') ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'">
+                {{ item.difficulty || '-' }}
+              </span>
+              <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 text-[9px] shrink-0">{{ item.cat1 || '未分类' }}</span>
+              <span class="text-[10px] text-ink-400 dark:text-ink-500 ml-auto tabular-nums">{{ item.frequency }}</span>
+            </div>
+            <p class="text-xs text-ink-700 dark:text-ink-300 leading-snug line-clamp-2 ml-7">{{ item.question }}</p>
+          </button>
+        </div>
+      </div>
+    </Transition>
+
     <!-- MAIN CONTENT -->
-    <div ref="mainRef" class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+    <div ref="mainRef" class="relative flex-1 overflow-hidden"
+      :class="isMobile ? 'flex flex-col' : 'grid'"
+      :style="isMobile ? {} : { gridTemplateColumns: leftWidth + '% 4px 1fr', gridTemplateRows: '1fr' }">
       <!-- LEFT PANEL -->
-      <div class="flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-surface-200 dark:border-ink-700" :style="isMobile ? {} : { width: leftWidth + '%' }">
+      <div class="flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-surface-200 dark:border-ink-700 min-w-0">
         <!-- Tabs -->
         <div class="flex border-b border-surface-200 dark:border-ink-600 shrink-0 bg-white dark:bg-surface-800">
           <button v-for="tab in leftTabs" :key="tab.key" @click="leftTab = tab.key"
@@ -49,23 +88,49 @@
 
         <!-- Tab content -->
         <div class="flex-1 overflow-y-auto custom-scrollbar">
+        <div :key="currentIndex" class="question-content-enter">
           <!-- Description tab -->
           <div v-if="leftTab === 'description'" class="p-5 space-y-4">
-            <div class="flex gap-1.5 flex-wrap">
-              <span v-for="tag in (currentQ.tags ? currentQ.tags.split(',') : [])" :key="tag" class="badge bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200/80 dark:border-ink-700 text-[10px]">{{ tag }}</span>
+            <!-- Category badges -->
+            <div class="flex gap-1.5 flex-wrap items-center">
+              <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 text-[10px]">{{ currentQ.cat1 || '未分类' }}</span>
+              <span v-if="currentQ.cat2" class="badge bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200 dark:border-ink-700 text-[10px]">{{ currentQ.cat2 }}</span>
+              <span v-for="tag in (currentQ.tags ? currentQ.tags.split(',') : [])" :key="tag" class="badge bg-surface-50 dark:bg-surface-900 text-ink-400 dark:text-ink-500 border border-surface-200/60 dark:border-ink-700/60 text-[10px]">{{ tag }}</span>
             </div>
+            <!-- Question text -->
             <div class="text-sm text-ink-800 dark:text-ink-100 leading-relaxed font-medium">{{ currentQ.question }}</div>
+            <!-- Original question content -->
+            <div v-if="currentQ.original_questions && currentQ.original_questions.length > 0" class="bg-surface-50 dark:bg-surface-900 border border-surface-200 dark:border-ink-700 rounded-xl p-4">
+              <h4 class="text-xs font-bold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                原始面经题目
+              </h4>
+              <div v-for="(oq, oidx) in currentQ.original_questions" :key="oidx" class="mb-2 last:mb-0">
+                <p class="text-xs text-ink-700 dark:text-ink-300 leading-relaxed">{{ oq.question || oq }}</p>
+                <div v-if="oq.sources && oq.sources.length" class="flex flex-wrap gap-1 mt-1">
+                  <span v-for="(src, sidx) in oq.sources" :key="sidx" @click="emit('navigate-to-interview', src)"
+                    class="text-[10px] bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 px-1.5 py-0.5 rounded cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
+                    {{ src.company || '未知' }} | {{ src.round || '未知' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <!-- Sources -->
             <div v-if="currentQ.sources && currentQ.sources.length > 0" class="bg-primary-50/40 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 rounded-xl p-4">
               <h4 class="text-xs font-bold text-primary-800 dark:text-primary-400 mb-2 flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
                 出处追溯 ({{ currentQ.sources.length }} 次出现)
               </h4>
               <div class="flex flex-wrap gap-1.5 text-[11px]">
-                <span v-for="(src, idx) in currentQ.sources" :key="idx" @click="emit('navigate-to-interview', src)"
-                  class="bg-white dark:bg-ink-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center cursor-pointer hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors">
-                  {{ src.company === '未提供' ? '未知' : src.company }}
-                  <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
-                  {{ src.round === '未提供' ? '未知轮次' : src.round }}
+                <span v-for="(src, idx) in currentQ.sources" :key="idx" class="bg-white dark:bg-ink-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center gap-1">
+                  <span @click="emit('navigate-to-interview', src)" class="cursor-pointer hover:underline">
+                    {{ src.company === '未提供' ? '未知' : src.company }}
+                    <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
+                    {{ src.round === '未提供' ? '未知轮次' : src.round }}
+                  </span>
+                  <a v-if="src.url" :href="src.url" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-600 dark:hover:text-primary-300" title="在新窗口打开">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                  </a>
                 </span>
               </div>
             </div>
@@ -147,14 +212,15 @@
           </div>
         </div>
       </div>
+      </div>
 
       <!-- DRAGGABLE DIVIDER (desktop only) -->
-      <div v-if="!isMobile" class="w-1 shrink-0 bg-surface-200 dark:bg-ink-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-col-resize transition-colors relative group" @mousedown="onDividerMouseDown">
+      <div v-if="!isMobile" class="bg-surface-200 dark:bg-ink-700 hover:bg-primary-400 dark:hover:bg-primary-500 cursor-col-resize transition-colors relative group" @mousedown="onDividerMouseDown">
         <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-surface-400 dark:bg-ink-500 group-hover:bg-primary-500 transition-colors"></div>
       </div>
 
       <!-- RIGHT PANEL -->
-      <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+      <div class="flex flex-col overflow-hidden min-h-0 min-w-0">
         <!-- Answer input area -->
         <div class="flex-1 flex flex-col overflow-hidden min-h-0" :style="qState._evaluation && consoleExpanded ? {} : { flex: 1 }">
           <div class="px-5 pt-4 pb-2 shrink-0">
@@ -328,6 +394,30 @@ function onGlobalKeydown(e) {
 onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 
+// ── Directory ──
+const showDirectory = ref(false)
+const directorySearch = ref('')
+const directoryRef = ref(null)
+const filteredQuestions = computed(() => {
+  const q = directorySearch.value.toLowerCase().trim()
+  if (!q) return props.questions
+  return props.questions.filter(item =>
+    (item.question || '').toLowerCase().includes(q) ||
+    (item.cat1 || '').toLowerCase().includes(q) ||
+    (item.cat2 || '').toLowerCase().includes(q)
+  )
+})
+
+function goToDirectoryItem(item) {
+  const idx = props.questions.indexOf(item)
+  if (idx >= 0) {
+    currentIndex.value = idx
+    resetState()
+  }
+  showDirectory.value = false
+  directorySearch.value = ''
+}
+
 // ── Left panel ──
 const leftTab = ref('description')
 const consoleExpanded = ref(true)
@@ -400,3 +490,36 @@ async function handleEvaluate() {
   }
 }
 </script>
+
+<style scoped>
+/* Directory panel slide-in animation */
+.directory-slide-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.directory-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.directory-slide-enter-from {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+.directory-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+/* Question switching fade animation */
+.question-content-enter {
+  animation: question-enter 0.25s ease both;
+}
+@keyframes question-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>

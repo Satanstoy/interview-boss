@@ -62,9 +62,10 @@ async def get_analytics(user: dict = Depends(get_current_user)):
                 jd_where = "WHERE deleted_at IS NULL AND owner_id IS NULL AND status = 'approved'"
                 jd_params = ()
 
+            _skip_tech = {'未提供', '无', '暂无', '没有', '不详', '未知', 'n/a', 'none', 'null'}
             for r in conn.execute(f"SELECT tech_stack FROM jd {jd_where}", jd_params).fetchall():
                 if r['tech_stack']:
-                    tech_counter.update([t.strip().lstrip('0123456789. ') for t in r['tech_stack'].split('\n') if t.strip()])
+                    tech_counter.update([t.strip().lstrip('0123456789. ') for t in r['tech_stack'].split('\n') if t.strip() and t.strip().lstrip('0123456789. ').lower() not in _skip_tech])
 
             # 按 bank_mode 过滤 questions_detail 数据（通过关联 interview 表）
             if mode == 'personal':
