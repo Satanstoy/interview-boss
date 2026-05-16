@@ -23,6 +23,7 @@ wheels/
 *.db.bak.*
 *.db
 *.sqlite
+!backend/schema.db
 
 # Sensitive files
 *.pem
