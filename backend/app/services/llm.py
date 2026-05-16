@@ -6,7 +6,7 @@ import logging
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APITimeoutError
 from anthropic import AsyncAnthropic
 import anthropic as anthropic_mod
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, stop_after_delay, wait_exponential, retry_if_exception_type
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
 
 logger = logging.getLogger("interview-boss")
@@ -75,6 +75,7 @@ def rebuild_clients():
 
 # --------------- Per-user client 缓存 ---------------
 
+_MAX_USER_CLIENT_CACHE = 50  # 最多缓存 50 个用户的 LLM 客户端
 _user_client_cache: dict[int, tuple] = {}  # user_id -> (api_key, base_url, timeout, client, provider)
 
 
@@ -106,6 +107,13 @@ def get_llm_client_for_user(user_id: int) -> tuple:
         return cached[3], model, timeout, base_url, cached[4]
 
     user_client = _make_client(api_key, base_url, timeout, provider)
+
+    # 缓存淘汰：超过上限时清除最旧的一半
+    if len(_user_client_cache) >= _MAX_USER_CLIENT_CACHE:
+        keys = list(_user_client_cache.keys())
+        for k in keys[:len(keys) // 2]:
+            _user_client_cache.pop(k, None)
+
     _user_client_cache[user_id] = (api_key, base_url, timeout, user_client, provider)
     return user_client, model, timeout, base_url, provider
 
@@ -252,8 +260,8 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
 # --------------- LLM 调用 ---------------
 
 @retry(
-    stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=2, min=3, max=30),
+    stop=stop_after_attempt(4) | stop_after_delay(60),
+    wait=wait_exponential(multiplier=2, min=3, max=15),
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}")
 )
@@ -285,8 +293,8 @@ async def _call_llm_with_retry(prompt: str, system_msg: str = "你是一个后�
 
 
 @retry(
-    stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=2, min=3, max=30),
+    stop=stop_after_attempt(4) | stop_after_delay(60),
+    wait=wait_exponential(multiplier=2, min=3, max=15),
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}")
 )

@@ -49,18 +49,42 @@ if ALLOWED_ORIGINS:
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
-# ── 安全响应头 ──
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-        if not DEBUG:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-        return response
+# ── 安全响应头（纯 ASGI 实现，避免 BaseHTTPMiddleware 缓冲 SSE 响应）──
+_SECURITY_HEADERS = [
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+    (b"content-security-policy",
+     b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+     b"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
+     b"frame-ancestors 'none'; base-uri 'self'; form-action 'self'"),
+]
+_HSTS_HEADER = (b"strict-transport-security",
+                b"max-age=31536000; includeSubDomains; preload")
+
+
+class SecurityHeadersMiddleware:
+    """纯 ASGI 中间件：注入安全响应头，不缓冲响应体（SSE 友好）"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(_SECURITY_HEADERS)
+                if not DEBUG:
+                    headers.append(_HSTS_HEADER)
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 app.add_middleware(SecurityHeadersMiddleware)
@@ -116,6 +140,16 @@ async def startup_cleanup():
     except Exception as e:
         logger.warning(f"清理过期 refresh token 失败: {e}")
 
+    # 初始化 Redis 连接池（ARQ 任务队列）
+    try:
+        from arq.connections import create_pool, RedisSettings
+        from app.core.config import REDIS_URL
+        app.state.redis = await create_pool(RedisSettings.from_dsn(REDIS_URL))
+        logger.info(f"Redis 连接池已初始化: {REDIS_URL}")
+    except Exception as e:
+        logger.warning(f"Redis 连接池初始化失败（ARQ 将不可用）: {e}")
+        app.state.redis = None
+
 
 @app.on_event("shutdown")
 async def shutdown_cleanup():
@@ -128,3 +162,12 @@ async def shutdown_cleanup():
             logger.info("数据库连接已关闭")
         except Exception as e:
             logger.warning(f"关闭数据库连接失败: {e}")
+
+    # 关闭 Redis 连接池
+    redis = getattr(app.state, 'redis', None)
+    if redis is not None:
+        try:
+            await redis.close()
+            logger.info("Redis 连接池已关闭")
+        except Exception as e:
+            logger.warning(f"关闭 Redis 连接池失败: {e}")

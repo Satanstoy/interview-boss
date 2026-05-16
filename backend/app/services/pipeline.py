@@ -467,28 +467,47 @@ async def process_interview_tag_then_maybe_cluster(
 
     result = {"tagged_count": len(tagged_rows), "clustered": False, "new_qb_count": 0}
     if should_trigger_clustering(batch_size):
-        batch = dequeue_batch(batch_size)
-        if batch:
-            try:
-                new_count = await cluster_batch(batch, user_id=user_id)
-                queue_ids = [item['queue_id'] for item in batch]
-                mark_batch_done(queue_ids)
-                result["clustered"] = True
-                result["new_qb_count"] = new_count
-            except Exception as e:
-                logger.error(f"聚类失败，回退队列状态: {e}")
-                queue_ids = [item['queue_id'] for item in batch]
-                mark_batch_failed(queue_ids)
-                raise
+        # 优先使用 ARQ 异步调度，失败时回退到内联执行
+        try:
+            from app.worker import enqueue_cluster_task
+            job = await enqueue_cluster_task(interview_id, user_id)
+            logger.info(f"聚类任务已通过 ARQ 调度: job_id={job.job_id}")
+            return result
+        except Exception as e:
+            logger.warning(f"ARQ 调度失败，回退到内联聚类: {e}")
+            batch = dequeue_batch(batch_size)
+            if batch:
+                try:
+                    new_count = await cluster_batch(batch, user_id=user_id)
+                    queue_ids = [item['queue_id'] for item in batch]
+                    mark_batch_done(queue_ids)
+                    result["clustered"] = True
+                    result["new_qb_count"] = new_count
+                except Exception as e:
+                    logger.error(f"聚类失败，回退队列状态: {e}")
+                    queue_ids = [item['queue_id'] for item in batch]
+                    mark_batch_failed(queue_ids)
+                    raise
     return result
 
 
 async def force_cluster_all_pending(user_id: int = None) -> Dict:
     """强制处理所有 pending 队列（用于手动触发重建）
 
+    优先通过 ARQ 异步调度，失败时回退到内联执行。
     注意：全量重建时 skip_clean=True，因为 QB 已在重建入口清空，
     每个批次的 _pre_clean 会误删前序批次新建的 QB 条目。
     """
+    # 优先使用 ARQ 异步调度
+    try:
+        from app.worker import enqueue_force_cluster_task
+        job = await enqueue_force_cluster_task(user_id)
+        logger.info(f"全量重建任务已通过 ARQ 调度: job_id={job.job_id}")
+        return {"status": "queued", "job_id": job.job_id}
+    except Exception as e:
+        logger.warning(f"ARQ 调度失败，回退到内联执行: {e}")
+
+    # 回退：内联执行
     total_new = 0
     total_batches = 0
 
@@ -520,19 +539,32 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
 
 async def compact_singletons_in_db(user_id: int = None) -> Dict:
     """孤岛碎片整理：对 frequency=1 且无 ai_answer 的独立题按 cat2 做二次合并"""
-    # Step 1: 加载孤立题
-    def _load_singletons():
-        conn = get_db_connection()
-        rows = conn.execute(
-            "SELECT id, question, cat1, cat2, tags, difficulty, sources, "
-            "original_questions, original_question_sources "
-            "FROM question_bank "
-            "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
-            "AND frequency = 1 AND (ai_answer IS NULL OR ai_answer = '')"
-        ).fetchall()
-        return [dict(r) for r in rows]
+    # Step 1: 分页加载孤立题（避免一次性 fetchall 内存峰值）
+    _SINGLETONS_PAGE_SIZE = 200
 
-    singletons = await run_db(_load_singletons)
+    singletons = []
+    offset = 0
+    while True:
+        def _load_page(_offset=offset):
+            conn = get_db_connection()
+            rows = conn.execute(
+                "SELECT id, question, cat1, cat2, tags, difficulty, sources, "
+                "original_questions, original_question_sources "
+                "FROM question_bank "
+                "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
+                "AND frequency = 1 AND (ai_answer IS NULL OR ai_answer = '') "
+                "ORDER BY id LIMIT ? OFFSET ?",
+                (_SINGLETONS_PAGE_SIZE, _offset)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        page = await run_db(_load_page)
+        if not page:
+            break
+        singletons.extend(page)
+        offset += len(page)
+        del page
+        await asyncio.sleep(0)
     if not singletons:
         return {"total_singletons": 0, "merged": 0, "remaining": 0}
 

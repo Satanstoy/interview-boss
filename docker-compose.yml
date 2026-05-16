@@ -1,0 +1,79 @@
+# InterviewBoss Docker Compose（2c4g 优化版）
+# 用法：
+#   首次部署: docker-compose up -d --build
+#   更新部署: docker-compose up -d --build backend worker nginx
+#   查看日志: docker-compose logs -f
+#   停止服务: docker-compose down
+
+services:
+  # ── Redis ──
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redis-data:/data
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ── FastAPI 后端 ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    env_file: backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend/data:/app/backend/data
+    mem_limit: 512m
+    cpus: 0.75
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── ARQ Worker ──
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    env_file: backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend/data:/app/backend/data
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Nginx（前端 + 反向代理）──
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    mem_limit: 64m
+    cpus: 0.25
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  redis-data:

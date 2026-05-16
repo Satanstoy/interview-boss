@@ -573,25 +573,29 @@ import * as api from './api/index.js'
 import { useSelection } from './composables/useSelection.js'
 import { useTheme } from './composables/useTheme.js'
 
+import { defineAsyncComponent } from 'vue'
+
 import StagingPanel from './components/StagingPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
-import AnalyticsSidebar from './components/AnalyticsSidebar.vue'
 import TabBar from './components/TabBar.vue'
 import SearchFilterBar from './components/SearchFilterBar.vue'
 import RoundedSelect from './components/RoundedSelect.vue'
 import DataTable from './components/DataTable.vue'
 import MasterBankList from './components/MasterBankList.vue'
-import MockInterview from './components/MockInterview.vue'
-import KnowledgeGraph from './components/KnowledgeGraph.vue'
 import InlineEdit from './components/InlineEdit.vue'
 import { Toaster } from 'vue-sonner'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import LoginModal from './components/LoginModal.vue'
 import UserMenu from './components/UserMenu.vue'
-import ProfilePanel from './components/ProfilePanel.vue'
-import AdminReview from './components/AdminReview.vue'
 import PracticePanel from './components/PracticePanel.vue'
-import PracticeMode from './components/PracticeMode.vue'
+
+// 低频组件异步懒加载，减少首屏 JS 体积
+const MockInterview = defineAsyncComponent(() => import('./components/MockInterview.vue'))
+const KnowledgeGraph = defineAsyncComponent(() => import('./components/KnowledgeGraph.vue'))
+const ProfilePanel = defineAsyncComponent(() => import('./components/ProfilePanel.vue'))
+const AdminReview = defineAsyncComponent(() => import('./components/AdminReview.vue'))
+const PracticeMode = defineAsyncComponent(() => import('./components/PracticeMode.vue'))
+const AnalyticsSidebar = defineAsyncComponent(() => import('./components/AnalyticsSidebar.vue'))
 import { useToast, useConfirm } from './composables/useNotification.js'
 
 const toast = useToast()

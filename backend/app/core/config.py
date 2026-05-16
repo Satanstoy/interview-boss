@@ -19,6 +19,9 @@ MAX_TOTAL_UPLOAD_SIZE = int(os.environ.get("MAX_TOTAL_UPLOAD_SIZE_MB", "50")) * 
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 
+# Redis 配置（ARQ 任务队列）
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
 # 字段白名单（用于 GenericUpdateRequest 安全校验）
 ALLOWED_UPDATE_COLUMNS = {
     "master_question_bank": {"question", "cat1", "cat2", "tags", "difficulty", "ai_answer", "is_starred"},

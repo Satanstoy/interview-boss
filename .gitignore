@@ -43,3 +43,9 @@ docs/
 .playwright-mcp/
 backend/tests
 frontend/tests
+
+# Docker
+backups/
+
+# Test results
+test-results/

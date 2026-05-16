@@ -112,19 +112,26 @@ API 地址、模型名称、超时时间、相似度阈值等均可通过界面�
 题库题目删除后进入回收站，支持单条/批量恢复。JD、面经、题目详情均支持软删除，防止数据误删丢失。
 </details>
 
+<details>
+<summary><strong>异步任务队列</strong> — Redis + ARQ 后台处理</summary>
+
+聚类去重等耗时任务通过 ARQ 异步执行，不阻塞 API 响应。Redis 不可用时自动降级为同步执行，保证功能可用。Worker 独立进程运行，可单独扩缩容。
+</details>
+
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
 | 后端框架 | FastAPI + Uvicorn |
 | 数据库 | SQLite (WAL 模式) |
+| 任务队列 | Redis + ARQ（异步任务处理，自动降级到同步） |
 | LLM | OpenAI Compatible API（支持代理 / 国产模型） |
 | 聚类去重 | LLM-based Clustering（cat2 预分组 + 两遍聚类） |
 | 前端框架 | Vue 3 (Composition API) + Vite |
 | 样式 | Tailwind CSS |
 | 图表 | ECharts 6 |
 | 认证 | JWT 双 Token（Access + HttpOnly Refresh） |
-| 部署 | Nginx + systemd |
+| 部署 | Docker Compose / Nginx + systemd |
 | 包管理 | uv (Python) / npm (Node.js) |
 
 ## 项目结构
@@ -138,17 +145,24 @@ interview-boss/
 │   │   ├── services/      # LLM 调用、聚类去重、工具函数
 │   │   ├── db/            # SQLite 连接管理、CRUD、自动迁移
 │   │   ├── middleware/     # 请求日志中间件
-│   │   └── models/        # Pydantic 请求/响应模型
+│   │   ├── models/        # Pydantic 请求/响应模型
+│   │   └── worker.py      # ARQ 异步任务定义（聚类任务）
 │   ├── data/              # SQLite 数据库文件（自动备份）
 │   └── .env.example       # 环境变量模板
 ├── frontend/
 │   ├── src/
-│   │   ├── components/    # 20 个 Vue SFC 组件
+│   │   ├── components/    # 20 个 Vue SFC 组件（异步懒加载）
 │   │   ├── composables/   # 组合式函数（useSelection, useNotification, useTheme）
 │   │   ├── api/           # API 封装
 │   │   └── utils/         # HTTP 客户端（JWT + 自动刷新）、Markdown 渲染、校验
 │   └── public/            # 静态资源（favicon）
+├── nginx/
+│   └── nginx.conf         # Docker Nginx 配置（API 代理 + SPA + 安全头）
+├── Dockerfile             # 多阶段构建（前端 + 后端）
+├── docker-compose.yml     # 容器编排（Redis + Backend + Worker + Nginx）
+├── docker-deploy.sh       # Docker 部署脚本
 ├── pyproject.toml         # Python 依赖定义
+├── deploy.sh              # systemd 部署脚本
 ├── deploy-frontend.sh     # 前端部署脚本
 ├── nginx-hardened.conf    # Nginx 安全配置参考
 └── README.md
@@ -220,6 +234,7 @@ npm run dev
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `REDIS_URL` | Redis 连接地址 | `redis://localhost:6379/0` |
 | `OPENAI_API_KEY` | LLM API 密钥 | *(必填)* |
 | `OPENAI_BASE_URL` | LLM API 地址 | 空 |
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
@@ -328,6 +343,50 @@ sudo journalctl -u interview-boss -n 100
 
 # 查看错误日志
 sudo journalctl -u interview-boss -p err
+```
+
+### Docker 部署（推荐）
+
+Docker 一键部署包含 Redis、后端、Worker、Nginx 四个容器，适合 2c4g 服务器。
+
+#### 首次部署
+
+```bash
+# 确保已配置 backend/.env（参考 .env.example）
+cd interview-boss
+
+# 构建并启动所有服务
+./docker-deploy.sh all
+```
+
+#### 常用运维命令
+
+```bash
+./docker-deploy.sh status    # 查看服务状态和资源使用
+./docker-deploy.sh logs      # 查看日志（可指定: logs backend）
+./docker-deploy.sh update    # 代码更新后重新部署
+./docker-deploy.sh restart   # 重启所有服务
+./docker-deploy.sh backup    # 备份数据库和 Redis 数据
+./docker-deploy.sh down      # 停止所有服务
+```
+
+#### 资源分配（2c4g 优化）
+
+| 服务 | 内存限制 | CPU | 说明 |
+|------|---------|-----|------|
+| Redis | 128MB | 0.25 | 任务队列 + 缓存 |
+| Backend | 512MB | 0.75 | FastAPI 应用 |
+| Worker | 256MB | 0.5 | ARQ 异步任务 |
+| Nginx | 64MB | 0.25 | 反向代理 + 静态文件 |
+
+#### 从 systemd 迁移
+
+```bash
+# 停止宿主机服务
+./docker-deploy.sh migrate
+
+# 构建并启动 Docker 服务
+./docker-deploy.sh all
 ```
 
 ### 前端部署
