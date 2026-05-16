@@ -7,7 +7,10 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+
+# Python version manager
+.python-version
 
 # Environment variables
 .env
@@ -34,18 +37,18 @@ node_modules/
 .vscode/
 .idea/
 
-# Claude Code local settings (may contain tokens)
-.claude/settings.local.json
+# Claude Code (may contain tokens and local state)
+.claude/
 
+# Docs (auto-generated, not for version control)
 docs/
 
+# Test artifacts
 .pytest_cache/
 .playwright-mcp/
-backend/tests
-frontend/tests
+backend/tests/
+frontend/tests/
+test-results/
 
 # Docker
 backups/
-
-# Test results
-test-results/
