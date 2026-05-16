@@ -298,7 +298,81 @@ refactor: 提取 HTTP 客户端为独立模块
 
 ## 部署指南
 
-### 后端部署
+### Docker 部署（推荐）
+
+Docker 一键部署包含 Redis、后端、Worker、Nginx 四个容器，镜像已配置国内加速（阿里云 npm/apt/PyPI 镜像）。
+
+#### 前置条件
+
+- Docker + Docker Compose v1（`docker-compose`）或 v2（`docker compose`）
+- 80 端口未被占用（如有系统 Nginx，需先停止：`sudo systemctl stop nginx && sudo systemctl disable nginx`）
+
+#### 首次部署
+
+```bash
+cd interview-boss
+
+# 1. 配置环境变量
+cp backend/.env.example backend/.env
+# 编辑 backend/.env，填入 OPENAI_API_KEY、ADMIN_PASSWORD 等必填项
+
+# 2. 构建并启动所有服务
+sudo ./docker-deploy.sh all
+```
+
+首次构建约 3-5 分钟（含前端构建 + Python 依赖安装），后续更新走缓存很快。
+
+#### 常用运维命令
+
+```bash
+sudo ./docker-deploy.sh           # 默认等同于 all（构建 + 启动 + 状态检查）
+sudo ./docker-deploy.sh status    # 查看服务状态和资源使用
+sudo ./docker-deploy.sh logs      # 查看日志（可指定: logs backend）
+sudo ./docker-deploy.sh update    # 代码更新后重新部署
+sudo ./docker-deploy.sh restart   # 重启所有服务
+sudo ./docker-deploy.sh backup    # 备份数据库和 Redis 数据
+sudo ./docker-deploy.sh down      # 停止所有服务
+```
+
+#### 仅更新前端
+
+前端修改后，只需重新构建 dist 并重启 Nginx（无需重建后端镜像）：
+
+```bash
+cd frontend && npm run build
+sudo docker-compose restart nginx
+```
+
+#### 资源分配（2c4g 优化）
+
+| 服务 | 内存限制 | CPU | 说明 |
+|------|---------|-----|------|
+| Redis | 128MB | 0.25 | 任务队列 + 缓存 |
+| Backend | 512MB | 0.75 | FastAPI 应用 |
+| Worker | 256MB | 0.5 | ARQ 异步任务 |
+| Nginx | 64MB | 0.25 | 反向代理 + 静态文件 |
+
+#### 从 systemd 迁移
+
+```bash
+# 停止宿主机服务
+sudo systemctl stop interview-boss
+sudo systemctl disable interview-boss
+
+# 构建并启动 Docker 服务
+sudo ./docker-deploy.sh all
+```
+
+#### 端口冲突排查
+
+如果启动时报 `address already in use`，检查占用 80 端口的进程：
+
+```bash
+sudo ss -tlnp | grep ':80 '
+# 常见原因：系统 Nginx → sudo systemctl stop nginx && sudo systemctl disable nginx
+```
+
+### 后端部署（systemd，非 Docker 场景）
 
 #### systemd 服务
 
@@ -345,51 +419,7 @@ sudo journalctl -u interview-boss -n 100
 sudo journalctl -u interview-boss -p err
 ```
 
-### Docker 部署（推荐）
-
-Docker 一键部署包含 Redis、后端、Worker、Nginx 四个容器，适合 2c4g 服务器。
-
-#### 首次部署
-
-```bash
-# 确保已配置 backend/.env（参考 .env.example）
-cd interview-boss
-
-# 构建并启动所有服务
-./docker-deploy.sh all
-```
-
-#### 常用运维命令
-
-```bash
-./docker-deploy.sh status    # 查看服务状态和资源使用
-./docker-deploy.sh logs      # 查看日志（可指定: logs backend）
-./docker-deploy.sh update    # 代码更新后重新部署
-./docker-deploy.sh restart   # 重启所有服务
-./docker-deploy.sh backup    # 备份数据库和 Redis 数据
-./docker-deploy.sh down      # 停止所有服务
-```
-
-#### 资源分配（2c4g 优化）
-
-| 服务 | 内存限制 | CPU | 说明 |
-|------|---------|-----|------|
-| Redis | 128MB | 0.25 | 任务队列 + 缓存 |
-| Backend | 512MB | 0.75 | FastAPI 应用 |
-| Worker | 256MB | 0.5 | ARQ 异步任务 |
-| Nginx | 64MB | 0.25 | 反向代理 + 静态文件 |
-
-#### 从 systemd 迁移
-
-```bash
-# 停止宿主机服务
-./docker-deploy.sh migrate
-
-# 构建并启动 Docker 服务
-./docker-deploy.sh all
-```
-
-### 前端部署
+### 前端部署（systemd，非 Docker 场景）
 
 #### 构建与部署
 
