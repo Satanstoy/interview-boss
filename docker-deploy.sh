@@ -29,13 +29,14 @@ check_docker() {
 # ── 构建镜像 ──
 do_build() {
   log "构建 Docker 镜像..."
-  docker-compose build --parallel 2>&1
+  docker-compose build 2>&1
   log "镜像构建完成"
 }
 
 # ── 启动服务 ──
 do_up() {
   log "启动 Docker 服务..."
+  docker-compose down 2>/dev/null || true
   docker-compose up -d
   sleep 3
   do_status
@@ -78,7 +79,9 @@ do_logs() {
 # ── 更新部署（代码变更后）──
 do_update() {
   log "更新部署..."
-  docker-compose up -d --build backend worker nginx
+  docker-compose down 2>/dev/null || true
+  docker-compose build backend worker nginx
+  docker-compose up -d
   sleep 5
   do_status
   log "更新完成"
@@ -123,7 +126,7 @@ do_migrate() {
 }
 
 # ── 主逻辑 ──
-MODE="${1:-help}"
+MODE="${1:-all}"
 
 case "$MODE" in
   build)    check_docker; do_build ;;

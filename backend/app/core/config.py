@@ -6,7 +6,7 @@ load_dotenv()
 
 logger = logging.getLogger("interview-boss")
 
-DATA_DIR = "/root/sj/interview-boss/backend/data"
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "interview-boss.db")
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
