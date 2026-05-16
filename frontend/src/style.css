@@ -58,6 +58,30 @@
     background-color: rgb(var(--c-primary-900) / 0.4);
     color: rgb(var(--c-primary-100));
   }
+
+  /* Dark mode: force all form elements to dark background */
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  .dark textarea,
+  .dark select {
+    background-color: #252220 !important;
+  }
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
+  .dark textarea:focus,
+  .dark select:focus {
+    background-color: #302b28 !important;
+  }
+
+  /* Dark mode: checkbox & radio styling */
+  .dark input[type="checkbox"],
+  .dark input[type="radio"] {
+    background-color: #3f3a36 !important;
+    border-color: #574f49 !important;
+  }
+  .dark input[type="checkbox"]:checked,
+  .dark input[type="radio"]:checked {
+    background-color: rgb(var(--c-primary-600)) !important;
+    border-color: rgb(var(--c-primary-600)) !important;
+  }
 }
 
 @layer components {
@@ -106,10 +130,10 @@
 
   /* Smooth card */
   .card-smooth {
-    @apply bg-white rounded-2xl shadow-card border border-surface-200/80 dark:bg-surface-800 dark:border-ink-700 dark:shadow-glass-dark transition-[box-shadow,transform] duration-300;
+    @apply bg-white rounded-2xl shadow-card border border-surface-200/60 dark:bg-surface-800 dark:border-ink-700/50 dark:shadow-glass-dark transition-shadow duration-200;
   }
   .card-smooth:hover {
-    @apply shadow-card-hover border-surface-300 dark:border-ink-600 -translate-y-0.5;
+    @apply shadow-card-hover dark:border-ink-600;
   }
 
   /* Button base */
@@ -139,6 +163,23 @@
   .warm-line {
     background: linear-gradient(90deg, var(--c-primary-500), var(--c-primary-600), transparent);
     height: 2px;
+  }
+
+  /* Unified type scale — eliminates arbitrary text-[10px] / text-[11px] */
+  .text-label {
+    font-size: 0.625rem;    /* 10px — uppercase labels, badge inner text */
+    line-height: 1rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .text-caption {
+    font-size: 0.6875rem;   /* 11px — secondary info, source links */
+    line-height: 1rem;
+  }
+  .text-detail {
+    font-size: 0.75rem;     /* 12px — tertiary detail text */
+    line-height: 1.125rem;
   }
 }
 
