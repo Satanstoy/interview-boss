@@ -138,6 +138,12 @@
             <span class="font-medium text-sm">加载答案中...</span>
           </div>
 
+          <div v-else-if="detailError" class="flex flex-col items-center justify-center py-6 text-amber-600 dark:text-amber-400 gap-2">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-sm">答案加载失败</span>
+            <button @click="detailError = false; fullAnswer = null; loadFullAnswer()" class="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-1">重试</button>
+          </div>
+
           <div v-else-if="question._isLoadingAnswer" class="flex flex-col items-center justify-center py-8 text-primary-600 dark:text-primary-400 gap-3">
             <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
             <span class="font-medium text-sm">AI 正在生成答案，请稍候...</span>
@@ -223,6 +229,7 @@ const showSources = ref(false)
 const fullAnswer = ref(null)
 const fullUserAnswer = ref(null)
 const isLoadingDetail = ref(false)
+const detailError = ref(false)
 
 async function loadFullAnswer() {
   if (fullAnswer.value !== null) return
@@ -240,7 +247,8 @@ async function loadFullAnswer() {
     // Emit to parent so it updates the question object too
     emit('update-answer', { id: props.question.id, ai_answer: detail.ai_answer, user_answer: detail.user_answer })
   } catch (e) {
-    console.error('Failed to load answer detail:', e)
+    console.warn('Failed to load answer detail:', e)
+    detailError.value = true
     fullAnswer.value = ''
   } finally {
     isLoadingDetail.value = false

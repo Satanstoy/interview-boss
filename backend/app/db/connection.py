@@ -1118,6 +1118,29 @@ def _migration_021_performance_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_aq_status_created ON analysis_queue(status, created_at)")
 
 
+def _migration_022_jobs_table(conn):
+    """Add jobs table for tracking async background tasks."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_type TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            progress_current INTEGER DEFAULT 0,
+            progress_total INTEGER DEFAULT 0,
+            progress_message TEXT DEFAULT '',
+            result TEXT,
+            error TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(job_type)")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1140,6 +1163,7 @@ _MIGRATIONS = [
     (19, 'fix_cascades',                 _migration_019_fix_cascades),
     # (20, 'drop_json_columns',         _migration_020_drop_json_columns),  # TODO: 启用前需先移除写路径中的 JSON 列引用
     (21, 'performance_indexes',          _migration_021_performance_indexes),
+    (22, 'jobs_table',                   _migration_022_jobs_table),
 ]
 
 

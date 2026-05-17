@@ -391,7 +391,7 @@ watch(leftTab, async (tab) => {
     try {
       qState._history = (await fetchPracticeHistory(props.question.id)).map(h => ({ ...h, _expanded: false }))
     } catch (e) {
-      console.error('加载练习记录失败', e)
+      console.warn('加载练习记录失败', e)
       qState._history = []
     } finally {
       qState._historyLoading = false

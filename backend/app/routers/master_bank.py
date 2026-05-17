@@ -231,166 +231,290 @@ async def analysis_status(user: dict = Depends(get_admin_user)):
     return await run_db(_check)
 
 
+@router.get("/api/jobs/{job_id}/stream")
+async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user)):
+    """Stream job progress via SSE."""
+    async def event_generator():
+        last_update = None
+        while True:
+            def _check():
+                with get_db_connection() as conn:
+                    return conn.execute(
+                        "SELECT status, progress_current, progress_total, progress_message, result, error "
+                        "FROM jobs WHERE id = ?", (job_id,)
+                    ).fetchone()
+
+            job = await run_db(_check)
+            if not job:
+                yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'})}\n\n"
+                break
+
+            update = {
+                'type': 'progress' if job['status'] == 'running' else job['status'],
+                'status': job['status'],
+                'current': job['progress_current'],
+                'total': job['progress_total'],
+                'message': job['progress_message']
+            }
+
+            current_update = json.dumps(update)
+            if current_update != last_update:
+                yield f"data: {current_update}\n\n"
+                last_update = current_update
+
+            if job['status'] in ('completed', 'failed'):
+                if job['error']:
+                    yield f"data: {json.dumps({'type': 'error', 'message': job['error']})}\n\n"
+                elif job['result']:
+                    yield f"data: {json.dumps({'type': 'done', 'message': job['result']})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'done', 'message': '重建完成'})}\n\n"
+                break
+
+            await asyncio.sleep(2)  # Poll every 2 seconds
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: int, user: dict = Depends(get_current_user)):
+    """Get job status (non-streaming)."""
+    def _query():
+        with get_db_connection() as conn:
+            return conn.execute(
+                "SELECT id, job_type, status, progress_current, progress_total, progress_message, error, created_at, completed_at "
+                "FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+
+    job = await run_db(_query)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return dict(job)
+
+
 @router.post("/api/master-bank/build")
-async def build_master_bank(admin: dict = Depends(get_admin_user)):
-    """基于现有分类重新聚类（SSE 流式推送进度）"""
-
-    async def event_stream():
-        try:
-            # ── 立即反馈 ──
-            yield f"data: {json.dumps({'type': 'init', 'total': 0, 'step': 'prepare', 'message': '正在备份数据库...'})}\n\n"
-
-            # ── 备份 ──
-            backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
+async def build_master_bank(user: dict = Depends(get_admin_user)):
+    """Submit a master bank rebuild job (async via ARQ worker)."""
+    def _create_job():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN")
             try:
-                shutil.copy2(DB_PATH, backup_path)
-            except Exception as e:
-                logger.warning(f"创建备份失败: {e}")
-            try:
-                import glob
-                backups = sorted(glob.glob(f"{DB_PATH}.bak.build.*"), key=os.path.getmtime, reverse=True)
-                for old in backups[3:]:
-                    os.remove(old)
+                # Check for existing running build
+                existing = cursor.execute(
+                    "SELECT id FROM jobs WHERE job_type = 'build_master_bank' AND status IN ('pending', 'running') AND created_by = ?",
+                    (user['id'],)
+                ).fetchone()
+                if existing:
+                    return None  # Already running
+
+                cursor.execute(
+                    "INSERT INTO jobs (job_type, status, created_by) VALUES ('build_master_bank', 'pending', ?)",
+                    (user['id'],)
+                )
+                job_id = cursor.lastrowid
+                conn.commit()
+                return job_id
             except Exception:
-                pass
+                conn.rollback()
+                raise
 
-            current_pos = get_current_job_position()
+    job_id = await run_db(_create_job)
+    if job_id is None:
+        raise HTTPException(status_code=409, detail="已有重建任务在执行中，请等待完成")
 
-            def _load():
-                with get_db_connection() as conn:
-                    raw = conn.execute(
-                        "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
-                        "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL AND qd.job_position = ?",
-                        (current_pos,)
-                    ).fetchall()
-                    existing = conn.execute(
-                        "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
-                        (current_pos,)
-                    ).fetchall()
-                    return raw, {r['question']: r['ai_answer'] for r in existing}
+    # Schedule via ARQ
+    arq_scheduled = False
+    try:
+        from app.worker import enqueue_build_job
+        await enqueue_build_job(job_id)
+        arq_scheduled = True
+        logger.info(f"重建任务已通过 ARQ 调度: job_id={job_id}")
+    except Exception as e:
+        logger.warning(f"ARQ 调度失败，回退到内联执行: {e}")
 
-            raw_questions, existing_answers_map = await run_db(_load)
-            if not raw_questions:
-                yield f"data: {json.dumps({'type': 'done', 'error': '没有数据'})}\n\n"
-                return
+    if not arq_scheduled:
+        # Fallback: run inline in background task
+        async def _fallback():
+            await _run_build_inline(job_id, user['id'])
+        asyncio.create_task(_fallback())
 
-            total = len(raw_questions)
-            yield f"data: {json.dumps({'type': 'init', 'total': total, 'step': 'prepare', 'message': f'共 {total} 道题目，准备聚类...'})}\n\n"
+    return {"job_id": job_id, "status": "pending", "message": "重建任务已提交，请通过 SSE 监听进度"}
 
-            # ── 保存已有 AI 答案（跳过重标注，直接使用现有分类） ──
 
-            # ── 清空公共题库 + 关联数据 ──
-            yield f"data: {json.dumps({'type': 'progress', 'step': 'save', 'current': 0, 'total': 0, 'message': '清空旧题库...'})}\n\n"
+async def _run_build_inline(job_id: int, user_id: int):
+    """Fallback inline build logic (used when ARQ is unavailable).
 
-            def _clear_bank():
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("BEGIN")
-                    try:
-                        cursor.execute(
-                            "DELETE FROM user_question_view WHERE question_bank_id IN "
-                            "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                            (current_pos,)
-                        )
-                        cursor.execute(
-                            "DELETE FROM user_practice_history WHERE question_bank_id IN "
-                            "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                            (current_pos,)
-                        )
-                        cursor.execute(
-                            "DELETE FROM question_position WHERE question_id IN "
-                            "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                            (current_pos,)
-                        )
-                        cursor.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
-                        conn.commit()
-                    except Exception:
-                        conn.rollback()
-                        raise
+    Same logic as the ARQ task but runs in the FastAPI process.
+    Updates the jobs table with progress for SSE monitoring.
+    """
+    import shutil as _shutil
 
-            await run_db(_clear_bank)
+    def _update_progress(current, total, message=''):
+        with get_db_connection() as conn:
+            conn.execute(
+                "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, progress_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (current, total, message, job_id)
+            )
+            conn.commit()
 
-            # ── 入队所有问题（基本单位：单个问题） ──
-            def _enqueue_all():
-                with get_db_connection() as conn:
-                    # 清空旧队列（包括 processing，因为全量重建会清空 question_bank，旧的 processing 无意义）
-                    conn.execute("DELETE FROM analysis_queue")
-                    # 获取所有 questions_detail（每题一条队列记录）
-                    qd_rows = conn.execute(
-                        "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
-                        "JOIN interview i ON qd.url = i.url "
-                        "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL AND qd.job_position = ?",
-                        (current_pos,)
-                    ).fetchall()
-                    for row in qd_rows:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status) VALUES (?, ?, 'pending')",
-                            (row['interview_id'], row['id'])
-                        )
-                    conn.commit()
-                    return len(qd_rows)
+    def _mark_complete(status, result=None, error=None):
+        with get_db_connection() as conn:
+            conn.execute(
+                "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, result, error, job_id)
+            )
+            conn.commit()
 
-            enqueued = await run_db(_enqueue_all)
-            yield f"data: {json.dumps({'type': 'progress', 'step': 'cluster', 'current': 0, 'total': enqueued, 'message': f'已入队 {enqueued} 道题目，开始批量聚类...'})}\n\n"
-            logger.info(f"重建题库: 已入队 {enqueued} 道题目")
+    try:
+        # Step 1: 备份
+        _update_progress(0, 0, '正在备份数据库...')
+        backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
+        try:
+            _shutil.copy2(DB_PATH, backup_path)
+        except Exception as e:
+            logger.warning(f"创建备份失败: {e}")
+        try:
+            import glob
+            backups = sorted(glob.glob(f"{DB_PATH}.bak.build.*"), key=os.path.getmtime, reverse=True)
+            for old in backups[3:]:
+                os.remove(old)
+        except Exception:
+            pass
 
-            # ── 分批聚类（复用 pipeline） ──
-            from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
+        current_pos = get_current_job_position()
 
-            total_new = 0
-            batch_num = 0
-            while True:
-                batch = dequeue_batch(BATCH_SIZE)
-                if not batch:
-                    break
-                batch_num += 1
+        # Step 2: 加载数据
+        _update_progress(0, 0, '加载题目数据...')
+        def _load():
+            with get_db_connection() as conn:
+                raw = conn.execute(
+                    "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
+                    "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL AND qd.job_position = ?",
+                    (current_pos,)
+                ).fetchall()
+                existing = conn.execute(
+                    "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
+                    (current_pos,)
+                ).fetchall()
+                return raw, {r['question']: r['ai_answer'] for r in existing}
+
+        raw_questions, existing_answers_map = await run_db(_load)
+        if not raw_questions:
+            _mark_complete('completed', result='没有数据')
+            return
+
+        total = len(raw_questions)
+        _update_progress(0, total, f'共 {total} 道题目，准备聚类...')
+
+        # Step 3: 清空公共题库
+        _update_progress(0, total, '清空旧题库...')
+        def _clear_bank():
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("BEGIN")
                 try:
-                    new_count = await cluster_batch(batch, user_id=admin['id'], skip_clean=True)
-                    queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_done(queue_ids)
-                    total_new += new_count
-                    yield f"data: {json.dumps({'type': 'progress', 'step': 'cluster', 'current': batch_num * BATCH_SIZE, 'total': enqueued, 'message': f'批次 {batch_num}: 新增 {new_count} 个聚类（累计 {total_new}）'})}\n\n"
-                except Exception as e:
-                    logger.error(f"重建聚类批次 {batch_num} 失败: {e}")
-                    queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_failed(queue_ids)
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'聚类批次 {batch_num} 失败: {str(e)[:100]}'})}\n\n"
+                    cursor.execute(
+                        "DELETE FROM user_question_view WHERE question_bank_id IN "
+                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
+                        (current_pos,)
+                    )
+                    cursor.execute(
+                        "DELETE FROM user_practice_history WHERE question_bank_id IN "
+                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
+                        (current_pos,)
+                    )
+                    cursor.execute(
+                        "DELETE FROM question_position WHERE question_id IN "
+                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
+                        (current_pos,)
+                    )
+                    cursor.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
                     raise
 
-            # ── 恢复 AI 答案 ──
-            def _restore_answers():
-                with get_db_connection() as conn:
-                    restored = 0
-                    rows = conn.execute(
-                        "SELECT id, question, original_questions FROM question_bank "
-                        "WHERE job_position = ? AND owner_id IS NULL AND (ai_answer IS NULL OR ai_answer = '')",
-                        (current_pos,)
-                    ).fetchall()
-                    for r in rows:
-                        ai_answer = existing_answers_map.get(r['question'])
-                        if not ai_answer:
-                            try:
-                                oqs = json.loads(r['original_questions'] or '[]')
-                                for oq in oqs:
-                                    ai_answer = existing_answers_map.get(oq)
-                                    if ai_answer:
-                                        break
-                            except Exception:
-                                pass
-                        if ai_answer:
-                            conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (ai_answer, r['id']))
-                            restored += 1
-                    conn.commit()
-                    return restored
+        await run_db(_clear_bank)
 
-            restored = await run_db(_restore_answers)
-            logger.info(f"全量重建完成: {total_new} 个聚类，恢复 {restored} 个 AI 答案")
-            yield f"data: {json.dumps({'type': 'done', 'total_unique': total_new, 'restored': restored})}\n\n"
-        except Exception as e:
-            logger.exception("全量重建失败")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'重建失败: {str(e)[:200]}'})}\n\n"
+        # Step 4: 入队所有问题
+        def _enqueue_all():
+            with get_db_connection() as conn:
+                conn.execute("DELETE FROM analysis_queue")
+                qd_rows = conn.execute(
+                    "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
+                    "JOIN interview i ON qd.url = i.url "
+                    "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL AND qd.job_position = ?",
+                    (current_pos,)
+                ).fetchall()
+                for row in qd_rows:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status) VALUES (?, ?, 'pending')",
+                        (row['interview_id'], row['id'])
+                    )
+                conn.commit()
+                return len(qd_rows)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+        enqueued = await run_db(_enqueue_all)
+        _update_progress(0, enqueued, f'已入队 {enqueued} 道题目，开始批量聚类...')
+        logger.info(f"重建题库(内联): 已入队 {enqueued} 道题目")
+
+        # Step 5: 分批聚类
+        from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
+
+        total_new = 0
+        batch_num = 0
+        while True:
+            batch = dequeue_batch(BATCH_SIZE)
+            if not batch:
+                break
+            batch_num += 1
+            try:
+                new_count = await cluster_batch(batch, user_id=user_id, skip_clean=True)
+                queue_ids = [item['queue_id'] for item in batch]
+                mark_batch_done(queue_ids)
+                total_new += new_count
+                _update_progress(batch_num * BATCH_SIZE, enqueued, f'批次 {batch_num}: 新增 {new_count} 个聚类（累计 {total_new}）')
+            except Exception as e:
+                logger.error(f"重建聚类批次 {batch_num} 失败: {e}")
+                queue_ids = [item['queue_id'] for item in batch]
+                mark_batch_failed(queue_ids)
+                raise
+
+        # Step 6: 恢复 AI 答案
+        _update_progress(enqueued, enqueued, '恢复 AI 答案...')
+        def _restore_answers():
+            with get_db_connection() as conn:
+                restored = 0
+                rows = conn.execute(
+                    "SELECT id, question, original_questions FROM question_bank "
+                    "WHERE job_position = ? AND owner_id IS NULL AND (ai_answer IS NULL OR ai_answer = '')",
+                    (current_pos,)
+                ).fetchall()
+                for r in rows:
+                    ai_answer = existing_answers_map.get(r['question'])
+                    if not ai_answer:
+                        try:
+                            oqs = json.loads(r['original_questions'] or '[]')
+                            for oq in oqs:
+                                ai_answer = existing_answers_map.get(oq)
+                                if ai_answer:
+                                    break
+                        except Exception:
+                            pass
+                    if ai_answer:
+                        conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (ai_answer, r['id']))
+                        restored += 1
+                conn.commit()
+                return restored
+
+        restored = await run_db(_restore_answers)
+        logger.info(f"全量重建完成(内联): {total_new} 个聚类，恢复 {restored} 个 AI 答案")
+        _mark_complete('completed', result=f'重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案')
+
+    except Exception as e:
+        logger.exception(f"全量重建失败(内联): job_id={job_id}")
+        _mark_complete('failed', error=str(e)[:500])
 
 
 @router.post("/api/master-bank/compact")
@@ -963,151 +1087,157 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
 
     def _merge():
         with get_db_connection() as conn:
-            source = conn.execute(
-                "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
-                (question_id,)
-            ).fetchone()
-            target = conn.execute(
-                "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
-                (req.target_id,)
-            ).fetchone()
-            if not source:
-                raise HTTPException(status_code=404, detail="未找到源聚类")
-            if not target:
-                raise HTTPException(status_code=404, detail="未找到目标聚类")
-
-            src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
-            src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []
-
-            is_standalone_merge = not src_orig and original_q == source['question']
-            if not is_standalone_merge and original_q not in src_orig:
-                raise HTTPException(status_code=400, detail="该原始题目不在源聚类中")
-
-            # 找到要移动的题目的来源
-            moving_src = []
-            if is_standalone_merge:
-                moving_src = json.loads(source['sources']) if source['sources'] else []
-            else:
-                for item in src_orig_src:
-                    if item.get('question') == original_q:
-                        moving_src = item.get('sources', [])
-                        break
-
-            # 更新目标聚类
-            tgt_orig = json.loads(target['original_questions']) if target['original_questions'] else []
-            tgt_orig_src = json.loads(target['original_question_sources']) if target['original_question_sources'] else []
-            tgt_sources = json.loads(target['sources']) if target['sources'] else []
-
-            tgt_orig.append(original_q)
-            tgt_orig_src.append({"question": original_q, "sources": moving_src})
-
-            # 更新目标的 sources
-            seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
-            for s in moving_src:
-                key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                if key not in seen:
-                    seen.add(key)
-                    tgt_sources.append(s)
-
-            # 可选：更新目标聚类类别
-            cat_set = ""
-            cat_params = []
-            if req.target_cat1:
-                cat_set += ", cat1 = ?"
-                cat_params.append(req.target_cat1)
-            if req.target_cat2:
-                cat_set += ", cat2 = ?"
-                cat_params.append(req.target_cat2)
-
-            conn.execute(
-                f"UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP{cat_set} WHERE id = ?",
-                [json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
-                 json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), *cat_params, req.target_id]
-            )
-
-            # Dual-write: insert moved item into target's normalized tables
-            for s in moving_src:
-                try:
-                    insert_source(conn, req.target_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                except Exception:
-                    pass
+            cursor = conn.cursor()
+            cursor.execute("BEGIN")
             try:
-                insert_original_item(conn, req.target_id, original_q, moving_src)
-            except Exception:
-                pass
+                source = conn.execute(
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
+                    (question_id,)
+                ).fetchone()
+                target = conn.execute(
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
+                    (req.target_id,)
+                ).fetchone()
+                if not source:
+                    raise HTTPException(status_code=404, detail="未找到源聚类")
+                if not target:
+                    raise HTTPException(status_code=404, detail="未找到目标聚类")
 
-            # 转移 ai_answer（目标没有答案时才转移）
-            if source['ai_answer'] and not target['ai_answer']:
-                conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (source['ai_answer'], req.target_id))
+                src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
+                src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []
 
-            # 转移收藏记录（跳过用户已在目标题目上的记录）
-            conn.execute(
-                "INSERT INTO user_question_view (user_id, question_bank_id, is_starred, personal_tags, note) "
-                "SELECT uqv.user_id, ?, uqv.is_starred, uqv.personal_tags, uqv.note "
-                "FROM user_question_view uqv WHERE uqv.question_bank_id = ? "
-                "AND NOT EXISTS (SELECT 1 FROM user_question_view t WHERE t.user_id = uqv.user_id AND t.question_bank_id = ?)",
-                (req.target_id, question_id, req.target_id)
-            )
+                is_standalone_merge = not src_orig and original_q == source['question']
+                if not is_standalone_merge and original_q not in src_orig:
+                    raise HTTPException(status_code=400, detail="该原始题目不在源聚类中")
 
-            # 转移练习记录（跳过用户已在目标题目上的记录）
-            conn.execute(
-                "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score, created_at) "
-                "SELECT uph.user_id, ?, uph.user_answer, uph.evaluation_result, uph.score, uph.created_at "
-                "FROM user_practice_history uph WHERE uph.question_bank_id = ? "
-                "AND NOT EXISTS (SELECT 1 FROM user_practice_history t WHERE t.user_id = uph.user_id AND t.question_bank_id = ?)",
-                (req.target_id, question_id, req.target_id)
-            )
+                # 找到要移动的题目的来源
+                moving_src = []
+                if is_standalone_merge:
+                    moving_src = json.loads(source['sources']) if source['sources'] else []
+                else:
+                    for item in src_orig_src:
+                        if item.get('question') == original_q:
+                            moving_src = item.get('sources', [])
+                            break
 
-            # 从源聚类中移除
-            new_src_orig = [q for q in src_orig if q != original_q]
-            new_src_orig_src = [item for item in src_orig_src if item.get('question') != original_q]
+                # 更新目标聚类
+                tgt_orig = json.loads(target['original_questions']) if target['original_questions'] else []
+                tgt_orig_src = json.loads(target['original_question_sources']) if target['original_question_sources'] else []
+                tgt_sources = json.loads(target['sources']) if target['sources'] else []
 
-            remaining_sources = []
-            seen2 = set()
-            for item in new_src_orig_src:
-                for s in item.get('sources', []):
+                tgt_orig.append(original_q)
+                tgt_orig_src.append({"question": original_q, "sources": moving_src})
+
+                # 更新目标的 sources
+                seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in tgt_sources}
+                for s in moving_src:
                     key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                    if key not in seen2:
-                        seen2.add(key)
-                        remaining_sources.append(s)
+                    if key not in seen:
+                        seen.add(key)
+                        tgt_sources.append(s)
 
-            if is_standalone_merge:
-                # 独立题合并后删除源（已完整并入目标）
-                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
-                conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
-            elif len(new_src_orig) == 0:
-                conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
-                conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
-            elif len(new_src_orig) == 1:
+                # 可选：更新目标聚类类别
+                cat_set = ""
+                cat_params = []
+                if req.target_cat1:
+                    cat_set += ", cat1 = ?"
+                    cat_params.append(req.target_cat1)
+                if req.target_cat2:
+                    cat_set += ", cat2 = ?"
+                    cat_params.append(req.target_cat2)
+
                 conn.execute(
-                    "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_src_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
-                )
-            else:
-                conn.execute(
-                    "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
-                     len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    f"UPDATE question_bank SET original_questions = ?, original_question_sources = ?, sources = ?, frequency = ?, updated_at = CURRENT_TIMESTAMP{cat_set} WHERE id = ?",
+                    [json.dumps(tgt_orig, ensure_ascii=False), json.dumps(tgt_orig_src, ensure_ascii=False),
+                     json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), *cat_params, req.target_id]
                 )
 
-            # Dual-write: cleanup source's normalized tables
-            if is_standalone_merge or len(new_src_orig) == 0:
-                # CASCADE handles cleanup when entire row is deleted
-                pass
-            else:
-                # Delete the moved item, then rebuild source's normalized sources
-                try:
-                    delete_original_item(conn, question_id, original_q)
-                except Exception:
-                    pass
-                conn.execute("DELETE FROM question_sources WHERE question_bank_id = ?", (question_id,))
-                for s in remaining_sources:
+                # Dual-write: insert moved item into target's normalized tables
+                for s in moving_src:
                     try:
-                        insert_source(conn, question_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                        insert_source(conn, req.target_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
                     except Exception:
                         pass
+                try:
+                    insert_original_item(conn, req.target_id, original_q, moving_src)
+                except Exception:
+                    pass
 
-            conn.commit()
+                # 转移 ai_answer（目标没有答案时才转移）
+                if source['ai_answer'] and not target['ai_answer']:
+                    conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (source['ai_answer'], req.target_id))
+
+                # 转移收藏记录（跳过用户已在目标题目上的记录）
+                conn.execute(
+                    "INSERT INTO user_question_view (user_id, question_bank_id, is_starred, personal_tags, note) "
+                    "SELECT uqv.user_id, ?, uqv.is_starred, uqv.personal_tags, uqv.note "
+                    "FROM user_question_view uqv WHERE uqv.question_bank_id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM user_question_view t WHERE t.user_id = uqv.user_id AND t.question_bank_id = ?)",
+                    (req.target_id, question_id, req.target_id)
+                )
+
+                # 转移练习记录（跳过用户已在目标题目上的记录）
+                conn.execute(
+                    "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score, created_at) "
+                    "SELECT uph.user_id, ?, uph.user_answer, uph.evaluation_result, uph.score, uph.created_at "
+                    "FROM user_practice_history uph WHERE uph.question_bank_id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM user_practice_history t WHERE t.user_id = uph.user_id AND t.question_bank_id = ?)",
+                    (req.target_id, question_id, req.target_id)
+                )
+
+                # 从源聚类中移除
+                new_src_orig = [q for q in src_orig if q != original_q]
+                new_src_orig_src = [item for item in src_orig_src if item.get('question') != original_q]
+
+                remaining_sources = []
+                seen2 = set()
+                for item in new_src_orig_src:
+                    for s in item.get('sources', []):
+                        key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                        if key not in seen2:
+                            seen2.add(key)
+                            remaining_sources.append(s)
+
+                if is_standalone_merge:
+                    # 独立题合并后删除源（已完整并入目标）
+                    conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                    conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
+                elif len(new_src_orig) == 0:
+                    conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
+                    conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
+                elif len(new_src_orig) == 1:
+                    conn.execute(
+                        "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (new_src_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
+                         len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                    )
+
+                # Dual-write: cleanup source's normalized tables
+                if is_standalone_merge or len(new_src_orig) == 0:
+                    # CASCADE handles cleanup when entire row is deleted
+                    pass
+                else:
+                    # Delete the moved item, then rebuild source's normalized sources
+                    try:
+                        delete_original_item(conn, question_id, original_q)
+                    except Exception:
+                        pass
+                    conn.execute("DELETE FROM question_sources WHERE question_bank_id = ?", (question_id,))
+                    for s in remaining_sources:
+                        try:
+                            insert_source(conn, question_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                        except Exception:
+                            pass
+
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             return new_src_orig, new_src_orig_src, question_id, tgt_orig, tgt_orig_src, req.target_id
 
     def _build_sources_ctx(orig_src_list):

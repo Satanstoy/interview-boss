@@ -1208,11 +1208,11 @@ const fetchTableData = async () => {
 }
 
 const fetchAnalytics = async () => {
-  try { analytics.value = await api.fetchAnalytics() } catch (e) { console.error('获取分析数据失败', e) }
+  try { analytics.value = await api.fetchAnalytics() } catch (e) { console.warn('获取分析数据失败', e) }
 }
 
 const fetchPracticeStats = async () => {
-  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.error('获取练习统计失败', e) }
+  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.warn('获取练习统计失败', e) }
 }
 
 // ── Actions ──
@@ -1618,7 +1618,11 @@ const triggerBuildMasterBank = async () => {
         throw new Error(event.message)
       }
     })
-    toast.success(`重建完成，共 ${result?.total_unique || 0} 道题目`)
+    if (!result) {
+      toast.error('重建连接中断，请刷新页面检查结果')
+    } else {
+      toast.success(`重建完成，共 ${result.total_unique || 0} 道题目`)
+    }
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
@@ -1700,7 +1704,7 @@ const loadActiveSeason = async () => {
     const data = await api.fetchPublicProfile()
     activeSeason.value = data.settings?.active_season || ''
     availableSeasons.value = data.available_seasons || []
-  } catch { /* ignore */ }
+  } catch (e) { console.warn('加载招聘季失败', e) }
 }
 
 onMounted(async () => {

@@ -115,10 +115,30 @@ Access Token 存内存（不存 localStorage）。Refresh Token 存 HttpOnly Coo
 ## 阶段性工作流
 
 每完成一个开发阶段后，按顺序执行：
-1. 运行测试，确认功能正常
-2. 如涉及上述变更，更新 README.md
-3. 执行 `git add` + `git commit`（遵循 Conventional Commits 规范）
-4. 执行 `git push` 推送到远程仓库（不使用 `--no-verify` 等跳过选项），让用户手动输入凭据
+1. 运行后端测试：`uv run pytest backend/tests/ -q`，确认功能正常
+2. 运行前端构建：`cd frontend && npm run build`，确认无编译错误
+3. 使用 Docker 脚本重新部署并测试：`./docker-deploy.sh`
+4. 如涉及功能/API/结构变更，更新 README.md
+5. 记录修改文档（见下方"文档记录规则"）
+6. 执行 `git add` + `git commit`（遵循 Conventional Commits 规范）
+7. 执行 `git push` 推送到远程仓库（不使用 `--no-verify` 等跳过选项），让用户手动输入凭据
+
+## 文档记录规则
+
+**关键修改**（新功能、数据库结构变更、API 变更、架构调整）：
+- **必须**更新 README.md
+- **必须**在 `docs/bug-reports/` 或 `docs/tdd-reports/` 创建对应文档
+
+**小修改**（Bug 修复、性能优化、代码重构）：
+- **必须**在 `docs/bug-reports/` 或 `docs/tdd-reports/` 创建文档记录
+- README.md 按需更新（仅当影响用户可见功能时）
+
+**文档格式：**
+- Bug 修复记录放在 `docs/bug-reports/`，命名格式：`YYYY-MM-DD-简短描述.md`
+- TDD/功能开发记录放在 `docs/tdd-reports/`，命名格式：`YYYY-MM-DD-简短描述.md`
+- 内容包含：问题描述、根因分析、修复方案、测试验证、影响范围
+
+**重要：每个完成的修改都必须有文档记录，不能遗漏。**
 
 ## Language
 

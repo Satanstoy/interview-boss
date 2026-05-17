@@ -94,30 +94,50 @@ def should_trigger_clustering(batch_size: int = BATCH_SIZE) -> bool:
 
 
 def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
-    """取出一批 pending 任务并标记为 processing"""
+    """原子取出一批 pending 任务并标记为 processing（防并发重复取出）"""
+    _recover_stuck_processing()
     conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT aq.id as queue_id, aq.question_detail_id as qd_id, "
-        "qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, "
-        "qd.url, qd.company, qd.round, qd.job_position "
-        "FROM analysis_queue aq "
-        "JOIN questions_detail qd ON aq.question_detail_id = qd.id "
-        "WHERE aq.status = 'pending' AND qd.deleted_at IS NULL "
-        "ORDER BY aq.id LIMIT ?",
-        (batch_size,)
-    ).fetchall()
+    cursor = conn.cursor()
+    cursor.execute("BEGIN")
+    try:
+        rows = cursor.execute(
+            "UPDATE analysis_queue SET status = 'processing', processed_at = CURRENT_TIMESTAMP "
+            "WHERE id IN ("
+            "  SELECT aq.id FROM analysis_queue aq "
+            "  JOIN questions_detail qd ON aq.question_detail_id = qd.id "
+            "  WHERE aq.status = 'pending' AND qd.deleted_at IS NULL "
+            "  ORDER BY aq.id LIMIT ?"
+            ") RETURNING id as queue_id, question_detail_id as qd_id",
+            (batch_size,)
+        ).fetchall()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
     if not rows:
         return []
 
-    queue_ids = [r['queue_id'] for r in rows]
-    placeholders = ','.join('?' * len(queue_ids))
-    conn.execute(
-        f"UPDATE analysis_queue SET status = 'processing' WHERE id IN ({placeholders})",
-        queue_ids
-    )
-    conn.commit()
-    return [dict(r) for r in rows]
+    # 补充 questions_detail 信息
+    qd_ids = [r['qd_id'] for r in rows]
+    if not qd_ids:
+        return []
+    placeholders = ','.join('?' * len(qd_ids))
+    details = conn.execute(
+        f"SELECT id, question, cat1, cat2, tags, diff_tag, url, company, round, job_position "
+        f"FROM questions_detail WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+        qd_ids
+    ).fetchall()
+    detail_map = {d['id']: dict(d) for d in details}
+
+    result = []
+    for r in rows:
+        d = detail_map.get(r['qd_id'], {})
+        if d:
+            d['queue_id'] = r['queue_id']
+            d['qd_id'] = r['qd_id']
+            result.append(d)
+    return result
 
 
 def mark_batch_done(queue_ids: List[int]):

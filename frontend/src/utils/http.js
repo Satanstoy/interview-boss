@@ -145,6 +145,7 @@ function getStatusMessage(status) {
     413: '上传内容过大，请压缩后重试',
     415: '不支持的文件格式',
     422: '请求参数有误',
+    423: '账号已锁定，请稍后重试或联系管理员',
     429: '请求过于频繁，请稍后重试',
     500: '服务器内部错误',
     502: '服务暂时不可用',
@@ -507,7 +508,7 @@ export async function uploadSSE(url, formData, onEvent) {
           const data = JSON.parse(trimmed.slice(6))
           if (onEvent) onEvent(data)
           if (data.type === 'done') finalResult = data
-          if (data.type === 'error') throw new Error(data.message)
+          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
         } catch (e) {
           if (e.message && !e.message.includes('JSON')) throw e
         }
@@ -519,7 +520,7 @@ export async function uploadSSE(url, formData, onEvent) {
         const data = JSON.parse(buffer.trim().slice(6))
         if (onEvent) onEvent(data)
         if (data.type === 'done') finalResult = data
-        if (data.type === 'error') throw new Error(data.message)
+        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
       } catch (e) {
         if (e.message && !e.message.includes('JSON')) throw e
       }

@@ -121,8 +121,9 @@ export async function loadHistory(questionId, qState) {
   try {
     qState._history = (await fetchPracticeHistory(questionId)).map(h => ({ ...h, _expanded: false }))
   } catch (e) {
-    console.error('加载练习记录失败', e)
+    console.warn('加载练习记录失败', e)
     qState._history = []
+    qState._historyError = true
   } finally {
     qState._historyLoading = false
   }
