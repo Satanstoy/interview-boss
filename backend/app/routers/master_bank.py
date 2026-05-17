@@ -68,6 +68,7 @@ async def get_master_bank(
     sort: str = "frequency_desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=1000),
+    compact: bool = Query(False, description="Return compact response without full text fields"),
     user: dict = Depends(get_current_user)
 ):
     bank_mode = user.get('bank_mode', 'public')
@@ -110,9 +111,63 @@ async def get_master_bank(
         d['is_personal'] = d.get('owner_id') is not None
         d['has_reference_answer'] = bool(d.get('ai_answer') and '生成失败' not in d['ai_answer'])
         d['user_answer'] = d.get('user_answer', '')
+        d.pop('status', None)  # Frontend doesn't use this
+        if compact:
+            d['ai_answer'] = None
+            d['user_answer'] = ''
+            # Replace original_question_sources with a flat source_labels map
+            source_labels = {}
+            for item in d.get('original_question_sources', []):
+                for s in item.get('sources', []):
+                    if s.get('url'):
+                        source_labels[s['url']] = item.get('question', '')
+            d['source_labels'] = source_labels
+            d.pop('original_question_sources', None)
         result.append(d)
 
-    return {"items": result, "total": total, "page": page, "page_size": page_size}
+    # Compute popular tags server-side
+    tag_counts = Counter()
+    for item in result:
+        for tag in (item.get('tags') or '').split(','):
+            tag = tag.strip()
+            if tag:
+                tag_counts[tag] += 1
+    popular_tags = [{"tag": t, "count": c} for t, c in tag_counts.most_common(20)]
+    return {"items": result, "total": total, "page": page, "page_size": page_size, "popular_tags": popular_tags}
+
+
+@router.get("/api/master-bank/{question_id}/detail")
+async def get_question_detail(question_id: int, user: dict = Depends(get_current_user)):
+    """Get full details for a single question (ai_answer, user_answer, original_question_sources)."""
+    def _query():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT qb.id, qb.ai_answer, COALESCE(uqv.user_answer, '') as user_answer, "
+                "qb.original_question_sources "
+                "FROM question_bank qb "
+                "LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? "
+                "WHERE qb.id = ?",
+                (user['id'], question_id)
+            ).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            # Build original_question_sources from normalized tables
+            try:
+                from app.db.question_bank_sources import get_original_question_sources
+                with get_db_connection() as conn2:
+                    d['original_question_sources'] = get_original_question_sources(conn2, question_id)
+            except Exception:
+                try:
+                    d['original_question_sources'] = json.loads(d.get('original_question_sources', '[]'))
+                except Exception:
+                    d['original_question_sources'] = []
+            return d
+
+    result = await run_db(_query)
+    if not result:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    return result
 
 
 @router.get("/api/master-bank/search")

@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, uploadSSE, postSSE, fetchWithCredentials } from '../utils/http.js'
+import { get, post, put, del, upload, uploadSSE, postSSE, fetchWithCredentials, invalidateCache } from '../utils/http.js'
 
 const API = '/api'
 
@@ -27,7 +27,16 @@ export const bindEmail = (email, code) => post(`${API}/profile/bind-email`, { em
 // ── Data fetching ──
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
 export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
-export const fetchMasterBank = (page = 1, pageSize = 500) => get(`${API}/master-bank?page=${page}&page_size=${pageSize}`)
+export const fetchMasterBank = (params = {}) => {
+  const query = new URLSearchParams({
+    page: params.page || 1,
+    page_size: params.page_size || 500,
+    sort: params.sort || 'frequency_desc',
+    ...params,
+    compact: 'true',  // Always use compact mode to reduce bandwidth
+  })
+  return get(`${API}/master-bank?${query}`)
+}
 export const fetchAnalytics = () => get(`${API}/analytics`)
 export const fetchPracticeStats = () => get(`${API}/practice-stats`)
 export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {
@@ -119,3 +128,6 @@ export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 
 // ── Practice History ──
 export const fetchPracticeHistory = (questionId) => get(`${API}/practice-history/${questionId}`)
+
+// ── Cache Management ──
+export { invalidateCache }

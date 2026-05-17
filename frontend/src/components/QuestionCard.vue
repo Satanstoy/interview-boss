@@ -127,10 +127,15 @@
                 重新生成
               </button>
             </div>
-            <div v-if="question.user_answer && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
+            <div v-if="(fullUserAnswer ?? question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
               <span class="text-label text-primary-500 dark:text-primary-400 bg-primary-50/60 dark:bg-primary-900/20 px-2 py-0.5 rounded">个人答案</span>
             </div>
             <div class="text-ink-700 dark:text-ink-100 text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
+          </div>
+
+          <div v-else-if="isLoadingDetail" class="flex flex-col items-center justify-center py-8 text-primary-600 dark:text-primary-400 gap-3">
+            <svg class="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <span class="font-medium text-sm">加载答案中...</span>
           </div>
 
           <div v-else-if="question._isLoadingAnswer" class="flex flex-col items-center justify-center py-8 text-primary-600 dark:text-primary-400 gap-3">
@@ -145,7 +150,7 @@
             </p>
             <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
-              <button v-if="question.has_reference_answer && !question.user_answer" @click.stop="$emit('use-reference-answer', question)" class="btn-secondary px-5 py-2">
+              <button v-if="question.has_reference_answer && !(fullUserAnswer ?? question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="btn-secondary px-5 py-2">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 使用参考答案
               </button>
@@ -207,11 +212,45 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { safeUrl } from '../utils/validate.js'
+import { get } from '../utils/http.js'
 
 const showSources = ref(false)
+
+// Lazy-loaded full answer detail (for compact mode)
+const fullAnswer = ref(null)
+const fullUserAnswer = ref(null)
+const isLoadingDetail = ref(false)
+
+async function loadFullAnswer() {
+  if (fullAnswer.value !== null) return
+  if (props.question.ai_answer) {
+    fullAnswer.value = props.question.ai_answer
+    fullUserAnswer.value = props.question.user_answer
+    return
+  }
+  if (!props.question.has_reference_answer && !props.question.id) return
+  isLoadingDetail.value = true
+  try {
+    const detail = await get(`/api/master-bank/${props.question.id}/detail`)
+    fullAnswer.value = detail.ai_answer || ''
+    fullUserAnswer.value = detail.user_answer || ''
+    // Emit to parent so it updates the question object too
+    emit('update-answer', { id: props.question.id, ai_answer: detail.ai_answer, user_answer: detail.user_answer })
+  } catch (e) {
+    console.error('Failed to load answer detail:', e)
+    fullAnswer.value = ''
+  } finally {
+    isLoadingDetail.value = false
+  }
+}
+
+// Trigger detail load when answer section is shown
+watch(() => props.question._showAnswer, (show) => {
+  if (show) loadFullAnswer()
+}, { immediate: true })
 
 const DIFFICULTY_CLASSES = {
   L3: 'bg-red-50 dark:bg-red-900/25 text-red-600 dark:text-red-400',
@@ -228,7 +267,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question'])
+const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
 
 const parsedTags = computed(() => {
   const tags = props.question.tags
@@ -272,7 +311,9 @@ const difficultyClass = computed(() => {
 
 const displayAnswer = computed(() => {
   // 优先显示个人答案，其次显示全局答案
-  return props.question.user_answer || props.question.ai_answer || ''
+  const userAns = fullUserAnswer.value ?? props.question.user_answer
+  const aiAns = fullAnswer.value ?? props.question.ai_answer
+  return userAns || aiAns || ''
 })
 
 const cachedMarkdown = computed(() => {
@@ -300,8 +341,9 @@ const formatPosition = (pos) => {
   return first.charAt(0).toUpperCase() + first.slice(1)
 }
 
-// 按 URL 去重的来源列表，确保展开数量 = badge 数量
+// 按 URL 去重的来源列表，仅在展开时计算以节省性能
 const dedupedSources = computed(() => {
+  if (!showSources.value) return []
   const q = props.question
   const sources = q.sources || []
   if (!q.original_question_sources || !q.original_question_sources.length) return sources

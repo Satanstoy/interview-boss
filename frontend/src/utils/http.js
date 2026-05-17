@@ -16,6 +16,32 @@ const RETRY_DELAYS = [1000, 3000]
 // 全局 AbortController 管理，用于组件卸载时批量取消
 const pendingControllers = new Set()
 
+// Simple TTL cache for GET requests
+const _cache = new Map()
+const DEFAULT_CACHE_TTL = 30000 // 30 seconds
+
+function getCached(key, ttl = DEFAULT_CACHE_TTL) {
+  const entry = _cache.get(key)
+  if (entry && Date.now() - entry.ts < ttl) return entry.data
+  return null
+}
+
+function setCache(key, data) {
+  _cache.set(key, { data, ts: Date.now() })
+  // Limit cache size
+  if (_cache.size > 100) {
+    const oldest = _cache.keys().next().value
+    _cache.delete(oldest)
+  }
+}
+
+export function invalidateCache(pattern) {
+  if (!pattern) { _cache.clear(); return }
+  for (const key of _cache.keys()) {
+    if (key.includes(pattern)) _cache.delete(key)
+  }
+}
+
 // ── Access Token 内存存储（比 localStorage 更安全，XSS 无法直接读取）──
 let _accessToken = ''
 
@@ -273,8 +299,21 @@ export function cancelAllRequests() {
 /**
  * GET 请求
  */
-export function get(url, options = {}) {
-  return request(url, { ...options, method: 'GET' })
+export async function get(url, options = {}) {
+  const { ttl, noCache, ...fetchOptions } = options
+  const cacheKey = url
+
+  // Check cache unless bypassed
+  if (!noCache && ttl !== 0) {
+    const cached = getCached(cacheKey, ttl)
+    if (cached) return cached
+  }
+
+  const data = await request(url, { ...fetchOptions, method: 'GET' })
+
+  // Cache successful response
+  if (ttl !== 0) setCache(cacheKey, data)
+  return data
 }
 
 /**
@@ -397,7 +436,10 @@ export async function postSSE(url, body, onEvent) {
           const data = JSON.parse(trimmed.slice(6))
           if (onEvent) onEvent(data)
           if (data.type === 'done') finalResult = data
-        } catch { /* 忽略解析错误 */ }
+          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e
+        }
       }
     }
 
@@ -406,7 +448,10 @@ export async function postSSE(url, body, onEvent) {
         const data = JSON.parse(buffer.trim().slice(6))
         if (onEvent) onEvent(data)
         if (data.type === 'done') finalResult = data
-      } catch { /* ignore */ }
+        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+      } catch (e) {
+        if (e.message && !e.message.includes('JSON')) throw e
+      }
     }
 
     return finalResult
@@ -500,4 +545,4 @@ export async function fetchWithCredentials(url, options = {}) {
   })
 }
 
-export default { get, post, put, del, upload, uploadSSE, cancelAllRequests }
+export default { get, post, put, del, upload, uploadSSE, cancelAllRequests, invalidateCache }

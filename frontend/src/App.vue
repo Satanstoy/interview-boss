@@ -434,6 +434,7 @@
                 @delete="deleteQuestion"
                 @edit-question="editQuestion"
                 @delete-original-question="deleteOriginalQuestion"
+                @update-answer="onUpdateAnswer"
               >
                 <template #actions>
                   <div v-if="isBuilding" class="flex items-center gap-2">
@@ -626,6 +627,7 @@ const buildStepList = computed(() => {
 const isDataLoading = ref(false)
 const dataLoadError = ref(null)
 const analytics = ref({ tech_trends: {} })
+const popularTagsFromServer = ref([])
 const selectedTag = ref('全部')
 const selectedSubTags = ref([])
 const searchQuery = ref('')
@@ -903,6 +905,15 @@ const interviewColumns = [
 
 // ── Computed ──
 const popularTags = computed(() => {
+  // Prefer server-side popular_tags when available
+  if (popularTagsFromServer.value.length > 0) {
+    const result = {}
+    for (const t of popularTagsFromServer.value) {
+      result[t.tag] = t.count
+    }
+    return result
+  }
+  // Fallback to client-side computation
   const counts = {}
   masterBank.value.forEach(q => {
     const cats = (q.cat1 || '未分类').split(',').map(c => c.trim()).filter(c => c)
@@ -1183,6 +1194,9 @@ const fetchTableData = async () => {
     jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
     interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
     masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
+    if (masterResp.popular_tags) {
+      popularTagsFromServer.value = masterResp.popular_tags
+    }
     selectedSubTags.value = []
     jdSelection.clearSelection()
     interviewSelection.clearSelection()
@@ -1464,6 +1478,14 @@ const editQuestion = async ({ question, newValue }) => {
     question._editQuestion = ''
     toast.success('题目已更新')
   } catch (e) { toast.error('编辑失败：' + getFriendlyError(e)) }
+}
+
+const onUpdateAnswer = ({ id, ai_answer, user_answer }) => {
+  const q = masterBank.value.find(item => item.id === id)
+  if (q) {
+    if (ai_answer !== undefined) q.ai_answer = ai_answer
+    if (user_answer !== undefined) q.user_answer = user_answer
+  }
 }
 
 // ── Cluster editing (per original question) ──

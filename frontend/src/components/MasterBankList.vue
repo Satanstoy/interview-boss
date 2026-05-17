@@ -64,6 +64,7 @@
             @delete="$emit('delete', $event)"
             @edit-question="$emit('edit-question', $event)"
             @delete-original-question="$emit('delete-original-question', $event)"
+            @update-answer="$emit('update-answer', $event)"
           />
         </DynamicScrollerItem>
       </template>
@@ -87,7 +88,7 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
 
 const containerRef = ref(null)
 let resizeObserver = null
