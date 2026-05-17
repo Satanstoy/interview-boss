@@ -358,7 +358,7 @@ def build_api_shapes_batch(cursor, qb_ids: list) -> dict:
             "sources": sources,
             "original_questions": oq_texts,
             "original_question_sources": oqs,
-            "frequency": len(oq_texts),
+            "frequency": len(sources),
         }
 
     return result
@@ -449,6 +449,6 @@ def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_i
             "sources": sources,
             "original_questions": [item["question"] for item in oqs] if oqs else oq_texts,
             "original_question_sources": oqs,
-            "frequency": len(oqs) if oqs else len(oq_texts),
+            "frequency": len(sources),
         }
     return result

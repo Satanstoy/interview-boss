@@ -807,29 +807,11 @@ const floatingReturnBtn = ref(null)
 const floatingBtnStyle = ref({ display: 'none' })
 
 const positionFloatingBtn = () => {
-  const row = document.querySelector(`[data-row-id="${highlightInterviewId.value}"]`)
-  if (!row) { floatingBtnStyle.value = { display: 'none' }; return }
-  const rect = row.getBoundingClientRect()
-  const btnW = 140
-  const btnH = 28
-  let top = rect.top + rect.height / 2 - btnH / 2
-  let left = rect.right + 8
-  // 如果右侧放不下，放到行内右侧
-  if (left + btnW > window.innerWidth - 8) {
-    left = window.innerWidth - btnW - 8
-  }
-  // 如果左侧溢出
-  if (left < 8) left = 8
-  // 如果下方放不下
-  if (top + btnH > window.innerHeight - 8) {
-    top = window.innerHeight - btnH - 8
-  }
-  // 如果上方溢出
-  if (top < 8) top = 8
+  // 固定在页面左上角（面经模块区域上方）
   floatingBtnStyle.value = {
     position: 'fixed',
-    top: top + 'px',
-    left: left + 'px',
+    top: '12px',
+    left: '12px',
     display: 'flex'
   }
 }
