@@ -5,6 +5,9 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
+from app.db.question_bank_sources import (
+    delete_source, delete_sources_by_url, remove_original_items_by_url, restore_source_for_url
+)
 from app.models.schemas import GenericUpdateRequest, BatchDataDeleteRequest
 
 logger = logging.getLogger("interview-boss")
@@ -67,6 +70,11 @@ def _cleanup_sources_for_url(cursor, url: str):
                      json.dumps(new_oqs_sources, ensure_ascii=False),
                      r['id'])
                 )
+                # Dual-write: also remove from normalized table
+                try:
+                    delete_source(cursor, r['id'], url)
+                except Exception:
+                    pass
 
     if ids_to_delete:
         placeholders = ','.join('?' * len(ids_to_delete))
@@ -76,6 +84,12 @@ def _cleanup_sources_for_url(cursor, url: str):
     cursor.execute("DELETE FROM question_position WHERE question_id IN "
                    "(SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL)")
     cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
+
+    # Dual-write: clean up original items whose all sources matched this URL
+    try:
+        remove_original_items_by_url(cursor, url)
+    except Exception:
+        pass
 
 
 def _restore_sources_for_url(cursor, url: str):
@@ -109,6 +123,12 @@ def _restore_sources_for_url(cursor, url: str):
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (len(orig_qs), json.dumps(sources, ensure_ascii=False), r['id'])
             )
+
+    # Dual-write: restore into normalized source tables
+    try:
+        restore_source_for_url(cursor, url)
+    except Exception:
+        pass
 
 
 @router.get("/api/data/{file_type}")

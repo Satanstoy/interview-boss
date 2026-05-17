@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql, filter_sources_by_mode, filter_original_question_sources_by_mode
+from app.db.question_bank_sources import insert_source, delete_original_item, insert_original_item, get_sources, build_api_shapes_batch_filtered
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_dynamic_frequency_sql
 from app.models.schemas import BatchDeleteRequest, BatchGenerateAnswersRequest, EvaluateAnswerRequest, SplitQuestionRequest, DeleteOriginalQuestionRequest, MergeOriginalQuestionRequest, UploadToBankRequest, UpdateQuestionRequest
 from app.services.llm import client, _call_llm_with_retry, _extract_json, _should_use_response_format, get_llm_client_for_user, raw_llm_call
 from app.services.clustering import generate_unified_question, match_new_questions
@@ -87,24 +88,25 @@ async def get_master_bank(
 
     total, rows = await run_db(_query)
 
+    # Collect all qb_ids for batch fetching from normalized tables
+    qb_ids = [r['id'] for r in rows]
+    def _fetch_normalized():
+        with get_db_connection() as conn2:
+            try:
+                return build_api_shapes_batch_filtered(conn2, qb_ids, bank_mode, user['id'])
+            except Exception:
+                return {}
+    normalized_map = await run_db(_fetch_normalized)
+
     result = []
     for r in rows:
         d = dict(r)
         d['frequency'] = d.pop('dyn_frequency', d.get('frequency', 0))
-        try:
-            raw_sources = json.loads(d['sources']) if d['sources'] else []
-        except Exception:
-            raw_sources = []
-        d['sources'] = filter_sources_by_mode(raw_sources, bank_mode, user['id'])
-        try:
-            d['original_questions'] = json.loads(d['original_questions']) if d['original_questions'] else []
-        except Exception:
-            d['original_questions'] = []
-        try:
-            raw_oqs = json.loads(d['original_question_sources']) if d['original_question_sources'] else []
-        except Exception:
-            raw_oqs = []
-        d['original_question_sources'] = filter_original_question_sources_by_mode(raw_oqs, bank_mode, user['id'])
+        norm = normalized_map.get(d['id'], {})
+        d['sources'] = norm.get('sources', [])
+        d['original_questions'] = norm.get('original_questions', [])
+        d['original_question_sources'] = norm.get('original_question_sources', [])
+        d['frequency'] = norm.get('frequency', d['frequency'])
         d['is_personal'] = d.get('owner_id') is not None
         d['has_reference_answer'] = bool(d.get('ai_answer') and '生成失败' not in d['ai_answer'])
         d['user_answer'] = d.get('user_answer', '')
@@ -138,9 +140,11 @@ async def search_master_bank(
         where_with_extra = where_clause
 
     def _query():
+        bank_mode = user.get('bank_mode', 'public')
+        dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user['id'])
         with get_db_connection() as conn:
             rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.frequency, qb.cat1, qb.cat2 {from_clause} {where_with_extra} ORDER BY qb.frequency DESC LIMIT ?",
+                f"SELECT qb.id, qb.question, ({dyn_freq_sql}) as frequency, qb.cat1, qb.cat2 {from_clause} {where_with_extra} ORDER BY ({dyn_freq_sql}) DESC LIMIT ?",
                 search_params + [limit]
             ).fetchall()
             return [dict(r) for r in rows]
@@ -541,6 +545,17 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                 "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (len(orig_qs), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
                             )
+                            # Dual-write: insert personal question's sources into target's normalized tables
+                            # INSERT OR IGNORE handles dedup with existing sources
+                            for s in personal_sources:
+                                try:
+                                    insert_source(conn, qb_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                                except Exception:
+                                    pass
+                            try:
+                                insert_original_item(conn, qb_id, personal_q_text, personal_sources)
+                            except Exception:
+                                pass
                         merged_count += 1
                         # 删除已合并的个人题目
                         conn.execute("DELETE FROM question_bank WHERE id = ?", (personal_row['id'],))
@@ -662,6 +677,17 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 )
                 new_id = cursor.execute("SELECT last_insert_rowid()").fetchone()[0]
 
+                # Dual-write: insert sources into normalized tables
+                for s in split_sources:
+                    try:
+                        insert_source(cursor, new_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    except Exception:
+                        pass
+                try:
+                    insert_original_item(cursor, new_id, original_q, split_sources)
+                except Exception:
+                    pass
+
                 # 同步 question_position 关联表
                 pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (orig_job_position,)).fetchone()
                 if pos_row:
@@ -697,6 +723,13 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                         (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
                          len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
+
+                # Dual-write: delete moved item from parent cluster's normalized tables
+                if len(new_orig) >= 1:
+                    try:
+                        delete_original_item(cursor, question_id, original_q)
+                    except Exception:
+                        pass
 
                 conn.commit()
                 return new_id, new_orig, new_orig_src, question_id
@@ -814,6 +847,13 @@ async def delete_original_question(question_id: int, req: DeleteOriginalQuestion
                          len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
 
+                # Dual-write: delete removed item from normalized tables (if cluster not fully deleted)
+                if len(new_orig) >= 1:
+                    try:
+                        delete_original_item(cursor, question_id, original_q)
+                    except Exception:
+                        pass
+
                 conn.commit()
                 return new_orig, new_orig_src, question_id
             except Exception:
@@ -930,6 +970,17 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                  json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), *cat_params, req.target_id]
             )
 
+            # Dual-write: insert moved item into target's normalized tables
+            for s in moving_src:
+                try:
+                    insert_source(conn, req.target_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                except Exception:
+                    pass
+            try:
+                insert_original_item(conn, req.target_id, original_q, moving_src)
+            except Exception:
+                pass
+
             # 转移 ai_answer（目标没有答案时才转移）
             if source['ai_answer'] and not target['ai_answer']:
                 conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (source['ai_answer'], req.target_id))
@@ -983,6 +1034,23 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     (json.dumps(new_src_orig, ensure_ascii=False), json.dumps(new_src_orig_src, ensure_ascii=False),
                      len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                 )
+
+            # Dual-write: cleanup source's normalized tables
+            if is_standalone_merge or len(new_src_orig) == 0:
+                # CASCADE handles cleanup when entire row is deleted
+                pass
+            else:
+                # Delete the moved item, then rebuild source's normalized sources
+                try:
+                    delete_original_item(conn, question_id, original_q)
+                except Exception:
+                    pass
+                conn.execute("DELETE FROM question_sources WHERE question_bank_id = ?", (question_id,))
+                for s in remaining_sources:
+                    try:
+                        insert_source(conn, question_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    except Exception:
+                        pass
 
             conn.commit()
             return new_src_orig, new_src_orig_src, question_id, tgt_orig, tgt_orig_src, req.target_id
@@ -1184,6 +1252,11 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
                             "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                             (json.dumps(oq, ensure_ascii=False), json.dumps(oqs, ensure_ascii=False), qb['id'])
                         )
+                        # Dual-write: also remove from normalized tables
+                        try:
+                            delete_original_item(cursor, qb['id'], question_text)
+                        except Exception:
+                            pass
 
             # Bug #14: 级联清理 user_question_view 和 question_position
             cursor.execute("DELETE FROM user_question_view WHERE question_bank_id = ?", (question_id,))
@@ -1252,6 +1325,11 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
                                 "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (json.dumps(oq, ensure_ascii=False), json.dumps(oqs_src, ensure_ascii=False), qb['id'])
                             )
+                            # Dual-write: also remove from normalized tables
+                            try:
+                                delete_original_item(cursor, qb['id'], q_text)
+                            except Exception:
+                                pass
             ph2 = ",".join("?" * len(found_ids))
             # Bug #14: 级联清理 user_question_view 和 question_position
             cursor.execute(f"DELETE FROM user_question_view WHERE question_bank_id IN ({ph2})", found_ids)
@@ -1481,8 +1559,9 @@ async def get_random_questions(
             else:
                 where_with_extra = where_clause
 
+            dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user['id'])
             candidates = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.frequency, qb.ai_answer, qb.sources {from_clause} {where_with_extra}",
+                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as frequency, qb.ai_answer {from_clause} {where_with_extra}",
                 params
             ).fetchall()
 
@@ -1556,14 +1635,21 @@ async def get_random_questions(
         remaining.pop(chosen_idx)
         remaining_weights.pop(chosen_idx)
 
+    # Fetch sources from normalized tables for selected questions
+    selected_ids = [candidates[idx]['id'] for idx in selected_indices]
+    def _fetch_sources():
+        with get_db_connection() as conn2:
+            try:
+                return {qid: get_sources(conn2, qid) for qid in selected_ids}
+            except Exception:
+                return {}
+    sources_map = await run_db(_fetch_sources)
+
     result = []
     for idx in selected_indices:
         r = candidates[idx]
         d = dict(r)
-        try:
-            d['sources'] = json.loads(d['sources']) if d['sources'] else []
-        except Exception:
-            d['sources'] = []
+        d['sources'] = sources_map.get(r['id'], [])
         info = practice_map.get(r['id'])
         d['attempt_count'] = info['count'] if info else 0
         d['last_practiced_at'] = info.get('last_at') if info else None

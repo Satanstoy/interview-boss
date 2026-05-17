@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from app.db.connection import get_db_connection
+from app.db.question_bank_sources import insert_source, delete_source, insert_original_item, remove_original_items_by_url
 from app.services.utils import _extract_url_signature, normalize_category
 
 logger = logging.getLogger("interview-boss")
@@ -143,6 +144,11 @@ def _cleanup_old_sources_txn(cursor, url: str):
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (len(orig_qs), json.dumps(new_sources, ensure_ascii=False), mr['id'])
             )
+            # Dual-write: also remove from normalized table
+            try:
+                delete_source(cursor, mr['id'], url)
+            except Exception:
+                pass
     cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
 
 
@@ -205,6 +211,15 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
                      json.dumps(new_oqs_sources, ensure_ascii=False),
                      mr['id'])
                 )
+                # Dual-write: also update normalized tables
+                try:
+                    delete_source(cursor, mr['id'], url)
+                except Exception:
+                    pass
+                try:
+                    remove_original_items_by_url(cursor, url)
+                except Exception:
+                    pass
 
     # 删除 frequency=0 的公共 QB 记录及其关联数据
     if ids_to_delete:
@@ -286,6 +301,15 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
                     "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (len(orig_qs), json.dumps(sources, ensure_ascii=False), json.dumps(orig_qs, ensure_ascii=False), json.dumps(orig_qs_src, ensure_ascii=False), qb_id)
                 )
+                # Dual-write: also insert into normalized tables
+                try:
+                    insert_source(cursor, qb_id, url, company, round_)
+                except Exception:
+                    pass
+                try:
+                    insert_original_item(cursor, qb_id, new_q_text, [new_source])
+                except Exception:
+                    pass
 
     for item in unmatched_rows:
         row = item.get("_orig_row") if isinstance(item, dict) else item
@@ -305,6 +329,15 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
         pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
         if pos_row:
             cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row[0]))
+        # Dual-write: also insert into normalized tables
+        try:
+            insert_source(cursor, new_id, url, company, round_)
+        except Exception:
+            pass
+        try:
+            insert_original_item(cursor, new_id, q_text, [{"url": url, "company": company, "round": round_}])
+        except Exception:
+            pass
         if status == 'approved':
             answer_tasks.append((new_id, q_text))
 
@@ -422,6 +455,11 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
                 pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (job_position,)).fetchone()
                 if pos_row:
                     cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row[0]))
+                # Dual-write: also insert into normalized tables
+                try:
+                    insert_source(cursor, new_id, url, company, round_)
+                except Exception:
+                    pass
                 answer_tasks.append((new_id, q_text))
             conn.commit()
             return answer_tasks

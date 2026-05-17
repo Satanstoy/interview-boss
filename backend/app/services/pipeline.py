@@ -11,6 +11,7 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection, run_db
+from app.db.question_bank_sources import insert_source, insert_original_item, delete_all_for_qb
 from app.services.clustering import process_incremental_batch, _cluster_unmatched
 
 logger = logging.getLogger("interview-boss")
@@ -337,11 +338,13 @@ def _apply_matched(conn, matched, job_position, saved_answers):
 
         url = item.get('url', '')
         existing_urls = {s.get('url') for s in sources}
-        if url and url not in existing_urls:
+        url_is_new = bool(url and url not in existing_urls)
+        if url_is_new:
             sources.append({"url": url, "company": item.get('company', ''), "round": item.get('round', '')})
 
         q = item.get('question', '')
-        if q and q not in oqs:
+        q_is_new = bool(q and q not in oqs)
+        if q_is_new:
             oqs.append(q)
             oqs_src.append({
                 "question": q,
@@ -361,6 +364,18 @@ def _apply_matched(conn, matched, job_position, saved_answers):
              json.dumps(oqs_src, ensure_ascii=False),
              ai_answer, cluster_id)
         )
+
+        # Dual-write: normalized tables
+        if url_is_new:
+            try:
+                insert_source(conn, cluster_id, url, item.get('company', ''), item.get('round', ''))
+            except Exception:
+                pass
+        if q_is_new:
+            try:
+                insert_original_item(conn, cluster_id, q, [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}])
+            except Exception:
+                pass
 
 
 def _insert_new_clusters(conn, new_clusters, job_position, saved_answers):
@@ -382,6 +397,18 @@ def _insert_new_clusters(conn, new_clusters, job_position, saved_answers):
         )
         new_id = cursor.lastrowid
         new_qb_ids.append(new_id)
+
+        # Dual-write: normalized tables
+        for s in entry['sources']:
+            try:
+                insert_source(conn, new_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
+            except Exception:
+                pass
+        for oqs in entry['original_question_sources']:
+            try:
+                insert_original_item(conn, new_id, oqs.get('question', ''), oqs.get('sources', []))
+            except Exception:
+                pass
 
         pos_rows = conn.execute("SELECT id FROM job_positions WHERE name = ?",
                                 (job_position,)).fetchall()
@@ -670,6 +697,23 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
                          json.dumps(s_oqs, ensure_ascii=False),
                          json.dumps(s_oqs_src, ensure_ascii=False), s['id'])
                     )
+
+                    # Dual-write: rebuild normalized tables for survivor
+                    try:
+                        delete_all_for_qb(conn, s['id'])
+                    except Exception:
+                        pass
+                    for src in s_src:
+                        try:
+                            insert_source(conn, s['id'], src.get('url', ''), src.get('company', ''), src.get('round', ''))
+                        except Exception:
+                            pass
+                    for oqs_entry in s_oqs_src:
+                        try:
+                            insert_original_item(conn, s['id'], oqs_entry.get('question', ''), oqs_entry.get('sources', []))
+                        except Exception:
+                            pass
+
                     conn.execute("COMMIT")
                 except Exception:
                     conn.execute("ROLLBACK")
