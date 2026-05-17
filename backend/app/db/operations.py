@@ -42,6 +42,7 @@ def _purge_soft_deleted(url: str, owner_id=None):
             old_url = row['url']
             if old_url:
                 cursor.execute("DELETE FROM questions_detail WHERE url = ? AND deleted_at IS NOT NULL", (old_url,))
+            cursor.execute("DELETE FROM analysis_queue WHERE interview_id = ?", (row['id'],))
             cursor.execute("DELETE FROM interview WHERE id = ?", (row['id'],))
 
         # 清理 jd 及其关联数据
@@ -57,6 +58,7 @@ def _purge_soft_deleted(url: str, owner_id=None):
             old_url = row['url']
             if old_url:
                 cursor.execute("DELETE FROM questions_detail WHERE url = ? AND deleted_at IS NOT NULL", (old_url,))
+                cursor.execute("DELETE FROM analysis_queue WHERE interview_id IN (SELECT id FROM interview WHERE url = ? AND deleted_at IS NOT NULL)", (old_url,))
                 cursor.execute("DELETE FROM interview WHERE url = ? AND deleted_at IS NOT NULL", (old_url,))
             cursor.execute("DELETE FROM jd WHERE id = ?", (row['id'],))
 
@@ -124,32 +126,11 @@ def _insert_details_txn(cursor, tagged_rows, job_position=""):
 
 
 def _cleanup_old_sources_txn(cursor, url: str):
-    """移除某面经对 question_bank 的所有贡献，frequency=0 直接删除。"""
-    affected_rows = cursor.execute(
-        "SELECT id, sources, original_questions FROM question_bank WHERE sources LIKE ?",
-        (f"%{url}%",)
-    ).fetchall()
-    for mr in affected_rows:
-        try:
-            sources = json.loads(mr['sources']) if mr['sources'] else []
-        except Exception:
-            sources = []
-        new_sources = [s for s in sources if s.get('url') != url]
-        if len(new_sources) != len(sources):
-            try:
-                orig_qs = json.loads(mr['original_questions']) if mr['original_questions'] else []
-            except Exception:
-                orig_qs = []
-            cursor.execute(
-                "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (len(orig_qs), json.dumps(new_sources, ensure_ascii=False), mr['id'])
-            )
-            # Dual-write: also remove from normalized table
-            try:
-                delete_source(cursor, mr['id'], url)
-            except Exception:
-                pass
-    cursor.execute("DELETE FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL")
+    """移除某面经对 question_bank 的所有贡献，frequency=0 直接删除。
+
+    Delegates to _cleanup_old_sources_txn_v2 for complete cleanup.
+    """
+    _cleanup_old_sources_txn_v2(cursor, url)
 
 
 def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
@@ -160,10 +141,24 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
     - original_question_sources 中属于该 URL 的条目
     - 被删除 QB 记录的 question_position 映射
     """
-    affected_rows = cursor.execute(
-        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
-        (f"%{url}%",)
-    ).fetchall()
+    # Use normalized question_sources table with indexed url column instead of LIKE scan
+    try:
+        affected_ids = cursor.execute(
+            "SELECT DISTINCT question_bank_id FROM question_sources WHERE url = ?", (url,)
+        ).fetchall()
+        if not affected_ids:
+            return
+        id_placeholders = ','.join('?' * len(affected_ids))
+        affected_rows = cursor.execute(
+            f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({id_placeholders})",
+            [r[0] for r in affected_ids]
+        ).fetchall()
+    except Exception:
+        # Fallback for tests / missing normalized tables
+        affected_rows = cursor.execute(
+            "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
+            (f"%{url}%",)
+        ).fetchall()
 
     ids_to_delete = []
     for mr in affected_rows:
@@ -311,6 +306,9 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
                 except Exception:
                     pass
 
+    # Cache job_positions lookup before loop (current_pos doesn't change)
+    pos_row_cache = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
+
     for item in unmatched_rows:
         row = item.get("_orig_row") if isinstance(item, dict) else item
         url, company, round_, q_text = row[0], row[1], row[2], row[3]
@@ -326,9 +324,8 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
         )
         new_id = cursor.lastrowid
         # BUG-008: 同步 question_position 关联表，否则新题在主库 INNER JOIN 查询中不可见
-        pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
-        if pos_row:
-            cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row[0]))
+        if pos_row_cache:
+            cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row_cache[0]))
         # Dual-write: also insert into normalized tables
         try:
             insert_source(cursor, new_id, url, company, round_)
@@ -440,6 +437,8 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
         try:
             cursor.execute("BEGIN")
             answer_tasks = []
+            # Cache job_positions lookup before loop (job_position doesn't change)
+            pos_row_cache = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (job_position,)).fetchone()
             for row in tagged_rows:
                 url, company, round_, q_text = row[0], row[1], row[2], row[3]
                 cat1 = normalize_category(row[4])
@@ -452,9 +451,8 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
                     (q_text, cat1, cat2, tags, diff_tag, sources_json, user_id, user_id, job_position)
                 )
                 new_id = cursor.lastrowid
-                pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (job_position,)).fetchone()
-                if pos_row:
-                    cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row[0]))
+                if pos_row_cache:
+                    cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row_cache[0]))
                 # Dual-write: also insert into normalized tables
                 try:
                     insert_source(cursor, new_id, url, company, round_)

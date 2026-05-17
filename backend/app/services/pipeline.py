@@ -381,6 +381,9 @@ def _apply_matched(conn, matched, job_position, saved_answers):
 def _insert_new_clusters(conn, new_clusters, job_position, saved_answers):
     """插入新聚类到 question_bank"""
     new_qb_ids = []
+    # Cache job_positions lookup before loop (job_position doesn't change)
+    pos_rows_cache = conn.execute("SELECT id FROM job_positions WHERE name = ?",
+                                  (job_position,)).fetchall()
     for cluster in new_clusters:
         entry = _build_new_entry(cluster, job_position)
         cursor = conn.execute(
@@ -410,9 +413,7 @@ def _insert_new_clusters(conn, new_clusters, job_position, saved_answers):
             except Exception:
                 pass
 
-        pos_rows = conn.execute("SELECT id FROM job_positions WHERE name = ?",
-                                (job_position,)).fetchall()
-        for pr in pos_rows:
+        for pr in pos_rows_cache:
             conn.execute(
                 "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
                 (new_id, pr['id'])

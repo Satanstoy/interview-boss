@@ -239,6 +239,22 @@ async def clear_db(admin: dict = Depends(get_admin_user)):
     def _clear():
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            try:
+                cursor.execute("DELETE FROM analysis_queue")
+            except Exception:
+                pass
+            try:
+                cursor.execute("DELETE FROM login_failures")
+            except Exception:
+                pass
+            try:
+                cursor.execute("DELETE FROM invalidated_families")
+            except Exception:
+                pass
+            try:
+                cursor.execute("DELETE FROM email_verification_codes")
+            except Exception:
+                pass
             cursor.execute("DELETE FROM jd")
             cursor.execute("DELETE FROM interview")
             cursor.execute("DELETE FROM questions_detail")
@@ -246,6 +262,10 @@ async def clear_db(admin: dict = Depends(get_admin_user)):
             cursor.execute("DELETE FROM user_practice_history")
             cursor.execute("DELETE FROM user_question_view")
             cursor.execute("DELETE FROM question_position")
+            try:
+                cursor.execute("DELETE FROM schema_version")
+            except Exception:
+                pass
             cursor.execute("DELETE FROM sqlite_sequence")
             conn.commit()
 

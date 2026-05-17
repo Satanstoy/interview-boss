@@ -365,11 +365,11 @@ def build_api_shapes_batch(cursor, qb_ids: list) -> dict:
 
 
 def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_id: int) -> dict:
-    """Batch-fetch with bank_mode filtering. Uses SQL JOINs instead of Python filtering."""
+    """Batch-fetch with bank_mode filtering. 3 queries total (no redundant unfiltered fetch)."""
     if not qb_ids:
         return {}
 
-    base = build_api_shapes_batch(cursor, qb_ids)
+    placeholders = ','.join(['?'] * len(qb_ids))
 
     owner_filter = {
         'personal': "i.owner_id = ?",
@@ -378,76 +378,77 @@ def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_i
     }[bank_mode]
     user_param = () if bank_mode == 'public' else (user_id,)
 
-    placeholders = ','.join(['?'] * len(qb_ids))
-
-    # Filter sources
+    # Query 1: filtered sources via JOIN
     if bank_mode == 'public':
         src_rows = cursor.execute(
             f"SELECT DISTINCT qs.question_bank_id, qs.url, qs.company, qs.round "
-            f"FROM question_sources qs "
-            f"JOIN interview i ON qs.url = i.url "
+            f"FROM question_sources qs JOIN interview i ON qs.url = i.url "
             f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
             (*qb_ids,)
         ).fetchall()
     else:
         src_rows = cursor.execute(
             f"SELECT DISTINCT qs.question_bank_id, qs.url, qs.company, qs.round "
-            f"FROM question_sources qs "
-            f"JOIN interview i ON qs.url = i.url "
+            f"FROM question_sources qs JOIN interview i ON qs.url = i.url "
             f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
             (*qb_ids, *user_param)
         ).fetchall()
-
-    filtered_sources = {}
+    sources_by_qb = {}
     for r in src_rows:
-        filtered_sources.setdefault(r[0], []).append({"url": r[1], "company": r[2], "round": r[3]})
+        sources_by_qb.setdefault(r[0], []).append({"url": r[1], "company": r[2], "round": r[3]})
 
-    # Filter original item sources
-    oi_ids = []
-    oi_id_to_qb = {}
-    for r in cursor.execute(
+    # Query 2: all original items (no filtering needed - items are owned by QB)
+    oi_rows = cursor.execute(
         f"SELECT id, question_bank_id, question_text FROM question_original_items "
-        f"WHERE question_bank_id IN ({placeholders})", qb_ids
-    ).fetchall():
+        f"WHERE question_bank_id IN ({placeholders}) ORDER BY id", qb_ids
+    ).fetchall()
+    oi_by_qb = {}
+    oi_ids = []
+    for r in oi_rows:
+        oi_by_qb.setdefault(r[1], []).append(r[2])
         oi_ids.append(r[0])
-        oi_id_to_qb[r[0]] = (r[1], r[2])
 
-    filtered_oqs = {}
+    # Query 3: filtered original item sources via JOIN
+    ois_by_oi = {}
     if oi_ids:
-        oi_placeholders = ','.join(['?'] * len(oi_ids))
+        oi_ph = ','.join(['?'] * len(oi_ids))
         if bank_mode == 'public':
             ois_rows = cursor.execute(
-                f"SELECT DISTINCT qois.original_item_id, qois.url, qois.company, qois.round "
+                f"SELECT DISTINCT qois.original_item_id, qoi.question_bank_id, qois.url, qois.company, qois.round "
                 f"FROM question_original_item_sources qois "
+                f"JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id IN ({oi_placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
+                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL AND {owner_filter}",
                 (*oi_ids,)
             ).fetchall()
         else:
             ois_rows = cursor.execute(
-                f"SELECT DISTINCT qois.original_item_id, qois.url, qois.company, qois.round "
+                f"SELECT DISTINCT qois.original_item_id, qoi.question_bank_id, qois.url, qois.company, qois.round "
                 f"FROM question_original_item_sources qois "
+                f"JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id IN ({oi_placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
+                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL AND {owner_filter}",
                 (*oi_ids, *user_param)
             ).fetchall()
-
-        ois_by_oi = {}
         for r in ois_rows:
-            ois_by_oi.setdefault(r[0], []).append({"url": r[1], "company": r[2], "round": r[3]})
+            ois_by_oi.setdefault(r[0], []).append({"url": r[2], "company": r[3], "round": r[4]})
 
-        for oi_id, (qb_id, q_text) in oi_id_to_qb.items():
-            sources = ois_by_oi.get(oi_id, [])
-            if sources:
-                filtered_oqs.setdefault(qb_id, []).append({"question": q_text, "sources": sources})
-
-    # Apply filters
+    # Assemble
+    result = {}
     for qb_id in qb_ids:
-        if qb_id in filtered_sources:
-            base[qb_id]["sources"] = filtered_sources[qb_id]
-        if qb_id in filtered_oqs:
-            base[qb_id]["original_question_sources"] = filtered_oqs[qb_id]
-            base[qb_id]["original_questions"] = [item["question"] for item in filtered_oqs[qb_id]]
-            base[qb_id]["frequency"] = len(filtered_oqs[qb_id])
-
-    return base
+        sources = sources_by_qb.get(qb_id, [])
+        oq_texts = oi_by_qb.get(qb_id, [])
+        oqs = []
+        for r in oi_rows:
+            if r[1] != qb_id:
+                continue
+            oi_sources = ois_by_oi.get(r[0], [])
+            if oi_sources:
+                oqs.append({"question": r[2], "sources": oi_sources})
+        result[qb_id] = {
+            "sources": sources,
+            "original_questions": [item["question"] for item in oqs] if oqs else oq_texts,
+            "original_question_sources": oqs,
+            "frequency": len(oqs) if oqs else len(oq_texts),
+        }
+    return result

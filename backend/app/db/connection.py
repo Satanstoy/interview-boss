@@ -1054,7 +1054,38 @@ def _migration_018_composite_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_qb_owner_status_position ON question_bank(owner_id, status, job_position)")
 
 
-def _migration_019_drop_json_columns(conn):
+def _migration_019_fix_cascades(conn):
+    """Fix missing ON DELETE CASCADE on user_practice_history.question_bank_id."""
+    cursor = conn.cursor()
+    # SQLite doesn't support ALTER TABLE to modify FK constraints.
+    # Recreate the table with CASCADE.
+    cursor.execute("ALTER TABLE user_practice_history RENAME TO user_practice_history_old")
+    cursor.execute('''
+        CREATE TABLE user_practice_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            question_bank_id INTEGER NOT NULL,
+            user_answer TEXT,
+            evaluation_result TEXT,
+            score INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        INSERT INTO user_practice_history (id, user_id, question_bank_id, user_answer, evaluation_result, score, created_at, updated_at)
+        SELECT id, user_id, question_bank_id, user_answer, evaluation_result, score, created_at, updated_at
+        FROM user_practice_history_old
+    ''')
+    cursor.execute("DROP TABLE user_practice_history_old")
+    # Recreate indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_uph_user ON user_practice_history(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_uph_question ON user_practice_history(question_bank_id)")
+
+
+def _migration_020_drop_json_columns(conn):
     """Drop deprecated JSON TEXT columns and static frequency from question_bank.
 
     WARNING: Only run after all write paths have been updated to use normalized tables.
@@ -1073,6 +1104,18 @@ def _migration_019_drop_json_columns(conn):
     cursor.execute("ALTER TABLE question_bank DROP COLUMN is_starred")
     cursor.execute("ALTER TABLE question_bank DROP COLUMN frequency")
     logger.info("Dropped JSON columns and static frequency from question_bank")
+
+
+def _migration_021_performance_indexes(conn):
+    """Add indexes for common query patterns identified in performance audit."""
+    # question_bank: composite index for bank_mode filtering
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qb_deleted_owner_status ON question_bank(deleted_at, owner_id, status)")
+    # questions_detail: index on question text for delete/edit operations
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qd_question ON questions_detail(question)")
+    # user_practice_history: composite index for daily trend queries
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_uph_user_date ON user_practice_history(user_id, created_at)")
+    # analysis_queue: index for dequeue operations
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_aq_status_created ON analysis_queue(status, created_at)")
 
 
 _MIGRATIONS = [
@@ -1094,7 +1137,9 @@ _MIGRATIONS = [
     (16, 'normalized_source_tables',     _migration_016_normalized_source_tables),
     (17, 'backfill_normalized_sources',  _migration_017_backfill_normalized_sources),
     (18, 'composite_indexes',            _migration_018_composite_indexes),
-    # (19, 'drop_json_columns',         _migration_019_drop_json_columns),  # TODO: 启用前需先移除写路径中的 JSON 列引用
+    (19, 'fix_cascades',                 _migration_019_fix_cascades),
+    # (20, 'drop_json_columns',         _migration_020_drop_json_columns),  # TODO: 启用前需先移除写路径中的 JSON 列引用
+    (21, 'performance_indexes',          _migration_021_performance_indexes),
 ]
 
 

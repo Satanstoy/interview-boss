@@ -28,10 +28,26 @@ def _safe_table_name(name: str) -> str:
 def _cleanup_sources_for_url(cursor, url: str):
     """清理 question_bank 中指向指定 URL 的所有贡献：sources、original_questions、original_question_sources。
     frequency=0 的公共 QB 及其 question_position 一并删除。"""
-    affected = cursor.execute(
-        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
-        (f'%{url}%',)
-    ).fetchall()
+    # Use normalized question_sources table with indexed url column instead of LIKE scan
+    try:
+        affected_ids = cursor.execute(
+            "SELECT DISTINCT question_bank_id FROM question_sources WHERE url = ?", (url,)
+        ).fetchall()
+        if affected_ids:
+            id_list = [r[0] for r in affected_ids]
+            placeholders = ','.join('?' * len(id_list))
+            affected = cursor.execute(
+                f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({placeholders})",
+                id_list
+            ).fetchall()
+        else:
+            affected = []
+    except Exception:
+        # Fallback for tests / missing normalized tables
+        affected = cursor.execute(
+            "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
+            (f'%{url}%',)
+        ).fetchall()
 
     ids_to_delete = []
     for r in affected:
@@ -94,11 +110,28 @@ def _cleanup_sources_for_url(cursor, url: str):
 
 def _restore_sources_for_url(cursor, url: str):
     """恢复面经时，从 original_question_sources 中找回被清理的 source 条目，重新加入 sources。"""
-    # 查找 original_question_sources 中包含该 URL 的 QB 记录
-    affected = cursor.execute(
-        "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE original_question_sources LIKE ?",
-        (f'%{url}%',)
-    ).fetchall()
+    # Use normalized tables with indexed url column instead of LIKE scan on JSON column
+    try:
+        affected_ids = cursor.execute(
+            "SELECT DISTINCT qoi.question_bank_id FROM question_original_item_sources qois "
+            "JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
+            "WHERE qois.url = ?", (url,)
+        ).fetchall()
+        if affected_ids:
+            id_list = [r[0] for r in affected_ids]
+            placeholders = ','.join('?' * len(id_list))
+            affected = cursor.execute(
+                f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({placeholders})",
+                id_list
+            ).fetchall()
+        else:
+            affected = []
+    except Exception:
+        # Fallback for tests / missing normalized tables
+        affected = cursor.execute(
+            "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE original_question_sources LIKE ?",
+            (f'%{url}%',)
+        ).fetchall()
     for r in affected:
         try:
             sources = json.loads(r['sources']) if r['sources'] else []
