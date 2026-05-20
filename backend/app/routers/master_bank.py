@@ -8,7 +8,7 @@ import asyncio
 import openai
 from collections import Counter
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH, LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, ANSWER_PROMPT, EVAL_PROMPT, build_tagging_prompt
@@ -51,14 +51,14 @@ def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
         if mode == 'personal':
             return from_clause, f"WHERE {prefix}owner_id = ? AND {prefix}job_position = ?", [uid, pos_fallback]
         elif mode == 'mixed':
-            return from_clause, f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?) AND {prefix}job_position = ?", [uid, pos_fallback]
+            return from_clause, f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {prefix}job_position = ?", [uid, pos_fallback]
         else:
             return from_clause, f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {prefix}job_position = ?", [pos_fallback]
 
     if mode == 'personal':
         return from_clause, f"WHERE {prefix}owner_id = ?", from_params + [uid]
     elif mode == 'mixed':
-        return from_clause, f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR {prefix}owner_id = ?", from_params + [uid]
+        return from_clause, f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)", from_params + [uid]
     else:  # 'public'
         return from_clause, f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'", from_params
 
@@ -273,7 +273,7 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
 
             await asyncio.sleep(2)  # Poll every 2 seconds
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.get("/api/jobs/{job_id}")
@@ -530,7 +530,7 @@ async def compact_singletons(admin: dict = Depends(get_admin_user)):
             logger.exception("孤岛碎片整理失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'整理失败: {str(e)[:200]}'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.put("/api/master-bank/{question_id}")
@@ -748,7 +748,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
             logger.exception("个人题库构建失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'构建失败: {str(e)[:200]}'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
@@ -1618,7 +1618,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest, user: dict = 
             logger.exception("批量生成答案失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'生成失败: {str(e)[:200]}'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.post("/api/master-bank/re-tag/{question_id}")
@@ -1989,17 +1989,22 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
 
 
 @router.post("/api/master-bank/approve/{question_id}")
-async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
+async def approve_question(question_id: int, admin: dict = Depends(get_admin_user), bg_tasks: BackgroundTasks = None):
     """审核通过题目"""
     def _approve():
         with get_db_connection() as conn:
-            row = conn.execute("SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
+            row = conn.execute("SELECT id, status, cat2, job_position FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该待审核题目")
             conn.execute("UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
             conn.commit()
+            return dict(row)
 
-    await run_db(_approve)
+    question = await run_db(_approve)
+    # 异步反向扫描：标记个人题库中的语义重复
+    if bg_tasks and question.get('cat2'):
+        from app.services.clustering import scan_personal_duplicates
+        bg_tasks.add_task(scan_personal_duplicates, question_id, question['cat2'], question.get('job_position', ''))
     return {"status": "success", "message": "已通过审核"}
 
 

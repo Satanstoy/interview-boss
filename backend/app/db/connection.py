@@ -1138,6 +1138,12 @@ def _migration_022_jobs_table(conn):
         )
     ''')
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+
+
+def _migration_023_duplicate_of(conn):
+    """Add duplicate_of column to question_bank for cross-bank dedup."""
+    conn.execute("ALTER TABLE question_bank ADD COLUMN duplicate_of INTEGER DEFAULT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qb_duplicate_of ON question_bank(duplicate_of)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(job_type)")
 
 
@@ -1164,6 +1170,7 @@ _MIGRATIONS = [
     # (20, 'drop_json_columns',         _migration_020_drop_json_columns),  # TODO: 启用前需先移除写路径中的 JSON 列引用
     (21, 'performance_indexes',          _migration_021_performance_indexes),
     (22, 'jobs_table',                   _migration_022_jobs_table),
+    (23, 'duplicate_of',                 _migration_023_duplicate_of),
 ]
 
 

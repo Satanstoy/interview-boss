@@ -3,9 +3,7 @@ import traceback
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -45,8 +43,9 @@ if ALLOWED_ORIGINS:
         allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Request-ID"],
     )
 
-# ── GZip 压缩（>500B 的响应自动压缩）──
-app.add_middleware(GZipMiddleware, minimum_size=500)
+# ── GZip 压缩 ──
+# 由 nginx 处理压缩（http 块 gzip on + /api/ location gzip off for SSE）
+# 应用层不再使用 GZipMiddleware，避免其内部缓冲破坏 SSE 流式传输
 
 
 # ── 安全响应头（纯 ASGI 实现，避免 BaseHTTPMiddleware 缓冲 SSE 响应）──
@@ -94,17 +93,29 @@ app.add_middleware(SecurityHeadersMiddleware)
 _CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/register', '/api/auth/login-form', '/api/health'}
 
 
-class CSRFMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # 只检查状态变更方法
-        if request.method in ('POST', 'PUT', 'DELETE'):
-            if request.url.path not in _CSRF_EXEMPT_PATHS:
-                has_custom_header = bool(request.headers.get("X-Requested-With"))
-                ct = request.headers.get("content-type", "")
+class CSRFMiddleware:
+    """纯 ASGI CSRF 中间件：不缓冲响应体（SSE 友好）"""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] in ("POST", "PUT", "DELETE"):
+            path = scope.get("path", "")
+            if path not in _CSRF_EXEMPT_PATHS:
+                headers = dict(scope.get("headers", []))
+                has_custom_header = b"x-requested-with" in headers
+                ct = headers.get(b"content-type", b"").decode("utf-8", errors="ignore")
                 has_json_content_type = "application/json" in ct
                 if not has_custom_header and not has_json_content_type:
-                    return JSONResponse(status_code=403, content={"detail": "缺少必要的请求头，请通过前端发起请求"})
-        return await call_next(request)
+                    response = JSONResponse(status_code=403, content={"detail": "缺少必要的请求头，请通过前端发起请求"})
+                    await response(scope, receive, send)
+                    return
+
+        await self.app(scope, receive, send)
 
 
 app.add_middleware(CSRFMiddleware)

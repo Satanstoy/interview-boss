@@ -509,6 +509,78 @@ export async function uploadSSE(url, formData, onEvent) {
           if (onEvent) onEvent(data)
           if (data.type === 'done') finalResult = data
           if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+          // 让出事件循环，确保浏览器有机会渲染进度更新
+          await new Promise(r => setTimeout(r, 0))
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e
+        }
+      }
+    }
+
+    if (buffer.trim().startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.trim().slice(6))
+        if (onEvent) onEvent(data)
+        if (data.type === 'done') finalResult = data
+        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+      } catch (e) {
+        if (e.message && !e.message.includes('JSON')) throw e
+      }
+    }
+
+    return finalResult
+  } finally {
+    pendingControllers.delete(controller)
+  }
+}
+
+/**
+ * GET 请求，返回 SSE 流式响应
+ */
+export async function getSSE(url, onEvent) {
+  const controller = new AbortController()
+  pendingControllers.add(controller)
+
+  try {
+    const authHeaders = {}
+    const token = getAuthToken()
+    if (token) authHeaders['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders },
+      signal: controller.signal,
+      credentials: 'same-origin',
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      let detail
+      try { detail = JSON.parse(text).detail } catch { detail = text }
+      throw new Error(detail || getStatusMessage(res.status))
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalResult = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(trimmed.slice(6))
+          if (onEvent) onEvent(data)
+          if (data.type === 'done') finalResult = data
+          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
         } catch (e) {
           if (e.message && !e.message.includes('JSON')) throw e
         }

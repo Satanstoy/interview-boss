@@ -127,7 +127,7 @@
                 重新生成
               </button>
             </div>
-            <div v-if="(fullUserAnswer ?? question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
+            <div v-if="(fullUserAnswer || question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
               <span class="text-label text-primary-500 dark:text-primary-400 bg-primary-50/60 dark:bg-primary-900/20 px-2 py-0.5 rounded">个人答案</span>
             </div>
             <div class="text-ink-700 dark:text-ink-100 text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
@@ -156,7 +156,7 @@
             </p>
             <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
-              <button v-if="question.has_reference_answer && !(fullUserAnswer ?? question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="btn-secondary px-5 py-2">
+              <button v-if="question.has_reference_answer && !(fullUserAnswer || question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="btn-secondary px-5 py-2">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 使用参考答案
               </button>
@@ -174,14 +174,14 @@
 
       <!-- Sources & original questions (secondary — collapsible) -->
       <div v-if="hasSources" class="border-t border-surface-100 dark:border-ink-700 mt-5">
-        <button @click.stop="showSources = !showSources"
+        <button ref="sourceBtnRef" @click.stop="question._showSources = !question._showSources"
           class="w-full px-6 py-3 flex items-center gap-2 text-caption font-medium text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-50/60 dark:hover:bg-surface-700/30 transition-colors">
-          <svg class="w-3 h-3 transform transition-transform duration-200" :class="showSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <svg class="w-3 h-3 transform transition-transform duration-200" :class="question._showSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           <span>来源详情</span>
           <span class="text-label text-ink-400 dark:text-ink-500 ml-0.5">{{ sourceCount }}条</span>
         </button>
 
-        <div v-if="showSources" class="px-6 pb-5 space-y-2">
+        <div v-show="question._showSources" class="px-6 pb-5 space-y-2">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
             class="bg-surface-50/80 dark:bg-surface-700/30 rounded-xl p-3 flex items-start gap-3">
             <span class="text-caption text-ink-400 dark:text-ink-500 font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>
@@ -219,11 +219,11 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+
+const sourceBtnRef = ref(null)
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { safeUrl } from '../utils/validate.js'
 import { get } from '../utils/http.js'
-
-const showSources = ref(false)
 
 // Lazy-loaded full answer detail (for compact mode)
 const fullAnswer = ref(null)
@@ -255,17 +255,6 @@ async function loadFullAnswer() {
   }
 }
 
-// Trigger detail load when answer section is shown
-watch(() => props.question._showAnswer, (show) => {
-  if (show) loadFullAnswer()
-}, { immediate: true })
-
-const DIFFICULTY_CLASSES = {
-  L3: 'bg-red-50 dark:bg-red-900/25 text-red-600 dark:text-red-400',
-  L2: 'bg-amber-50 dark:bg-amber-900/25 text-amber-600 dark:text-amber-400',
-  default: 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-600 dark:text-emerald-400',
-}
-
 const props = defineProps({
   question: { type: Object, required: true },
   isSelected: { type: Function, required: true },
@@ -276,6 +265,41 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
+
+// Trigger detail load when answer section is shown
+watch(() => props.question._showAnswer, (show) => {
+  if (show) loadFullAnswer()
+}, { immediate: true })
+
+// Sync fullUserAnswer when parent updates question.user_answer (e.g., useReferenceAnswer)
+watch(() => props.question.user_answer, (val) => {
+  if (val && val !== fullUserAnswer.value) {
+    fullUserAnswer.value = val
+  }
+})
+
+// Scroll anchoring: keep the "来源详情" button visually stable when sources expand/collapse
+watch(() => props.question._showSources, () => {
+  const btn = sourceBtnRef.value
+  if (!btn) return
+  const scroller = document.querySelector('.vue-recycle-scroller')
+  if (!scroller) return
+  const btnTop = btn.getBoundingClientRect().top
+  // Wait for DynamicScroller to finish recalculating positions after size change
+  setTimeout(() => {
+    requestAnimationFrame(() => {
+      const newBtnTop = btn.getBoundingClientRect().top
+      const delta = newBtnTop - btnTop
+      if (Math.abs(delta) > 2) scroller.scrollTop += delta
+    })
+  }, 50)
+})
+
+const DIFFICULTY_CLASSES = {
+  L3: 'bg-red-50 dark:bg-red-900/25 text-red-600 dark:text-red-400',
+  L2: 'bg-amber-50 dark:bg-amber-900/25 text-amber-600 dark:text-amber-400',
+  default: 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-600 dark:text-emerald-400',
+}
 
 const parsedTags = computed(() => {
   const tags = props.question.tags
@@ -319,8 +343,8 @@ const difficultyClass = computed(() => {
 
 const displayAnswer = computed(() => {
   // 优先显示个人答案，其次显示全局答案
-  const userAns = fullUserAnswer.value ?? props.question.user_answer
-  const aiAns = fullAnswer.value ?? props.question.ai_answer
+  const userAns = fullUserAnswer.value || props.question.user_answer
+  const aiAns = fullAnswer.value || props.question.ai_answer
   return userAns || aiAns || ''
 })
 
@@ -351,21 +375,31 @@ const formatPosition = (pos) => {
 
 // 按 URL 去重的来源列表，仅在展开时计算以节省性能
 const dedupedSources = computed(() => {
-  if (!showSources.value) return []
+  if (!props.question._showSources) return []
   const q = props.question
   const sources = q.sources || []
-  if (!q.original_question_sources || !q.original_question_sources.length) return sources
-  // 建立 url -> 原始问题文本 的映射（支持同一 URL 多个题目）
-  const urlToOq = {}
-  for (const item of q.original_question_sources) {
-    for (const s of (item.sources || [])) {
-      if (s.url) {
-        if (!urlToOq[s.url]) urlToOq[s.url] = item.question
-        else if (!urlToOq[s.url].includes(item.question)) urlToOq[s.url] += '\n' + item.question
+
+  // 优先用 original_question_sources（非 compact 模式）
+  if (q.original_question_sources && q.original_question_sources.length) {
+    const urlToOq = {}
+    for (const item of q.original_question_sources) {
+      for (const s of (item.sources || [])) {
+        if (s.url) {
+          if (!urlToOq[s.url]) urlToOq[s.url] = item.question
+          else if (!urlToOq[s.url].includes(item.question)) urlToOq[s.url] += '\n' + item.question
+        }
       }
     }
+    return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '' }))
   }
-  return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '' }))
+
+  // compact 模式回退：用 source_labels（url → 原题文本）
+  const labels = q.source_labels || {}
+  if (Object.keys(labels).length) {
+    return sources.map(s => ({ ...s, _origQuestion: labels[s.url] || '' }))
+  }
+
+  return sources
 })
 </script>
 

@@ -24,7 +24,7 @@
             :data-row-id="row.id"
             class="border-b border-gray-50 dark:border-ink-700/50 text-sm transition-colors duration-150 animate-fade-in"
             :class="[
-              highlightId === row.id ? 'highlight-row' : '',
+              highlightId != null && highlightId == row.id ? 'highlight-row' : '',
               isSelected(row.id) ? 'bg-primary-50/60 dark:bg-primary-900/20' : idx % 2 === 0 ? 'bg-white dark:bg-surface-800' : 'bg-surface-50/30 dark:bg-surface-900/30'
             ]"
             :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
@@ -94,10 +94,17 @@ const paginatedRows = computed(() => {
 
 <style scoped>
 .highlight-row {
-  animation: highlight-pulse 3s ease-out;
+  animation: highlight-pulse 4s ease-out forwards;
 }
 @keyframes highlight-pulse {
-  0%, 20% { background-color: rgb(254 240 138 / 0.6); }
+  0%, 30% { background-color: rgba(248, 221, 165, 0.5); }
+  100% { background-color: transparent; }
+}
+:global(.dark) .highlight-row {
+  animation: highlight-pulse-dark 4s ease-out forwards;
+}
+@keyframes highlight-pulse-dark {
+  0%, 30% { background-color: rgba(248, 221, 165, 0.2); }
   100% { background-color: transparent; }
 }
 </style>

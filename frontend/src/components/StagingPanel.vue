@@ -125,24 +125,74 @@
       </div>
 
       <!-- 进度指示器 -->
-      <div v-if="isUploading" class="w-full flex items-center justify-center gap-3 py-2">
-        <div class="flex items-center gap-2">
-          <template v-for="s in submitStepList" :key="s.key">
+      <div v-if="isUploading" class="w-full py-3">
+        <!-- 进度条 -->
+        <div class="w-full bg-surface-200 dark:bg-ink-700 rounded-full h-1.5 mb-3 overflow-hidden">
+          <div
+            class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-700 ease-out"
+            :style="{ width: `${((submitStepList.findIndex(s => s.active) + 1) / submitStepsDef.length) * 100}%` }"
+          ></div>
+        </div>
+        <!-- 步骤标签 -->
+        <div class="flex items-center justify-center gap-2 mb-2">
+          <template v-for="(s, idx) in submitStepList" :key="s.key">
             <div class="flex items-center gap-1.5">
               <span
-                class="inline-block w-2 h-2 rounded-full transition-colors duration-300"
-                :class="s.active ? 'bg-blue-500 animate-pulse-slow' : s.done ? 'bg-blue-300 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
-              ></span>
-              <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-medium' : s.done ? 'text-blue-300 dark:text-blue-600' : 'text-gray-400 dark:text-gray-500'">{{ s.label }}</span>
+                class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold transition-all duration-300"
+                :class="s.active ? 'bg-blue-500 text-white animate-pulse-slow' : s.done ? 'bg-blue-500 text-white' : 'bg-surface-200 dark:bg-ink-600 text-ink-400 dark:text-ink-500'"
+              >
+                <svg v-if="s.done" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                <span v-else>{{ idx + 1 }}</span>
+              </span>
+              <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-semibold' : s.done ? 'text-ink-500 dark:text-ink-400' : 'text-ink-300 dark:text-ink-600'">{{ s.label }}</span>
             </div>
-            <svg v-if="s.key !== 'save'" class="w-3 h-3 text-gray-300 dark:text-gray-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            <svg v-if="s.key !== 'save'" class="w-3 h-3 text-surface-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </template>
         </div>
-        <span class="text-xs text-gray-500 dark:text-gray-400 ml-2">{{ submitProgress.message }}</span>
+        <!-- 当前步骤消息 + 详情 -->
+        <div class="text-center">
+          <span class="text-xs text-ink-500 dark:text-ink-400">{{ submitProgress.message }}</span>
+          <span v-if="progressDetail" class="text-xs text-ink-400 dark:text-ink-500 ml-2">· {{ progressDetail }}</span>
+        </div>
       </div>
 
-      <div v-if="uploadResult" class="text-green-600 dark:text-green-400 font-medium w-full text-center bg-green-50 dark:bg-green-900/30 p-2 rounded">
-        解析成功！类型：<span class="font-bold ml-1">{{ uploadResult.doc_type || uploadResult.type }}</span>
+      <div v-if="uploadResult" class="w-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/40 rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span class="text-green-700 dark:text-green-300 font-semibold text-sm">提交成功</span>
+          <span class="text-xs text-green-600/70 dark:text-green-400/60 bg-green-100 dark:bg-green-800/30 px-2 py-0.5 rounded-full">
+            {{ uploadResult.doc_type || 'Interview' }} · {{ uploadResult.target === 'public' ? '公共题库' : '个人题库' }}
+          </span>
+        </div>
+        <!-- 统计信息 -->
+        <div v-if="resultSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <div class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.questionCount }}</div>
+            <div class="text-[11px] text-ink-400 dark:text-ink-500">提取题目</div>
+          </div>
+          <div v-if="resultSummary.matchedCount != null" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.matchedCount }}<span class="text-xs text-ink-400">已有</span> / {{ resultSummary.unmatchedCount }}<span class="text-xs text-ink-400">新题</span></div>
+            <div class="text-[11px] text-ink-400 dark:text-ink-500">匹配结果</div>
+          </div>
+          <div v-if="resultSummary.qualityScore != null" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold" :class="resultSummary.qualityScore >= 7 ? 'text-green-600 dark:text-green-400' : resultSummary.qualityScore >= 4 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'">{{ resultSummary.qualityScore }}/10</div>
+            <div class="text-[11px] text-ink-400 dark:text-ink-500">质量评分</div>
+          </div>
+          <div v-if="resultSummary.elapsed" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.elapsed.toFixed(1) }}<span class="text-xs text-ink-400">s</span></div>
+            <div class="text-[11px] text-ink-400 dark:text-ink-500">处理耗时</div>
+          </div>
+        </div>
+        <!-- 分类分布 -->
+        <div v-if="resultSummary?.categories" class="flex flex-wrap gap-1.5">
+          <span
+            v-for="(count, cat) in resultSummary.categories"
+            :key="cat"
+            class="inline-flex items-center gap-1 text-xs bg-green-100 dark:bg-green-800/30 text-green-700 dark:text-green-300 px-2 py-1 rounded-md"
+          >
+            {{ cat }}<span class="font-semibold">×{{ count }}</span>
+          </span>
+        </div>
       </div>
       <div v-if="uploadError" class="text-red-600 dark:text-red-400 font-medium w-full text-center bg-red-50 dark:bg-red-900/30 p-2 rounded">
         {{ uploadError }}
@@ -152,7 +202,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { submitDataSSE } from '../api/index.js'
 import RoundedSelect from './RoundedSelect.vue'
 import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '../utils/validate.js'
@@ -178,7 +228,8 @@ const isDragging = ref(false)
 const isUploading = ref(false)
 const uploadResult = ref(null)
 const uploadError = ref(null)
-const submitProgress = ref({ step: '', message: '' })
+const submitProgress = ref({ step: '', message: '', data: null })
+const progressHistory = ref([]) // 收集所有步骤的数据用于成功后展示
 const submitStepsDef = [
   { key: 'extract', label: '提取内容' },
   { key: 'fill', label: '补全信息' },
@@ -193,6 +244,35 @@ const submitStepList = computed(() => {
     active: i === curIdx,
     done: curIdx >= 0 && i < curIdx,
   }))
+})
+
+const progressDetail = computed(() => {
+  const d = submitProgress.value.data
+  if (!d) return ''
+  const parts = []
+  if (d.question_count != null) parts.push(`${d.question_count}题`)
+  if (d.categories) {
+    const cats = Object.entries(d.categories).map(([k, v]) => `${k}×${v}`).join(', ')
+    if (cats) parts.push(cats)
+  }
+  if (d.quality_score != null) parts.push(`质量 ${d.quality_score}/10`)
+  if (d.elapsed_seconds != null) parts.push(`${d.elapsed_seconds}s`)
+  if (d.matched_count != null) parts.push(`${d.matched_count}道已有, ${d.unmatched_count}道新题`)
+  return parts.join(' | ')
+})
+
+const resultSummary = computed(() => {
+  if (!uploadResult.value?._history) return null
+  const hist = uploadResult.value._history
+  const result = {}
+  for (const evt of hist) {
+    if (evt.question_count != null) result.questionCount = evt.question_count
+    if (evt.categories) result.categories = evt.categories
+    if (evt.quality_score != null) result.qualityScore = evt.quality_score
+    if (evt.matched_count != null) { result.matchedCount = evt.matched_count; result.unmatchedCount = evt.unmatched_count }
+    if (evt.elapsed_seconds != null) result.elapsed = (result.elapsed || 0) + evt.elapsed_seconds
+  }
+  return result.questionCount != null ? result : null
 })
 
 // 类型和季节选择
@@ -291,7 +371,11 @@ const submitAll = async () => {
   isUploading.value = true
   uploadResult.value = null
   uploadError.value = null
-  submitProgress.value = { step: '', message: '' }
+  submitProgress.value = { step: '', message: '', data: null }
+
+  // 强制等两帧渲染：nextTick 确保 Vue 更新 DOM，requestAnimationFrame 确保浏览器绘制
+  await nextTick()
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
 
   const formData = new FormData()
   formData.append('url', sanitizeText(sourceUrl.value, 2048))
@@ -317,10 +401,13 @@ const submitAll = async () => {
   try {
     const data = await submitDataSSE(formData, (event) => {
       if (event.step) {
-        submitProgress.value = { step: event.step, message: event.message || '' }
+        submitProgress.value = { step: event.step, message: event.message || '', data: event.data || null }
+        if (event.data) {
+          progressHistory.value.push({ step: event.step, message: event.message, ...event.data })
+        }
       }
     })
-    uploadResult.value = data
+    uploadResult.value = { ...data, _history: progressHistory.value }
     stagedFiles.value.forEach(item => URL.revokeObjectURL(item.preview))
     stagedFiles.value = []
     stagedText.value = ''
@@ -329,7 +416,8 @@ const submitAll = async () => {
     uploadError.value = getFriendlyError(err, '提交失败，请稍后重试')
   } finally {
     isUploading.value = false
-    submitProgress.value = { step: '', message: '' }
+    submitProgress.value = { step: '', message: '', data: null }
+    progressHistory.value = []
   }
 }
 

@@ -233,7 +233,7 @@ def _replace_details_txn(cursor, url, tagged_rows, job_position=""):
     _insert_details_txn(cursor, tagged_rows, job_position)
 
 
-def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitter_is_admin, user_id, current_pos, owner_id=None):
+def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitter_is_admin, user_id, current_pos, owner_id=None, public_duplicates=None):
     """增量更新 question_bank（matched 增频，unmatched 新建）。
 
     owner_id: 传入时用于 unmatched 新建行的 owner_id（个人题库场景）。
@@ -308,9 +308,11 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
 
     # Cache job_positions lookup before loop (current_pos doesn't change)
     pos_row_cache = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
+    pub_dup_map = {d["new_id"]: d["question_bank_id"] for d in (public_duplicates or [])}
 
     for item in unmatched_rows:
         row = item.get("_orig_row") if isinstance(item, dict) else item
+        item_id = item.get("id") if isinstance(item, dict) else None
         url, company, round_, q_text = row[0], row[1], row[2], row[3]
         cat1 = normalize_category(row[4])
         cat2 = normalize_category(row[5]) if len(row) > 5 else ''
@@ -318,9 +320,10 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
         diff_tag = row[7] if len(row) > 7 else '未知'
         sources_json = json.dumps([{"url": url, "company": company, "round": round_}], ensure_ascii=False)
         oqs_json = json.dumps([{"question": q_text, "sources": [{"url": url, "company": company, "round": round_}]}], ensure_ascii=False)
+        dup_of = pub_dup_map.get(item_id)
         cursor.execute(
-            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_question_sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
-            (q_text, cat1, cat2, tags, diff_tag, sources_json, oqs_json, owner_id, submitter_id, status, current_pos)
+            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_question_sources, owner_id, submitted_by, status, job_position, duplicate_of) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+            (q_text, cat1, cat2, tags, diff_tag, sources_json, oqs_json, owner_id, submitter_id, status, current_pos, dup_of)
         )
         new_id = cursor.lastrowid
         # BUG-008: 同步 question_position 关联表，否则新题在主库 INNER JOIN 查询中不可见
@@ -347,7 +350,8 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
 
 def submit_interview_txn(saved_url, data, questions, season, owner_id, status,
                          job_position, tagged_rows, matched, unmatched_rows,
-                         idx_to_row, submitter_is_admin, user_id, qb_owner_id=None):
+                         idx_to_row, submitter_is_admin, user_id, qb_owner_id=None,
+                         public_duplicates=None):
     """操作3 提交新面经：insert_interview + insert_details + incremental_update。
 
     qb_owner_id: question_bank 中 unmatched 新建行的 owner_id（个人题库传 user_id）。
@@ -364,7 +368,7 @@ def submit_interview_txn(saved_url, data, questions, season, owner_id, status,
             answer_tasks = _apply_incremental_txn(
                 cursor, matched, unmatched_rows, idx_to_row,
                 submitter_is_admin, user_id, job_position,
-                owner_id=qb_owner_id
+                owner_id=qb_owner_id, public_duplicates=public_duplicates
             )
             conn.commit()
             return answer_tasks, interview_id

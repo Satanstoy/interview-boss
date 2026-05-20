@@ -97,23 +97,25 @@ async def process_incremental_batch(
     if no_cat2:
         cat2_groups[''] = no_cat2
 
+    cat2_list = list(cat2_groups.items())
+    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+    async def _process_one(cat2, questions):
+        async with semaphore:
+            existing = existing_by_cat2.get(cat2, [])
+            return await _match_and_cluster_cat2(cat2, questions, existing, user_id)
+
+    tasks = [_process_one(cat2, questions) for cat2, questions in cat2_list]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     all_matched = []
     all_new_clusters = []
-
-    # 顺序处理每个 cat2 组，组间强制间隔 1.5s 避免 429
-    cat2_list = list(cat2_groups.items())
-    for i, (cat2, questions) in enumerate(cat2_list):
-        existing = existing_by_cat2.get(cat2, [])
-        try:
-            res = await _match_and_cluster_cat2(cat2, questions, existing, user_id)
+    for (cat2, _), res in zip(cat2_list, results):
+        if isinstance(res, Exception):
+            logger.error(f"[{cat2 or '无分类'}] cat2 处理异常: {res}")
+        else:
             all_matched.extend(res['matched'])
             all_new_clusters.extend(res['new_clusters'])
-        except Exception as e:
-            logger.error(f"[{cat2 or '无分类'}] cat2 处理异常: {e}")
-
-        # 组间打散发车间隔
-        if i < len(cat2_list) - 1:
-            await asyncio.sleep(1.5)
 
     return {
         "matched_to_existing": all_matched,
@@ -255,14 +257,12 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None)
         cat2 = r.get('cat2') or ''
         cat2_groups.setdefault(cat2, []).append(r)
 
-    matched = []
-    still_unmatched = []
+    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
-    for cat2, group in cat2_groups.items():
+    async def _match_group(cat2, group):
         existing = existing_clusters_by_cat2.get(cat2, [])
         if not existing:
-            still_unmatched.extend(group)
-            continue
+            return [], group
 
         # 构建 cluster_id → question_bank_id 映射（兼容两种格式）
         id_to_qb = {}
@@ -272,28 +272,112 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None)
             id_to_qb[cid] = cid
             normalized.append({**c, 'id': cid})
 
-        prompt = MATCH_EXISTING_PROMPT.format(
-            existing_clusters=_format_existing_clusters(normalized),
-            new_questions=_format_new_questions(group),
-            count=len(group),
-        )
-
-        try:
+        async with semaphore:
+            prompt = MATCH_EXISTING_PROMPT.format(
+                existing_clusters=_format_existing_clusters(normalized),
+                new_questions=_format_new_questions(group),
+                count=len(group),
+            )
             content = await _call_llm_with_retry(prompt, response_format={"type": "json_object"}, user_id=user_id)
-            result = _extract_json(content)
 
-            group_matched_ids = set()
-            for m in result.get("matches", []):
-                new_id = m.get("new_id")
-                cluster_id = m.get("cluster_id")
-                if new_id is not None and cluster_id is not None and cluster_id in id_to_qb:
-                    matched.append({"new_id": new_id, "question_bank_id": id_to_qb[cluster_id]})
-                    group_matched_ids.add(new_id)
-            for r in group:
-                if r['id'] not in group_matched_ids:
-                    still_unmatched.append(r)
-        except Exception as e:
-            logger.warning(f"同分类增量匹配失败: {e}")
-            still_unmatched.extend(group)
+        result = _extract_json(content)
+        group_matched = []
+        group_unmatched = []
+        group_matched_ids = set()
+
+        for m in result.get("matches", []):
+            new_id = m.get("new_id")
+            cluster_id = m.get("cluster_id")
+            try:
+                cluster_id_int = int(cluster_id) if cluster_id is not None else None
+                new_id_int = int(new_id) if new_id is not None else None
+            except (ValueError, TypeError):
+                continue
+            if new_id_int is not None and cluster_id_int is not None and cluster_id_int in id_to_qb:
+                group_matched.append({"new_id": new_id_int, "question_bank_id": id_to_qb[cluster_id_int]})
+                group_matched_ids.add(new_id_int)
+        for r in group:
+            if r['id'] not in group_matched_ids:
+                group_unmatched.append(r)
+
+        return group_matched, group_unmatched
+
+    tasks = []
+    for cat2, group in cat2_groups.items():
+        tasks.append(_match_group(cat2, group))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    matched = []
+    still_unmatched = []
+    for (cat2, _), res in zip(cat2_groups.items(), results):
+        if isinstance(res, Exception):
+            logger.warning(f"同分类增量匹配失败 [{cat2 or '无分类'}]: {res}")
+            still_unmatched.extend(cat2_groups[cat2])
+        else:
+            m, u = res
+            matched.extend(m)
+            still_unmatched.extend(u)
 
     return {"matched": matched, "unmatched": still_unmatched}
+
+
+async def scan_personal_duplicates(public_qb_id: int, cat2: str, job_position: str):
+    """公共题审核通过后，扫描所有用户个人题，标记语义重复。"""
+    from app.db.connection import get_db_connection
+    import json as _json
+
+    def _scan():
+        with get_db_connection() as conn:
+            # 获取公共题信息
+            pub = conn.execute("SELECT id, question FROM question_bank WHERE id = ?", (public_qb_id,)).fetchone()
+            if not pub:
+                return
+
+            # 查找同 cat2 + job_position 的个人题（未标记重复的）
+            personal = conn.execute(
+                "SELECT id, question, cat2, original_questions FROM question_bank "
+                "WHERE owner_id IS NOT NULL AND duplicate_of IS NULL AND deleted_at IS NULL "
+                "AND cat2 = ? AND (job_position = ? OR job_position = '' OR job_position IS NULL)",
+                (cat2, job_position)
+            ).fetchall()
+
+            if not personal:
+                return
+
+            # 构建匹配用数据
+            existing = [{"question_bank_id": pub['id'], "question": pub['question']}]
+            new_rows = []
+            for p in personal:
+                new_rows.append({"id": p['id'], "question": p['question']})
+
+            return existing, new_rows, [dict(p) for p in personal]
+
+    result = await _scan_async(_scan)
+    if not result:
+        return
+
+    existing, new_rows, personal_dicts = result
+
+    try:
+        match_result = await match_new_questions(new_rows, {"": existing})
+        if match_result["matched"]:
+            matched_ids = [m["new_id"] for m in match_result["matched"]]
+            def _mark():
+                with get_db_connection() as conn:
+                    for mid in matched_ids:
+                        conn.execute(
+                            "UPDATE question_bank SET duplicate_of = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND duplicate_of IS NULL",
+                            (public_qb_id, mid)
+                        )
+                    conn.commit()
+            await _scan_async(_mark)
+            logger.info(f"反向扫描标记 {len(matched_ids)} 个个人题为公共题 {public_qb_id} 的重复")
+    except Exception as e:
+        logger.warning(f"反向扫描失败: {e}")
+
+
+async def _scan_async(func):
+    """将同步 DB 操作包装为异步。"""
+    import asyncio
+    return await asyncio.to_thread(func)

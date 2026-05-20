@@ -157,7 +157,7 @@ async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get
                 pass
             yield f"data: {json.dumps({'type': 'error', 'message': f'分析失败: {str(e)}'}, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.post("/api/interview/batch-reprocess-stream")
@@ -214,4 +214,4 @@ async def batch_reprocess_stream(user: dict = Depends(get_admin_user)):
 
         yield f"data: {json.dumps({'step': 'done', 'message': f'批量分析完成，共 {total} 条面经，{tagged_total} 道题', 'type': 'done', 'total': total, 'tagged_total': tagged_total}, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})

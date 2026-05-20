@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, uploadSSE, postSSE, fetchWithCredentials, invalidateCache } from '../utils/http.js'
+import { get, post, put, del, upload, uploadSSE, postSSE, getSSE, fetchWithCredentials, invalidateCache } from '../utils/http.js'
 
 const API = '/api'
 
@@ -48,7 +48,7 @@ export const fetchRandomQuestions = ({ count = 10, cat1, difficulty } = {}) => {
 
 // ── Submit ──
 export const submitData = (formData) => upload(`${API}/submit`, formData)
-export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-stream`, formData, onEvent)
+export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-stream-v2`, formData, onEvent)
 
 // ── Data mutations ──
 export const deleteRecord = (type, id) => del(`${API}/data/${type}/${id}`)
@@ -63,6 +63,7 @@ export const reprocessInterviewSSE = (id, onEvent) => postSSE(`${API}/interview/
 // ── Master bank ──
 export const buildMasterBank = () => post(`${API}/master-bank/build`, null, { timeout: 600_000, noRetry: true })
 export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build`, null, onEvent)
+export const streamJobProgress = (jobId, onEvent) => getSSE(`${API}/jobs/${jobId}/stream`, onEvent)
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`, null, { timeout: 180_000 })

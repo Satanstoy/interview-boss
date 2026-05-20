@@ -22,6 +22,8 @@ from app.db.operations import (
 from app.services.llm import client, _should_use_response_format, _extract_json, _call_llm_with_retry_messages, get_llm_client_for_user, raw_llm_call
 from app.services.utils import encode_image, normalize_category
 
+from app.agents.submit.graph import stream_submit_graph
+
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
@@ -724,4 +726,94 @@ async def submit_data_stream(
             logger.exception("流式提交处理失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)[:200]}'})}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
+
+
+@router.post("/api/submit-stream-v2")
+async def submit_data_stream_v2(
+    bg_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+    url: Optional[str] = Form(""),
+    text: Optional[str] = Form(""),
+    season: Optional[str] = Form(""),
+    content_type: Optional[str] = Form(""),
+    target: Optional[str] = Form(""),
+    files: List[UploadFile] = File(default=[])
+):
+    """SSE 版提交端点 (LangGraph 版本) — 流式推送处理进度。"""
+
+    # ── 输入校验（与 v1 相同） ──
+    if text and len(text) > 50000:
+        raise HTTPException(status_code=400, detail="文本内容过长，请限制在 50000 字符以内")
+    url = (url or "").strip()
+    submit_target = (target or "personal").lower()
+    if submit_target not in ("personal", "public"):
+        submit_target = "personal"
+    if url:
+        check_owner = user['id'] if submit_target == 'personal' else None
+        if await run_db(lambda: _check_duplicate_url_sync(url, owner_id=check_owner)):
+            raise HTTPException(status_code=409, detail="该链接的内容已存在于数据库中，请勿重复上传！")
+    if not (text or "").strip() and (not files or len(files) == 0 or not files[0].filename):
+        raise HTTPException(status_code=400, detail="提交内容不能为空，必须提供纯文本或至少一张图片。")
+
+    # ── 读取文件到内存 ──
+    image_data = []
+    if files and files[0].filename:
+        if len(files) > 20:
+            raise HTTPException(status_code=400, detail="最多上传 20 个文件")
+        total_size = 0
+        for file in files:
+            if file.content_type.startswith("image/"):
+                content = await file.read()
+                total_size += len(content)
+                if total_size > MAX_TOTAL_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail=f"上传文件总大小超过限制（最大 {MAX_TOTAL_UPLOAD_SIZE // 1024 // 1024}MB）")
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail=f"图片 {file.filename} 超过大小限制（最大 {MAX_FILE_SIZE // 1024 // 1024}MB）")
+                real_mime = _magic.from_buffer(content[:2048], mime=True)
+                if real_mime not in ALLOWED_MIME_TYPES:
+                    raise HTTPException(status_code=400, detail=f"文件 {file.filename} 不是有效的图片文件（检测到: {real_mime}）")
+                image_data.append({"content": content, "mime": real_mime})
+
+    from app.db.connection import get_current_job_position
+
+    input_state = {
+        "raw_text": text or "",
+        "image_data": image_data,
+        "url": url,
+        "season": season or "",
+        "content_type_hint": (content_type or "").lower(),
+        "target": submit_target,
+        "user_id": user['id'],
+        "is_admin": bool(user.get('is_admin', 0)),
+        "job_position": get_current_job_position(),
+    }
+
+    async def event_stream():
+        result_collector = {}
+        try:
+            async for sse_data in stream_submit_graph(input_state, result_collector=result_collector):
+                yield sse_data
+        except openai.AuthenticationError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'API Key 无效或已过期，请在系统配置中检查并更新'})}\n\n"
+        except openai.NotFoundError as e:
+            msg = str(e)
+            if 'image' in msg.lower():
+                yield f"data: {json.dumps({'type': 'error', 'message': '当前模型不支持图片输入，请在系统配置中切换支持视觉的模型，或仅提交文本内容'})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'LLM 接口返回错误，请检查模型配置是否正确'})}\n\n"
+        except openai.APIConnectionError:
+            yield f"data: {json.dumps({'type': 'error', 'message': '无法连接 LLM 服务，请检查 Base URL 是否正确'})}\n\n"
+        except openai.APITimeoutError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'LLM 服务响应超时，请稍后重试'})}\n\n"
+        except openai.APIStatusError as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'LLM 接口返回错误（{e.status_code}），请查看服务端日志'})}\n\n"
+        except Exception as e:
+            logger.exception("LangGraph 流式提交处理失败")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)[:200]}'})}\n\n"
+        finally:
+            # 派发后台 AI 答案生成
+            for qid, qtext in result_collector.get("answer_tasks", []):
+                bg_tasks.add_task(background_generate_answer, qid, qtext, result_collector.get("user_id"))
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})

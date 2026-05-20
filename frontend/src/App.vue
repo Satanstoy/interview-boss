@@ -173,7 +173,7 @@
       <div class="relative min-w-0 flex-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden flex flex-col h-[calc(100vh-88px)]">
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar">
+        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar" style="position: relative;">
           <SearchFilterBar
             v-if="activeTab === 'MasterBank'"
             :search-query="searchQuery"
@@ -373,22 +373,17 @@
                 </template>
               </DataTable>
 
-              <!-- Floating return button (appears next to highlighted row) -->
-              <Teleport to="body">
-                <Transition name="float-pop">
-                  <button
-                    v-if="activeTab === 'Interview' && returnTab && highlightInterviewId"
-                    ref="floatingReturnBtn"
-                    @click="handleReturn"
-                    class="fixed z-[200] flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 whitespace-nowrap"
-                    :style="floatingBtnStyle"
-                  >
-                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-                    {{ returnToPracticeMode ? '返回刷题模式' : '返回题库' }}
-                    <svg class="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-                  </button>
-                </Transition>
-              </Teleport>
+              <!-- Floating return button (positioned inside scroll container) -->
+              <button
+                v-if="activeTab === 'Interview' && returnTab && highlightInterviewId"
+                ref="floatingReturnBtn"
+                @click="handleReturn"
+                class="absolute z-50 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 dark:bg-primary-500 dark:hover:bg-primary-600 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 whitespace-nowrap"
+                :style="floatingBtnStyle"
+              >
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                {{ returnToPracticeMode ? '返回刷题模式' : '返回题库' }}
+              </button>
 
               <!-- MockInterview Tab -->
               <MockInterview
@@ -410,6 +405,7 @@
               <!-- MasterBank Tab -->
               <MasterBankList
                 v-if="activeTab === 'MasterBank'"
+                ref="masterBankRef"
                 :items="filteredMasterBank"
                 :selected-count="masterSelection.selectedCount.value"
                 :is-selected="isMasterSelected"
@@ -417,6 +413,7 @@
                 :practiced-questions="practicedQuestions"
                 :bank-mode="currentUser?.bank_mode"
                 :is-admin="currentUser?.is_admin"
+                @scroller-visible="onScrollerVisible"
                 :current-user-id="currentUser?.id"
                 @toggle-select-all="masterSelection.toggleSelectAll()"
                 @invert-selection="masterSelection.invertSelection()"
@@ -638,6 +635,7 @@ const interviewSortOrder = ref('desc')  // desc = newest first, asc = oldest fir
 const reprocessingIds = ref({})
 const reprocessProgress = ref({})  // { [id]: { step, message } }
 const mockInterviewRef = ref(null)
+const masterBankRef = ref(null)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
@@ -806,33 +804,208 @@ const returnToPracticeMode = ref(false)
 const floatingReturnBtn = ref(null)
 const floatingBtnStyle = ref({ display: 'none' })
 
-const positionFloatingBtn = () => {
-  // 固定在页面左上角（面经模块区域上方）
-  floatingBtnStyle.value = {
-    position: 'fixed',
-    top: '12px',
-    left: '12px',
-    display: 'flex'
+let highlightScrollHandler = null
+let highlightAnimFrame = null
+let highlightRetryId = null
+let savedQuestionIdx = -1
+let savedScrollTop = null
+let savedFirstVisibleIdx = 0
+let savedShowAnswer = false
+let savedShowSources = false
+let pendingScrollRestore = false
+let isRestoringScroll = false
+let masterBankScrollHandler = null
+
+// 持续追踪 MasterBank 滚动位置（恢复期间暂停，避免覆盖已保存的值）
+watch(activeTab, (tab) => {
+  if (masterBankScrollHandler) {
+    document.querySelectorAll('.vue-recycle-scroller').forEach(el => el.removeEventListener('scroll', masterBankScrollHandler))
+    masterBankScrollHandler = null
   }
+  if (tab === 'MasterBank') {
+    nextTick(() => {
+      const scroller = document.querySelector('.vue-recycle-scroller')
+      if (scroller) {
+        masterBankScrollHandler = () => {
+          if (isRestoringScroll) return
+          savedScrollTop = scroller.scrollTop
+          const inner = masterBankRef.value?.scrollerRef?.$refs?.scroller
+          if (inner) savedFirstVisibleIdx = inner.$_startIndex ?? 0
+        }
+        scroller.addEventListener('scroll', masterBankScrollHandler, { passive: true })
+      }
+    })
+  }
+}, { immediate: true })
+
+// DynamicScroller 可见时恢复滚动位置（@visible 事件触发时 scroller 已完成内部初始化）
+const onScrollerVisible = () => {
+  if (!pendingScrollRestore) return
+  pendingScrollRestore = false
+  const idx = savedQuestionIdx
+  const showAnswer = savedShowAnswer
+  const showSources = savedShowSources
+
+  // 恢复展开状态
+  if (idx >= 0) {
+    const question = filteredMasterBank.value[idx]
+    if (question) {
+      if (showAnswer) question._showAnswer = true
+      if (showSources) question._showSources = true
+    }
+  }
+
+  // 策略：用 scrollToItem 跳到目标题目，然后居中 + 高亮
+  // 不依赖精确 scrollTop 恢复（展开状态改变项目高度导致位置偏移）
+  const doRestore = (attempt) => {
+    const scroller = document.querySelector('.vue-recycle-scroller')
+    if (!scroller) return
+
+    // 有目标题目 → scrollToItem 跳转 + 居中 + 高亮
+    if (idx >= 0 && masterBankRef.value?.scrollerRef) {
+      masterBankRef.value.scrollerRef.scrollToItem(idx)
+      isRestoringScroll = false
+      // 等待虚拟滚动器渲染目标卡片后居中高亮
+      setTimeout(() => {
+        const card = scroller.querySelector(`[data-index="${idx}"]`)
+        if (card) {
+          centerAndHighlight(card, scroller, idx)
+        } else if (attempt < 10) {
+          doRestore(attempt + 1)
+        }
+      }, 100 + attempt * 50)
+    }
+    // 无目标题目但有保存位置 → 恢复精确位置
+    else if (savedScrollTop != null) {
+      scroller.scrollTop = savedScrollTop
+      isRestoringScroll = false
+    } else {
+      isRestoringScroll = false
+    }
+  }
+
+  nextTick(() => setTimeout(() => doRestore(0), 100))
+}
+
+// 居中目标卡片并高亮
+const centerAndHighlight = (card, scroller, idx) => {
+  const scrollerRect = scroller.getBoundingClientRect()
+  const cardRect = card.getBoundingClientRect()
+  const cardCenter = cardRect.top + cardRect.height / 2
+  const scrollerCenter = scrollerRect.top + scrollerRect.height / 2
+  const delta = cardCenter - scrollerCenter
+
+  if (Math.abs(delta) > 10) {
+    scroller.scrollTop += delta
+  }
+  highlightTargetCard(idx, scroller)
+}
+
+// 高亮目标卡片（2.2s 渐隐动画）
+const highlightTargetCard = (idx, scroller, retryCount = 0) => {
+  if (idx < 0 || !scroller) return
+  const card = scroller.querySelector(`[data-index="${idx}"]`)
+  if (card) {
+    card.classList.remove('scroll-restore-highlight')
+    void card.offsetWidth
+    card.classList.add('scroll-restore-highlight')
+    setTimeout(() => card.classList.remove('scroll-restore-highlight'), 2500)
+  } else if (retryCount < 8) {
+    // 虚拟滚动器可能尚未渲染该卡片，仅等待（不修改滚动位置）
+    setTimeout(() => highlightTargetCard(idx, scroller, retryCount + 1), 200)
+  }
+}
+
+const findScrollContainer = (el) => {
+  let cur = el?.parentElement
+  while (cur) {
+    if (cur.classList.contains('custom-scrollbar') && cur.scrollHeight > cur.clientHeight + 10) return cur
+    cur = cur.parentElement
+  }
+  return null
+}
+
+const getOffsetTopRelativeTo = (el, ancestor) => {
+  let top = 0
+  let cur = el
+  while (cur && cur !== ancestor) {
+    top += cur.offsetTop
+    cur = cur.offsetParent
+  }
+  return top
+}
+
+const positionFloatingBtn = () => {
+  const id = highlightInterviewId.value
+  if (!id) return false
+  const row = document.querySelector(`[data-row-id="${id}"]`)
+  if (!row) return false
+  const container = findScrollContainer(row)
+  if (!container) return false
+  const rowRect = row.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  floatingBtnStyle.value = {
+    top: Math.max(4, rowRect.top - containerRect.top + container.scrollTop - 4) + 'px',
+    left: Math.max(8, rowRect.left - containerRect.left + 8) + 'px',
+  }
+  return true
+}
+
+const attachHighlightScroll = () => {
+  detachHighlightScroll()
+  const id = highlightInterviewId.value
+  if (!id) return
+  const row = document.querySelector(`[data-row-id="${id}"]`)
+  const container = findScrollContainer(row)
+  if (!container) return
+  highlightScrollHandler = () => {
+    if (highlightAnimFrame) return
+    highlightAnimFrame = requestAnimationFrame(() => {
+      highlightAnimFrame = null
+      positionFloatingBtn()
+    })
+  }
+  container.addEventListener('scroll', highlightScrollHandler, { passive: true })
+}
+
+const detachHighlightScroll = () => {
+  if (highlightAnimFrame) { cancelAnimationFrame(highlightAnimFrame); highlightAnimFrame = null }
+  if (highlightRetryId) { clearTimeout(highlightRetryId); highlightRetryId = null }
+  if (highlightScrollHandler) {
+    document.querySelectorAll('.custom-scrollbar').forEach(el => el.removeEventListener('scroll', highlightScrollHandler))
+    highlightScrollHandler = null
+  }
+}
+
+const waitForHighlightRow = (attempt = 0) => {
+  if (!highlightInterviewId.value) return
+  if (positionFloatingBtn()) {
+    attachHighlightScroll()
+    return
+  }
+  if (attempt >= 40) {
+    floatingBtnStyle.value = { top: '4px', left: '8px' }
+    return
+  }
+  highlightRetryId = setTimeout(() => waitForHighlightRow(attempt + 1), 100)
 }
 
 watch(highlightInterviewId, async (id) => {
   if (id) {
     await nextTick()
-    await new Promise(r => setTimeout(r, 250))
-    positionFloatingBtn()
-    const onScroll = () => positionFloatingBtn()
-    window.addEventListener('scroll', onScroll, true)
+    waitForHighlightRow()
     setTimeout(() => {
-      window.removeEventListener('scroll', onScroll, true)
+      detachHighlightScroll()
+      highlightInterviewId.value = null
       floatingBtnStyle.value = { display: 'none' }
-    }, 30000)
+    }, 300000)
   } else {
+    detachHighlightScroll()
     floatingBtnStyle.value = { display: 'none' }
   }
 })
 
-const handleReturn = () => {
+const handleReturn = async () => {
   floatingBtnStyle.value = { display: 'none' }
   const target = returnTab.value
   const practice = returnToPracticeMode.value
@@ -841,6 +1014,16 @@ const handleReturn = () => {
   highlightInterviewId.value = null
   activeTab.value = target
   if (practice) showPracticeMode.value = true
+  // 标记需要恢复滚动位置（实际恢复在 onScrollerVisible 中执行）
+  if (savedQuestionIdx >= 0 || savedFirstVisibleIdx > 0 || savedScrollTop != null) {
+    isRestoringScroll = true
+    pendingScrollRestore = true
+    // 兜底：如果 @visible 事件未触发（scroller 已经可见），延迟恢复
+    await nextTick()
+    setTimeout(() => {
+      if (pendingScrollRestore) onScrollerVisible()
+    }, 1500)
+  }
 }
 
 // ── Selection composables ──
@@ -1175,7 +1358,7 @@ const fetchTableData = async () => {
     ])
     jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
     interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
-    masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
+    masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _showSources: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
     if (masterResp.popular_tags) {
       popularTagsFromServer.value = masterResp.popular_tags
     }
@@ -1240,41 +1423,117 @@ const onGoToQuestion = (question) => {
   selectedSubTags.value = []
 }
 
-const onNavigateToInterview = async (source) => {
+const onNavigateToInterview = (source) => {
   const targetUrl = source.url || ''
   if (!targetUrl) return
 
+  // 归一化 URL：去掉查询参数和末尾斜杠，只比较路径部分
+  const normalizeUrl = (u) => {
+    try { return new URL(u).pathname.replace(/\/+$/, '') } catch { return u.split('?')[0].replace(/\/+$/, '') }
+  }
+  const targetPath = normalizeUrl(targetUrl)
+
   // 在全量数据中查找（不受筛选条件限制）
-  const match = interviewData.value.find(row => (row['来源链接'] || row.url) === targetUrl)
+  const match = interviewData.value.find(row => {
+    const rowUrl = row['来源链接'] || row.url || ''
+    return rowUrl === targetUrl || normalizeUrl(rowUrl) === targetPath
+  })
   if (!match) {
     toast.warning('未找到该面经记录')
     return
   }
 
-  // 记录来源 tab 并切换到面经库
+  // 记录来源 tab、滚动位置和跳转来源的题目在列表中的索引
   returnTab.value = activeTab.value
+  // 保存滚动位置：优先从 scroller 获取，其次从 masterBankRef 获取
+  // 同时保存第一个可见项索引（用于 scrollToItem 恢复，避免浏览器钳制问题）
+  const scroller = document.querySelector('.vue-recycle-scroller')
+  if (scroller) {
+    savedScrollTop = scroller.scrollTop
+  } else if (masterBankRef.value?.scrollerRef?.$el) {
+    savedScrollTop = masterBankRef.value.scrollerRef.$el.scrollTop
+  }
+  // 从 RecycleScroller 内部状态获取第一个可见项索引
+  const innerScroller = masterBankRef.value?.scrollerRef?.$refs?.scroller
+  savedFirstVisibleIdx = innerScroller?.$_startIndex ?? 0
+  // 找到当前展开的题目在列表中的索引，并保存展开状态
+  savedShowAnswer = false
+  savedShowSources = false
+  const expandedCard = document.querySelector('.answer-section')?.closest('[class*="card-smooth"]')
+  if (expandedCard) {
+    const h3 = expandedCard.querySelector('h3')
+    if (h3) {
+      const title = h3.textContent.trim()
+      const idx = filteredMasterBank.value.findIndex(q => q.question === title)
+      savedQuestionIdx = idx >= 0 ? idx : -1
+      if (idx >= 0) {
+        savedShowAnswer = !!filteredMasterBank.value[idx]._showAnswer
+        savedShowSources = !!filteredMasterBank.value[idx]._showSources
+      }
+    }
+  }
   if (showPracticeMode.value) {
     returnToPracticeMode.value = true
+    // 从刷题模式导航时，用当前题目索引作为恢复目标
+    if (savedQuestionIdx < 0) {
+      savedQuestionIdx = practiceModeIndex.value
+      savedShowAnswer = true
+      savedShowSources = true
+    }
     showPracticeMode.value = false
   }
   activeTab.value = 'Interview'
 
-  // 计算目标行在全量数据中的页码（清除筛选确保可见）
+  // 计算目标行在排序后的数据中的页码（DataTable 显示的是 filteredInterviewData）
   filterSeason.value = ''
-  const idx = interviewData.value.indexOf(match)
+  const sortedIdx = filteredInterviewData.value.indexOf(match)
+  const idx = sortedIdx >= 0 ? sortedIdx : interviewData.value.indexOf(match)
   interviewCurrentPage.value = Math.floor(idx / interviewPageSize.value) + 1
 
   // 设置高亮
   highlightInterviewId.value = match.id
 
-  // 等待 DOM 渲染完成后滚动
-  await nextTick()
-  await new Promise(r => setTimeout(r, 200))
-  const el = document.querySelector(`[data-row-id="${match.id}"]`)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // 轮询等待行元素出现后滚动（Transition 动画可能需要 250ms+）
+  const scrollAndHighlight = (attempt = 0) => {
+    const el = document.querySelector(`[data-row-id="${match.id}"]`)
+    if (el) {
+      // Scroll the DataTable container (not window) to the target row
+      const container = findScrollContainer(el)
+      if (container) {
+        const rowTop = getOffsetTopRelativeTo(el, container)
+        const visibleHeight = container.clientHeight
+        const rowHeight = el.offsetHeight
+        container.scrollTo({ top: Math.max(0, rowTop - visibleHeight / 2 + rowHeight / 2), behavior: 'smooth' })
+      } else {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+      // 高亮具体题目文本
+      const questionText = source._origQuestion || source.question || ''
+      if (questionText) {
+        setTimeout(() => {
+          const cells = el.querySelectorAll('td')
+          for (const cell of cells) {
+            if (cell.textContent.includes(questionText.slice(0, 15))) {
+              const escaped = questionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              cell.innerHTML = cell.innerHTML.replace(
+                new RegExp(`(${escaped})`, 'g'),
+                '<mark class="bg-yellow-200 dark:bg-yellow-700/60 rounded px-0.5 question-highlight">$1</mark>'
+              )
+              setTimeout(() => {
+                cell.querySelectorAll('.question-highlight').forEach(m => {
+                  m.replaceWith(m.textContent)
+                })
+              }, 10000)
+              break
+            }
+          }
+        }, 300)
+      }
+    } else if (attempt < 40) {
+      setTimeout(() => scrollAndHighlight(attempt + 1), 100)
+    }
   }
-  setTimeout(() => { highlightInterviewId.value = null; floatingBtnStyle.value = { display: 'none' } }, 30000)
+  scrollAndHighlight()
 }
 
 const toggleSubTag = (tag) => {
@@ -1589,22 +1848,24 @@ const triggerBuildMasterBank = async () => {
 
   if (!await showConfirm('将基于现有分类重新聚类（不会重新打标），确定继续？', { title: '重新聚类', variant: 'danger' })) return
   isBuilding.value = true
-  buildProgress.value = { step: '', current: 0, total: 0, message: '' }
+  buildProgress.value = { step: '', current: 0, total: 0, message: '提交重建任务...' }
   try {
-    const result = await api.buildMasterBankSSE((event) => {
-      if (event.type === 'init') {
-        buildProgress.value = { step: event.step, current: 0, total: event.total, message: event.message }
-      } else if (event.type === 'progress') {
-        buildProgress.value = { step: event.step, current: event.current, total: event.total, message: event.message }
+    // Step 1: POST to get job_id
+    const res = await api.buildMasterBank()
+    const jobId = res?.job_id
+    if (!jobId) throw new Error('未获取到任务 ID')
+
+    buildProgress.value = { step: '', current: 0, total: 0, message: '连接进度流...' }
+
+    // Step 2: GET SSE stream for real-time progress
+    const result = await api.streamJobProgress(jobId, (event) => {
+      if (event.type === 'progress') {
+        buildProgress.value = { step: event.step || '', current: event.current || 0, total: event.total || 0, message: event.message || '' }
       } else if (event.type === 'error') {
         throw new Error(event.message)
       }
     })
-    if (!result) {
-      toast.error('重建连接中断，请刷新页面检查结果')
-    } else {
-      toast.success(`重建完成，共 ${result.total_unique || 0} 道题目`)
-    }
+    toast.success(result?.message || '重建完成')
     fetchTableData()
     fetchAnalytics()
   } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
@@ -1692,7 +1953,7 @@ const loadActiveSeason = async () => {
 onMounted(async () => {
   await initAuth()
 })
-onUnmounted(() => cancelAllRequests())
+onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
 
 <style scoped>
@@ -1914,5 +2175,42 @@ onUnmounted(() => cancelAllRequests())
 :global(.dark) .resize-handle__collapse-btn:hover {
   color: var(--color-primary-400);
   background: var(--color-primary-900/30);
+}
+
+/* 滚动恢复高亮动画 */
+:global(.scroll-restore-highlight) {
+  animation: scroll-glow 2.2s ease-out forwards;
+  border-radius: 16px;
+}
+@keyframes scroll-glow {
+  0% {
+    box-shadow: 0 0 0 3px var(--color-primary-400), 0 0 20px var(--color-primary-400/40);
+    background-color: var(--color-primary-50);
+  }
+  40% {
+    box-shadow: 0 0 0 3px var(--color-primary-300), 0 0 12px var(--color-primary-300/25);
+    background-color: var(--color-primary-50/60);
+  }
+  100% {
+    box-shadow: none;
+    background-color: transparent;
+  }
+}
+:global(.dark) :global(.scroll-restore-highlight) {
+  animation: scroll-glow-dark 2.2s ease-out forwards;
+}
+@keyframes scroll-glow-dark {
+  0% {
+    box-shadow: 0 0 0 3px var(--color-primary-500), 0 0 20px var(--color-primary-500/30);
+    background-color: var(--color-primary-900/20);
+  }
+  40% {
+    box-shadow: 0 0 0 3px var(--color-primary-600), 0 0 12px var(--color-primary-600/15);
+    background-color: var(--color-primary-900/10);
+  }
+  100% {
+    box-shadow: none;
+    background-color: transparent;
+  }
 }
 </style>

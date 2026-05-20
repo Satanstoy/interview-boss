@@ -84,9 +84,31 @@ async def cluster_questions_task(ctx, interview_id: int, user_id: int = None):
 
 
 async def force_cluster_all_task(ctx, user_id: int = None):
-    """全量重建任务"""
-    from app.services.pipeline import force_cluster_all_pending
-    return await force_cluster_all_pending(user_id=user_id)
+    """全量重建任务 — 直接处理队列，不通过 ARQ 再次调度"""
+    from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
+    import asyncio
+
+    total_new = 0
+    total_batches = 0
+
+    while True:
+        batch = dequeue_batch(BATCH_SIZE)
+        if not batch:
+            break
+        total_batches += 1
+        try:
+            new_count = await cluster_batch(batch, user_id=user_id, skip_clean=True)
+            queue_ids = [item['queue_id'] for item in batch]
+            mark_batch_done(queue_ids)
+            total_new += new_count
+        except Exception as e:
+            logger.error(f"聚类批次 {total_batches} 失败: {e}")
+            queue_ids = [item['queue_id'] for item in batch]
+            mark_batch_failed(queue_ids)
+            raise
+        await asyncio.sleep(0.5)
+
+    return {"batches": total_batches, "new_qb_count": total_new}
 
 
 async def build_master_bank_task(ctx, job_id: int):

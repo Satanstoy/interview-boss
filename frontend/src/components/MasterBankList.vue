@@ -33,12 +33,13 @@
       :min-item-size="130"
       key-field="id"
       class="virtual-scroller custom-scrollbar"
+      @visible="emit('scroller-visible')"
     >
       <template #default="{ item, index, active }">
         <DynamicScrollerItem
           :item="item"
           :active="active"
-          :size-dependencies="[item._showAnswer]"
+          :size-dependencies="[item._showAnswer, item._showSources]"
           :data-index="index"
           class="mb-4"
         >
@@ -88,9 +89,10 @@ const props = defineProps({
   currentUserId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer', 'scroller-visible'])
 
 const containerRef = ref(null)
+const scrollerRef = ref(null)
 let resizeObserver = null
 let lastHeight = 0
 
@@ -156,6 +158,8 @@ const expandAll = () => {
 const collapseAll = () => {
   props.items.forEach(q => { q._showAnswer = false })
 }
+
+defineExpose({ scrollerRef })
 </script>
 
 <style scoped>

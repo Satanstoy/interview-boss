@@ -136,23 +136,43 @@ def _resolve_client_and_model(user_id: int = None):
 
 # --------------- JSON 提取 ---------------
 
+def _repair_json(text: str) -> str:
+    """修复 LLM 返回的常见 JSON 语法错误"""
+    # 移除对象/数组末尾的多余逗号: {"a":1,} → {"a":1}
+    text = re.sub(r',\s*([\]}])', r'\1', text)
+    return text
+
+
 def _extract_json(text: str) -> dict:
     """从 LLM 响应中提取 JSON，兼容 markdown 代码块包裹的情况"""
     text = text.strip()
+
+    def _try_parse(s):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            return json.loads(_repair_json(s))
+
     # 尝试直接解析
     try:
-        return json.loads(text)
+        return _try_parse(text)
     except json.JSONDecodeError:
         pass
     # 尝试提取 ```json ... ``` 代码块
     m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
     if m:
-        return json.loads(m.group(1).strip())
+        try:
+            return _try_parse(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
     # 尝试找到第一个 { 到最后一个 }
     start = text.find('{')
     end = text.rfind('}')
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start:end + 1])
+        try:
+            return _try_parse(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
     raise json.JSONDecodeError("无法从 LLM 响应中提取 JSON", text, 0)
 
 
