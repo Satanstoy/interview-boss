@@ -18,7 +18,7 @@ from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
 
-router = APIRouter(prefix="/api/master-bank")
+router = APIRouter()
 
 
 def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
