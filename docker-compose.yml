@@ -1,20 +1,24 @@
 # InterviewBoss Docker Compose（2c4g 优化版）
 # 用法：
-#   首次部署: docker-compose up -d --build
-#   更新部署: docker-compose up -d --build backend worker nginx
-#   查看日志: docker-compose logs -f
-#   停止服务: docker-compose down
+#   首次部署: docker compose up -d --build
+#   更新部署: docker compose up -d --build backend worker nginx
+#   查看日志: docker compose logs -f
+#   停止服务: docker compose down
 
 services:
   # ── Redis ──
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     restart: always
     command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru --appendonly yes
     volumes:
       - redis-data:/data
     mem_limit: 128m
     cpus: 0.25
+    networks:
+      - app-network
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -34,6 +38,10 @@ services:
       - ./backend/data:/app/backend/data
     mem_limit: 512m
     cpus: 0.75
+    networks:
+      - app-network
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       redis:
         condition: service_healthy
@@ -42,6 +50,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # ── ARQ Worker ──
   worker:
@@ -57,13 +66,17 @@ services:
     command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
     mem_limit: 256m
     cpus: 0.5
+    networks:
+      - app-network
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       redis:
         condition: service_healthy
 
   # ── Nginx（前端 + 反向代理）──
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     restart: always
     ports:
       - "80:80"
@@ -72,9 +85,17 @@ services:
       - ./frontend/dist:/usr/share/nginx/html:ro
     mem_limit: 64m
     cpus: 0.25
+    networks:
+      - app-network
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       backend:
         condition: service_healthy
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   redis-data:
