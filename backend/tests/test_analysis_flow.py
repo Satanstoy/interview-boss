@@ -181,7 +181,7 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_status_column(self):
         """修复后：interview 表应有 analysis_status 列"""
-        with open("backend/app/db/connection.py", "r", encoding="utf-8") as f:
+        with open("backend/app/db/migrations.py", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "analysis_status" in content, (
@@ -191,7 +191,7 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_result_column(self):
         """修复后：interview 表应有 analysis_result 列用于存储中间结果"""
-        with open("backend/app/db/connection.py", "r", encoding="utf-8") as f:
+        with open("backend/app/db/migrations.py", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "analysis_result" in content, (

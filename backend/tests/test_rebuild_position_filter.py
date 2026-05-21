@@ -112,10 +112,10 @@ class TestBug003LoadShouldFilterByPosition:
         mock_conn.__exit__ = MagicMock(return_value=False)
 
         # 验证 SQL 包含 job_position 过滤
-        with patch("app.routers.master_bank.get_db_connection", return_value=mock_conn):
-            with patch("app.routers.master_bank.get_current_job_position", return_value="后端开发"):
+        with patch("app.routers.bank_build.get_db_connection", return_value=mock_conn):
+            with patch("app.routers.bank_build.get_current_job_position", return_value="后端开发"):
                 # 重新加载 _load 函数来验证
-                from app.routers.master_bank import build_master_bank
+                from app.routers.bank_build import build_master_bank
                 # 直接验证 _load 的 SQL 是否包含 job_position 过滤
                 # 这通过检查 execute 调用的 SQL 来验证
                 pass
@@ -126,7 +126,7 @@ class TestBug003LoadShouldFilterByPosition:
         import inspect
         import ast
 
-        with open("/root/sj/interview-boss/backend/app/routers/master_bank.py", "r") as f:
+        with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
             source = f.read()
 
         # 检查 _load 函数中的 SQL 是否包含 job_position 过滤
@@ -136,7 +136,7 @@ class TestBug003LoadShouldFilterByPosition:
 
     def test_save_sql_must_include_job_position(self):
         """验证 _save() 写入 question_bank 时包含 job_position"""
-        with open("/root/sj/interview-boss/backend/app/routers/master_bank.py", "r") as f:
+        with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
             source = f.read()
 
         assert "job_position" in source, "_save() 中 INSERT INTO question_bank 应包含 job_position"
@@ -212,10 +212,10 @@ class TestPositionIsolationIntegration:
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
 
-        with patch("app.routers.master_bank.get_db_connection", return_value=mock_conn):
-            with patch("app.routers.master_bank.get_current_job_position", return_value="后端开发"):
+        with patch("app.routers.bank_build.get_db_connection", return_value=mock_conn):
+            with patch("app.routers.bank_build.get_current_job_position", return_value="后端开发"):
                 # 通过检查源码确保 SQL 包含过滤条件
-                with open("/root/sj/interview-boss/backend/app/routers/master_bank.py", "r") as f:
+                with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
                     source = f.read()
 
                 # 在 _load 函数的 questions_detail 查询中必须有 job_position 过滤
