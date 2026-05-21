@@ -1,0 +1,11 @@
+# 与 .gitignore 保持一致，排除 CC 不需要探索的目录
+__pycache__/
+.venv/
+.pytest_cache/
+node_modules/
+frontend/dist/
+build/
+.git/
+.playwright-mcp/
+test-results/
+*.pyc

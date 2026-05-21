@@ -1,23 +1,16 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
-build/
-dist/
-wheels/
 *.egg-info
-
-# Virtual environments
 .venv/
+.pytest_cache/
 
-# Python version manager
-.python-version
-
-# Environment variables
+# 环境变量（密钥）
 .env
 .env.*
 !.env.example
 
-# SQLite runtime files
+# SQLite 运行时
 *.db-shm
 *.db-wal
 *.db.bak.*
@@ -25,7 +18,7 @@ wheels/
 *.sqlite
 !backend/schema.db
 
-# Sensitive files
+# 敏感文件
 *.pem
 *.key
 credentials.*
@@ -34,22 +27,34 @@ backend/data/
 # Node
 node_modules/
 
+# 构建产物
+frontend/dist/
+build/
+
 # IDE
 .vscode/
 .idea/
 
-# Claude Code (may contain tokens and local state)
+# Claude Code
 .claude/
 
-# Docs (auto-generated, not for version control)
-docs/
-
-# Test artifacts
-.pytest_cache/
-.playwright-mcp/
+# 测试代码（可能含密钥，不提交）
 backend/tests/
 frontend/tests/
 test-results/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 文档（内部记录，不提交）
+docs/
 
 # Docker
 backups/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Playwright
+.playwright-mcp/

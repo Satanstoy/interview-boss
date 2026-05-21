@@ -48,7 +48,7 @@ RUN useradd --create-home --shell /bin/false appuser && \
     chown -R appuser:appuser /app
 
 # Entrypoint（以 root 修复 bind mount 权限，然后切换到 appuser）
-COPY entrypoint.sh /entrypoint.sh
+COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # 环境变量

@@ -2,12 +2,33 @@
 
 中文 AI 面试备战平台。JD/面经 → 提取面试题 → LLM 分类打标聚类 → 口述级答案 + 模拟面试 + 知识图谱。
 
-## 目录
+## 目录地图
 
-- `backend/` — Python FastAPI 后端（→ `backend/CLAUDE.md`）
-- `frontend/` — Vue 3 + Vite 前端（→ `frontend/CLAUDE.md`）
-- `deploy/` — 部署脚本和配置
-- `docs/` — bug-reports、tdd-reports（历史经验库）
+```
+backend/
+├── app/routers/       ← 13 个 API 路由（HTTP 感知层，禁止业务逻辑）
+├── app/services/      ← 业务逻辑（LLM 调用、聚类、pipeline）
+├── app/core/          ← 配置、认证、提示词模板
+├── app/db/            ← SQLite 连接、CRUD、查询、迁移
+├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate）
+├── app/models/        ← Pydantic schemas
+├── app/middleware/     ← 请求日志
+└── tests/             ← pytest 测试（不提交 git）
+
+frontend/
+├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
+├── src/composables/   ← 领域逻辑复用（use* 前缀）
+├── src/components/
+│   ├── common/        ← 通用 UI（DataTable、TabBar 等，无业务依赖）
+│   └── business/      ← 业务组件（MasterBankList、PracticePanel 等）
+├── src/utils/         ← 纯工具函数（markdown、validate）
+├── src/constants/     ← config.js、enums.js
+└── tests/             ← Playwright E2E 测试（不提交 git）
+
+deploy/                ← 部署脚本（deploy.sh、docker-deploy.sh、systemd）
+docs/                  ← 历史经验库（bug-reports、tdd-reports，不提交 git）
+nginx/                 ← Docker Nginx 配置（API 代理 + SPA）
+```
 
 ## 命令
 
@@ -23,9 +44,15 @@ Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 ## 核心规范
 
 - **TDD 原则（强制）**：修 Bug 或开发新功能时，必须**先写测试 → 确认测试失败 → 写最少代码让测试通过 → 重构**。详见 `backend/CLAUDE.md` 和 `frontend/CLAUDE.md` 的测试规则。
-- **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文
+- **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文。Git hook 会自动检查格式。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文
 - **禁止**：根目录装包、跨包引用源码、`--force`/`--no-verify`
+
+## 测试基础设施
+
+- **后端**：`conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures，开箱即用
+- **前端**：Playwright 测试必须 mock API，禁止截图断言，禁止使用真实密码
+- **详细规则**：`.claude/rules/test-files.md`（编辑测试文件时自动加载）
 
 ## 代码路由表（快速定位文件）
 

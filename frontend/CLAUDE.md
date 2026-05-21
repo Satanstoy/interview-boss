@@ -41,58 +41,9 @@ src/
 
 **任何修 Bug 或新功能，必须按以下顺序执行：**
 
-### 1. 先写测试（红灯）
-
-在 `frontend/tests/` 中写 Playwright 测试，运行确认**失败**。
-
-### 2. 最小实现（绿灯）
-
-只写让测试通过的**最少代码**。运行确认**通过**。
-
-### 3. 重构
-
-测试通过后优化代码，每次改动后重新运行测试确认仍通过。
-
-## 测试规则
-
-- 框架：Playwright（`@playwright/test`）
-- 测试目录：`frontend/tests/`
-- 测试必须 mock API 响应，**禁止调用真实后端**
-- 命名：`test-<场景>.spec.ts`
-
-### 禁止截图测试
-
-**禁止使用 `page.screenshot()`、`expect(page).toHaveScreenshot()` 等截图断言。** 部分模型无法处理图片，截图测试会导致测试无法被 AI 理解和调试。
-
-### 推荐的断言方式
-
-```typescript
-// ✅ 正确：基于文本/元素的断言
-await expect(page.getByText('登录成功')).toBeVisible()
-await expect(page.getByRole('button', { name: '提交' })).toBeEnabled()
-await expect(page.locator('[data-testid="question-list"]')).toHaveCount(5)
-
-// ✅ 正确：基于 URL 的断言
-await expect(page).toHaveURL(/.*dashboard/)
-
-// ✅ 正确：Mock API 响应
-await page.route('**/api/data/*', route =>
-  route.fulfill({ status: 200, body: JSON.stringify(mockData) })
-)
-
-// ❌ 禁止：截图断言
-// await expect(page).toHaveScreenshot()
-// await page.screenshot({ path: 'test.png' })
-```
-
-## Vue 3 规则
-
-- `<script setup>` only，禁止 Options API、mixins
-- Composables 命名 `use*`，返回 refs，不含渲染逻辑
-- `ref` 用于基本类型；`reactive` 仅用于固定结构对象，禁止解构
-- Props 只读，子传父用 emit 事件
-- 命名导出（named export），禁止 default export
-- 通用组件（`common/`）禁止引入 API 或业务逻辑
+1. **先写测试（红灯）** — 在 `frontend/tests/` 中写 Playwright 测试，运行确认失败
+2. **最小实现（绿灯）** — 只写让测试通过的最少代码
+3. **重构** — 测试通过后优化代码，每次改动后重跑测试
 
 ## 代码路由表
 
@@ -106,13 +57,27 @@ await page.route('**/api/data/*', route =>
 | 通用 UI | `components/common/`（DataTable、TabBar、PaginationBar 等） |
 | 业务逻辑复用 | `composables/`（use* 前缀） |
 
+## 修改前必读（避免盲目搜索）
+
+| 你要做的事 | 先读这些文件 | 再读这些文件 |
+|-----------|------------|------------|
+| 修登录 Bug | `services/authApi.js` + `services/http.js` | `components/business/LoginModal.vue` |
+| 改题库列表 | `services/masterBankApi.js` | `components/business/MasterBankList.vue` |
+| 改练习/面试 | `services/practiceApi.js` | `components/business/PracticePanel.vue` + `MockInterview.vue` |
+| 改数据分析 | `services/analyticsApi.js` | `components/business/AnalyticsSidebar.vue` |
+| 改用户配置 | `services/profileApi.js` | `components/business/SettingsPanel.vue` |
+| 改通用 UI 组件 | `components/common/` 对应文件 | `App.vue`（看怎么被调用） |
+| 改业务逻辑复用 | `composables/use*.js` | 调用它的 `components/business/*.vue` |
+| 改 HTTP 客户端 | `services/http.js` | `api/index.js`（re-export） |
+| 新增页面/Tab | `App.vue`（Tab 切换逻辑） | 新建 `components/business/*.vue` |
+
 ## 认证
 
 Access Token 存内存（不存 localStorage）。Refresh Token 存 HttpOnly Cookie。401 时 `http.js` 自动刷新重试。
 
-## 禁止
+## 详细规则
 
-- `any` 类型
-- 组件内直接 fetch（用 `services/` + `composables/`）
-- `common/` 组件引入业务依赖
-- 截图测试（`page.screenshot()`、`toHaveScreenshot()`）
+Vue 组件规范、composables 规范和测试规则见 `.claude/rules/`：
+- `vue-components.md` — 编辑 Vue 文件时自动加载
+- `vue-composables.md` — 编辑 composables 文件时自动加载
+- `test-files.md` — 编辑测试文件时自动加载
