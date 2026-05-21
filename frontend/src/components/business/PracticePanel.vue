@@ -56,7 +56,7 @@
                     </h4>
                     <div class="flex flex-wrap gap-1.5 text-[11px]">
                       <span v-for="(src, idx) in question.sources" :key="idx"
-                        @click="emit('navigate-to-interview', src)"
+                        @click="emit('navigate-to-interview', { source: src, questionId: question.id })"
                         class="bg-white dark:bg-ink-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center cursor-pointer hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors">
                         {{ src.company === '未提供' ? '未知' : src.company }}
                         <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
@@ -244,10 +244,10 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { renderSafeMarkdown } from '../utils/markdown.js'
-import { generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord } from '../api/index.js'
-import { sanitizeAgainstInjection } from '../utils/validate.js'
-import { useToast } from '../composables/useNotification.js'
+import { renderSafeMarkdown } from '@/utils/markdown.js'
+import { generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord } from '@/api/index.js'
+import { sanitizeAgainstInjection } from '@/utils/validate.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const toast = useToast()
 

@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import './style.css'
+import '@/assets/styles/global.css'
 import 'vue-sonner/style.css'
 import App from './App.vue'
 import { autoAnimatePlugin } from '@formkit/auto-animate/vue'

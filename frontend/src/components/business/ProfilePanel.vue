@@ -96,8 +96,8 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { getMyEmail, sendBindCode, bindEmail } from '../api/index.js'
-import { useToast } from '../composables/useNotification.js'
+import { getMyEmail, sendBindCode, bindEmail } from '@/api/index.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const toast = useToast()
 

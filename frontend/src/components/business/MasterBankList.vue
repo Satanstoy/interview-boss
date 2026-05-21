@@ -75,8 +75,8 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import BatchActionPanel from './BatchActionPanel.vue'
-import QuestionCard from './QuestionCard.vue'
+import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
+import QuestionCard from '@/components/business/QuestionCard.vue'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },

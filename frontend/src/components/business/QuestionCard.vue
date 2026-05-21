@@ -174,14 +174,15 @@
 
       <!-- Sources & original questions (secondary — collapsible) -->
       <div v-if="hasSources" class="border-t border-surface-100 dark:border-ink-700 mt-5">
-        <button ref="sourceBtnRef" @click.stop="question._showSources = !question._showSources"
+        <button ref="sourceBtnRef" @click.stop="toggleSources"
           class="w-full px-6 py-3 flex items-center gap-2 text-caption font-medium text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-50/60 dark:hover:bg-surface-700/30 transition-colors">
           <svg class="w-3 h-3 transform transition-transform duration-200" :class="question._showSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           <span>来源详情</span>
           <span class="text-label text-ink-400 dark:text-ink-500 ml-0.5">{{ sourceCount }}条</span>
         </button>
 
-        <div v-show="question._showSources" class="px-6 pb-5 space-y-2">
+        <div ref="sourcesContentRef" :style="{ height: question._showSources ? 'auto' : '0px', overflow: question._showSources ? '' : 'hidden' }">
+        <div class="px-6 pb-5 space-y-2">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
             class="bg-surface-50/80 dark:bg-surface-700/30 rounded-xl p-3 flex items-start gap-3">
             <span class="text-caption text-ink-400 dark:text-ink-500 font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>
@@ -212,6 +213,7 @@
             </div>
           </div>
         </div>
+        </div>
       </div>
     </div>
   </div>
@@ -221,9 +223,10 @@
 import { ref, computed, watch } from 'vue'
 
 const sourceBtnRef = ref(null)
-import { renderSafeMarkdown } from '../utils/markdown.js'
-import { safeUrl } from '../utils/validate.js'
-import { get } from '../utils/http.js'
+const sourcesContentRef = ref(null)
+import { renderSafeMarkdown } from '@/utils/markdown.js'
+import { safeUrl } from '@/utils/validate.js'
+import { get } from '@/services/http.js'
 
 // Lazy-loaded full answer detail (for compact mode)
 const fullAnswer = ref(null)
@@ -278,22 +281,56 @@ watch(() => props.question.user_answer, (val) => {
   }
 })
 
-// Scroll anchoring: keep the "来源详情" button visually stable when sources expand/collapse
-watch(() => props.question._showSources, () => {
-  const btn = sourceBtnRef.value
-  if (!btn) return
+// 平滑展开/收起来源详情（JS 高度动画 + 锁定 scrollTop 防止虚拟滚动器跳动）
+const toggleSources = () => {
+  const q = props.question
+  const el = sourcesContentRef.value
+  if (!el || !q.sources?.length) return
+
   const scroller = document.querySelector('.vue-recycle-scroller')
-  if (!scroller) return
-  const btnTop = btn.getBoundingClientRect().top
-  // Wait for DynamicScroller to finish recalculating positions after size change
-  setTimeout(() => {
-    requestAnimationFrame(() => {
-      const newBtnTop = btn.getBoundingClientRect().top
-      const delta = newBtnTop - btnTop
-      if (Math.abs(delta) > 2) scroller.scrollTop += delta
+  const btn = sourceBtnRef.value
+  const savedScroll = scroller?.scrollTop
+  const savedBtnOffset = btn ? btn.offsetTop : 0
+
+  if (!q._showSources) {
+    q._showSources = true
+    el.style.overflow = 'hidden'
+    const targetH = el.scrollHeight
+    el.style.height = '0px'
+    el.offsetHeight
+    animateExpand(el, 0, targetH, scroller, btn, savedScroll, savedBtnOffset, () => {
+      el.style.height = 'auto'
+      el.style.overflow = ''
     })
-  }, 50)
-})
+  } else {
+    const currentH = el.offsetHeight
+    el.style.height = currentH + 'px'
+    el.style.overflow = 'hidden'
+    el.offsetHeight
+    q._showSources = false
+    animateExpand(el, currentH, 0, scroller, btn, savedScroll, savedBtnOffset, () => {
+      el.style.height = '0px'
+    })
+  }
+}
+
+const animateExpand = (el, from, to, scroller, btn, savedScroll, savedBtnOffset, onDone) => {
+  const duration = 280
+  const start = performance.now()
+  const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration)
+    el.style.height = (from + (to - from) * ease(t)) + 'px'
+    if (scroller && btn) {
+      const drift = btn.offsetTop - savedBtnOffset
+      if (Math.abs(drift) > 1) scroller.scrollTop = savedScroll + drift
+    }
+    if (t < 1) requestAnimationFrame(step)
+    else onDone()
+  }
+  requestAnimationFrame(step)
+}
 
 const DIFFICULTY_CLASSES = {
   L3: 'bg-red-50 dark:bg-red-900/25 text-red-600 dark:text-red-400',

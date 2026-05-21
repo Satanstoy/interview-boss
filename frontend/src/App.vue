@@ -57,51 +57,8 @@
       @build-master-bank="triggerBuildMasterBank"
     />
 
-    <!-- Login gate: split layout -->
-    <div v-if="!currentUser" class="relative min-h-[calc(100vh-56px)] overflow-hidden">
-      <div class="absolute inset-0 overflow-hidden pointer-events-none">
-        <div class="absolute -top-40 -right-40 w-[500px] h-[500px] bg-primary-200/20 dark:bg-primary-900/15 rounded-full blur-[100px] animate-pulse-slow"></div>
-        <div class="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-accent-200/20 dark:bg-accent-900/15 rounded-full blur-[100px] animate-pulse-slow" style="animation-delay: 1.5s"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary-100/10 rounded-full blur-[80px] animate-float"></div>
-      </div>
-
-      <div class="relative flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
-        <!-- Left: brand showcase -->
-        <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0 animate-fade-in">
-          <div class="max-w-md mx-auto lg:mx-0">
-            <div class="w-20 h-20 mb-8 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-warm transform hover:scale-105 transition-transform duration-300">
-              <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-              </svg>
-            </div>
-
-            <h2 class="font-serif text-3xl lg:text-[2.5rem] text-ink-900 dark:text-ink-100 mb-3 leading-tight">
-              欢迎使用 InterviewBoss
-            </h2>
-            <p class="text-ink-400 dark:text-ink-400 mb-10 leading-relaxed text-lg font-light">
-              AI 驱动的面试准备平台
-            </p>
-
-            <div class="grid grid-cols-3 gap-4">
-              <div v-for="feature in loginFeatures" :key="feature.label"
-                class="flex flex-col items-center gap-2.5 p-4 rounded-2xl bg-white/70 dark:bg-surface-800/70 backdrop-blur-sm border border-surface-200/80 dark:border-ink-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
-                  <span class="text-lg">{{ feature.icon }}</span>
-                </div>
-                <span class="text-xs font-semibold text-ink-600 dark:text-ink-400">{{ feature.label }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: login form -->
-        <div class="flex items-center justify-center px-8 lg:px-16 py-12 lg:py-0 lg:w-[440px] xl:w-[480px]">
-          <div class="w-full max-w-sm animate-fade-in">
-            <LoginModal embedded @login-success="handleLoginSuccess" />
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Login gate -->
+    <LoginPage v-if="!currentUser" @login-success="handleLoginSuccess" />
 
     <main v-else class="p-3 lg:p-5 max-w-[1920px] mx-auto">
       <div class="sidebar-layout flex gap-6 lg:gap-8">
@@ -127,7 +84,7 @@
           @refresh-recommend="recommendSeed++"
         />
       </div>
-      <!-- Resize handle: positioned via JS to track sidebar edge -->
+      <!-- Resize handle -->
       <div
         v-show="!sidebarCollapsed"
         ref="resizeHandleRef"
@@ -141,7 +98,6 @@
           <span></span>
           <span></span>
         </div>
-        <!-- Collapse arrow: click to hide sidebar -->
         <button
           v-if="!sidebarCollapsed"
           class="resize-handle__collapse-btn"
@@ -155,7 +111,7 @@
         </button>
       </div>
 
-      <!-- Expand button: visible when sidebar is collapsed -->
+      <!-- Expand button -->
       <Transition name="expand-btn-fade">
         <button
           v-if="sidebarCollapsed"
@@ -174,31 +130,6 @@
         <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
 
         <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar" style="position: relative;">
-          <SearchFilterBar
-            v-if="activeTab === 'MasterBank'"
-            :search-query="searchQuery"
-            :filter-difficulty="filterDifficulty"
-            @update:search-query="searchQuery = $event"
-            @update:filter-difficulty="filterDifficulty = $event"
-          />
-
-          <!-- Sub-tag filter chips -->
-          <div v-if="activeTab === 'MasterBank' && selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
-            <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
-            <button
-              v-for="st in availableSubTags"
-              :key="st.tag"
-              @click="toggleSubTag(st.tag)"
-              class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
-              :class="selectedSubTags.includes(st.tag)
-                ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
-                : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
-            >
-              {{ st.tag }}
-              <span class="ml-1 opacity-50">{{ st.count }}</span>
-            </button>
-          </div>
-
 
           <!-- Error banner -->
           <div v-if="dataLoadError" class="mb-4 bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
@@ -233,6 +164,83 @@
                 <div class="skeleton h-5 w-24 rounded-full"></div>
               </div>
             </div>
+          </div>
+
+          <!-- SearchFilterBar -->
+          <div v-if="masterBankEverShown" :class="activeTab !== 'MasterBank' ? 'hidden' : ''">
+            <SearchFilterBar
+              :search-query="searchQuery"
+              :filter-difficulty="filterDifficulty"
+              @update:search-query="searchQuery = $event"
+              @update:filter-difficulty="filterDifficulty = $event"
+            />
+            <!-- Sub-tag filter chips -->
+            <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
+              <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
+              <button
+                v-for="st in availableSubTags"
+                :key="st.tag"
+                @click="toggleSubTag(st.tag)"
+                class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
+                :class="selectedSubTags.includes(st.tag)
+                  ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
+                  : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
+              >
+                {{ st.tag }}
+                <span class="ml-1 opacity-50">{{ st.count }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- MasterBankList -->
+          <div v-if="masterBankEverShown"
+            class="flex flex-col flex-1 min-h-0"
+            :class="activeTab !== 'MasterBank' ? 'invisible absolute inset-0' : ''">
+            <MasterBankList
+              ref="masterBankRef"
+              :items="filteredMasterBank"
+              :selected-count="masterSelection.selectedCount.value"
+              :is-selected="isMasterSelected"
+              :batch-actions="masterBatchActions"
+              :practiced-questions="practicedQuestions"
+              :bank-mode="currentUser?.bank_mode"
+              :is-admin="currentUser?.is_admin"
+              :current-user-id="currentUser?.id"
+              @toggle-select-all="masterSelection.toggleSelectAll()"
+              @invert-selection="masterSelection.invertSelection()"
+              @toggle-item="masterSelection.toggleItem($event)"
+              @toggle-star="toggleStar"
+              @retag="retagQuestion"
+              @generate-answer="generateAnswer"
+              @use-reference-answer="useReferenceAnswer"
+              @save-user-answer="saveUserAnswer"
+              @save-field="saveFieldFromEvent"
+              @practice="practiceQuestion = $event"
+              @split-question="splitQuestion"
+              @start-merge="startMerge"
+              @navigate-to-interview="onNavigateToInterview"
+              @delete="deleteQuestion"
+              @edit-question="editQuestion"
+              @delete-original-question="deleteOriginalQuestion"
+              @update-answer="onUpdateAnswer"
+            >
+              <template #default>
+                <div class="flex flex-wrap items-center gap-2 pt-1">
+                  <button v-if="currentUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
+                    {{ isBuilding ? '重建中...' : '重建题库' }}
+                  </button>
+                  <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
+                    {{ isBuilding ? '重建中...' : '重建题库' }}
+                  </button>
+                  <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
+                    刷题模式
+                  </button>
+                  <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
+                    刷新
+                  </button>
+                </div>
+              </template>
+            </MasterBankList>
           </div>
 
           <!-- Tab content with transitions -->
@@ -373,7 +381,7 @@
                 </template>
               </DataTable>
 
-              <!-- Floating return button (positioned inside scroll container) -->
+              <!-- Floating return button -->
               <button
                 v-if="activeTab === 'Interview' && returnTab && highlightInterviewId"
                 ref="floatingReturnBtn"
@@ -402,72 +410,6 @@
               <!-- Import Tab -->
               <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" :available-seasons="availableSeasons" :is-admin="currentUser?.is_admin" @submitted="onSubmitted" />
 
-              <!-- MasterBank Tab -->
-              <MasterBankList
-                v-if="activeTab === 'MasterBank'"
-                ref="masterBankRef"
-                :items="filteredMasterBank"
-                :selected-count="masterSelection.selectedCount.value"
-                :is-selected="isMasterSelected"
-                :batch-actions="masterBatchActions"
-                :practiced-questions="practicedQuestions"
-                :bank-mode="currentUser?.bank_mode"
-                :is-admin="currentUser?.is_admin"
-                @scroller-visible="onScrollerVisible"
-                :current-user-id="currentUser?.id"
-                @toggle-select-all="masterSelection.toggleSelectAll()"
-                @invert-selection="masterSelection.invertSelection()"
-                @toggle-item="masterSelection.toggleItem($event)"
-                @toggle-star="toggleStar"
-                @retag="retagQuestion"
-                @generate-answer="generateAnswer"
-                @use-reference-answer="useReferenceAnswer"
-                @save-user-answer="saveUserAnswer"
-                @save-field="saveFieldFromEvent"
-                @practice="practiceQuestion = $event"
-                @split-question="splitQuestion"
-                @start-merge="startMerge"
-                @navigate-to-interview="onNavigateToInterview"
-                @delete="deleteQuestion"
-                @edit-question="editQuestion"
-                @delete-original-question="deleteOriginalQuestion"
-                @update-answer="onUpdateAnswer"
-              >
-                <template #actions>
-                  <div v-if="isBuilding" class="flex items-center gap-2">
-                    <div class="flex items-center gap-1">
-                      <template v-for="s in buildStepList" :key="s.key">
-                        <span
-                          class="inline-block w-1.5 h-1.5 rounded-full transition-colors duration-300"
-                          :class="s.active ? 'bg-primary-500 animate-pulse-slow' : s.done ? 'bg-primary-300 dark:bg-primary-600' : 'bg-surface-300 dark:bg-ink-600'"
-                          :title="s.label"
-                        ></span>
-                      </template>
-                    </div>
-                    <div class="w-24 h-1.5 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
-                      <div
-                        class="h-full bg-primary-500 rounded-full"
-                        :class="buildProgress.total > 0 ? 'transition-all duration-500 ease-out' : (buildProgress.message ? 'indeterminate-bar' : '')"
-                        :style="buildProgress.total > 0 ? { width: Math.round((buildProgress.current / buildProgress.total) * 100) + '%' } : { width: buildProgress.message ? undefined : '15%' }"
-                      ></div>
-                    </div>
-                    <span class="text-xs font-medium text-primary-600 dark:text-primary-400 whitespace-nowrap tabular-nums">
-                      <template v-if="buildProgress.total > 0">{{ buildProgress.message }} ({{ Math.round((buildProgress.current / buildProgress.total) * 100) }}%)</template>
-                      <template v-else-if="buildProgress.message">{{ buildProgress.message }}</template>
-                      <template v-else>准备中...</template>
-                    </span>
-                  </div>
-                  <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
-                    {{ isBuilding ? '重建中...' : '重建题库' }}
-                  </button>
-                  <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
-                    刷题模式
-                  </button>
-                  <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
-                    刷新
-                  </button>
-                </template>
-              </MasterBankList>
             </div>
           </Transition>
         </div>
@@ -544,7 +486,7 @@
       </div>
     </Teleport>
 
-    <!-- 全局分析进度提示（切换 Tab 后仍可见） -->
+    <!-- Reprocessing toast -->
     <Transition name="tab-fade">
       <div v-if="Object.keys(activeReprocessing).length > 0"
            class="fixed bottom-4 right-4 z-50 bg-white dark:bg-surface-800 rounded-xl shadow-lg border border-surface-200 dark:border-ink-700 p-4 max-w-sm">
@@ -564,44 +506,63 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError } from './utils/http.js'
-import { safeUrl } from './utils/validate.js'
-import * as api from './api/index.js'
-import { useSelection } from './composables/useSelection.js'
-import { useTheme } from './composables/useTheme.js'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError } from '@/services/http.js'
+import { safeUrl } from '@/utils/validate.js'
+import * as api from '@/api/index.js'
+import { useSelection } from '@/composables/useSelection.js'
+import { useTheme } from '@/composables/useTheme.js'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useSidebar } from '@/composables/useSidebar.js'
+import { useHighlightNav } from '@/composables/useHighlightNav.js'
+import { useQuestionOps } from '@/composables/useQuestionOps.js'
+import { useMergeDialog } from '@/composables/useMergeDialog.js'
+import { useBatchActions } from '@/composables/useBatchActions.js'
 
 import { defineAsyncComponent } from 'vue'
-
-import StagingPanel from './components/StagingPanel.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
-import TabBar from './components/TabBar.vue'
-import SearchFilterBar from './components/SearchFilterBar.vue'
-import RoundedSelect from './components/RoundedSelect.vue'
-import DataTable from './components/DataTable.vue'
-import MasterBankList from './components/MasterBankList.vue'
-import InlineEdit from './components/InlineEdit.vue'
+import StagingPanel from '@/components/business/StagingPanel.vue'
+import SettingsPanel from '@/components/business/SettingsPanel.vue'
+import TabBar from '@/components/common/TabBar.vue'
+import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import DataTable from '@/components/common/DataTable.vue'
+import MasterBankList from '@/components/business/MasterBankList.vue'
+import InlineEdit from '@/components/common/InlineEdit.vue'
 import { Toaster } from 'vue-sonner'
-import ConfirmDialog from './components/ConfirmDialog.vue'
-import LoginModal from './components/LoginModal.vue'
-import UserMenu from './components/UserMenu.vue'
-import PracticePanel from './components/PracticePanel.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import LoginModal from '@/components/business/LoginModal.vue'
+import UserMenu from '@/components/business/UserMenu.vue'
+import PracticePanel from '@/components/business/PracticePanel.vue'
+import LoginPage from '@/components/business/LoginPage.vue'
 
-// 低频组件异步懒加载，减少首屏 JS 体积
-const MockInterview = defineAsyncComponent(() => import('./components/MockInterview.vue'))
-const KnowledgeGraph = defineAsyncComponent(() => import('./components/KnowledgeGraph.vue'))
-const ProfilePanel = defineAsyncComponent(() => import('./components/ProfilePanel.vue'))
-const AdminReview = defineAsyncComponent(() => import('./components/AdminReview.vue'))
-const PracticeMode = defineAsyncComponent(() => import('./components/PracticeMode.vue'))
-const AnalyticsSidebar = defineAsyncComponent(() => import('./components/AnalyticsSidebar.vue'))
-import { useToast, useConfirm } from './composables/useNotification.js'
+const MockInterview = defineAsyncComponent(() => import('@/components/business/MockInterview.vue'))
+const KnowledgeGraph = defineAsyncComponent(() => import('@/components/business/KnowledgeGraph.vue'))
+const ProfilePanel = defineAsyncComponent(() => import('@/components/business/ProfilePanel.vue'))
+const AdminReview = defineAsyncComponent(() => import('@/components/business/AdminReview.vue'))
+const PracticeMode = defineAsyncComponent(() => import('@/components/business/PracticeMode.vue'))
+const AnalyticsSidebar = defineAsyncComponent(() => import('@/components/business/AnalyticsSidebar.vue'))
 
+// ── Composables ──
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()
 const { isDark, toggleDark } = useTheme()
 
-// ── State ──
 const activeTab = ref('MasterBank')
+const showPracticeMode = ref(false)
+
+const {
+  sidebarCollapsed, sidebarWidth, isResizing,
+  resizeHandleRef, expandBtnRef, sidebarWrapperRef,
+  resizeHandleStyle, onResizeStart, onExpandBtnDragStart,
+} = useSidebar()
+
+const {
+  highlightInterviewId, returnTab, returnToPracticeMode,
+  floatingReturnBtn, floatingBtnStyle, masterBankEverShown,
+  handleReturn, detachHighlightScroll, setSavedScrollTop,
+} = useHighlightNav(activeTab, showPracticeMode)
+
+// ── Core data ──
 const jdData = ref([])
 const interviewData = ref([])
 const masterBank = ref([])
@@ -625,15 +586,17 @@ const isDataLoading = ref(false)
 const dataLoadError = ref(null)
 const analytics = ref({ tech_trends: {} })
 const popularTagsFromServer = ref([])
+
+// ── Filters ──
 const selectedTag = ref('全部')
 const selectedSubTags = ref([])
 const searchQuery = ref('')
 const filterDifficulty = ref('')
 const showStarredOnly = ref(false)
 const filterSeason = ref('')
-const interviewSortOrder = ref('desc')  // desc = newest first, asc = oldest first
-const reprocessingIds = ref({})
-const reprocessProgress = ref({})  // { [id]: { step, message } }
+const interviewSortOrder = ref('desc')
+
+// ── UI state ──
 const mockInterviewRef = ref(null)
 const masterBankRef = ref(null)
 const jdCurrentPage = ref(1)
@@ -646,400 +609,66 @@ const showSettings = ref(false)
 const showProfile = ref(false)
 const practiceStats = ref({})
 const recommendSeed = ref(0)
-const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
-const sidebarWidth = ref(Number(localStorage.getItem('sidebar-width')) || 320)
-const isResizing = ref(false)
-const resizeHandleRef = ref(null)
-const expandBtnRef = ref(null)
-const sidebarWrapperRef = ref(null)
-const SIDEBAR_MIN = 200
-const SIDEBAR_MAX = 480
-const SIDEBAR_COLLAPSE_THRESHOLD = 120
-
-const toggleSidebar = () => {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-  localStorage.setItem('sidebar-collapsed', sidebarCollapsed.value)
-}
-
-function onResizeStart(e) {
-  if (e.button !== 0) return
-  e.preventDefault()
-  isResizing.value = true
-  const startX = e.clientX
-  const startWidth = sidebarWidth.value
-  const wasCollapsed = sidebarCollapsed.value
-
-  const handle = resizeHandleRef.value
-  if (handle) handle.setPointerCapture(e.pointerId)
-
-  const wrapperEl = sidebarWrapperRef.value
-  let rafId = null
-  let finalWidth = startWidth
-  let finalCollapsed = wasCollapsed
-
-  function onMove(ev) {
-    const delta = ev.clientX - startX
-    if (wasCollapsed) {
-      if (delta > 10) {
-        finalCollapsed = false
-        finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, delta))
-      } else {
-        return
-      }
-    } else {
-      const newWidth = startWidth + delta
-      if (newWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
-        finalCollapsed = true
-        finalWidth = 0
-      } else {
-        finalCollapsed = false
-        finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, newWidth))
-      }
-    }
-    if (!rafId) {
-      rafId = requestAnimationFrame(() => {
-        rafId = null
-        if (wrapperEl) wrapperEl.style.width = finalWidth + 'px'
-        if (handle) handle.style.left = (finalWidth - 6) + 'px'
-      })
-    }
-  }
-
-  function onUp(ev) {
-    isResizing.value = false
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
-    if (handle) handle.releasePointerCapture(ev.pointerId)
-    handle?.removeEventListener('pointermove', onMove)
-    handle?.removeEventListener('pointerup', onUp)
-    handle?.removeEventListener('pointercancel', onUp)
-    // Sync final state to reactive refs (one-time)
-    sidebarCollapsed.value = finalCollapsed
-    if (!finalCollapsed) {
-      sidebarWidth.value = finalWidth
-      localStorage.setItem('sidebar-width', finalWidth)
-    }
-    localStorage.setItem('sidebar-collapsed', finalCollapsed)
-  }
-
-  handle?.addEventListener('pointermove', onMove)
-  handle?.addEventListener('pointerup', onUp)
-  handle?.addEventListener('pointercancel', onUp)
-}
-
-// Drag-to-resize from the expand button when sidebar is collapsed
-function onExpandBtnDragStart(e) {
-  if (e.button !== 0) return
-  e.preventDefault()
-  e.stopPropagation()  // prevent the click handler from firing immediately
-  isResizing.value = true  // disable CSS transition immediately
-  const startX = e.clientX
-  let dragged = false
-
-  const btn = expandBtnRef.value
-  if (btn) btn.setPointerCapture(e.pointerId)
-
-  const wrapperEl = sidebarWrapperRef.value
-  const handle = resizeHandleRef.value
-  let rafId = null
-  let finalWidth = 0
-
-  function onMove(ev) {
-    const delta = ev.clientX - startX
-    if (delta > 10) {
-      dragged = true
-      finalWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, delta))
-      if (!rafId) {
-        rafId = requestAnimationFrame(() => {
-          rafId = null
-          if (wrapperEl) wrapperEl.style.width = finalWidth + 'px'
-          if (handle) handle.style.left = (finalWidth - 6) + 'px'
-        })
-      }
-    }
-  }
-
-  function onUp(ev) {
-    isResizing.value = false
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null }
-    if (btn) btn.releasePointerCapture(ev.pointerId)
-    btn?.removeEventListener('pointermove', onMove)
-    btn?.removeEventListener('pointerup', onUp)
-    btn?.removeEventListener('pointercancel', onUp)
-    if (!dragged) {
-      // It was a click, not a drag — toggle sidebar
-      toggleSidebar()
-    } else {
-      // Sync final state to reactive refs (one-time)
-      sidebarCollapsed.value = false
-      sidebarWidth.value = finalWidth
-      localStorage.setItem('sidebar-width', finalWidth)
-      localStorage.setItem('sidebar-collapsed', 'false')
-    }
-  }
-
-  btn?.addEventListener('pointermove', onMove)
-  btn?.addEventListener('pointerup', onUp)
-  btn?.addEventListener('pointercancel', onUp)
-}
-
-const resizeHandleStyle = computed(() => {
-  // Position the handle at the sidebar's right edge (centered on the edge)
-  if (sidebarCollapsed.value) {
-    return { left: '0px' }
-  }
-  return { left: (sidebarWidth.value - 6) + 'px' }
-})
-
-// ── Auth state ──
 const currentUser = ref(null)
 const showLoginModal = ref(false)
 const showReviewPanel = ref(false)
 const pendingReviewCount = ref(0)
 const practiceQuestion = ref(null)
-const showPracticeMode = ref(false)
 const practiceModeIndex = ref(0)
-const highlightInterviewId = ref(null)
-const returnTab = ref(null)
-const returnToPracticeMode = ref(false)
-const floatingReturnBtn = ref(null)
-const floatingBtnStyle = ref({ display: 'none' })
 
-let highlightScrollHandler = null
-let highlightAnimFrame = null
-let highlightRetryId = null
-let savedQuestionIdx = -1
-let savedScrollTop = null
-let savedFirstVisibleIdx = 0
-let savedShowAnswer = false
-let savedShowSources = false
-let pendingScrollRestore = false
-let isRestoringScroll = false
-let masterBankScrollHandler = null
-
-// 持续追踪 MasterBank 滚动位置（恢复期间暂停，避免覆盖已保存的值）
-watch(activeTab, (tab) => {
-  if (masterBankScrollHandler) {
-    document.querySelectorAll('.vue-recycle-scroller').forEach(el => el.removeEventListener('scroll', masterBankScrollHandler))
-    masterBankScrollHandler = null
-  }
-  if (tab === 'MasterBank') {
-    nextTick(() => {
-      const scroller = document.querySelector('.vue-recycle-scroller')
-      if (scroller) {
-        masterBankScrollHandler = () => {
-          if (isRestoringScroll) return
-          savedScrollTop = scroller.scrollTop
-          const inner = masterBankRef.value?.scrollerRef?.$refs?.scroller
-          if (inner) savedFirstVisibleIdx = inner.$_startIndex ?? 0
-        }
-        scroller.addEventListener('scroll', masterBankScrollHandler, { passive: true })
-      }
-    })
-  }
-}, { immediate: true })
-
-// DynamicScroller 可见时恢复滚动位置（@visible 事件触发时 scroller 已完成内部初始化）
-const onScrollerVisible = () => {
-  if (!pendingScrollRestore) return
-  pendingScrollRestore = false
-  const idx = savedQuestionIdx
-  const showAnswer = savedShowAnswer
-  const showSources = savedShowSources
-
-  // 恢复展开状态
-  if (idx >= 0) {
-    const question = filteredMasterBank.value[idx]
-    if (question) {
-      if (showAnswer) question._showAnswer = true
-      if (showSources) question._showSources = true
-    }
-  }
-
-  // 策略：用 scrollToItem 跳到目标题目，然后居中 + 高亮
-  // 不依赖精确 scrollTop 恢复（展开状态改变项目高度导致位置偏移）
-  const doRestore = (attempt) => {
-    const scroller = document.querySelector('.vue-recycle-scroller')
-    if (!scroller) return
-
-    // 有目标题目 → scrollToItem 跳转 + 居中 + 高亮
-    if (idx >= 0 && masterBankRef.value?.scrollerRef) {
-      masterBankRef.value.scrollerRef.scrollToItem(idx)
-      isRestoringScroll = false
-      // 等待虚拟滚动器渲染目标卡片后居中高亮
-      setTimeout(() => {
-        const card = scroller.querySelector(`[data-index="${idx}"]`)
-        if (card) {
-          centerAndHighlight(card, scroller, idx)
-        } else if (attempt < 10) {
-          doRestore(attempt + 1)
-        }
-      }, 100 + attempt * 50)
-    }
-    // 无目标题目但有保存位置 → 恢复精确位置
-    else if (savedScrollTop != null) {
-      scroller.scrollTop = savedScrollTop
-      isRestoringScroll = false
-    } else {
-      isRestoringScroll = false
-    }
-  }
-
-  nextTick(() => setTimeout(() => doRestore(0), 100))
-}
-
-// 居中目标卡片并高亮
-const centerAndHighlight = (card, scroller, idx) => {
-  const scrollerRect = scroller.getBoundingClientRect()
-  const cardRect = card.getBoundingClientRect()
-  const cardCenter = cardRect.top + cardRect.height / 2
-  const scrollerCenter = scrollerRect.top + scrollerRect.height / 2
-  const delta = cardCenter - scrollerCenter
-
-  if (Math.abs(delta) > 10) {
-    scroller.scrollTop += delta
-  }
-  highlightTargetCard(idx, scroller)
-}
-
-// 高亮目标卡片（2.2s 渐隐动画）
-const highlightTargetCard = (idx, scroller, retryCount = 0) => {
-  if (idx < 0 || !scroller) return
-  const card = scroller.querySelector(`[data-index="${idx}"]`)
-  if (card) {
-    card.classList.remove('scroll-restore-highlight')
-    void card.offsetWidth
-    card.classList.add('scroll-restore-highlight')
-    setTimeout(() => card.classList.remove('scroll-restore-highlight'), 2500)
-  } else if (retryCount < 8) {
-    // 虚拟滚动器可能尚未渲染该卡片，仅等待（不修改滚动位置）
-    setTimeout(() => highlightTargetCard(idx, scroller, retryCount + 1), 200)
-  }
-}
-
-const findScrollContainer = (el) => {
-  let cur = el?.parentElement
-  while (cur) {
-    if (cur.classList.contains('custom-scrollbar') && cur.scrollHeight > cur.clientHeight + 10) return cur
-    cur = cur.parentElement
-  }
-  return null
-}
-
-const getOffsetTopRelativeTo = (el, ancestor) => {
-  let top = 0
-  let cur = el
-  while (cur && cur !== ancestor) {
-    top += cur.offsetTop
-    cur = cur.offsetParent
-  }
-  return top
-}
-
-const positionFloatingBtn = () => {
-  const id = highlightInterviewId.value
-  if (!id) return false
-  const row = document.querySelector(`[data-row-id="${id}"]`)
-  if (!row) return false
-  const container = findScrollContainer(row)
-  if (!container) return false
-  const rowRect = row.getBoundingClientRect()
-  const containerRect = container.getBoundingClientRect()
-  floatingBtnStyle.value = {
-    top: Math.max(4, rowRect.top - containerRect.top + container.scrollTop - 4) + 'px',
-    left: Math.max(8, rowRect.left - containerRect.left + 8) + 'px',
-  }
-  return true
-}
-
-const attachHighlightScroll = () => {
-  detachHighlightScroll()
-  const id = highlightInterviewId.value
-  if (!id) return
-  const row = document.querySelector(`[data-row-id="${id}"]`)
-  const container = findScrollContainer(row)
-  if (!container) return
-  highlightScrollHandler = () => {
-    if (highlightAnimFrame) return
-    highlightAnimFrame = requestAnimationFrame(() => {
-      highlightAnimFrame = null
-      positionFloatingBtn()
-    })
-  }
-  container.addEventListener('scroll', highlightScrollHandler, { passive: true })
-}
-
-const detachHighlightScroll = () => {
-  if (highlightAnimFrame) { cancelAnimationFrame(highlightAnimFrame); highlightAnimFrame = null }
-  if (highlightRetryId) { clearTimeout(highlightRetryId); highlightRetryId = null }
-  if (highlightScrollHandler) {
-    document.querySelectorAll('.custom-scrollbar').forEach(el => el.removeEventListener('scroll', highlightScrollHandler))
-    highlightScrollHandler = null
-  }
-}
-
-const waitForHighlightRow = (attempt = 0) => {
-  if (!highlightInterviewId.value) return
-  if (positionFloatingBtn()) {
-    attachHighlightScroll()
-    return
-  }
-  if (attempt >= 40) {
-    floatingBtnStyle.value = { top: '4px', left: '8px' }
-    return
-  }
-  highlightRetryId = setTimeout(() => waitForHighlightRow(attempt + 1), 100)
-}
-
-watch(highlightInterviewId, async (id) => {
-  if (id) {
-    await nextTick()
-    waitForHighlightRow()
-    setTimeout(() => {
-      detachHighlightScroll()
-      highlightInterviewId.value = null
-      floatingBtnStyle.value = { display: 'none' }
-    }, 300000)
-  } else {
-    detachHighlightScroll()
-    floatingBtnStyle.value = { display: 'none' }
-  }
-})
-
-const handleReturn = async () => {
-  floatingBtnStyle.value = { display: 'none' }
-  const target = returnTab.value
-  const practice = returnToPracticeMode.value
-  returnTab.value = null
-  returnToPracticeMode.value = false
-  highlightInterviewId.value = null
-  activeTab.value = target
-  if (practice) showPracticeMode.value = true
-  // 标记需要恢复滚动位置（实际恢复在 onScrollerVisible 中执行）
-  if (savedQuestionIdx >= 0 || savedFirstVisibleIdx > 0 || savedScrollTop != null) {
-    isRestoringScroll = true
-    pendingScrollRestore = true
-    // 兜底：如果 @visible 事件未触发（scroller 已经可见），延迟恢复
-    await nextTick()
-    setTimeout(() => {
-      if (pendingScrollRestore) onScrollerVisible()
-    }, 1500)
-  }
-}
-
-// ── Selection composables ──
+// ── Selection ──
 const jdSelection = useSelection(() => jdData.value)
 const interviewSelection = useSelection(() => interviewData.value)
 const masterSelection = useSelection(() => filteredMasterBank.value)
 const isMasterSelected = (id) => masterSelection.selectedIds.value.has(id)
 
-// ── Login features ──
-const loginFeatures = [
-  { icon: '📚', label: '智能题库', iconBg: 'bg-primary-100 dark:bg-primary-900/30' },
-  { icon: '🤖', label: 'AI 刷题', iconBg: 'bg-sage-100 dark:bg-sage-700/30' },
-  { icon: '🎯', label: '模拟面试', iconBg: 'bg-accent-100 dark:bg-accent-700/30' },
-]
+// ── Data fetching (must be before composables that reference them) ──
+const fetchTableData = async () => {
+  isDataLoading.value = true
+  dataLoadError.value = null
+  try {
+    const [jdResp, intResp, masterResp] = await Promise.all([
+      api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank()
+    ])
+    jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
+    interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
+    masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _showSources: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
+    if (masterResp.popular_tags) { popularTagsFromServer.value = masterResp.popular_tags }
+    selectedSubTags.value = []
+    jdSelection.clearSelection()
+    interviewSelection.clearSelection()
+  } catch (e) {
+    dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
+  } finally { isDataLoading.value = false }
+}
+const fetchAnalytics = async () => {
+  try { analytics.value = await api.fetchAnalytics() } catch (e) { console.warn('获取分析数据失败', e) }
+}
+const fetchPracticeStats = async () => {
+  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.warn('获取练习统计失败', e) }
+}
 
-// ── Skeleton data ──
+// ── Question operations ──
+const {
+  reprocessingIds, reprocessProgress, activeReprocessing,
+  deleteDataRow, reprocessInterview, retagQuestion,
+  saveField, saveFieldFromEvent, toggleStar,
+  generateAnswer, useReferenceAnswer, saveUserAnswer,
+  deleteQuestion, deleteOriginalQuestion, editQuestion, onUpdateAnswer, splitQuestion,
+} = useQuestionOps(masterBank, currentUser, fetchTableData, fetchAnalytics)
+
+// ── Merge dialog ──
+const {
+  mergeDialogVisible, mergeSourceOriginalQ, mergeSearchQuery,
+  mergeSearchResults, mergeSearching, startMerge, doMergeSearch, confirmMerge, splitAsNew,
+} = useMergeDialog(fetchTableData)
+
+// ── Batch actions ──
+const { jdBatchActions, interviewBatchActions, masterBatchActions } = useBatchActions({
+  currentUser, jdSelection, interviewSelection, masterSelection, fetchTableData, fetchAnalytics,
+})
+
+// ── Static data ──
 const skeletonCards = [
   { title: '75%', subtitle: '45%' },
   { title: '60%', subtitle: '55%' },
@@ -1047,8 +676,6 @@ const skeletonCards = [
   { title: '50%', subtitle: '65%' },
   { title: '70%', subtitle: '40%' },
 ]
-
-// ── Column definitions ──
 const jdColumns = [
   { key: 'company', label: '公司', frontendKey: '公司', width: '12%' },
   { key: 'job_title', label: '岗位名称', frontendKey: '岗位名称', width: '15%' },
@@ -1057,7 +684,6 @@ const jdColumns = [
   { key: 'bonus', label: '加分项', frontendKey: '加分项', width: '22%' },
   { key: 'season', label: '招聘季', frontendKey: 'season', width: '8%' }
 ]
-
 const interviewColumns = [
   { key: 'company', label: '公司', frontendKey: '公司', width: '10%' },
   { key: 'season', label: '招聘季', frontendKey: 'season', width: '8%' },
@@ -1070,15 +696,11 @@ const interviewColumns = [
 
 // ── Computed ──
 const popularTags = computed(() => {
-  // Prefer server-side popular_tags when available
   if (popularTagsFromServer.value.length > 0) {
     const result = {}
-    for (const t of popularTagsFromServer.value) {
-      result[t.tag] = t.count
-    }
+    for (const t of popularTagsFromServer.value) { result[t.tag] = t.count }
     return result
   }
-  // Fallback to client-side computation
   const counts = {}
   masterBank.value.forEach(q => {
     const cats = (q.cat1 || '未分类').split(',').map(c => c.trim()).filter(c => c)
@@ -1087,7 +709,6 @@ const popularTags = computed(() => {
   })
   return Object.entries(counts).sort((a, b) => b[1] - a[1]).reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
 })
-
 const availableSubTags = computed(() => {
   if (selectedTag.value === '全部') return []
   const catItems = masterBank.value.filter(q =>
@@ -1098,11 +719,8 @@ const availableSubTags = computed(() => {
     const tags = (q.tags || '').split(',').map(t => t.trim()).filter(t => t)
     tags.forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
   })
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([tag, count]) => ({ tag, count }))
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }))
 })
-
 const filteredMasterBank = computed(() => {
   let result = masterBank.value
   if (selectedTag.value !== '全部') {
@@ -1133,12 +751,10 @@ const filteredMasterBank = computed(() => {
   if (showStarredOnly.value) result = result.filter(q => q.is_starred)
   return result
 })
-
 const interviewSeasons = computed(() => {
   const seasons = [...new Set(interviewData.value.map(d => d.season).filter(Boolean))]
   return seasons.sort()
 })
-
 const filteredInterviewData = computed(() => {
   let data = filterSeason.value
     ? interviewData.value.filter(d => d.season === filterSeason.value)
@@ -1146,247 +762,36 @@ const filteredInterviewData = computed(() => {
   data.sort((a, b) => {
     const da = a.created_at || ''
     const db = b.created_at || ''
-    return interviewSortOrder.value === 'desc'
-      ? db.localeCompare(da)
-      : da.localeCompare(db)
+    return interviewSortOrder.value === 'desc' ? db.localeCompare(da) : da.localeCompare(db)
   })
   return data
 })
-
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   return dateStr.replace('T', ' ').slice(0, 16)
 }
-
 const practicedQuestions = computed(() => {
   const stats = practiceStats.value
   if (!stats?.practiced_details) return {}
   return stats.practiced_details
 })
 
-const handlePracticeEvaluated = async ({ questionId, score }) => {
-  await fetchPracticeStats()
-}
-
+// ── Practice mode ──
+const handlePracticeEvaluated = async ({ questionId, score }) => { await fetchPracticeStats() }
 const enterPracticeMode = () => {
-  if (filteredMasterBank.value.length === 0) {
-    toast.warning('当前筛选条件下没有题目')
-    return
-  }
+  if (filteredMasterBank.value.length === 0) { toast.warning('当前筛选条件下没有题目'); return }
   practiceModeIndex.value = 0
   showPracticeMode.value = true
 }
-
-const handlePracticeModeClose = () => {
-  showPracticeMode.value = false
-  fetchPracticeStats()
-}
-
-const handlePracticeModeEvaluated = async ({ questionId, score }) => {
-  await fetchPracticeStats()
-}
+const handlePracticeModeClose = () => { showPracticeMode.value = false; fetchPracticeStats() }
+const handlePracticeModeEvaluated = async ({ questionId, score }) => { await fetchPracticeStats() }
 
 watch(activeTab, (newTab, oldTab) => {
-  if (oldTab === 'MockInterview' && newTab === 'MasterBank') {
-    fetchPracticeStats()
-  }
+  if (oldTab === 'MockInterview' && newTab === 'MasterBank') { fetchPracticeStats() }
 })
 
-// ── Batch action definitions ──
-const jdBatchActions = computed(() => {
-  if (!currentUser.value?.is_admin) return []
-  return [
-  {
-    key: 'batch-delete',
-    label: '批量删除',
-    color: 'red',
-    handler: async (onProgress) => {
-      const ids = [...jdSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`, { title: '确认删除', variant: 'danger' })) return
-      onProgress(0, ids.length)
-      try {
-        const result = await api.batchDeleteData('jd', ids)
-        onProgress(result.deleted, ids.length)
-        toast.success(`已成功删除 ${result.deleted} 条记录！`)
-      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-      jdSelection.clearSelection()
-      fetchTableData()
-      fetchAnalytics()
-    }
-  }
-  ]
-})
-
-const interviewBatchActions = computed(() => {
-  if (!currentUser.value?.is_admin) return []
-  return [
-  {
-    key: 'batch-reprocess',
-    label: '批量重新分析',
-    color: 'blue',
-    handler: async (onProgress) => {
-      const ids = [...interviewSelection.selectedIds.value]
-      if (!await showConfirm(`确定要重新分析选中的 ${ids.length} 条面经？`)) return
-      onProgress(0, ids.length)
-      let ok = 0
-      const failed = []  // { id, error }
-      for (let i = 0; i < ids.length; i++) {
-        try {
-          await api.reprocessInterviewSSE(ids[i], (evt) => {
-            if (evt.type === 'error') throw new Error(evt.message)
-          })
-          ok++
-        } catch (e) {
-          // 首次失败，重试一次
-          try {
-            await api.reprocessInterviewSSE(ids[i], (evt) => {
-              if (evt.type === 'error') throw new Error(evt.message)
-            })
-            ok++
-          } catch (e2) {
-            failed.push({ id: ids[i], error: getFriendlyError(e2) })
-          }
-        }
-        onProgress(i + 1, ids.length)
-      }
-      // 报告结果
-      if (failed.length === 0) {
-        toast.success(`全部 ${ok} 条面经分析完成！`)
-      } else {
-        toast.error(`完成 ${ok}/${ids.length} 条，${failed.length} 条失败（已重试一次）`)
-        // 在控制台打印失败详情，方便排查
-        console.warn('批量分析失败详情:', failed)
-        // 弹窗展示失败详情
-        const failList = failed.map(f => `ID ${f.id}: ${f.error}`).join('\n')
-        await showConfirm(`${failed.length} 条面经分析失败（已重试一次）：\n\n${failList}\n\n请检查这些问题后重试。`, { title: '分析失败详情', variant: 'danger' })
-      }
-      interviewSelection.clearSelection()
-      fetchTableData()
-      fetchAnalytics()
-    }
-  },
-  {
-    key: 'batch-delete',
-    label: '批量删除',
-    color: 'red',
-    handler: async (onProgress) => {
-      const ids = [...interviewSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 条记录？`, { title: '确认删除', variant: 'danger' })) return
-      onProgress(0, ids.length)
-      try {
-        const result = await api.batchDeleteData('interview', ids)
-        onProgress(result.deleted, ids.length)
-        toast.success(`已成功删除 ${result.deleted} 条记录！`)
-      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-      interviewSelection.clearSelection()
-      fetchTableData()
-      fetchAnalytics()
-    }
-  }
-  ]
-})
-
-const masterBatchActions = computed(() => [
-  {
-    key: 'batch-generate',
-    label: '批量生成答案',
-    color: 'blue',
-    handler: async (onProgress) => {
-      const ids = [...masterSelection.selectedIds.value]
-      if (!await showConfirm(`确定要为选中的 ${ids.length} 道题目生成答案？`)) return
-      try {
-        const result = await api.batchGenerateAnswers(ids, (event) => {
-          if (event.type === 'init') {
-            if (event.total === 0) {
-              toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
-            } else {
-              onProgress(0, event.total)
-            }
-          } else if (event.type === 'progress') {
-            onProgress(event.current, event.total)
-          }
-        })
-        if (result) {
-          const parts = []
-          if (result.generated) parts.push(`成功 ${result.generated} 题`)
-          if (result.failed) parts.push(`失败 ${result.failed} 题`)
-          if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
-          toast.success(parts.length ? `生成完成：${parts.join('，')}` : '生成完成')
-        }
-      } catch (e) { toast.error('批量生成答案失败：' + getFriendlyError(e)) }
-      fetchTableData()
-    }
-  },
-  {
-    key: 'batch-delete',
-    label: '批量删除',
-    color: 'red',
-    handler: async (onProgress) => {
-      const ids = [...masterSelection.selectedIds.value]
-      if (!await showConfirm(`确定要删除选中的 ${ids.length} 道题目？`, { title: '确认删除', variant: 'danger' })) return
-      onProgress(0, ids.length)
-      try {
-        const result = await api.batchDeleteMasterBank(ids)
-        onProgress(result.deleted, ids.length)
-        toast.success(`已成功删除 ${result.deleted} 道题目！`)
-      } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-      fetchTableData()
-    }
-  }
-])
-
-// ── Global reprocessing progress (visible across all tabs) ──
-const activeReprocessing = computed(() => {
-  const active = {}
-  for (const [id, isProcessing] of Object.entries(reprocessingIds.value)) {
-    if (isProcessing && reprocessProgress.value[id]) {
-      active[id] = reprocessProgress.value[id]
-    }
-  }
-  return active
-})
-
-// ── Data fetching ──
-const fetchTableData = async () => {
-  isDataLoading.value = true
-  dataLoadError.value = null
-  try {
-    const [jdResp, intResp, masterResp] = await Promise.all([
-      api.fetchJdData(),
-      api.fetchInterviewData(),
-      api.fetchMasterBank()
-    ])
-    jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
-    interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
-    masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _showSources: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
-    if (masterResp.popular_tags) {
-      popularTagsFromServer.value = masterResp.popular_tags
-    }
-    selectedSubTags.value = []
-    jdSelection.clearSelection()
-    interviewSelection.clearSelection()
-  } catch (e) {
-    dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
-  } finally {
-    isDataLoading.value = false
-  }
-}
-
-const fetchAnalytics = async () => {
-  try { analytics.value = await api.fetchAnalytics() } catch (e) { console.warn('获取分析数据失败', e) }
-}
-
-const fetchPracticeStats = async () => {
-  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.warn('获取练习统计失败', e) }
-}
-
-// ── Actions ──
-const onSubmitted = () => {
-  // 保持在导入界面，让用户看到成功反馈（StagingPanel 的绿色提示）
-  fetchTableData()
-  fetchAnalytics()
-}
-
+// ── Event handlers ──
+const onSubmitted = () => { fetchTableData(); fetchAnalytics() }
 const onTabChange = (tab) => {
   activeTab.value = tab
   returnTab.value = null
@@ -1394,120 +799,66 @@ const onTabChange = (tab) => {
   highlightInterviewId.value = null
   floatingBtnStyle.value = { display: 'none' }
 }
-
-const onSelectTag = (tag) => {
-  selectedTag.value = tag
-  selectedSubTags.value = []
-  activeTab.value = 'MasterBank'
-}
-
-const onGraphFilterTag = (tagName) => {
-  selectedTag.value = '全部'
-  selectedSubTags.value = []
-  searchQuery.value = tagName
-  activeTab.value = 'MasterBank'
-}
-
-const onGraphFilterCategory = (catName) => {
-  selectedTag.value = catName
-  selectedSubTags.value = []
-  searchQuery.value = ''
-  activeTab.value = 'MasterBank'
-}
-
+const onSelectTag = (tag) => { selectedTag.value = tag; selectedSubTags.value = []; activeTab.value = 'MasterBank' }
+const onGraphFilterTag = (tagName) => { selectedTag.value = '全部'; selectedSubTags.value = []; searchQuery.value = tagName; activeTab.value = 'MasterBank' }
+const onGraphFilterCategory = (catName) => { selectedTag.value = catName; selectedSubTags.value = []; searchQuery.value = ''; activeTab.value = 'MasterBank' }
 const onGoToQuestion = (question) => {
   activeTab.value = 'MasterBank'
   const q = question.question || ''
   searchQuery.value = q.length > 30 ? q.substring(0, 30) : q
-  selectedTag.value = '全部'
-  selectedSubTags.value = []
+  selectedTag.value = '全部'; selectedSubTags.value = []
+}
+const toggleSubTag = (tag) => {
+  const idx = selectedSubTags.value.indexOf(tag)
+  if (idx === -1) { selectedSubTags.value = [...selectedSubTags.value, tag] }
+  else { selectedSubTags.value = selectedSubTags.value.filter(t => t !== tag) }
 }
 
-const onNavigateToInterview = (source) => {
+const onNavigateToInterview = (event) => {
+  const source = event?.source || event
+  const questionId = event?.questionId
   const targetUrl = source.url || ''
   if (!targetUrl) return
 
-  // 归一化 URL：去掉查询参数和末尾斜杠，只比较路径部分
   const normalizeUrl = (u) => {
     try { return new URL(u).pathname.replace(/\/+$/, '') } catch { return u.split('?')[0].replace(/\/+$/, '') }
   }
   const targetPath = normalizeUrl(targetUrl)
 
-  // 在全量数据中查找（不受筛选条件限制）
   const match = interviewData.value.find(row => {
     const rowUrl = row['来源链接'] || row.url || ''
     return rowUrl === targetUrl || normalizeUrl(rowUrl) === targetPath
   })
-  if (!match) {
-    toast.warning('未找到该面经记录')
-    return
-  }
+  if (!match) { toast.warning('未找到该面经记录'); return }
 
-  // 记录来源 tab、滚动位置和跳转来源的题目在列表中的索引
   returnTab.value = activeTab.value
-  // 保存滚动位置：优先从 scroller 获取，其次从 masterBankRef 获取
-  // 同时保存第一个可见项索引（用于 scrollToItem 恢复，避免浏览器钳制问题）
-  const scroller = document.querySelector('.vue-recycle-scroller')
-  if (scroller) {
-    savedScrollTop = scroller.scrollTop
-  } else if (masterBankRef.value?.scrollerRef?.$el) {
-    savedScrollTop = masterBankRef.value.scrollerRef.$el.scrollTop
-  }
-  // 从 RecycleScroller 内部状态获取第一个可见项索引
-  const innerScroller = masterBankRef.value?.scrollerRef?.$refs?.scroller
-  savedFirstVisibleIdx = innerScroller?.$_startIndex ?? 0
-  // 找到当前展开的题目在列表中的索引，并保存展开状态
-  savedShowAnswer = false
-  savedShowSources = false
-  const expandedCard = document.querySelector('.answer-section')?.closest('[class*="card-smooth"]')
-  if (expandedCard) {
-    const h3 = expandedCard.querySelector('h3')
-    if (h3) {
-      const title = h3.textContent.trim()
-      const idx = filteredMasterBank.value.findIndex(q => q.question === title)
-      savedQuestionIdx = idx >= 0 ? idx : -1
-      if (idx >= 0) {
-        savedShowAnswer = !!filteredMasterBank.value[idx]._showAnswer
-        savedShowSources = !!filteredMasterBank.value[idx]._showSources
-      }
-    }
-  }
-  if (showPracticeMode.value) {
-    returnToPracticeMode.value = true
-    // 从刷题模式导航时，用当前题目索引作为恢复目标
-    if (savedQuestionIdx < 0) {
-      savedQuestionIdx = practiceModeIndex.value
-      savedShowAnswer = true
-      savedShowSources = true
-    }
-    showPracticeMode.value = false
-  }
+  const outerScroll = document.querySelector('.overflow-y-auto.custom-scrollbar')
+  if (outerScroll) setSavedScrollTop(outerScroll.scrollTop)
+
+  if (showPracticeMode.value) { returnToPracticeMode.value = true; showPracticeMode.value = false }
   activeTab.value = 'Interview'
 
-  // 计算目标行在排序后的数据中的页码（DataTable 显示的是 filteredInterviewData）
   filterSeason.value = ''
   const sortedIdx = filteredInterviewData.value.indexOf(match)
   const idx = sortedIdx >= 0 ? sortedIdx : interviewData.value.indexOf(match)
   interviewCurrentPage.value = Math.floor(idx / interviewPageSize.value) + 1
 
-  // 设置高亮
   highlightInterviewId.value = match.id
 
-  // 轮询等待行元素出现后滚动（Transition 动画可能需要 250ms+）
   const scrollAndHighlight = (attempt = 0) => {
     const el = document.querySelector(`[data-row-id="${match.id}"]`)
     if (el) {
-      // Scroll the DataTable container (not window) to the target row
-      const container = findScrollContainer(el)
-      if (container) {
-        const rowTop = getOffsetTopRelativeTo(el, container)
-        const visibleHeight = container.clientHeight
-        const rowHeight = el.offsetHeight
-        container.scrollTo({ top: Math.max(0, rowTop - visibleHeight / 2 + rowHeight / 2), behavior: 'smooth' })
-      } else {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const allScrollContainers = document.querySelectorAll('.custom-scrollbar')
+      let mainScroll = null
+      for (const c of allScrollContainers) {
+        if (c.scrollHeight > c.clientHeight + 10 && c.classList.contains('overflow-y-auto')) { mainScroll = c; break }
       }
-      // 高亮具体题目文本
+      if (mainScroll) {
+        const containerRect = mainScroll.getBoundingClientRect()
+        const rowRect = el.getBoundingClientRect()
+        const delta = rowRect.top - containerRect.top - containerRect.height / 3
+        mainScroll.scrollTo({ top: mainScroll.scrollTop + delta, behavior: 'smooth' })
+      } else { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
       const questionText = source._origQuestion || source.question || ''
       if (questionText) {
         setTimeout(() => {
@@ -1515,315 +866,25 @@ const onNavigateToInterview = (source) => {
           for (const cell of cells) {
             if (cell.textContent.includes(questionText.slice(0, 15))) {
               const escaped = questionText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-              cell.innerHTML = cell.innerHTML.replace(
-                new RegExp(`(${escaped})`, 'g'),
-                '<mark class="bg-yellow-200 dark:bg-yellow-700/60 rounded px-0.5 question-highlight">$1</mark>'
-              )
-              setTimeout(() => {
-                cell.querySelectorAll('.question-highlight').forEach(m => {
-                  m.replaceWith(m.textContent)
-                })
-              }, 10000)
+              cell.innerHTML = cell.innerHTML.replace(new RegExp(`(${escaped})`, 'g'), '<mark class="bg-yellow-200 dark:bg-yellow-700/60 rounded px-0.5 question-highlight">$1</mark>')
+              setTimeout(() => { cell.querySelectorAll('.question-highlight').forEach(m => { m.replaceWith(m.textContent) }) }, 10000)
               break
             }
           }
         }, 300)
       }
-    } else if (attempt < 40) {
-      setTimeout(() => scrollAndHighlight(attempt + 1), 100)
-    }
+    } else if (attempt < 40) { setTimeout(() => scrollAndHighlight(attempt + 1), 100) }
   }
   scrollAndHighlight()
 }
 
-const toggleSubTag = (tag) => {
-  const idx = selectedSubTags.value.indexOf(tag)
-  if (idx === -1) {
-    selectedSubTags.value = [...selectedSubTags.value, tag]
-  } else {
-    selectedSubTags.value = selectedSubTags.value.filter(t => t !== tag)
-  }
-}
+// ── Settings callbacks ──
+const onSettingsClose = () => { showSettings.value = false; loadAllData() }
+const onSettingsSaved = () => { loadAllData() }
+const onPositionChanged = () => { loadAllData() }
 
-const deleteDataRow = async (type, recordId) => {
-  if (!await showConfirm('确定要删除该记录？', { title: '确认删除', variant: 'danger' })) return
-  try {
-    await api.deleteRecord(type, recordId)
-    toast.success('删除成功')
-    fetchTableData()
-    fetchAnalytics()
-  } catch (err) { toast.error('删除失败：' + getFriendlyError(err)) }
-}
-
-const reprocessInterview = async (id) => {
-  if (!await showConfirm('确定要重新解析该面经？')) return
-  reprocessingIds.value[id] = true
-  reprocessProgress.value[id] = { step: '', message: '准备中...' }
-  try {
-    await api.reprocessInterviewSSE(id, (evt) => {
-      if (evt.type === 'progress' || evt.type === 'done') {
-        reprocessProgress.value[id] = { step: evt.step, message: evt.message || '' }
-      }
-      if (evt.type === 'error') throw new Error(evt.message)
-    })
-    toast.success('重新解析完成')
-    fetchTableData()
-    fetchAnalytics()
-  } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
-  finally {
-    reprocessingIds.value[id] = false
-    reprocessProgress.value[id] = null
-  }
-}
-
-const retagQuestion = async (question) => {
-  // Find cluster siblings: entries sharing the same original question texts
-  const origTexts = new Set()
-  if (question.original_questions) {
-    question.original_questions.forEach(oq => {
-      const text = typeof oq === 'string' ? oq : (oq.question || '')
-      if (text) origTexts.add(text)
-    })
-  }
-  const siblings = origTexts.size > 0
-    ? masterBank.value.filter(q => q.id !== question.id && q.original_questions?.some(oq => {
-        const text = typeof oq === 'string' ? oq : (oq.question || '')
-        return origTexts.has(text)
-      }))
-    : []
-
-  const totalCount = 1 + siblings.length
-  const msg = siblings.length > 0
-    ? `确定要重新分类该题目及其 ${siblings.length} 个聚类关联题？共 ${totalCount} 题。`
-    : '确定要重新分类该题目？'
-  if (!await showConfirm(msg)) return
-
-  question._isRetagging = true
-  siblings.forEach(s => { s._isRetagging = true })
-  try {
-    const data = await api.retagQuestion(question.id)
-    const newCat1 = data.data.cat1
-    const newCat2 = data.data.cat2
-    const newTags = data.data.tags
-    const newDiff = data.data.difficulty
-
-    // Apply to the target question
-    question.cat1 = newCat1
-    question.cat2 = newCat2
-    question.tags = newTags
-    question.difficulty = newDiff
-
-    // Propagate to siblings
-    if (siblings.length > 0) {
-      await Promise.all(siblings.map(async (s) => {
-        try {
-          await api.retagQuestion(s.id)
-          s.cat1 = newCat1
-          s.cat2 = newCat2
-          s.tags = newTags
-          s.difficulty = newDiff
-        } catch (e) { /* sibling fail non-fatal */ }
-      }))
-    }
-
-    toast.success(siblings.length > 0 ? `已更新 ${totalCount} 个聚类关联题` : '分类成功')
-    fetchAnalytics()
-  } catch (e) { toast.error('失败：' + getFriendlyError(e)) }
-  finally {
-    question._isRetagging = false
-    siblings.forEach(s => { s._isRetagging = false })
-  }
-}
-
-const saveField = async (tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey) => {
-  try {
-    await api.updateRecord({ table_name: tableName, record_id: recordId, update_data: { [dbColumn]: newValue } })
-    rowObj[frontendKey] = newValue
-    rowObj[editStateKey] = false
-    toast.success('保存成功')
-  } catch (err) { toast.error('保存失败：' + getFriendlyError(err)) }
-}
-
-const saveFieldFromEvent = ({ tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey }) => {
-  saveField(tableName, recordId, dbColumn, newValue, rowObj, editStateKey, frontendKey)
-}
-
-const toggleStar = async (question) => {
-  try {
-    const data = await api.toggleStar(question.id)
-    question.is_starred = data.is_starred
-  } catch (e) { toast.error('操作失败：' + getFriendlyError(e)) }
-}
-
-const generateAnswer = async (question) => {
-  question._isLoadingAnswer = true
-  try {
-    const data = await api.generateAnswer(question.id)
-    // 普通用户答案存入 user_answer，管理员存入 ai_answer
-    if (currentUser.value?.is_admin) {
-      question.ai_answer = data.answer
-    } else {
-      question.user_answer = data.answer
-    }
-    toast.success('答案生成成功')
-  } catch (e) { toast.error('生成失败：' + getFriendlyError(e)) }
-  finally { question._isLoadingAnswer = false }
-}
-
-const useReferenceAnswer = async (question) => {
-  question._isLoadingAnswer = true
-  try {
-    const data = await api.useReferenceAnswer(question.id)
-    question.user_answer = data.answer
-    toast.success('已使用参考答案')
-  } catch (e) { toast.error('操作失败：' + getFriendlyError(e)) }
-  finally { question._isLoadingAnswer = false }
-}
-
-const saveUserAnswer = async ({ question, answer }) => {
-  try {
-    await api.saveUserAnswer(question.id, answer)
-    question.user_answer = answer
-    question._isEditingAnswer = false
-    toast.success('保存成功')
-  } catch (e) { toast.error('保存失败：' + getFriendlyError(e)) }
-}
-
-const deleteQuestion = async (question) => {
-  const shortQ = question.question.length > 30 ? question.question.slice(0, 30) + '...' : question.question
-  if (!await showConfirm(`确定要删除题目「${shortQ}」吗？此操作不可撤销。`, { title: '确认删除', variant: 'danger' })) return
-  try {
-    await api.deleteMasterQuestion(question.id)
-    toast.success('题目已删除')
-    fetchTableData()
-    fetchAnalytics()
-  } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
-}
-
-const deleteOriginalQuestion = async ({ question, originalQuestion }) => {
-  const shortQ = originalQuestion.length > 30 ? originalQuestion.slice(0, 30) + '...' : originalQuestion
-  if (!await showConfirm(`确定要从聚类中删除「${shortQ}」吗？此操作不可撤销。`, { title: '删除聚类题目', variant: 'danger' })) return
-  try {
-    await api.deleteOriginalQuestion(question.id, originalQuestion)
-    toast.success('已从聚类中删除')
-    fetchTableData()
-    fetchAnalytics()
-  } catch (e) { toast.error('删除失败：' + getFriendlyError(e)) }
-}
-
-const editQuestion = async ({ question, newValue }) => {
-  try {
-    const data = await api.updateQuestion(question.id, { question: newValue })
-    question.question = data.data.question
-    question._isEditingQuestion = false
-    question._editQuestion = ''
-    toast.success('题目已更新')
-  } catch (e) { toast.error('编辑失败：' + getFriendlyError(e)) }
-}
-
-const onUpdateAnswer = ({ id, ai_answer, user_answer }) => {
-  const q = masterBank.value.find(item => item.id === id)
-  if (q) {
-    if (ai_answer !== undefined) q.ai_answer = ai_answer
-    if (user_answer !== undefined) q.user_answer = user_answer
-  }
-}
-
-// ── Cluster editing (per original question) ──
-const splitQuestion = async ({ question, originalQuestion }) => {
-  const shortQ = originalQuestion.length > 30 ? originalQuestion.slice(0, 30) + '...' : originalQuestion
-  if (!await showConfirm(`确定要将「${shortQ}」从当前聚类中拆出为独立题目吗？`, { title: '拆分为独立题目' })) return
-  try {
-    await api.splitQuestion(question.id, originalQuestion)
-    toast.success('题目已拆分为独立题目')
-    fetchTableData()
-  } catch (e) { toast.error('拆分失败：' + getFriendlyError(e)) }
-}
-
-const mergeDialogVisible = ref(false)
-const mergeSourceQuestionId = ref(null)
-const mergeSourceOriginalQ = ref('')
-const mergeSourceCat1 = ref('')
-const mergeSourceCat2 = ref('')
-const mergeSearchQuery = ref('')
-const mergeSearchResults = ref([])
-const mergeSearching = ref(false)
-
-const startMerge = ({ question, originalQuestion }) => {
-  mergeSourceQuestionId.value = question.id
-  mergeSourceOriginalQ.value = originalQuestion
-  mergeSourceCat1.value = question.cat1 || ''
-  mergeSourceCat2.value = question.cat2 || ''
-  mergeSearchQuery.value = ''
-  mergeSearchResults.value = []
-  mergeDialogVisible.value = true
-}
-
-const doMergeSearch = async () => {
-  mergeSearching.value = true
-  try {
-    const data = await api.searchMasterBank(mergeSearchQuery.value, mergeSourceQuestionId.value)
-    mergeSearchResults.value = data.items || []
-  } catch (e) { toast.error('搜索失败：' + getFriendlyError(e)) }
-  finally { mergeSearching.value = false }
-}
-
-const confirmMerge = async (target) => {
-  const shortQ = mergeSourceOriginalQ.value.length > 20 ? mergeSourceOriginalQ.value.slice(0, 20) + '...' : mergeSourceOriginalQ.value
-  const shortT = target.question.length > 20 ? target.question.slice(0, 20) + '...' : target.question
-
-  let targetCat1 = ''
-  let targetCat2 = ''
-
-  // 跨类别合并时让用户选择类别
-  const srcCat = `${mergeSourceCat1.value}/${mergeSourceCat2.value}`
-  const tgtCat = `${target.cat1 || '未分类'}/${target.cat2 || '未分类'}`
-  if (srcCat !== tgtCat && (mergeSourceCat1.value || target.cat1)) {
-    const choice = await showConfirm(
-      `源类别：${srcCat}\n目标类别：${tgtCat}\n\n是否将目标聚类的类别更新为源类别？\n（取消则保留目标类别）`,
-      { title: '选择类别', confirmLabel: '更新为源类别', cancelLabel: '保留目标类别' }
-    )
-    if (choice) {
-      targetCat1 = mergeSourceCat1.value
-      targetCat2 = mergeSourceCat2.value
-    }
-  }
-
-  if (!await showConfirm(`确定将「${shortQ}」合并到「${shortT}」吗？`, { title: '确认合并', variant: 'danger' })) return
-  try {
-    await api.mergeQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value, target.id, targetCat1, targetCat2)
-    toast.success('题目已合并到目标聚类')
-    mergeDialogVisible.value = false
-    fetchTableData()
-  } catch (e) { toast.error('合并失败：' + getFriendlyError(e)) }
-}
-
-const splitAsNew = async () => {
-  const shortQ = mergeSourceOriginalQ.value.length > 30 ? mergeSourceOriginalQ.value.slice(0, 30) + '...' : mergeSourceOriginalQ.value
-  if (!await showConfirm(`确定要将「${shortQ}」从当前聚类中拆出为独立题目吗？`, { title: '拆分为独立题目' })) return
-  try {
-    await api.splitQuestion(mergeSourceQuestionId.value, mergeSourceOriginalQ.value)
-    toast.success('题目已拆分为独立题目')
-    mergeDialogVisible.value = false
-    fetchTableData()
-  } catch (e) { toast.error('拆分失败：' + getFriendlyError(e)) }
-}
-
-const onSettingsClose = () => {
-  showSettings.value = false
-  loadAllData()
-}
-
-const onSettingsSaved = () => {
-  loadAllData()
-}
-
-const onPositionChanged = () => {
-  loadAllData()
-}
-
+// ── Build ──
 const triggerBuildMasterBank = async () => {
-  // 先检查是否有未分析的面经
   try {
     const status = await api.getAnalysisStatus()
     if (status.unanalyzed_count > 0) {
@@ -1835,56 +896,39 @@ const triggerBuildMasterBank = async () => {
         warnMsg += hasContent.slice(0, 5).map(u => `\n  · ${u.company} - ${u.round}`).join('')
         if (hasContent.length > 5) warnMsg += `\n  ...等共 ${hasContent.length} 条`
       }
-      if (noContent.length > 0) {
-        warnMsg += `\n\n无题目内容（${noContent.length} 条），将被跳过`
-      }
+      if (noContent.length > 0) { warnMsg += `\n\n无题目内容（${noContent.length} 条），将被跳过` }
       warnMsg += '\n\n未分析的面经不会被纳入题库。是否继续重建？'
       if (!await showConfirm(warnMsg, { title: '存在未分析的面经', variant: 'warning' })) return
     }
-  } catch (e) {
-    // 检查失败不阻塞重建，仅记录
-    console.warn('检查分析状态失败，继续重建:', e)
-  }
+  } catch (e) { console.warn('检查分析状态失败，继续重建:', e) }
 
   if (!await showConfirm('将基于现有分类重新聚类（不会重新打标），确定继续？', { title: '重新聚类', variant: 'danger' })) return
   isBuilding.value = true
   buildProgress.value = { step: '', current: 0, total: 0, message: '提交重建任务...' }
   try {
-    // Step 1: POST to get job_id
     const res = await api.buildMasterBank()
     const jobId = res?.job_id
     if (!jobId) throw new Error('未获取到任务 ID')
-
     buildProgress.value = { step: '', current: 0, total: 0, message: '连接进度流...' }
-
-    // Step 2: GET SSE stream for real-time progress
     const result = await api.streamJobProgress(jobId, (event) => {
       if (event.type === 'progress') {
         buildProgress.value = { step: event.step || '', current: event.current || 0, total: event.total || 0, message: event.message || '' }
-      } else if (event.type === 'error') {
-        throw new Error(event.message)
-      }
+      } else if (event.type === 'error') { throw new Error(event.message) }
     })
     toast.success(result?.message || '重建完成')
-    fetchTableData()
-    fetchAnalytics()
+    fetchTableData(); fetchAnalytics()
   } catch (e) { toast.error('重建失败：' + getFriendlyError(e)) }
   finally { isBuilding.value = false; buildProgress.value = { step: '', current: 0, total: 0, message: '' } }
 }
-
 const triggerBuildPersonalBank = async () => {
   if (!await showConfirm('将把你的个人题目与公共题库进行聚类合并，匹配到的题目会并入公共题库，确定继续？', { title: '重建个人题库' })) return
   isBuilding.value = true
   buildProgress.value = { step: '', current: 0, total: 0, message: '' }
   try {
     const result = await api.buildPersonalBankSSE((event) => {
-      if (event.type === 'init') {
-        buildProgress.value = { step: 'match', current: 0, total: event.total, message: event.message }
-      } else if (event.type === 'progress') {
-        buildProgress.value = { step: event.step, current: event.current, total: event.total, message: event.message }
-      } else if (event.type === 'error') {
-        throw new Error(event.message)
-      }
+      if (event.type === 'init') { buildProgress.value = { step: 'match', current: 0, total: event.total, message: event.message } }
+      else if (event.type === 'progress') { buildProgress.value = { step: event.step, current: event.current, total: event.total, message: event.message } }
+      else if (event.type === 'error') { throw new Error(event.message) }
     })
     toast.success(`个人题库重建完成，合并 ${result?.merged || 0} 题，保留 ${result?.kept || 0} 题`)
     fetchTableData()
@@ -1892,56 +936,25 @@ const triggerBuildPersonalBank = async () => {
   finally { isBuilding.value = false; buildProgress.value = { step: '', current: 0, total: 0, message: '' } }
 }
 
-// ── Lifecycle ──
+// ── Auth / Lifecycle ──
 const initAuth = async () => {
   const refreshResult = await refreshAuthToken()
   if (refreshResult?.token && refreshResult?.user) {
     setAuthToken(refreshResult.token)
     currentUser.value = refreshResult.user
-    loadAllData()
-    loadPendingCount()
+    loadAllData(); loadPendingCount()
   }
 }
-
-const handleLoginSuccess = (user) => {
-  currentUser.value = user
-  loadAllData()
-  loadPendingCount()
-}
-
-const handleLogout = () => {
-  setAuthToken('')
-  currentUser.value = null
-  fetchTableData()
-  fetchPracticeStats()
-  pendingReviewCount.value = 0
-}
-
-const handleBankModeChanged = (user) => {
-  currentUser.value = user
-  fetchTableData()
-  fetchPracticeStats()
-}
-
+const handleLoginSuccess = (user) => { currentUser.value = user; loadAllData(); loadPendingCount() }
+const handleLogout = () => { setAuthToken(''); currentUser.value = null; fetchTableData(); fetchPracticeStats(); pendingReviewCount.value = 0 }
+const handleBankModeChanged = (user) => { currentUser.value = user; fetchTableData(); fetchPracticeStats() }
 const loadPendingCount = async () => {
   if (!currentUser.value?.is_admin) { pendingReviewCount.value = 0; return }
-  try {
-    const data = await api.fetchPendingQuestions()
-    pendingReviewCount.value = data.total || 0
-  } catch { pendingReviewCount.value = 0 }
+  try { const data = await api.fetchPendingQuestions(); pendingReviewCount.value = data.total || 0 }
+  catch { pendingReviewCount.value = 0 }
 }
-
-setUnauthorizedHandler(() => {
-  showLoginModal.value = true
-})
-
-const loadAllData = () => {
-  fetchTableData()
-  fetchAnalytics()
-  fetchPracticeStats()
-  loadActiveSeason()
-}
-
+setUnauthorizedHandler(() => { showLoginModal.value = true })
+const loadAllData = () => { fetchTableData(); fetchAnalytics(); fetchPracticeStats(); loadActiveSeason() }
 const loadActiveSeason = async () => {
   try {
     const data = await api.fetchPublicProfile()
@@ -1950,9 +963,7 @@ const loadActiveSeason = async () => {
   } catch (e) { console.warn('加载招聘季失败', e) }
 }
 
-onMounted(async () => {
-  await initAuth()
-})
+onMounted(async () => { await initAuth() })
 onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
 
@@ -1971,246 +982,52 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
   50% { margin-left: 40%; width: 50%; }
   100% { margin-left: 85%; width: 15%; }
 }
-.indeterminate-bar {
-  animation: indeterminate-slide 1.8s ease-in-out infinite;
-}
-
+.indeterminate-bar { animation: indeterminate-slide 1.8s ease-in-out infinite; }
 .tab-fade-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
 .tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .tab-fade-enter-from { opacity: 0; transform: translateY(10px); }
 .tab-fade-leave-to { opacity: 0; transform: translateY(-4px); }
-
 .fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateX(-8px); }
 .fade-slide-leave-to { opacity: 0; transform: translateX(-8px); }
-
 .float-pop-enter-active { transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .float-pop-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .float-pop-enter-from { opacity: 0; transform: scale(0.8) translateX(-8px); }
 .float-pop-leave-to { opacity: 0; transform: scale(0.8) translateX(-8px); }
 
-/* ── Sidebar resize handle ── */
-.sidebar-layout {
-  position: relative;
-}
-.sidebar-wrapper {
-  transition: width 0.15s ease;
-}
-.sidebar-wrapper:has(~ .resize-handle--dragging) {
-  transition: none;
-}
-.resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 20;
-  width: 12px;
-  cursor: col-resize;
-  align-items: center;
-  justify-content: center;
-  touch-action: none;
-  user-select: none;
-}
-.resize-handle::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
-  background: var(--color-surface-200);
-}
-:global(.dark) .resize-handle::before {
-  background: var(--color-ink-700);
-}
-.resize-handle::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 3px;
-  margin-left: -1.5px;
-  background: transparent;
-  transition: background 0.15s ease;
-  border-radius: 2px;
-}
-.resize-handle:hover::after,
-.resize-handle--dragging::after {
-  background: var(--color-primary-400);
-  opacity: 0.5;
-}
-.resize-handle__grip {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 3px;
-  border-radius: 6px;
-  background: var(--color-white);
-  border: 1px solid var(--color-surface-200);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  opacity: 0;
-  transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease;
-}
-.resize-handle:hover .resize-handle__grip,
-.resize-handle--dragging .resize-handle__grip {
-  opacity: 1;
-}
-.resize-handle--collapsed .resize-handle__grip {
-  opacity: 1;
-}
-.resize-handle--collapsed:hover .resize-handle__grip,
-.resize-handle--collapsed.resize-handle--dragging .resize-handle__grip {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-  transform: scale(1.05);
-}
-:global(.dark) .resize-handle__grip {
-  background: var(--color-surface-800);
-  border-color: var(--color-ink-600);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-.resize-handle__grip span {
-  display: block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--color-surface-400);
-  transition: background 0.15s ease;
-}
-:global(.dark) .resize-handle__grip span {
-  background: var(--color-ink-500);
-}
-.resize-handle:hover .resize-handle__grip span,
-.resize-handle--dragging .resize-handle__grip span {
-  background: var(--color-primary-500);
-}
+.sidebar-layout { position: relative; }
+.sidebar-wrapper { transition: width 0.15s ease; }
+.sidebar-wrapper:has(~ .resize-handle--dragging) { transition: none; }
+.resize-handle { position: absolute; top: 0; bottom: 0; z-index: 20; width: 12px; cursor: col-resize; align-items: center; justify-content: center; touch-action: none; user-select: none; }
+.resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; margin-left: -0.5px; background: var(--color-surface-200); }
+:global(.dark) .resize-handle::before { background: var(--color-ink-700); }
+.resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; background: transparent; transition: background 0.15s ease; border-radius: 2px; }
+.resize-handle:hover::after, .resize-handle--dragging::after { background: var(--color-primary-400); opacity: 0.5; }
+.resize-handle__grip { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 3px; padding: 6px 3px; border-radius: 6px; background: var(--color-white); border: 1px solid var(--color-surface-200); box-shadow: 0 1px 3px rgba(0,0,0,0.08); opacity: 0; transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease; }
+.resize-handle:hover .resize-handle__grip, .resize-handle--dragging .resize-handle__grip { opacity: 1; }
+.resize-handle--collapsed .resize-handle__grip { opacity: 1; }
+.resize-handle--collapsed:hover .resize-handle__grip, .resize-handle--collapsed.resize-handle--dragging .resize-handle__grip { box-shadow: 0 2px 8px rgba(0,0,0,0.12); transform: scale(1.05); }
+:global(.dark) .resize-handle__grip { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.resize-handle__grip span { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--color-surface-400); transition: background 0.15s ease; }
+:global(.dark) .resize-handle__grip span { background: var(--color-ink-500); }
+.resize-handle:hover .resize-handle__grip span, .resize-handle--dragging .resize-handle__grip span { background: var(--color-primary-500); }
 
-/* ── Sidebar expand button (visible when collapsed) ── */
-.sidebar-expand-btn {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 25;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-white);
-  border: 1px solid var(--color-surface-200);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  color: var(--color-surface-400);
-  cursor: pointer;
-  touch-action: none;
-  user-select: none;
-  transition: color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
-}
-.sidebar-expand-btn:hover {
-  color: var(--color-primary-500);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-  transform: translateY(-50%) scale(1.1);
-}
-.sidebar-expand-btn:active {
-  transform: translateY(-50%) scale(0.95);
-}
-:global(.dark) .sidebar-expand-btn {
-  background: var(--color-surface-800);
-  border-color: var(--color-ink-600);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  color: var(--color-ink-400);
-}
-:global(.dark) .sidebar-expand-btn:hover {
-  color: var(--color-primary-400);
-}
-
-/* expand button fade transition */
+.sidebar-expand-btn { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 25; width: 28px; height: 28px; border-radius: 50%; align-items: center; justify-content: center; background: var(--color-white); border: 1px solid var(--color-surface-200); box-shadow: 0 2px 8px rgba(0,0,0,0.1); color: var(--color-surface-400); cursor: pointer; touch-action: none; user-select: none; transition: color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease; }
+.sidebar-expand-btn:hover { color: var(--color-primary-500); box-shadow: 0 2px 12px rgba(0,0,0,0.15); transform: translateY(-50%) scale(1.1); }
+.sidebar-expand-btn:active { transform: translateY(-50%) scale(0.95); }
+:global(.dark) .sidebar-expand-btn { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: 0 2px 8px rgba(0,0,0,0.3); color: var(--color-ink-400); }
+:global(.dark) .sidebar-expand-btn:hover { color: var(--color-primary-400); }
 .expand-btn-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .expand-btn-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .expand-btn-fade-enter-from { opacity: 0; transform: translateY(-50%) scale(0.8); }
 .expand-btn-fade-leave-to { opacity: 0; transform: translateY(-50%) scale(0.8); }
 
-/* ── Sidebar collapse arrow button ── */
-.resize-handle__collapse-btn {
-  position: absolute;
-  left: -16px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  width: 20px;
-  height: 36px;
-  border-radius: 6px 0 0 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-white);
-  border: 1px solid var(--color-surface-200);
-  border-right: none;
-  box-shadow: -1px 1px 4px rgba(0,0,0,0.06);
-  color: var(--color-surface-400);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease;
-  pointer-events: none;
-}
-.resize-handle:hover .resize-handle__collapse-btn {
-  opacity: 0.7;
-  pointer-events: auto;
-}
-.resize-handle__collapse-btn:hover {
-  opacity: 1 !important;
-  color: var(--color-primary-500);
-  background: var(--color-primary-50);
-}
-:global(.dark) .resize-handle__collapse-btn {
-  background: var(--color-surface-800);
-  border-color: var(--color-ink-600);
-  box-shadow: -1px 1px 4px rgba(0,0,0,0.2);
-  color: var(--color-ink-400);
-}
-:global(.dark) .resize-handle__collapse-btn:hover {
-  color: var(--color-primary-400);
-  background: var(--color-primary-900/30);
-}
+.resize-handle__collapse-btn { position: absolute; left: -16px; top: 50%; transform: translateY(-50%); z-index: 2; width: 20px; height: 36px; border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center; background: var(--color-white); border: 1px solid var(--color-surface-200); border-right: none; box-shadow: -1px 1px 4px rgba(0,0,0,0.06); color: var(--color-surface-400); cursor: pointer; opacity: 0; transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease; pointer-events: none; }
+.resize-handle:hover .resize-handle__collapse-btn { opacity: 0.7; pointer-events: auto; }
+.resize-handle__collapse-btn:hover { opacity: 1 !important; color: var(--color-primary-500); background: var(--color-primary-50); }
+:global(.dark) .resize-handle__collapse-btn { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: -1px 1px 4px rgba(0,0,0,0.2); color: var(--color-ink-400); }
+:global(.dark) .resize-handle__collapse-btn:hover { color: var(--color-primary-400); background: var(--color-primary-900/30); }
 
-/* 滚动恢复高亮动画 */
-:global(.scroll-restore-highlight) {
-  animation: scroll-glow 2.2s ease-out forwards;
-  border-radius: 16px;
-}
-@keyframes scroll-glow {
-  0% {
-    box-shadow: 0 0 0 3px var(--color-primary-400), 0 0 20px var(--color-primary-400/40);
-    background-color: var(--color-primary-50);
-  }
-  40% {
-    box-shadow: 0 0 0 3px var(--color-primary-300), 0 0 12px var(--color-primary-300/25);
-    background-color: var(--color-primary-50/60);
-  }
-  100% {
-    box-shadow: none;
-    background-color: transparent;
-  }
-}
-:global(.dark) :global(.scroll-restore-highlight) {
-  animation: scroll-glow-dark 2.2s ease-out forwards;
-}
-@keyframes scroll-glow-dark {
-  0% {
-    box-shadow: 0 0 0 3px var(--color-primary-500), 0 0 20px var(--color-primary-500/30);
-    background-color: var(--color-primary-900/20);
-  }
-  40% {
-    box-shadow: 0 0 0 3px var(--color-primary-600), 0 0 12px var(--color-primary-600/15);
-    background-color: var(--color-primary-900/10);
-  }
-  100% {
-    box-shadow: none;
-    background-color: transparent;
-  }
-}
+:global(.scroll-restore-highlight) { animation: scroll-glow 2.2s ease-out forwards; }
 </style>

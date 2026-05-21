@@ -329,10 +329,10 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { renderSafeMarkdown } from '../utils/markdown.js'
-import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '../api/index.js'
-import { sanitizeAgainstInjection, validateNumber } from '../utils/validate.js'
-import { useToast, useConfirm } from '../composables/useNotification.js'
+import { renderSafeMarkdown } from '@/utils/markdown.js'
+import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '@/api/index.js'
+import { sanitizeAgainstInjection, validateNumber } from '@/utils/validate.js'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()

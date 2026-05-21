@@ -57,7 +57,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import RoundedSelect from './RoundedSelect.vue'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
 
 const props = defineProps({
   currentPage: { type: Number, required: true },

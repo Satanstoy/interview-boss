@@ -151,10 +151,20 @@ interview-boss/
 │   └── .env.example       # 环境变量模板
 ├── frontend/
 │   ├── src/
-│   │   ├── components/    # 20 个 Vue SFC 组件（异步懒加载）
-│   │   ├── composables/   # 组合式函数（useSelection, useNotification, useTheme）
-│   │   ├── api/           # API 封装
-│   │   └── utils/         # HTTP 客户端（JWT + 自动刷新）、Markdown 渲染、校验
+│   │   ├── assets/
+│   │   │   └── styles/      # 样式：variables.css、reset.css、global.css
+│   │   ├── components/
+│   │   │   ├── common/      # 通用 UI 组件（DataTable, RoundedSelect, TabBar 等）
+│   │   │   └── business/    # 业务组件（MasterBankList, PracticeMode, QuestionCard 等）
+│   │   ├── composables/     # 组合式函数（useSelection, useNotification, useTheme, usePractice, useSidebar, useHighlightNav, useQuestionOps, useMergeDialog, useBatchActions）
+│   │   ├── constants/       # 应用常量与枚举（config.js, enums.js）
+│   │   ├── layouts/         # 布局组件（DefaultLayout, BlankLayout）
+│   │   ├── router/          # 路由配置占位（当前使用 Tab 导航）
+│   │   ├── services/        # API 服务层（按领域拆分：authApi, dataApi, masterBankApi 等）+ HTTP 客户端
+│   │   ├── stores/          # Pinia store 占位（当前状态在 App.vue）
+│   │   ├── api/             # API 统一入口（从 services/ re-export，兼容旧 import）
+│   │   ├── utils/           # 工具函数（Markdown 渲染、校验）
+│   │   └── views/           # 页面视图占位（当前使用 App.vue 内 Tab 切换）
 │   └── public/            # 静态资源（favicon）
 ├── nginx/
 │   └── nginx.conf         # Docker Nginx 配置（API 代理 + SPA + 安全头）

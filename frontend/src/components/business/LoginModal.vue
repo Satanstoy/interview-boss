@@ -211,9 +211,9 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { authLogin, authRegister, authLoginWithEmail, authRegisterWithEmail, sendVerifyCode } from '../api/index.js'
-import { setAuthToken } from '../utils/http.js'
-import { validateUsername, validatePassword } from '../utils/validate.js'
+import { authLogin, authRegister, authLoginWithEmail, authRegisterWithEmail, sendVerifyCode } from '@/api/index.js'
+import { setAuthToken } from '@/services/http.js'
+import { validateUsername, validatePassword } from '@/utils/validate.js'
 
 const props = defineProps({
   visible: Boolean,

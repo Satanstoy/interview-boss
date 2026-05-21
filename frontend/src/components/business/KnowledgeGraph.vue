@@ -33,9 +33,9 @@ import { TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
 echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
-import { fetchKnowledgeGraph } from '../api/index.js'
-import { useToast } from '../composables/useNotification.js'
-import { useTheme } from '../composables/useTheme.js'
+import { fetchKnowledgeGraph } from '@/api/index.js'
+import { useToast } from '@/composables/useNotification.js'
+import { useTheme } from '@/composables/useTheme.js'
 
 const toast = useToast()
 const emit = defineEmits(['filter-by-tag', 'filter-by-category'])

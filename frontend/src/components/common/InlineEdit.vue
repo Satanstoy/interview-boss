@@ -37,8 +37,8 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { validateTextField } from '../utils/validate.js'
-import RoundedSelect from './RoundedSelect.vue'
+import { validateTextField } from '@/utils/validate.js'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
 
 const props = defineProps({
   row: { type: Object, required: true },

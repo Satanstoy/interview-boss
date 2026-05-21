@@ -203,10 +203,10 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { submitDataSSE } from '../api/index.js'
-import RoundedSelect from './RoundedSelect.vue'
-import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '../utils/validate.js'
-import { getFriendlyError } from '../utils/http.js'
+import { submitDataSSE } from '@/api/index.js'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '@/utils/validate.js'
+import { getFriendlyError } from '@/services/http.js'
 
 const emit = defineEmits(['submitted'])
 

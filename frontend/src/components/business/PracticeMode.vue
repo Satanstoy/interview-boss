@@ -108,7 +108,7 @@
               <div v-for="(oq, oidx) in currentQ.original_questions" :key="oidx" class="mb-2 last:mb-0">
                 <p class="text-xs text-ink-700 dark:text-ink-300 leading-relaxed">{{ oq.question || oq }}</p>
                 <div v-if="oq.sources && oq.sources.length" class="flex flex-wrap gap-1 mt-1">
-                  <span v-for="(src, sidx) in oq.sources" :key="sidx" @click="emit('navigate-to-interview', src)"
+                  <span v-for="(src, sidx) in oq.sources" :key="sidx" @click="emit('navigate-to-interview', { source: src, questionId: currentQ.id })"
                     class="text-[10px] bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 px-1.5 py-0.5 rounded cursor-pointer hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors">
                     {{ src.company || '未知' }} | {{ src.round || '未知' }}
                   </span>
@@ -123,7 +123,7 @@
               </h4>
               <div class="flex flex-wrap gap-1.5 text-[11px]">
                 <span v-for="(src, idx) in currentQ.sources" :key="idx" class="bg-white dark:bg-ink-800 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400 px-2 py-1 rounded-lg inline-flex items-center gap-1">
-                  <span @click="emit('navigate-to-interview', src)" class="cursor-pointer hover:underline">
+                  <span @click="emit('navigate-to-interview', { source: src, questionId: currentQ.id })" class="cursor-pointer hover:underline">
                     {{ src.company === '未提供' ? '未知' : src.company }}
                     <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
                     {{ src.round === '未提供' ? '未知轮次' : src.round }}
@@ -175,7 +175,7 @@
           <div v-else-if="leftTab === 'history'" class="p-5">
             <div v-if="qState._historyLoading" class="text-center py-8 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
             <div v-else-if="qState._history && qState._history.length > 0" class="space-y-2">
-              <div v-for="(h, hIdx) in qState._history" :key="h.id" class="border border-surface-200 dark:border-ink-600 rounded-xl overflow-hidden">
+              <div v-for="(h, hIdx) in qState._history" :key="h.id" v-auto-animate class="border border-surface-200 dark:border-ink-600 rounded-xl overflow-hidden">
                 <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-50 dark:hover:bg-ink-800 transition" @click="h._expanded = !h._expanded">
                   <span class="text-[10px] text-ink-400 dark:text-ink-500 w-6 text-right shrink-0">#{{ qState._history.length - hIdx }}</span>
                   <span class="text-xs font-bold" :class="scoreTextColor(h.score)">{{ h.score }}分</span>
@@ -251,7 +251,7 @@
         </div>
 
         <!-- Console panel (evaluation results) -->
-        <div v-if="qState._evaluation" class="border-t border-surface-200 dark:border-ink-600 shrink-0 flex flex-col" :style="consoleExpanded ? { maxHeight: '45%' } : {}">
+        <div v-if="qState._evaluation" v-auto-animate class="border-t border-surface-200 dark:border-ink-600 shrink-0 flex flex-col" :style="consoleExpanded ? { maxHeight: '45%' } : {}">
           <!-- Console header -->
           <button @click="consoleExpanded = !consoleExpanded" class="flex items-center justify-between px-5 py-2.5 bg-surface-50 dark:bg-surface-900 hover:bg-surface-100 dark:hover:bg-ink-800 transition shrink-0">
             <div class="flex items-center gap-3">
@@ -325,8 +325,8 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { leftTabs, dimLabel, isFailedAnswer, renderMarkdown, scoreColor, scoreTextColor, resetQState, generateAnswerForQuestion, saveAnswerForQuestion, evaluateAnswerForQuestion, loadHistory } from '../composables/usePractice.js'
-import { useToast } from '../composables/useNotification.js'
+import { leftTabs, dimLabel, isFailedAnswer, renderMarkdown, scoreColor, scoreTextColor, resetQState, generateAnswerForQuestion, saveAnswerForQuestion, evaluateAnswerForQuestion, loadHistory } from '@/composables/usePractice.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const toast = useToast()
 

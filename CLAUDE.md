@@ -62,11 +62,23 @@ uv add <package>           # 添加新依赖
 
 ### 前端 (`frontend/src/`)
 
-- **`App.vue`** — 单体编排组件（~750 行），持有所有状态（数据、认证、筛选、选中项）。子组件通过 props 接收数据、emit 触发事件。
-- **`api/index.js`** — 类型化 API 客户端封装。
-- **`utils/http.js`** — 自定义 Fetch 封装：自动注入 JWT、401 触发 Token 刷新并重试、5xx/网络错误重试、超时、SSE 流式、请求取消。
-- **`composables/`** — `useSelection`（多选复选框）、`useNotification`（Toast + 确认对话框）、`useTheme`（主题切换）。
-- **`components/`** — 20 个 Vue SFC 组件，使用 `<script setup>` Composition API 风格。
+采用标准目录结构范式，按职责分目录组织：
+
+- **`App.vue`** — 核心编排组件（~1033 行），持有数据、认证、筛选状态。逻辑已按领域抽取到 composables 中，模板保留 Tab 切换和组件编排。
+- **`services/`** — API 服务层，按领域拆分：`authApi.js`（认证）、`dataApi.js`（数据）、`masterBankApi.js`（题库）、`interviewApi.js`（面试）、`analyticsApi.js`（分析）、`profileApi.js`（用户配置）、`practiceApi.js`（练习）。`http.js` 是 HTTP 客户端（JWT + 自动刷新 + SSE）。
+- **`api/index.js`** — 统一入口，从 `services/` re-export 所有函数。保留兼容旧 import 路径。
+- **`utils/`** — 纯工具函数：`markdown.js`（Markdown 渲染）、`validate.js`（校验）。原 `http.js` 已移至 `services/`，保留 re-export。
+- **`composables/`** — 领域逻辑复用：`useSelection`（多选复选框）、`useNotification`（Toast + 确认对话框）、`useTheme`（主题切换）、`usePractice`（刷题逻辑复用）、`useSidebar`（侧边栏拖拽/折叠）、`useHighlightNav`（面经高亮导航）、`useQuestionOps`（题目 CRUD 操作）、`useMergeDialog`（合并对话框）、`useBatchActions`（批量操作定义）。
+- **`components/common/`** — 通用 UI 组件，无业务依赖：`DataTable`、`RoundedSelect`、`TabBar`、`BatchActionPanel`、`PaginationBar`、`InlineEdit`、`ConfirmDialog`。
+- **`components/business/`** — 业务组件：`MasterBankList`、`QuestionCard`、`PracticeMode`、`PracticePanel`、`MockInterview`、`KnowledgeGraph`、`AnalyticsSidebar`、`ProfilePanel`、`AdminReview`、`StagingPanel`、`SettingsPanel`、`LoginModal`、`LoginPage`、`UserMenu`、`SearchFilterBar`。
+- **`assets/styles/`** — 样式文件：`variables.css`（CSS 变量）、`reset.css`（基础重置）、`global.css`（全局组件/工具类 + Tailwind 指令）。
+- **`layouts/`** — 布局组件：`DefaultLayout.vue`、`BlankLayout.vue`（slot 布局壳）。
+- **`constants/`** — 应用常量：`config.js`（配置常量）、`enums.js`（枚举定义）。
+- **`router/`** — 路由配置占位。当前使用 TabBar 组件在 App.vue 内切换视图，未使用 Vue Router。
+- **`stores/`** — Pinia store 占位。当前所有状态在 App.vue 中管理。
+- **`views/`** — 页面视图占位。当前使用 App.vue 内 Tab 切换。
+
+**路径别名：** `@/` 指向 `src/` 目录，配置在 `vite.config.js` 中。所有组件统一使用 `@/` 绝对路径导入跨模块依赖。
 
 ### 认证流程
 
@@ -78,6 +90,7 @@ Access Token 存内存（不存 localStorage）。Refresh Token 存 HttpOnly Coo
 
 ## Key Patterns
 
+- **组件分类：** `components/common/` 放通用 UI 组件（无业务依赖），`components/business/` 放业务组件。新增组件时根据是否有 API 调用或业务逻辑依赖来决定放哪个目录。
 - **题目去重：** LLM 聚类方案，cat2 预分组 + 两遍聚类 + 验证步骤。
 - **批量操作：** SSE 流式推送进度更新（答案生成、题库重建）。
 - **管理员系统：** `users.is_admin` 标记；管理员审核上传题目流程。

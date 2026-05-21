@@ -1,0 +1,30 @@
+/* ── Color tokens (RGB channels for Tailwind opacity support) ── */
+:root {
+  /* Light mode: warm amber */
+  --c-primary-50: 254 249 238;
+  --c-primary-100: 252 240 211;
+  --c-primary-200: 248 221 165;
+  --c-primary-300: 243 196 109;
+  --c-primary-400: 237 169 64;
+  --c-primary-500: 232 145 30;
+  --c-primary-600: 212 119 20;
+  --c-primary-700: 176 90 19;
+  --c-primary-800: 142 71 22;
+  --c-primary-900: 116 59 21;
+  --c-glow: 232 145 30;
+}
+
+.dark {
+  /* Dark mode: muted dusty rose — warm but not garish */
+  --c-primary-50: 253 242 240;
+  --c-primary-100: 249 221 216;
+  --c-primary-200: 240 184 174;
+  --c-primary-300: 224 144 128;
+  --c-primary-400: 201 122 108;
+  --c-primary-500: 184 104 88;
+  --c-primary-600: 160 85 72;
+  --c-primary-700: 133 69 60;
+  --c-primary-800: 110 58 51;
+  --c-primary-900: 90 48 44;
+  --c-glow: 184 104 88;
+}

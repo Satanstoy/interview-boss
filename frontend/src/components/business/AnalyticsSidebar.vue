@@ -194,7 +194,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
 echarts.use([PieChart, TooltipComponent, CanvasRenderer])
-import { useTheme } from '../composables/useTheme.js'
+import { useTheme } from '@/composables/useTheme.js'
 
 const { isDark } = useTheme()
 

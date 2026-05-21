@@ -1,88 +1,9 @@
+@import './variables.css';
+@import './reset.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* ── Color tokens (RGB channels for Tailwind opacity support) ── */
-:root {
-  /* Light mode: warm amber */
-  --c-primary-50: 254 249 238;
-  --c-primary-100: 252 240 211;
-  --c-primary-200: 248 221 165;
-  --c-primary-300: 243 196 109;
-  --c-primary-400: 237 169 64;
-  --c-primary-500: 232 145 30;
-  --c-primary-600: 212 119 20;
-  --c-primary-700: 176 90 19;
-  --c-primary-800: 142 71 22;
-  --c-primary-900: 116 59 21;
-  --c-glow: 232 145 30;
-}
-
-.dark {
-  /* Dark mode: muted dusty rose — warm but not garish */
-  --c-primary-50: 253 242 240;
-  --c-primary-100: 249 221 216;
-  --c-primary-200: 240 184 174;
-  --c-primary-300: 224 144 128;
-  --c-primary-400: 201 122 108;
-  --c-primary-500: 184 104 88;
-  --c-primary-600: 160 85 72;
-  --c-primary-700: 133 69 60;
-  --c-primary-800: 110 58 51;
-  --c-primary-900: 90 48 44;
-  --c-glow: 184 104 88;
-}
-
-@layer base {
-  html {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    scroll-behavior: smooth;
-  }
-
-  body {
-    @apply bg-surface-50 text-ink-800 dark:bg-surface-900 dark:text-ink-200;
-    font-feature-settings: 'cv11', 'ss01';
-  }
-
-  /* Global focus ring */
-  *:focus-visible {
-    @apply outline-none ring-2 ring-primary-400 ring-offset-2 dark:ring-offset-surface-900;
-  }
-
-  /* Global selection */
-  ::selection {
-    @apply bg-primary-100 text-primary-900;
-  }
-  .dark ::selection {
-    background-color: rgb(var(--c-primary-900) / 0.4);
-    color: rgb(var(--c-primary-100));
-  }
-
-  /* Dark mode: force all form elements to dark background */
-  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-  .dark textarea,
-  .dark select {
-    background-color: #252220 !important;
-  }
-  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
-  .dark textarea:focus,
-  .dark select:focus {
-    background-color: #302b28 !important;
-  }
-
-  /* Dark mode: checkbox & radio styling */
-  .dark input[type="checkbox"],
-  .dark input[type="radio"] {
-    background-color: #3f3a36 !important;
-    border-color: #574f49 !important;
-  }
-  .dark input[type="checkbox"]:checked,
-  .dark input[type="radio"]:checked {
-    background-color: rgb(var(--c-primary-600)) !important;
-    border-color: rgb(var(--c-primary-600)) !important;
-  }
-}
 
 @layer components {
   /* Skeleton loader */

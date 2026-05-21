@@ -89,8 +89,8 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { fetchPendingQuestions, approveQuestion, rejectQuestion } from '../api/index.js'
-import { useToast } from '../composables/useNotification.js'
+import { fetchPendingQuestions, approveQuestion, rejectQuestion } from '@/api/index.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close', 'reviewed'])

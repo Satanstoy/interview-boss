@@ -91,8 +91,8 @@
 
 <script setup>
 import { ref } from 'vue'
-import { authUpdateBankMode, authLogout } from '../api/index.js'
-import { setAuthToken } from '../utils/http.js'
+import { authUpdateBankMode, authLogout } from '@/api/index.js'
+import { setAuthToken } from '@/services/http.js'
 
 const props = defineProps({
   user: Object,

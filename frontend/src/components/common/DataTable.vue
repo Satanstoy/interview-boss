@@ -71,8 +71,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import BatchActionPanel from './BatchActionPanel.vue'
-import PaginationBar from './PaginationBar.vue'
+import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
+import PaginationBar from '@/components/common/PaginationBar.vue'
 
 const props = defineProps({
   columns: { type: Array, required: true },

@@ -379,10 +379,10 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '../api/index.js'
-import RoundedSelect from './RoundedSelect.vue'
-import { validateSeason, validateBaseUrl } from '../utils/validate.js'
-import { useToast } from '../composables/useNotification.js'
+import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '@/api/index.js'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { validateSeason, validateBaseUrl } from '@/utils/validate.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const toast = useToast()
 

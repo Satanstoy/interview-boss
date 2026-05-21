@@ -1,0 +1,50 @@
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-50 text-ink-800 dark:bg-surface-900 dark:text-ink-200;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Global focus ring */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary-400 ring-offset-2 dark:ring-offset-surface-900;
+  }
+
+  /* Global selection */
+  ::selection {
+    @apply bg-primary-100 text-primary-900;
+  }
+  .dark ::selection {
+    background-color: rgb(var(--c-primary-900) / 0.4);
+    color: rgb(var(--c-primary-100));
+  }
+
+  /* Dark mode: force all form elements to dark background */
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  .dark textarea,
+  .dark select {
+    background-color: #252220 !important;
+  }
+  .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
+  .dark textarea:focus,
+  .dark select:focus {
+    background-color: #302b28 !important;
+  }
+
+  /* Dark mode: checkbox & radio styling */
+  .dark input[type="checkbox"],
+  .dark input[type="radio"] {
+    background-color: #3f3a36 !important;
+    border-color: #574f49 !important;
+  }
+  .dark input[type="checkbox"]:checked,
+  .dark input[type="radio"]:checked {
+    background-color: rgb(var(--c-primary-600)) !important;
+    border-color: rgb(var(--c-primary-600)) !important;
+  }
+}

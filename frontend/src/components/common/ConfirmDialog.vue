@@ -43,7 +43,7 @@
 
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue'
-import { useConfirm } from '../composables/useNotification.js'
+import { useConfirm } from '@/composables/useNotification.js'
 
 const { confirmState, handleConfirm, handleCancel } = useConfirm()
 const dialogEl = ref(null)

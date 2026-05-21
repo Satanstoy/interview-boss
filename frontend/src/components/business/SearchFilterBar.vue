@@ -34,7 +34,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import RoundedSelect from './RoundedSelect.vue'
+import RoundedSelect from '@/components/common/RoundedSelect.vue'
 
 const difficultyOptions = [
   { value: '', label: '全部难度' },
