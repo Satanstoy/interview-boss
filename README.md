@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" alt="InterviewBoss Logo" width="400" />
+<img src="docs/logo.png" alt="InterviewBoss Logo" width="400" />
 
 # InterviewBoss
 
@@ -138,43 +138,37 @@ API 地址、模型名称、超时时间、相似度阈值等均可通过界面�
 
 ```
 interview-boss/
-├── backend/
+├── backend/                 # Python FastAPI 后端
 │   ├── app/
-│   │   ├── core/          # 认证、配置热更新、LLM 提示词模板、日志
-│   │   ├── routers/       # 8 个 API 路由模块（auth, submit, data, master_bank, interview, analytics, profile, health）
-│   │   ├── services/      # LLM 调用、聚类去重、工具函数
-│   │   ├── db/            # SQLite 连接管理、CRUD、自动迁移
-│   │   ├── middleware/     # 请求日志中间件
-│   │   ├── models/        # Pydantic 请求/响应模型
-│   │   └── worker.py      # ARQ 异步任务定义（聚类任务）
-│   ├── data/              # SQLite 数据库文件（自动备份）
-│   └── .env.example       # 环境变量模板
-├── frontend/
+│   │   ├── core/            # 认证、配置热更新、LLM 提示词模板、日志
+│   │   ├── routers/         # API 路由模块
+│   │   ├── services/        # LLM 调用、聚类去重、工具函数
+│   │   ├── agents/          # LangGraph 状态机（submit/build/batch_generate）
+│   │   ├── db/              # SQLite 连接管理、CRUD、自动迁移
+│   │   ├── middleware/      # 请求日志中间件
+│   │   └── models/          # Pydantic 请求/响应模型
+│   ├── data/                # SQLite 数据库文件（自动备份）
+│   └── tests/               # 后端测试
+├── frontend/                # Vue 3 + Vite 前端
 │   ├── src/
-│   │   ├── assets/
-│   │   │   └── styles/      # 样式：variables.css、reset.css、global.css
 │   │   ├── components/
-│   │   │   ├── common/      # 通用 UI 组件（DataTable, RoundedSelect, TabBar 等）
-│   │   │   └── business/    # 业务组件（MasterBankList, PracticeMode, QuestionCard 等）
-│   │   ├── composables/     # 组合式函数（useSelection, useNotification, useTheme, usePractice, useSidebar, useHighlightNav, useQuestionOps, useMergeDialog, useBatchActions）
-│   │   ├── constants/       # 应用常量与枚举（config.js, enums.js）
-│   │   ├── layouts/         # 布局组件（DefaultLayout, BlankLayout）
-│   │   ├── router/          # 路由配置占位（当前使用 Tab 导航）
-│   │   ├── services/        # API 服务层（按领域拆分：authApi, dataApi, masterBankApi 等）+ HTTP 客户端
-│   │   ├── stores/          # Pinia store 占位（当前状态在 App.vue）
-│   │   ├── api/             # API 统一入口（从 services/ re-export，兼容旧 import）
-│   │   ├── utils/           # 工具函数（Markdown 渲染、校验）
-│   │   └── views/           # 页面视图占位（当前使用 App.vue 内 Tab 切换）
-│   └── public/            # 静态资源（favicon）
-├── nginx/
-│   └── nginx.conf         # Docker Nginx 配置（API 代理 + SPA + 安全头）
-├── Dockerfile             # 多阶段构建（前端 + 后端）
-├── docker-compose.yml     # 容器编排（Redis + Backend + Worker + Nginx）
-├── docker-deploy.sh       # Docker 部署脚本
-├── pyproject.toml         # Python 依赖定义
-├── deploy.sh              # systemd 部署脚本
-├── deploy-frontend.sh     # 前端部署脚本
-├── nginx-hardened.conf    # Nginx 安全配置参考
+│   │   │   ├── common/      # 通用 UI 组件（DataTable, TabBar 等）
+│   │   │   └── business/    # 业务组件（MasterBankList, PracticeMode 等）
+│   │   ├── composables/     # 组合式函数
+│   │   ├── services/        # API 服务层 + HTTP 客户端
+│   │   └── ...
+│   └── tests/               # 前端测试（Playwright）
+├── deploy/                  # 部署配置
+│   ├── deploy.sh            # systemd 部署脚本
+│   ├── docker-deploy.sh     # Docker 部署脚本
+│   ├── .dockerignore        # Docker 构建排除规则
+│   ├── nginx-hardened.conf  # Nginx 安全配置参考
+│   └── interview-boss-worker.service  # systemd 服务文件
+├── docs/                    # 文档（bug-reports、tdd-reports）
+├── nginx/                   # Docker Nginx 配置（API 代理 + SPA + 安全头）
+├── Dockerfile               # 多阶段构建（前端 + 后端）
+├── docker-compose.yml       # 容器编排（Redis + Backend + Worker + Nginx）
+├── pyproject.toml           # Python 依赖定义
 └── README.md
 ```
 
@@ -327,7 +321,7 @@ cp backend/.env.example backend/.env
 # 编辑 backend/.env，填入 OPENAI_API_KEY、ADMIN_PASSWORD 等必填项
 
 # 2. 构建并启动所有服务
-sudo ./docker-deploy.sh all
+sudo ./deploy/docker-deploy.sh all
 ```
 
 首次构建约 3-5 分钟（含前端构建 + Python 依赖安装），后续更新走缓存很快。
@@ -335,13 +329,13 @@ sudo ./docker-deploy.sh all
 #### 常用运维命令
 
 ```bash
-sudo ./docker-deploy.sh           # 默认等同于 all（构建 + 启动 + 状态检查）
-sudo ./docker-deploy.sh status    # 查看服务状态和资源使用
-sudo ./docker-deploy.sh logs      # 查看日志（可指定: logs backend）
-sudo ./docker-deploy.sh update    # 代码更新后重新部署
-sudo ./docker-deploy.sh restart   # 重启所有服务
-sudo ./docker-deploy.sh backup    # 备份数据库和 Redis 数据
-sudo ./docker-deploy.sh down      # 停止所有服务
+sudo ./deploy/docker-deploy.sh           # 默认等同于 all（构建 + 启动 + 状态检查）
+sudo ./deploy/docker-deploy.sh status    # 查看服务状态和资源使用
+sudo ./deploy/docker-deploy.sh logs      # 查看日志（可指定: logs backend）
+sudo ./deploy/docker-deploy.sh update    # 代码更新后重新部署
+sudo ./deploy/docker-deploy.sh restart   # 重启所有服务
+sudo ./deploy/docker-deploy.sh backup    # 备份数据库和 Redis 数据
+sudo ./deploy/docker-deploy.sh down      # 停止所有服务
 ```
 
 #### 仅更新前端
@@ -370,7 +364,7 @@ sudo systemctl stop interview-boss
 sudo systemctl disable interview-boss
 
 # 构建并启动 Docker 服务
-sudo ./docker-deploy.sh all
+sudo ./deploy/docker-deploy.sh all
 ```
 
 #### 端口冲突排查
