@@ -81,3 +81,11 @@ Vue 组件规范、composables 规范和测试规则见 `.claude/rules/`：
 - `vue-components.md` — 编辑 Vue 文件时自动加载
 - `vue-composables.md` — 编辑 composables 文件时自动加载
 - `test-files.md` — 编辑测试文件时自动加载
+
+## 修改铁律
+
+1. **修改后必须更新 CLAUDE.md** — 涉及文件增删、职责变更时，更新对应目录的 CLAUDE.md
+2. **一组修改必须 commit** — 逻辑相关修改完成后立即提交
+3. **新模块必须更新 README** — 新增功能后更新 README.md
+
+子目录 CLAUDE.md 位置：`src/components/business/`、`src/components/common/`、`src/services/`、`src/composables/`、`src/utils/`、`tests/`。

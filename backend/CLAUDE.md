@@ -119,3 +119,11 @@ Routers → Services → Core/DB → (external)
 Python 编码规范和测试规则见 `.claude/rules/`：
 - `python-backend.md` — 编辑 Python 文件时自动加载
 - `test-files.md` — 编辑测试文件时自动加载
+
+## 修改铁律
+
+1. **修改后必须更新 CLAUDE.md** — 涉及文件增删、职责变更时，更新对应目录的 CLAUDE.md
+2. **一组修改必须 commit** — 逻辑相关修改完成后立即提交
+3. **新模块必须更新 README** — 新增功能后更新 README.md
+
+子目录 CLAUDE.md 位置：`app/db/`、`app/services/`、`app/core/`、`app/agents/` 及其子目录、`app/routers/profile_pkg/`、`app/routers/questions_pkg/`、`tests/` 及其子目录。

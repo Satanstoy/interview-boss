@@ -55,6 +55,37 @@ Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文
 - **禁止**：根目录装包、跨包引用源码、`--force`/`--no-verify`
 
+## 修改铁律（强制遵守）
+
+1. **修改后必须更新 CLAUDE.md** — 任何涉及文件增删、职责变更、架构调整的修改，必须更新对应目录的 CLAUDE.md。不更新 = 任务未完成。
+2. **一组修改必须 commit** — 每次会话中完成一组逻辑相关的修改后，必须立即 `git commit`。禁止积攒大量未提交修改。
+3. **新模块必须更新 README** — 新增功能模块或 API 端点后，必须更新 README.md 和对应目录的 CLAUDE.md。
+
+## 子目录 CLAUDE.md
+
+每个有一定规模的目录都有自己的 CLAUDE.md，CC 会按目录层级自动加载。修改代码时先读对应目录的 CLAUDE.md：
+
+```
+backend/app/db/CLAUDE.md              ← 数据库层规范
+backend/app/services/CLAUDE.md        ← 业务逻辑层规范
+backend/app/core/CLAUDE.md            ← 配置认证层规范
+backend/app/agents/CLAUDE.md          ← Agent 总览
+backend/app/agents/submit/CLAUDE.md   ← Submit agent 流程
+backend/app/agents/build/CLAUDE.md    ← Build agent 流程
+backend/app/agents/chat/CLAUDE.md     ← Chat agent 流程
+backend/app/agents/shared/CLAUDE.md   ← 共享模块
+backend/app/routers/profile_pkg/CLAUDE.md  ← 配置子路由
+backend/app/routers/questions_pkg/CLAUDE.md ← 题库子路由
+backend/tests/CLAUDE.md               ← 测试规范
+backend/tests/*/CLAUDE.md             ← 各测试子目录
+frontend/src/components/business/CLAUDE.md ← 业务组件
+frontend/src/components/common/CLAUDE.md   ← 通用组件
+frontend/src/services/CLAUDE.md       ← API 服务层
+frontend/src/composables/CLAUDE.md    ← composables
+frontend/src/utils/CLAUDE.md          ← 工具函数
+frontend/tests/CLAUDE.md              ← 前端测试
+```
+
 ## 测试基础设施
 
 - **后端**：`conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures，开箱即用
@@ -89,11 +120,12 @@ Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 ## 完成阶段后
 
 1. `uv run pytest backend/tests/ -q` → `cd frontend && npm run build` → `./deploy/docker-deploy.sh update`
-2. 涉及功能/API/结构变更 → 最小化更新 README.md
-3. **创建 docs 记录**（关键修改：README + docs；小修改：仅 docs）
+2. **更新 CLAUDE.md** — 修改了哪个目录的代码，就更新哪个目录的 CLAUDE.md（铁律）
+3. 涉及功能/API/结构变更 → 最小化更新 README.md
+4. **创建 docs 记录**（关键修改：README + docs；小修改：仅 docs）
    - `docs/bug-reports/YYYY-MM-DD-描述.md` / `docs/tdd-reports/YYYY-MM-DD-描述.md`
    - 内容：问题描述、根因分析、修复方案、测试验证、影响范围
-4. `git add` + `git commit` → `git push`（让用户输入凭据）
+5. `git add` + `git commit` → `git push`（让用户输入凭据）
 
 ## 生产环境（Docker Compose）
 
