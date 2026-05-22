@@ -10,7 +10,9 @@ from slowapi.errors import RateLimitExceeded
 from app.core.logging_config import logger
 from app.db.connection import init_db
 from app.middleware.request_log import log_requests
-from app.routers import health, submit, data, questions, answers, practice, admin_review, bank_build, interview, analytics, profile, auth
+from app.routers import health, submit, data, questions, answers, practice, admin_review, bank_build, interview, analytics, profile, auth, chat
+from app.routers.profile_pkg import router as profile_pkg_router
+from app.routers.questions_pkg import router as questions_pkg_router
 from app.core.config import _reload_from_db
 from app.core.auth import cleanup_expired_refresh_tokens
 
@@ -137,6 +139,7 @@ app.include_router(auth.router)
 app.include_router(submit.router)
 app.include_router(data.router)
 app.include_router(questions.router)
+app.include_router(questions_pkg_router)
 app.include_router(answers.router)
 app.include_router(practice.router)
 app.include_router(admin_review.router)
@@ -144,6 +147,8 @@ app.include_router(bank_build.router)
 app.include_router(interview.router)
 app.include_router(analytics.router)
 app.include_router(profile.router)
+app.include_router(profile_pkg_router)
+app.include_router(chat.router)
 
 
 @app.on_event("startup")

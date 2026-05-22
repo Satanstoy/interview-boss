@@ -73,7 +73,7 @@ async def extract_node(state: SubmitState) -> dict:
         # 过滤黑名单
         if doc_type == "interview":
             q_list = data.get("具体题目清单", [])
-            q_list = [q for q in q_list if q.strip() and not any(q.strip() == b for b in _EXTRACT_BLACKLIST)]
+            q_list = [q for q in q_list if q.strip() and not any(b in q for b in _EXTRACT_BLACKLIST)]
             data["具体题目清单"] = q_list
 
     # 质量评估

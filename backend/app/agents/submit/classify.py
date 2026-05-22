@@ -91,7 +91,7 @@ async def classify_node(state: SubmitState) -> dict:
         # 加载分类体系
         taxonomy_config = state.get("taxonomy_config")
         if not taxonomy_config:
-            taxonomy_config = await run_db(get_taxonomy_for_position)
+            taxonomy_config = await run_db(lambda: get_taxonomy_for_position(user_id=state.get("user_id")))
 
         tagged_rows = await tag_questions_batch(
             url=state.get("saved_url", ""),
@@ -112,7 +112,11 @@ async def classify_node(state: SubmitState) -> dict:
             cname = cat.get("cat1", "")
             if cname:
                 valid_cat1.add(cname)
-                valid_cat2_by_cat1[cname] = set(cat.get("children", []))
+                children = cat.get("children", [])
+                valid_cat2_by_cat1[cname] = set(
+                    c if isinstance(c, str) else c.get("name", "")
+                    for c in children
+                )
 
     quality = evaluate_tagging_quality(tagged_rows, valid_cat1=valid_cat1, valid_cat2_by_cat1=valid_cat2_by_cat1)
     retry_count = state.get("tagging_retries", 0)

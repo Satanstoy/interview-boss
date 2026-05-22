@@ -35,37 +35,42 @@ def evaluate_extraction_quality(data: dict, content_type_hint: str = "") -> floa
 def evaluate_tagging_quality(rows: list[list[str]], valid_cat1: set = None, valid_cat2_by_cat1: dict = None) -> float:
     """评估分类质量 (0-10)
 
-    检查项:
-    - 无效的 cat1 → -1.5/题
-    - 无效的 cat2 → -1.0/题
-    - 无效的难度标签(非 L1/L2/L3) → -0.5/题
+    检查项（按错误率归一化）:
+    - 无效的 cat1
+    - 无效的 cat2
+    - 无效的难度标签(非 L1/L2/L3)
 
-    最终分数归一化到 0-10。
+    最终分数 = 10 * (1 - 错误率)，归一化到 0-10。
     """
     if not rows:
         return 0.0
 
-    score = 10.0
     valid_diffs = {"L1-基础", "L2-中等", "L2-中级", "L3-高级", "L3-困难"}
+    error_count = 0
 
     for row in rows:
         if len(row) < 8:
-            score -= 1.0
+            error_count += 1
             continue
         cat1 = row[4] if len(row) > 4 else ""
         cat2 = row[5] if len(row) > 5 else ""
         diff_tag = row[7] if len(row) > 7 else ""
 
+        has_error = False
         if valid_cat1 and cat1 and cat1 not in valid_cat1 and "未分类" not in cat1:
-            score -= 1.5
+            has_error = True
         if valid_cat2_by_cat1 and cat1 and cat2:
             expected = valid_cat2_by_cat1.get(cat1, set())
             if expected and cat2 not in expected and "未分类" not in cat2:
-                score -= 1.0
+                has_error = True
         if diff_tag and diff_tag not in valid_diffs and diff_tag != "未知":
-            score -= 0.5
+            has_error = True
+        if has_error:
+            error_count += 1
 
-    return max(0.0, min(10.0, score))
+    error_rate = error_count / len(rows)
+    score = 10.0 * (1.0 - error_rate)
+    return max(0.0, min(10.0, round(score, 1)))
 
 
 def evaluate_answer_quality(answer: str, question: str = "") -> float:
