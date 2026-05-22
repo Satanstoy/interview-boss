@@ -70,6 +70,7 @@ async def get_random_questions(
     """加权随机抽题，避免重复抽取近期练过的题目"""
 
     from_clause, where_clause, base_params = _build_bank_where_clause(user, "qb")
+    bank_mode = user.get('bank_mode', 'public')
 
     def _query():
         with get_db_connection() as conn:
