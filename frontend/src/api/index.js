@@ -110,5 +110,26 @@ export {
   evaluateAnswer,
 } from '../services/practiceApi.js'
 
+// ── Chat ──
+export {
+  createConversation,
+  getConversations,
+  getConversation,
+  updateTitle,
+  archiveConversation,
+  deleteConversation,
+  getMessages,
+  sendMessage,
+  getMemories,
+  deleteMemory,
+} from '../services/chatApi.js'
+
+// ── Resume ──
+export {
+  uploadResume,
+  getResume,
+  deleteResume,
+} from '../services/resumeApi.js'
+
 // ── Cache Management (re-export from http service) ──
 export { invalidateCache } from '../services/http.js'

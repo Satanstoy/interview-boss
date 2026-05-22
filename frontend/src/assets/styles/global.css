@@ -49,30 +49,116 @@
     background-color: #7d7168;
   }
 
-  /* Smooth card */
+  /* Smooth card — layered shadow with hover lift */
   .card-smooth {
-    @apply bg-white rounded-2xl shadow-card border border-surface-200/60 dark:bg-surface-800 dark:border-ink-700/50 dark:shadow-glass-dark transition-shadow duration-200;
+    @apply bg-white rounded-2xl border border-surface-200/60 dark:bg-surface-800 dark:border-ink-700/50 transition-all duration-300 ease-out;
+    box-shadow:
+      0 1px 3px 0 rgb(0 0 0 / 0.04),
+      0 1px 2px -1px rgb(0 0 0 / 0.03),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.6);
+  }
+  .dark .card-smooth {
+    box-shadow:
+      0 1px 3px 0 rgb(0 0 0 / 0.2),
+      0 2px 6px -1px rgb(0 0 0 / 0.15),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.03);
   }
   .card-smooth:hover {
-    @apply shadow-card-hover dark:border-ink-600;
+    @apply -translate-y-0.5 border-surface-300/80 dark:border-ink-600;
+    box-shadow:
+      0 8px 24px -4px rgb(0 0 0 / 0.08),
+      0 2px 6px -2px rgb(0 0 0 / 0.03),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.6);
+  }
+  .dark .card-smooth:hover {
+    box-shadow:
+      0 8px 28px -4px rgb(0 0 0 / 0.3),
+      0 4px 10px -2px rgb(0 0 0 / 0.2),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04);
   }
 
-  /* Button base */
+  /* Button base — with press micro-interaction */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-brand rounded-xl transition-all duration-200 hover:shadow-glow hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-none;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-brand rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 2px 8px -2px rgb(var(--c-glow) / 0.3), inset 0 1px 0 0 rgb(255 255 255 / 0.15);
+  }
+  .btn-primary:hover:not(:disabled) {
+    @apply -translate-y-px;
+    box-shadow: 0 4px 16px -4px rgb(var(--c-glow) / 0.4), inset 0 1px 0 0 rgb(255 255 255 / 0.2);
+  }
+  .btn-primary:active:not(:disabled) {
+    @apply translate-y-0 scale-[0.98];
+    box-shadow: 0 1px 4px -2px rgb(var(--c-glow) / 0.25), inset 0 1px 3px 0 rgb(0 0 0 / 0.1);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-ink-700 dark:text-ink-300 bg-white dark:bg-surface-800 border border-surface-200 dark:border-ink-600 rounded-xl transition-all duration-200 hover:bg-surface-50 dark:hover:bg-surface-700 hover:border-surface-300 dark:hover:border-ink-500 active:scale-[0.98];
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-ink-700 dark:text-ink-300 bg-white dark:bg-surface-800 border border-surface-200 dark:border-ink-600 rounded-xl transition-all duration-200 hover:bg-surface-50 dark:hover:bg-surface-700 hover:border-surface-300 dark:hover:border-ink-500;
+  }
+  .btn-secondary:active {
+    @apply scale-[0.98] bg-surface-100 dark:bg-ink-800;
   }
 
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-sm font-medium text-ink-500 dark:text-ink-400 rounded-lg transition-all duration-200 hover:bg-surface-100 dark:hover:bg-ink-800 hover:text-ink-800 dark:hover:text-ink-200;
   }
+  .btn-ghost:active {
+    @apply scale-[0.96] bg-surface-200 dark:bg-ink-700;
+  }
 
   /* Badge */
   .badge {
     @apply inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-full;
+  }
+
+  /* Prose chat — unified markdown rendering for chat messages */
+  .prose-chat p { margin: 0 0 0.5em; }
+  .prose-chat p:last-child { margin-bottom: 0; }
+  .prose-chat code {
+    background: rgba(0,0,0,0.06);
+    padding: 0.1em 0.3em;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+  .prose-chat pre {
+    background: #2d2a27;
+    color: #faf9f7;
+    padding: 0.75em;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+    position: relative;
+  }
+  .prose-chat pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  .prose-chat ul, .prose-chat ol {
+    padding-left: 1.5em;
+    margin: 0.3em 0;
+  }
+  .prose-chat li { margin: 0.15em 0; }
+  .prose-chat strong { font-weight: 600; }
+  .prose-chat h1, .prose-chat h2, .prose-chat h3 {
+    font-weight: 700;
+    margin-top: 0.8em;
+    margin-bottom: 0.3em;
+  }
+  .prose-chat h3 { font-size: 1.125rem; }
+  .prose-chat blockquote {
+    border-left: 3px solid rgba(0,0,0,0.15);
+    padding-left: 0.8em;
+    margin: 0.5em 0;
+    color: rgba(0,0,0,0.6);
+  }
+  .dark .prose-chat blockquote {
+    border-left-color: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.5);
+  }
+  .dark .prose-chat code {
+    background: rgba(255,255,255,0.08);
   }
 }
 
@@ -102,6 +188,86 @@
     font-size: 0.75rem;     /* 12px — tertiary detail text */
     line-height: 1.125rem;
   }
+}
+
+/* ── Reduced motion: disable animations for accessibility ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-float,
+  .animate-pulse-slow,
+  .animate-shimmer {
+    animation: none !important;
+  }
+}
+
+/* ── Responsive: mobile-first overflow handling ── */
+@media (max-width: 767px) {
+  .mobile-scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .mobile-scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+  .mobile-full {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+/* ── Enhanced elevation system ── */
+.elevation-0 {
+  box-shadow: none;
+}
+.elevation-1 {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+}
+.elevation-2 {
+  box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.06), 0 4px 8px -2px rgb(0 0 0 / 0.05);
+}
+.elevation-3 {
+  box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 8px 20px -4px rgb(0 0 0 / 0.06);
+}
+.elevation-4 {
+  box-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.1), 0 16px 40px -8px rgb(0 0 0 / 0.08);
+}
+.dark .elevation-1 {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.2), 0 2px 6px -1px rgb(0 0 0 / 0.15);
+}
+.dark .elevation-2 {
+  box-shadow: 0 2px 6px -1px rgb(0 0 0 / 0.25), 0 6px 12px -2px rgb(0 0 0 / 0.2);
+}
+.dark .elevation-3 {
+  box-shadow: 0 4px 16px -2px rgb(0 0 0 / 0.3), 0 10px 24px -4px rgb(0 0 0 / 0.2);
+}
+.dark .elevation-4 {
+  box-shadow: 0 8px 28px -4px rgb(0 0 0 / 0.4), 0 20px 48px -8px rgb(0 0 0 / 0.3);
+}
+
+/* ── Empty state visual ── */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-12 text-center;
+}
+.empty-state-icon {
+  @apply w-16 h-16 mb-4 rounded-2xl flex items-center justify-center text-3xl;
+  @apply bg-surface-100 dark:bg-ink-800;
+}
+.empty-state-title {
+  @apply text-base font-semibold text-ink-700 dark:text-ink-300 mb-1;
+}
+.empty-state-desc {
+  @apply text-sm text-ink-400 dark:text-ink-500 max-w-xs;
 }
 
 /* Dark mode native select option styling */

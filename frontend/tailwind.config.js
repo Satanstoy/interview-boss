@@ -67,10 +67,13 @@ export default {
       boxShadow: {
         'card': '0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03)',
         'card-hover': '0 8px 24px -4px rgb(0 0 0 / 0.08), 0 2px 6px -2px rgb(0 0 0 / 0.03)',
+        'card-active': '0 1px 2px 0 rgb(0 0 0 / 0.04)',
         'glow': '0 0 24px -6px rgb(var(--c-glow) / 0.25)',
+        'glow-sm': '0 0 12px -4px rgb(var(--c-glow) / 0.2)',
         'glass': '0 8px 32px rgba(0, 0, 0, 0.1)',
         'glass-dark': '0 8px 32px rgba(0, 0, 0, 0.35)',
         'warm': '0 4px 16px -2px rgb(var(--c-glow) / 0.15)',
+        'inner-glow': 'inset 0 1px 2px 0 rgb(var(--c-glow) / 0.1)',
       },
       borderRadius: {
         'xl': '0.875rem',

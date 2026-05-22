@@ -243,9 +243,9 @@
             </MasterBankList>
           </div>
 
-          <!-- Tab content with transitions -->
+          <!-- Tab content with motion-enhanced transitions -->
           <Transition name="tab-fade" mode="out-in">
-            <div :key="activeTab">
+            <div :key="activeTab" class="tab-content" data-motion="tab-transition">
               <!-- JD Tab -->
               <DataTable
                 v-if="activeTab === 'JD'"
@@ -400,6 +400,12 @@
                 :popular-tags="popularTags"
               />
 
+              <!-- Chat Tab (模拟面试) -->
+              <ChatView
+                v-if="activeTab === 'Chat'"
+                :jd-list="jdData"
+              />
+
               <!-- KnowledgeGraph Tab -->
               <KnowledgeGraph
                 v-if="activeTab === 'KnowledgeGraph'"
@@ -507,7 +513,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError } from '@/services/http.js'
+import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError, invalidateCache } from '@/services/http.js'
 import { safeUrl } from '@/utils/validate.js'
 import * as api from '@/api/index.js'
 import { useSelection } from '@/composables/useSelection.js'
@@ -537,6 +543,7 @@ import LoginPage from '@/components/business/LoginPage.vue'
 
 const MockInterview = defineAsyncComponent(() => import('@/components/business/MockInterview.vue'))
 const KnowledgeGraph = defineAsyncComponent(() => import('@/components/business/KnowledgeGraph.vue'))
+const ChatView = defineAsyncComponent(() => import('@/components/business/ChatView.vue'))
 const ProfilePanel = defineAsyncComponent(() => import('@/components/business/ProfilePanel.vue'))
 const AdminReview = defineAsyncComponent(() => import('@/components/business/AdminReview.vue'))
 const PracticeMode = defineAsyncComponent(() => import('@/components/business/PracticeMode.vue'))
@@ -879,7 +886,7 @@ const onNavigateToInterview = (event) => {
 }
 
 // ── Settings callbacks ──
-const onSettingsClose = () => { showSettings.value = false; loadAllData() }
+const onSettingsClose = () => { showSettings.value = false }
 const onSettingsSaved = () => { loadAllData() }
 const onPositionChanged = () => { loadAllData() }
 
@@ -947,7 +954,7 @@ const initAuth = async () => {
 }
 const handleLoginSuccess = (user) => { currentUser.value = user; loadAllData(); loadPendingCount() }
 const handleLogout = () => { setAuthToken(''); currentUser.value = null; fetchTableData(); fetchPracticeStats(); pendingReviewCount.value = 0 }
-const handleBankModeChanged = (user) => { currentUser.value = user; fetchTableData(); fetchPracticeStats() }
+const handleBankModeChanged = (user) => { currentUser.value = user; invalidateCache('master-bank'); fetchTableData(); fetchPracticeStats() }
 const loadPendingCount = async () => {
   if (!currentUser.value?.is_admin) { pendingReviewCount.value = 0; return }
   try { const data = await api.fetchPendingQuestions(); pendingReviewCount.value = data.total || 0 }
@@ -963,7 +970,11 @@ const loadActiveSeason = async () => {
   } catch (e) { console.warn('加载招聘季失败', e) }
 }
 
-onMounted(async () => { await initAuth() })
+onMounted(async () => {
+  await initAuth()
+  // 通知白屏检测器：Vue 应用已完成初始化
+  window.__VUE_APP_READY__ = true
+})
 onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
 
@@ -983,10 +994,10 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
   100% { margin-left: 85%; width: 15%; }
 }
 .indeterminate-bar { animation: indeterminate-slide 1.8s ease-in-out infinite; }
-.tab-fade-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
-.tab-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.tab-fade-enter-from { opacity: 0; transform: translateY(10px); }
-.tab-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+.tab-fade-enter-active { transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+.tab-fade-leave-active { transition: opacity 0.18s ease-in, transform 0.18s ease-in; }
+.tab-fade-enter-from { opacity: 0; transform: translateY(12px); }
+.tab-fade-leave-to { opacity: 0; transform: translateY(-6px); }
 .fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateX(-8px); }
@@ -1030,4 +1041,15 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 :global(.dark) .resize-handle__collapse-btn:hover { color: var(--color-primary-400); background: var(--color-primary-900/30); }
 
 :global(.scroll-restore-highlight) { animation: scroll-glow 2.2s ease-out forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-fade-enter-active, .tab-fade-leave-active { transition-duration: 0.01ms !important; }
+  .fade-slide-enter-active, .fade-slide-leave-active { transition-duration: 0.01ms !important; }
+  .float-pop-enter-active, .float-pop-leave-active { transition-duration: 0.01ms !important; }
+  .expand-btn-fade-enter-active, .expand-btn-fade-leave-active { transition-duration: 0.01ms !important; }
+  .sidebar-wrapper { transition: none !important; }
+  .resize-handle::after { transition: none !important; }
+  .resize-handle__grip { transition: none !important; }
+  .sidebar-expand-btn { transition: none !important; }
+}
 </style>

@@ -3,8 +3,8 @@ import { get, put, post, del } from './http.js'
 const API = '/api'
 
 // ── Profile ──
-export const fetchProfile = () => get(`${API}/profile`)
-export const fetchPublicProfile = () => get(`${API}/profile/public`)
+export const fetchProfile = (options) => get(`${API}/profile`, options)
+export const fetchPublicProfile = (options) => get(`${API}/profile/public`, options)
 export const updateProfile = (settings) => put(`${API}/profile`, { settings })
 export const switchPosition = (position) => put(`${API}/profile/position`, { position })
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })

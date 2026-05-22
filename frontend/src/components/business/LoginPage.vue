@@ -8,8 +8,13 @@
 
     <div class="relative flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
       <!-- Left: brand showcase -->
-      <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0 animate-fade-in">
-        <div class="max-w-md mx-auto lg:mx-0">
+      <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0">
+        <div
+          v-motion
+          :initial="{ opacity: 0, y: 24 }"
+          :enter="{ opacity: 1, y: 0, transition: { duration: 500, easing: [0.25, 0.46, 0.45, 0.94] } }"
+          class="max-w-md mx-auto lg:mx-0"
+        >
           <div class="w-20 h-20 mb-8 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-warm transform hover:scale-105 transition-transform duration-300">
             <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
@@ -24,8 +29,14 @@
           </p>
 
           <div class="grid grid-cols-3 gap-4">
-            <div v-for="feature in loginFeatures" :key="feature.label"
-              class="flex flex-col items-center gap-2.5 p-4 rounded-2xl bg-white/70 dark:bg-surface-800/70 backdrop-blur-sm border border-surface-200/80 dark:border-ink-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
+            <div v-for="(feature, idx) in loginFeatures" :key="feature.label"
+              v-motion
+              :initial="{ opacity: 0, y: 20, scale: 0.95 }"
+              :enter="{
+                opacity: 1, y: 0, scale: 1,
+                transition: { duration: 400, delay: 200 + idx * 100, easing: [0.25, 0.46, 0.45, 0.94] }
+              }"
+              class="flex flex-col items-center gap-2.5 p-4 rounded-2xl bg-white/70 dark:bg-surface-800/70 backdrop-blur-sm border border-surface-200/80 dark:border-ink-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5 cursor-default">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
                 <span class="text-lg">{{ feature.icon }}</span>
               </div>
@@ -37,7 +48,12 @@
 
       <!-- Right: login form -->
       <div class="flex items-center justify-center px-8 lg:px-16 py-12 lg:py-0 lg:w-[440px] xl:w-[480px]">
-        <div class="w-full max-w-sm animate-fade-in">
+        <div
+          v-motion
+          :initial="{ opacity: 0, x: 24 }"
+          :enter="{ opacity: 1, x: 0, transition: { duration: 500, delay: 150, easing: [0.25, 0.46, 0.45, 0.94] } }"
+          class="w-full max-w-sm"
+        >
           <LoginModal embedded @login-success="$emit('login-success', $event)" />
         </div>
       </div>

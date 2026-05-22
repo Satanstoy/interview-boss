@@ -3,6 +3,7 @@ import '@/assets/styles/global.css'
 import 'vue-sonner/style.css'
 import App from './App.vue'
 import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
+import { MotionPlugin } from '@vueuse/motion'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
@@ -53,10 +54,19 @@ window.addEventListener('unhandledrejection', (event) => {
 // 白屏检测：页面加载完成后检查关键 DOM 节点是否存在
 function detectBlankScreen() {
   const MAX_RETRIES = 3
-  const RETRY_DELAY = 2000
+  const RETRY_DELAY = 3000
   let retries = 0
 
   function check() {
+    // 等待 Vue 应用初始化完成（App.vue 中 initAuth 完成后设置此标记）
+    if (!window.__VUE_APP_READY__) {
+      if (retries < MAX_RETRIES) {
+        retries++
+        setTimeout(check, RETRY_DELAY)
+      }
+      return
+    }
+
     const app = document.getElementById('app')
     // 检查 #app 是否有实际内容（子元素数量）
     const hasContent = app && app.children.length > 0 && app.innerHTML.trim().length > 100
@@ -84,9 +94,9 @@ function detectBlankScreen() {
 
   // 等待 DOM 渲染完成后再检测
   if (document.readyState === 'complete') {
-    setTimeout(check, 1000)
+    setTimeout(check, 2000)
   } else {
-    window.addEventListener('load', () => setTimeout(check, 1000))
+    window.addEventListener('load', () => setTimeout(check, 2000))
   }
 }
 
@@ -95,6 +105,7 @@ detectBlankScreen()
 // 创建并挂载 Vue 应用
 const app = createApp(App)
 app.use(autoAnimatePlugin)
+app.use(MotionPlugin)
 app.component('DynamicScroller', DynamicScroller)
 app.component('DynamicScrollerItem', DynamicScrollerItem)
 

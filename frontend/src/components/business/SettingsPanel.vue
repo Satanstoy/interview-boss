@@ -380,6 +380,7 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '@/api/index.js'
+import { invalidateCache } from '@/services/http.js'
 import RoundedSelect from '@/components/common/RoundedSelect.vue'
 import { validateSeason, validateBaseUrl } from '@/utils/validate.js'
 import { useToast } from '@/composables/useNotification.js'
@@ -532,20 +533,15 @@ const removeCat1 = (index) => {
 const onSwitchPosition = async (pos) => {
   if (pos === taxonomy.job_position) return
   try {
-    if (props.isAdmin) {
-      await switchPosition(pos)
-    } else {
-      await switchMyPosition(pos)
-    }
+    // 仅本地更新，不调用后端 API（等 saveProfile 统一提交）
     taxonomy.job_position = pos
-    originalPosition.value = pos
     positionOnlyChanged.value = true
     if (!availablePositions.value.includes(pos)) {
       availablePositions.value.push(pos)
     }
-    // 重新加载分类配置
+    // 重新加载分类配置（绕过缓存）
     if (props.isAdmin) {
-      const data = await fetchProfile()
+      const data = await fetchProfile({ noCache: true })
       const s = data.settings
       if (s.taxonomy_config) {
         try {
@@ -557,7 +553,7 @@ const onSwitchPosition = async (pos) => {
       }
       availablePositions.value = data.settings.available_positions || availablePositions.value
     } else {
-      const data = await fetchPublicProfile()
+      const data = await fetchPublicProfile({ noCache: true })
       if (data.settings?.taxonomy_config) {
         try {
           const tc = typeof data.settings.taxonomy_config === 'string' ? JSON.parse(data.settings.taxonomy_config) : data.settings.taxonomy_config
@@ -565,9 +561,8 @@ const onSwitchPosition = async (pos) => {
         } catch { taxonomy.categories = [] }
       }
     }
-    toast.success(`已切换到岗位：${pos}`)
   } catch (e) {
-    toast.error(`切换失败: ${e.message}`)
+    toast.error(`加载分类失败: ${e.message}`)
   }
 }
 
@@ -762,6 +757,15 @@ const saveProfile = async () => {
   isSaving.value = true
   saveMessage.value = ''
   try {
+    // 如果岗位有变更，先调用切换 API
+    if (positionOnlyChanged.value) {
+      if (props.isAdmin) {
+        await switchPosition(taxonomy.job_position)
+      } else {
+        await switchMyPosition(taxonomy.job_position)
+      }
+    }
+
     const payload = {
       active_season: form.active_season,
     }
@@ -774,6 +778,7 @@ const saveProfile = async () => {
     }
 
     await updateProfile(payload)
+    invalidateCache()  // 清除所有 GET 缓存，确保 loadAllData 获取最新数据
     emit('update:activeSeason', form.active_season)
     await loadProfile()
 

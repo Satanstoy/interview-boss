@@ -82,6 +82,51 @@
 
               <p class="text-xs text-ink-400 dark:text-ink-500">绑定邮箱后可使用邮箱验证码登录</p>
             </div>
+
+            <!-- 简历管理 -->
+            <div class="space-y-3.5 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800 bg-gradient-to-b from-emerald-50/50 to-white dark:from-emerald-900/20 dark:to-surface-800">
+              <h3 class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                简历管理
+              </h3>
+
+              <!-- 已有简历 -->
+              <div v-if="resumeInfo" class="flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-ink-700 dark:text-ink-200 truncate">{{ resumeInfo.filename }}</p>
+                  <p class="text-xs text-ink-400 dark:text-ink-500">上传于 {{ formatDate(resumeInfo.created_at) }}</p>
+                </div>
+                <label class="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium cursor-pointer whitespace-nowrap">
+                  重新上传
+                  <input type="file" accept=".pdf" class="hidden" @change="onResumeFileSelect" />
+                </label>
+                <button @click="onDeleteResume" class="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium">删除</button>
+              </div>
+
+              <!-- 无简历 - 上传区域 -->
+              <div v-else>
+                <div
+                  class="border-2 border-dashed border-surface-300 dark:border-ink-600 rounded-xl p-4 text-center hover:border-emerald-400 dark:hover:border-emerald-500 transition cursor-pointer"
+                  @dragover.prevent="resumeDragover = true"
+                  @dragleave="resumeDragover = false"
+                  @drop.prevent="onResumeDrop"
+                  :class="resumeDragover ? 'border-emerald-400 dark:border-emerald-500 bg-emerald-50/30 dark:bg-emerald-900/10' : ''"
+                  @click="$refs.resumeInput.click()"
+                >
+                  <input ref="resumeInput" type="file" accept=".pdf" class="hidden" @change="onResumeFileSelect" />
+                  <svg class="w-8 h-8 mx-auto text-ink-300 dark:text-ink-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                  <div class="text-xs text-ink-400 dark:text-ink-500">点击上传或拖拽 PDF 简历</div>
+                  <div class="text-[10px] text-ink-300 dark:text-ink-600 mt-1">上传后，模拟面试时可自动使用</div>
+                </div>
+              </div>
+
+              <!-- 上传进度 -->
+              <div v-if="resumeUploading" class="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                上传解析中...
+              </div>
+              <p v-if="resumeError" class="text-xs text-red-500 dark:text-red-400">{{ resumeError }}</p>
+            </div>
           </div>
 
           <!-- Footer -->
@@ -96,7 +141,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
-import { getMyEmail, sendBindCode, bindEmail } from '@/api/index.js'
+import { getMyEmail, sendBindCode, bindEmail, uploadResume, getResume, deleteResume } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
 
 const toast = useToast()
@@ -118,6 +163,64 @@ const emailBinding = reactive({
   error: ''
 })
 let emailCooldownTimer = null
+
+// ── 简历状态 ──
+const resumeInfo = ref(null)
+const resumeUploading = ref(false)
+const resumeError = ref('')
+const resumeDragover = ref(false)
+
+const loadResume = async () => {
+  try {
+    const data = await getResume()
+    resumeInfo.value = data.has_resume ? data.resume : null
+  } catch { /* ignore */ }
+}
+
+const onResumeFileSelect = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  await doUploadResume(file)
+}
+
+const onResumeDrop = async (e) => {
+  resumeDragover.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file && file.type === 'application/pdf') {
+    await doUploadResume(file)
+  }
+}
+
+const doUploadResume = async (file) => {
+  resumeError.value = ''
+  resumeUploading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    await uploadResume(formData)
+    await loadResume()
+    toast.success('简历上传成功')
+  } catch (e) {
+    resumeError.value = e.message || '上传失败'
+  } finally {
+    resumeUploading.value = false
+  }
+}
+
+const onDeleteResume = async () => {
+  try {
+    await deleteResume()
+    resumeInfo.value = null
+    toast.success('简历已删除')
+  } catch (e) {
+    resumeError.value = e.message || '删除失败'
+  }
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  return dateStr.replace('T', ' ').slice(0, 16)
+}
 
 const loadMyEmail = async () => {
   try {
@@ -170,8 +273,10 @@ const onConfirmBindEmail = async () => {
 watch(() => props.visible, (val) => {
   if (val) {
     loadMyEmail()
+    loadResume()
     emailBinding.editing = false
     emailBinding.error = ''
+    resumeError.value = ''
   }
 })
 </script>
