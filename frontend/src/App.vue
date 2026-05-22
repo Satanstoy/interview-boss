@@ -244,7 +244,7 @@
           </div>
 
           <!-- Tab content with motion-enhanced transitions -->
-          <Transition name="tab-fade" mode="out-in">
+          <Transition name="tab-fade" mode="out-in" @after-enter="restoreScroll()">
             <div :key="activeTab" class="tab-content" data-motion="tab-transition">
               <!-- JD Tab -->
               <DataTable
@@ -524,6 +524,7 @@ import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
 import { useBatchActions } from '@/composables/useBatchActions.js'
+import { useTabScroll } from '@/composables/useTabScroll.js'
 
 import { defineAsyncComponent } from 'vue'
 import StagingPanel from '@/components/business/StagingPanel.vue'
@@ -562,6 +563,7 @@ const {
   resizeHandleRef, expandBtnRef, sidebarWrapperRef,
   resizeHandleStyle, onResizeStart, onExpandBtnDragStart,
 } = useSidebar()
+const { saveScroll, restoreScroll } = useTabScroll()
 
 const {
   highlightInterviewId, returnTab, returnToPracticeMode,
@@ -800,6 +802,9 @@ watch(activeTab, (newTab, oldTab) => {
 // ── Event handlers ──
 const onSubmitted = () => { fetchTableData(); fetchAnalytics() }
 const onTabChange = (tab) => {
+  // 保存当前 tab 的滚动位置
+  const scrollEl = document.querySelector('.overflow-y-auto.custom-scrollbar')
+  if (scrollEl) saveScroll(activeTab.value, scrollEl.scrollTop)
   activeTab.value = tab
   returnTab.value = null
   returnToPracticeMode.value = false
@@ -994,10 +999,10 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
   100% { margin-left: 85%; width: 15%; }
 }
 .indeterminate-bar { animation: indeterminate-slide 1.8s ease-in-out infinite; }
-.tab-fade-enter-active { transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
-.tab-fade-leave-active { transition: opacity 0.18s ease-in, transform 0.18s ease-in; }
-.tab-fade-enter-from { opacity: 0; transform: translateY(12px); }
-.tab-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+.tab-fade-enter-active { transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+.tab-fade-leave-active { transition: opacity 0.18s ease-in; }
+.tab-fade-enter-from { opacity: 0; }
+.tab-fade-leave-to { opacity: 0; }
 .fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateX(-8px); }

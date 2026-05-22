@@ -1,4 +1,5 @@
 import { ref, watch, nextTick } from 'vue'
+import { useTabScroll } from './useTabScroll.js'
 
 export function useHighlightNav(activeTab, showPracticeMode) {
   const highlightInterviewId = ref(null)
@@ -8,20 +9,16 @@ export function useHighlightNav(activeTab, showPracticeMode) {
   const floatingBtnStyle = ref({ display: 'none' })
   const masterBankEverShown = ref(false)
 
+  const { saveScroll, restoreScroll: tabRestoreScroll } = useTabScroll()
+
   let highlightScrollHandler = null
   let highlightAnimFrame = null
   let highlightRetryId = null
-  let savedScrollTop = null
 
   watch(activeTab, (tab) => { if (tab === 'MasterBank') masterBankEverShown.value = true }, { immediate: true })
 
   const restoreOuterScroll = () => {
-    if (savedScrollTop == null) return
-    const container = document.querySelector('.overflow-y-auto.custom-scrollbar')
-    if (container) {
-      container.scrollTop = savedScrollTop
-      savedScrollTop = null
-    }
+    tabRestoreScroll()
   }
 
   const findScrollContainer = (el) => {
@@ -137,7 +134,7 @@ export function useHighlightNav(activeTab, showPracticeMode) {
     masterBankEverShown,
     handleReturn,
     detachHighlightScroll,
-    // Expose savedScrollTop setter for onNavigateToInterview
-    setSavedScrollTop: (val) => { savedScrollTop = val },
+    // Expose saveScroll for onNavigateToInterview
+    setSavedScrollTop: (val) => { saveScroll(activeTab.value, val) },
   }
 }
