@@ -33,11 +33,18 @@ nginx/                 ← Docker Nginx 配置（API 代理 + SPA）
 ## 命令
 
 ```bash
-./deploy/deploy.sh              # 全量部署
-./deploy/deploy.sh frontend     # 仅前端
-./deploy/deploy.sh backend      # 仅后端
-./deploy/docker-deploy.sh       # Docker 部署
+# 开发测试
+uv run pytest backend/tests/ -q          # 后端测试
+cd frontend && npm run build              # 前端构建
+
+# 部署（必须用 Docker，不要用 deploy.sh 的 systemd 模式）
+./deploy/docker-deploy.sh update          # 代码变更后重新部署（重建后端/worker/nginx 容器）
+./deploy/docker-deploy.sh status          # 查看容器状态
+./deploy/docker-deploy.sh logs backend    # 查看后端日志
+./deploy/docker-deploy.sh backup          # 备份数据库
 ```
+
+> `deploy/deploy.sh` 是 systemd 模式，**不用于生产**。生产环境全部走 Docker。
 
 Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 
@@ -81,13 +88,22 @@ Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 
 ## 完成阶段后
 
-1. `uv run pytest backend/tests/ -q` → `cd frontend && npm run build` → `./deploy/docker-deploy.sh`
+1. `uv run pytest backend/tests/ -q` → `cd frontend && npm run build` → `./deploy/docker-deploy.sh update`
 2. 涉及功能/API/结构变更 → 最小化更新 README.md
 3. **创建 docs 记录**（关键修改：README + docs；小修改：仅 docs）
    - `docs/bug-reports/YYYY-MM-DD-描述.md` / `docs/tdd-reports/YYYY-MM-DD-描述.md`
    - 内容：问题描述、根因分析、修复方案、测试验证、影响范围
 4. `git add` + `git commit` → `git push`（让用户输入凭据）
 
-## 生产环境
+## 生产环境（Docker Compose）
 
-Nginx 反代 `/api/` → uvicorn:8000（180s 超时）；前端 `/var/www/interview-boss/dist/`。`claude_runner` 已配置 NOPASSWD。
+```
+nginx (port 80) → backend (port 8000) + worker
+                  redis (port 6379)
+```
+
+- Docker Compose 编排，配置见 `docker-compose.yml`
+- Nginx 容器反代 `/api/` → backend:8000（180s 超时），其余 → 静态文件
+- 数据卷：`./backend/data` 挂载到容器内 `/app/backend/data`
+- `deploy/deploy.sh` 是 systemd 模式，**不用于生产**
+- `claude_runner` 已配置 NOPASSWD
