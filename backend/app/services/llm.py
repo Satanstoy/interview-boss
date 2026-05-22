@@ -334,3 +334,34 @@ async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **k
     kwargs.setdefault('model', model)
     response = await resolved_client.chat.completions.create(messages=messages, **kwargs)
     return response.choices[0].message.content.strip()
+
+
+async def stream_llm_messages(messages: list, user_id: int = None, **kwargs):
+    """流式 LLM 调用，yield 每个 chunk 的文本内容。仅支持 OpenAI 兼容 API。"""
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+
+    if provider == "anthropic":
+        # Anthropic 流式：转换消息格式
+        system_text, anthropic_msgs = _convert_openai_messages_to_anthropic(messages)
+        async with resolved_client.messages.stream(
+            model=model,
+            system=system_text or "你是一个后端和算法面试指导专家。",
+            messages=anthropic_msgs,
+            max_tokens=kwargs.get("max_tokens", 4096),
+            temperature=kwargs.get("temperature", 0.7),
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+        return
+
+    # OpenAI 兼容流式
+    kwargs.setdefault('model', model)
+    kwargs.setdefault('temperature', 0.7)
+    stream = await resolved_client.chat.completions.create(
+        messages=messages,
+        stream=True,
+        **kwargs,
+    )
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content

@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_user_job_position
 from app.db.question_bank_sources import (
     delete_source, delete_sources_by_url, remove_original_items_by_url, restore_source_for_url
 )
@@ -179,9 +179,9 @@ async def get_data(file_type: str, page: int = Query(1, ge=1), page_size: int = 
             if table_name in ('jd', 'interview'):
                 # 根据用户的 bank_mode 过滤可见范围（管理员也遵守）
                 bank_mode = user.get('bank_mode', 'public')
-                # 获取当前岗位用于过滤
-                from app.db.connection import get_current_job_position
-                current_pos = get_current_job_position()
+                # 获取用户当前岗位用于过滤（支持个人岗位）
+                from app.db.connection import get_user_job_position
+                _, current_pos = get_user_job_position(user['id'])
                 if bank_mode == 'personal':
                     where = "owner_id = ? AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
                     params = (user['id'], current_pos)
