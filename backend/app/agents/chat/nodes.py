@@ -239,6 +239,19 @@ async def fts_retrieve(state: ChatState) -> dict:
     return {"retrieved_questions": results}
 
 
+def _determine_interview_phase(recent_count: int) -> str:
+    """根据对话轮数判定当前面试阶段"""
+    # recent_count = 历史消息数（不含当前用户消息）
+    # 开场白(assistant) + 用户自我介绍(user) = 2 条 → 开场阶段
+    if recent_count <= 2:
+        return "开场阶段：候选人刚做完自我介绍，请简要点评并自然过渡到第一个技术问题"
+    # 2~16 条 = 1~8 轮问答 → 提问阶段
+    if recent_count <= 16:
+        return "提问阶段：正在进行技术提问，一次一题，根据回答深度适当追问"
+    # 超过 8 轮问答 → 收尾阶段
+    return "收尾阶段：面试已进行多轮，可以总结表现并询问候选人是否有问题想问"
+
+
 async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     """生成面试官回复（流式输出），带 token budget 控制"""
     user_id = state["user_id"]
@@ -252,6 +265,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     # 构建面试上下文（岗位、分类、练习统计）
     interview_context = state.get("interview_context", "")
+    interview_phase = _determine_interview_phase(len(recent))
 
     # 构建 system prompt
     if mode == "jd_resume":
@@ -259,6 +273,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             jd_text=state.get("jd_text", "未提供 JD"),
             resume_text=resume_summary or state.get("resume_text", "未提供简历"),
             interview_context=interview_context or "",
+            interview_phase=interview_phase,
         )
     else:
         # 构建记忆上下文（使用摘要而非完整内容）
@@ -277,6 +292,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         system_prompt = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
             memory_context=memory_context or "暂无用户背景信息",
             interview_context=interview_context or "",
+            interview_phase=interview_phase,
         )
 
     system_prompt = _truncate_to_budget(system_prompt, SYSTEM_BUDGET)

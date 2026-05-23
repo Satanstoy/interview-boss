@@ -9,7 +9,7 @@
 | `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出 | `core/config` |
 | `pipeline.py` | JD/面经提交处理流程（解析→去重→入库） | `llm`, `clustering` |
 | `clustering.py` | LLM 聚类去重（cat2 预分组 + 两遍聚类） | `llm` |
-| `chat_service.py` | 对话管理、消息存储、记忆提取 | `llm`, `memory_recall_service` |
+| `chat_service.py` | 对话管理、消息存储、记忆提取、面试开场白生成 | `llm`, `memory_recall_service` |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |

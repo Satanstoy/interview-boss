@@ -52,6 +52,11 @@ async def create_conversation(req: CreateConversationRequest, user: dict = Depen
         if resume_text and resume_text != "__saved__":
             await run_db(lambda: chat_service.save_resume_memory(user['id'], resume_text))
 
+        # 自动生成面试官开场白
+        opening = chat_service.generate_opening_message(req.mode)
+        await run_db(lambda: chat_service.save_message(result["id"], "assistant", opening))
+        result["opening_message"] = opening
+
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"创建对话失败: {e}")
