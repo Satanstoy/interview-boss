@@ -563,7 +563,7 @@ const {
   resizeHandleRef, expandBtnRef, sidebarWrapperRef,
   resizeHandleStyle, onResizeStart, onExpandBtnDragStart,
 } = useSidebar()
-const { saveScroll, restoreScroll } = useTabScroll()
+const { saveScroll, prepareRestore, restoreScroll } = useTabScroll()
 
 const {
   highlightInterviewId, returnTab, returnToPracticeMode,
@@ -802,9 +802,10 @@ watch(activeTab, (newTab, oldTab) => {
 // ── Event handlers ──
 const onSubmitted = () => { fetchTableData(); fetchAnalytics() }
 const onTabChange = (tab) => {
-  // 保存当前 tab 的滚动位置
+  // 保存当前 tab 的滚动位置，标记下一个 tab 需要恢复
   const scrollEl = document.querySelector('.overflow-y-auto.custom-scrollbar')
   if (scrollEl) saveScroll(activeTab.value, scrollEl.scrollTop)
+  prepareRestore(tab)
   activeTab.value = tab
   returnTab.value = null
   returnToPracticeMode.value = false

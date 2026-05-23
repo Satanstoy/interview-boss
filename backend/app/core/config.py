@@ -46,7 +46,7 @@ def get_profile_setting(key: str, default: str = "") -> str:
 
 
 def get_user_llm_config(user_id: int) -> dict | None:
-    """从 user_llm_config 表读取用户的 LLM 配置。未配置时返回 None。"""
+    """从 user_llm_config 表读取用户的 LLM 配置。未配置时回退到全局配置。"""
     try:
         from app.db.connection import get_db_connection
         with get_db_connection() as conn:
@@ -56,13 +56,38 @@ def get_user_llm_config(user_id: int) -> dict | None:
             ).fetchone()
             if row:
                 cfg = dict(row)
-                # 未配置 api_key 视为未配置
+                # 未配置 api_key 视为未配置，回退到全局
                 if not cfg.get("api_key"):
-                    return None
+                    return _get_global_llm_config()
                 return cfg
     except Exception:
         pass
-    return None
+    return _get_global_llm_config()
+
+
+def _get_global_llm_config() -> dict | None:
+    """获取全局 LLM 配置（环境变量 + user_profile 表）。无配置时返回 None。"""
+    api_key = get_profile_setting("llm_api_key") or LLM_API_KEY
+    base_url = get_profile_setting("llm_base_url") or LLM_BASE_URL
+    model = get_profile_setting("llm_model") or LLM_MODEL
+    timeout_str = get_profile_setting("llm_timeout")
+
+    if not api_key:
+        return None
+
+    timeout = LLM_TIMEOUT
+    if timeout_str:
+        try:
+            timeout = max(5, min(int(timeout_str), 600))
+        except ValueError:
+            pass
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+        "timeout": timeout,
+    }
 
 
 def _reload_from_db():

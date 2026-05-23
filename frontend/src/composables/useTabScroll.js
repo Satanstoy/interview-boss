@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 
 /**
  * 管理各 tab 的滚动位置，切换 tab 时保存/恢复 scrollTop。
@@ -10,6 +10,9 @@ let pendingRestore = null
 export function useTabScroll() {
   const saveScroll = (tabKey, scrollTop) => {
     scrollPositions.value.set(tabKey, scrollTop)
+  }
+
+  const prepareRestore = (tabKey) => {
     pendingRestore = tabKey
   }
 
@@ -18,11 +21,15 @@ export function useTabScroll() {
     const saved = scrollPositions.value.get(pendingRestore)
     pendingRestore = null
     if (saved == null) return
-    requestAnimationFrame(() => {
-      const container = document.querySelector('.overflow-y-auto.custom-scrollbar')
-      if (container) container.scrollTop = saved
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const container = document.querySelector('.overflow-y-auto.custom-scrollbar')
+          if (container) container.scrollTop = saved
+        })
+      })
     })
   }
 
-  return { scrollPositions, saveScroll, restoreScroll }
+  return { scrollPositions, saveScroll, prepareRestore, restoreScroll }
 }
