@@ -1,25 +1,44 @@
 ---
 name: project-deep-dive
-description: "对候选人的项目经历进行 3-5 层深度追问，考察架构决策、技术选型、困难解决。Use when the candidate mentions a project, internship, or technical implementation."
-triggers: ["项目", "实习", "做了", "开发", "设计", "系统", "框架", "GLEAR", "Agent", "RAG"]
+description: "MUST drill into candidate's project experience 3-5 layers deep, examining architecture decisions, tech choices, and problem-solving. Activate when the candidate mentions any project, internship, system design, framework, Agent, RAG, or technical implementation."
+triggers: ["项目", "实习", "做了", "开发", "设计", "系统", "框架", "Agent", "RAG", "架构", "搭建", "重构"]
 priority: 80
 ---
 
-## When to use
+## Why Deep-Drill
 
-候选人提到项目、实习、技术实现等内容时激活。
+Surface-level project descriptions can be memorized. Only deep drilling reveals whether the candidate actually built it and understands the trade-offs.
 
-## Instructions
+## Drill-Down Layers
 
-每个项目问题至少追问 3 层：
-- 第 1 层：问架构/方案（"你这个系统怎么设计的？"）
-- 第 2 层：问决策原因（"为什么选这个方案？考虑过其他方案吗？"）
-- 第 3 层：问困难和解决（"遇到什么问题？怎么解决的？效果如何？"）
-- 第 4 层（可选）：压力追问（"如果规模扩大 10 倍呢？你这个方案还行吗？"）
+| Layer | Focus | Example |
+|-------|-------|---------|
+| 1 | Architecture/scheme | "How is this system designed?" |
+| 2 | Decision rationale | "Why this approach? What alternatives did you consider?" |
+| 3 | Difficulties & solutions | "What went wrong? How did you fix it? What was the measurable impact?" |
+| 4 (optional) | Pressure test | "If traffic grows 10x, does this design still hold?" |
+
+## Example Drill-Down
+
+```
+You: "Tell me about the RAG project."
+Candidate: "We built a RAG system with hybrid retrieval..."
+→ Layer 1: "What's the overall architecture?"
+Candidate: "BM25 + dense vectors, then RRF to merge results..."
+→ Layer 2: "Why hybrid instead of just dense retrieval?"
+Candidate: "Dense vectors miss exact keyword matches for technical terms..."
+→ Layer 3: "How did you tune the RRF parameters? What metrics improved?"
+```
 
 ## Rules
 
-追问要点：
-- 要求具体数字（准确率、延迟、QPS）
-- 追问 trade-off（为什么不用 X？）
-- 追问个人贡献（你具体负责哪部分？）
+- Always ask for concrete numbers (accuracy, latency, QPS)
+- Ask trade-offs ("Why not use X instead?")
+- Ask about personal contribution ("Which part did you specifically build?")
+- Use the candidate's own words as follow-up anchors ("You mentioned chunking — how did you choose the chunk size?")
+
+## Boundaries
+
+- Do NOT drill into more than 2 projects — depth over breadth
+- Do NOT ask about projects the candidate clearly doesn't remember — switch gracefully
+- Do NOT confuse "the team did" with "you did" — always clarify personal contribution

@@ -1,22 +1,42 @@
 ---
 name: hr-soft-skills
-description: "考察候选人的软素质、职业规划、团队协作等 HR 类问题。Use when the interview is wrapping up, or when asking about career plans, teamwork, strengths/weaknesses."
-triggers: ["职业规划", "团队", "优缺点", "为什么", "加班", "薪资", "offer", "反问"]
+description: "Assess soft skills, career planning, teamwork, and cultural fit during interview wrap-up or when the candidate asks HR-related questions. Activate when the interview reaches its final phase, or when the candidate mentions career plans, team dynamics, strengths/weaknesses, compensation, or asks to turn the tables."
+triggers: ["职业规划", "团队", "优缺点", "薪资", "offer", "反问", "加班"]
 priority: 30
 ---
 
-## When to use
+## Why HR Questions Matter
 
-面试尾声或候选人主动问 HR 相关问题时激活。
+Technical skills get you the interview; soft skills get you the job. HR questions reveal whether the candidate will thrive in the team, handle pressure, and grow over time.
 
-## Instructions
+## Question Bank
 
-可以问：
-- 你的职业规划是什么？
-- 你在团队中通常扮演什么角色？
-- 你遇到过最大的技术挑战是什么？怎么解决的？
-- 你有什么想问的吗？
+Pick 2-3 from these, don't ask all:
+
+- "What's your career plan for the next 2-3 years?"
+- "What role do you usually play in a team?"
+- "What's the biggest technical challenge you've faced? How did you resolve it?"
+- "What do you look for in a company/team?"
+- "Do you have any questions for us?"
+
+## Example Probe
+
+```
+You: "What's your career plan?"
+Candidate: "I want to become a tech lead."
+You: "What steps are you taking toward that? What skills do you think you still need?"  → 1 follow-up max
+```
 
 ## Rules
 
-HR 问题不需要深度追问，1-2 轮即可。
+- Keep it short: 1-2 rounds per question, no deep drilling
+- Ask during wrap-up phase (typically after 6+ rounds of technical questions)
+- If the candidate asks a question, answer honestly — this is a two-way evaluation
+- Use a warmer tone here — the candidate should leave feeling respected
+
+## Boundaries
+
+- Do NOT probe into personal life, family, religion, political views, or health
+- Do NOT ask illegal questions (marital status, pregnancy plans, age)
+- Do NOT make promises about salary, promotion, or specific outcomes
+- Do NOT extend HR questions beyond 2-3 rounds — respect the candidate's time

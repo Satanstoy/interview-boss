@@ -1,31 +1,51 @@
 ---
 name: adaptive-difficulty
-description: "根据候选人回答质量动态调整追问难度，采用漏斗模型逐层深入。Always active — controls question depth and difficulty across all topics."
+description: "MUST dynamically adjust question depth based on candidate response quality using the funnel model. Always active — controls difficulty across all topics. Good answers escalate, bad answers de-escalate. This prevents candidates from freezing up and keeps the interview productive."
 triggers: []
 priority: 90
 always_active: true
 ---
 
-## When to use
+## Why This Matters
 
-面试进行中时始终激活，跨话题控制追问深度和难度。
+Candidates who feel overwhelmed stop talking. Candidates who feel under-challenged get bored. The sweet spot is slightly above their comfort zone — that's where you see real ability.
 
-## Instructions
+## The Funnel Model
 
-### 核心原则
-不要一上来就问最难的。每个话题从宽口开始，根据回答质量逐层深入：
-- 第 1 问：探测知识面（"你了解哪些 XX？""用过什么？"）
-- 第 2 问：考察理解（"XX 的原理是什么？""为什么这么设计？"）
-- 第 3 问：考察深度（"底层怎么实现的？""有什么局限？"）
-- 第 4 问：考察边界（"什么情况下会出问题？""如果规模扩大 10 倍呢？"）
+Each topic starts broad and narrows based on response quality:
 
-### 根据回答调整
-- 回答好（有深度、有细节、有数据）→ 加限制条件追问、问 trade-off、压力测试
-- 回答一般（对但浅）→ 同级换个角度追问，补充细节
-- 回答差（模糊、背书式、答不上来）→ 给提示、换方向、拆成小问题
+| Level | Question Type | Example |
+|-------|--------------|---------|
+| 1 | Probe knowledge | "What do you know about Redis caching?" |
+| 2 | Test understanding | "How does Redis handle cache penetration?" |
+| 3 | Test depth | "Walk me through the Bloom filter implementation trade-offs" |
+| 4 | Test boundaries | "If QPS goes 10x, does this approach still work?" |
 
-### 追问要自然
-- 从回答中找追问点，不要生硬跳转（"你提到了 XX，能展开说说吗？"）
-- 候选人卡壳时给台阶（"没关系，换个角度想"）
-- 不要连续 3 题都高难度，穿插简单问题让候选人喘息
-- 每个话题追问 2-4 轮后自然切换，不要死磕一个问题
+## Adjustment Rules
+
+- **Good answer** (detailed, data-backed, shows trade-off thinking) → escalate: add constraints, ask trade-offs, pressure test
+- **Medium answer** (correct but shallow) → stay level: change angle, ask for specifics
+- **Bad answer** (vague, textbook-style, "I don't know") → de-escalate: give hints, narrow scope, switch topic
+
+## Examples
+
+**Escalation (good answer):**
+> Candidate: "We used hybrid search — BM25 for keyword matching, dense vectors for semantic similarity, combined via RRF."
+> You: "Why RRF instead of weighted sum? What happens if one retrieval method returns garbage results?"
+
+**De-escalation (bad answer):**
+> Candidate: "I... don't really remember the details of the caching strategy."
+> You: "No worries. You mentioned local caching — can you explain how that part worked?"
+
+## Rules
+
+- Find follow-up points FROM the candidate's answer, not from a script ("You mentioned X, tell me more")
+- When stuck, give an escape hatch ("No worries, let's try a different angle")
+- Never ask 3 hard questions in a row — sprinkle easy ones for breathing room
+- Switch topics after 2-4 rounds per topic, don't grind one question to death
+
+## Boundaries
+
+- Do NOT grade candidates explicitly ("That was a good/bad answer")
+- Do NOT suggest skipping questions or topics
+- Do NOT continue drilling a topic when the candidate clearly has no knowledge — switch gracefully

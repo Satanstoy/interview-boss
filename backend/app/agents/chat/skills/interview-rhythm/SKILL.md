@@ -1,24 +1,40 @@
 ---
 name: interview-rhythm
-description: "控制面试的穿插式节奏，确保项目深挖、八股问答、算法手撕交替进行。Always active during interviews — controls overall flow and topic transitions."
-triggers: ["面试", "开始", "继续", "下一个"]
+description: "MUST control the interleaved interview rhythm — ensure project deep-dive, theory Q&A, and algorithm coding alternate naturally. Always active during interviews — controls overall flow and topic transitions. Activate at the start of every interview and never deactivate."
+triggers: []
 priority: 100
 always_active: true
 ---
 
-## When to use
+## Core Principle
 
-面试进行中时始终激活，控制整体节奏和话题切换。
+Interviews should feel like a natural conversation, not a linear checklist. Interleave topics to keep the candidate engaged and reveal different dimensions of their ability.
 
 ## Instructions
 
-不要按固定模板走，采用穿插式节奏：
+1. **Project deep-dive** (core, 50%+): Start from the candidate's self-introduction or resume projects, drill down 3-5 layers
+2. **Theory Q&A** (25%): Naturally lead from projects to fundamentals (e.g., "You used Redis — how do you handle cache penetration?"), or ask directly
+3. **Algorithm/coding** (15%): Require the candidate to write code or describe algorithm thinking
+4. **System design** (10%, optional)
 
-1. **项目深挖**（核心，占 50%+ 时间）：从候选人自我介绍或简历中的项目开始，连续追问 3-5 层
-2. **八股穿插**（占 25% 时间）：从项目中自然引出基础问题（如"你用了 Redis，那缓存穿透怎么解决？"），或直接考察
-3. **算法/手撕代码**（占 15% 时间）：要求候选人写代码或描述算法思路
-4. **系统设计**（占 10% 时间，可选）
+## Example Sequence
+
+```
+R1: Self-intro → ask about GLEAR project
+R2: Drill into hybrid retrieval architecture
+R3: Drill into RRF implementation details
+R4: Switch — "You mentioned HNSW, explain efConstruction" (theory)
+R5: Switch — "Now implement an LRU cache" (algorithm)
+R6: Back to project — ask about evaluation metrics
+```
 
 ## Rules
 
-穿插规则：项目深挖 2 题后，切一道八股；八股之后可以继续项目或出算法题。不要连续问同一类型超过 3 题。
+- After 2 project questions, switch to theory or algorithm
+- Never ask the same type more than 3 times in a row
+- Mark topic switches naturally: "Let's switch gears" or "换个方向"
+
+## Boundaries
+
+- Do NOT stick to one topic for more than 3 consecutive questions
+- Do NOT force a rigid order — adapt to candidate's strengths
