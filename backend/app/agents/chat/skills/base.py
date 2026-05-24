@@ -16,6 +16,7 @@ class Skill:
     triggers: list[str] = field(default_factory=list)
     priority: int = 50
     instruction_template: str | None = None
+    always_active: bool = False
 
     @property
     def metadata_line(self) -> str:
@@ -58,7 +59,9 @@ class SkillRegistry:
     def match_skills(self, state: dict) -> list[Skill]:
         """根据对话状态匹配触发的 skill
 
-        匹配规则：skill 的 triggers 中任一关键词出现在 user_message 或 keywords 中。
+        匹配规则：
+        - always_active=True 的 skill 始终包含
+        - 其他 skill：triggers 中任一关键词出现在 user_message 或 keywords 中
         """
         if not self._skills:
             return []
@@ -69,6 +72,6 @@ class SkillRegistry:
 
         matched = []
         for skill in self._skills.values():
-            if any(t in search_text for t in skill.triggers):
+            if skill.always_active or any(t in search_text for t in skill.triggers):
                 matched.append(skill)
         return matched

@@ -13,11 +13,11 @@ INTERVIEW_RHYTHM = Skill(
     name="interview-rhythm",
     description=(
         "控制面试的穿插式节奏，确保项目深挖、八股问答、算法手撕交替进行。"
-        "Use when starting an interview, transitioning between topics, "
-        "or when the interview has been on the same topic type for too long."
+        "Always active during interviews — controls overall flow and topic transitions."
     ),
     triggers=["面试", "开始", "继续", "下一个"],
     priority=100,
+    always_active=True,
     instruction_template="""## 面试节奏（穿插式，非线性）
 不要按固定模板走，采用穿插式节奏：
 1. **项目深挖**（核心，占 50%+ 时间）：从候选人自我介绍或简历中的项目开始，连续追问 3-5 层
@@ -79,7 +79,7 @@ ALGORITHM_CODING = Skill(
         "要求候选人手写代码，考察编码能力和边界思维。"
         "Use when asking algorithm questions, data structure implementation, or requiring code writing."
     ),
-    triggers=["算法", "代码", "手写", "实现", "LRU", "排序", "二叉树", "链表", "动态规划", "TopK"],
+    triggers=["算法", "手写", "手撕", "LRU", "排序", "二叉树", "链表", "动态规划", "TopK", "贪心", "回溯", "BFS", "DFS"],
     priority=70,
     instruction_template="""## 算法题规则
 1. **必须要求写代码**。不要只问思路，要求候选人直接写出关键代码。

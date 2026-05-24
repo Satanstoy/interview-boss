@@ -13,6 +13,7 @@ Chatbot 功能测试：agent 流程、记忆、预算、路由。
 | `test_chat_memory_recall.py` | 记忆召回 |
 | `test_chat_routing.py` | 条件路由 |
 | `test_chat_session_notes.py` | 会话笔记 |
+| `test_chat_skills.py` | Skills 系统（Skill 基类、Registry、匹配、prompt 构建） |
 
 ## 运行
 
