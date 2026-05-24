@@ -241,16 +241,19 @@ async def fts_retrieve(state: ChatState) -> dict:
 
 
 def _determine_interview_phase(recent_count: int) -> str:
-    """根据对话轮数判定当前面试阶段"""
-    # recent_count = 历史消息数（不含当前用户消息）
-    # 开场白(assistant) + 用户自我介绍(user) = 2 条 → 开场阶段
+    """根据对话轮数判定当前面试阶段（宽松，让 LLM 自主决策）
+
+    Args:
+        recent_count: 历史消息数（不含当前用户消息）
+    """
+    # 开场白(assistant) + 用户自我介绍(user) = 2 条
     if recent_count <= 2:
-        return "开场阶段：候选人刚做完自我介绍，请简要点评并自然过渡到第一个技术问题"
-    # 2~16 条 = 1~8 轮问答 → 提问阶段
-    if recent_count <= 16:
-        return "提问阶段：正在进行技术提问，一次一题，根据回答深度适当追问"
-    # 超过 8 轮问答 → 收尾阶段
-    return "收尾阶段：面试已进行多轮，可以总结表现并询问候选人是否有问题想问"
+        return "开场阶段：候选人刚做完自我介绍。简短过渡（不要夸奖），直接问第一个技术问题，从项目深挖开始。"
+    # 2~30 条 = 1~15 轮问答 → 主面试阶段
+    if recent_count <= 30:
+        return "面试进行中。继续穿插式提问（项目深挖 + 八股 + 算法），根据候选人回答决定追问深度。"
+    # 超过 15 轮 → 可以考虑收尾，但不强制
+    return "面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾；否则继续提问补足覆盖度。"
 
 
 async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
