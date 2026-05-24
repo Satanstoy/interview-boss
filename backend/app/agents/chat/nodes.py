@@ -14,6 +14,7 @@ from app.agents.chat.prompts import (
     CONTEXT_COMPRESS_PROMPT,
     MEMORY_EXTRACT_PROMPT,
 )
+from app.agents.chat.skills import get_default_registry, build_skill_prompt
 
 logger = logging.getLogger("interview-boss")
 
@@ -300,6 +301,15 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         )
 
     system_prompt = _truncate_to_budget(system_prompt, SYSTEM_BUDGET)
+
+    # Skills 系统：匹配并注入 active skill 指令
+    skill_registry = get_default_registry()
+    matched_skills = skill_registry.match_skills(state)
+    active_skill_names = [s.name for s in matched_skills]
+    skill_prompt = build_skill_prompt(skill_registry, active_skill_names)
+    if skill_prompt:
+        system_prompt += f"\n\n{skill_prompt}"
+        logger.info(f"Active skills: {active_skill_names}")
 
     # 构建消息列表
     messages = [{"role": "system", "content": system_prompt}]

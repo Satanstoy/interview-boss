@@ -1,5 +1,6 @@
 """Skills 系统 — 面试官技能模块化架构"""
 from app.agents.chat.skills.base import Skill, SkillRegistry
 from app.agents.chat.skills.builder import build_skill_prompt
+from app.agents.chat.skills.defaults import get_default_registry
 
-__all__ = ["Skill", "SkillRegistry", "build_skill_prompt"]
+__all__ = ["Skill", "SkillRegistry", "build_skill_prompt", "get_default_registry"]

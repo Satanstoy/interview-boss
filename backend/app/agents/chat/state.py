@@ -52,3 +52,6 @@ class ChatState(TypedDict, total=False):
     # === 输出 ===
     response: str                           # AI 面试官回复
     metadata: dict                          # 回复元数据（检索到的题目等）
+
+    # === Skills ===
+    active_skills: list[str]                # 当前激活的 skill 名称列表
