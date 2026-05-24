@@ -161,6 +161,17 @@ async def send_message(
             # 导入 chat agent
             from app.agents.chat.graph import run_chat
 
+            # 加载 JD 文本（如果关联了 JD）
+            jd_text = None
+            if conv.get("jd_id"):
+                from app.db.connection import get_db_connection
+                with get_db_connection() as conn:
+                    jd_row = conn.execute(
+                        "SELECT content FROM jd WHERE id = ?", (conv["jd_id"],)
+                    ).fetchone()
+                    if jd_row:
+                        jd_text = jd_row[0]
+
             async for event in run_chat(
                 conversation_id=conversation_id,
                 user_id=user['id'],
@@ -168,6 +179,7 @@ async def send_message(
                 mode=conv.get("mode", "free_practice"),
                 jd_id=conv.get("jd_id"),
                 resume_text=conv.get("resume_text"),
+                jd_text=jd_text,
             ):
                 event_type = event.get("type", "chunk")
 

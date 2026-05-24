@@ -235,7 +235,8 @@ async def fts_retrieve(state: ChatState) -> dict:
     if not keywords:
         return {"retrieved_questions": []}
 
-    results = search_questions_fts(keywords, limit=5)
+    job_position = state.get("job_position")
+    results = search_questions_fts(keywords, limit=5, job_position=job_position)
     return {"retrieved_questions": results}
 
 

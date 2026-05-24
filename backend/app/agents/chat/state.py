@@ -34,6 +34,7 @@ class ChatState(TypedDict, total=False):
     resume_summary: Optional[str]           # 简历摘要（从记忆中提取）
     session_notes: str                      # 会话级累积笔记（增量记忆）
     interview_context: str                  # 面试上下文（岗位、分类、练习统计）
+    job_position: Optional[str]             # 用户目标岗位名
 
     # === 上下文压缩 ===
     message_history: list[dict]             # 完整消息历史

@@ -26,6 +26,7 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **Token 预算**：`budget.py` 控制上下文窗口大小，优先保留最近消息
 - **面试流程**：开场(自我介绍) → 提问(一次一题) → 收尾(反问)，由 `_determine_interview_phase()` 根据消息数自动切换
 - **开场白**：创建对话时 `chat_service.generate_opening_message()` 自动生成，零 LLM 成本
+- **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
 
 ## 修改后必做
 

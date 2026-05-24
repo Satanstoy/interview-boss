@@ -86,8 +86,9 @@ async def run_chat(
 
         # 构建面试上下文（岗位、分类、练习统计、历史面试）
         yield {"type": "step", "step": "context", "message": "正在加载个人画像..."}
-        interview_context = build_interview_context(user_id, conversation_id=conversation_id)
+        interview_context, job_position = build_interview_context(user_id, conversation_id=conversation_id)
         state["interview_context"] = interview_context
+        state["job_position"] = job_position
 
         if not check_round_limit(state.get("message_history", [])):
             yield {"type": "error", "message": "对话已达最大轮次限制（50轮），请新建对话继续"}

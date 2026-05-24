@@ -39,12 +39,13 @@ def delete_fts_entry(question_bank_id: int) -> None:
         conn.commit()
 
 
-def search_questions_fts(keywords: list[str], limit: int = 10) -> list[dict]:
+def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str = None) -> list[dict]:
     """用 FTS5 搜索题库，返回最相关的题目列表。
 
     Args:
         keywords: LLM 提取的关键词列表
         limit: 返回结果数量上限
+        job_position: 目标岗位名，用于过滤题目
 
     Returns:
         [{"id": int, "question": str, "cat1": str, "cat2": str, "tags": str, "rank": float}]
@@ -66,22 +67,47 @@ def search_questions_fts(keywords: list[str], limit: int = 10) -> list[dict]:
     fts_query = " OR ".join(terms)
 
     with get_db_connection() as conn:
-        try:
-            rows = conn.execute(
-                "SELECT rowid, question, cat1, cat2, tags, ai_answer, rank "
-                "FROM question_fts "
-                "WHERE question_fts MATCH ? "
-                "ORDER BY rank "
-                "LIMIT ?",
-                (fts_query, limit)
-            ).fetchall()
-        except Exception as e:
-            logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
-            # 降级：用 LIKE 查询
-            return _fallback_like_search(keywords, conn, limit)
+        # 优先按岗位过滤搜索
+        rows = []
+        if job_position:
+            try:
+                rows = conn.execute(
+                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank "
+                    "FROM question_fts f "
+                    "JOIN question_bank qb ON f.rowid = qb.id "
+                    "WHERE question_fts MATCH ? AND qb.job_position = ? "
+                    "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
+                    "ORDER BY f.rank LIMIT ?",
+                    (fts_query, job_position, limit)
+                ).fetchall()
+            except Exception as e:
+                logger.warning(f"FTS5 岗位过滤查询失败: {e}")
+
+        # 岗位过滤结果不足时，回退到无过滤搜索
+        if len(rows) < 3:
+            try:
+                fallback_rows = conn.execute(
+                    "SELECT rowid, question, cat1, cat2, tags, ai_answer, rank "
+                    "FROM question_fts "
+                    "WHERE question_fts MATCH ? "
+                    "ORDER BY rank "
+                    "LIMIT ?",
+                    (fts_query, limit)
+                ).fetchall()
+                # 合并去重
+                existing_ids = {row[0] for row in rows}
+                for row in fallback_rows:
+                    if row[0] not in existing_ids:
+                        rows.append(row)
+                        if len(rows) >= limit:
+                            break
+            except Exception as e:
+                logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
+                if not rows:
+                    return _fallback_like_search(keywords, conn, limit, job_position)
 
     results = []
-    for row in rows:
+    for row in rows[:limit]:
         results.append({
             "id": row[0],
             "question": row[1],
@@ -95,7 +121,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10) -> list[dict]:
     # 如果 FTS 结果太少，用 LIKE 补充
     if len(results) < 3 and keywords:
         existing_ids = {r["id"] for r in results}
-        fallback = _fallback_like_search(keywords, conn, limit)
+        fallback = _fallback_like_search(keywords, conn, limit, job_position)
         for item in fallback:
             if item["id"] not in existing_ids:
                 results.append(item)
@@ -105,7 +131,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10) -> list[dict]:
     return results[:limit]
 
 
-def _fallback_like_search(keywords: list[str], conn, limit: int) -> list[dict]:
+def _fallback_like_search(keywords: list[str], conn, limit: int, job_position: str = None) -> list[dict]:
     """降级搜索：当 FTS5 查询失败时用 LIKE 模糊匹配"""
     if not keywords:
         return []
@@ -124,11 +150,16 @@ def _fallback_like_search(keywords: list[str], conn, limit: int) -> list[dict]:
     if not conditions:
         return []
 
+    position_filter = ""
+    if job_position:
+        position_filter = "AND job_position = ? "
+        params.append(job_position)
+
     where = " AND ".join(conditions)
     rows = conn.execute(
         f"SELECT id, question, cat1, cat2, tags, ai_answer "
         f"FROM question_bank "
-        f"WHERE deleted_at IS NULL AND status = 'approved' AND ({where}) "
+        f"WHERE deleted_at IS NULL AND status = 'approved' {position_filter}AND ({where}) "
         f"LIMIT ?",
         params + [limit]
     ).fetchall()

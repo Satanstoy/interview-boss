@@ -14,24 +14,11 @@ from app.db.connection import get_db_connection
 logger = logging.getLogger("interview-boss")
 
 
-def build_interview_context(user_id: int, conversation_id: Optional[str] = None) -> str:
+def build_interview_context(user_id: int, conversation_id: Optional[str] = None) -> tuple[str, str]:
     """构建面试上下文字符串，注入到系统 prompt 中
 
     Returns:
-        格式化的上下文文本，如:
-        ```
-        【求职背景】
-        目标岗位: Java 后端开发工程师
-
-        【考察类别】
-        - Java 基础: 多线程、JVM、集合框架
-        - 数据库: MySQL 索引优化、事务隔离级别
-        - ...
-
-        【薄弱环节】
-        - Redis 缓存策略（正确率 40%）
-        - 系统设计（尚未练习）
-        ```
+        (context_text, position_name) — 上下文文本和岗位名
     """
     parts = []
 
@@ -77,7 +64,7 @@ def build_interview_context(user_id: int, conversation_id: Optional[str] = None)
     except Exception as e:
         logger.debug(f"历史会话搜索跳过: {e}")
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), position_name
 
 
 def _get_user_practice_summary(user_id: int) -> str:
