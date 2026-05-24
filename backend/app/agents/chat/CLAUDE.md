@@ -18,6 +18,8 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 | `prompts.py` | 系统提示词（含面试阶段协议）、记忆提取提示词 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
+| `skills/base.py` | Skill 基类 + SkillRegistry（Progressive Disclosure 架构） |
+| `skills/builder.py` | build_skill_prompt() — 合并 active skills 指令为 prompt 片段 |
 
 ## 核心模式
 
@@ -27,6 +29,7 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **面试流程**：开场(自我介绍) → 提问(一次一题) → 收尾(反问)，由 `_determine_interview_phase()` 根据消息数自动切换
 - **开场白**：创建对话时 `chat_service.generate_opening_message()` 自动生成，零 LLM 成本
 - **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
+- **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 metadata 始终加载，Layer 2 instruction 按需注入，Layer 3 resources 条件触发。`SkillRegistry` 管理所有 skill，`build_skill_prompt()` 合并 active skills 指令
 
 ## 修改后必做
 
