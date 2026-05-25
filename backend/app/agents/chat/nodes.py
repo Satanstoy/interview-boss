@@ -267,7 +267,8 @@ def should_retrieve(state: ChatState) -> bool:
     决策逻辑：
     - chat/follow_up → 不检索（闲聊/追问不需要出新题）
     - practice_request → 检索（用户主动要题）
-    - interview_question → 检索（为面试官提供参考题目，由 LLM 自行决定追问还是出新题）
+    - interview_question + answer_complete=True → 检索（回答完整，面试官要出新题）
+    - interview_question + answer_complete=False → 不检索（用户还在回答，面试官会追问，不需要出新题）
 
     Returns:
         True 如果需要检索，False 如果可以跳过
@@ -278,8 +279,12 @@ def should_retrieve(state: ChatState) -> bool:
     if intent in ("chat", "follow_up"):
         return False
 
-    # 其他意图（interview_question / practice_request）始终检索
-    return True
+    # practice_request 始终检索
+    if intent == "practice_request":
+        return True
+
+    # interview_question：仅在回答完整时检索
+    return state.get("answer_complete", False)
 
 
 def _determine_interview_phase(recent_count: int, active_skills: list[str] = None) -> str:
