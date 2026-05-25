@@ -1,5 +1,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+// 导入 highlight.js 触发 marked.use() 全局初始化（只执行一次）
+import './highlight.js'
 
 // 配置 DOMPurify：只允许安全的 HTML 标签和属性
 const purifyConfig = {

@@ -391,9 +391,54 @@ export function upload(url, formData, options = {}) {
 }
 
 /**
+ * 共享 SSE 流读取函数（消除 postSSE/uploadSSE/getSSE 中的重复代码）
+ */
+async function _consumeSSEStream(reader, onEvent, yieldForRender = false) {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalResult = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop()
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data: ')) continue
+      try {
+        const data = JSON.parse(trimmed.slice(6))
+        if (onEvent) onEvent(data)
+        if (data.type === 'done') finalResult = data
+        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+        if (yieldForRender) await new Promise(r => setTimeout(r, 0))
+      } catch (e) {
+        if (e.message && !e.message.includes('JSON')) throw e
+      }
+    }
+  }
+
+  if (buffer.trim().startsWith('data: ')) {
+    try {
+      const data = JSON.parse(buffer.trim().slice(6))
+      if (onEvent) onEvent(data)
+      if (data.type === 'done') finalResult = data
+      if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+    } catch (e) {
+      if (e.message && !e.message.includes('JSON')) throw e
+    }
+  }
+
+  return finalResult
+}
+
+/**
  * POST 请求，返回 SSE 流式响应
  */
-export async function postSSE(url, body, onEvent) {
+export async function postSSE(url, body, onEvent, _isRetry = false) {
   const controller = new AbortController()
   pendingControllers.add(controller)
 
@@ -410,6 +455,14 @@ export async function postSSE(url, body, onEvent) {
       credentials: 'same-origin',
     })
 
+    // 401 → 尝试刷新 token 并重试一次
+    if (res.status === 401 && !_isRetry) {
+      const refreshResult = await tryRefreshToken()
+      if (refreshResult) return postSSE(url, body, onEvent, true)
+      if (onUnauthorized) onUnauthorized()
+      throw new Error(getStatusMessage(401))
+    }
+
     if (!res.ok) {
       const text = await res.text()
       let detail
@@ -417,45 +470,7 @@ export async function postSSE(url, body, onEvent) {
       throw new Error(detail || getStatusMessage(res.status))
     }
 
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalResult = null
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop()
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        try {
-          const data = JSON.parse(trimmed.slice(6))
-          if (onEvent) onEvent(data)
-          if (data.type === 'done') finalResult = data
-          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-        } catch (e) {
-          if (e.message && !e.message.includes('JSON')) throw e
-        }
-      }
-    }
-
-    if (buffer.trim().startsWith('data: ')) {
-      try {
-        const data = JSON.parse(buffer.trim().slice(6))
-        if (onEvent) onEvent(data)
-        if (data.type === 'done') finalResult = data
-        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-      } catch (e) {
-        if (e.message && !e.message.includes('JSON')) throw e
-      }
-    }
-
-    return finalResult
+    return await _consumeSSEStream(res.body.getReader(), onEvent)
   } finally {
     pendingControllers.delete(controller)
   }
@@ -464,7 +479,7 @@ export async function postSSE(url, body, onEvent) {
 /**
  * 上传 FormData，返回 SSE 流式响应
  */
-export async function uploadSSE(url, formData, onEvent) {
+export async function uploadSSE(url, formData, onEvent, _isRetry = false) {
   const controller = new AbortController()
   pendingControllers.add(controller)
 
@@ -481,6 +496,14 @@ export async function uploadSSE(url, formData, onEvent) {
       credentials: 'same-origin',
     })
 
+    // 401 → 尝试刷新 token 并重试一次
+    if (res.status === 401 && !_isRetry) {
+      const refreshResult = await tryRefreshToken()
+      if (refreshResult) return uploadSSE(url, formData, onEvent, true)
+      if (onUnauthorized) onUnauthorized()
+      throw new Error(getStatusMessage(401))
+    }
+
     if (!res.ok) {
       const text = await res.text()
       let detail
@@ -488,47 +511,7 @@ export async function uploadSSE(url, formData, onEvent) {
       throw new Error(detail || getStatusMessage(res.status))
     }
 
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalResult = null
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop()
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        try {
-          const data = JSON.parse(trimmed.slice(6))
-          if (onEvent) onEvent(data)
-          if (data.type === 'done') finalResult = data
-          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-          // 让出事件循环，确保浏览器有机会渲染进度更新
-          await new Promise(r => setTimeout(r, 0))
-        } catch (e) {
-          if (e.message && !e.message.includes('JSON')) throw e
-        }
-      }
-    }
-
-    if (buffer.trim().startsWith('data: ')) {
-      try {
-        const data = JSON.parse(buffer.trim().slice(6))
-        if (onEvent) onEvent(data)
-        if (data.type === 'done') finalResult = data
-        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-      } catch (e) {
-        if (e.message && !e.message.includes('JSON')) throw e
-      }
-    }
-
-    return finalResult
+    return await _consumeSSEStream(res.body.getReader(), onEvent, true)
   } finally {
     pendingControllers.delete(controller)
   }
@@ -537,7 +520,7 @@ export async function uploadSSE(url, formData, onEvent) {
 /**
  * GET 请求，返回 SSE 流式响应
  */
-export async function getSSE(url, onEvent) {
+export async function getSSE(url, onEvent, _isRetry = false) {
   const controller = new AbortController()
   pendingControllers.add(controller)
 
@@ -553,6 +536,14 @@ export async function getSSE(url, onEvent) {
       credentials: 'same-origin',
     })
 
+    // 401 → 尝试刷新 token 并重试一次
+    if (res.status === 401 && !_isRetry) {
+      const refreshResult = await tryRefreshToken()
+      if (refreshResult) return getSSE(url, onEvent, true)
+      if (onUnauthorized) onUnauthorized()
+      throw new Error(getStatusMessage(401))
+    }
+
     if (!res.ok) {
       const text = await res.text()
       let detail
@@ -560,45 +551,7 @@ export async function getSSE(url, onEvent) {
       throw new Error(detail || getStatusMessage(res.status))
     }
 
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let finalResult = null
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop()
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        try {
-          const data = JSON.parse(trimmed.slice(6))
-          if (onEvent) onEvent(data)
-          if (data.type === 'done') finalResult = data
-          if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-        } catch (e) {
-          if (e.message && !e.message.includes('JSON')) throw e
-        }
-      }
-    }
-
-    if (buffer.trim().startsWith('data: ')) {
-      try {
-        const data = JSON.parse(buffer.trim().slice(6))
-        if (onEvent) onEvent(data)
-        if (data.type === 'done') finalResult = data
-        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
-      } catch (e) {
-        if (e.message && !e.message.includes('JSON')) throw e
-      }
-    }
-
-    return finalResult
+    return await _consumeSSEStream(res.body.getReader(), onEvent)
   } finally {
     pendingControllers.delete(controller)
   }

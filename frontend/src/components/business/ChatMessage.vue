@@ -14,7 +14,7 @@
         :class="isUser
           ? 'bg-primary-600 dark:bg-primary-700 text-white rounded-tr-md'
           : 'bg-surface-100 dark:bg-surface-700 text-ink-800 dark:text-ink-100 rounded-tl-md border border-surface-200/80 dark:border-ink-600'">
-        <div v-if="isUser" class="whitespace-pre-wrap">{{ message.content }}</div>
+        <div v-if="isUser" class="prose-chat" v-html="renderedContent"></div>
         <div v-else class="prose-chat" v-html="renderedContent"></div>
       </div>
 
@@ -54,35 +54,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { marked } from 'marked'
-import hljs from 'highlight.js/lib/core'
-import javascript from 'highlight.js/lib/languages/javascript'
-import python from 'highlight.js/lib/languages/python'
-import java from 'highlight.js/lib/languages/java'
-import sql from 'highlight.js/lib/languages/sql'
-import bash from 'highlight.js/lib/languages/bash'
-import json from 'highlight.js/lib/languages/json'
-import css from 'highlight.js/lib/languages/css'
-import xml from 'highlight.js/lib/languages/xml'
-import typescript from 'highlight.js/lib/languages/typescript'
-import DOMPurify from 'dompurify'
-import 'highlight.js/styles/github-dark.css'
-
-// Register only common languages to keep bundle small
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('js', javascript)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('py', python)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('shell', bash)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('html', xml)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('ts', typescript)
+import { renderSafeMarkdown } from '@/utils/markdown.js'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -92,22 +64,8 @@ const isUser = computed(() => props.message.role === 'user')
 const showRetrieved = ref(false)
 const copied = ref(false)
 
-// Configure marked with highlight.js for code syntax highlighting
-marked.setOptions({
-  highlight: (code, lang) => {
-    if (lang && hljs.getLanguage(lang)) {
-      try { return hljs.highlight(code, { language: lang }).value } catch { /* ignore */ }
-    }
-    return hljs.highlightAuto(code).value
-  },
-  breaks: true,
-  gfm: true,
-})
-
 const renderedContent = computed(() => {
-  if (!props.message.content) return ''
-  const html = marked.parse(props.message.content)
-  return DOMPurify.sanitize(html)
+  return renderSafeMarkdown(props.message.content)
 })
 
 async function copyContent() {

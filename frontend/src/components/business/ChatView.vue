@@ -159,8 +159,7 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import ChatMessage from './ChatMessage.vue'
 import NewChatModal from './NewChatModal.vue'
@@ -193,8 +192,7 @@ const inputPlaceholder = computed(() => {
 
 const renderStreamingContent = computed(() => {
   if (!streamingContent.value) return ''
-  const html = marked.parse(streamingContent.value, { breaks: true, gfm: true })
-  return DOMPurify.sanitize(html)
+  return renderSafeMarkdown(streamingContent.value)
 })
 
 // Load conversations
