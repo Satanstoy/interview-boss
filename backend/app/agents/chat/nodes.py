@@ -242,13 +242,17 @@ async def fts_retrieve(state: ChatState) -> dict:
     elif keywords:
         query_keywords = keywords
     else:
+        logger.info("RAG 检索: 无 search_query 和 keywords，跳过")
         return {"retrieved_questions": []}
+
+    logger.info(f"RAG 检索: search_query='{search_query}', keywords={keywords}, 最终查询词={query_keywords}")
 
     # 收集已展示的题目 ID，避免重复检索
     exclude_ids = {q["id"] for q in state.get("retrieved_questions", []) if "id" in q}
 
     job_position = state.get("job_position")
     results = search_questions_fts(query_keywords, limit=5, job_position=job_position, exclude_ids=exclude_ids)
+    logger.info(f"RAG 检索: 返回 {len(results)} 条题目")
     return {"retrieved_questions": results}
 
 
@@ -263,8 +267,7 @@ def should_retrieve(state: ChatState) -> bool:
     决策逻辑：
     - chat/follow_up → 不检索（闲聊/追问不需要出新题）
     - practice_request → 检索（用户主动要题）
-    - interview_question + answer_complete → 检索（回答完整，面试官出下一道题）
-    - interview_question + !answer_complete → 不检索（回答不完整，面试官可能追问）
+    - interview_question → 检索（为面试官提供参考题目，由 LLM 自行决定追问还是出新题）
 
     Returns:
         True 如果需要检索，False 如果可以跳过
@@ -275,38 +278,33 @@ def should_retrieve(state: ChatState) -> bool:
     if intent in ("chat", "follow_up"):
         return False
 
-    # practice_request 始终检索（用户主动要题）
-    if intent == "practice_request":
-        return True
-
-    # interview_question: 检查回答是否完整
-    answer_complete = state.get("answer_complete", False)
-    if not answer_complete:
-        return False
-
+    # 其他意图（interview_question / practice_request）始终检索
     return True
 
 
 def _determine_interview_phase(recent_count: int, active_skills: list[str] = None) -> str:
     """根据对话轮数和激活的 skills 判定当前面试阶段
 
+    目标：12-15 个问题，约 30-50 分钟（每题 ~2 条消息）。
+    开场(2) + 12题(24) = 26 条，15题(30) = 32 条。
+
     Args:
-        recent_count: 历史消息数（不含当前用户消息）
+        recent_count: 总消息数（不含当前用户消息）
         active_skills: 当前激活的 skill 名称列表
     """
     # 开场白(assistant) + 用户自我介绍(user) = 2 条
     if recent_count <= 2:
         return "开场阶段：候选人刚做完自我介绍。简短过渡（不要夸奖），直接问第一个技术问题，从项目深挖开始。"
-    # 2~20 条 = 1~10 轮问答 → 主面试阶段
-    if recent_count <= 20:
-        # 当 hr-soft-skills 激活且已过面试中期，提示主动转入 HR
-        if active_skills and "hr-soft-skills" in active_skills and recent_count >= 12:
+    # 2~32 条 = 1~15 轮问答 → 主面试阶段
+    if recent_count <= 32:
+        # 当 hr-soft-skills 激活且已过面试中期（约第10题），提示主动转入 HR
+        if active_skills and "hr-soft-skills" in active_skills and recent_count >= 22:
             return '面试中后期。技术考察已进行多轮，现在需要自然地转入 HR 环节：直接问 1-2 个 HR 软素质问题（职业规划、团队角色、选择公司的考量等），不需要说过渡语，然后问"你有什么想问我们的吗？"。'
         return "面试进行中。继续穿插式提问（项目深挖 + 八股 + 算法），根据候选人回答决定追问深度。"
-    # 20~30 条 = 10~15 轮 → 可以考虑收尾，可以问 HR 问题
-    if recent_count <= 30:
+    # 32~44 条 = 16~22 轮 → 可以考虑收尾，可以问 HR 问题
+    if recent_count <= 44:
         return '面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。收尾前可以问 1-2 个 HR 软素质问题（职业规划、团队合作等），然后问"你有什么想问的吗？"。'
-    # 超过 15 轮 → 强制收尾
+    # 超过 22 轮 → 强制收尾
     return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
 

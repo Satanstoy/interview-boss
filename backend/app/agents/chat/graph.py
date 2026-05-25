@@ -65,6 +65,8 @@ async def run_chat(
         "interview_context": "",
         "intent": "interview_question",
         "keywords": [],
+        "search_query": "",
+        "answer_complete": False,
         "retrieved_questions": [],
         "response": "",
         "metadata": {},
@@ -114,14 +116,15 @@ async def run_chat(
         if is_first_message:
             # 快速路径：规则分类 + 最近记忆，零 LLM 成本
             yield {"type": "step", "step": "understanding", "message": "正在理解你的问题..."}
-            intent, memory_ids, keywords = await classify_and_recall_fast(
+            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
                 user_message=user_message,
                 memory_summaries=state.get("memory_summaries", []),
+                recent_context=recent_context,
             )
         else:
-            # 完整路径：LLM 分类 + 语义记忆召回
+            # 完整路径：LLM 分类 + 语义记忆召回 + 检索查询改写
             yield {"type": "step", "step": "understanding", "message": "正在分析你的回答..."}
-            intent, memory_ids, keywords = await classify_and_recall(
+            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
                 user_message=user_message,
                 recent_context=recent_context,
                 memory_summaries=state.get("memory_summaries", []),
@@ -129,6 +132,8 @@ async def run_chat(
             )
         state["intent"] = intent
         state["keywords"] = keywords
+        state["search_query"] = search_query
+        state["answer_complete"] = answer_complete
 
         # Step 3.5: 解析 LLM 选中的记忆（按 ID 获取完整内容）
         if memory_ids:
@@ -157,6 +162,7 @@ async def run_chat(
 
         # Step 4: 显式条件路由（基于 LangGraph 最佳实践）
         route = route_after_classify(state)
+        logger.info(f"路由决策: intent={state.get('intent')}, route={route}, keywords={state.get('keywords')}, search_query='{state.get('search_query')}'")
         if route == "rag_retrieve":
             # 需要 RAG 检索
             yield {"type": "step", "step": "searching", "message": "正在搜索相关面试题..."}
