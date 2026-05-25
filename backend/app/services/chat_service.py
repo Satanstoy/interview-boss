@@ -8,6 +8,17 @@ from app.db.connection import get_db_connection
 logger = logging.getLogger("interview-boss")
 
 
+def _safe_json_loads(raw) -> dict:
+    """安全解析 JSON 字符串，解析失败返回空字典"""
+    if not raw or not str(raw).strip():
+        return {}
+    try:
+        result = json.loads(raw)
+        return result if isinstance(result, dict) else {}
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return {}
+
+
 # ═══════════════════════════════════════════════════
 #  面试开场白
 # ═══════════════════════════════════════════════════
@@ -182,7 +193,7 @@ def get_messages(conversation_id: str, limit: int = 100) -> list[dict]:
             "role": row[1],
             "content": row[2],
             "token_count": row[3],
-            "metadata": json.loads(row[4]) if row[4] else {},
+            "metadata": _safe_json_loads(row[4]),
             "created_at": row[5],
         }
         for row in rows
@@ -208,7 +219,7 @@ def get_recent_messages(conversation_id: str, limit: int = 10) -> list[dict]:
             "role": row[1],
             "content": row[2],
             "token_count": row[3],
-            "metadata": json.loads(row[4]) if row[4] else {},
+            "metadata": _safe_json_loads(row[4]),
             "created_at": row[5],
         }
         for row in reversed(rows)
@@ -375,6 +386,15 @@ def get_resume_memory(user_id: int) -> Optional[str]:
 def save_resume_memory(user_id: int, resume_text: str) -> int:
     """保存或更新用户的简历记忆（停用旧的，创建新的）"""
     with get_db_connection() as conn:
+        # 去重：相同内容已存在则跳过
+        existing = conn.execute(
+            "SELECT id FROM chat_memories "
+            "WHERE user_id = ? AND memory_type = 'resume' AND is_active = 1 AND content = ?",
+            (user_id, resume_text)
+        ).fetchone()
+        if existing:
+            return existing[0]
+
         # 停用旧简历
         conn.execute(
             "UPDATE chat_memories SET is_active = 0, updated_at = CURRENT_TIMESTAMP "

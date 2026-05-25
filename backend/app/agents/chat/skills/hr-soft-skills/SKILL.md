@@ -1,42 +1,31 @@
 ---
 name: hr-soft-skills
-description: "Assess soft skills, career planning, teamwork, and cultural fit during interview wrap-up or when the candidate asks HR-related questions. Activate when the interview reaches its final phase, or when the candidate mentions career plans, team dynamics, strengths/weaknesses, compensation, or asks to turn the tables."
-triggers: ["职业规划", "团队", "优缺点", "薪资", "offer", "反问", "加班"]
+description: "面试收尾阶段评估候选人的软素质、职业规划、团队协作和文化匹配度。当面试进入后期（12+消息）或候选人提到职业规划、优缺点、薪资、反问等话题时激活。"
+triggers: ["职业规划", "优缺点", "薪资", "offer", "反问", "想问", "成长空间"]
 priority: 30
 ---
 
-## Why HR Questions Matter
+## 强制指令：HR 软素质提问
 
-Technical skills get you the interview; soft skills get you the job. HR questions reveal whether the candidate will thrive in the team, handle pressure, and grow over time.
+当此技能激活时，你必须在下一轮提问中融入 HR 软素质问题。这不是可选的。
 
-## Question Bank
+## 问题库（从中选 1-2 个）
 
-Pick 2-3 from these, don't ask all:
+- "你未来 2-3 年的职业规划是什么？"
+- "你在团队中通常扮演什么角色？"
+- "你遇到过最大的技术挑战是什么？怎么解决的？"
+- "你选择公司/团队最看重什么？"
+- "你有什么想问我们的？"
 
-- "What's your career plan for the next 2-3 years?"
-- "What role do you usually play in a team?"
-- "What's the biggest technical challenge you've faced? How did you resolve it?"
-- "What do you look for in a company/team?"
-- "Do you have any questions for us?"
+## 追问规则
 
-## Example Probe
+- 每个问题最多追问 1 轮，不要深挖
+- 语气比技术问题柔和一些，让候选人感受到尊重
+- 如果候选人主动问问题，如实回答，这是双向评估
 
-```
-You: "What's your career plan?"
-Candidate: "I want to become a tech lead."
-You: "What steps are you taking toward that? What skills do you think you still need?"  → 1 follow-up max
-```
+## 边界（禁止触碰）
 
-## Rules
-
-- Keep it short: 1-2 rounds per question, no deep drilling
-- Ask during wrap-up phase (typically after 6+ rounds of technical questions)
-- If the candidate asks a question, answer honestly — this is a two-way evaluation
-- Use a warmer tone here — the candidate should leave feeling respected
-
-## Boundaries
-
-- Do NOT probe into personal life, family, religion, political views, or health
-- Do NOT ask illegal questions (marital status, pregnancy plans, age)
-- Do NOT make promises about salary, promotion, or specific outcomes
-- Do NOT extend HR questions beyond 2-3 rounds — respect the candidate's time
+- 禁止询问个人生活、家庭、宗教、政治、健康
+- 禁止询问婚姻状况、生育计划、年龄
+- 禁止对薪资、晋升、具体待遇做承诺
+- HR 问题不超过 2-3 轮，尊重候选人时间

@@ -8,6 +8,20 @@ Progressive Disclosure 架构：
 from dataclasses import dataclass, field
 
 
+def _triggers_match(triggers: list[str], search_text: str, skill_name: str) -> bool:
+    """上下文感知的触发词匹配，减少误触发"""
+    for trigger in triggers:
+        if trigger not in search_text:
+            continue
+        # hr-soft-skills 特殊处理：泛化触发词需要上下文验证
+        if skill_name == "hr-soft-skills" and trigger in ("团队",):
+            hr_context = ["合作", "协作", "氛围", "文化", "管理", "角色", "选择"]
+            if not any(ctx in search_text for ctx in hr_context):
+                continue
+        return True
+    return False
+
+
 @dataclass
 class Skill:
     """面试官技能定义"""
@@ -62,6 +76,7 @@ class SkillRegistry:
         匹配规则：
         - always_active=True 的 skill 始终包含
         - 其他 skill：triggers 中任一关键词出现在 user_message 或 keywords 中
+        - 面试后期（12+ 消息）自动激活 hr-soft-skills
         """
         if not self._skills:
             return []
@@ -69,9 +84,20 @@ class SkillRegistry:
         user_message = state.get("user_message", "")
         keywords = state.get("keywords", [])
         search_text = user_message + " " + " ".join(keywords)
+        message_count = state.get("message_count", 0)
 
         matched = []
         for skill in self._skills.values():
-            if skill.always_active or any(t in search_text for t in skill.triggers):
+            if skill.always_active:
                 matched.append(skill)
+                continue
+            if _triggers_match(skill.triggers, search_text, skill.name):
+                matched.append(skill)
+
+        # 面试后期（12+ 消息 = 6+ 轮问答）自动激活 hr-soft-skills
+        if message_count >= 12:
+            hr_skill = self._skills.get("hr-soft-skills")
+            if hr_skill and hr_skill not in matched:
+                matched.append(hr_skill)
+
         return matched

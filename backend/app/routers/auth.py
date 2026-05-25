@@ -135,24 +135,32 @@ class BankModeRequest(BaseModel):
     bank_mode: BankMode
 
 
-def _set_refresh_cookie(response: Response, token: str, remember: bool = False):
+def _is_secure(request: Request) -> bool:
+    """根据请求协议决定 cookie 是否需要 secure 标志"""
+    proto = request.headers.get("x-forwarded-proto", "")
+    if proto:
+        return proto.lower() == "https"
+    return request.url.scheme == "https"
+
+
+def _set_refresh_cookie(response: Response, token: str, request: Request, remember: bool = False):
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
     response.set_cookie(
         key="refresh_token",
         value=token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=_is_secure(request),
+        samesite="lax",
         max_age=days * 86400,
         path="/",
     )
 
 
-def _clear_refresh_cookie(response: Response):
-    response.delete_cookie(key="refresh_token", path="/", httponly=True, secure=True, samesite="strict")
+def _clear_refresh_cookie(response: Response, request: Request):
+    response.delete_cookie(key="refresh_token", path="/", httponly=True, secure=_is_secure(request), samesite="lax")
 
 
-def _issue_token_pair(user: dict, response: Response, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = "") -> dict:
+def _issue_token_pair(user: dict, response: Response, request: Request, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = "") -> dict:
     """签发 access + refresh token，设置 cookie，返回响应体"""
     import secrets
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
@@ -162,7 +170,7 @@ def _issue_token_pair(user: dict, response: Response, remember: bool = False, ip
         family_id = secrets.token_urlsafe(16)
     refresh_token, jti = create_refresh_token(token_data, days=days, family_id=family_id)
     store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent, family_id=family_id)
-    _set_refresh_cookie(response, refresh_token, remember=remember)
+    _set_refresh_cookie(response, refresh_token, request, remember=remember)
     # 获取岗位名称
     pos_name = ""
     pos_id = user.get('current_position_id')
@@ -216,7 +224,7 @@ async def register(request: Request, req: RegisterRequest, response: Response):
 
     return _issue_token_pair(
         {"id": user_id, "username": req.username, "is_admin": False, "bank_mode": "public"},
-        response, remember=False,
+        response, request, remember=False,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )
@@ -246,7 +254,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
 
     _clear_failures(req.username)
     return _issue_token_pair(
-        dict(user), response, remember=req.remember_me,
+        dict(user), response, request, remember=req.remember_me,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )
@@ -273,7 +281,7 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
 
     # 检查 family 是否已被撤销（重放攻击响应）
     if family_id and is_family_invalidated(family_id):
-        _clear_refresh_cookie(response)
+        _clear_refresh_cookie(response, request)
         raise HTTPException(status_code=401, detail="token 已失效，请重新登录")
 
     record = get_refresh_token_jti(jti)
@@ -282,7 +290,7 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
         if family_id:
             invalidate_family(family_id)
             logger.warning(f"检测到可能的 token 重放攻击: user_id={user_id}, family_id={family_id}")
-        _clear_refresh_cookie(response)
+        _clear_refresh_cookie(response, request)
         raise HTTPException(status_code=401, detail="refresh token 已失效，请重新登录")
 
     remember = bool(record.get('remember', 0))
@@ -311,7 +319,7 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
 
     delete_refresh_token(jti)
     return _issue_token_pair(
-        dict(user), response, remember=remember,
+        dict(user), response, request, remember=remember,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", ""),
         family_id=db_family_id
@@ -328,7 +336,7 @@ async def logout(request: Request, response: Response, rt: str = Depends(get_ref
             delete_refresh_token(jti)
     except HTTPException:
         pass  # Token 可能已过期，仍需清除 cookie
-    _clear_refresh_cookie(response)
+    _clear_refresh_cookie(response, request)
     return {"status": "success"}
 
 
@@ -487,7 +495,7 @@ async def register_with_email(request: Request, req: EmailRegisterRequest, respo
     user = _insert_user(req.username, password_hash, req.email)
 
     return _issue_token_pair(
-        user, response, remember=False,
+        user, response, request, remember=False,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )
@@ -508,7 +516,7 @@ async def login_with_email(request: Request, req: EmailLoginRequest, response: R
         raise HTTPException(status_code=404, detail="该邮箱未注册")
 
     return _issue_token_pair(
-        dict(user), response, remember=False,
+        dict(user), response, request, remember=False,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )

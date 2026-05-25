@@ -44,9 +44,11 @@ class ChatState(TypedDict, total=False):
 
     # === 意图分类 ===
     intent: str                             # 'interview_question' | 'practice_request' | 'chat' | 'follow_up'
+    answer_complete: bool                   # 用户回答是否完整（面试官可以出下一题）
 
     # === RAG 检索 ===
     keywords: list[str]                     # LLM 提取的检索关键词
+    search_query: Optional[str]             # 基于对话上下文改写的检索查询
     retrieved_questions: list[dict]         # FTS5 检索到的相关题目
 
     # === 输出 ===
