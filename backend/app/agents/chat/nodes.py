@@ -231,30 +231,83 @@ async def extract_keywords(state: ChatState) -> dict:
 
 
 async def fts_retrieve(state: ChatState) -> dict:
-    """用 FTS5 检索相关题目"""
+    """用 FTS5 检索相关题目（优先使用 search_query，降级到 keywords）"""
+    # 优先使用基于上下文改写的检索查询
+    search_query = state.get("search_query", "")
     keywords = state.get("keywords", [])
-    if not keywords:
+
+    if search_query:
+        # search_query 是完整查询语句，拆分为关键词列表传给 FTS
+        query_keywords = search_query.split()
+    elif keywords:
+        query_keywords = keywords
+    else:
         return {"retrieved_questions": []}
 
+    # 收集已展示的题目 ID，避免重复检索
+    exclude_ids = {q["id"] for q in state.get("retrieved_questions", []) if "id" in q}
+
     job_position = state.get("job_position")
-    results = search_questions_fts(keywords, limit=5, job_position=job_position)
+    results = search_questions_fts(query_keywords, limit=5, job_position=job_position, exclude_ids=exclude_ids)
     return {"retrieved_questions": results}
 
 
-def _determine_interview_phase(recent_count: int) -> str:
-    """根据对话轮数判定当前面试阶段（宽松，让 LLM 自主决策）
+# ── 检索时机门控 ──
+
+def should_retrieve(state: ChatState) -> bool:
+    """判断当前轮次是否需要 RAG 检索（检索时机门控）
+
+    核心目的：为面试官出新题提供真实面经参考。
+    检索触发时机 = 面试官即将出新题（用户回答完整 或 用户主动要题）。
+
+    决策逻辑：
+    - chat/follow_up → 不检索（闲聊/追问不需要出新题）
+    - practice_request → 检索（用户主动要题）
+    - interview_question + answer_complete → 检索（回答完整，面试官出下一道题）
+    - interview_question + !answer_complete → 不检索（回答不完整，面试官可能追问）
+
+    Returns:
+        True 如果需要检索，False 如果可以跳过
+    """
+    intent = state.get("intent", "interview_question")
+
+    # chat 和 follow_up 不需要检索
+    if intent in ("chat", "follow_up"):
+        return False
+
+    # practice_request 始终检索（用户主动要题）
+    if intent == "practice_request":
+        return True
+
+    # interview_question: 检查回答是否完整
+    answer_complete = state.get("answer_complete", False)
+    if not answer_complete:
+        return False
+
+    return True
+
+
+def _determine_interview_phase(recent_count: int, active_skills: list[str] = None) -> str:
+    """根据对话轮数和激活的 skills 判定当前面试阶段
 
     Args:
         recent_count: 历史消息数（不含当前用户消息）
+        active_skills: 当前激活的 skill 名称列表
     """
     # 开场白(assistant) + 用户自我介绍(user) = 2 条
     if recent_count <= 2:
         return "开场阶段：候选人刚做完自我介绍。简短过渡（不要夸奖），直接问第一个技术问题，从项目深挖开始。"
-    # 2~30 条 = 1~15 轮问答 → 主面试阶段
-    if recent_count <= 30:
+    # 2~20 条 = 1~10 轮问答 → 主面试阶段
+    if recent_count <= 20:
+        # 当 hr-soft-skills 激活且已过面试中期，提示主动转入 HR
+        if active_skills and "hr-soft-skills" in active_skills and recent_count >= 12:
+            return '面试中后期。技术考察已进行多轮，现在需要自然地转入 HR 环节：直接问 1-2 个 HR 软素质问题（职业规划、团队角色、选择公司的考量等），不需要说过渡语，然后问"你有什么想问我们的吗？"。'
         return "面试进行中。继续穿插式提问（项目深挖 + 八股 + 算法），根据候选人回答决定追问深度。"
-    # 超过 15 轮 → 可以考虑收尾，但不强制
-    return "面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾；否则继续提问补足覆盖度。"
+    # 20~30 条 = 10~15 轮 → 可以考虑收尾，可以问 HR 问题
+    if recent_count <= 30:
+        return '面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。收尾前可以问 1-2 个 HR 软素质问题（职业规划、团队合作等），然后问"你有什么想问的吗？"。'
+    # 超过 15 轮 → 强制收尾
+    return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
 
 async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
@@ -270,7 +323,18 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     # 构建面试上下文（岗位、分类、练习统计）
     interview_context = state.get("interview_context", "")
-    interview_phase = _determine_interview_phase(len(recent))
+
+    # Skills 系统：先匹配 skills（供面试阶段判定使用）
+    # 注意：message_count 必须用总消息数（非 recent 窗口），否则 hr-soft-skills 的 12+ 条件永远不满足
+    skill_registry = get_default_registry()
+    total_message_count = len(state.get("message_history", []))
+    state_with_count = {**state, "message_count": total_message_count}
+    matched_skills = skill_registry.match_skills(state_with_count)
+    active_skill_names = [s.name for s in matched_skills]
+    logger.info(f"Active skills: {active_skill_names}")
+
+    # 用 active skills 判定面试阶段（必须用总消息数，recent 窗口被 KEEP_RECENT_ROUNDS 截断）
+    interview_phase = _determine_interview_phase(total_message_count, active_skill_names)
 
     # 构建 system prompt
     if mode == "jd_resume":
@@ -302,14 +366,10 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     system_prompt = _truncate_to_budget(system_prompt, SYSTEM_BUDGET)
 
-    # Skills 系统：匹配并注入 active skill 指令
-    skill_registry = get_default_registry()
-    matched_skills = skill_registry.match_skills(state)
-    active_skill_names = [s.name for s in matched_skills]
+    # 注入 active skill 指令到 system prompt
     skill_prompt = build_skill_prompt(skill_registry, active_skill_names)
     if skill_prompt:
         system_prompt += f"\n\n{skill_prompt}"
-        logger.info(f"Active skills: {active_skill_names}")
 
     # 构建消息列表
     messages = [{"role": "system", "content": system_prompt}]
@@ -374,8 +434,16 @@ async def extract_memory(state: ChatState) -> dict:
     if not response or len(user_message) < 10:
         return {}
 
-    # 构建对话片段
-    history_text = f"候选人: {user_message}\n面试官: {response[:300]}"
+    # 构建对话片段（包含面试官提问上下文，提高记忆提取准确性）
+    recent = state.get("recent_messages", [])
+    prior_question = ""
+    if recent:
+        for msg in reversed(recent):
+            if msg["role"] == "assistant":
+                prior_question = msg["content"][:200]
+                break
+
+    history_text = f"面试官提问: {prior_question}\n候选人回答: {user_message}\n面试官追问: {response[:500]}"
 
     try:
         prompt = MEMORY_EXTRACT_PROMPT.format(message_history=history_text)
@@ -468,23 +536,17 @@ def check_round_limit(messages: list[dict]) -> bool:
 def route_after_classify(state: ChatState) -> str:
     """显式条件路由（基于 LangGraph 最佳实践）
 
-    根据意图分类结果决定下一步：
-    - interview_question / practice_request → rag_retrieve (需要题库检索)
-    - chat / follow_up → direct_respond (直接回复)
-    - 未知意图 → rag_retrieve (安全优先)
+    根据意图分类结果和检索时机门控决定下一步：
+    - should_retrieve() 返回 True → rag_retrieve
+    - should_retrieve() 返回 False → direct_respond
 
     Returns:
         "rag_retrieve" 或 "direct_respond"
     """
-    intent = state.get("intent", "interview_question")
-
-    if intent in ("practice_request", "interview_question"):
+    if should_retrieve(state):
         return "rag_retrieve"
-    elif intent in ("chat", "follow_up"):
-        return "direct_respond"
     else:
-        # 未知意图默认走 RAG（安全优先）
-        return "rag_retrieve"
+        return "direct_respond"
 
 
 async def load_memories_by_intent(state: ChatState) -> dict:
