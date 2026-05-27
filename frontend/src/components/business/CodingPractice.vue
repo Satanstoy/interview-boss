@@ -123,19 +123,38 @@
           <div class="flex-1"></div>
 
           <button
-            @click="submitCode('full_review')"
-            :disabled="isSubmitting || !code.trim()"
-            class="px-4 py-1.5 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            @click="clearCurrentProblem"
+            class="px-3 py-1.5 rounded-md text-xs text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors"
           >
-            {{ isSubmitting ? (currentStep || '评审中...') : '提交评审' }}
+            清空记录
           </button>
-          <button
-            @click="submitCode('hint')"
-            :disabled="isSubmitting || !code.trim()"
-            class="px-4 py-1.5 rounded-md text-sm font-medium bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {{ isSubmitting ? '提示中...' : '请求提示' }}
-          </button>
+          <div class="relative group">
+            <button
+              @click="submitCode('full_review')"
+              :disabled="isSubmitting || !code.trim()"
+              class="px-4 py-1.5 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {{ isSubmitting && currentMode === 'full_review' ? (currentStep || '评审中...') : '提交评审' }}
+            </button>
+            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-ink-800 dark:bg-ink-200 dark:text-ink-800 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+              AI 评审代码并给出评分和参考答案
+            </div>
+          </div>
+          <div class="relative group">
+            <button
+              @click="submitCode('hint')"
+              :disabled="isSubmitting || !code.trim() || hintCount >= 3"
+              class="px-4 py-1.5 rounded-md text-sm font-medium bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {{ isSubmitting && currentMode === 'hint' ? '提示中...' : hintCount >= 3 ? '提示已用完' : `请求提示 (${hintCount}/3)` }}
+            </button>
+            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-ink-800 dark:bg-ink-200 dark:text-ink-800 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+              {{ hintCount >= 3 ? '提示机会已用完，请提交评审' : '获取渐进式提示，最多 3 次' }}
+            </div>
+          </div>
+        </div>
+        <div v-if="hintCount >= 3 && !isSubmitting" class="text-xs text-amber-600 dark:text-amber-400 -mt-1">
+          提示机会已用完，请点击「提交评审」查看完整评分和参考答案
         </div>
 
         <!-- Monaco 编辑器 -->
@@ -247,6 +266,8 @@ const scores = ref(null)
 const totalScore = ref(0)
 const referenceAnswer = ref('')
 const currentStep = ref('')
+const hintCount = ref(0)
+const currentMode = ref('')
 
 // ── 常量 ──
 const langLabels = { python: 'Python', c: 'C', java: 'Java' }
@@ -307,6 +328,8 @@ async function selectProblem(p) {
   scores.value = null
   totalScore.value = 0
   referenceAnswer.value = ''
+  hintCount.value = 0
+  currentMode.value = ''
   try {
     const detail = await fetchCodingProblem(p.id)
     selectedProblem.value = detail
@@ -315,10 +338,22 @@ async function selectProblem(p) {
   }
 }
 
+function clearCurrentProblem() {
+  feedback.value = ''
+  lastSubmission.value = null
+  scores.value = null
+  totalScore.value = 0
+  referenceAnswer.value = ''
+  hintCount.value = 0
+  currentMode.value = ''
+}
+
 async function submitCode(mode) {
   if (!selectedProblem.value || !code.value.trim()) return
+  if (mode === 'hint' && hintCount.value >= 3) return
 
   isSubmitting.value = true
+  currentMode.value = mode
   currentStep.value = ''
   // hint 模式不清空之前的 feedback，保留历史提示
   if (mode === 'full_review') {
@@ -364,6 +399,9 @@ async function submitCode(mode) {
         }
       } else if (event.type === 'done') {
         // hint 模式不显示评分
+        if (event.mode === 'hint') {
+          hintCount.value = (event.hint_round || hintCount.value + 1)
+        }
         if (event.mode === 'full_review') {
           scores.value = event.scores || null
           totalScore.value = event.total_score || 0
