@@ -18,6 +18,7 @@ HTTP 感知层，禁止包含业务逻辑。路由函数只负责解析请求、
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent） |
 | `admin_review.py` | `/api/admin/*` | 管理员审核 |
+| `coding.py` | `/api/coding/*` | 手撕代码练习（题目/提交/错误统计） |
 | `health.py` | `/api/health` | 健康检查 |
 
 ## 子路由包

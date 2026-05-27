@@ -8,6 +8,8 @@
 |------|------|
 | `AdminReview.vue` | 管理员审核面板 |
 | `AnalyticsSidebar.vue` | 数据分析侧边栏 |
+| `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
+| `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审） |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染） |
 | `ChatView.vue` | Chat 主视图（SSE 流式） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |

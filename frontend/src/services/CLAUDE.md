@@ -16,6 +16,7 @@
 | `analyticsApi.js` | 数据分析 | `/api/analytics/*` |
 | `profileApi.js` | 用户配置 | `/api/profile/*` |
 | `resumeApi.js` | 简历管理 | `/api/profile/resume` |
+| `codingApi.js` | 手撕代码练习 | `/api/coding/*` |
 
 ## 核心规则
 

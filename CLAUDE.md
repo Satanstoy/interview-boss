@@ -6,7 +6,7 @@
 
 ```
 backend/
-├── app/routers/       ← 13 个 API 路由（HTTP 感知层，禁止业务逻辑）
+├── app/routers/       ← 14 个 API 路由（HTTP 感知层，禁止业务逻辑）
 ├── app/services/      ← 业务逻辑（LLM 调用、聚类、pipeline）
 ├── app/core/          ← 配置、认证、提示词模板
 ├── app/db/            ← SQLite 连接、CRUD、查询、迁移
@@ -105,6 +105,7 @@ frontend/tests/CLAUDE.md              ← 前端测试
 | 练习/模拟面试 | `backend/app/routers/practice.py` + `routers/interview.py` | `frontend/src/components/business/PracticePanel.vue` + `MockInterview.vue` |
 | 数据分析 | `backend/app/routers/analytics.py` | `frontend/src/services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `backend/app/routers/profile.py` + `core/config.py` | `frontend/src/services/profileApi.js` + `components/business/SettingsPanel.vue` |
+| 手撕代码 | `backend/app/routers/coding.py` | `frontend/src/services/codingApi.js` + `components/business/CodingPractice.vue` |
 | 题目去重 | `backend/app/services/clustering.py` | — |
 | LLM 调用 | `backend/app/services/llm.py` + `core/prompts.py` | — |
 | 认证中间件 | `backend/app/core/auth.py` | `frontend/src/services/http.js` |

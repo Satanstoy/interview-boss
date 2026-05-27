@@ -24,6 +24,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **Dual-write**：`question_bank` 的 JSON 字段和 `question_sources`/`question_original_items` 表同步写入
 - **软删除**：`deleted_at` 列，查询时加 `WHERE deleted_at IS NULL`
 - **岗位过滤**：通过 `question_position` 关联表，fallback 到 `job_position` 列
+- **手撕代码**：`coding_problems`（题库，50 道 seed 数据）+ `coding_submissions`（提交记录 + AI 评审结果），migration 030
 
 ## 修改后必做
 
