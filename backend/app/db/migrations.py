@@ -1424,6 +1424,7 @@ def _migration_030_coding_module(conn):
         # 堆
         ("前 K 个高频元素", "给你一个整数数组 `nums` 和一个整数 `k`，请你返回其中出现频率前 k 高的元素。可以按任意顺序返回答案。\n\n**示例：**\n```\n输入：nums = [1,1,1,2,2,3], k = 2\n输出：[1,2]\n```", "medium", '["堆","哈希表","排序"]', "O(nlogk)", "LeetCode #347"),
         ("数据流的中位数", "中位数是有序整数列表中间的数。设计一个支持以下两种操作的数据结构：`addNum(num)` 从数据流中添加一个整数到数据结构中；`findMedian()` 返回目前所有元素的中位数。\n\n**示例：**\n```\naddNum(1)\naddNum(2)\nfindMedian() -> 1.5\naddNum(3)\nfindMedian() -> 2\n```", "hard", '["堆","设计"]', "O(logn)", "LeetCode #295"),
+        ("合并区间", "以数组 `intervals` 表示若干个区间的集合，其中单个区间为 `intervals[i] = [starti, endi]`。请你合并所有重叠的区间，并返回一个不重叠的区间数组。\n\n**示例：**\n```\n输入：intervals = [[1,3],[2,6],[8,10],[15,18]]\n输出：[[1,6],[8,10],[15,18]]\n解释：区间 [1,3] 和 [2,6] 重叠，合并为 [1,6]\n```", "medium", '["数组","排序"]', "O(nlogn)", "LeetCode #56"),
     ]
 
     for title, desc, diff, tags, complexity, source in problems:
