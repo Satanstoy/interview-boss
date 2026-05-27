@@ -38,6 +38,9 @@ build/
 # Claude Code
 .claude/
 
+# Issue tracker (local markdown)
+.scratch/
+
 # 测试代码（可能含密钥，不提交）
 backend/tests/
 frontend/tests/

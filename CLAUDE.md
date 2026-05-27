@@ -139,3 +139,17 @@ nginx (port 80) → backend (port 8000) + worker
 - 数据卷：`./backend/data` 挂载到容器内 `/app/backend/data`
 - `deploy/deploy.sh` 是 systemd 模式，**不用于生产**
 - `claude_runner` 已配置 NOPASSWD
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown — issues live as files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
