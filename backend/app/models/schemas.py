@@ -62,3 +62,21 @@ class UpdateQuestionRequest(BaseModel):
     cat2: str = Field(None, max_length=200)
     tags: str = Field(None, max_length=500)
     difficulty: str = Field(None, max_length=50)
+
+
+class CodingSubmitRequest(BaseModel):
+    problem_id: int
+    language: str = Field(..., max_length=20)
+    code: str = Field(..., max_length=50000)
+    mode: str = Field("full_review", max_length=20)
+    parent_submission_id: int = None
+
+
+class CodingProblemCreateRequest(BaseModel):
+    title: str = Field(..., max_length=200)
+    description: str = Field(..., max_length=20000)
+    difficulty: str = Field("medium", max_length=20)
+    tags: str = Field("[]", max_length=500)
+    expected_complexity: str = Field("", max_length=100)
+    source: str = Field("", max_length=200)
+    supported_languages: str = Field('["python","c","java"]', max_length=500)
