@@ -55,10 +55,10 @@ export function escapeHtml(str) {
 
 // ── 特定字段验证 ──
 
-const USERNAME_RE = /^[a-zA-Z0-9_一-龥]{2,32}$/
+const USERNAME_RE = /^[a-zA-Z0-9_一-鿿]{2,32}$/
 const RESERVED_USERNAMES = ['admin', 'root', 'system', 'null', 'undefined', 'superuser', 'moderator', 'guest', 'test']
 const URL_RE = /^https?:\/\/[^\s"'<>]+$/i
-const SEASON_RE = /^[一-龥a-zA-Z0-9\s\-_()（）]{1,50}$/
+const SEASON_RE = /^[一-鿿a-zA-Z0-9\s\-_()（）]{1,50}$/
 
 /**
  * 验证用户名：2-32 字符，仅允许字母数字下划线中文

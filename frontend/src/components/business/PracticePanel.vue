@@ -326,12 +326,7 @@ const handleGenerate = async () => {
 
 const handleSaveAnswer = async () => {
   const q = props.question
-  try {
-    sanitizeAgainstInjection(qState._editAnswer, '参考答案')
-  } catch (e) {
-    toast.warning(e.message)
-    return
-  }
+  qState._editAnswer = sanitizeAgainstInjection(qState._editAnswer, '参考答案')
   qState._isSavingAnswer = true
   try {
     await updateRecord({ table: 'question_bank', id: q.id, field: 'ai_answer', value: qState._editAnswer })
@@ -355,12 +350,7 @@ const handleEvaluate = async () => {
     toast.warning('请先生成或查看 AI 参考答案')
     return
   }
-  try {
-    sanitizeAgainstInjection(qState._userAnswer, '你的回答')
-  } catch (e) {
-    toast.warning(e.message)
-    return
-  }
+  qState._userAnswer = sanitizeAgainstInjection(qState._userAnswer, '你的回答')
   qState._isEvaluating = true
   qState._evaluation = null
   try {
