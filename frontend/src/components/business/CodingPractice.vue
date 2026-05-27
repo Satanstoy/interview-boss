@@ -127,7 +127,15 @@
             :disabled="isSubmitting || !code.trim()"
             class="px-4 py-1.5 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {{ isSubmitting ? '评审中...' : '提交评审' }}
+            {{ isSubmitting ? (currentStep || '评审中...') : '提交评审' }}
+          </button>
+          <button
+            v-if="lastSubmission"
+            @click="submitCode('hint')"
+            :disabled="isSubmitting || !code.trim()"
+            class="px-4 py-1.5 rounded-md text-sm font-medium bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {{ isSubmitting ? '提示中...' : '请求提示' }}
           </button>
         </div>
 
@@ -140,26 +148,57 @@
           />
         </div>
 
-        <!-- AI 评审反馈 -->
+        <!-- 评分面板 -->
+        <div
+          v-if="scores && Object.keys(scores).length"
+          class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100">评审评分</h3>
+            <div class="flex items-baseline gap-1">
+              <span class="text-2xl font-bold" :class="totalScore >= 80 ? 'text-green-600 dark:text-green-400' : totalScore >= 60 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'">{{ totalScore }}</span>
+              <span class="text-sm text-ink-400">/100</span>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div v-for="(score, dim) in scores" :key="dim" class="flex items-center gap-2">
+              <span class="text-xs text-ink-500 dark:text-ink-400 w-12">{{ categoryLabels[dim] || dim }}</span>
+              <div class="flex-1 h-2 bg-surface-100 dark:bg-surface-700 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all"
+                  :class="scoreBarColors[dim] || 'bg-gray-400'"
+                  :style="{ width: (score / 5 * 100) + '%' }"
+                ></div>
+              </div>
+              <span class="text-xs text-ink-600 dark:text-ink-300 w-8 text-right">{{ score }}/5</span>
+            </div>
+          </div>
+          <div v-if="lastSubmission?.error_categories?.length" class="flex gap-1 mt-3 pt-3 border-t border-surface-200 dark:border-surface-600">
+            <span
+              v-for="cat in lastSubmission.error_categories"
+              :key="cat"
+              class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
+            >{{ categoryLabels[cat] || cat }}</span>
+          </div>
+        </div>
+
+        <!-- AI 评审反馈（流式渲染） -->
         <div
           v-if="feedback"
           class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
         >
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100">
-              AI 评审结果
-              <span v-if="lastSubmission?.is_passed" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">通过</span>
-              <span v-else class="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">未通过</span>
-            </h3>
-            <div v-if="lastSubmission?.error_categories?.length" class="flex gap-1">
-              <span
-                v-for="cat in lastSubmission.error_categories"
-                :key="cat"
-                class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
-              >{{ categoryLabels[cat] || cat }}</span>
-            </div>
-          </div>
+          <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-3">详细评审</h3>
           <div class="prose-sm max-w-none text-ink-600 dark:text-ink-300" v-html="renderedFeedback"></div>
+          <span v-if="isSubmitting" class="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 mt-1"></span>
+        </div>
+
+        <!-- 参考答案 -->
+        <div
+          v-if="referenceAnswer"
+          class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
+        >
+          <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-3">最小改动参考答案</h3>
+          <pre class="text-sm text-ink-700 dark:text-ink-200 bg-surface-50 dark:bg-surface-900 rounded-md p-3 overflow-x-auto whitespace-pre-wrap"><code>{{ referenceAnswer }}</code></pre>
         </div>
       </template>
 
@@ -199,6 +238,10 @@ const lastSubmission = ref(null)
 const showDescription = ref(true)
 const filterDifficulty = ref('')
 const errorStats = ref(null)
+const scores = ref(null)
+const totalScore = ref(0)
+const referenceAnswer = ref('')
+const currentStep = ref('')
 
 // ── 常量 ──
 const langLabels = { python: 'Python', c: 'C', java: 'Java' }
@@ -215,6 +258,13 @@ const categoryColors = {
   algorithm: 'bg-purple-400',
   complexity: 'bg-blue-400',
   style: 'bg-gray-400',
+}
+const scoreBarColors = {
+  syntax: 'bg-red-500',
+  logic: 'bg-orange-500',
+  algorithm: 'bg-purple-500',
+  complexity: 'bg-blue-500',
+  style: 'bg-gray-500',
 }
 
 // ── 计算属性 ──
@@ -244,6 +294,10 @@ async function selectProblem(p) {
   feedback.value = ''
   lastSubmission.value = null
   showDescription.value = true
+  scores.value = null
+  totalScore.value = 0
+  referenceAnswer.value = ''
+  code.value = ''
   try {
     const detail = await fetchCodingProblem(p.id)
     selectedProblem.value = detail
@@ -257,29 +311,42 @@ async function submitCode(mode) {
 
   isSubmitting.value = true
   feedback.value = ''
+  scores.value = null
+  totalScore.value = 0
+  referenceAnswer.value = ''
+  currentStep.value = ''
+
+  const data = {
+    problem_id: selectedProblem.value.id,
+    language: currentLanguage.value,
+    code: code.value,
+    mode,
+  }
+  if (mode === 'hint' && lastSubmission.value) {
+    data.parent_submission_id = lastSubmission.value.submission_id
+  }
+
   try {
-    const data = {
-      problem_id: selectedProblem.value.id,
-      language: currentLanguage.value,
-      code: code.value,
-      mode,
-    }
-    if (mode === 'hint' && lastSubmission.value) {
-      data.parent_submission_id = lastSubmission.value.submission_id
-    }
-
-    const result = await submitCodingCode(data)
-    feedback.value = result.feedback
-    lastSubmission.value = result
-    loadErrorStats()
-
-    if (result.is_passed) {
-      toast.success('恭喜通过！')
-    }
+    await submitCodingCode(data, (event) => {
+      if (event.type === 'step') {
+        currentStep.value = event.message
+      } else if (event.type === 'chunk') {
+        feedback.value += event.content
+      } else if (event.type === 'done') {
+        scores.value = event.scores || null
+        totalScore.value = event.total_score || 0
+        referenceAnswer.value = event.reference_answer || ''
+        lastSubmission.value = event
+        loadErrorStats()
+      } else if (event.type === 'error') {
+        toast.error(event.message || '评审失败')
+      }
+    })
   } catch (e) {
     toast.error('提交失败，请重试')
   } finally {
     isSubmitting.value = false
+    currentStep.value = ''
   }
 }
 

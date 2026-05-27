@@ -2,11 +2,12 @@ import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user
 from app.core.prompts import CODING_REVIEW_PROMPT, CODING_HINT_PROMPT
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import CodingSubmitRequest
-from app.services.llm import _call_llm_with_retry, _extract_json
+from app.services.llm import _extract_json, stream_llm_messages
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter()
@@ -95,7 +96,7 @@ async def get_coding_problem(problem_id: int, user: dict = Depends(get_current_u
 
 @router.post("/api/coding/submit")
 async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_current_user)):
-    """提交代码，触发 AI 评审"""
+    """提交代码，触发 AI 评审（SSE 流式返回）"""
     # 校验
     if req.language not in VALID_LANGUAGES:
         raise HTTPException(status_code=400, detail=f"不支持的语言: {req.language}，支持: {', '.join(VALID_LANGUAGES)}")
@@ -129,15 +130,12 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
     if req.mode == "hint" and req.parent_submission_id:
         def _get_hint_chain():
             with get_db_connection() as conn:
-                # 获取父提交
                 parent = conn.execute(
                     "SELECT id, hint_round, ai_feedback, parent_submission_id FROM coding_submissions WHERE id = ? AND user_id = ?",
                     (req.parent_submission_id, user['id'])
                 ).fetchone()
                 if not parent:
                     return 0, ""
-
-                # 回溯整条链
                 chain = []
                 current = dict(parent)
                 while current:
@@ -153,13 +151,10 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
                             break
                     else:
                         break
-
                 chain.reverse()
                 round_num = len(chain) + 1
-
                 if not chain:
                     return round_num, ""
-
                 history_lines = ["## 之前的提示历史"]
                 for i, item in enumerate(chain, 1):
                     history_lines.append(f"\n### 第 {i} 次提示")
@@ -188,69 +183,91 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
             hint_history_section=hint_history_section,
         )
 
-    # 调用 LLM
-    try:
-        raw = await _call_llm_with_retry(
-            prompt=prompt,
-            system_msg="你是一位资深的技术面试官，专注于算法和数据结构面试。",
-            user_id=user['id'],
-        )
-        result = _extract_json(raw)
-    except Exception as e:
-        logger.error(f"AI 评审调用失败: {e}")
-        raise HTTPException(status_code=500, detail="AI 评审服务异常，请稍后重试")
+    messages = [
+        {"role": "system", "content": "你是一位资深的技术面试官，专注于算法和数据结构面试。"},
+        {"role": "user", "content": prompt},
+    ]
 
-    # 解析结果
-    if req.mode == "full_review":
-        feedback = result.get("feedback", "")
-        error_categories = result.get("error_categories", [])
-        is_passed = result.get("is_passed", False)
-        complexity_analysis = result.get("complexity_analysis", "")
-        feedback_text = feedback
-        if complexity_analysis:
-            feedback_text += f"\n\n**复杂度分析：** {complexity_analysis}"
-    else:
-        feedback_text = result.get("hint", "")
-        error_categories = result.get("error_categories", [])
-        is_passed = result.get("is_passed", False)
+    # SSE 流式返回
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    # 校验 error_categories
-    valid_categories = {"syntax", "logic", "algorithm", "complexity", "style"}
-    error_categories = [c for c in error_categories if c in valid_categories]
+    async def event_stream():
+        full_response = ""
+        try:
+            yield _sse({"type": "step", "message": "正在分析代码..."})
 
-    # 写入数据库
-    def _save():
-        with get_db_connection() as conn:
-            conn.execute(
-                """INSERT INTO coding_submissions
-                   (user_id, problem_id, language, code, mode, hint_round, parent_submission_id, ai_feedback, error_categories, is_passed)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    user['id'], req.problem_id, req.language, req.code,
-                    req.mode, hint_round, req.parent_submission_id,
-                    feedback_text, json.dumps(error_categories, ensure_ascii=False),
-                    1 if is_passed else 0,
-                )
-            )
-            conn.commit()
-            # 获取刚插入的 ID
-            row = conn.execute("SELECT last_insert_rowid()").fetchone()
-            return row[0]
+            async for chunk in stream_llm_messages(messages, user_id=user['id']):
+                full_response += chunk
+                yield _sse({"type": "chunk", "content": chunk})
 
-    try:
-        submission_id = await run_db(_save)
-    except Exception as e:
-        logger.error(f"保存提交记录失败: {e}")
-        raise HTTPException(status_code=500, detail="保存提交记录失败")
+            # 解析最终 JSON
+            result = _extract_json(full_response)
 
-    return {
-        "submission_id": submission_id,
-        "feedback": feedback_text,
-        "error_categories": error_categories,
-        "is_passed": is_passed,
-        "mode": req.mode,
-        "hint_round": hint_round,
-    }
+            if req.mode == "full_review":
+                feedback_text = result.get("feedback", "")
+                scores = result.get("scores", {})
+                reference_answer = result.get("reference_answer", "")
+                error_categories = result.get("error_categories", [])
+                complexity_analysis = result.get("complexity_analysis", "")
+                if complexity_analysis:
+                    feedback_text += f"\n\n**复杂度分析：** {complexity_analysis}"
+            else:
+                feedback_text = result.get("hint", "")
+                scores = result.get("scores", {})
+                reference_answer = ""
+                error_categories = result.get("error_categories", [])
+
+            # 校验
+            valid_categories = {"syntax", "logic", "algorithm", "complexity", "style"}
+            error_categories = [c for c in error_categories if c in valid_categories]
+            valid_scores = {k: max(1, min(5, int(v))) for k, v in scores.items()
+                           if k in {"syntax", "logic", "algorithm", "complexity", "style"}}
+            total_score = sum(valid_scores.values()) * 4 if valid_scores else 0
+
+            # 写入数据库
+            def _save():
+                with get_db_connection() as conn:
+                    conn.execute(
+                        """INSERT INTO coding_submissions
+                           (user_id, problem_id, language, code, mode, hint_round,
+                            parent_submission_id, ai_feedback, error_categories, is_passed,
+                            scores, reference_answer, total_score)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            user['id'], req.problem_id, req.language, req.code,
+                            req.mode, hint_round, req.parent_submission_id,
+                            feedback_text, json.dumps(error_categories, ensure_ascii=False),
+                            1 if total_score >= 60 else 0,
+                            json.dumps(valid_scores, ensure_ascii=False),
+                            reference_answer, total_score,
+                        )
+                    )
+                    conn.commit()
+                    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+            submission_id = await run_db(_save)
+
+            yield _sse({
+                "type": "done",
+                "submission_id": submission_id,
+                "scores": valid_scores,
+                "total_score": total_score,
+                "reference_answer": reference_answer,
+                "error_categories": error_categories,
+                "mode": req.mode,
+                "hint_round": hint_round,
+            })
+
+        except Exception as e:
+            logger.exception("AI 评审失败")
+            yield _sse({"type": "error", "message": "AI 评审服务异常，请稍后重试"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/api/coding/submissions")

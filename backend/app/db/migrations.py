@@ -1438,6 +1438,22 @@ def _migration_030_coding_module(conn):
     logger.info("已创建 coding_problems / coding_submissions 表，插入 50 道初始题目")
 
 
+def _migration_031_coding_scores(conn):
+    """Add scores, reference_answer, total_score columns to coding_submissions."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(coding_submissions)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if "scores" not in columns:
+        conn.execute("ALTER TABLE coding_submissions ADD COLUMN scores TEXT DEFAULT '{}'")
+    if "reference_answer" not in columns:
+        conn.execute("ALTER TABLE coding_submissions ADD COLUMN reference_answer TEXT DEFAULT ''")
+    if "total_score" not in columns:
+        conn.execute("ALTER TABLE coding_submissions ADD COLUMN total_score REAL DEFAULT 0")
+
+    logger.info("已为 coding_submissions 添加 scores/reference_answer/total_score 列")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1469,6 +1485,7 @@ _MIGRATIONS = [
     (28, 'session_notes',                _migration_028_session_notes),
     (29, 'user_resumes',                 _migration_029_user_resumes),
     (30, 'coding_module',                _migration_030_coding_module),
+    (31, 'coding_scores',                _migration_031_coding_scores),
 ]
 
 
