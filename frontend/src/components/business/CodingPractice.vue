@@ -130,7 +130,6 @@
             {{ isSubmitting ? (currentStep || '评审中...') : '提交评审' }}
           </button>
           <button
-            v-if="lastSubmission"
             @click="submitCode('hint')"
             :disabled="isSubmitting || !code.trim()"
             class="px-4 py-1.5 rounded-md text-sm font-medium bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -198,7 +197,13 @@
           class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
         >
           <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-3">最小改动参考答案</h3>
-          <pre class="text-sm text-ink-700 dark:text-ink-200 bg-surface-50 dark:bg-surface-900 rounded-md p-3 overflow-x-auto whitespace-pre-wrap"><code>{{ referenceAnswer }}</code></pre>
+          <div class="h-[200px] rounded-md overflow-hidden border border-surface-200 dark:border-surface-700">
+            <CodeEditor
+              :model-value="cleanReferenceAnswer"
+              :language="currentLanguage"
+              :read-only="true"
+            />
+          </div>
         </div>
       </template>
 
@@ -272,6 +277,11 @@ const renderedDescription = computed(() =>
   selectedProblem.value ? renderSafeMarkdown(selectedProblem.value.description) : ''
 )
 const renderedFeedback = computed(() => feedback.value ? renderSafeMarkdown(feedback.value) : '')
+const cleanReferenceAnswer = computed(() => {
+  if (!referenceAnswer.value) return ''
+  // 去掉 markdown 代码块包裹（```python ... ``` 或 ``` ... ```）
+  return referenceAnswer.value.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim()
+})
 const maxErrorCount = computed(() => {
   if (!errorStats.value?.error_stats) return 1
   return Math.max(1, ...Object.values(errorStats.value.error_stats))

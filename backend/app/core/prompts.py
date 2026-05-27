@@ -285,11 +285,12 @@ CODING_REVIEW_PROMPT = """你是一位资深的技术面试官，正在面试候
 - 不要从零重写，要让用户看到"我的代码改哪里就能对"
 - 如果代码已经正确，给出进一步优化的建议版本
 
-## 输出格式
-严格返回以下 JSON，不要输出其他内容：
-```json
+## 输出格式（严格遵循，分两段输出）
+
+**第一段**：直接输出 Markdown 格式的详细评审正文（每个维度单独分析，给出具体的优点和问题），不要包裹在 JSON 中。
+
+**第二段**：评审正文结束后，另起一行输出 `---JSON---` 分隔符，然后输出以下 JSON（不要包裹在代码块中）：
 {{
-  "feedback": "Markdown 格式的详细评审，每个维度单独分析，给出具体的优点和问题",
   "scores": {{
     "syntax": 5,
     "logic": 4,
@@ -297,11 +298,14 @@ CODING_REVIEW_PROMPT = """你是一位资深的技术面试官，正在面试候
     "complexity": 4,
     "style": 5
   }},
-  "reference_answer": "基于用户代码的最小改动正确答案（代码块格式，带注释说明改动点）",
+  "reference_answer": "基于用户代码的最小改动正确答案，纯代码，不带 markdown 代码块标记，带注释说明改动点",
   "error_categories": ["logic"],
   "complexity_analysis": "当前 O(n²)，预期 O(nlogn)，建议使用哈希表优化"
 }}
-```
+
+**注意**：
+- 第一段和第二段之间必须有 `---JSON---` 分隔符
+- reference_answer 字段中不要使用 ``` 包裹代码，直接输出纯代码文本
 
 ## 题目信息
 - 题目：{problem_title}
@@ -333,11 +337,12 @@ CODING_HINT_PROMPT = """你是一位资深的技术面试官，正在给候选�
 ## 错误分类（可多选）
 - `syntax` / `logic` / `algorithm` / `complexity` / `style`
 
-## 输出格式
-严格返回以下 JSON：
-```json
+## 输出格式（严格遵循，分两段输出）
+
+**第一段**：直接输出 Markdown 格式的提示内容，不要包裹在 JSON 中。
+
+**第二段**：提示正文结束后，另起一行输出 `---JSON---` 分隔符，然后输出以下 JSON（不要包裹在代码块中）：
 {{
-  "hint": "提示内容（Markdown 格式）",
   "hint_level": "directional",
   "scores": {{
     "syntax": 5,
@@ -348,7 +353,8 @@ CODING_HINT_PROMPT = """你是一位资深的技术面试官，正在给候选�
   }},
   "error_categories": ["logic"]
 }}
-```
+
+**注意**：第一段和第二段之间必须有 `---JSON---` 分隔符。
 
 ## 题目信息
 - 题目：{problem_title}
