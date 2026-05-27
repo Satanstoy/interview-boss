@@ -133,3 +133,13 @@ export {
 
 // ── Cache Management (re-export from http service) ──
 export { invalidateCache } from '../services/http.js'
+
+// ── Coding ──
+export {
+  fetchCodingProblems,
+  fetchCodingProblem,
+  submitCodingCode,
+  fetchCodingSubmissions,
+  fetchCodingSubmission,
+  fetchCodingErrorStats,
+} from '../services/codingApi.js'

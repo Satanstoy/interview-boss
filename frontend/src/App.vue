@@ -416,6 +416,9 @@
               <!-- Import Tab -->
               <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" :available-seasons="availableSeasons" :is-admin="currentUser?.is_admin" @submitted="onSubmitted" />
 
+              <!-- Coding Tab -->
+              <CodingPractice v-if="activeTab === 'Coding'" />
+
             </div>
           </Transition>
         </div>
@@ -547,6 +550,7 @@ const KnowledgeGraph = defineAsyncComponent(() => import('@/components/business/
 const ChatView = defineAsyncComponent(() => import('@/components/business/ChatView.vue'))
 const ProfilePanel = defineAsyncComponent(() => import('@/components/business/ProfilePanel.vue'))
 const AdminReview = defineAsyncComponent(() => import('@/components/business/AdminReview.vue'))
+const CodingPractice = defineAsyncComponent(() => import('@/components/business/CodingPractice.vue'))
 const PracticeMode = defineAsyncComponent(() => import('@/components/business/PracticeMode.vue'))
 const AnalyticsSidebar = defineAsyncComponent(() => import('@/components/business/AnalyticsSidebar.vue'))
 
@@ -635,6 +639,7 @@ const isMasterSelected = (id) => masterSelection.selectedIds.value.has(id)
 const fetchTableData = async () => {
   isDataLoading.value = true
   dataLoadError.value = null
+  invalidateCache()  // 确保刷新时获取最新数据
   try {
     const [jdResp, intResp, masterResp] = await Promise.all([
       api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank()

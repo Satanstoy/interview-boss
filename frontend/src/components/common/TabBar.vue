@@ -34,7 +34,8 @@ const tabs = [
   { key: 'Chat', label: '模拟面试' },
   { key: 'MockInterview', label: '题目抽测' },
   { key: 'KnowledgeGraph', label: '知识图谱' },
-  { key: 'Import', label: '导入' }
+  { key: 'Import', label: '导入' },
+  { key: 'Coding', label: '手撕代码' }
 ]
 </script>
 
