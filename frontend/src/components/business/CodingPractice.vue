@@ -307,7 +307,6 @@ async function selectProblem(p) {
   scores.value = null
   totalScore.value = 0
   referenceAnswer.value = ''
-  code.value = ''
   try {
     const detail = await fetchCodingProblem(p.id)
     selectedProblem.value = detail
@@ -320,11 +319,16 @@ async function submitCode(mode) {
   if (!selectedProblem.value || !code.value.trim()) return
 
   isSubmitting.value = true
-  feedback.value = ''
-  scores.value = null
-  totalScore.value = 0
-  referenceAnswer.value = ''
   currentStep.value = ''
+  // hint 模式不清空之前的 feedback，保留历史提示
+  if (mode === 'full_review') {
+    feedback.value = ''
+    scores.value = null
+    totalScore.value = 0
+    referenceAnswer.value = ''
+  }
+  // hint 模式：在 feedback 末尾加分隔标记
+  const hintSeparator = mode === 'hint' && feedback.value ? '\n\n---\n\n' : ''
 
   const data = {
     problem_id: selectedProblem.value.id,
@@ -341,13 +345,32 @@ async function submitCode(mode) {
       if (event.type === 'step') {
         currentStep.value = event.message
       } else if (event.type === 'chunk') {
-        feedback.value += event.content
+        if (event.replace) {
+          // replace 模式：用新内容替换当前 chunk 流（避免重复）
+          // 保留 hint 历史部分，只替换当前 hint 的流式内容
+          const historyEnd = hintSeparator ? feedback.value.indexOf(hintSeparator) : -1
+          if (historyEnd >= 0) {
+            feedback.value = feedback.value.substring(0, historyEnd + hintSeparator.length) + event.content
+          } else if (mode === 'hint' && hintSeparator) {
+            feedback.value = hintSeparator + event.content
+          } else {
+            feedback.value = event.content
+          }
+        } else {
+          if (hintSeparator && !feedback.value.includes(hintSeparator)) {
+            feedback.value += hintSeparator
+          }
+          feedback.value += event.content
+        }
       } else if (event.type === 'done') {
-        scores.value = event.scores || null
-        totalScore.value = event.total_score || 0
-        referenceAnswer.value = event.reference_answer || ''
+        // hint 模式不显示评分
+        if (event.mode === 'full_review') {
+          scores.value = event.scores || null
+          totalScore.value = event.total_score || 0
+          referenceAnswer.value = event.reference_answer || ''
+          loadErrorStats()
+        }
         lastSubmission.value = event
-        loadErrorStats()
       } else if (event.type === 'error') {
         toast.error(event.message || '评审失败')
       }

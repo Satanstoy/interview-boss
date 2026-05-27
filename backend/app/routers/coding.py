@@ -211,36 +211,38 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
         feedback_text = ""
         json_part = ""
         separator_found = False
+        feedback_sent = False
         try:
             yield _sse({"type": "step", "message": "正在分析代码..."})
 
             async for chunk in stream_llm_messages(messages, user_id=user['id']):
                 full_response += chunk
                 if not separator_found:
-                    # 检查是否包含 ---JSON--- 分隔符
                     if "---JSON---" in full_response:
                         separator_found = True
-                        # 分离 feedback 和 JSON 部分
                         parts = full_response.split("---JSON---", 1)
                         feedback_text = parts[0].strip()
                         json_part = parts[1]
-                        # 发送完整的 feedback 文本
-                        yield _sse({"type": "chunk", "content": feedback_text})
+                        # 发送干净的 feedback 文本（替换之前流式发送的内容）
+                        yield _sse({"type": "chunk", "content": feedback_text, "replace": True})
+                        feedback_sent = True
                     else:
-                        # 流式发送 feedback（分隔符还没出现，实时输出）
-                        # 只发送新增的部分（避免重复）
+                        # 流式发送 chunk
                         yield _sse({"type": "chunk", "content": chunk})
                 else:
-                    # 分隔符已找到，后续内容是 JSON，不发送给用户
                     json_part += chunk
 
             # 解析最终 JSON
             if separator_found:
                 result = _extract_json(json_part)
             else:
-                # fallback：没有分隔符，尝试从完整响应中解析
+                # fallback：没有分隔符
                 result = _extract_json(full_response)
-                feedback_text = result.get("feedback", "") or result.get("hint", "")
+                if not feedback_sent:
+                    feedback_text = result.get("feedback", "") or result.get("hint", "")
+                    if feedback_text:
+                        yield _sse({"type": "chunk", "content": feedback_text, "replace": True})
+                        feedback_sent = True
 
             if req.mode == "full_review":
                 scores = result.get("scores", {})
@@ -250,7 +252,7 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
                 if complexity_analysis:
                     feedback_text += f"\n\n**复杂度分析：** {complexity_analysis}"
             else:
-                scores = result.get("scores", {})
+                scores = {}
                 reference_answer = ""
                 error_categories = result.get("error_categories", [])
 
