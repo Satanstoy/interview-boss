@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/root/sj/interview-boss"
+PROJECT_DIR="/home/ubuntu/sj/interview-boss"
 cd "$PROJECT_DIR"
 
 # 颜色
@@ -29,15 +29,15 @@ check_docker() {
 # ── 构建镜像 ──
 do_build() {
   log "构建 Docker 镜像..."
-  docker-compose build 2>&1
+  docker compose build 2>&1
   log "镜像构建完成"
 }
 
 # ── 启动服务 ──
 do_up() {
   log "启动 Docker 服务..."
-  docker-compose down 2>/dev/null || true
-  docker-compose up -d
+  docker compose down 2>/dev/null || true
+  docker compose up -d
   sleep 3
   do_status
 }
@@ -45,14 +45,14 @@ do_up() {
 # ── 停止服务 ──
 do_down() {
   log "停止 Docker 服务..."
-  docker-compose down
+  docker compose down
   log "服务已停止"
 }
 
 # ── 重启服务 ──
 do_restart() {
   log "重启 Docker 服务..."
-  docker-compose restart
+  docker compose restart
   sleep 3
   do_status
 }
@@ -60,7 +60,7 @@ do_restart() {
 # ── 查看状态 ──
 do_status() {
   log "服务状态："
-  docker-compose ps
+  docker compose ps
   echo ""
   log "资源使用："
   docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || true
@@ -70,18 +70,18 @@ do_status() {
 do_logs() {
   local service="${1:-}"
   if [ -n "$service" ]; then
-    docker-compose logs -f --tail=50 "$service"
+    docker compose logs -f --tail=50 "$service"
   else
-    docker-compose logs -f --tail=50
+    docker compose logs -f --tail=50
   fi
 }
 
 # ── 更新部署（代码变更后）──
 do_update() {
   log "更新部署..."
-  docker-compose down 2>/dev/null || true
-  docker-compose build backend worker nginx
-  docker-compose up -d
+  docker compose down 2>/dev/null || true
+  docker compose build backend worker nginx
+  docker compose up -d
   sleep 5
   do_status
   log "更新完成"
@@ -98,9 +98,9 @@ do_backup() {
      "$backup_dir/interview-boss_${timestamp}.db"
 
   log "备份 Redis 数据..."
-  docker-compose exec redis redis-cli BGSAVE >/dev/null 2>&1 || true
+  docker compose exec redis redis-cli BGSAVE >/dev/null 2>&1 || true
   sleep 1
-  docker cp "$(docker-compose ps -q redis):/data/dump.rdb" \
+  docker cp "$(docker compose ps -q redis):/data/dump.rdb" \
      "$backup_dir/redis_${timestamp}.rdb" 2>/dev/null || warn "Redis 备份跳过"
 
   log "备份完成: $backup_dir/"
