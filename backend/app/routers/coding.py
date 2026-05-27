@@ -199,7 +199,6 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
 
             async for chunk in stream_llm_messages(messages, user_id=user['id']):
                 full_response += chunk
-                yield _sse({"type": "chunk", "content": chunk})
 
             # 解析最终 JSON
             result = _extract_json(full_response)
@@ -217,6 +216,10 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
                 scores = result.get("scores", {})
                 reference_answer = ""
                 error_categories = result.get("error_categories", [])
+
+            # 发送解析后的反馈文本（不含 JSON 结构）
+            if feedback_text:
+                yield _sse({"type": "chunk", "content": feedback_text})
 
             # 校验
             valid_categories = {"syntax", "logic", "algorithm", "complexity", "style"}
