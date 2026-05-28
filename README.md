@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.png" alt="InterviewBoss Logo" width="400" />
+<img src="logo.png" alt="InterviewBoss Logo" width="400" />
 
 # InterviewBoss
 
@@ -95,6 +95,32 @@ ECharts 6 知识点关联网络、技术栈热度趋势、考点分布、难度�
 </details>
 
 <details>
+<summary><strong>AI 对话</strong> — 多轮对话 + PDF 解析 + Skills 技能系统</summary>
+
+独立的对话模块，支持多轮对话、SSE 流式响应、对话归档/重命名/删除。内置记忆系统，AI 可跨对话记住关键信息。支持 PDF 文件上传提取内容。
+
+**Skills 技能系统（Progressive Disclosure）**：面试官 AI 内置 6 种专业技能模式，根据对话内容自动激活：
+- **自适应难度** — 基于答题表现动态调整题目深度，好答案升级追问，差答案降级换题
+- **算法编码** — 聚焦手撕代码类问题，引导思路而非直接给答案
+- **HR 软技能** — 行为面试、STAR 法则、团队协作类问题
+- **面试节奏** — 控制提问节奏，冷风格 + 交错式追问
+- **项目深挖** — 针对简历项目经验深度追问技术细节和决策理由
+- **理论问答** — 基础原理、八股文类问题的结构化追问
+
+**岗位驱动 RAG**：自动注入用户目标岗位、练习薄弱环节、历史面试经验到对话上下文，面试题检索按岗位智能过滤。
+</details>
+
+<details>
+<summary><strong>手撕代码</strong> — 在线编程 + SSE 流式评测 + 渐进提示</summary>
+
+内置 50+ 编程题库，支持在线代码提交。AI 从语法、逻辑、算法、复杂度、代码风格 5 个维度评测（每项 1-5 分），SSE 实时流式输出分析过程。支持两种模式：
+- **完整评审**（`full_review`）— 一次性输出完整分析和评分
+- **渐进提示**（`hint`）— 不直接给答案，通过多轮提示链逐步引导思考，支持多轮追问
+
+统计错误类型分布，帮助针对性提升。
+</details>
+
+<details>
 <summary><strong>多用户系统</strong> — JWT 双 Token 认证</summary>
 
 三种题库模式（公共/个人/混用），管理员审核机制，Access Token 15 分钟 + Refresh Token HttpOnly Cookie + 服务端 JTI 轮转。
@@ -138,37 +164,46 @@ API 地址、模型名称、超时时间、相似度阈值等均可通过界面�
 
 ```
 interview-boss/
-├── backend/                 # Python FastAPI 后端
+├── backend/                    # Python FastAPI 后端
 │   ├── app/
-│   │   ├── core/            # 认证、配置热更新、LLM 提示词模板、日志
-│   │   ├── routers/         # API 路由模块
-│   │   ├── services/        # LLM 调用、聚类去重、工具函数
-│   │   ├── agents/          # LangGraph 状态机（submit/build/batch_generate）
-│   │   ├── db/              # SQLite 连接管理、CRUD、自动迁移
-│   │   ├── middleware/      # 请求日志中间件
-│   │   └── models/          # Pydantic 请求/响应模型
-│   ├── data/                # SQLite 数据库文件（自动备份）
-│   └── tests/               # 后端测试
-├── frontend/                # Vue 3 + Vite 前端
+│   │   ├── core/               # 认证、配置热更新、LLM 提示词模板、日志
+│   │   ├── routers/            # 14+ API 路由模块（含 profile_pkg / questions_pkg 子路由）
+│   │   ├── services/           # LLM 调用、聚类去重、管道、简历、邮件等业务服务
+│   │   ├── agents/             # LangGraph 状态机（submit / build / batch_generate / chat）
+│   │   │   └── chat/skills/    # 6 种面试技能（自适应难度、算法编码、HR 软技能等）
+│   │   ├── db/                 # SQLite 连接管理、CRUD、查询、自动迁移
+│   │   ├── middleware/         # 请求日志中间件
+│   │   └── models/             # Pydantic 请求/响应模型
+│   ├── worker.py               # ARQ Worker 入口
+│   ├── data/                   # SQLite 数据库文件（自动备份）
+│   └── tests/                  # 后端测试
+├── frontend/                   # Vue 3 + Vite 前端
 │   ├── src/
+│   │   ├── api/                # API 接口定义
 │   │   ├── components/
-│   │   │   ├── common/      # 通用 UI 组件（DataTable, TabBar 等）
-│   │   │   └── business/    # 业务组件（MasterBankList, PracticeMode 等）
-│   │   ├── composables/     # 组合式函数
-│   │   ├── services/        # API 服务层 + HTTP 客户端
-│   │   └── ...
-│   └── tests/               # 前端测试（Playwright）
-├── deploy/                  # 部署配置
-│   ├── deploy.sh            # systemd 部署脚本
-│   ├── docker-deploy.sh     # Docker 部署脚本
-│   ├── .dockerignore        # Docker 构建排除规则
-│   ├── nginx-hardened.conf  # Nginx 安全配置参考
+│   │   │   ├── common/         # 通用 UI 组件（DataTable, TabBar, BaseModal 等）
+│   │   │   └── business/       # 业务组件（MasterBankList, PracticePanel, ChatView 等）
+│   │   ├── composables/        # 组合式函数（usePractice, useSelection, useMotionPresets, useTabScroll 等）
+│   │   ├── constants/          # 配置常量与枚举（config.js, enums.js）
+│   │   ├── layouts/            # 页面布局（DefaultLayout, BlankLayout）
+│   │   ├── router/             # Vue Router 路由定义
+│   │   ├── services/           # API 服务层 + HTTP 客户端（按领域拆分：chatApi、codingApi 等）
+│   │   ├── stores/             # Pinia 状态管理
+│   │   ├── utils/              # 纯工具函数（markdown、validate、highlight）
+│   │   └── views/              # 页面级组件
+│   └── tests/                  # 前端测试（Playwright）
+├── deploy/                     # 部署配置
+│   ├── deploy.sh               # systemd 部署脚本（非生产）
+│   ├── docker-deploy.sh        # Docker 部署脚本（生产推荐）
+│   ├── entrypoint.sh           # Docker 容器入口脚本
+│   ├── nginx-hardened.conf     # Nginx 安全配置参考
 │   └── interview-boss-worker.service  # systemd 服务文件
-├── docs/                    # 文档（bug-reports、tdd-reports）
-├── nginx/                   # Docker Nginx 配置（API 代理 + SPA + 安全头）
-├── Dockerfile               # 多阶段构建（前端 + 后端）
-├── docker-compose.yml       # 容器编排（Redis + Backend + Worker + Nginx）
-├── pyproject.toml           # Python 依赖定义
+├── docs/                       # 文档（agents、bug-reports、tdd-reports、dev-log）
+├── nginx/                      # Docker Nginx 配置（API 代理 + SPA + 安全头）
+├── Dockerfile                  # 多阶段构建（前端 + 后端）
+├── docker-compose.yml          # 容器编排（Redis + Backend + Worker + Nginx）
+├── pyproject.toml              # Python 依赖定义
+├── main.py                     # 本地开发入口
 └── README.md
 ```
 
@@ -253,6 +288,13 @@ npm run dev
 | `DEBUG` | 开启热重载和 Swagger 文档 | `false` |
 | `ALLOWED_ORIGINS` | CORS 允许来源（逗号分隔） | 空 |
 | `MAX_FILE_SIZE_MB` | 最大上传大小（MB） | `10` |
+| `SMTP_HOST` | 邮件服务器地址 | 空 |
+| `SMTP_PORT` | 邮件服务器端口 | `587` |
+| `SMTP_USERNAME` | 邮箱用户名 | 空 |
+| `SMTP_PASSWORD` | 邮箱密码 | 空 |
+| `SMTP_FROM` | 发件人邮箱 | 空 |
+| `SMTP_FROM_NAME` | 发件人显示名称 | `InterviewBoss` |
+| `SMTP_USE_TLS` | 启用 TLS | `true` |
 
 > 所有配置均可在运行时通过 `/api/profile` 界面在线修改，变更会自动持久化到数据库和 `.env` 文件。
 
@@ -344,7 +386,7 @@ sudo ./deploy/docker-deploy.sh down      # 停止所有服务
 
 ```bash
 cd frontend && npm run build
-sudo docker-compose restart nginx
+sudo docker compose restart nginx
 ```
 
 #### 资源分配（2c4g 优化）
@@ -564,6 +606,66 @@ sudo systemctl reload nginx
 | GET | `/api/analytics` | 全局分析数据 |
 | GET | `/api/practice-stats` | 个人练习统计 |
 | GET | `/api/knowledge-graph` | 知识图谱数据 |
+
+</details>
+
+<details>
+<summary><strong>AI 对话</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/chat/conversations` | 创建对话 |
+| GET | `/api/chat/conversations` | 对话列表 |
+| GET | `/api/chat/conversations/{id}` | 对话详情 |
+| PUT | `/api/chat/conversations/{id}/title` | 重命名对话 |
+| PUT | `/api/chat/conversations/{id}/archive` | 归档对话 |
+| DELETE | `/api/chat/conversations/{id}` | 删除对话 |
+| GET | `/api/chat/conversations/{id}/messages` | 获取消息列表 |
+| POST | `/api/chat/conversations/{id}/messages` | 发送消息（SSE 流式） |
+| GET | `/api/chat/memories` | 获取记忆列表 |
+| DELETE | `/api/chat/memories/{id}` | 删除记忆 |
+| POST | `/api/chat/extract-pdf` | PDF 文件内容提取 |
+
+</details>
+
+<details>
+<summary><strong>手撕代码</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/coding/problems` | 题目列表 |
+| GET | `/api/coding/problems/{id}` | 题目详情 |
+| POST | `/api/coding/submit` | 提交代码（SSE 流式 AI 评测，支持 `mode=full_review\|hint`） |
+| GET | `/api/coding/submissions` | 提交记录列表 |
+| GET | `/api/coding/submissions/{id}` | 提交详情（含 5 维评分 + 参考答案 + 复杂度分析） |
+| GET | `/api/coding/error-stats` | 错误统计 |
+
+</details>
+
+<details>
+<summary><strong>数据管理</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/data/{file_type}` | 获取指定类型数据列表 |
+| PUT | `/api/data/update` | 更新数据记录 |
+| DELETE | `/api/data/{file_type}/{id}` | 删除数据记录 |
+| POST | `/api/data/batch-delete` | 批量删除 |
+| POST | `/api/data/restore/{file_type}/{id}` | 恢复已删除记录 |
+| GET | `/api/data/{file_type}/trash` | 回收站列表 |
+
+</details>
+
+<details>
+<summary><strong>题库构建</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/master-bank/build` | 全量重建题库 |
+| POST | `/api/master-bank/compact` | 压缩合并题库 |
+| POST | `/api/master-bank/build-personal` | 构建个人题库 |
+| GET | `/api/jobs/{job_id}` | 查询异步任务状态 |
+| GET | `/api/jobs/{job_id}/stream` | SSE 实时任务进度 |
 
 </details>
 
