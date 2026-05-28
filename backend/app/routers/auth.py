@@ -270,7 +270,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
     _clear_failures(req.username)
 
     # 未绑定邮箱的老用户：返回临时 token，要求绑定邮箱
-    if not user.get('email'):
+    if not user['email']:
         temp_token = create_email_bind_token(user['id'], user['username'])
         return {
             "need_email_bind": True,
