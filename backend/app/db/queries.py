@@ -63,22 +63,22 @@ def get_dynamic_frequency_sql(bank_mode: str, user_id: int, table_alias: str = "
     """根据 bank_mode 返回动态计算频率的 SQL 子查询片段。
 
     频率 = question_sources 表中匹配当前模式的面试记录数量。
-    - public:  只统计 owner_id IS NULL 的面试
-    - personal: 只统计 owner_id = user_id 的面试
-    - mixed:   统计 owner_id IS NULL 或 owner_id = user_id 的面试
+    - public:   只统计 owner_id IS NULL 的面试
+    - personal: 统计所有非软删除面试（不限 owner_id，因为个人题目来源可能是公共面试）
+    - mixed:    统计 owner_id IS NULL 或 owner_id = user_id 的面试
     """
     prefix = f"{table_alias}." if table_alias else ""
     owner_filter = {
-        'personal': f"i.owner_id = {user_id}",
-        'mixed': f"(i.owner_id IS NULL OR i.owner_id = {user_id})",
-        'public': "i.owner_id IS NULL",
+        'personal': "",  # 统计所有来源
+        'mixed': f"AND (i.owner_id IS NULL OR i.owner_id = {user_id})",
+        'public': "AND i.owner_id IS NULL",
     }[bank_mode]
 
     return (
         f"(SELECT COUNT(*) FROM question_sources qs "
         f"JOIN interview i ON qs.url = i.url "
         f"WHERE qs.question_bank_id = {prefix}id "
-        f"AND i.deleted_at IS NULL AND {owner_filter})"
+        f"AND i.deleted_at IS NULL {owner_filter})"
     )
 
 

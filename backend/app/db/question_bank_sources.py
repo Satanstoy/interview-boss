@@ -224,17 +224,19 @@ def get_original_question_sources(cursor, qb_id: int) -> list:
 def get_sources_filtered(cursor, qb_id: int, bank_mode: str, user_id: int) -> list:
     """Get sources filtered by bank_mode using SQL JOIN (replaces filter_sources_by_mode)."""
     owner_filter = {
-        'personal': "i.owner_id = ?",
+        'personal': "",
         'mixed': "(i.owner_id IS NULL OR i.owner_id = ?)",
         'public': "i.owner_id IS NULL",
     }[bank_mode]
+    user_param = () if bank_mode == 'personal' else (user_id,) if bank_mode == 'mixed' else ()
+    owner_clause = f" AND {owner_filter}" if owner_filter else ""
 
     if bank_mode == 'public':
         rows = cursor.execute(
             f"SELECT DISTINCT qs.url, qs.company, qs.round "
             f"FROM question_sources qs "
             f"JOIN interview i ON qs.url = i.url "
-            f"WHERE qs.question_bank_id = ? AND i.deleted_at IS NULL AND {owner_filter}",
+            f"WHERE qs.question_bank_id = ? AND i.deleted_at IS NULL{owner_clause}",
             (qb_id,)
         ).fetchall()
     else:
@@ -242,8 +244,8 @@ def get_sources_filtered(cursor, qb_id: int, bank_mode: str, user_id: int) -> li
             f"SELECT DISTINCT qs.url, qs.company, qs.round "
             f"FROM question_sources qs "
             f"JOIN interview i ON qs.url = i.url "
-            f"WHERE qs.question_bank_id = ? AND i.deleted_at IS NULL AND {owner_filter}",
-            (qb_id, user_id)
+            f"WHERE qs.question_bank_id = ? AND i.deleted_at IS NULL{owner_clause}",
+            (qb_id, *user_param)
         ).fetchall()
     return [{"url": r[0], "company": r[1], "round": r[2]} for r in rows]
 
@@ -251,10 +253,12 @@ def get_sources_filtered(cursor, qb_id: int, bank_mode: str, user_id: int) -> li
 def get_original_question_sources_filtered(cursor, qb_id: int, bank_mode: str, user_id: int) -> list:
     """Get original question sources filtered by bank_mode using SQL JOIN."""
     owner_filter = {
-        'personal': "i.owner_id = ?",
+        'personal': "",
         'mixed': "(i.owner_id IS NULL OR i.owner_id = ?)",
         'public': "i.owner_id IS NULL",
     }[bank_mode]
+    user_param = () if bank_mode == 'personal' else (user_id,) if bank_mode == 'mixed' else ()
+    owner_clause = f" AND {owner_filter}" if owner_filter else ""
 
     items = cursor.execute(
         "SELECT id, question_text FROM question_original_items WHERE question_bank_id = ? ORDER BY id",
@@ -268,7 +272,7 @@ def get_original_question_sources_filtered(cursor, qb_id: int, bank_mode: str, u
                 f"SELECT DISTINCT qois.url, qois.company, qois.round "
                 f"FROM question_original_item_sources qois "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id = ? AND i.deleted_at IS NULL AND {owner_filter}",
+                f"WHERE qois.original_item_id = ? AND i.deleted_at IS NULL{owner_clause}",
                 (item[0],)
             ).fetchall()
         else:
@@ -276,8 +280,8 @@ def get_original_question_sources_filtered(cursor, qb_id: int, bank_mode: str, u
                 f"SELECT DISTINCT qois.url, qois.company, qois.round "
                 f"FROM question_original_item_sources qois "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id = ? AND i.deleted_at IS NULL AND {owner_filter}",
-                (item[0], user_id)
+                f"WHERE qois.original_item_id = ? AND i.deleted_at IS NULL{owner_clause}",
+                (item[0], *user_param)
             ).fetchall()
         if sources:
             result.append({
@@ -372,25 +376,26 @@ def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_i
     placeholders = ','.join(['?'] * len(qb_ids))
 
     owner_filter = {
-        'personal': "i.owner_id = ?",
+        'personal': "",
         'mixed': "(i.owner_id IS NULL OR i.owner_id = ?)",
         'public': "i.owner_id IS NULL",
     }[bank_mode]
-    user_param = () if bank_mode == 'public' else (user_id,)
+    user_param = () if bank_mode == 'public' else (user_id,) if bank_mode == 'mixed' else ()
+    owner_clause = f" AND {owner_filter}" if owner_filter else ""
 
     # Query 1: filtered sources via JOIN
     if bank_mode == 'public':
         src_rows = cursor.execute(
             f"SELECT DISTINCT qs.question_bank_id, qs.url, qs.company, qs.round "
             f"FROM question_sources qs JOIN interview i ON qs.url = i.url "
-            f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
+            f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL{owner_clause}",
             (*qb_ids,)
         ).fetchall()
     else:
         src_rows = cursor.execute(
             f"SELECT DISTINCT qs.question_bank_id, qs.url, qs.company, qs.round "
             f"FROM question_sources qs JOIN interview i ON qs.url = i.url "
-            f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL AND {owner_filter}",
+            f"WHERE qs.question_bank_id IN ({placeholders}) AND i.deleted_at IS NULL{owner_clause}",
             (*qb_ids, *user_param)
         ).fetchall()
     sources_by_qb = {}
@@ -418,7 +423,7 @@ def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_i
                 f"FROM question_original_item_sources qois "
                 f"JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL AND {owner_filter}",
+                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL{owner_clause}",
                 (*oi_ids,)
             ).fetchall()
         else:
@@ -427,7 +432,7 @@ def build_api_shapes_batch_filtered(cursor, qb_ids: list, bank_mode: str, user_i
                 f"FROM question_original_item_sources qois "
                 f"JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
                 f"JOIN interview i ON qois.url = i.url "
-                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL AND {owner_filter}",
+                f"WHERE qois.original_item_id IN ({oi_ph}) AND i.deleted_at IS NULL{owner_clause}",
                 (*oi_ids, *user_param)
             ).fetchall()
         for r in ois_rows:
