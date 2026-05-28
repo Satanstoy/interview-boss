@@ -18,7 +18,7 @@ Full architecture in CLAUDE.md — this file covers Hermes-specific delegation r
 - File reading → use read_file
 - Background tasks → use /background for long-running work
 
-## What you DELEGATE to Claude Code (use terminal + claude -p)
+## What you DELEGATE to Claude Code (USE CC BRIDGE, NOT claude -p)
 
 - ALL code writing, editing, generating
 - File creation/modification in project directories
@@ -28,26 +28,41 @@ Full architecture in CLAUDE.md — this file covers Hermes-specific delegation r
 - Any task touching /home/ubuntu/sj project files
 
 NEVER write code yourself. NEVER use write_file or patch for code.
+NEVER use `terminal(claude -p ...)` — use CC bridge for meaningful progress.
 
-## Claude Code command template
+## CC Bridge command template (MANDATORY for code tasks)
 
 ```bash
-cd /home/ubuntu/sj && claude -p "<task>" --output-format text --max-turns 15 --permission-mode bypassPermissions
+SCRIPT="$HOME/.hermes/skills/claude-code-bridge/scripts/claude-code-bridge.sh"
+SID="weixin_o9cq801vgFS6lTjY5oxumNK9Wmwg"
+
+# Step 1: 检查/启动 bridge
+STATUS=$("$SCRIPT" "$SID" status 2>&1)
+if echo "$STATUS" | grep -q "没有活跃"; then
+    "$SCRIPT" "$SID" start /home/ubuntu/sj
+    sleep 3
+fi
+
+# Step 2: 发送任务（--stream 输出有意义进度，--long 5分钟超时）
+"$SCRIPT" "$SID" send "<task>" --stream --long
 ```
 
 ## Workflow for code tasks: Plan → Approve → Code → Review
 
-Step 1 — Plan: `claude -p "给出简要实现计划: <task>" --max-turns 5`
+Step 1 — Plan: `"$SCRIPT" "$SID" send "给出简要实现计划: <task>"` (quick, no --stream)
 Step 2 — Present plan to user, wait for approval
-Step 3 — Code: `claude -p "<task>" --max-turns 15`
-Step 4 — Review: `claude -p "review changes, 检查bug和风格" --max-turns 10`
+Step 3 — Code: `"$SCRIPT" "$SID" send "<task>" --stream --long`
+Step 4 — Review: `"$SCRIPT" "$SID" send "review changes, 检查bug和风格" --stream`
 
-For simple tasks (read file, git status, run test), skip plan/review, delegate directly.
+For simple tasks (read file, git status, run test), use `send` without --stream.
 
 ## Progress reporting (避免长时间沉默)
 
-在委托 Claude Code 之前和之后，必须发送简短进度消息给用户：
-- 委托前："正在让 cc 实现 XXX，预计需要几分钟..."
+**STOP 用终端直接跑 claude -p！用 bridge 的 --stream 模式自动推送有意义的进度。**
+
+进度来自 bridge 的 stream 输出（如 "正在编辑 src/api/auth.ts"、"Running pytest"），而不是无意义的 "⏳ Still working... (iteration X/60)"。
+
+如果用户问进度，用：`"$SCRIPT" "$SID" progress`
 - 委托后："cc 完成了，结果：（一句话总结）"
 
 对于预期超过 3 分钟的任务，拆成多个阶段，每阶段结束后汇报一次进度。
