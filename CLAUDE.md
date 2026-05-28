@@ -59,31 +59,63 @@ Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip。
 
 1. **修改后必须更新 CLAUDE.md** — 任何涉及文件增删、职责变更、架构调整的修改，必须更新对应目录的 CLAUDE.md。不更新 = 任务未完成。
 2. **一组修改必须 commit** — 每次会话中完成一组逻辑相关的修改后，必须立即 `git commit`。禁止积攒大量未提交修改。
-3. **新模块必须更新 README** — 新增功能模块或 API 端点后，必须更新 README.md 和对应目录的 CLAUDE.md。
+3. **README 更新检查（commit 前必须执行）** — commit 代码前，对照以下清单逐项检查。命中任何一项就必须更新 README.md，否则 commit 不完整：
+
+   **命中条件（任一触发）：**
+   - 新增了 `app/routers/` 下的文件（新 API 路由）
+   - 新增了 `frontend/src/services/` 下的文件（新 API 服务层）
+   - 新增了 `frontend/src/components/business/` 下的文件（新业务组件）
+   - 新增了 `frontend/src/composables/` 下的文件（新 composable）
+   - 新增了 `app/agents/` 下的子目录（新 agent）
+   - 新增了数据库表或迁移（`app/db/migrations/`）
+   - 新增或修改了环境变量（`.env.example`）
+   - 修改了 API 端点的路径、方法或参数（`app/routers/*.py`）
+   - 新增了功能模块的入口页面（`frontend/src/views/`）
+   - 变更了部署方式或依赖（`docker-compose.yml`、`Dockerfile`、`pyproject.toml`）
+
+   **更新内容：**
+   - README.md 的「功能详解」「技术栈」「项目结构」「API 概览」对应章节
+   - 本文件（CLAUDE.md）的「目录地图」「代码路由表」对应条目
+   - 新模块涉及的子目录 CLAUDE.md
 
 ## 子目录 CLAUDE.md
 
 每个有一定规模的目录都有自己的 CLAUDE.md，CC 会按目录层级自动加载。修改代码时先读对应目录的 CLAUDE.md：
 
 ```
+backend/CLAUDE.md                     ← 后端总览
+backend/app/CLAUDE.md                 ← 应用入口（asgi 中间件/路由注册）
 backend/app/db/CLAUDE.md              ← 数据库层规范
 backend/app/services/CLAUDE.md        ← 业务逻辑层规范
 backend/app/core/CLAUDE.md            ← 配置认证层规范
+backend/app/middleware/CLAUDE.md      ← 请求中间件
+backend/app/models/CLAUDE.md          ← Pydantic schemas
+backend/app/routers/CLAUDE.md         ← API 路由层
+backend/app/routers/profile_pkg/CLAUDE.md  ← 配置子路由
+backend/app/routers/questions_pkg/CLAUDE.md ← 题库子路由
 backend/app/agents/CLAUDE.md          ← Agent 总览
 backend/app/agents/submit/CLAUDE.md   ← Submit agent 流程
 backend/app/agents/build/CLAUDE.md    ← Build agent 流程
+backend/app/agents/batch_generate/CLAUDE.md ← 批量生成 agent
 backend/app/agents/chat/CLAUDE.md     ← Chat agent 流程
+backend/app/agents/chat/skills/CLAUDE.md ← Chat 技能模块
 backend/app/agents/shared/CLAUDE.md   ← 共享模块
-backend/app/routers/profile_pkg/CLAUDE.md  ← 配置子路由
-backend/app/routers/questions_pkg/CLAUDE.md ← 题库子路由
 backend/tests/CLAUDE.md               ← 测试规范
 backend/tests/*/CLAUDE.md             ← 各测试子目录
+frontend/CLAUDE.md                    ← 前端总览
 frontend/src/components/business/CLAUDE.md ← 业务组件
 frontend/src/components/common/CLAUDE.md   ← 通用组件
 frontend/src/services/CLAUDE.md       ← API 服务层
 frontend/src/composables/CLAUDE.md    ← composables
 frontend/src/utils/CLAUDE.md          ← 工具函数
+frontend/src/constants/CLAUDE.md      ← 应用常量（config/enums）
+frontend/src/layouts/CLAUDE.md        ← 布局组件
+frontend/src/router/CLAUDE.md         ← 路由配置（占位）
+frontend/src/stores/CLAUDE.md         ← Pinia store（占位）
+frontend/src/views/CLAUDE.md          ← 页面视图（占位）
+frontend/src/assets/styles/CLAUDE.md  ← 全局样式
 frontend/tests/CLAUDE.md              ← 前端测试
+docs/CLAUDE.md                        ← 文档规范
 ```
 
 ## 测试基础设施
@@ -118,11 +150,11 @@ frontend/tests/CLAUDE.md              ← 前端测试
 **修 Bug 前：** 先搜 `docs/bug-reports/` 是否有类似问题的历史记录，避免重复踩坑。
 **开发新功能前：** 先搜 `docs/tdd-reports/` 了解相关模块的历史设计决策和已有模式。
 
-## 完成阶段后
+## 完成阶段后（门控流程，必须按顺序执行）
 
 1. `uv run pytest backend/tests/ -q` → `cd frontend && npm run build` → `./deploy/docker-deploy.sh update`
 2. **更新 CLAUDE.md** — 修改了哪个目录的代码，就更新哪个目录的 CLAUDE.md（铁律）
-3. 涉及功能/API/结构变更 → 最小化更新 README.md
+3. **README 更新检查** — 按上方「修改铁律 #3」的命中条件逐项检查。命中的条目必须在 commit 前更新完 README。这是硬性门控，不是可选项。
 4. **创建 docs 记录**（关键修改：README + docs；小修改：仅 docs）
    - `docs/bug-reports/YYYY-MM-DD-描述.md` / `docs/tdd-reports/YYYY-MM-DD-描述.md`
    - 内容：问题描述、根因分析、修复方案、测试验证、影响范围
