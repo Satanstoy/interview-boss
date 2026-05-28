@@ -210,7 +210,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, h, Transition } from 'vue'
 import { authLogin, authRegister, authLoginWithEmail, authRegisterWithEmail, sendVerifyCode } from '@/api/index.js'
 import { setAuthToken } from '@/services/http.js'
 import { validateUsername, validatePassword } from '@/utils/validate.js'
@@ -235,16 +235,31 @@ const error = ref('')
 const codeCooldown = ref(0)
 let cooldownTimer = null
 
-// 子组件
+// 子组件（render 函数，无需运行时模板编译器）
 const ErrorMessage = {
   props: ['error'],
-  template: `<Transition name="fade"><p v-if="error" class="text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-    {{ error }}
-  </p></Transition>`
+  render() {
+    return h(Transition, { name: 'fade' }, () =>
+      this.error
+        ? h('p', { class: 'text-red-500 dark:text-red-400 text-sm mt-2 flex items-center gap-1.5' }, [
+            h('svg', { class: 'w-4 h-4 flex-shrink-0', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '2' }, [
+              h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', d: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' })
+            ]),
+            this.error
+          ])
+        : null
+    )
+  }
 }
 const Spinner = {
-  template: `<span class="absolute inset-0 flex items-center justify-center"><svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span>`
+  render() {
+    return h('span', { class: 'absolute inset-0 flex items-center justify-center' }, [
+      h('svg', { class: 'animate-spin h-5 w-5', viewBox: '0 0 24 24' }, [
+        h('circle', { class: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', 'stroke-width': '4', fill: 'none' }),
+        h('path', { class: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z' })
+      ])
+    ])
+  }
 }
 
 watch(() => props.visible, (v) => {

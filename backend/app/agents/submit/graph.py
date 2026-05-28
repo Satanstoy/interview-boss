@@ -14,6 +14,15 @@ from app.agents.submit.persist_public import persist_public_node, cluster_public
 
 logger = logging.getLogger("interview-boss")
 
+_FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 API Key"
+
+
+def _sanitize_error(e: Exception) -> str:
+    err_str = str(e).lower()
+    if "401" in err_str or "invalid api key" in err_str or "unauthorized" in err_str:
+        return _FRIENDLY_ERROR
+    return f"处理失败: {str(e)[:200]}"
+
 
 # ── 条件路由函数 ──
 
@@ -141,7 +150,7 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
             logger.info(f"[SSE] graph task completed in {_t.monotonic()-_t0:.1f}s")
         except Exception as e:
             logger.exception(f"[SSE] graph task failed in {_t.monotonic()-_t0:.1f}s")
-            queue.put_nowait(make_error_event(str(e)[:200]))
+            queue.put_nowait(make_error_event(_sanitize_error(e)))
         finally:
             queue.put_nowait(_SENTINEL)
 
@@ -181,8 +190,7 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
 
     except Exception as e:
         logger.exception("LangGraph 流式执行失败")
-        detail = getattr(e, "detail", None) or str(e) or repr(e)
-        yield format_sse(make_error_event(f"处理失败: {detail[:200]}"))
+        yield format_sse(make_error_event(_sanitize_error(e)))
     finally:
         # 恢复 contextvar，避免泄漏
         _event_queue_var.reset(token)

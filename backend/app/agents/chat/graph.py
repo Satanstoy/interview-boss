@@ -27,6 +27,15 @@ from app.agents.chat.context_builder import build_interview_context
 
 logger = logging.getLogger("interview-boss")
 
+_FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 API Key"
+
+
+def _sanitize_error_message(e: Exception) -> str:
+    err_str = str(e).lower()
+    if "401" in err_str or "invalid api key" in err_str or "unauthorized" in err_str:
+        return _FRIENDLY_ERROR
+    return f"处理消息时出现错误: {str(e)}"
+
 
 async def run_chat(
     conversation_id: str,
@@ -212,4 +221,4 @@ async def run_chat(
 
     except Exception as e:
         logger.error(f"Chat 流程异常: {e}", exc_info=True)
-        yield {"type": "error", "message": f"处理消息时出现错误: {str(e)}"}
+        yield {"type": "error", "message": _sanitize_error_message(e)}

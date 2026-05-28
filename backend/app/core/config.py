@@ -67,7 +67,7 @@ def get_user_llm_config(user_id: int) -> dict | None:
 
 def _get_global_llm_config() -> dict | None:
     """获取全局 LLM 配置（环境变量 + user_profile 表）。无配置时返回 None。"""
-    api_key = get_profile_setting("llm_api_key") or LLM_API_KEY
+    api_key = get_profile_setting("llm_api_key") or LLM_API_KEY or os.environ.get("OPENAI_API_KEY", "")
     base_url = get_profile_setting("llm_base_url") or LLM_BASE_URL
     model = get_profile_setting("llm_model") or LLM_MODEL
     timeout_str = get_profile_setting("llm_timeout")
