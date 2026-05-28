@@ -6,7 +6,7 @@ HTTP 感知层，禁止包含业务逻辑。路由函数只负责解析请求、
 
 | 文件 | 端点 | 职责 |
 |------|------|------|
-| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出 |
+| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定（注册强制邮箱，登录检测邮箱绑定） |
 | `submit.py` | `/api/submit` | JD/面经提交（SSE 流式） |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD） |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |

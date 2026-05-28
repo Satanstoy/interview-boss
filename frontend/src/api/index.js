@@ -23,6 +23,7 @@ export {
   getMyEmail,
   sendBindCode,
   bindEmail,
+  bindEmailWithToken,
 } from '../services/authApi.js'
 
 // ── Data ──

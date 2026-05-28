@@ -9,6 +9,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.core.auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
+    create_email_bind_token, decode_email_bind_token,
     decode_token, get_current_user, get_refresh_token,
     store_refresh_token, get_refresh_token_jti, delete_refresh_token,
     is_family_invalidated, invalidate_family,
@@ -95,9 +96,13 @@ RESERVED_USERNAMES = {'admin', 'root', 'system', 'null', 'undefined', 'superuser
 _USERNAME_RE = re.compile(r'^[a-zA-Z0-9_一-鿿]{2,32}$')
 
 
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=32)
     password: str = Field(..., min_length=8, max_length=128)
+    email: str = Field(..., min_length=5, max_length=120)
 
     @field_validator('username')
     @classmethod
@@ -117,6 +122,13 @@ class RegisterRequest(BaseModel):
         if categories < 2:
             raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
         return v
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
 
 
 class LoginRequest(BaseModel):
@@ -200,16 +212,19 @@ def _issue_token_pair(user: dict, response: Response, request: Request, remember
 async def register(request: Request, req: RegisterRequest, response: Response):
     if req.username.lower() in RESERVED_USERNAMES:
         raise HTTPException(status_code=400, detail="该用户名为系统保留，请更换")
-    password_hash = hash_password(req.password)
 
     def _create():
         with get_db_connection() as conn:
             existing = conn.execute("SELECT id FROM users WHERE username = ?", (req.username,)).fetchone()
             if existing:
                 raise HTTPException(status_code=409, detail="用户名已存在")
+            email_taken = conn.execute("SELECT id FROM users WHERE email = ?", (req.email,)).fetchone()
+            if email_taken:
+                raise HTTPException(status_code=409, detail="该邮箱已被注册")
+            password_hash = hash_password(req.password)
             cursor = conn.execute(
-                "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, 0, 'public')",
-                (req.username, password_hash)
+                "INSERT INTO users (username, password_hash, email, is_admin, bank_mode) VALUES (?, ?, ?, 0, 'public')",
+                (req.username, password_hash, req.email)
             )
             conn.commit()
             return cursor.lastrowid
@@ -238,7 +253,7 @@ async def login(request: Request, req: LoginRequest, response: Response):
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id FROM users WHERE username = ?",
+                "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id, email FROM users WHERE username = ?",
                 (req.username,)
             ).fetchone()
 
@@ -253,6 +268,17 @@ async def login(request: Request, req: LoginRequest, response: Response):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     _clear_failures(req.username)
+
+    # 未绑定邮箱的老用户：返回临时 token，要求绑定邮箱
+    if not user.get('email'):
+        temp_token = create_email_bind_token(user['id'], user['username'])
+        return {
+            "need_email_bind": True,
+            "temp_token": temp_token,
+            "message": "请先绑定邮箱后再使用系统",
+            "user": {"id": user['id'], "username": user['username']}
+        }
+
     return _issue_token_pair(
         dict(user), response, request, remember=req.remember_me,
         ip_address=request.client.host if request.client else "",
@@ -517,6 +543,60 @@ async def login_with_email(request: Request, req: EmailLoginRequest, response: R
 
     return _issue_token_pair(
         dict(user), response, request, remember=False,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", "")
+    )
+
+
+# ── 临时 token 绑定邮箱（老用户首次登录强制绑定）──────────────────────
+
+
+class BindEmailWithTokenRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    code: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
+
+
+@router.post("/bind-email-with-token")
+@limiter.limit("5/minute")
+async def bind_email_with_token(request: Request, req: BindEmailWithTokenRequest, response: Response, temp_token: str = ""):
+    """用临时 token + 验证码绑定邮箱，成功后返回正式 token pair"""
+    # 从 header 或 query 参数获取临时 token
+    if not temp_token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            temp_token = auth_header[7:]
+    if not temp_token:
+        temp_token = request.query_params.get("temp_token", "")
+    if not temp_token:
+        raise HTTPException(status_code=401, detail="缺少临时令牌")
+
+    payload = decode_email_bind_token(temp_token)
+    user_id = payload["user_id"]
+    username = payload.get("username", "")
+
+    # 验证邮箱验证码
+    valid = await verify_code(req.email, req.code, "bind")
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    # 检查邮箱是否已被其他用户占用
+    with get_db_connection() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE email = ? AND id != ?", (req.email, user_id)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="该邮箱已被其他用户绑定")
+        conn.execute("UPDATE users SET email = ? WHERE id = ?", (req.email, user_id))
+        conn.commit()
+
+    return _issue_token_pair(
+        {"id": user_id, "username": username, "is_admin": False, "bank_mode": "public"},
+        response, request, remember=False,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )

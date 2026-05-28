@@ -97,6 +97,38 @@ def create_refresh_token(data: dict, jti: Optional[str] = None, days: int = REFR
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM), _jti
 
 
+EMAIL_BIND_TOKEN_EXPIRE_MINUTES = 30
+
+
+def create_email_bind_token(user_id: int, username: str) -> str:
+    """签发临时 token（type=email_bind），仅用于绑定邮箱，30 分钟有效"""
+    now = datetime.now(timezone.utc)
+    to_encode = {
+        "user_id": user_id,
+        "username": username,
+        "exp": now + timedelta(minutes=EMAIL_BIND_TOKEN_EXPIRE_MINUTES),
+        "iss": TOKEN_ISSUER,
+        "sub": str(user_id),
+        "type": "email_bind",
+        "iat": now,
+    }
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_email_bind_token(token: str) -> dict:
+    """解码邮箱绑定临时 token，过期或无效抛 401"""
+    try:
+        payload = jwt.decode(
+            token, SECRET_KEY, algorithms=[ALGORITHM],
+            issuer=TOKEN_ISSUER, options={"require_sub": True}
+        )
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="临时令牌已过期或无效，请重新登录")
+    if payload.get("type") != "email_bind":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌类型不匹配")
+    return payload
+
+
 def decode_token(token: str, expected_type: str = "access") -> dict:
     """解码并严格校验 JWT claims"""
     try:

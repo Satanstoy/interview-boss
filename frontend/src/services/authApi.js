@@ -3,7 +3,7 @@ import { get, post, put, del, fetchWithCredentials } from './http.js'
 const API = '/api'
 
 // ── Auth ──
-export const authRegister = (username, password) => post(`${API}/auth/register`, { username, password })
+export const authRegister = (username, password, email) => post(`${API}/auth/register`, { username, password, email })
 export const authLogin = (username, password, remember_me = false) => post(`${API}/auth/login`, { username, password, remember_me })
 export const authMe = () => get(`${API}/auth/me`)
 export const authUpdateBankMode = (bank_mode) => put(`${API}/auth/bank-mode`, { bank_mode })
@@ -23,3 +23,4 @@ export const authLoginWithEmail = (email, code) => post(`${API}/auth/login-with-
 export const getMyEmail = () => get(`${API}/profile/email`)
 export const sendBindCode = (email) => post(`${API}/profile/send-bind-code`, { email })
 export const bindEmail = (email, code) => post(`${API}/profile/bind-email`, { email, code })
+export const bindEmailWithToken = (email, code, tempToken) => post(`${API}/auth/bind-email-with-token`, { email, code }, { headers: { Authorization: `Bearer ${tempToken}` } })
