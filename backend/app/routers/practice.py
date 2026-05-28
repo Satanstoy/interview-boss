@@ -77,7 +77,8 @@ async def get_random_questions(
             conditions = []
             params = list(base_params)
             if cat1:
-                conditions.append("qb.cat1 LIKE ?")
+                conditions.append("(qb.cat1 LIKE ? OR qb.tags LIKE ?)")
+                params.append(f"%{cat1}%")
                 params.append(f"%{cat1}%")
             if difficulty:
                 conditions.append("qb.difficulty LIKE ?")
