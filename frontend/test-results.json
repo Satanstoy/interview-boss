@@ -1,0 +1,1260 @@
+{
+  "config": {
+    "configFile": "/home/ubuntu/sj/interview-boss/frontend/playwright.config.js",
+    "rootDir": "/home/ubuntu/sj/interview-boss/frontend",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/ubuntu/sj/interview-boss/frontend/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "/home/ubuntu/sj/interview-boss/frontend",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.spec.js"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 2,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/e2e/comprehensive.spec.js",
+      "file": "tests/e2e/comprehensive.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "登录模块",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 327,
+          "column": 6,
+          "specs": [
+            {
+              "title": "登录页面渲染完整 — 标题、输入框、按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-4940e798777cd7a99c2c",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 328,
+              "column": 3
+            },
+            {
+              "title": "密码长度验证 — <8 位时提交按钮禁用",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-043953336d95f58574f7",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 347,
+              "column": 3
+            },
+            {
+              "title": "有效输入时提交按钮可用",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-3ef2241c639d058514f6",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 362,
+              "column": 3
+            },
+            {
+              "title": "成功登录后显示主界面",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-93cd178392a365541265",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 376,
+              "column": 3
+            },
+            {
+              "title": "记住我复选框存在",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-dfb24e4171c2fd31b8da",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 392,
+              "column": 3
+            },
+            {
+              "title": "密码登录和邮箱验证码登录模式可切换",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-005de7af4b0b22be3e62",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 403,
+              "column": 3
+            },
+            {
+              "title": "注册链接可点击",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-cd13b5febcb4f4dd8d70",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 426,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Tab 切换模块",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 445,
+          "column": 6,
+          "specs": [
+            {
+              "title": "所有 Tab 都存在",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-8457f06de7fd217dd0c5",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 461,
+              "column": 3
+            },
+            {
+              "title": "点击每个 Tab 后内容区切换",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-2bba0e07f5a91b3e62e8",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 468,
+              "column": 3
+            },
+            {
+              "title": "Tab 高亮状态正确 — 默认高频题库高亮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-d593175254e9d85cc223",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 498,
+              "column": 3
+            },
+            {
+              "title": "切换 Tab 后高亮状态更新",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-1eac5e0101433f575f48",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 504,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "题库模块",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 517,
+          "column": 6,
+          "specs": [
+            {
+              "title": "题库列表渲染",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-ff5b9c0e80529591280f",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 525,
+              "column": 3
+            },
+            {
+              "title": "搜索框输入后触发筛选",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-5dbc2bc1885187cafe1d",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 539,
+              "column": 3
+            },
+            {
+              "title": "搜索清除按钮可用",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-5d19a321b23eeb974b04",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 549,
+              "column": 3
+            },
+            {
+              "title": "难度筛选下拉框可操作",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-4f9b22d39559fdab1cc3",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 565,
+              "column": 3
+            },
+            {
+              "title": "全部展开 / 全部收起按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-4a23871122d951fa3e8b",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 580,
+              "column": 3
+            },
+            {
+              "title": "收藏按钮点击切换",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-e11e0d29650d38bbda0c",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 596,
+              "column": 3
+            },
+            {
+              "title": "题目卡片展开/折叠",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-8574e0308028ac8c099b",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 608,
+              "column": 3
+            },
+            {
+              "title": "分类标签筛选",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-fc48f6c94d0670e44421",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 619,
+              "column": 3
+            },
+            {
+              "title": "刷题模式按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-f5a55c865108ea23172a",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 633,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "面经库模块",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 646,
+          "column": 6,
+          "specs": [
+            {
+              "title": "面经列表渲染",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-c267329d5dba8e5baa5a",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 653,
+              "column": 3
+            },
+            {
+              "title": "排序切换 — 升序/降序",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-c912d5ae241e8821d75c",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 662,
+              "column": 3
+            },
+            {
+              "title": "招聘季筛选",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-b6fb1fabf1a62b46286d",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 675,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "模拟面试（题目抽测）模块",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 686,
+          "column": 6,
+          "specs": [
+            {
+              "title": "配置面板渲染",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-d1a20bb77d45417a80b0",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 693,
+              "column": 3
+            },
+            {
+              "title": "开始抽测按钮存在",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-c3d98979a7630fb36ef5",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 705,
+              "column": 3
+            },
+            {
+              "title": "难度选项可选择",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-f0e7d26e7eab78450d6b",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 710,
+              "column": 3
+            },
+            {
+              "title": "题目数量加减按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-dc8117589191c2bd4438",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 726,
+              "column": 3
+            },
+            {
+              "title": "开始抽测后进入答题界面",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-55a124d48303b21d70ab",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 740,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "设置面板",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 756,
+          "column": 6,
+          "specs": [
+            {
+              "title": "设置按钮可点击并打开面板",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-4de2b3d0e28643f295d2",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 761,
+              "column": 3
+            },
+            {
+              "title": "设置面板内容渲染 — LLM 配置",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-70506f58e408fccc17cb",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 771,
+              "column": 3
+            },
+            {
+              "title": "设置面板 — 目标岗位",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-863eb0ee03be6b89ee92",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 780,
+              "column": 3
+            },
+            {
+              "title": "设置面板关闭按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-999c74f773d11ee35072",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 789,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "暗色模式",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 808,
+          "column": 6,
+          "specs": [
+            {
+              "title": "暗色模式切换按钮存在",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-12501e7f8ed4530a0f85",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 813,
+              "column": 3
+            },
+            {
+              "title": "点击后 html class 变化",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-eb5c36b3bd22b66be3a8",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 819,
+              "column": 3
+            },
+            {
+              "title": "暗色模式持久化到 localStorage",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-76f11e3891086b4587ad",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 835,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "响应式布局",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 850,
+          "column": 6,
+          "specs": [
+            {
+              "title": "桌面视口下侧边栏可见",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-73bbe9ddab215e959866",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 851,
+              "column": 3
+            },
+            {
+              "title": "桌面视口下侧边栏有合理宽度",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-aa26e19ff9ab0a57db8f",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 860,
+              "column": 3
+            },
+            {
+              "title": "移动端视口下侧边栏隐藏",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-1587b57cb8d0dac80727",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 874,
+              "column": 3
+            },
+            {
+              "title": "移动端视口下 Tab 栏仍可见",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-47e21c01ace503f1a6c0",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 885,
+              "column": 3
+            },
+            {
+              "title": "侧边栏折叠/展开按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-ad479bde2c0fd0da8f25",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 894,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "用户菜单",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 917,
+          "column": 6,
+          "specs": [
+            {
+              "title": "用户菜单显示用户名",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-2081b3f14102c3496e60",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 922,
+              "column": 3
+            },
+            {
+              "title": "点击头像打开下拉菜单",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-15db1d49a39088118a48",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 928,
+              "column": 3
+            },
+            {
+              "title": "题库模式切换按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-123651d1af11f3bbd75e",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 940,
+              "column": 3
+            },
+            {
+              "title": "普通用户不看到审核题库按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-3d8028dfe0abf07c5c48",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 951,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "管理员用户菜单",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 962,
+          "column": 6,
+          "specs": [
+            {
+              "title": "管理员看到审核题库按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-a7a094d173771516f744",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 963,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "侧边栏数据分析",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 977,
+          "column": 6,
+          "specs": [
+            {
+              "title": "学习进度区域显示",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-9d651d9596d99a59fd2e",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 983,
+              "column": 3
+            },
+            {
+              "title": "每日推荐区域显示",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-b18e4a8e7abe9fb8834a",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 987,
+              "column": 3
+            },
+            {
+              "title": "收藏夹区域显示",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-b868cb8d0ab2c291de87",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 991,
+              "column": 3
+            },
+            {
+              "title": "分类目录区域显示",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-8c3b39c281b8c1bf70e9",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 995,
+              "column": 3
+            },
+            {
+              "title": "刷新数据按钮可点击",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-cf6c9a2ac1bf88c6b015",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 999,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "错误处理",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 1012,
+          "column": 6,
+          "specs": [
+            {
+              "title": "API 返回 500 时页面不崩溃",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-c3fe68d38a90ec8df9ee",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 1013,
+              "column": 3
+            },
+            {
+              "title": "网络断开时页面不崩溃",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-cb348927ee3e9329b8f7",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 1027,
+              "column": 3
+            },
+            {
+              "title": "API 错误时显示重试按钮",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-d8e252b7969956bb3335",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 1043,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "练习面板",
+          "file": "tests/e2e/comprehensive.spec.js",
+          "line": 1063,
+          "column": 6,
+          "specs": [
+            {
+              "title": "点击做题按钮打开练习面板",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "09a53ba93b34e85c7707-61f72d6026f72d515c1a",
+              "file": "tests/e2e/comprehensive.spec.js",
+              "line": 1064,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-05-28T14:16:45.708Z",
+    "duration": 82.40099999999995,
+    "expected": 0,
+    "skipped": 54,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

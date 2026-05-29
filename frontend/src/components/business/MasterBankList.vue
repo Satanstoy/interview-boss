@@ -29,6 +29,7 @@
     <DynamicScroller
       v-if="items.length > 0"
       ref="scrollerRef"
+      :key="items.map(i => i.id).join(',')"
       :items="items"
       :min-item-size="130"
       key-field="id"
