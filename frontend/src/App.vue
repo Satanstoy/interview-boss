@@ -806,7 +806,18 @@ watch(activeTab, (newTab, oldTab) => {
 
 // ── Event handlers ──
 const onSubmitted = () => { fetchTableData(); fetchAnalytics() }
-const onTabChange = (tab) => {
+const onTabChange = async (tab) => {
+  if (tab === activeTab.value) return
+  // 检查是否有未保存的内联编辑
+  const editingInputs = document.querySelectorAll('.tab-content input:not([type="checkbox"]):not([type="hidden"]), .tab-content textarea')
+  const hasActiveEdit = Array.from(editingInputs).some(el => {
+    const parent = el.closest('.group')
+    return parent && el.offsetParent !== null && el === document.activeElement
+  })
+  if (hasActiveEdit) {
+    const confirmed = await showConfirm('有未保存的编辑内容，确定要离开吗？', { title: '未保存的修改', variant: 'warning' })
+    if (!confirmed) return
+  }
   // 保存当前 tab 的滚动位置，标记下一个 tab 需要恢复
   const scrollEl = document.querySelector('.overflow-y-auto.custom-scrollbar')
   if (scrollEl) saveScroll(activeTab.value, scrollEl.scrollTop)
