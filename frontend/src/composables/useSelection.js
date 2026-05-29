@@ -10,7 +10,12 @@ export function useSelection(getList, getFilteredList) {
     return list.length > 0 && list.every(item => selectedIds.value.has(item.id))
   })
 
+  let _lastToggleTime = 0
   const toggleSelectAll = () => {
+    // 防抖：300ms 内忽略重复点击
+    const now = Date.now()
+    if (now - _lastToggleTime < 300) return
+    _lastToggleTime = now
     // 按当前筛选列表全选/取消，不影响筛选外的已选项
     const list = getFilteredList ? getFilteredList() : getList()
     if (allSelected.value) {
