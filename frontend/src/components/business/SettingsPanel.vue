@@ -137,8 +137,11 @@
                   </div>
                 </div>
                 <div class="flex gap-2">
-                  <input v-model="newPositionInput" placeholder="新增岗位（最多30字）" maxlength="30" class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-accent-200 dark:focus:ring-accent-800 focus:border-accent-400 transition-all duration-200" />
+                  <input v-model="newPositionInput" placeholder="新增岗位（最多30字）" class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3 py-2 text-xs bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-accent-200 dark:focus:ring-accent-800 focus:border-accent-400 transition-all duration-200" />
                   <button @click="addPosition" class="text-xs bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 px-3 py-2 rounded-xl hover:bg-accent-100 dark:hover:bg-accent-900/50 transition font-medium whitespace-nowrap border border-accent-200 dark:border-accent-800">添加</button>
+                </div>
+                <div v-if="newPositionInput.length > 20" class="text-xs mt-1" :class="newPositionInput.length > 30 ? 'text-red-500' : 'text-ink-400 dark:text-ink-500'">
+                  {{ newPositionInput.length }} / 30
                 </div>
                 <!-- AI生成分类按钮 -->
                 <button
