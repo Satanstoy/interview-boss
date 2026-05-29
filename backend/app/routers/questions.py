@@ -68,11 +68,10 @@ async def get_master_bank(
     def _query():
         with get_db_connection() as conn:
             total = conn.execute(f"SELECT COUNT(*) {from_clause} {where_clause}", params).fetchone()[0]
-            rows = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, qb.owner_id, qb.status, qb.job_position "
-                f"{from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?",
-                params + [user['id'], page_size, offset]
-            ).fetchall()
+            # 注意：JOIN 的 user_id 参数必须在 WHERE 的 params 之前
+            full_sql = f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, qb.owner_id, qb.status, qb.job_position {from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?"
+            full_params = [user['id']] + params + [page_size, offset]
+            rows = conn.execute(full_sql, full_params).fetchall()
             return total, rows
 
     total, rows = await run_db(_query)
