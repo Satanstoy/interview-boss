@@ -1,7 +1,7 @@
 <template>
   <teleport to="body">
     <transition name="fade">
-      <div v-if="visible" class="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4">
+      <div v-if="visible" class="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4" @keydown.esc="emit('close')" tabindex="-1">
         <!-- Backdrop -->
         <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')"></div>
 
@@ -381,7 +381,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, nextTick } from 'vue'
 import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '@/api/index.js'
 import { invalidateCache } from '@/services/http.js'
 import RoundedSelect from '@/components/common/RoundedSelect.vue'
@@ -395,6 +395,14 @@ const props = defineProps({
   activeSeason: { type: String, default: '' },
   isAdmin: { type: Boolean, default: false },
   isBuilding: { type: Boolean, default: false }
+})
+
+// 弹窗打开时自动聚焦以接收 ESC 键事件
+watch(() => props.visible, (val) => {
+  if (val) nextTick(() => {
+    const modal = document.querySelector('.fixed.inset-0.z-\\[100\\]')
+    if (modal) modal.focus()
+  })
 })
 
 const availablePositions = ref([])
