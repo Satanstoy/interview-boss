@@ -28,9 +28,13 @@
         <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-2">文本内容</label>
         <textarea
           v-model="stagedText"
+          :maxlength="TEXT_MAX_LENGTH"
           class="flex-1 w-full border border-surface-300 dark:border-ink-600 rounded-lg p-3 bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
           placeholder="在此处粘贴面经或 JD 的纯文本内容（可与右侧图片组合提交）..."
         ></textarea>
+        <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-ink-400 dark:text-ink-500'">
+          {{ stagedText.length.toLocaleString() }} / {{ TEXT_MAX_LENGTH.toLocaleString() }} 字符
+        </div>
       </div>
 
       <div
@@ -116,7 +120,7 @@
         </button>
         <button
           @click="submitAll"
-          :disabled="isUploading || (!stagedText.trim() && stagedFiles.length === 0)"
+          :disabled="isUploading || stagedText.length > TEXT_MAX_LENGTH || (!stagedText.trim() && stagedFiles.length === 0)"
           class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold px-8 py-2.5 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:from-blue-300 disabled:to-indigo-300 dark:disabled:from-blue-800 dark:disabled:to-indigo-800 disabled:cursor-not-allowed flex items-center gap-2 active:scale-[0.98]"
         >
           <svg v-if="isUploading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -220,6 +224,8 @@ const seasonOptions = computed(() => [
   ...props.availableSeasons.map(s => ({ value: s, label: s })),
   { value: 'custom', label: '自定义...' },
 ])
+
+const TEXT_MAX_LENGTH = 10000
 
 const sourceUrl = ref('')
 const stagedText = ref('')
