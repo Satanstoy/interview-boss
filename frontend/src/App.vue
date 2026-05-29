@@ -827,6 +827,8 @@ const onTabChange = async (tab) => {
   returnToPracticeMode.value = false
   highlightInterviewId.value = null
   floatingBtnStyle.value = { display: 'none' }
+  // 更新浏览器历史，支持后退/前进恢复 Tab
+  history.pushState({ tab }, '', `#${tab}`)
 }
 const onSelectTag = (tag) => { selectedTag.value = tag; selectedSubTags.value = []; activeTab.value = 'MasterBank' }
 const onGraphFilterTag = (tagName) => { selectedTag.value = '全部'; selectedSubTags.value = []; searchQuery.value = tagName; activeTab.value = 'MasterBank' }
@@ -996,6 +998,21 @@ onMounted(async () => {
   await initAuth()
   // 通知白屏检测器：Vue 应用已完成初始化
   window.__VUE_APP_READY__ = true
+  // 从 URL hash 恢复 Tab
+  const hashTab = location.hash.replace('#', '')
+  const validTabs = ['MasterBank', 'JD', 'Interview', 'MockInterview', 'Chat', 'KnowledgeGraph', 'Import', 'Coding']
+  if (hashTab && validTabs.includes(hashTab)) {
+    activeTab.value = hashTab
+  }
+  // 监听浏览器后退/前进
+  const onPopState = (e) => {
+    const tab = e.state?.tab || location.hash.replace('#', '')
+    if (tab && validTabs.includes(tab)) {
+      activeTab.value = tab
+    }
+  }
+  window.addEventListener('popstate', onPopState)
+  onUnmounted(() => window.removeEventListener('popstate', onPopState))
 })
 onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
