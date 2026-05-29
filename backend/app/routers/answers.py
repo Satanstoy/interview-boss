@@ -47,6 +47,10 @@ async def save_user_answer(question_id: int, body: dict, user: dict = Depends(ge
     answer = body.get("answer", "")
     def _upsert():
         with get_db_connection() as conn:
+            # 检查题目是否存在
+            exists = conn.execute("SELECT 1 FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            if not exists:
+                return False
             conn.execute(
                 "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
                 "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
@@ -54,7 +58,10 @@ async def save_user_answer(question_id: int, body: dict, user: dict = Depends(ge
                 (user['id'], question_id, answer, answer)
             )
             conn.commit()
-    await run_db(_upsert)
+            return True
+    result = await run_db(_upsert)
+    if not result:
+        raise HTTPException(status_code=404, detail="题目不存在")
     return {"status": "success"}
 
 
