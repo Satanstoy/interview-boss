@@ -552,6 +552,10 @@ const onSwitchPosition = async (pos) => {
         taxonomy.categories = []
       }
       availablePositions.value = data.settings.available_positions || availablePositions.value
+      // 确保当前岗位在列表中（新增岗位可能还没写入后端）
+      if (!availablePositions.value.includes(taxonomy.job_position)) {
+        availablePositions.value.push(taxonomy.job_position)
+      }
     } else {
       const data = await fetchPublicProfile({ noCache: true })
       if (data.settings?.taxonomy_config) {
