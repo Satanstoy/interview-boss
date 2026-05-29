@@ -3,7 +3,7 @@
     <button
       v-for="tab in tabs" :key="tab.key"
       @click="$emit('update:activeTab', tab.key)"
-      class="relative px-4 sm:px-5 py-3 text-sm font-semibold transition-colors duration-150 flex-shrink-0"
+      class="relative px-2.5 sm:px-4 md:px-5 py-3 text-xs sm:text-sm font-semibold transition-colors duration-150 flex-shrink-0"
       :class="[
         activeTab === tab.key
           ? 'text-primary-700 dark:text-primary-400'

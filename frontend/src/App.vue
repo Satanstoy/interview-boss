@@ -2,12 +2,12 @@
   <div class="min-h-screen bg-surface-50 dark:bg-surface-900">
     <!-- Top bar -->
     <nav class="sticky top-0 z-50 bg-white/85 dark:bg-surface-900/85 backdrop-blur-xl border-b border-surface-200/60 dark:border-ink-700/40 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
-      <div class="max-w-[1920px] mx-auto px-5 lg:px-8 h-14 flex items-center justify-between">
-        <h1 class="text-lg lg:text-xl font-serif font-normal tracking-tight text-ink-900 dark:text-ink-100">
+      <div class="max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-8 h-14 flex items-center justify-between overflow-hidden">
+        <h1 class="text-lg lg:text-xl font-serif font-normal tracking-tight text-ink-900 dark:text-ink-100 shrink-0">
           Interview<span class="text-primary-600 dark:text-primary-400">Boss</span>
         </h1>
-        <div class="flex items-center gap-3">
-          <span v-if="currentUser && activeSeason" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-200 dark:border-primary-800 px-3 py-1">
+        <div class="flex items-center gap-1.5 sm:gap-3 min-w-0 shrink-0">
+          <span v-if="currentUser && activeSeason" class="hidden sm:inline-flex badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-200 dark:border-primary-800 px-3 py-1">
             {{ activeSeason }}
           </span>
           <UserMenu
