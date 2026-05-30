@@ -223,7 +223,7 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
 # ============================================================
 
 async def compact_singletons_in_db(user_id: int = None) -> Dict:
-    """孤岛碎片整理：对 frequency=1 且无 ai_answer 的独立题按 cat2 做二次合并"""
+    """孤岛碎片整理：对 frequency=1 的独立题按 cat2 做二次合并"""
     _SINGLETONS_PAGE_SIZE = 200
 
     singletons = []
@@ -233,10 +233,10 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
             conn = get_db_connection()
             rows = conn.execute(
                 "SELECT id, question, cat1, cat2, tags, difficulty, sources, "
-                "original_questions, original_question_sources "
+                "original_questions, original_question_sources, ai_answer "
                 "FROM question_bank "
                 "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
-                "AND frequency = 1 AND (ai_answer IS NULL OR ai_answer = '') "
+                "AND frequency = 1 "
                 "ORDER BY id LIMIT ? OFFSET ?",
                 (_SINGLETONS_PAGE_SIZE, _offset)
             ).fetchall()
@@ -287,7 +287,7 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
             if len(qb_entries) < 2:
                 continue
 
-            qb_entries.sort(key=lambda x: x['id'])
+            qb_entries.sort(key=lambda x: (-x.get('frequency', 1), x['id']))
             survivor = qb_entries[0]
             to_merge = qb_entries[1:]
 
@@ -296,7 +296,7 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
                 conn.execute("BEGIN")
                 try:
                     existing = conn.execute(
-                        "SELECT sources, original_questions, original_question_sources "
+                        "SELECT sources, original_questions, original_question_sources, ai_answer "
                         "FROM question_bank WHERE id = ?", (s['id'],)
                     ).fetchone()
                     try:
@@ -311,6 +311,14 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
                         s_oqs_src = json.loads(existing['original_question_sources']) if existing['original_question_sources'] else []
                     except Exception:
                         s_oqs_src = []
+
+                    # 保留 ai_answer：如果 survivor 没有，从被合并的题中获取
+                    s_ai_answer = existing['ai_answer'] if existing else None
+                    if not s_ai_answer:
+                        for entry in m:
+                            if entry.get('ai_answer'):
+                                s_ai_answer = entry['ai_answer']
+                                break
 
                     seen_urls = {x.get('url') for x in s_src}
 
@@ -345,10 +353,11 @@ async def compact_singletons_in_db(user_id: int = None) -> Dict:
                     conn.execute(
                         "UPDATE question_bank SET frequency = ?, sources = ?, "
                         "original_questions = ?, original_question_sources = ?, "
-                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        "ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (len(s_oqs), json.dumps(s_src, ensure_ascii=False),
                          json.dumps(s_oqs, ensure_ascii=False),
-                         json.dumps(s_oqs_src, ensure_ascii=False), s['id'])
+                         json.dumps(s_oqs_src, ensure_ascii=False),
+                         s_ai_answer, s['id'])
                     )
 
                     try:

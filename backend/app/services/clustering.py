@@ -18,19 +18,25 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 注意：【待匹配的新题目】是一个不超过 40 道题的微批次，请逐题判断是否与已有题库中的某道题真正重复。
 
 匹配判断准则（核心）：
-不要过于拘泥于字面词汇的完全一致，重点判断【考察的技术盲区是否完全重叠】。
+只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
 
 可以合并（同一技术点的不同提问角度）：
 - "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
 - "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
 - "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
 
-坚决不合并：
+坚决不合并（负面示例）：
+- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
+- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
+- 「介绍一下Memory」≠「摘要压缩怎么限制长度」（概述 vs 具体实现细节）
+- 「高并发限流」≠「研究生方向」（完全不相关领域）
+- 「MCP介绍」≠「mcp和skills区别」（前者问原理，后者问对比）
+- 「使用过AI Coding吗」≠「AI工具费用对比」（体验 vs 成本）
 - 包含层级关系的概念：如 "Agent" 与 "ReAct"（ReAct 是 Agent 的一种范式，不是同一道题）
 - 平级但不同的技术：如 "MCP" 与 "Function Call"（都是工具调用方案但考察点不同）
 - 同一领域但不同子问题：如 "RAG 的 embedding 怎么设计" ≠ "RAG 的检索召回率怎么提升"
 
-原则：只有当准备了其中一道题的答案，可以直接回答另一道题时，才能匹配。不确定时，宁可不匹配，也不要错配。
+**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
 
 【已有标准题库】（格式：[聚类ID] 代表题目）：
 {existing_clusters}
@@ -45,19 +51,25 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不超过 40 道题的微批次，请在它们内部寻找**真正重复**的题目并进行合并。
 
 合并判断准则（核心）：
-不要过于拘泥于字面词汇的完全一致，重点判断【考察的技术盲区是否完全重叠】。
+只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
 
 可以合并（同一技术点的不同提问角度）：
 - "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
 - "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
 - "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
 
-坚决不合并：
+坚决不合并（负面示例）：
+- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
+- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
+- 「介绍一下Memory」≠「摘要压缩怎么限制长度」（概述 vs 具体实现细节）
+- 「高并发限流」≠「研究生方向」（完全不相关领域）
+- 「MCP介绍」≠「mcp和skills区别」（前者问原理，后者问对比）
+- 「使用过AI Coding吗」≠「AI工具费用对比」（体验 vs 成本）
 - 包含层级关系的概念：如 "Agent" 与 "ReAct"
 - 平级但不同的技术：如 "MCP" 与 "Function Call"
 - 同一领域但不同子问题：如 "RAG 的 embedding 怎么设计" ≠ "RAG 的检索召回率怎么提升"
 
-原则：**宁可少合并，不要错合并。**
+**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
 
 【待聚类的新题目】（微批次，共 {count} 题）：
 {unmatched_questions}
@@ -67,7 +79,100 @@ CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不�
 只输出 JSON，不要解释。"""
 
 
+VALIDATE_MERGES_PROMPT = """你是一个面试题去重验证专家。以下是一批待合并的题目对，请验证每一对是否真的应该合并。
+
+验证标准：
+只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
+
+坚决不合并（负面示例）：
+- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
+- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
+- 「高并发限流」≠「研究生方向」（完全不相关领域）
+
+**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
+
+【待验证的题目对】：
+{pairs}
+
+请输出 JSON 格式，列出每一对的验证结果。
+{{"validations": [{{"new_id": "新题ID", "cluster_id": "聚类ID", "valid": true/false}}]}}
+只输出 JSON，不要解释。"""
+
+
 # ──────────────────────────── 公开入口 ────────────────────────────
+
+async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
+                          existing_clusters: List[Dict], user_id=None) -> List[Dict]:
+    """验证合并结果（两阶段验证）
+
+    Args:
+        matches: 待验证的合并列表 [{"new_id": ..., "cluster_id": ...}]
+        new_questions: 新题目列表
+        existing_clusters: 已有聚类列表
+        user_id: 用户 ID
+
+    Returns:
+        验证通过的合并列表
+    """
+    if not matches:
+        return []
+
+    # 构建题目映射
+    new_q_map = {str(q['id']): q for q in new_questions}
+    cluster_map = {str(c['id']): c for c in existing_clusters}
+
+    # 构建验证对
+    pairs_text = []
+    for match in matches:
+        new_id = str(match.get('new_id', ''))
+        cluster_id = str(match.get('cluster_id', ''))
+
+        new_q = new_q_map.get(new_id)
+        cluster_q = cluster_map.get(cluster_id)
+
+        if new_q and cluster_q:
+            pairs_text.append(f"[新题 {new_id}] {new_q['question']}\n[聚类 {cluster_id}] {cluster_q['question']}")
+
+    if not pairs_text:
+        return matches
+
+    # 调用 LLM 验证
+    prompt = VALIDATE_MERGES_PROMPT.format(
+        pairs="\n\n".join(pairs_text)
+    )
+
+    try:
+        content = await _call_llm_with_retry(
+            prompt, response_format={"type": "json_object"}, user_id=user_id
+        )
+        result = _extract_json(content)
+
+        # 过滤验证通过的合并
+        validated_matches = []
+        validations = result.get("validations", [])
+
+        for match in matches:
+            new_id = str(match.get('new_id', ''))
+            cluster_id = str(match.get('cluster_id', ''))
+
+            # 查找对应的验证结果
+            validation = next(
+                (v for v in validations
+                 if str(v.get('new_id')) == new_id and str(v.get('cluster_id')) == cluster_id),
+                None
+            )
+
+            if validation and validation.get('valid', False):
+                validated_matches.append(match)
+            else:
+                logger.info(f"  验证拒绝合并: 新题 {new_id} -> 聚类 {cluster_id}")
+
+        return validated_matches
+
+    except Exception as e:
+        logger.warning(f"验证合并失败，返回原始结果: {e}")
+        return matches
+
 
 async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Dict]:
     """加载最近 N 天入库的 frequency=1 题目（同 cat2）
@@ -210,6 +315,18 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
             unmatched_ids -= matched_cluster_ids
             if matched_cluster_ids:
                 logger.info(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类: {len(matched_cluster_ids)} 题")
+
+                # 验证 Phase 1 的合并结果
+                phase1_matches = result.get("matches", [])
+                if phase1_matches:
+                    validated_matches = await _validate_merges(
+                        phase1_matches, new_questions, existing_clusters, user_id
+                    )
+                    # 更新 matched 列表，只保留验证通过的
+                    validated_new_ids = {str(m.get('new_id')) for m in validated_matches}
+                    matched = [m for m in matched if str(m.get('qd_id')) in validated_new_ids or str(m.get('qd_id')) not in matched_cluster_ids]
+                    # 更新 unmatched_ids
+                    unmatched_ids = {str(q['id']) for q in new_questions} - {str(m.get('qd_id')) for m in matched}
 
         except Exception as e:
             logger.warning(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类失败: {e}")
