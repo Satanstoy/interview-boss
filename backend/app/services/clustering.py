@@ -3,11 +3,13 @@ import asyncio
 import logging
 from typing import List, Dict, Any
 
+from app.db.connection import get_db_connection
 from app.services.llm import _call_llm_with_retry, _extract_json
 
 logger = logging.getLogger("interview-boss")
 
 MAX_CONCURRENCY = 2
+RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
 
 # ──────────────────────────── Prompts ────────────────────────────
 
@@ -67,10 +69,39 @@ CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不�
 
 # ──────────────────────────── 公开入口 ────────────────────────────
 
+async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Dict]:
+    """加载最近 N 天入库的 frequency=1 题目（同 cat2）
+
+    Args:
+        cat2: 题目分类
+        days: 天数，默认 7 天
+
+    Returns:
+        最近 N 天的 frequency=1 题目列表
+    """
+    def _query():
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT id, question FROM question_bank "
+            "WHERE cat2 = ? AND frequency = 1 AND deleted_at IS NULL "
+            "AND created_at > datetime('now', ?) "
+            "ORDER BY id DESC",
+            (cat2, f'-{days} days')
+        ).fetchall()
+        return [{"id": r['id'], "question": r['question']} for r in rows]
+
+    try:
+        return await asyncio.to_thread(_query)
+    except Exception as e:
+        logger.warning(f"加载最近 {days} 天的题目失败: {e}")
+        return []
+
+
 async def process_incremental_batch(
     new_rows: List[Dict],
     existing_by_cat2: Dict[str, List[Dict]],
     user_id=None,
+    recent_days: int = RECENT_DAYS,
 ) -> Dict[str, Any]:
     """流式增量聚类主入口。
 
@@ -78,6 +109,7 @@ async def process_incremental_batch(
         new_rows: 一批新题，每项需含 id, question, cat2
         existing_by_cat2: {cat2: [{"id": qb_id, "question": 代表题}]}
         user_id: 调用者用户 ID
+        recent_days: 匹配最近 N 天的 frequency=1 题目，默认 7 天
 
     返回：
         {
@@ -103,7 +135,10 @@ async def process_incremental_batch(
     async def _process_one(cat2, questions):
         async with semaphore:
             existing = existing_by_cat2.get(cat2, [])
-            return await _match_and_cluster_cat2(cat2, questions, existing, user_id)
+            return await _match_and_cluster_cat2(
+                cat2, questions, existing, user_id,
+                recent_days=recent_days
+            )
 
     tasks = [_process_one(cat2, questions) for cat2, questions in cat2_list]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -125,8 +160,16 @@ async def process_incremental_batch(
 
 # ──────────────────────────── 内部函数 ────────────────────────────
 
-async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_id):
-    """处理单个 cat2 分组：匹配已有 → 内部聚类剩余"""
+async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_id, recent_days=RECENT_DAYS):
+    """处理单个 cat2 分组：匹配已有 → 匹配最近题目 → 内部聚类剩余
+
+    Args:
+        cat2: 题目分类
+        new_questions: 新题目列表
+        existing_clusters: 已有聚类列表
+        user_id: 用户 ID
+        recent_days: 匹配最近 N 天的 frequency=1 题目
+    """
     matched = []
     unmatched_ids = {str(q['id']) for q in new_questions}
 
@@ -166,10 +209,54 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
 
             unmatched_ids -= matched_cluster_ids
             if matched_cluster_ids:
-                logger.info(f"  [{cat2 or '无分类'}] 匹配已有聚类: {len(matched_cluster_ids)} 题")
+                logger.info(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类: {len(matched_cluster_ids)} 题")
 
         except Exception as e:
-            logger.warning(f"  [{cat2 or '无分类'}] 匹配已有聚类失败: {e}")
+            logger.warning(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类失败: {e}")
+
+    # Phase 1.5: 匹配最近 N 天的 frequency=1 题目（新增）
+    unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]
+    if unmatched_questions and recent_days > 0:
+        try:
+            recent_singletons = await _load_recent_singletons(cat2, days=recent_days)
+            if recent_singletons:
+                prompt = MATCH_EXISTING_PROMPT.format(
+                    existing_clusters=_format_existing_clusters(recent_singletons),
+                    new_questions=_format_new_questions(unmatched_questions),
+                    count=len(unmatched_questions),
+                )
+                content = await _call_llm_with_retry(
+                    prompt, response_format={"type": "json_object"}, user_id=user_id
+                )
+                result = _extract_json(content)
+
+                matched_recent_ids = set()
+                for m in result.get("matches", []):
+                    nid = str(m.get("new_id", ""))
+                    cid = m.get("cluster_id")
+                    if nid in unmatched_ids and cid is not None:
+                        matched_recent_ids.add(nid)
+                        q = next((q for q in unmatched_questions if str(q['id']) == nid), None)
+                        if q:
+                            matched.append({
+                                "qd_id": q['id'],
+                                "cluster_id": cid,
+                                "question": q['question'],
+                                "cat1": q.get('cat1', ''),
+                                "cat2": q.get('cat2', cat2),
+                                "tags": q.get('tags', ''),
+                                "diff_tag": q.get('diff_tag', ''),
+                                "url": q.get('url', ''),
+                                "company": q.get('company', ''),
+                                "round": q.get('round', ''),
+                            })
+
+                unmatched_ids -= matched_recent_ids
+                if matched_recent_ids:
+                    logger.info(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近 {recent_days} 天题目: {len(matched_recent_ids)} 题")
+
+        except Exception as e:
+            logger.warning(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近题目失败: {e}")
 
     # Phase 2: 剩余新题内部聚类
     unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]

@@ -6,9 +6,11 @@ ARQ Worker 配置
 """
 import os
 import time
+import json
 import shutil
 import asyncio
 import logging
+from datetime import datetime
 from arq.connections import RedisSettings
 
 logger = logging.getLogger("interview-boss")
@@ -294,8 +296,56 @@ async def build_master_bank_task(ctx, job_id: int):
         raise
 
 
+async def scheduled_compaction_task(ctx):
+    """定时 compaction 任务：每天凌晨 3 点自动运行"""
+    from app.services.pipeline import compact_singletons_in_db
+
+    logger.info("[定时任务] 开始 compaction...")
+    start_time = time.time()
+
+    try:
+        result = await compact_singletons_in_db()
+        elapsed = time.time() - start_time
+
+        # 记录统计日志
+        log_entry = {
+            "task": "scheduled_compaction",
+            "timestamp": datetime.now().isoformat(),
+            "result": result,
+            "elapsed_seconds": round(elapsed, 2)
+        }
+        logger.info(f"[定时任务] Compaction 完成: {result}")
+
+        # 写入数据库记录
+        def _save_log():
+            from app.db.connection import get_db_connection
+            conn = get_db_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO task_logs (task_type, result, elapsed_seconds, created_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    ("compaction", json.dumps(result, ensure_ascii=False), elapsed)
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"[定时任务] 保存日志失败: {e}")
+                conn.rollback()
+
+        await asyncio.to_thread(_save_log)
+
+        return result
+    except Exception as e:
+        logger.exception(f"[定时任务] Compaction 失败: {e}")
+        raise
+
+
 class WorkerSettings:
-    functions = [cluster_questions_task, force_cluster_all_task, build_master_bank_task]
+    functions = [
+        cluster_questions_task,
+        force_cluster_all_task,
+        build_master_bank_task,
+        scheduled_compaction_task
+    ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(REDIS_URL)
@@ -303,3 +353,13 @@ class WorkerSettings:
     max_tries = 2              # 最多重试 2 次（重建任务重试成本高）
     keep_result = 3600         # 结果保留 1 小时
     queue_read_limit = 10      # 每次最多读取 10 个任务
+
+    # 定时任务：每天凌晨 3 点运行 compaction
+    cron_jobs = [
+        {
+            "function": scheduled_compaction_task,
+            "hour": 3,
+            "minute": 0,
+            "next_run": None  # ARQ 会自动计算
+        }
+    ]
