@@ -516,7 +516,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { cancelAllRequests, setUnauthorizedHandler, setAuthToken, refreshAuthToken, getFriendlyError, invalidateCache } from '@/services/http.js'
+import { cancelAllRequests, getFriendlyError } from '@/services/http.js'
 import { safeUrl } from '@/utils/validate.js'
 import * as api from '@/api/index.js'
 import { useSelection } from '@/composables/useSelection.js'
@@ -528,6 +528,8 @@ import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
 import { useBatchActions } from '@/composables/useBatchActions.js'
 import { useTabScroll } from '@/composables/useTabScroll.js'
+import { useAuth } from '@/composables/useAuth.js'
+import { useMasterBankData } from '@/composables/useMasterBankData.js'
 
 import { defineAsyncComponent } from 'vue'
 import StagingPanel from '@/components/business/StagingPanel.vue'
@@ -575,10 +577,23 @@ const {
   handleReturn, detachHighlightScroll, setSavedScrollTop,
 } = useHighlightNav(activeTab, showPracticeMode)
 
-// ── Core data ──
-const jdData = ref([])
-const interviewData = ref([])
-const masterBank = ref([])
+// ── Data (题库数据 + 筛选 + 获取) ──
+let afterFetchCleanup = () => {}
+const {
+  jdData, interviewData, masterBank,
+  isDataLoading, dataLoadError,
+  analytics, practiceStats, popularTags,
+  activeSeason, availableSeasons,
+  selectedTag, selectedSubTags, searchQuery,
+  filterDifficulty, showStarredOnly,
+  filterSeason, interviewSortOrder,
+  filteredMasterBank, filteredInterviewData,
+  availableSubTags, interviewSeasons, practicedQuestions,
+  fetchTableData, fetchAnalytics, fetchPracticeStats,
+  loadActiveSeason, loadAllData, formatDate,
+} = useMasterBankData({ onAfterFetch: () => afterFetchCleanup() })
+
+// ── Build state ──
 const isBuilding = ref(false)
 const buildProgress = ref({ step: '', current: 0, total: 0, message: '' })
 const buildStepsDef = [
@@ -595,19 +610,6 @@ const buildStepList = computed(() => {
     done: curIdx >= 0 && i < curIdx,
   }))
 })
-const isDataLoading = ref(false)
-const dataLoadError = ref(null)
-const analytics = ref({ tech_trends: {} })
-const popularTagsFromServer = ref([])
-
-// ── Filters ──
-const selectedTag = ref('全部')
-const selectedSubTags = ref([])
-const searchQuery = ref('')
-const filterDifficulty = ref('')
-const showStarredOnly = ref(false)
-const filterSeason = ref('')
-const interviewSortOrder = ref('desc')
 
 // ── UI state ──
 const mockInterviewRef = ref(null)
@@ -616,16 +618,10 @@ const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
 const interviewPageSize = ref(20)
-const activeSeason = ref('')
-const availableSeasons = ref([])
 const showSettings = ref(false)
 const showProfile = ref(false)
-const practiceStats = ref({})
 const recommendSeed = ref(0)
-const currentUser = ref(null)
-const showLoginModal = ref(false)
 const showReviewPanel = ref(false)
-const pendingReviewCount = ref(0)
 const practiceQuestion = ref(null)
 const practiceModeIndex = ref(0)
 
@@ -634,33 +630,16 @@ const jdSelection = useSelection(() => jdData.value)
 const interviewSelection = useSelection(() => interviewData.value)
 const masterSelection = useSelection(() => filteredMasterBank.value)
 const isMasterSelected = (id) => masterSelection.selectedIds.value.has(id)
+afterFetchCleanup = () => { jdSelection.clearSelection(); interviewSelection.clearSelection() }
 
-// ── Data fetching (must be before composables that reference them) ──
-const fetchTableData = async () => {
-  isDataLoading.value = true
-  dataLoadError.value = null
-  invalidateCache()  // 确保刷新时获取最新数据
-  try {
-    const [jdResp, intResp, masterResp] = await Promise.all([
-      api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank()
-    ])
-    jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
-    interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
-    masterBank.value = (masterResp.items || masterResp).map(q => ({ ...q, _showAnswer: false, _showSources: false, _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: '' }))
-    if (masterResp.popular_tags) { popularTagsFromServer.value = masterResp.popular_tags }
-    selectedSubTags.value = []
-    jdSelection.clearSelection()
-    interviewSelection.clearSelection()
-  } catch (e) {
-    dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
-  } finally { isDataLoading.value = false }
-}
-const fetchAnalytics = async () => {
-  try { analytics.value = await api.fetchAnalytics() } catch (e) { console.warn('获取分析数据失败', e) }
-}
-const fetchPracticeStats = async () => {
-  try { practiceStats.value = await api.fetchPracticeStats() } catch (e) { console.warn('获取练习统计失败', e) }
-}
+// ── Auth（认证状态） ──
+const {
+  currentUser, showLoginModal, pendingReviewCount,
+  initAuth, handleLoginSuccess, handleLogout, handleBankModeChanged,
+} = useAuth({
+  onReady: loadAllData,
+  onDataRefresh: () => { fetchTableData(); fetchPracticeStats() },
+})
 
 // ── Question operations ──
 const {
@@ -707,88 +686,6 @@ const interviewColumns = [
   { key: 'difficulty', label: '难度', frontendKey: '难易程度', width: '8%' },
   { key: 'created_at', label: '上传日期', frontendKey: '上传日期', width: '10%' }
 ]
-
-// ── Computed ──
-const popularTags = computed(() => {
-  if (popularTagsFromServer.value.length > 0) {
-    const result = {}
-    for (const t of popularTagsFromServer.value) { result[t.tag] = t.count }
-    return result
-  }
-  const counts = {}
-  masterBank.value.forEach(q => {
-    const cats = (q.cat1 || '未分类').split(',').map(c => c.trim()).filter(c => c)
-    if (cats.length === 0) counts['未分类'] = (counts['未分类'] || 0) + 1
-    else cats.forEach(cat => counts[cat] = (counts[cat] || 0) + 1)
-  })
-  return Object.entries(counts).sort((a, b) => b[1] - a[1]).reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
-})
-const availableSubTags = computed(() => {
-  if (selectedTag.value === '全部') return []
-  const catItems = masterBank.value.filter(q =>
-    (q.cat1 || '未分类').split(',').map(c => c.trim()).includes(selectedTag.value)
-  )
-  const counts = {}
-  catItems.forEach(q => {
-    const tags = (q.tags || '').split(',').map(t => t.trim()).filter(t => t)
-    tags.forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 })
-  })
-  return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([tag, count]) => ({ tag, count }))
-})
-const filteredMasterBank = computed(() => {
-  let result = masterBank.value
-  if (selectedTag.value !== '全部') {
-    result = result.filter(q => (q.cat1 || '未分类').split(',').map(c => c.trim()).includes(selectedTag.value))
-  }
-  if (selectedSubTags.value.length > 0) {
-    result = result.filter(q => {
-      const itemTags = (q.tags || '').split(',').map(t => t.trim()).filter(t => t)
-      return selectedSubTags.value.some(st => itemTags.includes(st))
-    })
-  }
-  if (searchQuery.value.trim()) {
-    const query = searchQuery.value.trim().toLowerCase()
-    result = result.filter(q => {
-      if ((q.question || '').toLowerCase().includes(query)) return true
-      if ((q.cat1 || '').toLowerCase().includes(query)) return true
-      if ((q.tags || '').toLowerCase().includes(query)) return true
-      if (q.original_questions && Array.isArray(q.original_questions)) {
-        return q.original_questions.some(oq => {
-          const text = typeof oq === 'string' ? oq : (oq.question || '')
-          return text.toLowerCase().includes(query)
-        })
-      }
-      return false
-    })
-  }
-  if (filterDifficulty.value) result = result.filter(q => (q.difficulty || '').includes(filterDifficulty.value))
-  if (showStarredOnly.value) result = result.filter(q => q.is_starred)
-  return result
-})
-const interviewSeasons = computed(() => {
-  const seasons = [...new Set(interviewData.value.map(d => d.season).filter(Boolean))]
-  return seasons.sort()
-})
-const filteredInterviewData = computed(() => {
-  let data = filterSeason.value
-    ? interviewData.value.filter(d => d.season === filterSeason.value)
-    : [...interviewData.value]
-  data.sort((a, b) => {
-    const da = a.created_at || ''
-    const db = b.created_at || ''
-    return interviewSortOrder.value === 'desc' ? db.localeCompare(da) : da.localeCompare(db)
-  })
-  return data
-})
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  return dateStr.replace('T', ' ').slice(0, 16)
-}
-const practicedQuestions = computed(() => {
-  const stats = practiceStats.value
-  if (!stats?.practiced_details) return {}
-  return stats.practiced_details
-})
 
 // ── Practice mode ──
 const handlePracticeEvaluated = async ({ questionId, score }) => { await fetchPracticeStats() }
@@ -967,33 +864,7 @@ const triggerBuildPersonalBank = async () => {
   finally { isBuilding.value = false; buildProgress.value = { step: '', current: 0, total: 0, message: '' } }
 }
 
-// ── Auth / Lifecycle ──
-const initAuth = async () => {
-  const refreshResult = await refreshAuthToken()
-  if (refreshResult?.token && refreshResult?.user) {
-    setAuthToken(refreshResult.token)
-    currentUser.value = refreshResult.user
-    loadAllData(); loadPendingCount()
-  }
-}
-const handleLoginSuccess = (user) => { currentUser.value = user; loadAllData(); loadPendingCount() }
-const handleLogout = () => { setAuthToken(''); currentUser.value = null; fetchTableData(); fetchPracticeStats(); pendingReviewCount.value = 0 }
-const handleBankModeChanged = (user) => { currentUser.value = user; invalidateCache('master-bank'); fetchTableData(); fetchPracticeStats() }
-const loadPendingCount = async () => {
-  if (!currentUser.value?.is_admin) { pendingReviewCount.value = 0; return }
-  try { const data = await api.fetchPendingQuestions(); pendingReviewCount.value = data.total || 0 }
-  catch { pendingReviewCount.value = 0 }
-}
-setUnauthorizedHandler(() => { showLoginModal.value = true })
-const loadAllData = () => { fetchTableData(); fetchAnalytics(); fetchPracticeStats(); loadActiveSeason() }
-const loadActiveSeason = async () => {
-  try {
-    const data = await api.fetchPublicProfile()
-    activeSeason.value = data.settings?.active_season || ''
-    availableSeasons.value = data.available_seasons || []
-  } catch (e) { console.warn('加载招聘季失败', e) }
-}
-
+// ── Lifecycle ──
 onMounted(async () => {
   await initAuth()
   // 通知白屏检测器：Vue 应用已完成初始化
