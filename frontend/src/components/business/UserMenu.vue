@@ -1,7 +1,7 @@
 <template>
   <div class="relative">
     <!-- User button -->
-    <button @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5 transition-all duration-200 text-ink-700 dark:text-white group">
+    <button ref="buttonRef" @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5 transition-all duration-200 text-ink-700 dark:text-white group">
       <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 dark:from-white/30 dark:to-white/10 flex items-center justify-center text-sm font-bold text-white backdrop-blur-sm border border-primary-400/30 dark:border-white/20 group-hover:from-primary-600 group-hover:to-primary-800 dark:group-hover:from-white/40 dark:group-hover:to-white/20 transition">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
@@ -11,9 +11,19 @@
       </svg>
     </button>
 
-    <!-- Dropdown -->
-    <Transition name="menu">
-      <div v-if="showMenu" class="absolute right-0 top-full mt-2 w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-surface-100 dark:border-ink-700 py-1.5 z-50 overflow-hidden">
+    <!-- Teleport dropdown + overlay to body to escape overflow-hidden -->
+    <Teleport to="body">
+      <!-- Click outside -->
+      <div v-if="showMenu" class="fixed inset-0 z-40" @click="showMenu = false"></div>
+
+      <!-- Dropdown -->
+      <Transition name="menu">
+        <div
+          v-if="showMenu"
+          ref="dropdownRef"
+          class="fixed w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-surface-100 dark:border-ink-700 py-1.5 z-50 overflow-hidden"
+          :style="dropdownStyle"
+        >
         <!-- User info -->
         <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
           <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
@@ -83,14 +93,12 @@
         </button>
       </div>
     </Transition>
-
-    <!-- Click outside -->
-    <div v-if="showMenu" class="fixed inset-0 z-40" @click="showMenu = false"></div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { authUpdateBankMode, authLogout } from '@/api/index.js'
 import { setAuthToken } from '@/services/http.js'
 
@@ -102,12 +110,44 @@ const props = defineProps({
 const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed', 'show-profile'])
 
 const showMenu = ref(false)
+const buttonRef = ref(null)
+const dropdownRef = ref(null)
+const dropdownStyle = ref({})
 
 const bankModes = [
   { value: 'public', label: '公共' },
   { value: 'personal', label: '个人' },
   { value: 'mixed', label: '混用' }
 ]
+
+// Calculate dropdown position when menu opens
+watch(showMenu, async (open) => {
+  if (open) {
+    await nextTick()
+    updateDropdownPosition()
+  }
+})
+
+function updateDropdownPosition() {
+  const btn = buttonRef.value
+  if (!btn) return
+  const rect = btn.getBoundingClientRect()
+  dropdownStyle.value = {
+    top: `${rect.bottom + 8}px`,
+    right: `${window.innerWidth - rect.right}px`,
+  }
+}
+
+// Update position on scroll/resize while menu is open
+function onScrollOrResize() {
+  if (showMenu.value) updateDropdownPosition()
+}
+window.addEventListener('scroll', onScrollOrResize, true)
+window.addEventListener('resize', onScrollOrResize)
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
+})
 
 async function switchBankMode(mode) {
   if (mode === props.user?.bank_mode) return
@@ -128,7 +168,8 @@ async function handleLogout() {
 }
 </script>
 
-<style scoped>
+<style>
+/* Transition styles must be global since dropdown is teleported to body */
 .menu-enter-active, .menu-leave-active { transition: all 0.2s cubic-bezier(0.21, 1.02, 0.73, 1); }
 .menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(-8px) scale(0.95); }
 </style>
