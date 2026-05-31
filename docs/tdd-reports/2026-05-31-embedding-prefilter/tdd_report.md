@@ -1,6 +1,6 @@
 # TDD 开发完成报告
 
-**功能名称:** Embedding 预筛服务（embedding_service.py）
+**功能名称:** Embedding 预筛优化（完整）
 **完成日期:** 2026-05-31
 **TDD 状态:** ✅ 完整
 
@@ -12,6 +12,7 @@
 | TDD循环数 | 3 |
 | 最终测试通过率 | 100% |
 | 重构次数 | 1 |
+| 提交数 | 2 |
 
 ## 红-绿-重构循环记录
 
@@ -23,19 +24,25 @@
 
 ## 最终代码
 
-### 实现文件: `backend/app/services/embedding_service.py`
+### 新增文件
 
-- `encode_texts(texts)` → numpy array (N, 512)
-- `build_index(vectors)` → FAISS IndexFlatIP
-- `search_index(index, query, top_k)` → (indices, scores)
-- `prefilter_centroids(query_text, centroids, top_k)` → top-K centroid 列表
+- `backend/app/services/embedding_service.py` — Embedding 编码 + FAISS 预筛选
+- `backend/tests/embedding/test_embedding_service.py` — 7 个测试
 
-### 测试文件: `backend/tests/embedding/test_embedding_service.py`
+### 修改文件
 
-7 个测试覆盖：
-- 文本编码（正常 + 空输入）
-- FAISS 索引（正常搜索 + K>N + 空索引）
-- 预筛选端到端（正常 + 无 embedding 降级）
+- `backend/app/db/migrations.py` — Migration 032: 添加 embedding BLOB 列
+- `backend/app/services/clustering.py` — Phase 1 前加入预筛选步骤
+- `backend/app/services/pipeline/batch.py` — 加载时反序列化 embedding
+- `backend/app/services/pipeline/batch_v2.py` — Compaction 时加载 embedding
+
+### 架构
+
+```
+新题文本 → Embedding(bge-small-zh) → FAISS top-K(30) → LLM 精筛
+                                              ↑
+centroid 数量 > 30 时激活预筛选，否则直接走 LLM（降级兼容）
+```
 
 ## 测试覆盖情况
 
@@ -57,12 +64,8 @@
 - [x] 持续重构：消除冗余代码
 - [x] 一次一个测试：每个循环只处理一组测试
 
-## 经验总结
+## 待完成
 
-### 遇到困难
-1. `socks5h://` 代理不被 httpx 识别 → 在 embedding_service 中添加代理修正
-
-### 下一步
-1. Migration 008: 为 question_bank 添加 embedding BLOB 列
-2. 集成到 clustering.py 的 `_match_and_cluster_cat2` 流程
-3. 入库时自动计算 embedding
+1. **入库时自动计算 embedding** — 新题创建时同步生成 embedding 并写入 BLOB
+2. **已有数据回填** — 对数据库中现有的 centroid 批量生成 embedding
+3. **前端展示** — 聚类匹配时显示预筛选效果（如 "300→25 候选"）
