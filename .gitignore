@@ -37,6 +37,8 @@ build/
 
 # Claude Code
 .claude/
+CLAUDE.md
+AGENTS.md
 
 # Issue tracker (local markdown)
 .scratch/
@@ -45,9 +47,14 @@ build/
 backend/tests/
 frontend/tests/
 test-results/
+test-results.json
 .pytest_cache/
 .coverage
 htmlcov/
+
+# 脚本（调试/迁移用，不提交）
+backend/scripts/
+*.log
 
 # 文档（内部记录，不提交）
 docs/
