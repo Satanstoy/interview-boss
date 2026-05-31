@@ -1,15 +1,19 @@
 """流式增量聚类服务：匹配已有聚类 + 内部聚类新题"""
 import asyncio
+import json as _json_mod
 import logging
 from typing import List, Dict, Any
 
 from app.db.connection import get_db_connection
 from app.services.llm import _call_llm_with_retry, _extract_json
+from app.services.embedding_service import prefilter_centroids
 
 logger = logging.getLogger("interview-boss")
 
 MAX_CONCURRENCY = 2
 RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
+VALIDATION_CONFIDENCE_THRESHOLD = 0.8  # 验证置信度阈值
+_PREFILTER_TOP_K = 30  # Embedding 预筛选保留的候选 centroid 数量
 
 # ──────────────────────────── Prompts ────────────────────────────
 
@@ -18,25 +22,25 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 注意：【待匹配的新题目】是一个不超过 40 道题的微批次，请逐题判断是否与已有题库中的某道题真正重复。
 
 匹配判断准则（核心）：
-只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
+如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
 
 可以合并（同一技术点的不同提问角度）：
 - "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
 - "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
 - "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
+- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
+- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
+- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
 
-坚决不合并（负面示例）：
-- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
-- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
-- 「介绍一下Memory」≠「摘要压缩怎么限制长度」（概述 vs 具体实现细节）
+坚决不合并（负面示例 — 相似但不同知识点）：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
+- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
+- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
+- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
+- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
 - 「高并发限流」≠「研究生方向」（完全不相关领域）
-- 「MCP介绍」≠「mcp和skills区别」（前者问原理，后者问对比）
-- 「使用过AI Coding吗」≠「AI工具费用对比」（体验 vs 成本）
-- 包含层级关系的概念：如 "Agent" 与 "ReAct"（ReAct 是 Agent 的一种范式，不是同一道题）
-- 平级但不同的技术：如 "MCP" 与 "Function Call"（都是工具调用方案但考察点不同）
-- 同一领域但不同子问题：如 "RAG 的 embedding 怎么设计" ≠ "RAG 的检索召回率怎么提升"
 
-**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
+**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
 
 【已有标准题库】（格式：[聚类ID] 代表题目）：
 {existing_clusters}
@@ -51,25 +55,25 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不超过 40 道题的微批次，请在它们内部寻找**真正重复**的题目并进行合并。
 
 合并判断准则（核心）：
-只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
+如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
 
 可以合并（同一技术点的不同提问角度）：
 - "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
 - "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
 - "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
+- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
+- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
+- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
 
-坚决不合并（负面示例）：
-- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
-- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
-- 「介绍一下Memory」≠「摘要压缩怎么限制长度」（概述 vs 具体实现细节）
+坚决不合并（负面示例 — 相似但不同知识点）：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
+- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
+- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
+- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
+- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
 - 「高并发限流」≠「研究生方向」（完全不相关领域）
-- 「MCP介绍」≠「mcp和skills区别」（前者问原理，后者问对比）
-- 「使用过AI Coding吗」≠「AI工具费用对比」（体验 vs 成本）
-- 包含层级关系的概念：如 "Agent" 与 "ReAct"
-- 平级但不同的技术：如 "MCP" 与 "Function Call"
-- 同一领域但不同子问题：如 "RAG 的 embedding 怎么设计" ≠ "RAG 的检索召回率怎么提升"
 
-**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
+**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
 
 【待聚类的新题目】（微批次，共 {count} 题）：
 {unmatched_questions}
@@ -82,27 +86,35 @@ CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不�
 VALIDATE_MERGES_PROMPT = """你是一个面试题去重验证专家。以下是一批待合并的题目对，请验证每一对是否真的应该合并。
 
 验证标准：
-只有当「准备了 A 的答案，可以直接用它回答 B」时才合并。
+如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
 
-坚决不合并（负面示例）：
-- 「上下文过长怎么办」≠「agent怎么获取上下文」（前者问溢出处理，后者问获取机制）
-- 「volatile关键字」≠「Java JUC、JVM相关知识」（具体知识点 vs 大话题）
+可以合并（同一技术点的不同提问角度）：
+- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
+- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
+- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
+
+坚决不合并（负面示例 — 相似但不同知识点）：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
+- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
+- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
+- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
+- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
 - 「高并发限流」≠「研究生方向」（完全不相关领域）
 
-**重要原则：如果不确定，不要合并。错合并比漏合并更严重。**
+**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
 
 【待验证的题目对】：
 {pairs}
 
-请输出 JSON 格式，列出每一对的验证结果。
-{{"validations": [{{"new_id": "新题ID", "cluster_id": "聚类ID", "valid": true/false}}]}}
+请输出 JSON 格式，列出每一对的验证结果。confidence 为 0~1 之间的小数，表示你对该合并判断的确信程度。
+{{"validations": [{{"new_id": "新题ID", "cluster_id": "聚类ID", "valid": true/false, "confidence": 0.95, "reason": "判断理由（简短）"}}]}}
 只输出 JSON，不要解释。"""
 
 
 # ──────────────────────────── 公开入口 ────────────────────────────
 
 async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
-                          existing_clusters: List[Dict], user_id=None) -> List[Dict]:
+                          existing_clusters: List[Dict], user_id=None):
     """验证合并结果（两阶段验证）
 
     Args:
@@ -112,10 +124,11 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
         user_id: 用户 ID
 
     Returns:
-        验证通过的合并列表
+        (验证通过的合并列表, 置信度映射 {(new_id, cluster_id): confidence})
     """
+    empty_result = ([], {})
     if not matches:
-        return []
+        return empty_result
 
     # 构建题目映射
     new_q_map = {str(q['id']): q for q in new_questions}
@@ -123,6 +136,7 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
 
     # 构建验证对
     pairs_text = []
+    pair_lookup = {}
     for match in matches:
         new_id = str(match.get('new_id', ''))
         cluster_id = str(match.get('cluster_id', ''))
@@ -132,9 +146,10 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
 
         if new_q and cluster_q:
             pairs_text.append(f"[新题 {new_id}] {new_q['question']}\n[聚类 {cluster_id}] {cluster_q['question']}")
+            pair_lookup[(new_id, cluster_id)] = (new_q, cluster_q)
 
     if not pairs_text:
-        return matches
+        return (matches, {})
 
     # 调用 LLM 验证
     prompt = VALIDATE_MERGES_PROMPT.format(
@@ -147,9 +162,11 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
         )
         result = _extract_json(content)
 
-        # 过滤验证通过的合并
+        # 过滤验证通过的合并（带置信度阈值）
         validated_matches = []
+        confidence_map = {}
         validations = result.get("validations", [])
+        rejected_for_review = []
 
         for match in matches:
             new_id = str(match.get('new_id', ''))
@@ -162,16 +179,51 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
                 None
             )
 
-            if validation and validation.get('valid', False):
-                validated_matches.append(match)
-            else:
-                logger.info(f"  验证拒绝合并: 新题 {new_id} -> 聚类 {cluster_id}")
+            if validation:
+                is_valid = validation.get('valid', False)
+                confidence = float(validation.get('confidence', 0))
+                reason = validation.get('reason', '')
+                confidence_map[(new_id, cluster_id)] = confidence
 
-        return validated_matches
+                if is_valid and confidence >= VALIDATION_CONFIDENCE_THRESHOLD:
+                    validated_matches.append(match)
+                    logger.info(f"  验证通过: 新题 {new_id} -> 聚类 {cluster_id} "
+                                f"(置信度={confidence:.2f}, 原因={reason})")
+                else:
+                    # 记录拒绝原因
+                    reject_reason = reason if reason else (
+                        f"置信度不足 ({confidence:.2f} < {VALIDATION_CONFIDENCE_THRESHOLD})"
+                        if is_valid else "验证未通过"
+                    )
+                    logger.info(f"  验证拒绝合并: 新题 {new_id} -> 聚类 {cluster_id} "
+                                f"(置信度={confidence:.2f}, 原因={reject_reason})")
+                    # 低置信度的有效判定 → 二次人工审核
+                    if is_valid and confidence < VALIDATION_CONFIDENCE_THRESHOLD:
+                        pair_data = pair_lookup.get((new_id, cluster_id))
+                        rejected_for_review.append({
+                            "new_id": new_id,
+                            "cluster_id": cluster_id,
+                            "new_question": pair_data[0]['question'] if pair_data else '',
+                            "cluster_question": pair_data[1]['question'] if pair_data else '',
+                            "confidence": confidence,
+                            "reason": reason,
+                        })
+            else:
+                logger.info(f"  验证拒绝合并: 新题 {new_id} -> 聚类 {cluster_id} (无验证结果)")
+
+        if rejected_for_review:
+            logger.warning(
+                f"  ⚠ {len(rejected_for_review)} 对合并需要二次人工审核 "
+                f"(置信度 < {VALIDATION_CONFIDENCE_THRESHOLD}): "
+                + ", ".join(f"新题{r['new_id']}→聚类{r['cluster_id']}(c={r['confidence']:.2f})"
+                            for r in rejected_for_review)
+            )
+
+        return (validated_matches, confidence_map)
 
     except Exception as e:
         logger.warning(f"验证合并失败，返回原始结果: {e}")
-        return matches
+        return (matches, {})
 
 
 async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Dict]:
@@ -200,6 +252,45 @@ async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Di
     except Exception as e:
         logger.warning(f"加载最近 {days} 天的题目失败: {e}")
         return []
+
+
+async def calculate_dynamic_recent_days(cat2: str) -> int:
+    """根据 cat2 的题目更新频率动态调整 recent_days。
+
+    高频分类（最近 30 天新增 >= 20 题）→ 3 天窗口
+    中频分类（最近 30 天新增 5~19 题）→ 7 天窗口（默认）
+    低频分类（最近 30 天新增 < 5 题）→ 14 天窗口
+
+    Args:
+        cat2: 题目分类
+
+    Returns:
+        动态计算的 recent_days
+    """
+    def _query():
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM question_bank "
+            "WHERE cat2 = ? AND deleted_at IS NULL "
+            "AND created_at > datetime('now', '-30 days')",
+            (cat2,)
+        ).fetchone()
+        return row['cnt'] if row else 0
+
+    try:
+        count = await asyncio.to_thread(_query)
+        if count >= 20:
+            days = 3
+            logger.info(f"  [{cat2}] 高频分类（30天内 {count} 题），recent_days={days}")
+        elif count >= 5:
+            days = 7
+        else:
+            days = 14
+            logger.info(f"  [{cat2}] 低频分类（30天内 {count} 题），recent_days={days}")
+        return days
+    except Exception as e:
+        logger.warning(f"动态调整 recent_days 失败: {e}")
+        return RECENT_DAYS
 
 
 async def process_incremental_batch(
@@ -281,8 +372,23 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
     # Phase 1: 匹配已有聚类
     if existing_clusters:
         try:
+            # Embedding 预筛选：从全部 centroid 中选出最可能匹配的 top-K
+            filtered_clusters = existing_clusters
+            if len(existing_clusters) > _PREFILTER_TOP_K:
+                # 对每个新题取 top-K centroid 的并集
+                candidate_ids = set()
+                for q in new_questions:
+                    top_k = prefilter_centroids(
+                        query_text=q['question'],
+                        centroids=existing_clusters,
+                        top_k=_PREFILTER_TOP_K,
+                    )
+                    candidate_ids.update(c['id'] for c in top_k)
+                filtered_clusters = [c for c in existing_clusters if c['id'] in candidate_ids]
+                logger.info(f"  [{cat2 or '无分类'}] Embedding 预筛选: {len(existing_clusters)} → {len(filtered_clusters)} 个候选 centroid")
+
             prompt = MATCH_EXISTING_PROMPT.format(
-                existing_clusters=_format_existing_clusters(existing_clusters),
+                existing_clusters=_format_existing_clusters(filtered_clusters),
                 new_questions=_format_new_questions(new_questions),
                 count=len(new_questions),
             )
@@ -319,7 +425,7 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
                 # 验证 Phase 1 的合并结果
                 phase1_matches = result.get("matches", [])
                 if phase1_matches:
-                    validated_matches = await _validate_merges(
+                    validated_matches, _confidence_map = await _validate_merges(
                         phase1_matches, new_questions, existing_clusters, user_id
                     )
                     # 更新 matched 列表，只保留验证通过的
@@ -331,11 +437,13 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
         except Exception as e:
             logger.warning(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类失败: {e}")
 
-    # Phase 1.5: 匹配最近 N 天的 frequency=1 题目（新增）
+    # Phase 1.5: 匹配最近 N 天的 frequency=1 题目（动态时间窗口）
     unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]
     if unmatched_questions and recent_days > 0:
+        # 动态调整时间窗口
+        effective_days = await calculate_dynamic_recent_days(cat2) if recent_days == RECENT_DAYS else recent_days
         try:
-            recent_singletons = await _load_recent_singletons(cat2, days=recent_days)
+            recent_singletons = await _load_recent_singletons(cat2, days=effective_days)
             if recent_singletons:
                 prompt = MATCH_EXISTING_PROMPT.format(
                     existing_clusters=_format_existing_clusters(recent_singletons),
@@ -370,7 +478,7 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
 
                 unmatched_ids -= matched_recent_ids
                 if matched_recent_ids:
-                    logger.info(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近 {recent_days} 天题目: {len(matched_recent_ids)} 题")
+                    logger.info(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近 {effective_days} 天题目: {len(matched_recent_ids)} 题")
 
         except Exception as e:
             logger.warning(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近题目失败: {e}")

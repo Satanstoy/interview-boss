@@ -84,13 +84,15 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
 # ============================================================
 
 async def _load_existing_clusters_by_cat2(job_position: str) -> Dict[str, List[Dict]]:
-    """分页加载已有聚类(只取 ID + 代表题,节省内存)"""
+    """分页加载已有聚类(只取 ID + 代表题 + embedding,节省内存)"""
+    import numpy as np
+
     existing_by_cat2 = {}
     offset = 0
     while True:
         conn = get_db_connection()
         rows = conn.execute(
-            "SELECT id, question, cat2 "
+            "SELECT id, question, cat2, embedding "
             "FROM question_bank "
             "WHERE status = 'approved' AND deleted_at IS NULL AND job_position = ? "
             "ORDER BY id LIMIT ? OFFSET ?",
@@ -100,10 +102,15 @@ async def _load_existing_clusters_by_cat2(job_position: str) -> Dict[str, List[D
             break
         for r in rows:
             cat2 = r['cat2'] or ''
-            existing_by_cat2.setdefault(cat2, []).append({
+            entry = {
                 "id": r['id'],
                 "question": r['question'],
-            })
+            }
+            # 反序列化 embedding BLOB
+            emb_blob = r['embedding'] if len(r) > 3 else None
+            if emb_blob:
+                entry["embedding"] = np.frombuffer(emb_blob, dtype=np.float32).copy()
+            existing_by_cat2.setdefault(cat2, []).append(entry)
         offset += len(rows)
         del rows
         await asyncio.sleep(0)

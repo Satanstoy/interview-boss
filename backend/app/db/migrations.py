@@ -1454,6 +1454,16 @@ def _migration_031_coding_scores(conn):
     logger.info("已为 coding_submissions 添加 scores/reference_answer/total_score 列")
 
 
+def _migration_032_embedding_column(conn):
+    """Add embedding BLOB column to question_bank for vector pre-filtering."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info('question_bank')")
+    columns = [info[1] for info in cursor.fetchall()]
+    if "embedding" not in columns:
+        conn.execute("ALTER TABLE question_bank ADD COLUMN embedding BLOB")
+    logger.info("已为 question_bank 添加 embedding BLOB 列")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1486,6 +1496,7 @@ _MIGRATIONS = [
     (29, 'user_resumes',                 _migration_029_user_resumes),
     (30, 'coding_module',                _migration_030_coding_module),
     (31, 'coding_scores',                _migration_031_coding_scores),
+    (32, 'embedding_column',             _migration_032_embedding_column),
 ]
 
 
