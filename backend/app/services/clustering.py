@@ -1,6 +1,6 @@
 """流式增量聚类服务：匹配已有聚类 + 内部聚类新题"""
 import asyncio
-import json as _json_mod
+import json
 import logging
 from typing import List, Dict, Any
 
