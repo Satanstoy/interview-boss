@@ -73,7 +73,7 @@ class TestFaissIndex:
 
         assert len(indices) == 3
         assert indices[0] == 2  # 最相似的应该是向量 2
-        assert all(0 <= s <= 1.01 for s in scores)  # 归一化内积 ∈ [-1, 1]
+        assert all(-1.01 <= s <= 1.01 for s in scores)  # 归一化内积 ∈ [-1, 1]
 
     # =========================================================
     # T-004: K > N 返回全部
