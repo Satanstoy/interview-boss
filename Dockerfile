@@ -26,13 +26,11 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
 # 安装 uv（通过 PyPI 镜像安装，避免 ghcr.io 拉取失败）
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com uv
 
-# Python 依赖（阿里云 PyPI 镜像）— 利用 Docker cache
+# Python 依赖（阿里云 PyPI 镜像 + CPU-only PyTorch）— 利用 Docker cache
 COPY pyproject.toml uv.lock ./
 ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ENV UV_HTTP_TIMEOUT=120
-RUN sed -i 's|https://pypi.org/simple|https://mirrors.aliyun.com/pypi/simple/|g' uv.lock && \
-    sed -i 's|https://files.pythonhosted.org/packages|https://mirrors.aliyun.com/pypi/packages|g' uv.lock && \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 # 后端代码（频繁变更，放最后以最大化 cache 命中）
 COPY backend/ ./backend/
