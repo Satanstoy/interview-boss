@@ -297,28 +297,33 @@ def _execute_like_search(keywords: list[str], conn, limit: int, job_position: st
 # 混合搜索：FTS5 + 向量 + RRF 融合
 # ═══════════════════════════════════════════════════════════════
 
-def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = RRF_K) -> list[dict]:
+def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = RRF_K, weights: list[float] = None) -> list[dict]:
     """Reciprocal Rank Fusion (RRF) — 融合多个排序列表。
 
     行业标准算法，用于合并 FTS 和向量搜索结果。
     不需要归一化分数（解决 FTS rank vs 余弦相似度不可比问题）。
 
-    公式: score(doc) = Σ 1/(k + rank_i)
+    公式: score(doc) = Σ weight_i / (k + rank_i)
 
     Args:
         result_lists: 多个搜索结果列表，每个列表按相关性排序
         k: 平滑常数（默认 60，行业标准）
+        weights: 每个列表的权重（默认全 1.0）
 
     Returns:
         融合后的结果列表，按 RRF 分数降序排列，附带 _rrf_score 字段
     """
+    if weights is None:
+        weights = [1.0] * len(result_lists)
+
     scores = {}  # doc_id -> rrf_score
     doc_info = {}  # doc_id -> document dict
 
-    for results in result_lists:
+    for i, results in enumerate(result_lists):
+        w = weights[i] if i < len(weights) else 1.0
         for rank, item in enumerate(results, 1):
             doc_id = item["id"]
-            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+            scores[doc_id] = scores.get(doc_id, 0.0) + w / (k + rank)
             # 保留最完整的文档信息（优先取有更多字段的）
             if doc_id not in doc_info or len(str(item)) > len(str(doc_info[doc_id])):
                 doc_info[doc_id] = item
