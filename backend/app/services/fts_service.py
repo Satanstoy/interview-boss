@@ -4,17 +4,175 @@
 1. FTS5/LIKE 关键词检索（精确匹配）
 2. FAISS 向量语义检索（语义相似）
 3. Reciprocal Rank Fusion (RRF) 融合两路结果
-4. 相关性重排序（question/tags 优先于 ai_answer）
+4. 自适应 IDF 加权（稀有词偏 FTS，常见词偏向量）
+5. 查询扩展（缩写/同义词映射）
+6. MMR 多样性去重（按 cat2 分散结果）
 
 RRF 公式: score(doc) = Σ 1/(k + rank_i), k=60（行业标准）
 """
 import re
+import math
 import logging
 from app.db.connection import get_db_connection
 
 logger = logging.getLogger("interview-boss")
 
 RRF_K = 60  # RRF 平滑常数（行业标准值）
+
+# ── 查询扩展：缩写/同义词映射（零 LLM 成本）──
+QUERY_EXPANSION_MAP = {
+    "llm": ["大模型", "语言模型"],
+    "rag": ["检索增强", "知识检索"],
+    "mcp": ["模型上下文协议"],
+    "lru": ["最近最少使用", "缓存淘汰"],
+    "tcp": ["传输控制协议", "三次握手"],
+    "http": ["超文本传输协议"],
+    "jvm": ["Java虚拟机", "Java 虚拟机"],
+    "gc": ["垃圾回收", "垃圾收集"],
+    "mq": ["消息队列"],
+    "sql": ["结构化查询"],
+    "jwt": ["JSON Web Token"],
+    "orm": ["对象关系映射"],
+    "cap": ["一致性可用性分区"],
+    "ci": ["持续集成"],
+    "cd": ["持续部署", "持续交付"],
+}
+
+# ── IDF 缓存（惰性加载，写操作时失效）──
+_idf_cache = None
+
+
+def _compute_idf_cache():
+    """从数据库计算所有关键词的 IDF（惰性加载）"""
+    global _idf_cache
+    if _idf_cache is not None:
+        return _idf_cache
+
+    _idf_cache = {}
+    try:
+        with get_db_connection() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM question_bank WHERE deleted_at IS NULL AND status='approved'"
+            ).fetchone()[0]
+            if total == 0:
+                return _idf_cache
+
+            # 从 question 和 tags 中提取所有词
+            rows = conn.execute(
+                "SELECT question, tags FROM question_bank WHERE deleted_at IS NULL AND status='approved'"
+            ).fetchall()
+
+            doc_freq = {}
+            for r in rows:
+                text = f"{r[0] or ''} {r[1] or ''}".lower()
+                # 提取英文词和中文词
+                tokens = set()
+                tokens.update(re.findall(r'[a-zA-Z][a-zA-Z0-9]{1,}', text))
+                tokens.update(re.findall(r'[一-鿿]{2,4}', text))
+                for t in tokens:
+                    doc_freq[t] = doc_freq.get(t, 0) + 1
+
+            # 计算 IDF
+            for token, df in doc_freq.items():
+                _idf_cache[token] = math.log((total + 1) / (df + 1)) + 1
+
+    except Exception as e:
+        logger.warning(f"IDF 缓存计算失败: {e}")
+
+    return _idf_cache
+
+
+def _expand_query(keywords: list[str]) -> list[str]:
+    """查询扩展：将缩写展开为完整术语（零 LLM 成本）
+
+    例如: ["LLM"] → ["LLM", "大模型", "语言模型"]
+    """
+    expanded = list(keywords)
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower in QUERY_EXPANSION_MAP:
+            expanded.extend(QUERY_EXPANSION_MAP[kw_lower])
+    return expanded
+
+
+def _adaptive_rrf_weights(keywords: list[str]) -> tuple[float, float]:
+    """自适应 RRF 权重：基于 IDF 决定 FTS vs 向量权重
+
+    参考 vstash: 高 IDF（稀有词）→ 偏 FTS；低 IDF（常见词）→ 偏向量
+    使用 sigmoid 函数平滑过渡。
+
+    Returns:
+        (fts_weight, vec_weight)
+    """
+    idf_cache = _compute_idf_cache()
+    if not idf_cache:
+        return 1.0, 1.0
+
+    # 计算关键词的平均 IDF
+    idfs = []
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower in idf_cache:
+            idfs.append(idf_cache[kw_lower])
+
+    if not idfs:
+        return 1.0, 1.0
+
+    mean_idf = sum(idfs) / len(idfs)
+
+    # sigmoid 映射: IDF → FTS 权重
+    # 高 IDF (>3) → FTS 权重 ~1.3（精确匹配更重要）
+    # 低 IDF (<1.5) → FTS 权重 ~0.8（语义匹配更重要）
+    # 中等 IDF → 约 1.0
+    x = (mean_idf - 2.0) / 1.5  # 归一化到 [-1, 1] 附近
+    fts_weight = 1.0 + 0.3 * (2 / (1 + math.exp(-x)) - 1)  # sigmoid 映射到 [0.7, 1.3]
+    vec_weight = 2.0 - fts_weight  # 互补
+
+    return round(fts_weight, 2), round(vec_weight, 2)
+
+
+def _mmr_diversify(results: list[dict], lambda_param: float = 0.7, limit: int = 5) -> list[dict]:
+    """MMR (Maximal Marginal Relevance) 多样性去重
+
+    确保返回结果在 cat2 维度上有多样性，避免 Top-5 全是同一分类。
+
+    Args:
+        results: 已排序的结果列表
+        lambda_param: 相关性 vs 多样性的平衡（0.7 = 70% 相关性 + 30% 多样性）
+        limit: 返回结果数
+    """
+    if len(results) <= limit:
+        return results
+
+    selected = [results[0]]  # 第一个总是最相关的
+    candidates = results[1:]
+
+    while len(selected) < limit and candidates:
+        best_score = -1
+        best_idx = 0
+
+        for i, cand in enumerate(candidates):
+            # 相关性分数（基于在原列表中的位置）
+            relevance = 1.0 / (i + 2)  # 位置越靠后分数越低
+
+            # 多样性分数（与已选结果的 cat2 重复度）
+            cand_cat2 = cand.get("cat2", "")
+            max_sim = 0
+            for sel in selected:
+                if sel.get("cat2", "") == cand_cat2:
+                    max_sim = 1.0
+                    break
+
+            # MMR 分数 = λ * relevance - (1-λ) * max_similarity
+            mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim
+
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_idx = i
+
+        selected.append(candidates.pop(best_idx))
+
+    return selected
 
 
 def sync_fts_entry(question_bank_id: int) -> None:
@@ -414,13 +572,12 @@ def hybrid_search(
     job_position: str = None,
     exclude_ids: set[int] = None,
 ) -> list[dict]:
-    """FTS5 + 向量 + RRF 混合搜索。
+    """FTS5 + 向量 + RRF 混合搜索（含 3 项轻量优化）。
 
-    参考行业最佳实践（vstash / Supabase / Digital Applied 2026）：
-    1. FTS5/LIKE 关键词检索（精确匹配能力强）
-    2. FAISS 向量语义检索（语义泛化能力强）
-    3. RRF 融合（解决分数不可比问题）
-    4. 相关性重排序（question/tags 优先）
+    优化技术（零额外 LLM 调用）：
+    1. 自适应 IDF 加权（vstash）：稀有词偏 FTS，常见词偏向量
+    2. 查询扩展：缩写/同义词映射（LLM→大模型, RAG→检索增强）
+    3. MMR 多样性：按 cat2 分散结果，避免 Top-5 全是同一分类
 
     Args:
         keywords: FTS 关键词列表
@@ -435,8 +592,16 @@ def hybrid_search(
     if not keywords and not query_text:
         return []
 
+    # ── 优化 1: 查询扩展（缩写→完整术语）──
+    original_keywords = keywords
+    if keywords:
+        expanded = _expand_query(keywords)
+        if len(expanded) > len(keywords):
+            logger.info(f"查询扩展: {keywords} → {expanded}")
+            keywords = expanded
+
     # 过采样：每路检索取 limit*2 个候选，给 RRF 更多信号
-    oversample = limit * 2
+    oversample = limit * 3  # 增加过采样给 MMR 更多选择
 
     # 路径 1: FTS/LIKE 关键词检索
     fts_results = search_questions_fts(
@@ -463,14 +628,21 @@ def hybrid_search(
         logger.info(f"混合搜索: FTS 无结果，降级到纯向量 ({len(vec_results)} 条)")
         return vec_results[:limit]
 
-    # RRF 融合
-    fused = reciprocal_rank_fusion([fts_results, vec_results])
+    # ── 优化 2: 自适应 RRF 权重（基于 IDF）──
+    fts_weight, vec_weight = _adaptive_rrf_weights(original_keywords or keywords)
+    logger.info(f"自适应权重: FTS={fts_weight}, Vec={vec_weight} (keywords={original_keywords})")
+
+    # RRF 融合（使用自适应权重）
+    fused = reciprocal_rank_fusion([fts_results, vec_results], weights=[fts_weight, vec_weight])
 
     # 相关性重排序（question/tags 匹配优先）
     if keywords:
         fused.sort(key=lambda r: _relevance_score(
-            r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords
+            r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), original_keywords or keywords
         ), reverse=True)
+
+    # ── 优化 3: MMR 多样性去重 ──
+    fused = _mmr_diversify(fused, lambda_param=0.7, limit=limit * 2)
 
     logger.info(
         f"混合搜索完成: FTS={len(fts_results)}, 向量={len(vec_results)}, "
