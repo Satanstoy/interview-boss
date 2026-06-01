@@ -693,3 +693,198 @@ async def _scan_async(func):
     """将同步 DB 操作包装为异步。"""
     import asyncio
     return await asyncio.to_thread(func)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 混合搜索聚类（跨 cat2，hybrid search + LLM 逐对验证）
+# ═══════════════════════════════════════════════════════════════
+
+_PAIR_VERIFY_PROMPT = """判断以下两道面试题是否应该合并（核心知识点相同，只是提问角度不同）。
+
+题1: {q1}
+题2: {q2}
+
+判断标准：
+- 核心知识点相同 → merge=true
+- 相似但不同知识点 → merge=false
+
+返回 JSON: {{"merge": true/false, "confidence": 0.0-1.0, "reason": "简短原因"}}
+只返回 JSON。"""
+
+
+async def _verify_pair(q1_text: str, q2_text: str, user_id=None) -> float:
+    """逐对验证：小 prompt，低失败率。
+
+    Returns:
+        置信度 (0.0-1.0)，merge=false 时返回 0.0
+    """
+    try:
+        prompt = _PAIR_VERIFY_PROMPT.format(q1=q1_text[:100], q2=q2_text[:100])
+        result = await _call_llm_with_retry(
+            prompt, response_format={"type": "json_object"}, user_id=user_id
+        )
+        parsed = _extract_json(result)
+        if parsed.get('merge'):
+            return float(parsed.get('confidence', 0.8))
+        return 0.0
+    except Exception as e:
+        logger.warning(f"逐对验证失败: {e}")
+        return 0.0
+
+
+async def cluster_with_hybrid_search(
+    questions: List[Dict],
+    user_id=None,
+    min_confidence: float = 0.7,
+    max_candidates: int = 5,
+) -> Dict[str, Any]:
+    """混合搜索聚类：跨 cat2，hybrid search 找候选 + LLM 逐对验证。
+
+    优势：
+    1. 跨 cat2 匹配（不再局限于同分类）
+    2. 逐对验证（小 prompt，低失败率）
+    3. 置信度阈值过滤（避免误合并）
+
+    Args:
+        questions: 题目列表 [{"id", "question", "cat1", "cat2", "tags"}]
+        user_id: 用户 ID
+        min_confidence: 最低置信度阈值
+        max_candidates: 每题最多验证的候选数
+
+    Returns:
+        {"merged": [(survivor_id, merged_id, confidence)], "unmatched": [id]}
+    """
+    from app.services.fts_service import hybrid_search
+
+    merged_pairs = []
+    merged_ids = set()
+    unmatched_ids = []
+
+    for q in questions:
+        qid = q['id']
+        if qid in merged_ids:
+            continue
+
+        # 1. hybrid search 找候选（跨 cat2）
+        keywords = (q.get('question') or '').split()[:3]
+        candidates = hybrid_search(
+            keywords=keywords,
+            query_text=q.get('question', ''),
+            limit=max_candidates + 1,  # +1 因为可能包含自己
+            exclude_ids={qid} | merged_ids,
+        )
+
+        # 过滤已合并和已删除的题
+        candidates = [
+            c for c in candidates
+            if c['id'] != qid and c['id'] not in merged_ids
+        ][:max_candidates]
+
+        if not candidates:
+            unmatched_ids.append(qid)
+            continue
+
+        # 2. 逐对 LLM 验证
+        best_match = None
+        best_confidence = 0.0
+
+        for cand in candidates:
+            confidence = await _verify_pair(
+                q.get('question', ''), cand.get('question', ''), user_id=user_id
+            )
+            if confidence > best_confidence and confidence >= min_confidence:
+                best_match = cand
+                best_confidence = confidence
+
+        if best_match:
+            # 决定谁是存活题（保留 frequency 更高的）
+            if q.get('frequency', 1) >= best_match.get('frequency', 1):
+                survivor_id, merged_id = qid, best_match['id']
+            else:
+                survivor_id, merged_id = best_match['id'], qid
+
+            merged_pairs.append((survivor_id, merged_id, best_confidence))
+            merged_ids.add(merged_id)
+            logger.info(
+                f"  混合聚类合并: [{merged_id}] → [{survivor_id}] "
+                f"(c={best_confidence:.2f})"
+            )
+        else:
+            unmatched_ids.append(qid)
+
+    return {"merged": merged_pairs, "unmatched": unmatched_ids}
+
+
+async def full_recluster_hybrid(
+    user_id=None,
+    min_confidence: float = 0.7,
+) -> Dict[str, Any]:
+    """全量聚类：用 hybrid search 对所有孤岛题做跨 cat2 匹配。
+
+    Args:
+        user_id: 用户 ID
+        min_confidence: 最低置信度阈值
+
+    Returns:
+        {"total": int, "merged": int, "remaining": int}
+    """
+    def _load_singletons():
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT id, question, cat1, cat2, tags, frequency "
+            "FROM question_bank "
+            "WHERE deleted_at IS NULL AND status = 'approved' AND duplicate_of IS NULL "
+            "ORDER BY frequency DESC, id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    questions = await _scan_async(_load_singletons)
+    if not questions:
+        return {"total": 0, "merged": 0, "remaining": 0}
+
+    logger.info(f"全量聚类开始: {len(questions)} 题")
+
+    result = await cluster_with_hybrid_search(
+        questions, user_id=user_id, min_confidence=min_confidence
+    )
+
+    # 执行合并
+    for survivor_id, merged_id, confidence in result['merged']:
+        def _do_merge(s=survivor_id, m=merged_id, c=confidence):
+            conn = get_db_connection()
+            conn.execute("BEGIN")
+            try:
+                # 标记重复
+                conn.execute(
+                    "UPDATE question_bank SET duplicate_of = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (s, m)
+                )
+                # 更新 frequency
+                conn.execute(
+                    "UPDATE question_bank SET frequency = frequency + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (s,)
+                )
+                # 记录合并历史
+                conn.execute(
+                    "INSERT INTO merge_history "
+                    "(survivor_id, merged_ids, merged_questions, pre_snapshot, "
+                    "operation_type, phase, confidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (s, json.dumps([m]),
+                     json.dumps([next((q['question'] for q in questions if q['id'] == m), '')]),
+                     json.dumps({"merged_id": m}),
+                     'hybrid_recluster', 'full_recluster', c)
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+        await _scan_async(_do_merge)
+
+    total = len(questions)
+    merged = len(result['merged'])
+    remaining = len(result['unmatched'])
+
+    logger.info(f"全量聚类完成: 总数={total}, 合并={merged}, 剩余={remaining}")
+    return {"total": total, "merged": merged, "remaining": remaining}
