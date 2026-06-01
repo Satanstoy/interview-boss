@@ -40,11 +40,36 @@ def delete_fts_entry(question_bank_id: int) -> None:
         conn.commit()
 
 
+def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[str]) -> int:
+    """计算搜索结果的相关性分数（用于重排序）。
+
+    优先级：question/tags 匹配 > ai_answer 匹配
+    分数越高越相关。
+    """
+    score = 0
+    q_lower = (question or "").lower()
+    t_lower = (tags or "").lower()
+    a_lower = (ai_answer or "").lower()
+
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower in q_lower:
+            score += 10  # question 匹配权重最高
+        if kw_lower in t_lower:
+            score += 5   # tags 匹配权重次之
+        if kw_lower in a_lower:
+            score += 1   # ai_answer 匹配权重最低
+
+    return score
+
+
 def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str = None, exclude_ids: set[int] = None) -> list[dict]:
     """用 FTS5 搜索题库，返回最相关的题目列表。
 
-    优化策略：优先匹配 question 和 tags 字段，降低 ai_answer 字段权重。
-    FTS5 使用列限定查询：question:"keyword" OR tags:"keyword"
+    优化策略：
+    1. FTS5 全字段搜索（unicode61 分词器对 CJK+英文混合文本的列限定查询不可靠）
+    2. 搜索结果按相关性重排序（question/tags 匹配优先于 ai_answer 匹配）
+    3. CJK 关键词直接走 LIKE 搜索
 
     Args:
         keywords: LLM 提取的关键词列表
@@ -61,15 +86,12 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
 
     logger.info(f"FTS 检索开始: keywords={keywords}, job_position={job_position}")
 
-    # 构建 FTS5 查询：列限定搜索 question 和 tags（避免 ai_answer 干扰）
-    # 对中文关键词加引号避免分词问题
+    # 构建 FTS5 查询：OR 连接各关键词
     terms = []
     for kw in keywords:
         kw = kw.strip()
         if kw:
-            # 优先搜索 question 字段，其次 tags 字段
-            terms.append(f'question:"{kw}"')
-            terms.append(f'tags:"{kw}"')
+            terms.append(f'"{kw}"')
     if not terms:
         return []
 
@@ -86,7 +108,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
             logger.info(f"FTS 检索完成(LIKE): 返回 {len(results)} 条结果")
             return results
 
-        # 英文关键词用 FTS5 列限定搜索
+        # 英文关键词用 FTS5
         # 优先按岗位过滤搜索
         if job_position:
             try:
@@ -121,36 +143,18 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
                         if len(rows) >= limit:
                             break
             except Exception as e:
-                logger.warning(f"FTS5 列限定查询失败: {e}, query={fts_query}")
-                # 降级到全字段搜索
-                try:
-                    fallback_query = " OR ".join(f'"{kw}"' for kw in keywords if kw.strip())
-                    fallback_rows = conn.execute(
-                        "SELECT rowid, question, cat1, cat2, tags, ai_answer, rank "
-                        "FROM question_fts "
-                        "WHERE question_fts MATCH ? "
-                        "ORDER BY rank "
-                        "LIMIT ?",
-                        (fallback_query, limit)
-                    ).fetchall()
-                    existing_ids = {row[0] for row in rows}
-                    for row in fallback_rows:
-                        if row[0] not in existing_ids:
-                            rows.append(row)
-                            if len(rows) >= limit:
-                                break
-                except Exception as e2:
-                    logger.warning(f"FTS5 全字段查询也失败: {e2}")
-                    if not rows:
-                        logger.info("FTS5 查询异常，降级到 LIKE 搜索")
-                        results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
-                        logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
-                        return results
+                logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
+                if not rows:
+                    logger.info("FTS5 查询异常，降级到 LIKE 搜索")
+                    results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
+                    logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
+                    return results
 
     # 排除已展示的题目
     if exclude_ids:
         rows = [r for r in rows if r[0] not in exclude_ids]
 
+    # 构建结果并按相关性重排序
     results = []
     for row in rows[:limit]:
         results.append({
@@ -162,6 +166,11 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
             "ai_answer": row[5],
             "rank": row[6],
         })
+
+    # 按相关性重排序：question/tags 匹配优先于 ai_answer 匹配
+    results.sort(key=lambda r: _relevance_score(
+        r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords
+    ), reverse=True)
 
     # 如果 FTS 结果太少，用 LIKE 补充
     if len(results) < 3 and keywords:
