@@ -538,6 +538,10 @@ async def _match_singletons_to_existing(
         for cid, entry, conf in res:
             if entry['id'] in matched_ids:
                 continue
+            # 跳过零置信度合并（验证未通过或置信度不足）
+            if conf <= 0:
+                logger.info(f"[Compaction→Existing] 跳过零置信度合并: {entry['question'][:30]}")
+                continue
 
             def _merge(s_id=cid, e=entry, c=conf):
                 conn = get_db_connection()
@@ -654,6 +658,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
 
             # 验证
             cluster_confidence = 0.0
+            validation_passed = False
             async with semaphore:
                 try:
                     validate_matches = [
@@ -662,16 +667,25 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
                     ]
                     new_q_for_validate = [{"id": e['id'], "question": e['question']} for e in to_merge]
                     existing_for_validate = [{"id": survivor['id'], "question": survivor['question']}]
-                    _, conf_map = await _validate_merges(
+                    validated, conf_map = await _validate_merges(
                         validate_matches, new_q_for_validate, existing_for_validate, user_id
                     )
-                    conf_values = list(conf_map.values())
-                    if conf_values:
-                        cluster_confidence = sum(conf_values) / len(conf_values)
+                    # 只有验证通过的合并才执行
+                    if validated:
+                        conf_values = list(conf_map.values())
+                        if conf_values:
+                            cluster_confidence = sum(conf_values) / len(conf_values)
+                        validation_passed = True
+                    else:
+                        logger.info(f"[Compaction→Mutual] 验证拒绝: {survivor['question'][:30]} + {len(to_merge)} 题")
                 except Exception as e:
-                    logger.warning(f"[Compaction→Mutual] 验证失败,使用默认置信度: {e}")
+                    logger.warning(f"[Compaction→Mutual] 验证异常，拒绝合并: {e}")
 
-            merge_ops.append((survivor, to_merge, cluster_confidence, cat2))
+            # 只有验证通过且置信度 > 0 才执行合并
+            if validation_passed and cluster_confidence > 0:
+                merge_ops.append((survivor, to_merge, cluster_confidence, cat2))
+            else:
+                logger.info(f"[Compaction→Mutual] 跳过合并 (confidence={cluster_confidence:.2f})")
 
         return merge_ops
 

@@ -222,8 +222,8 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
         return (validated_matches, confidence_map)
 
     except Exception as e:
-        logger.warning(f"验证合并失败，返回原始结果: {e}")
-        return (matches, {})
+        logger.warning(f"验证合并失败，拒绝所有合并: {e}")
+        return ([], {})  # 验证失败时拒绝所有合并，而非返回原始匹配
 
 
 async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Dict]:
