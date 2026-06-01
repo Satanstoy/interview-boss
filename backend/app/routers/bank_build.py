@@ -3,7 +3,7 @@ import json
 import time
 import logging
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH
 from app.core.auth import get_current_user, get_admin_user
@@ -302,13 +302,21 @@ async def _run_build_inline(job_id: int, user_id: int):
 
 
 @router.post("/api/master-bank/compact")
-async def compact_singletons(admin: dict = Depends(get_admin_user)):
-    """孤岛碎片整理：对独立题做二次合并（SSE 流式推送）"""
+async def compact_singletons(
+    admin: dict = Depends(get_admin_user),
+    match_existing: bool = Query(False, description="是否先匹配已有聚类"),
+):
+    """孤岛碎片整理：对独立题做二次合并（SSE 流式推送）
+
+    Args:
+        match_existing: True 时先将孤岛匹配到已有聚类（RAG+LLM），再做内部合并
+    """
     async def event_stream():
         try:
             from app.services.pipeline import compact_singletons_in_db
-            yield f"data: {json.dumps({'type': 'init', 'step': 'compact', 'message': '开始孤岛碎片整理...'})}\n\n"
-            result = await compact_singletons_in_db(user_id=admin['id'])
+            mode = "匹配已有聚类+内部合并" if match_existing else "仅内部合并"
+            yield f"data: {json.dumps({'type': 'init', 'step': 'compact', 'message': f'开始孤岛碎片整理（{mode}）...'})}\n\n"
+            result = await compact_singletons_in_db(user_id=admin['id'], match_existing=match_existing)
             yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
         except Exception as e:
             logger.exception("孤岛碎片整理失败")
