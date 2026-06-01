@@ -212,7 +212,9 @@ def delete_fts_entry(question_bank_id: int) -> None:
 def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[str]) -> int:
     """计算搜索结果的相关性分数（用于重排序）。
 
-    优先级：question/tags 匹配 > ai_answer 匹配
+    优先级：question >> tags >> 无匹配 > ai_answer 匹配
+    ai_answer 单独匹配视为噪声，应被降权到负分。
+
     分数越高越相关。
     """
     score = 0
@@ -226,8 +228,13 @@ def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[st
             score += 10  # question 匹配权重最高
         if kw_lower in t_lower:
             score += 5   # tags 匹配权重次之
-        if kw_lower in a_lower:
-            score += 1   # ai_answer 匹配权重最低
+        # ai_answer 匹配不加分（避免 ai_answer 污染干扰排序）
+
+    # 额外惩罚：如果关键词只在 ai_answer 中出现（question 和 tags 都没有），扣分
+    if score == 0:
+        for kw in keywords:
+            if kw.lower() in a_lower:
+                score -= 5  # 纯 ai_answer 匹配视为噪声
 
     return score
 
@@ -565,6 +572,14 @@ def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = Non
     return results
 
 
+def _has_question_tag_match(results: list[dict], keywords: list[str]) -> bool:
+    """检查搜索结果中是否有 question/tags 匹配（非纯 ai_answer 匹配）"""
+    for r in results[:3]:
+        if _relevance_score(r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords) > 0:
+            return True
+    return False
+
+
 def hybrid_search(
     keywords: list[str],
     query_text: str = None,
@@ -572,12 +587,13 @@ def hybrid_search(
     job_position: str = None,
     exclude_ids: set[int] = None,
 ) -> list[dict]:
-    """FTS5 + 向量 + RRF 混合搜索（含 3 项轻量优化）。
+    """FTS5 + 向量 + RRF 混合搜索（含 4 项轻量优化）。
 
     优化技术（零额外 LLM 调用）：
     1. 自适应 IDF 加权（vstash）：稀有词偏 FTS，常见词偏向量
     2. 查询扩展：缩写/同义词映射（LLM→大模型, RAG→检索增强）
     3. MMR 多样性：按 cat2 分散结果，避免 Top-5 全是同一分类
+    4. FTS 质量检测：FTS 无 question/tags 匹配时，降低 FTS 权重
 
     Args:
         keywords: FTS 关键词列表
