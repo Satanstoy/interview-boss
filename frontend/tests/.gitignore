@@ -1,0 +1,6 @@
+# Playwright test artifacts
+test-results/
+test-results.json
+.auth/
+*-error-context.md
+*.png

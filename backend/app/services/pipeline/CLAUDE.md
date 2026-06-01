@@ -1,0 +1,25 @@
+# Pipeline — 批处理流水线
+
+> 位置：`backend/app/services/pipeline/` | 上游调用方：`services/clustering.py`, `routers/submit.py` | 下游依赖：`db/`, `services/clustering.py`
+> 职责：增量聚类、完整流水线、孤岛碎片整理、队列管理、数据清洗。
+
+## 文件职责
+
+| 文件 | 职责 |
+|------|------|
+| `batch.py` | 增量聚类、完整流水线、孤岛碎片整理（主入口） |
+| `batch_v2.py` | v2 版本，新增"孤岛匹配已有聚类"步骤 |
+| `queue.py` | 队列操作：enqueue / dequeue / mark_done / mark_failed / trigger 判断 |
+| `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE = 40`） |
+| `writer.py` | 数据库写入：将聚类结果写入 question_bank 及关联表 |
+
+## 核心规则
+
+- 批处理入口在 `batch.py`，不要绕过直接调用内部函数
+- 队列状态通过 `queue.py` 管理，禁止直接操作数据库队列表
+- 数据清洗规则在 `sanitize.py` 的 `_BLACKLIST_PHRASES` 中维护
+
+## 修改后必做
+
+1. 运行 `uv run pytest backend/tests/pipeline/ -q`
+2. 更新本文件（如新增文件或改变职责）
