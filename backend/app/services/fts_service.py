@@ -1,9 +1,20 @@
-"""FTS5 全文检索服务 — 面试题库 RAG 检索（零 embedding 模型依赖）"""
+"""FTS5 + 向量混合检索服务 — 面试题库 RAG 检索
+
+混合检索架构（参考 vstash / Supabase / Digital Applied 2026 最佳实践）:
+1. FTS5/LIKE 关键词检索（精确匹配）
+2. FAISS 向量语义检索（语义相似）
+3. Reciprocal Rank Fusion (RRF) 融合两路结果
+4. 相关性重排序（question/tags 优先于 ai_answer）
+
+RRF 公式: score(doc) = Σ 1/(k + rank_i), k=60（行业标准）
+"""
 import re
 import logging
 from app.db.connection import get_db_connection
 
 logger = logging.getLogger("interview-boss")
+
+RRF_K = 60  # RRF 平滑常数（行业标准值）
 
 
 def sync_fts_entry(question_bank_id: int) -> None:
@@ -280,3 +291,184 @@ def _execute_like_search(keywords: list[str], conn, limit: int, job_position: st
         f"LIMIT ?",
         params + [limit]
     ).fetchall()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 混合搜索：FTS5 + 向量 + RRF 融合
+# ═══════════════════════════════════════════════════════════════
+
+def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = RRF_K) -> list[dict]:
+    """Reciprocal Rank Fusion (RRF) — 融合多个排序列表。
+
+    行业标准算法，用于合并 FTS 和向量搜索结果。
+    不需要归一化分数（解决 FTS rank vs 余弦相似度不可比问题）。
+
+    公式: score(doc) = Σ 1/(k + rank_i)
+
+    Args:
+        result_lists: 多个搜索结果列表，每个列表按相关性排序
+        k: 平滑常数（默认 60，行业标准）
+
+    Returns:
+        融合后的结果列表，按 RRF 分数降序排列，附带 _rrf_score 字段
+    """
+    scores = {}  # doc_id -> rrf_score
+    doc_info = {}  # doc_id -> document dict
+
+    for results in result_lists:
+        for rank, item in enumerate(results, 1):
+            doc_id = item["id"]
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+            # 保留最完整的文档信息（优先取有更多字段的）
+            if doc_id not in doc_info or len(str(item)) > len(str(doc_info[doc_id])):
+                doc_info[doc_id] = item
+
+    # 按 RRF 分数降序排列
+    sorted_ids = sorted(scores.keys(), key=lambda did: scores[did], reverse=True)
+
+    result = []
+    for doc_id in sorted_ids:
+        entry = {**doc_info[doc_id], "_rrf_score": scores[doc_id]}
+        result.append(entry)
+
+    return result
+
+
+def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = None) -> list[dict]:
+    """向量语义搜索 — 从数据库加载 embedding 并用 FAISS 检索。
+
+    Args:
+        query_text: 查询文本
+        top_k: 返回结果数
+        exclude_ids: 排除的 ID 集合
+
+    Returns:
+        [{"id": int, "question": str, "cat1": str, "cat2": str, "tags": str, "score": float}]
+    """
+    import numpy as np
+
+    try:
+        from app.services.embedding_service import encode_texts, build_index, search_index
+    except ImportError:
+        logger.warning("向量搜索: embedding_service 不可用")
+        return []
+
+    with get_db_connection() as conn:
+        # 加载所有有效题目的 embedding
+        rows = conn.execute(
+            "SELECT id, question, cat1, cat2, tags, embedding "
+            "FROM question_bank "
+            "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL"
+        ).fetchall()
+
+    if not rows:
+        logger.info("向量搜索: 无 embedding 数据，跳过")
+        return []
+
+    # 构建 FAISS 索引
+    ids = []
+    vectors = []
+    doc_map = {}
+    for r in rows:
+        qid = r[0]
+        if exclude_ids and qid in exclude_ids:
+            continue
+        emb = np.frombuffer(r[5], dtype=np.float32).copy()
+        ids.append(qid)
+        vectors.append(emb)
+        doc_map[qid] = {
+            "id": qid,
+            "question": r[1],
+            "cat1": r[2],
+            "cat2": r[3],
+            "tags": r[4],
+        }
+
+    if not vectors:
+        return []
+
+    vectors_np = np.array(vectors, dtype=np.float32)
+    index = build_index(vectors_np)
+
+    # 编码查询文本
+    query_emb = encode_texts([query_text])
+    indices, scores = search_index(index, query_emb, top_k=top_k)
+
+    results = []
+    for idx, score in zip(indices, scores):
+        qid = ids[idx]
+        results.append({**doc_map[qid], "score": score})
+
+    return results
+
+
+def hybrid_search(
+    keywords: list[str],
+    query_text: str = None,
+    limit: int = 5,
+    job_position: str = None,
+    exclude_ids: set[int] = None,
+) -> list[dict]:
+    """FTS5 + 向量 + RRF 混合搜索。
+
+    参考行业最佳实践（vstash / Supabase / Digital Applied 2026）：
+    1. FTS5/LIKE 关键词检索（精确匹配能力强）
+    2. FAISS 向量语义检索（语义泛化能力强）
+    3. RRF 融合（解决分数不可比问题）
+    4. 相关性重排序（question/tags 优先）
+
+    Args:
+        keywords: FTS 关键词列表
+        query_text: 原始查询文本（用于向量搜索，为空时仅用 FTS）
+        limit: 返回结果数
+        job_position: 岗位过滤
+        exclude_ids: 排除 ID
+
+    Returns:
+        融合后的搜索结果列表
+    """
+    if not keywords and not query_text:
+        return []
+
+    # 过采样：每路检索取 limit*2 个候选，给 RRF 更多信号
+    oversample = limit * 2
+
+    # 路径 1: FTS/LIKE 关键词检索
+    fts_results = search_questions_fts(
+        keywords=keywords or [query_text],
+        limit=oversample,
+        job_position=job_position,
+        exclude_ids=exclude_ids,
+    )
+
+    # 路径 2: 向量语义检索（如果 query_text 可用）
+    vec_results = []
+    if query_text:
+        vec_results = _vector_search(
+            query_text=query_text,
+            top_k=oversample,
+            exclude_ids=exclude_ids,
+        )
+
+    # 如果只有一路有结果，直接返回
+    if not vec_results:
+        logger.info(f"混合搜索: 向量无结果，降级到纯 FTS ({len(fts_results)} 条)")
+        return fts_results[:limit]
+    if not fts_results:
+        logger.info(f"混合搜索: FTS 无结果，降级到纯向量 ({len(vec_results)} 条)")
+        return vec_results[:limit]
+
+    # RRF 融合
+    fused = reciprocal_rank_fusion([fts_results, vec_results])
+
+    # 相关性重排序（question/tags 匹配优先）
+    if keywords:
+        fused.sort(key=lambda r: _relevance_score(
+            r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords
+        ), reverse=True)
+
+    logger.info(
+        f"混合搜索完成: FTS={len(fts_results)}, 向量={len(vec_results)}, "
+        f"融合后={len(fused)}, 返回={min(limit, len(fused))}"
+    )
+    return fused[:limit]

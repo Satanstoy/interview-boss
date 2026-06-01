@@ -231,7 +231,7 @@ async def extract_keywords(state: ChatState) -> dict:
 
 
 async def fts_retrieve(state: ChatState) -> dict:
-    """用 FTS5 检索相关题目（优先使用 search_query，降级到 keywords）"""
+    """混合检索：FTS5 + 向量 + RRF 融合（优先使用 search_query，降级到 keywords）"""
     # 优先使用基于上下文改写的检索查询
     search_query = state.get("search_query", "")
     keywords = state.get("keywords", [])
@@ -251,7 +251,16 @@ async def fts_retrieve(state: ChatState) -> dict:
     exclude_ids = {q["id"] for q in state.get("retrieved_questions", []) if "id" in q}
 
     job_position = state.get("job_position")
-    results = search_questions_fts(query_keywords, limit=5, job_position=job_position, exclude_ids=exclude_ids)
+
+    # 混合搜索：FTS5 + 向量 + RRF 融合
+    from app.services.fts_service import hybrid_search
+    results = hybrid_search(
+        keywords=query_keywords,
+        query_text=search_query or " ".join(keywords),
+        limit=5,
+        job_position=job_position,
+        exclude_ids=exclude_ids,
+    )
     logger.info(f"RAG 检索: 返回 {len(results)} 条题目")
     return {"retrieved_questions": results}
 
