@@ -285,7 +285,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
             return results
 
         # 英文关键词用 FTS5
-        # 优先按岗位过滤搜索
+        # 优先按岗位过滤搜索（排除重复题）
         if job_position:
             try:
                 rows = conn.execute(
@@ -294,20 +294,24 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? AND qb.job_position = ? "
                     "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
+                    "AND qb.duplicate_of IS NULL "
                     "ORDER BY f.rank LIMIT ?",
                     (fts_query, job_position, limit)
                 ).fetchall()
             except Exception as e:
                 logger.warning(f"FTS5 岗位过滤查询失败: {e}")
 
-        # 岗位过滤结果不足时，回退到无过滤搜索
+        # 岗位过滤结果不足时，回退到无过滤搜索（排除重复题）
         if len(rows) < 3:
             try:
                 fallback_rows = conn.execute(
-                    "SELECT rowid, question, cat1, cat2, tags, ai_answer, rank "
-                    "FROM question_fts "
+                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank "
+                    "FROM question_fts f "
+                    "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? "
-                    "ORDER BY rank "
+                    "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
+                    "AND qb.duplicate_of IS NULL "
+                    "ORDER BY f.rank "
                     "LIMIT ?",
                     (fts_query, limit)
                 ).fetchall()
@@ -452,7 +456,8 @@ def _execute_like_search(keywords: list[str], conn, limit: int, job_position: st
     return conn.execute(
         f"SELECT id, question, cat1, cat2, tags, ai_answer "
         f"FROM question_bank "
-        f"WHERE deleted_at IS NULL AND status = 'approved' {position_filter}AND ({where}) "
+        f"WHERE deleted_at IS NULL AND status = 'approved' AND duplicate_of IS NULL "
+        f"{position_filter}AND ({where}) "
         f"LIMIT ?",
         params + [limit]
     ).fetchall()
@@ -524,11 +529,12 @@ def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = Non
         return []
 
     with get_db_connection() as conn:
-        # 加载所有有效题目的 embedding
+        # 加载所有有效题目的 embedding（排除重复题）
         rows = conn.execute(
             "SELECT id, question, cat1, cat2, tags, embedding "
             "FROM question_bank "
-            "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL"
+            "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL "
+            "AND duplicate_of IS NULL"
         ).fetchall()
 
     if not rows:
