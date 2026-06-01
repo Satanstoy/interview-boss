@@ -43,6 +43,9 @@ def delete_fts_entry(question_bank_id: int) -> None:
 def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str = None, exclude_ids: set[int] = None) -> list[dict]:
     """用 FTS5 搜索题库，返回最相关的题目列表。
 
+    优化策略：优先匹配 question 和 tags 字段，降低 ai_answer 字段权重。
+    FTS5 使用列限定查询：question:"keyword" OR tags:"keyword"
+
     Args:
         keywords: LLM 提取的关键词列表
         limit: 返回结果数量上限
@@ -58,14 +61,15 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
 
     logger.info(f"FTS 检索开始: keywords={keywords}, job_position={job_position}")
 
-    # 构建 FTS5 查询：OR 连接各关键词（CJK 文本用 AND 过于严格）
+    # 构建 FTS5 查询：列限定搜索 question 和 tags（避免 ai_answer 干扰）
     # 对中文关键词加引号避免分词问题
     terms = []
     for kw in keywords:
         kw = kw.strip()
         if kw:
-            # FTS5 通配符搜索，支持部分匹配
-            terms.append(f'"{kw}"')
+            # 优先搜索 question 字段，其次 tags 字段
+            terms.append(f'question:"{kw}"')
+            terms.append(f'tags:"{kw}"')
     if not terms:
         return []
 
@@ -82,7 +86,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
             logger.info(f"FTS 检索完成(LIKE): 返回 {len(results)} 条结果")
             return results
 
-        # 英文关键词用 FTS5
+        # 英文关键词用 FTS5 列限定搜索
         # 优先按岗位过滤搜索
         if job_position:
             try:
@@ -117,12 +121,31 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
                         if len(rows) >= limit:
                             break
             except Exception as e:
-                logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
-                if not rows:
-                    logger.info("FTS5 查询异常，降级到 LIKE 搜索")
-                    results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
-                    logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
-                    return results
+                logger.warning(f"FTS5 列限定查询失败: {e}, query={fts_query}")
+                # 降级到全字段搜索
+                try:
+                    fallback_query = " OR ".join(f'"{kw}"' for kw in keywords if kw.strip())
+                    fallback_rows = conn.execute(
+                        "SELECT rowid, question, cat1, cat2, tags, ai_answer, rank "
+                        "FROM question_fts "
+                        "WHERE question_fts MATCH ? "
+                        "ORDER BY rank "
+                        "LIMIT ?",
+                        (fallback_query, limit)
+                    ).fetchall()
+                    existing_ids = {row[0] for row in rows}
+                    for row in fallback_rows:
+                        if row[0] not in existing_ids:
+                            rows.append(row)
+                            if len(rows) >= limit:
+                                break
+                except Exception as e2:
+                    logger.warning(f"FTS5 全字段查询也失败: {e2}")
+                    if not rows:
+                        logger.info("FTS5 查询异常，降级到 LIKE 搜索")
+                        results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
+                        logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
+                        return results
 
     # 排除已展示的题目
     if exclude_ids:
