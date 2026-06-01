@@ -37,15 +37,12 @@ build/
 
 # Claude Code
 .claude/
-CLAUDE.md
 AGENTS.md
 
 # Issue tracker (local markdown)
 .scratch/
 
-# 测试代码（可能含密钥，不提交）
-backend/tests/
-frontend/tests/
+# 测试结果和覆盖率（不提交）
 test-results/
 test-results.json
 .pytest_cache/
@@ -57,7 +54,7 @@ backend/scripts/
 *.log
 
 # 文档（内部记录，不提交）
-docs/
+# docs/  # 移除忽略，文档应该被跟踪
 
 # Docker
 backups/
