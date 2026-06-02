@@ -12,15 +12,15 @@
 ## Commands
 
 ```bash
-# 开发测试
-uv run pytest backend/tests/ -q          # 后端测试
-cd frontend && npm run build              # 前端构建
+# 开发测试（必须通过 Docker 容器执行，禁止宿主机直接 uv run）
+docker compose exec backend pytest backend/tests/ -q   # 后端测试
+cd frontend && npm run build                             # 前端构建
 
 # 部署（必须用 Docker，不要用 deploy.sh 的 systemd 模式）
-./deploy/docker-deploy.sh update          # 重新部署（重建后端/worker/nginx 容器）
-./deploy/docker-deploy.sh status          # 查看容器状态
-./deploy/docker-deploy.sh logs backend    # 查看后端日志
-./deploy/docker-deploy.sh backup          # 备份数据库
+./deploy/docker-deploy.sh update                         # 重新部署（重建后端/worker/nginx 容器）
+./deploy/docker-deploy.sh status                         # 查看容器状态
+./deploy/docker-deploy.sh logs backend                   # 查看后端日志
+./deploy/docker-deploy.sh backup                         # 备份数据库
 ```
 
 ## 核心规范
@@ -29,7 +29,8 @@ cd frontend && npm run build              # 前端构建
 - **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文。Git hook 自动检查。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文。
 - **禁止**：根目录装包、跨包引用源码、`--force`/`--no-verify`。
-- **依赖管理**：Python 用 `cd backend && uv add X`，JS 用 `cd frontend && npm install X`，禁止在根目录操作。
+- **依赖管理**：Python 用 `cd backend && uv add X`，JS 用 `cd frontend && npm install X`，禁止在根目录操作
+- **运行方式**：所有 Python 命令（pytest、脚本等）必须通过 `docker compose exec backend` 执行，禁止宿主机直接 `uv run`（宿主机无 uv 缓存，走 Docker 构建层缓存即可）。
 
 ## 修改铁律
 
@@ -92,7 +93,7 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 ## Gotchas
 
 - `deploy/deploy.sh` 是 systemd 模式，**生产必须用** `docker-deploy.sh`
-- Python 依赖必须用 uv（`/root/.local/bin/uv`），禁止 pip
+- Python 依赖管理用 uv（`uv add`），运行/测试必须通过 Docker 容器执行，禁止宿主机直接 `uv run`
 - SQLite 迁移后必须重启 backend 容器
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
 

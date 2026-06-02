@@ -12,6 +12,7 @@ import asyncio
 import logging
 from datetime import datetime
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 logger = logging.getLogger("interview-boss")
 
@@ -356,10 +357,5 @@ class WorkerSettings:
 
     # 定时任务：每天凌晨 3 点运行 compaction
     cron_jobs = [
-        {
-            "function": scheduled_compaction_task,
-            "hour": 3,
-            "minute": 0,
-            "next_run": None  # ARQ 会自动计算
-        }
+        cron(scheduled_compaction_task, hour={3}, minute={0})
     ]
