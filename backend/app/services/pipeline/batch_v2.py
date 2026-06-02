@@ -294,20 +294,20 @@ async def compact_singletons_in_db_v2(user_id: int = None) -> Dict:
                         "FROM question_bank WHERE id = ?", (s['id'],)
                     ).fetchone()
                     try:
-                        s_src = json.loads(existing[0]) if existing[0] else []
+                        s_src = json.loads(existing['sources']) if existing['sources'] else []
                     except Exception:
                         s_src = []
                     try:
-                        s_oqs = json.loads(existing[1]) if existing[1] else []
+                        s_oqs = json.loads(existing['original_questions']) if existing['original_questions'] else []
                     except Exception:
                         s_oqs = []
                     try:
-                        s_oqs_src = json.loads(existing[2]) if existing[2] else []
+                        s_oqs_src = json.loads(existing['original_question_sources']) if existing['original_question_sources'] else []
                     except Exception:
                         s_oqs_src = []
 
                     # 保留 ai_answer：如果 survivor 没有，从被合并的题中获取
-                    s_ai_answer = existing[3] if existing else None
+                    s_ai_answer = existing['ai_answer'] if existing else None
                     if not s_ai_answer:
                         for entry in m:
                             if entry.get('ai_answer'):

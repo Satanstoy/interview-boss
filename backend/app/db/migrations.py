@@ -1489,6 +1489,12 @@ def _migration_034_backfill_confidence(conn):
     """
     import numpy as np
 
+    # 检查 merge_history 表是否存在
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if 'merge_history' not in tables:
+        logger.info("migration_034: merge_history 表不存在，跳过回填")
+        return
+
     zero_rows = conn.execute(
         "SELECT id, survivor_id, merged_questions, confidence "
         "FROM merge_history WHERE confidence = 0 AND is_rolled_back = 0"

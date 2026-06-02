@@ -6,11 +6,11 @@ from typing import List, Dict, Any
 
 from app.db.connection import get_db_connection
 from app.services.llm import _call_llm_with_retry, _extract_json
-from app.services.embedding_service import prefilter_centroids
+from app.services.embedding_service import prefilter_centroids, prefilter_centroids_batch
 
 logger = logging.getLogger("interview-boss")
 
-MAX_CONCURRENCY = 2
+MAX_CONCURRENCY = 4
 RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
 VALIDATION_CONFIDENCE_THRESHOLD = 0.8  # 验证置信度阈值
 _PREFILTER_TOP_K = 30  # Embedding 预筛选保留的候选 centroid 数量
@@ -48,8 +48,8 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 【待匹配的新题目】（微批次，共 {count} 题）：
 {new_questions}
 
-请输出 JSON 格式，列出成功匹配的结果。如果没有匹配项，输出空数组。
-{{"matches": [{{"new_id": "新题ID", "cluster_id": "已有聚类ID"}}]}}
+请输出 JSON 格式，列出成功匹配的结果。每个匹配必须附带 confidence（0~1 小数，表示你对该匹配的确信程度）。如果没有匹配项，输出空数组。
+{{"matches": [{{"new_id": "新题ID", "cluster_id": "已有聚类ID", "confidence": 0.95}}]}}
 只输出 JSON，不要解释。"""
 
 CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不超过 40 道题的微批次，请在它们内部寻找**真正重复**的题目并进行合并。
@@ -377,15 +377,15 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
             # Embedding 预筛选：从全部 centroid 中选出最可能匹配的 top-K
             filtered_clusters = existing_clusters
             if len(existing_clusters) > _PREFILTER_TOP_K:
-                # 对每个新题取 top-K centroid 的并集
+                # 批量预筛选：建一次 FAISS index，对所有新题统一查 top-K 并集
+                batch_results = prefilter_centroids_batch(
+                    query_texts=[q['question'] for q in new_questions],
+                    centroids=existing_clusters,
+                    top_k=_PREFILTER_TOP_K,
+                )
                 candidate_ids = set()
-                for q in new_questions:
-                    top_k = prefilter_centroids(
-                        query_text=q['question'],
-                        centroids=existing_clusters,
-                        top_k=_PREFILTER_TOP_K,
-                    )
-                    candidate_ids.update(c['id'] for c in top_k)
+                for qi_results in batch_results.values():
+                    candidate_ids.update(c['id'] for c in qi_results)
                 filtered_clusters = [c for c in existing_clusters if c['id'] in candidate_ids]
                 logger.info(f"  [{cat2 or '无分类'}] Embedding 预筛选: {len(existing_clusters)} → {len(filtered_clusters)} 个候选 centroid")
 
@@ -401,42 +401,66 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
 
             matched_cluster_ids = set()
             processed_new_ids = set()
+            low_confidence_matches = []  # 需要二次验证的低置信度匹配
+            high_confidence_matches = []  # 直接通过的高置信度匹配
+
             for m in result.get("matches", []):
                 nid = str(m.get("new_id", ""))
                 cid = m.get("cluster_id")
+                conf = float(m.get("confidence", 0))
                 if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
                     processed_new_ids.add(nid)
-                    matched_cluster_ids.add(nid)
-                    q = next((q for q in new_questions if str(q['id']) == nid), None)
-                    if q:
-                        matched.append({
-                            "qd_id": q['id'],
-                            "cluster_id": cid,
-                            "question": q['question'],
-                            "cat1": q.get('cat1', ''),
-                            "cat2": q.get('cat2', cat2),
-                            "tags": q.get('tags', ''),
-                            "diff_tag": q.get('diff_tag', ''),
-                            "url": q.get('url', ''),
-                            "company": q.get('company', ''),
-                            "round": q.get('round', ''),
-                        })
+                    if conf >= VALIDATION_CONFIDENCE_THRESHOLD:
+                        # 高置信度直接通过，省掉二次 LLM 验证
+                        matched_cluster_ids.add(nid)
+                        high_confidence_matches.append(m)
+                        q = next((q for q in new_questions if str(q['id']) == nid), None)
+                        if q:
+                            matched.append({
+                                "qd_id": q['id'],
+                                "cluster_id": cid,
+                                "question": q['question'],
+                                "cat1": q.get('cat1', ''),
+                                "cat2": q.get('cat2', cat2),
+                                "tags": q.get('tags', ''),
+                                "diff_tag": q.get('diff_tag', ''),
+                                "url": q.get('url', ''),
+                                "company": q.get('company', ''),
+                                "round": q.get('round', ''),
+                            })
+                    else:
+                        low_confidence_matches.append(m)
+
+            # 只对低置信度匹配调用二次 LLM 验证（节省 API 调用）
+            if low_confidence_matches:
+                logger.info(f"  [{cat2 or '无分类'}] 低置信度匹配需二次验证: {len(low_confidence_matches)} 题")
+                validated_matches, _confidence_map = await _validate_merges(
+                    low_confidence_matches, new_questions, existing_clusters, user_id
+                )
+                for m in validated_matches:
+                    nid = str(m.get("new_id", ""))
+                    cid = m.get("cluster_id")
+                    if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
+                        matched_cluster_ids.add(nid)
+                        q = next((q for q in new_questions if str(q['id']) == nid), None)
+                        if q:
+                            matched.append({
+                                "qd_id": q['id'],
+                                "cluster_id": cid,
+                                "question": q['question'],
+                                "cat1": q.get('cat1', ''),
+                                "cat2": q.get('cat2', cat2),
+                                "tags": q.get('tags', ''),
+                                "diff_tag": q.get('diff_tag', ''),
+                                "url": q.get('url', ''),
+                                "company": q.get('company', ''),
+                                "round": q.get('round', ''),
+                            })
 
             unmatched_ids -= matched_cluster_ids
             if matched_cluster_ids:
-                logger.info(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类: {len(matched_cluster_ids)} 题")
-
-                # 验证 Phase 1 的合并结果
-                phase1_matches = result.get("matches", [])
-                if phase1_matches:
-                    validated_matches, _confidence_map = await _validate_merges(
-                        phase1_matches, new_questions, existing_clusters, user_id
-                    )
-                    # 更新 matched 列表，只保留验证通过的
-                    validated_new_ids = {str(m.get('new_id')) for m in validated_matches}
-                    matched = [m for m in matched if str(m.get('qd_id')) in validated_new_ids or str(m.get('qd_id')) not in matched_cluster_ids]
-                    # 更新 unmatched_ids
-                    unmatched_ids = {str(q['id']) for q in new_questions} - {str(m.get('qd_id')) for m in matched}
+                logger.info(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类: {len(matched_cluster_ids)} 题 "
+                            f"(高置信度={len(high_confidence_matches)}, 低置信度通过={len(matched_cluster_ids)-len(high_confidence_matches)})")
 
         except Exception as e:
             logger.warning(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类失败: {e}")
@@ -506,7 +530,9 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
 
 
 async def _cluster_unmatched(unmatched_questions, user_id):
-    """将未匹配的新题进行内部聚类"""
+    """将未匹配的新题进行内部聚类（带 embedding 门控）"""
+    _MIN_CLUSTER_SIMILARITY = 0.6  # 聚类内最低平均相似度阈值
+
     if len(unmatched_questions) < 2:
         return [{"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
                 for q in unmatched_questions]
@@ -522,12 +548,35 @@ async def _cluster_unmatched(unmatched_questions, user_id):
         )
         result = _extract_json(content)
 
+        # 预编码所有题目 embedding（一次批量调用）
+        try:
+            from app.services.embedding_service import encode_texts
+            import numpy as np
+            texts = [q['question'] for q in unmatched_questions]
+            embeddings = encode_texts(texts)
+            emb_map = {str(q['id']): embeddings[i] for i, q in enumerate(unmatched_questions)}
+        except Exception:
+            emb_map = {}
+
         clusters = []
         clustered_ids = set()
 
         for c in result.get("clusters", []):
             ids = [str(i) for i in c.get("ids", [])]
             if len(ids) >= 2:
+                # embedding 门控：检查聚类内平均相似度
+                if emb_map and all(i in emb_map for i in ids):
+                    sims = []
+                    for i in range(len(ids)):
+                        for j in range(i + 1, len(ids)):
+                            sim = float(np.dot(emb_map[ids[i]], emb_map[ids[j]]))
+                            sims.append(sim)
+                    avg_sim = sum(sims) / len(sims) if sims else 0
+                    if avg_sim < _MIN_CLUSTER_SIMILARITY:
+                        logger.info(f"    embedding 门控拒绝: avg_sim={avg_sim:.3f} < {_MIN_CLUSTER_SIMILARITY}, "
+                                    f"拆散聚类 {ids}")
+                        continue
+
                 clustered_ids.update(ids)
                 items = [q for q in unmatched_questions if str(q['id']) in ids]
                 rep = c.get("representative", "")
@@ -708,194 +757,6 @@ async def _scan_async(func):
     """将同步 DB 操作包装为异步。"""
     import asyncio
     return await asyncio.to_thread(func)
-
-
-# ═══════════════════════════════════════════════════════════════
-# 三阶段高效聚类（零 LLM 粗筛 + 批量 LLM 验证）
-#
-# 行业标准三阶段漏斗（参考 SemDeDup / MinHash-LSH / Milvus）：
-#   Stage 1: 精确文本匹配 → 直接合并频率（零成本）
-#   Stage 2: Embedding 余弦相似度 → 找候选对（零 LLM 成本）
-#   Stage 3: LLM 批量验证 → 一次调用验证所有候选对
-#
-# 旧方案: 229题 × 3候选 × 1次LLM = 687 次 API 调用
-# 新方案: 229题 × FAISS检索 → ~30候选对 → 1次批量LLM = 1 次调用
-# ═══════════════════════════════════════════════════════════════
-
-_BATCH_VERIFY_PROMPT = """你是面试题去重专家。以下是一批待验证的面试题对，请判断每一对是否应该合并（频率累加）。
-
-判断标准：
-- 核心知识点相同，只是提问角度不同 → 合并
-- 相似但不同知识点 → 不合并
-
-可以合并：
-- "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
-- "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
-- "上下文过长怎么办" ≈ "agent怎么获取上下文"
-
-坚决不合并：
-- "Redis 缓存穿透" ≠ "Redis 缓存雪崩"
-- "MySQL 索引优化" ≠ "MySQL 查询优化"
-- "TCP 三次握手" ≠ "TCP 四次挥手"
-
-【待验证的题目对】（共 {count} 对）：
-{pairs}
-
-返回 JSON 格式：
-{{"results": [{{"pair_id": 1, "merge": true/false, "confidence": 0.0-1.0}}]}}
-只返回 JSON。"""
-
-
-async def cluster_three_stage(
-    questions: List[Dict],
-    user_id=None,
-    similarity_threshold: float = 0.75,
-) -> Dict[str, Any]:
-    """三阶段高效聚类：精确匹配 → Embedding 粗筛 → LLM 批量验证。
-
-    API 调用次数：1 次（批量验证所有候选对）
-
-    Args:
-        questions: 题目列表 [{"id", "question", "cat1", "cat2", "tags", "frequency"}]
-        user_id: 用户 ID
-        similarity_threshold: Embedding 余弦相似度阈值（粗筛）
-
-    Returns:
-        {"merged": [(survivor_id, merged_id, confidence)], "unmatched": [id]}
-    """
-    import numpy as np
-    from app.services.embedding_service import encode_texts, build_index
-
-    merged_pairs = []
-    merged_ids = set()
-
-    # ═══════════════════════════════════════════════════════════
-    # Stage 1: 精确文本匹配（零成本）
-    # ═══════════════════════════════════════════════════════════
-    text_map = {}  # question_text -> [ids]
-    for q in questions:
-        text = (q.get('question') or '').strip()
-        if text:
-            text_map.setdefault(text, []).append(q['id'])
-
-    stage1_count = 0
-    for text, ids in text_map.items():
-        if len(ids) < 2:
-            continue
-        # 保留 frequency 最高的作为存活题
-        survivors = [(q['frequency'], q['id']) for q in questions if q['id'] in ids]
-        survivors.sort(reverse=True)
-        survivor_id = survivors[0][1]
-        for _, mid in survivors[1:]:
-            if mid not in merged_ids:
-                merged_pairs.append((survivor_id, mid, 1.0))
-                merged_ids.add(mid)
-                stage1_count += 1
-
-    logger.info(f"Stage 1 精确匹配: {stage1_count} 对")
-
-    # ═══════════════════════════════════════════════════════════
-    # Stage 2: Embedding 余弦相似度粗筛（零 LLM 成本）
-    # ═══════════════════════════════════════════════════════════
-    remaining = [q for q in questions if q['id'] not in merged_ids]
-    if len(remaining) < 2:
-        return {"merged": merged_pairs, "unmatched": [q['id'] for q in remaining]}
-
-    # 编码所有剩余题目（一次性批量编码）
-    texts = [q.get('question', '') for q in remaining]
-    embeddings = encode_texts(texts)
-
-    # 构建 FAISS 索引
-    index = build_index(embeddings)
-
-    # 搜索每个题目的最近邻
-    candidate_pairs = []  # [(idx1, idx2, similarity)]
-    seen_pairs = set()
-
-    for i in range(len(remaining)):
-        q_emb = embeddings[i:i+1]
-        k = min(6, len(remaining))  # 最近 5 个邻居
-        scores, indices = index.search(q_emb, k)
-
-        for j, (idx, score) in enumerate(zip(indices[0], scores[0])):
-            if idx == i or idx >= len(remaining):
-                continue
-            # 确保 pair 唯一（小 id 在前）
-            pair = (min(i, idx), max(i, idx))
-            if pair in seen_pairs:
-                continue
-            seen_pairs.add(pair)
-
-            if score >= similarity_threshold:
-                candidate_pairs.append((pair[0], pair[1], float(score)))
-
-    # 按相似度降序排列
-    candidate_pairs.sort(key=lambda x: x[2], reverse=True)
-
-    logger.info(f"Stage 2 Embedding 粗筛: {len(candidate_pairs)} 候选对 (阈值={similarity_threshold})")
-
-    if not candidate_pairs:
-        unmatched = [q['id'] for q in remaining]
-        return {"merged": merged_pairs, "unmatched": unmatched}
-
-    # ═══════════════════════════════════════════════════════════
-    # Stage 3: LLM 批量验证（1 次 API 调用）
-    # ═══════════════════════════════════════════════════════════
-    # 构建验证 prompt
-    pairs_text = []
-    for pi, (i1, i2, sim) in enumerate(candidate_pairs):
-        q1 = remaining[i1]
-        q2 = remaining[i2]
-        pairs_text.append(
-            f"对{pi+1}: [{q1['id']}] {q1['question'][:80]}\n"
-            f"     [{q2['id']}] {q2['question'][:80]} (相似度={sim:.2f})"
-        )
-
-    prompt = _BATCH_VERIFY_PROMPT.format(
-        count=len(candidate_pairs),
-        pairs="\n\n".join(pairs_text),
-    )
-
-    try:
-        logger.info(f"Stage 3 LLM 批量验证: {len(candidate_pairs)} 对 (1 次 API 调用)")
-        content = await _call_llm_with_retry(
-            prompt, response_format={"type": "json_object"}, user_id=user_id
-        )
-        result = _extract_json(content)
-
-        stage3_count = 0
-        for pr in result.get("results", []):
-            pair_id = pr.get("pair_id", 0) - 1  # 1-indexed → 0-indexed
-            if pair_id < 0 or pair_id >= len(candidate_pairs):
-                continue
-            if not pr.get("merge"):
-                continue
-
-            confidence = float(pr.get("confidence", 0.8))
-            i1, i2, _ = candidate_pairs[pair_id]
-            q1 = remaining[i1]
-            q2 = remaining[i2]
-
-            if q1['id'] in merged_ids or q2['id'] in merged_ids:
-                continue
-
-            # 保留 frequency 更高的作为存活题
-            if q1.get('frequency', 1) >= q2.get('frequency', 1):
-                survivor_id, merged_id = q1['id'], q2['id']
-            else:
-                survivor_id, merged_id = q2['id'], q1['id']
-
-            merged_pairs.append((survivor_id, merged_id, confidence))
-            merged_ids.add(merged_id)
-            stage3_count += 1
-
-        logger.info(f"Stage 3 验证通过: {stage3_count} 对")
-
-    except Exception as e:
-        logger.warning(f"Stage 3 LLM 验证失败: {e}")
-
-    unmatched = [q['id'] for q in remaining if q['id'] not in merged_ids]
-    return {"merged": merged_pairs, "unmatched": unmatched}
 
 
 # ═══════════════════════════════════════════════════════════════

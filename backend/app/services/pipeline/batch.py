@@ -118,7 +118,7 @@ async def _load_existing_clusters_by_cat2(job_position: str) -> Dict[str, List[D
         rows = conn.execute(
             "SELECT id, question, cat2, embedding "
             "FROM question_bank "
-            "WHERE status = 'approved' AND deleted_at IS NULL AND job_position = ? "
+            "WHERE status = 'approved' AND deleted_at IS NULL AND duplicate_of IS NULL AND job_position = ? "
             "ORDER BY id LIMIT ? OFFSET ?",
             (job_position, _EXISTING_CLUSTERS_PAGE_SIZE, offset)
         ).fetchall()
@@ -728,19 +728,22 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
 
     cluster_results = await asyncio.gather(*cluster_tasks, return_exceptions=True)
 
-    # 顺序执行 DB 写入
+    # 顺序执行 DB 写入（按组批量提交事务，减少 BEGIN/COMMIT 开销）
     for res in cluster_results:
         if isinstance(res, Exception):
             logger.warning(f"[Compaction] 并发聚类任务异常: {res}")
             continue
-        for survivor, to_merge, conf, cat2 in res:
-            def _do_merge(s=survivor, m=to_merge, c=conf, _cat2=cat2):
-                conn = get_db_connection()
-                conn.execute("BEGIN")
-                try:
+        if not res:
+            continue
+
+        def _do_batch_merge(ops=res):
+            conn = get_db_connection()
+            conn.execute("BEGIN")
+            try:
+                for survivor, to_merge, conf, cat2 in ops:
                     existing = conn.execute(
                         "SELECT sources, original_questions, original_question_sources, ai_answer "
-                        "FROM question_bank WHERE id = ?", (s['id'],)
+                        "FROM question_bank WHERE id = ?", (survivor['id'],)
                     ).fetchone()
                     try:
                         s_src = json.loads(existing['sources']) if existing['sources'] else []
@@ -755,22 +758,19 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
                     except Exception:
                         s_oqs_src = []
 
-                    # 保留 ai_answer:如果 survivor 没有,从被合并的题中获取
                     s_ai_answer = existing['ai_answer'] if existing else None
                     if not s_ai_answer:
-                        for entry in m:
+                        for entry in to_merge:
                             if entry.get('ai_answer'):
                                 s_ai_answer = entry['ai_answer']
                                 break
 
-                    # 合并前快照
-                    pre_snapshot = _snapshot_question(conn, s['id'])
-
+                    pre_snapshot = _snapshot_question(conn, survivor['id'])
                     seen_urls = {x.get('url') for x in s_src}
 
                     merged_ids = []
                     merged_questions = []
-                    for entry in m:
+                    for entry in to_merge:
                         merged_ids.append(entry['id'])
                         merged_questions.append(entry.get('question', ''))
 
@@ -808,47 +808,45 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
                         (len(s_oqs), json.dumps(s_src, ensure_ascii=False),
                          json.dumps(s_oqs, ensure_ascii=False),
                          json.dumps(s_oqs_src, ensure_ascii=False),
-                         s_ai_answer, s['id'])
+                         s_ai_answer, survivor['id'])
                     )
 
                     try:
-                        delete_all_for_qb(conn, s['id'])
+                        delete_all_for_qb(conn, survivor['id'])
                     except Exception:
                         pass
                     for src in s_src:
                         try:
-                            insert_source(conn, s['id'], src.get('url', ''), src.get('company', ''), src.get('round', ''))
+                            insert_source(conn, survivor['id'], src.get('url', ''), src.get('company', ''), src.get('round', ''))
                         except Exception:
                             pass
                     for oqs_entry in s_oqs_src:
                         try:
-                            insert_original_item(conn, s['id'], oqs_entry.get('question', ''), oqs_entry.get('sources', []))
+                            insert_original_item(conn, survivor['id'], oqs_entry.get('question', ''), oqs_entry.get('sources', []))
                         except Exception:
                             pass
 
-                    # 合并后快照 & 记录历史
-                    post_snapshot = _snapshot_question(conn, s['id'])
+                    post_snapshot = _snapshot_question(conn, survivor['id'])
                     _record_merge_history(
-                        conn, s['id'],
+                        conn, survivor['id'],
                         merged_ids=merged_ids,
                         merged_questions=merged_questions,
                         pre_snapshot=pre_snapshot,
                         post_snapshot=post_snapshot,
                         operation_type='compaction',
                         phase='compaction_mutual',
-                        confidence=c,
-                        cat2=_cat2,
+                        confidence=conf,
+                        cat2=cat2,
                         operator_id=user_id,
                     )
+                    total_merged += len(to_merge)
 
-                    conn.execute("COMMIT")
-                except Exception:
-                    conn.execute("ROLLBACK")
-                    raise
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
-            await run_db(_do_merge)
-            total_merged += len(to_merge)
-
+        await run_db(_do_batch_merge)
         await asyncio.sleep(0)
 
     # ── 合并质量监控统计 ──

@@ -153,3 +153,44 @@ def prefilter_centroids(
         {**with_emb[idx], "_similarity_score": score}
         for idx, score in zip(indices, scores)
     ]
+
+
+def prefilter_centroids_batch(
+    query_texts: List[str],
+    centroids: List[Dict],
+    top_k: int = 10,
+) -> Dict[int, List[Dict]]:
+    """批量预筛选：建一次 FAISS index，对多道新题分别查 top-K。
+
+    Args:
+        query_texts: 新题文本列表
+        centroids: [{"id": int, "question": str, "embedding"?: ndarray}, ...]
+        top_k: 每道题返回的最大候选数
+
+    Returns:
+        {query_index: [centroid_dicts...]}，每个 centroid 附 _similarity_score
+    """
+    with_emb = [c for c in centroids if c.get("embedding") is not None]
+    if not with_emb:
+        return {i: centroids for i in range(len(query_texts))}
+
+    # 建一次 index
+    vectors = np.array([c["embedding"] for c in with_emb], dtype=np.float32)
+    index = build_index(vectors)
+
+    # 批量编码所有新题（一次 encode_texts 调用）
+    query_embs = encode_texts(query_texts)
+    if query_embs.shape[0] == 0:
+        return {i: centroids for i in range(len(query_texts))}
+
+    # 批量搜索
+    k = min(top_k, len(with_emb))
+    all_scores, all_indices = index.search(query_embs, k)
+
+    results = {}
+    for qi in range(len(query_texts)):
+        results[qi] = [
+            {**with_emb[idx], "_similarity_score": float(score)}
+            for idx, score in zip(all_indices[qi], all_scores[qi])
+        ]
+    return results
