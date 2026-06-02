@@ -88,6 +88,14 @@ def apply_matched(conn, matched, job_position, saved_answers):
                 "question": q,
                 "sources": [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}]
             })
+        elif q and url_is_new:
+            # 原题文本已存在但来源 URL 是新的 → 追加来源到已有原题的 sources 映射
+            for oqs_entry in oqs_src:
+                if oqs_entry.get('question') == q:
+                    oqs_entry.setdefault('sources', []).append({
+                        "url": url, "company": item.get('company', ''), "round": item.get('round', '')
+                    })
+                    break
 
         ai_answer = existing['ai_answer']
         if not ai_answer:
