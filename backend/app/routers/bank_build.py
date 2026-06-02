@@ -316,7 +316,7 @@ async def compact_singletons(
             from app.services.pipeline import compact_singletons_in_db
             mode = "匹配已有聚类+内部合并" if match_existing else "仅内部合并"
             yield f"data: {json.dumps({'type': 'init', 'step': 'compact', 'message': f'开始孤岛碎片整理（{mode}）...'})}\n\n"
-            result = await compact_singletons_in_db(user_id=admin['id'], match_existing=match_existing)
+            result = await compact_singletons_in_db(user_id=None, match_existing=match_existing, operator_id=admin['id'])
             yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
         except Exception as e:
             logger.exception("孤岛碎片整理失败")

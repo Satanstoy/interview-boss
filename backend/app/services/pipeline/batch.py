@@ -581,7 +581,7 @@ async def _match_singletons_to_existing(
                                           operation_type='compaction',
                                           phase='compaction_to_existing',
                                           cat2=e.get('cat2', ''),
-                                          operator_id=user_id,
+                                          operator_id=_audit_id,
                                           confidence=c)
                     conn.execute("COMMIT")
                 except Exception:
@@ -598,12 +598,15 @@ async def _match_singletons_to_existing(
     return matched_ids
 
 
-async def compact_singletons_in_db(user_id: int = None, match_existing: bool = False) -> Dict:
+async def compact_singletons_in_db(user_id: int = None, match_existing: bool = False, operator_id: int = None) -> Dict:
     """孤岛碎片整理:对 frequency=1 的独立题按 cat2 做二次合并
 
     Args:
+        user_id: LLM 调用使用的用户 ID（None=全局配置，公共题库应始终为 None）
         match_existing: 是否先匹配已有 frequency>1 聚类(默认跳过,因 API 延迟高)
+        operator_id: 审计记录的操作者 ID（merge_history 用）
     """
+    _audit_id = operator_id or user_id  # 审计用，优先 operator_id
     _SINGLETONS_PAGE_SIZE = 200
 
     singletons = []
@@ -837,7 +840,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
                         phase='compaction_mutual',
                         confidence=conf,
                         cat2=cat2,
-                        operator_id=user_id,
+                        operator_id=_audit_id,
                     )
                     total_merged += len(to_merge)
 
