@@ -135,6 +135,8 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
              job_position)
         )
         new_id = cursor.lastrowid
+        # 设置 cluster_id = 自身 id（新建聚类自己就是代表）
+        conn.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (new_id, new_id))
         new_qb_ids.append(new_id)
 
         for s in entry['sources']:

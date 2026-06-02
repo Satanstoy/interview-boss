@@ -4,7 +4,8 @@
 import json
 import asyncio
 import logging
-from typing import List, Dict
+import numpy as np
+from typing import List, Dict, Optional
 
 from app.db.connection import get_db_connection, run_db
 from app.db.question_bank_sources import delete_all_for_qb, insert_source, insert_original_item
@@ -20,6 +21,29 @@ from .writer import apply_matched, insert_new_clusters, tag_and_write_details
 logger = logging.getLogger("interview-boss")
 
 _EXISTING_CLUSTERS_PAGE_SIZE = 100
+
+
+def _compute_merge_confidence(survivor_id: int, merged_question: str) -> float:
+    """使用 embedding 相似度计算合并置信度的 fallback。
+
+    当 LLM 验证未返回有效置信度时，使用此函数计算。
+    """
+    try:
+        from app.services.embedding_service import encode_texts, compute_confidence_from_embeddings
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT embedding FROM question_bank WHERE id = ?", (survivor_id,)
+        ).fetchone()
+        if not row or not row[0]:
+            return 0.70
+        survivor_emb = np.frombuffer(row[0], dtype=np.float32)
+        merged_emb = encode_texts([merged_question])
+        if merged_emb.shape[0] == 0:
+            return 0.70
+        return compute_confidence_from_embeddings(survivor_emb, merged_emb[0])
+    except Exception as e:
+        logger.warning(f"[置信度fallback] embedding 计算失败: {e}")
+        return 0.70
 
 
 # ──────────────────────────── 合并历史记录 ────────────────────────────
@@ -405,6 +429,12 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
 
     # 合并后快照 & 记录历史
     post_snapshot = _snapshot_question(conn, survivor_id)
+    # 置信度 fallback: 当 confidence=0 时用 embedding 相似度估算
+    final_confidence = confidence
+    if final_confidence <= 0:
+        final_confidence = _compute_merge_confidence(survivor_id, entry.get('question', ''))
+        if final_confidence > 0:
+            logger.info(f"  [置信度fallback] 原始confidence=0, embedding估算={final_confidence:.2f}")
     _record_merge_history(
         conn, survivor_id,
         merged_ids=[entry['id']],
@@ -413,7 +443,7 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
         post_snapshot=post_snapshot,
         operation_type=operation_type,
         phase=phase,
-        confidence=confidence,
+        confidence=final_confidence,
         cat2=cat2 or entry.get('cat2', ''),
         operator_id=operator_id,
     )
@@ -538,10 +568,10 @@ async def _match_singletons_to_existing(
         for cid, entry, conf in res:
             if entry['id'] in matched_ids:
                 continue
-            # 跳过零置信度合并（验证未通过或置信度不足）
+            # 零置信度: 使用 embedding fallback 而非跳过
             if conf <= 0:
-                logger.info(f"[Compaction→Existing] 跳过零置信度合并: {entry['question'][:30]}")
-                continue
+                conf = _compute_merge_confidence(cid, entry.get('question', ''))
+                logger.info(f"[Compaction→Existing] 零置信度fallback: {entry['question'][:30]} → {conf:.2f}")
 
             def _merge(s_id=cid, e=entry, c=conf):
                 conn = get_db_connection()

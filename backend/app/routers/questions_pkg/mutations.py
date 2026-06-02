@@ -77,6 +77,8 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                      json.dumps(split_sources, ensure_ascii=False), admin_id, admin_id, orig_job_position)
                 )
                 new_id = cursor.execute("SELECT last_insert_rowid()").fetchone()[0]
+                # 设置 cluster_id = 自身 id（拆分出的新题目自己就是聚类代表）
+                cursor.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (new_id, new_id))
 
                 # Dual-write: insert sources into normalized tables
                 for s in split_sources:

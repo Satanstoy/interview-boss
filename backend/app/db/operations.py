@@ -326,6 +326,8 @@ def _apply_incremental_txn(cursor, matched, unmatched_rows, idx_to_row, submitte
             (q_text, cat1, cat2, tags, diff_tag, sources_json, oqs_json, owner_id, submitter_id, status, current_pos, dup_of)
         )
         new_id = cursor.lastrowid
+        # 设置 cluster_id = 自身 id（新建题目自己就是聚类代表）
+        cursor.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (new_id, new_id))
         # BUG-008: 同步 question_position 关联表，否则新题在主库 INNER JOIN 查询中不可见
         if pos_row_cache:
             cursor.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row_cache[0]))

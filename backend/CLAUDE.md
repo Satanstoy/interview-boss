@@ -29,7 +29,7 @@ Routers → Services → Core/DB → (external)
 - `llm.py` — AsyncOpenAI + tenacity 重试
 - `clustering.py` — LLM 聚类去重（cat2 预分组 + 两遍聚类）
 - `pipeline.py` — 提交处理流程
-- `embedding_service.py` — Embedding 向量编码 + FAISS 预筛选
+- `embedding_service.py` — Embedding 向量编码 + FAISS 预筛选 + 置信度计算
 - `chat_service.py` — 对话管理、记忆提取
 
 ### Core (`app/core/`) — 配置层
@@ -78,7 +78,7 @@ Routers → Services → Core/DB → (external)
 
 ## 关键模式
 
-- 题目去重：LLM 聚类（非 Embedding）
+- 题目去重：LLM 聚类 + Embedding 预筛选（cluster_id 显式标识，frequency 记录合并数）
 - 批量操作：SSE 流式推送进度
 - 管理员：`users.is_admin`；审核上传题目流程
 - DB 自动备份：破坏性操作前自动备份

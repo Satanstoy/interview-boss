@@ -353,3 +353,150 @@ async def get_merge_stats(admin: dict = Depends(get_admin_user)):
             }
 
     return await run_db(_query)
+
+
+@router.post("/fix-lone-islands")
+async def fix_lone_islands(
+    similarity_threshold: float = 0.85,
+    max_merges: int = 50,
+    admin: dict = Depends(get_admin_user),
+):
+    """修复孤岛题目: 用 embedding 相似度找出高相似度题目对并合并。
+
+    Args:
+        similarity_threshold: 相似度阈值，默认 0.85
+        max_merges: 最大合并数，防止过度合并
+    """
+    import numpy as np
+    from app.services.embedding_service import compute_confidence_from_embeddings
+
+    def _fix():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, question, cat2, frequency, embedding "
+                "FROM question_bank "
+                "WHERE duplicate_of IS NULL AND deleted_at IS NULL "
+                "AND status = 'approved' AND embedding IS NOT NULL"
+            ).fetchall()
+
+            if len(rows) < 2:
+                return {"message": "题目数不足", "merged": 0}
+
+            # 解码 embeddings
+            ids, questions, cat2s, freqs, embs = [], [], [], [], []
+            for r in rows:
+                emb = np.frombuffer(r['embedding'], dtype=np.float32)
+                ids.append(r['id'])
+                questions.append(r['question'])
+                cat2s.append(r['cat2'])
+                freqs.append(r['frequency'])
+                embs.append(emb)
+
+            X = np.array(embs)
+            norms = np.linalg.norm(X, axis=1, keepdims=True)
+            X_norm = X / norms
+            sim = X_norm @ X_norm.T
+
+            # 找高相似度对，优先合并 frequency 低的到高的
+            pairs = []
+            n = len(ids)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if sim[i, j] >= similarity_threshold:
+                        # 选择 frequency 更高的作为 survivor
+                        if freqs[i] >= freqs[j]:
+                            survivor_idx, merge_idx = i, j
+                        else:
+                            survivor_idx, merge_idx = j, i
+                        pairs.append((float(sim[i, j]), survivor_idx, merge_idx))
+
+            pairs.sort(key=lambda x: -x[0])
+
+            # 去重: 每个题目只能被合并一次
+            merged_set = set()
+            merge_results = []
+            for sim_score, s_idx, m_idx in pairs:
+                if len(merge_results) >= max_merges:
+                    break
+                if m_idx in merged_set or s_idx in merged_set:
+                    continue
+
+                s_id, m_id = ids[s_idx], ids[m_idx]
+                m_question = questions[m_idx]
+                confidence = compute_confidence_from_embeddings(embs[s_idx], embs[m_idx])
+
+                # 执行合并: 把 merge 题的原始问题移到 survivor
+                survivor = conn.execute(
+                    "SELECT original_questions, original_question_sources, sources, frequency "
+                    "FROM question_bank WHERE id = ?", (s_id,)
+                ).fetchone()
+                merged_q = conn.execute(
+                    "SELECT original_questions, original_question_sources, sources "
+                    "FROM question_bank WHERE id = ?", (m_id,)
+                ).fetchone()
+
+                if not survivor or not merged_q:
+                    continue
+
+                s_oqs = json.loads(survivor['original_questions']) if survivor['original_questions'] else []
+                m_oqs = json.loads(merged_q['original_questions']) if merged_q['original_questions'] else []
+                s_oqs_src = json.loads(survivor['original_question_sources']) if survivor['original_question_sources'] else []
+                m_oqs_src = json.loads(merged_q['original_question_sources']) if merged_q['original_question_sources'] else []
+                s_src = json.loads(survivor['sources']) if survivor['sources'] else []
+                m_src = json.loads(merged_q['sources']) if merged_q['sources'] else []
+
+                # 合并原始问题列表
+                for oq in m_oqs:
+                    if oq and oq not in s_oqs:
+                        s_oqs.append(oq)
+                # 如果 merge 题本身不在 oqs 中，添加
+                if m_question not in s_oqs:
+                    s_oqs.append(m_question)
+                s_oqs_src.extend(m_oqs_src)
+
+                # 合并 sources
+                seen = {(s.get('url', ''), s.get('company', ''), s.get('round', '')) for s in s_src}
+                for s in m_src:
+                    key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    if key not in seen:
+                        seen.add(key)
+                        s_src.append(s)
+
+                new_freq = len(s_oqs)
+
+                # 更新 survivor
+                conn.execute(
+                    "UPDATE question_bank SET frequency = ?, original_questions = ?, "
+                    "original_question_sources = ?, sources = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_freq, json.dumps(s_oqs, ensure_ascii=False),
+                     json.dumps(s_oqs_src, ensure_ascii=False),
+                     json.dumps(s_src, ensure_ascii=False), s_id)
+                )
+
+                # 物理删除被合并的题目
+                conn.execute("DELETE FROM question_bank WHERE id = ?", (m_id,))
+
+                merged_set.add(m_idx)
+                merge_results.append({
+                    "survivor_id": s_id,
+                    "merged_id": m_id,
+                    "merged_question": m_question,
+                    "similarity": round(sim_score, 3),
+                    "confidence": confidence,
+                })
+
+                logger.info(
+                    f"[孤岛修复] 合并 {m_id}→{s_id}, "
+                    f"sim={sim_score:.3f}, conf={confidence:.2f}"
+                )
+
+            conn.commit()
+            return {
+                "total_scanned": len(rows),
+                "high_sim_pairs": len(pairs),
+                "merged": len(merge_results),
+                "details": merge_results,
+            }
+
+    return await run_db(_fix)

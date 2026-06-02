@@ -2,6 +2,13 @@ import re
 import base64
 
 
+# LLM 生成的 cat2 变体 → 标准 taxonomy 值的映射
+_TAXONOMY_ALIASES = {
+    "E1.算法手撕与数据结构": "E1.数据结构",
+    "E1.算法手撕": "E2.算法手撕",
+}
+
+
 def encode_image(file_bytes: bytes) -> str:
     return base64.b64encode(file_bytes).decode('utf-8')
 
@@ -15,6 +22,9 @@ def normalize_category(text: str) -> str:
     if ',' in text:
         text = text.split(',')[0].strip()
     text = re.sub(r'^([A-Za-z]+\d*)\.\s+', r'\1.', text)
+    # taxonomy 别名映射: 将 LLM 变体映射到标准值
+    if text in _TAXONOMY_ALIASES:
+        text = _TAXONOMY_ALIASES[text]
     return text
 
 

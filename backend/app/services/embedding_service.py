@@ -93,6 +93,33 @@ def search_index(index, query: np.ndarray, top_k: int = 10) -> Tuple[List[int], 
     return indices[0].tolist(), scores[0].tolist()
 
 
+def compute_confidence_from_embeddings(emb1, emb2) -> float:
+    """根据两个 embedding 向量的余弦相似度计算合并置信度。
+
+    映射规则:
+    - sim >= 0.95 → 0.95（几乎确定相同）
+    - sim >= 0.85 → 0.85（高度相似）
+    - sim >= 0.70 → 0.75（中等相似）
+    - sim < 0.70 → 0.60（低相似度）
+
+    Args:
+        emb1, emb2: numpy float32 向量（已归一化），或 None
+
+    Returns:
+        置信度浮点数，范围 [0.0, 1.0]
+    """
+    if emb1 is None or emb2 is None:
+        return 0.0
+    sim = float(np.dot(emb1, emb2))
+    if sim >= 0.95:
+        return 0.95
+    if sim >= 0.85:
+        return 0.85
+    if sim >= 0.70:
+        return 0.75
+    return 0.60
+
+
 def prefilter_centroids(
     query_text: str,
     centroids: List[Dict],
