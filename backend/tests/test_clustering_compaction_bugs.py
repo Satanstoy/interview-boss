@@ -12,13 +12,12 @@ from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 class TestBug001Phase15Validation:
     """BUG-001: Phase 1.5 匹配无验证保护，LLM 结果直接使用"""
 
-    def test_phase15_has_no_validation(self):
-        """确认 Phase 1.5 缺少 _validate_merges 调用"""
+    def test_phase15_has_validation_after_fix(self):
+        """修复后：Phase 1.5 应包含 _validate_merges 调用"""
         import inspect
         from app.services.clustering import _match_and_cluster_cat2
         source = inspect.getsource(_match_and_cluster_cat2)
 
-        # Phase 1.5 代码块在 "Phase 1.5" 注释之后
         phase15_start = source.find("Phase 1.5")
         phase2_start = source.find("Phase 2")
         if phase15_start == -1 or phase2_start == -1:
@@ -26,7 +25,7 @@ class TestBug001Phase15Validation:
 
         phase15_code = source[phase15_start:phase2_start]
         has_validation = "_validate_merges" in phase15_code
-        assert not has_validation, "BUG-001: Phase 1.5 缺少 _validate_merges 验证"
+        assert has_validation, "修复后：Phase 1.5 应有 _validate_merges 验证"
 
 
 # ─────────────── BUG-002: LLM 重复匹配无去重 ───────────────
@@ -120,8 +119,8 @@ class TestBug004V2NoMergeHistory:
 class TestBug005BuildNewEntryDedup:
     """BUG-005: _build_new_entry 的 original_questions 未去重"""
 
-    def test_duplicate_questions_inflated_frequency(self):
-        """修复前：重复题目文本导致 frequency 虚高"""
+    def test_duplicate_questions_deduped_frequency(self):
+        """修复后：重复题目应被去重，frequency 正确"""
         from app.services.pipeline.writer import _build_new_entry
 
         cluster = {
@@ -135,9 +134,9 @@ class TestBug005BuildNewEntryDedup:
 
         entry = _build_new_entry(cluster, job_position="")
 
-        # BUG: frequency=2 但只有一个不同的 question
-        assert entry['frequency'] == 2, "BUG-005: 重复题目导致 frequency 虚高"
-        assert len(entry['original_questions']) == 2, "BUG-005: original_questions 包含重复"
+        # 修复后：frequency=1（去重后只有一个不同题目）
+        assert entry['frequency'] == 1, "修复后：重复题目应被去重"
+        assert len(entry['original_questions']) == 1, "修复后：original_questions 不含重复"
 
 
 # ─────────────── BUG-006: O(N*M) 性能问题 ───────────────
@@ -145,14 +144,13 @@ class TestBug005BuildNewEntryDedup:
 class TestBug006Performance:
     """BUG-006: full_recluster_hybrid 中的 O(N*M) 线性扫描"""
 
-    def test_full_recluster_uses_linear_scan(self):
-        """确认 full_recluster_hybrid 使用线性扫描（无预构建 lookup）"""
+    def test_full_recluster_uses_lookup_after_fix(self):
+        """修复后：应使用预构建的 question_lookup 字典"""
         import inspect
         from app.services.clustering import full_recluster_hybrid
         source = inspect.getsource(full_recluster_hybrid)
-        # BUG: 使用 generator expression 在循环内扫描
-        has_linear_scan = "q['question'] for q in questions if q['id'] == m" in source
-        assert has_linear_scan, "BUG-006: 使用 O(N) 线性扫描"
+        has_lookup = "question_lookup" in source
+        assert has_lookup, "修复后：应使用 question_lookup 预构建字典"
 
 
 # ─────────────── BUG-007: frequency 计算不一致 ───────────────
@@ -160,10 +158,12 @@ class TestBug006Performance:
 class TestBug007FrequencyInconsistency:
     """BUG-007: 不同合并路径的 frequency 计算方式不一致"""
 
-    def test_batch_v2_uses_increment(self):
-        """确认 batch_v2 使用 frequency + 1"""
+    def test_batch_v2_uses_len_after_fix(self):
+        """修复后：batch_v2 应使用 len(original_questions) 计算 frequency"""
         import inspect
         from app.services.pipeline.batch_v2 import compact_singletons_in_db_v2
         source = inspect.getsource(compact_singletons_in_db_v2)
         has_increment = "frequency'] + 1" in source or "frequency'] +1" in source
-        assert has_increment, "BUG-007: batch_v2 使用 frequency + 1 方式"
+        has_len = "len(t_oqs)" in source
+        assert not has_increment, "修复后：不应使用 frequency + 1"
+        assert has_len, "修复后：应使用 len(t_oqs)"

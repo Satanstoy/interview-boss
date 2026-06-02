@@ -390,18 +390,18 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
 
     try:
         delete_all_for_qb(conn, survivor_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[合并] delete_all_for_qb 失败 (id={survivor_id}): {e}")
     for src in s_src:
         try:
             insert_source(conn, survivor_id, src.get('url', ''), src.get('company', ''), src.get('round', ''))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[合并] insert_source 失败 (id={survivor_id}): {e}")
     for oqs_entry in s_oqs_src:
         try:
             insert_original_item(conn, survivor_id, oqs_entry.get('question', ''), oqs_entry.get('sources', []))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[合并] insert_original_item 失败 (id={survivor_id}): {e}")
 
     # 合并后快照 & 记录历史
     post_snapshot = _snapshot_question(conn, survivor_id)

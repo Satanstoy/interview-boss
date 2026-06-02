@@ -214,7 +214,7 @@ async def compact_singletons_in_db_v2(user_id: int = None) -> Dict:
                                 "UPDATE question_bank SET frequency = ?, sources = ?, "
                                 "original_questions = ?, original_question_sources = ?, "
                                 "ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (target['frequency'] + 1, json.dumps(t_src, ensure_ascii=False),
+                                (len(t_oqs), json.dumps(t_src, ensure_ascii=False),
                                  json.dumps(t_oqs, ensure_ascii=False),
                                  json.dumps(t_oqs_src, ensure_ascii=False),
                                  t_ai_answer, m['cluster_id'])

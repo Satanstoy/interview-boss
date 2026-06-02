@@ -149,7 +149,9 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
             pair_lookup[(new_id, cluster_id)] = (new_q, cluster_q)
 
     if not pairs_text:
-        return (matches, {})
+        # 没有可验证的对时，拒绝所有匹配（而非放行）
+        logger.warning(f"[验证] 无法构建验证对 ({len(matches)} 匹配被拒绝)")
+        return ([], {})
 
     # 调用 LLM 验证
     prompt = VALIDATE_MERGES_PROMPT.format(
@@ -398,10 +400,12 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
             result = _extract_json(content)
 
             matched_cluster_ids = set()
+            processed_new_ids = set()
             for m in result.get("matches", []):
                 nid = str(m.get("new_id", ""))
                 cid = m.get("cluster_id")
-                if nid in unmatched_ids and cid is not None:
+                if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
+                    processed_new_ids.add(nid)
                     matched_cluster_ids.add(nid)
                     q = next((q for q in new_questions if str(q['id']) == nid), None)
                     if q:
@@ -455,11 +459,22 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
                 )
                 result = _extract_json(content)
 
+                # 验证 Phase 1.5 匹配（使用 recent_singletons 作为 cluster 列表）
+                raw_matches = result.get("matches", [])
+                if raw_matches:
+                    validated_matches, conf_map = await _validate_merges(
+                        raw_matches, unmatched_questions, recent_singletons, user_id
+                    )
+                else:
+                    validated_matches = []
+
                 matched_recent_ids = set()
-                for m in result.get("matches", []):
+                processed_new_ids = set()
+                for m in validated_matches:
                     nid = str(m.get("new_id", ""))
                     cid = m.get("cluster_id")
-                    if nid in unmatched_ids and cid is not None:
+                    if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
+                        processed_new_ids.add(nid)
                         matched_recent_ids.add(nid)
                         q = next((q for q in unmatched_questions if str(q['id']) == nid), None)
                         if q:
@@ -1170,6 +1185,9 @@ async def full_recluster_hybrid(
         questions, user_id=user_id, similarity_threshold=similarity_threshold
     )
 
+    # 构建 lookup 避免 O(N*M) 线性扫描
+    question_lookup = {q['id']: q['question'] for q in questions}
+
     # 执行合并
     for survivor_id, merged_id, confidence in result['merged']:
         def _do_merge(s=survivor_id, m=merged_id, c=confidence):
@@ -1190,7 +1208,7 @@ async def full_recluster_hybrid(
                     "operation_type, phase, confidence) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (s, json.dumps([m]),
-                     json.dumps([next((q['question'] for q in questions if q['id'] == m), '')]),
+                     json.dumps([question_lookup.get(m, '')]),
                      json.dumps({"merged_id": m}),
                      'three_stage', 'full_recluster', c)
                 )

@@ -193,7 +193,7 @@ def _build_new_entry(cluster, job_position):
             sources.append({"url": url, "company": item.get('company', ''), "round": item.get('round', '')})
             seen_urls.add(url)
         q = item.get('question', '')
-        if q:
+        if q and q not in original_questions:
             original_questions.append(q)
             original_question_sources.append({
                 "question": q,

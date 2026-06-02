@@ -123,27 +123,27 @@ class TestMatchAndClusterCat2:
     @pytest.mark.asyncio
     async def test_phase1_5_matches_recent_singletons(self, sample_new_questions, sample_existing_clusters, sample_recent_singletons):
         """测试：Phase 1.5 能匹配到最近 7 天的相似题"""
-        # 准备
-        new_questions = [sample_new_questions[0]]  # 只取第一道题
-        existing_clusters = []  # 没有已有聚类
-        
-        # 模拟 Phase 1.5 的 LLM 返回
+        new_questions = [sample_new_questions[0]]
+        existing_clusters = []
+
         mock_llm_response = '{"matches": [{"new_id": "101", "cluster_id": "50"}]}'
 
-        # 执行
         with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = sample_recent_singletons
             with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = mock_llm_response
                 with patch('app.services.clustering._extract_json') as mock_json:
                     mock_json.return_value = {"matches": [{"new_id": "101", "cluster_id": "50"}]}
-                    
-                    result = await _match_and_cluster_cat2(
-                        "C3.数据库基础",
-                        new_questions,
-                        existing_clusters,
-                        user_id=None
-                    )
+                    # Mock _validate_merges to pass through
+                    with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
+                        mock_validate.return_value = ([{"new_id": "101", "cluster_id": "50"}], {("101", "50"): 0.95})
+
+                        result = await _match_and_cluster_cat2(
+                            "C3.数据库基础",
+                            new_questions,
+                            existing_clusters,
+                            user_id=None
+                        )
 
         # 验证
         assert len(result["matched"]) == 1
@@ -281,21 +281,30 @@ class TestIntegration:
         with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
             with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
-                mock_llm.side_effect = [phase1_response, validate_response, phase15_response, phase2_response]
+                # Phase 1 matching, Phase 1.5 matching, Phase 2 clustering
+                # (Phase 1 validation is handled by mock_validate, not LLM)
+                mock_llm.side_effect = [phase1_response, phase15_response, phase2_response]
                 with patch('app.services.clustering._extract_json') as mock_json:
                     mock_json.side_effect = [
                         {"matches": [{"new_id": "101", "cluster_id": "1"}]},
-                        {"validations": [{"new_id": "101", "cluster_id": "1", "valid": True, "confidence": 0.95}]},
                         {"matches": [{"new_id": "102", "cluster_id": "50"}]},
                         {"clusters": []}
                     ]
-                    
-                    result = await _match_and_cluster_cat2(
-                        "C3.数据库基础",
-                        new_questions,
-                        existing_clusters,
-                        user_id=None
-                    )
+                    # Mock _validate_merges: first call for Phase 1, second for Phase 1.5
+                    with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
+                        mock_validate.side_effect = [
+                            # Phase 1 validation
+                            ([{"new_id": "101", "cluster_id": "1"}], {("101", "1"): 0.95}),
+                            # Phase 1.5 validation
+                            ([{"new_id": "102", "cluster_id": "50"}], {("102", "50"): 0.95}),
+                        ]
+
+                        result = await _match_and_cluster_cat2(
+                            "C3.数据库基础",
+                            new_questions,
+                            existing_clusters,
+                            user_id=None
+                        )
 
         # 验证
         assert len(result["matched"]) == 2
