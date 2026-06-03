@@ -34,8 +34,10 @@ services:
     env_file: backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - HF_HUB_OFFLINE=1
     volumes:
       - ./backend/data:/app/backend/data
+      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
     mem_limit: 512m
     cpus: 0.75
     networks:
@@ -61,8 +63,10 @@ services:
     env_file: backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - HF_HUB_OFFLINE=1
     volumes:
       - ./backend/data:/app/backend/data
+      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
     command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
     mem_limit: 256m
     cpus: 0.5

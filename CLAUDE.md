@@ -8,6 +8,7 @@
 - **Frontend**: Vue 3 (Composition API) / Vite / Tailwind CSS
 - **Deploy**: Docker Compose → nginx (port 80) → backend (8000) + worker + redis (6379)
 - **LLM**: OpenAI-compatible API (AsyncOpenAI + tenacity)
+- **Embedding**: BAAI/bge-small-zh-v1.5 (本地 HuggingFace 缓存，离线模式)
 
 ## Commands
 
@@ -112,3 +113,14 @@ nginx (port 80) → backend (port 8000) + worker
 - Docker Compose 编排，配置见 `docker-compose.yml`
 - Nginx 反代 `/api/` → backend:8000（180s 超时），其余 → 静态文件
 - 数据卷：`./backend/data` → 容器内 `/app/backend/data`
+- HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/root/.cache/huggingface`（只读）
+- 环境变量：`HF_HUB_OFFLINE=1`（强制离线模式，避免访问 huggingface.co）
+
+## 孤岛碎片整理（Compaction）
+
+- **方法**：纯 LLM 聚类（`_cluster_unmatched`），按 cat2 分组并行处理
+- **性能**：约 2 分钟/轮，134 个孤岛处理约 120 秒
+- **质量**：LLM 判断 + embedding 门控（阈值 0.6），避免误合并
+- **跳过**："其他"和空分类不参与聚类
+- **调用**：`POST /api/master-bank/compact`（SSE 流式推送）
+- **合并历史**：`merge_history` 表记录所有合并操作，支持回滚

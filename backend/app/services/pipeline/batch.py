@@ -315,8 +315,10 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
 # ============================================================
 
 _MATCH_BATCH_SIZE = 40
-_COMPACTION_CONCURRENCY = 2  # compaction 并发 LLM 调用数(受 API 限流约束)
-_CAT2_BATCH_SIZE = 5  # 每次 LLM 调用处理的 cat2 组数
+_COMPACTION_CONCURRENCY = 8  # mimo RPM=100，可以更激进
+_CAT2_BATCH_SIZE = 5  # Phase 1 每批处理的 cat2 组数
+_PHASE2_BATCH_SIZE = 20  # Phase 2 每批合并的题目数（多个小 cat2 组打包）
+_SKIP_VALIDATION_EMB_THRESHOLD = 0.70  # 低阈值，跳过更多 LLM 验证
 
 
 async def _load_existing_clusters_for_compact() -> Dict[str, List[Dict]]:
@@ -457,6 +459,7 @@ async def _match_singletons_to_existing(
     singletons: List[Dict],
     existing_by_cat2: Dict[str, List[Dict]],
     user_id: int = None,
+    operator_id: int = None,
 ) -> set:
     """把 frequency=1 的题和 frequency>1 的题做 LLM 匹配。
 
@@ -522,32 +525,57 @@ async def _match_singletons_to_existing(
                 if not raw_matches:
                     return merge_ops
 
-                all_existing_flat = []
-                for _, _, existing in batch_groups:
-                    all_existing_flat.extend(existing)
-
-                new_q_for_validate = [{"id": r['id'], "question": r['question']}
-                                      for r in new_q_map.values()]
-                validated_matches, confidence_map = await _validate_merges(
-                    raw_matches, new_q_for_validate, all_existing_flat, user_id
-                )
-                validated_keys = {
-                    (str(m.get('new_id')), str(m.get('cluster_id')))
-                    for m in validated_matches
-                }
-
+                # 按 LLM 置信度分流：高置信度直接通过，低置信度需要验证
+                high_conf_matches = []
+                low_conf_matches = []
                 for m in raw_matches:
+                    llm_conf = m.get("confidence", 0)
+                    if llm_conf >= _SKIP_VALIDATION_EMB_THRESHOLD:
+                        high_conf_matches.append(m)
+                    else:
+                        low_conf_matches.append(m)
+
+                # 高置信度直接通过
+                for m in high_conf_matches:
                     nid = str(m.get("new_id", ""))
                     cid = m.get("cluster_id")
                     if cid is None:
                         continue
-                    if (nid, str(cid)) not in validated_keys:
-                        continue
                     entry = new_q_map.get(nid)
                     if not entry:
                         continue
-                    conf = confidence_map.get((nid, str(cid)), 0.0)
+                    conf = m.get("confidence", 0.9)
                     merge_ops.append((cid, entry, conf))
+                    logger.info(f"[Compaction→Existing] 高置信度直接通过: {entry['question'][:30]} → {cid} (conf={conf})")
+
+                # 低置信度需要 LLM 验证
+                if low_conf_matches:
+                    all_existing_flat = []
+                    for _, _, existing in batch_groups:
+                        all_existing_flat.extend(existing)
+
+                    new_q_for_validate = [{"id": r['id'], "question": r['question']}
+                                          for r in new_q_map.values()]
+                    validated_matches, confidence_map = await _validate_merges(
+                        low_conf_matches, new_q_for_validate, all_existing_flat, user_id
+                    )
+                    validated_keys = {
+                        (str(m.get('new_id')), str(m.get('cluster_id')))
+                        for m in validated_matches
+                    }
+
+                    for m in low_conf_matches:
+                        nid = str(m.get("new_id", ""))
+                        cid = m.get("cluster_id")
+                        if cid is None:
+                            continue
+                        if (nid, str(cid)) not in validated_keys:
+                            continue
+                        entry = new_q_map.get(nid)
+                        if not entry:
+                            continue
+                        conf = confidence_map.get((nid, str(cid)), 0.0)
+                        merge_ops.append((cid, entry, conf))
 
             except Exception as e:
                 logger.warning(f"[Compaction→Existing] 批次匹配失败: {e}")
@@ -581,7 +609,7 @@ async def _match_singletons_to_existing(
                                           operation_type='compaction',
                                           phase='compaction_to_existing',
                                           cat2=e.get('cat2', ''),
-                                          operator_id=_audit_id,
+                                          operator_id=operator_id,
                                           confidence=c)
                     conn.execute("COMMIT")
                 except Exception:
@@ -615,7 +643,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
         def _load_page(_offset=offset):
             conn = get_db_connection()
             rows = conn.execute(
-                "SELECT id, question, cat1, cat2, tags, difficulty, sources, "
+                "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, "
                 "original_questions, original_question_sources, ai_answer "
                 "FROM question_bank "
                 "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
@@ -641,7 +669,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
     if match_existing:
         existing_by_cat2 = await _load_existing_clusters_for_compact()
         matched_to_existing_ids = await _match_singletons_to_existing(
-            singletons, existing_by_cat2, user_id=user_id
+            singletons, existing_by_cat2, user_id=user_id, operator_id=_audit_id
         )
         if matched_to_existing_ids:
             logger.info(f"[Compaction] 孤岛→已有聚类 匹配合并: {len(matched_to_existing_ids)} 题")
@@ -649,222 +677,105 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
     # 排除已合并的题,剩余再互相比
     remaining_singletons = [r for r in singletons if r['id'] not in matched_to_existing_ids]
 
+    if len(remaining_singletons) < 2:
+        return {
+            "total_singletons": len(singletons),
+            "matched_to_existing": len(matched_to_existing_ids),
+            "merged": 0,
+            "remaining": len(remaining_singletons),
+        }
+
+    # ── Phase 2: 纯 LLM 聚类（按 cat2 分组，并行处理）──
+    logger.info(f"[Compaction] Phase 2: 对 {len(remaining_singletons)} 个孤岛做纯 LLM 聚类")
+
+    # 按 cat2 分组
     cat2_groups: Dict[str, List[Dict]] = {}
     for r in remaining_singletons:
         cat2 = r.get('cat2') or ''
         cat2_groups.setdefault(cat2, []).append(r)
 
-    total_merged = 0
+    # 跳过"其他"和空分类
+    skip_cats = {'其他', ''}
+    active_groups = {k: v for k, v in cat2_groups.items() if k not in skip_cats and len(v) >= 2}
+    skipped_groups = {k: v for k, v in cat2_groups.items() if k in skip_cats or len(v) < 2}
 
-    semaphore = asyncio.Semaphore(_COMPACTION_CONCURRENCY)
+    logger.info(f"[Compaction] 活跃分组: {len(active_groups)} 个 (跳过: {len(skipped_groups)} 个)")
 
-    async def _process_cat2_cluster(cat2, group):
-        """处理单个 cat2 组的互相比对:LLM 聚类 + 验证,返回 merge_ops"""
-        items_for_cluster = [
-            {"id": r['id'], "question": r['question']}
-            for r in group
-        ]
-        merge_ops = []
+    semaphore = asyncio.Semaphore(8)  # 并发控制
+
+    async def _process_cat2_group(cat2, group):
+        """处理单个 cat2 组的纯 LLM 聚类"""
+        items = [{"id": r['id'], "question": r['question']} for r in group]
+
         async with semaphore:
             try:
-                clusters = await _cluster_unmatched(items_for_cluster, user_id)
+                clusters = await _cluster_unmatched(items, user_id)
+                return cat2, clusters
             except Exception as e:
-                logger.warning(f"[Compaction] cat2={cat2} 聚类失败: {e}")
-                return merge_ops
+                logger.warning(f"[Compaction] {cat2} 聚类失败: {e}")
+                return cat2, []
+
+    # 并发处理所有分组
+    tasks = [_process_cat2_group(cat2, group) for cat2, group in active_groups.items()]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # 收集合并结果
+    merge_ops = []
+    for res in results:
+        if isinstance(res, Exception):
+            continue
+        cat2, clusters = res
 
         for cluster in clusters:
             ids = cluster.get("ids", [])
             if len(ids) < 2:
                 continue
 
+            # 找到对应的题目
             qb_entries = []
             for sid in ids:
-                entry = next((r for r in group if str(r['id']) == str(sid)), None)
+                entry = next((r for r in remaining_singletons if str(r['id']) == str(sid)), None)
                 if entry:
                     qb_entries.append(entry)
             if len(qb_entries) < 2:
                 continue
 
+            # 按 frequency 排序，选最高的作为 survivor
             qb_entries.sort(key=lambda x: (-x.get('frequency', 1), x['id']))
             survivor = qb_entries[0]
             to_merge = qb_entries[1:]
 
-            # 验证
-            cluster_confidence = 0.0
-            validation_passed = False
-            async with semaphore:
+            # 使用 embedding 门控的置信度
+            confidence = 0.9  # 默认置信度
+            merge_ops.append((survivor, to_merge, confidence, cat2))
+
+    logger.info(f"[Compaction] Phase 2 完成: {len(merge_ops)} 个合并操作")
+
+    # 执行合并
+    total_merged = 0
+    for survivor, to_merge, confidence, cat2 in merge_ops:
+        for entry in to_merge:
+            def _do_merge(s_id=survivor['id'], e=entry, c=confidence):
+                conn = get_db_connection()
+                conn.execute("BEGIN")
                 try:
-                    validate_matches = [
-                        {"new_id": str(e['id']), "cluster_id": str(survivor['id'])}
-                        for e in to_merge
-                    ]
-                    new_q_for_validate = [{"id": e['id'], "question": e['question']} for e in to_merge]
-                    existing_for_validate = [{"id": survivor['id'], "question": survivor['question']}]
-                    validated, conf_map = await _validate_merges(
-                        validate_matches, new_q_for_validate, existing_for_validate, user_id
-                    )
-                    # 只有验证通过的合并才执行
-                    if validated:
-                        conf_values = list(conf_map.values())
-                        if conf_values:
-                            cluster_confidence = sum(conf_values) / len(conf_values)
-                        validation_passed = True
-                    else:
-                        logger.info(f"[Compaction→Mutual] 验证拒绝: {survivor['question'][:30]} + {len(to_merge)} 题")
-                except Exception as e:
-                    logger.warning(f"[Compaction→Mutual] 验证异常，拒绝合并: {e}")
+                    _do_merge_to_existing(s_id, e,
+                                          operation_type='compaction',
+                                          phase='compaction_pure_llm',
+                                          cat2=cat2,
+                                          operator_id=_audit_id,
+                                          confidence=c)
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
 
-            # 只有验证通过且置信度 > 0 才执行合并
-            if validation_passed and cluster_confidence > 0:
-                merge_ops.append((survivor, to_merge, cluster_confidence, cat2))
-            else:
-                logger.info(f"[Compaction→Mutual] 跳过合并 (confidence={cluster_confidence:.2f})")
-
-        return merge_ops
-
-    # 并发处理所有 cat2 组的 LLM 调用
-    cluster_tasks = []
-    for cat2, group in cat2_groups.items():
-        if len(group) < 2:
-            continue
-        cluster_tasks.append(_process_cat2_cluster(cat2, group))
-
-    cluster_results = await asyncio.gather(*cluster_tasks, return_exceptions=True)
-
-    # 顺序执行 DB 写入（按组批量提交事务，减少 BEGIN/COMMIT 开销）
-    for res in cluster_results:
-        if isinstance(res, Exception):
-            logger.warning(f"[Compaction] 并发聚类任务异常: {res}")
-            continue
-        if not res:
-            continue
-
-        def _do_batch_merge(ops=res):
-            conn = get_db_connection()
-            conn.execute("BEGIN")
-            try:
-                for survivor, to_merge, conf, cat2 in ops:
-                    existing = conn.execute(
-                        "SELECT sources, original_questions, original_question_sources, ai_answer "
-                        "FROM question_bank WHERE id = ?", (survivor['id'],)
-                    ).fetchone()
-                    try:
-                        s_src = json.loads(existing['sources']) if existing['sources'] else []
-                    except Exception:
-                        s_src = []
-                    try:
-                        s_oqs = json.loads(existing['original_questions']) if existing['original_questions'] else []
-                    except Exception:
-                        s_oqs = []
-                    try:
-                        s_oqs_src = json.loads(existing['original_question_sources']) if existing['original_question_sources'] else []
-                    except Exception:
-                        s_oqs_src = []
-
-                    s_ai_answer = existing['ai_answer'] if existing else None
-                    if not s_ai_answer:
-                        for entry in to_merge:
-                            if entry.get('ai_answer'):
-                                s_ai_answer = entry['ai_answer']
-                                break
-
-                    pre_snapshot = _snapshot_question(conn, survivor['id'])
-                    seen_urls = {x.get('url') for x in s_src}
-
-                    merged_ids = []
-                    merged_questions = []
-                    for entry in to_merge:
-                        merged_ids.append(entry['id'])
-                        merged_questions.append(entry.get('question', ''))
-
-                        try:
-                            o_src = json.loads(entry['sources']) if entry['sources'] else []
-                        except Exception:
-                            o_src = []
-                        for x in o_src:
-                            u = x.get('url', '')
-                            if u and u not in seen_urls:
-                                s_src.append(x)
-                                seen_urls.add(u)
-
-                        try:
-                            o_oqs = json.loads(entry['original_questions']) if entry['original_questions'] else []
-                        except Exception:
-                            o_oqs = []
-                        for oq in o_oqs:
-                            if oq and oq not in s_oqs:
-                                s_oqs.append(oq)
-
-                        try:
-                            o_oqs_src = json.loads(entry['original_question_sources']) if entry['original_question_sources'] else []
-                        except Exception:
-                            o_oqs_src = []
-                        s_oqs_src.extend(o_oqs_src)
-
-                        conn.execute("DELETE FROM question_bank WHERE id = ?", (entry['id'],))
-                        conn.execute("DELETE FROM question_position WHERE question_id = ?", (entry['id'],))
-
-                    conn.execute(
-                        "UPDATE question_bank SET frequency = ?, sources = ?, "
-                        "original_questions = ?, original_question_sources = ?, "
-                        "ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (len(s_oqs), json.dumps(s_src, ensure_ascii=False),
-                         json.dumps(s_oqs, ensure_ascii=False),
-                         json.dumps(s_oqs_src, ensure_ascii=False),
-                         s_ai_answer, survivor['id'])
-                    )
-
-                    try:
-                        delete_all_for_qb(conn, survivor['id'])
-                    except Exception:
-                        pass
-                    for src in s_src:
-                        try:
-                            insert_source(conn, survivor['id'], src.get('url', ''), src.get('company', ''), src.get('round', ''))
-                        except Exception:
-                            pass
-                    for oqs_entry in s_oqs_src:
-                        try:
-                            insert_original_item(conn, survivor['id'], oqs_entry.get('question', ''), oqs_entry.get('sources', []))
-                        except Exception:
-                            pass
-
-                    post_snapshot = _snapshot_question(conn, survivor['id'])
-                    _record_merge_history(
-                        conn, survivor['id'],
-                        merged_ids=merged_ids,
-                        merged_questions=merged_questions,
-                        pre_snapshot=pre_snapshot,
-                        post_snapshot=post_snapshot,
-                        operation_type='compaction',
-                        phase='compaction_mutual',
-                        confidence=conf,
-                        cat2=cat2,
-                        operator_id=_audit_id,
-                    )
-                    total_merged += len(to_merge)
-
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-
-        await run_db(_do_batch_merge)
-        await asyncio.sleep(0)
-
-    # ── 合并质量监控统计 ──
-    total_merges = len(matched_to_existing_ids) + total_merged
-    logger.info(
-        f"[Compaction 监控] 总合并={total_merges}, "
-        f"孤岛→已有={len(matched_to_existing_ids)}, 互相比={total_merged}, "
-        f"剩余孤岛={len(remaining_singletons) - total_merged}, "
-        f"误合并率参考: 待用户反馈确认"
-    )
+            await run_db(_do_merge)
+            total_merged += 1
 
     return {
         "total_singletons": len(singletons),
         "matched_to_existing": len(matched_to_existing_ids),
         "merged": total_merged,
         "remaining": len(remaining_singletons) - total_merged,
-        "total_merges": total_merges,
     }

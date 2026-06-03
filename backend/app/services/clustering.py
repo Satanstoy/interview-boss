@@ -10,7 +10,7 @@ from app.services.embedding_service import prefilter_centroids, prefilter_centro
 
 logger = logging.getLogger("interview-boss")
 
-MAX_CONCURRENCY = 4
+MAX_CONCURRENCY = 8  # 增加并发
 RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
 VALIDATION_CONFIDENCE_THRESHOLD = 0.8  # 验证置信度阈值
 _PREFILTER_TOP_K = 30  # Embedding 预筛选保留的候选 centroid 数量
@@ -773,7 +773,7 @@ async def _scan_async(func):
 _V2_GROUP_PROMPT = """你是面试题去重专家。以下是一个分类（{cat2}）下的面试题候选组，请将其中语义真正重复的题目分到同一组。
 
 判断准则（核心）：
-如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
+如果两道题考察的**核心知识点完全相同**，只是提问角度不同，才应该合并。
 
 可以合并（同一技术点的不同提问角度）：
 - "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
@@ -782,23 +782,25 @@ _V2_GROUP_PROMPT = """你是面试题去重专家。以下是一个分类（{cat
 - "volatile关键字的作用" ≈ "Java 中 volatile 有什么用"
 - "上下文过长怎么办" ≈ "agent 怎么管理长上下文"
 
-坚决不合并（负面示例 — 相似但不同知识点）：
-- 「Redis 缓存穿透」≠「Redis 缓存雪崩」
-- 「MySQL 索引优化」≠「MySQL 查询优化」
-- 「Vue 生命周期」≠「Vue 组件通信」
-- 「TCP 三次握手」≠「TCP 四次挥手」
-- 「JVM 垃圾回收」≠「JVM 内存模型」
+**坚决不合并（即使在同一分类下）：**
+- 不同技术主题：「数据库优化」≠「项目介绍」≠「代码质量」
+- 不同业务场景：「秒杀系统」≠「数据同步」≠「实习经历」
+- 泛化问题：「项目介绍」「拷打项目」这种泛化问题不要和其他具体问题合并
+- 只是都涉及"AI"但主题不同：「AI工具使用」≠「AI辅助编程质量」≠「AI前沿动态」
 
-**重要原则：真正重复的题目应该合并，不要遗漏。独立题目不需要输出。**
+**⚠️ 特别注意：**
+- 如果题目之间没有明确的知识点重叠，宁可不合并
+- "其他"分类下的题目通常不相关，要特别谨慎
+- 独立题目不需要输出，不要强行找关联
 
 【待聚类的题目】（分类：{cat2}，共 {count} 题）：
 {questions}
 
 返回 JSON 格式：
 {{"groups": [{{"ids": ["题号1", "题号2"], "representative": "表述最清晰的代表题"}}]}}
-只返回 JSON。"""
+只返回 JSON。没有可合并的就返回 {{"groups": []}}"""
 
-_V2_SIMILARITY_THRESHOLD = 0.55  # V2 embedding 粗筛阈值（低阈值高召回）
+_V2_SIMILARITY_THRESHOLD = 0.60  # V2 embedding 粗筛阈值
 _V2_FAISS_TOP_K = 10  # V2 FAISS 最近邻数
 
 
@@ -941,10 +943,19 @@ async def cluster_three_stage_v2(
     parent = {}
     rank = {}
 
-    for cat2, idx_set in cat2_candidates.items():
+    # 并发处理所有 cat2 组
+    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+    async def _process_cat2_group(cat2, idx_set):
+        """处理单个 cat2 组的 LLM 分组"""
         idx_list = sorted(idx_set)
         if len(idx_list) < 2:
-            continue
+            return
+
+        # "其他"分类跳过（是兜底分类，容易误合并）
+        if cat2 in ('其他', ''):
+            logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] 跳过（兜底分类，避免误合并）")
+            return
 
         # 初始化 union-find
         for idx in idx_list:
@@ -965,29 +976,33 @@ async def cluster_three_stage_v2(
             questions=questions_text,
         )
 
-        try:
-            content = await _call_llm_with_retry(
-                prompt, response_format={"type": "json_object"}, user_id=user_id
-            )
-            result = _extract_json(content)
+        async with semaphore:
+            try:
+                content = await _call_llm_with_retry(
+                    prompt, response_format={"type": "json_object"}, user_id=user_id
+                )
+                result = _extract_json(content)
 
-            for group in result.get("groups", []):
-                ids = [str(i) for i in group.get("ids", [])]
-                if len(ids) < 2:
-                    continue
-                # 找到对应的 remaining index
-                id_to_idx = {str(remaining[idx]['id']): idx for idx in idx_list}
-                group_indices = [id_to_idx[sid] for sid in ids if sid in id_to_idx]
-                if len(group_indices) < 2:
-                    continue
-                # Union-find 合并
-                for gi in group_indices[1:]:
-                    _union_merge(parent, rank, group_indices[0], gi)
+                for group in result.get("groups", []):
+                    ids = [str(i) for i in group.get("ids", [])]
+                    if len(ids) < 2:
+                        continue
+                    # 找到对应的 remaining index
+                    id_to_idx = {str(remaining[idx]['id']): idx for idx in idx_list}
+                    group_indices = [id_to_idx[sid] for sid in ids if sid in id_to_idx]
+                    if len(group_indices) < 2:
+                        continue
+                    # Union-find 合并
+                    for gi in group_indices[1:]:
+                        _union_merge(parent, rank, group_indices[0], gi)
 
-            logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组完成")
+                logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组完成")
 
-        except Exception as e:
-            logger.warning(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组失败: {e}")
+            except Exception as e:
+                logger.warning(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组失败: {e}")
+
+    # 并发执行所有 cat2 组
+    await asyncio.gather(*[_process_cat2_group(cat2, idx_set) for cat2, idx_set in cat2_candidates.items()])
 
     # 从 union-find 提取合并结果
     clusters = {}
