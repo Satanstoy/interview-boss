@@ -15,6 +15,15 @@ RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
 VALIDATION_CONFIDENCE_THRESHOLD = 0.8  # 验证置信度阈值
 _PREFILTER_TOP_K = 30  # Embedding 预筛选保留的候选 centroid 数量
 
+
+def _extract_id(raw) -> str:
+    """从 LLM 返回值提取纯数字 ID（兜底去掉「新题」「聚类」等前缀）"""
+    import re as _re
+    s = str(raw or "").strip()
+    m = _re.search(r'\d+', s)
+    return m.group(0) if m else s
+
+
 # ──────────────────────────── Prompts ────────────────────────────
 
 MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是将一批【新题目】归类到【已有标准题库】中。
@@ -22,25 +31,31 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 注意：【待匹配的新题目】是一个不超过 40 道题的微批次，请逐题判断是否与已有题库中的某道题真正重复。
 
 匹配判断准则（核心）：
-如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
+如果两道题考察的**核心知识点相同**，只是提问角度、详略、场景不同，就应该合并。
+如果一道题是另一道题的**子集或超集**，且答案高度重叠，也应该合并。
+如果两道题虽然属于同一技术领域，但需要**完全不同的一套答案**来回答，则不合并。
 
-可以合并（同一技术点的不同提问角度）：
-- "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
-- "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
-- "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
-- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
-- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
-- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
+✅ 可以合并的真实案例：
+- "多智能体框架你了解哪几个？" → "多智能体有哪些形式？"（同一问题的不同说法）
+- "你的 Agent 死循环了怎么办？" → "当Agent执行一个较长链路，出现死循环，如何做自动恢复？"（同一场景题）
+- "Workflow 和 Agent 到底有什么区别？" → "Agent Loop 是什么？和普通工作流有什么区别？"（核心都在对比 workflow 与 agent）
+- "介绍一下RAG的具体流程" → "RAG是怎么做的" → "RAG各个部分怎么做（端到端设计）"（同一问题不同详略）
+- "MCP 和 Function Calling 有什么区别？" → "function call和工具调用有什么区别" → "mcp和tool的区别"（都围绕 MCP vs FC vs Tool 的对比）
+- "挑一个项目介绍" → "介绍项目"（完全等价）
+- "上下文过长怎么办" → "token溢出怎么办" → "短期记忆如何处理上下文爆炸"（都涉及上下文/窗口溢出处理）
+- "SDD和skills的区别" → "mcp和skill" → "skill和prompt区别"（都涉及 Skill 机制的定位与对比）
+- "为什么选择用deepseek" → "模型选择" → "你用的是哪个基模型？"（都问模型选型理由）
 
-坚决不合并（负面示例 — 相似但不同知识点）：
-- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
-- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
-- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
-- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
-- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
+❌ 坚决不合并的真实案例：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同）
+- 「volatile关键字的作用」≠「Java JUC、JVM相关知识」（volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛，可包含线程池/AQS/CAS 等完全不同话题）
+- 「Agent Memory 怎么设计」≠「上下文漂移」（Memory 设计关注存储结构和检索策略，上下文漂移关注对话偏离主题的检测与纠正）
+- 「解释一下token」≠「Token 成本问题」（token 的定义/分词 vs token 计费/成本优化，需要不同答案）
+- 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」（过于宽泛的开场白 ≠ 具体子技术的考察）
+- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程完全不同）
 - 「高并发限流」≠「研究生方向」（完全不相关领域）
 
-**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
+**重要原则：真正重复的题目应该合并，不要遗漏。只在核心知识点确实不同时才拒绝。**
 
 【已有标准题库】（格式：[聚类ID] 代表题目）：
 {existing_clusters}
@@ -48,32 +63,35 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 【待匹配的新题目】（微批次，共 {count} 题）：
 {new_questions}
 
-请输出 JSON 格式，列出成功匹配的结果。每个匹配必须附带 confidence（0~1 小数，表示你对该匹配的确信程度）。如果没有匹配项，输出空数组。
-{{"matches": [{{"new_id": "新题ID", "cluster_id": "已有聚类ID", "confidence": 0.95}}]}}
+请输出 JSON 格式，列出成功匹配的结果。每个匹配必须附带 confidence（0~1 小数，表示你对该匹配的确信程度）。new_id 和 cluster_id 必须是纯数字 ID，不要添加任何前缀。如果没有匹配项，输出空数组。
+{{"matches": [{{"new_id": "6262", "cluster_id": "5878", "confidence": 0.95}}]}}
 只输出 JSON，不要解释。"""
 
 CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不超过 40 道题的微批次，请在它们内部寻找**真正重复**的题目并进行合并。
 
 合并判断准则（核心）：
-如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
+如果两道题考察的**核心知识点相同**，只是提问角度、详略、场景不同，就应该合并。
+如果一道题是另一道题的**子集或超集**，且答案高度重叠，也应该合并。
+如果两道题虽然属于同一技术领域，但需要**完全不同的一套答案**来回答，则不合并。
 
-可以合并（同一技术点的不同提问角度）：
-- "TCP为什么是三次握手" ≈ "TCP三次握手的作用"
-- "Redis 持久化方式有哪些？" ≈ "Redis 的 RDB 和 AOF 持久化有什么区别？"
-- "介绍一下 ReAct" ≈ "ReAct 范式的原理是什么"
-- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
-- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
-- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
+✅ 可以合并的真实案例：
+- "多智能体框架你了解哪几个？" + "多智能体有哪些形式？"（同一问题的不同说法）
+- "你的 Agent 死循环了怎么办？" + "当Agent执行一个较长链路，出现死循环，如何做自动恢复？"（同一场景题）
+- "介绍一下RAG的具体流程" + "RAG是怎么做的" + "RAG各个部分怎么做（端到端设计）"（同一问题不同详略）
+- "MCP 和 Function Calling 有什么区别？" + "function call和工具调用有什么区别" + "mcp和tool的区别"（都围绕 MCP vs FC vs Tool 的对比）
+- "上下文过长怎么办" + "token溢出怎么办" + "短期记忆如何处理上下文爆炸"（都涉及上下文/窗口溢出处理）
+- "SDD和skills的区别" + "mcp和skill" + "skill和prompt区别"（都涉及 Skill 机制的定位与对比）
+- "为什么选择用deepseek" + "模型选择" + "你用的是哪个基模型？"（都问模型选型理由）
 
-坚决不合并（负面示例 — 相似但不同知识点）：
-- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
-- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
-- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
-- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
-- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
-- 「高并发限流」≠「研究生方向」（完全不相关领域）
+❌ 坚决不合并的真实案例：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同）
+- 「volatile关键字的作用」≠「Java JUC、JVM相关知识」（volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛，可包含线程池/AQS/CAS 等完全不同话题）
+- 「Agent Memory 怎么设计」≠「上下文漂移」（Memory 设计关注存储结构和检索策略，上下文漂移关注对话偏离主题的检测与纠正）
+- 「解释一下token」≠「Token 成本问题」（token 的定义/分词 vs token 计费/成本优化，需要不同答案）
+- 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」（过于宽泛的开场白 ≠ 具体子技术的考察）
+- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程完全不同）
 
-**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
+**重要原则：真正重复的题目应该合并，不要遗漏。只在核心知识点确实不同时才拒绝。**
 
 【待聚类的新题目】（微批次，共 {count} 题）：
 {unmatched_questions}
@@ -86,28 +104,35 @@ CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不�
 VALIDATE_MERGES_PROMPT = """你是一个面试题去重验证专家。以下是一批待合并的题目对，请验证每一对是否真的应该合并。
 
 验证标准：
-如果两道题考察的核心知识点相同，只是提问角度不同，就应该合并。
+如果两道题考察的**核心知识点相同**，只是提问角度、详略、场景不同，应该合并（valid=true）。
+如果一道题是另一道题的**子集或超集**，且准备答案时高度重叠，应该合并（valid=true）。
+如果两道题虽然属于同一技术领域，但需要**完全不同的一套答案**来回答，不合并（valid=false）。
 
-可以合并（同一技术点的不同提问角度）：
-- "volatile关键字的作用" ≈ "Java JUC、JVM相关知识"（volatile 属于 JUC 范畴）
-- "上下文过长怎么办" ≈ "agent怎么获取上下文"（都涉及上下文管理）
-- "MCP介绍" ≈ "mcp和skills区别"（都涉及 MCP 概念）
+✅ 应该通过验证的真实案例（valid=true, confidence>=0.9）：
+- "多智能体框架你了解哪几个？" + "多智能体有哪些形式？" → 同一问题，不同说法
+- "你的 Agent 死循环了怎么办？" + "当Agent执行一个较长链路，出现死循环，如何做自动恢复？" → 同一场景题
+- "Workflow 和 Agent 到底有什么区别？" + "Agent Loop 是什么？和普通工作流有什么区别？" → 核心都在对比 workflow 与 agent
+- "MCP 和 Function Calling 有什么区别？" + "function call和工具调用有什么区别" → 都围绕 MCP vs FC vs Tool
+- "挑一个项目介绍" + "介绍项目" → 完全等价
+- "上下文过长怎么办" + "token溢出怎么办" → 都涉及上下文/窗口溢出处理
+- "SDD和skills的区别" + "mcp和skill" → 都涉及 Skill 机制的定位与对比
+- "为什么选择用deepseek" + "模型选择" → 都问模型选型理由
+- "介绍一下RAG的具体流程" + "RAG是怎么做的" → 同一问题不同详略
 
-坚决不合并（负面示例 — 相似但不同知识点）：
-- 「Redis 缓存穿透」≠「Redis 缓存雪崩」（同属缓存问题，但穿透是查询不存在的key，雪崩是大面积key同时过期）
-- 「MySQL 索引优化」≠「MySQL 查询优化」（索引优化是查询优化的子集，但查询优化还包括执行计划、SQL重写等）
-- 「Vue 生命周期」≠「Vue 组件通信」（同一框架不同主题，生命周期钩子 vs props/emit/provide-inject）
-- 「TCP 三次握手」≠「TCP 四次挥手」（建立连接 vs 断开连接，流程和状态机完全不同）
-- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法收集 vs 内存区域划分、可见性规则）
-- 「高并发限流」≠「研究生方向」（完全不相关领域）
-
-**重要原则：真正重复的题目应该合并，不要遗漏。只有完全不相关的题才不合并。**
+❌ 应该拒绝合并的真实案例（valid=false）：
+- 「Redis 缓存穿透」≠「Redis 缓存雪崩」→ 穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同
+- 「volatile关键字的作用」≠「Java JUC、JVM相关知识」→ volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛
+- 「Agent Memory 怎么设计」≠「上下文漂移」→ Memory 设计 vs 偏离检测，完全不同话题
+- 「解释一下token」≠「Token 定价/成本问题」→ token 的定义 vs token 计费，需要不同答案
+- 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」→ 过于宽泛的开场白 ≠ 具体子技术考察
+- 「TCP 三次握手」≠「TCP 四次挥手」→ 建立连接 vs 断开连接
 
 【待验证的题目对】：
 {pairs}
 
 请输出 JSON 格式，列出每一对的验证结果。confidence 为 0~1 之间的小数，表示你对该合并判断的确信程度。
-{{"validations": [{{"new_id": "新题ID", "cluster_id": "聚类ID", "valid": true/false, "confidence": 0.95, "reason": "判断理由（简短）"}}]}}
+new_id 和 cluster_id 必须是纯数字 ID，不要添加任何前缀。
+{{"validations": [{{"new_id": "6370", "cluster_id": "6289", "valid": true, "confidence": 0.95, "reason": "判断理由（简短）"}}]}}
 只输出 JSON，不要解释。"""
 
 
@@ -145,7 +170,7 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
         cluster_q = cluster_map.get(cluster_id)
 
         if new_q and cluster_q:
-            pairs_text.append(f"[新题 {new_id}] {new_q['question']}\n[聚类 {cluster_id}] {cluster_q['question']}")
+            pairs_text.append(f"题目A (ID={new_id}): {new_q['question']}\n题目B (ID={cluster_id}): {cluster_q['question']}")
             pair_lookup[(new_id, cluster_id)] = (new_q, cluster_q)
 
     if not pairs_text:
@@ -174,10 +199,10 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
             new_id = str(match.get('new_id', ''))
             cluster_id = str(match.get('cluster_id', ''))
 
-            # 查找对应的验证结果
+            # 查找对应的验证结果（用纯数字 ID 匹配，兼容 LLM 带前缀）
             validation = next(
                 (v for v in validations
-                 if str(v.get('new_id')) == new_id and str(v.get('cluster_id')) == cluster_id),
+                 if _extract_id(v.get('new_id')) == new_id and _extract_id(v.get('cluster_id')) == cluster_id),
                 None
             )
 
@@ -405,8 +430,8 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
             high_confidence_matches = []  # 直接通过的高置信度匹配
 
             for m in result.get("matches", []):
-                nid = str(m.get("new_id", ""))
-                cid = m.get("cluster_id")
+                nid = _extract_id(m.get("new_id", ""))
+                cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
                 conf = float(m.get("confidence", 0))
                 if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
                     processed_new_ids.add(nid)
@@ -438,8 +463,8 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
                     low_confidence_matches, new_questions, existing_clusters, user_id
                 )
                 for m in validated_matches:
-                    nid = str(m.get("new_id", ""))
-                    cid = m.get("cluster_id")
+                    nid = _extract_id(m.get("new_id", ""))
+                    cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
                     if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
                         matched_cluster_ids.add(nid)
                         q = next((q for q in new_questions if str(q['id']) == nid), None)
@@ -495,8 +520,8 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
                 matched_recent_ids = set()
                 processed_new_ids = set()
                 for m in validated_matches:
-                    nid = str(m.get("new_id", ""))
-                    cid = m.get("cluster_id")
+                    nid = _extract_id(m.get("new_id", ""))
+                    cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
                     if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
                         processed_new_ids.add(nid)
                         matched_recent_ids.add(nid)
@@ -662,11 +687,11 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None)
         group_matched_ids = set()
 
         for m in result.get("matches", []):
-            new_id = m.get("new_id")
-            cluster_id = m.get("cluster_id")
+            new_id = _extract_id(m.get("new_id"))
+            cluster_id = _extract_id(m.get("cluster_id"))
             try:
-                cluster_id_int = int(cluster_id) if cluster_id is not None else None
-                new_id_int = int(new_id) if new_id is not None else None
+                cluster_id_int = int(cluster_id) if cluster_id else None
+                new_id_int = int(new_id) if new_id else None
             except (ValueError, TypeError):
                 continue
             if new_id_int is not None and cluster_id_int is not None and cluster_id_int in id_to_qb:
