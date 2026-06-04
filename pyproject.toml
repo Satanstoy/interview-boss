@@ -27,6 +27,7 @@ dependencies = [
     "socksio>=1.0.0",
     "sentence-transformers>=5.5.1",
     "faiss-cpu>=1.14.2",
+    "structlog>=24.1.0",
 ]
 
 [dependency-groups]
