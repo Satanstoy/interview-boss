@@ -149,3 +149,52 @@ async def test_request_log_binds_contextvars(monkeypatch, capsys):
     assert len(handler_logs) >= 1
     log_entry = json.loads(handler_logs[0])
     assert "request_id" in log_entry
+
+
+# ── 前端错误上报端点测试 ──
+
+from fastapi.testclient import TestClient
+
+
+def test_error_report_endpoint_accepts_batch(client):
+    """POST /api/error-report 应接受批量错误并返回 ok"""
+    payload = {
+        "errors": [
+            {
+                "level": "error",
+                "message": "Cannot read properties of null",
+                "url": "http://localhost/practice",
+                "source": "PracticePanel.vue",
+                "lineno": 391,
+                "timestamp": "2026-06-05T14:30:00Z",
+            },
+            {
+                "level": "error",
+                "message": "Network error",
+                "url": "http://localhost/chat",
+                "timestamp": "2026-06-05T14:30:01Z",
+            },
+        ]
+    }
+
+    response = client.post("/api/error-report", json=payload)
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_error_report_endpoint_handles_empty_body(client):
+    """空 errors 数组也应返回 ok"""
+    response = client.post("/api/error-report", json={"errors": []})
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_error_report_endpoint_handles_malformed_json(client):
+    """畸形 JSON 不应导致 500"""
+    response = client.post(
+        "/api/error-report",
+        content=b"not json",
+        headers={"Content-Type": "application/json"},
+    )
+    # 应返回 ok: False 或 422，不应该是 500
+    assert response.status_code in (200, 422)
