@@ -24,6 +24,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── FastAPI 后端 ──
   backend:
@@ -35,6 +40,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - HF_HUB_OFFLINE=1
+      - ENV=production
     volumes:
       - ./backend/data:/app/backend/data
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
@@ -47,6 +53,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 15s
@@ -64,6 +71,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - HF_HUB_OFFLINE=1
+      - ENV=production
     volumes:
       - ./backend/data:/app/backend/data
       - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
@@ -77,6 +85,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    logging: *default-logging
 
   # ── Nginx（前端 + 反向代理）──
   nginx:
@@ -96,6 +105,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    logging: *default-logging
 
 networks:
   app-network:
