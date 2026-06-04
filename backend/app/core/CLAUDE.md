@@ -9,7 +9,7 @@
 | `config.py` | 数据库热加载配置（`_reload_from_db()`）、环境变量、`.env` 同步 |
 | `auth.py` | JWT Access Token (15min) + Refresh Token (HttpOnly Cookie, JTI 跟踪, 轮转) |
 | `prompts.py` | LLM 提示词模板（SYSTEM_PROMPT、TAGGING_PROMPT、ANSWER_PROMPT、CODING_REVIEW_PROMPT、CODING_HINT_PROMPT） |
-| `logging_config.py` | 日志配置（loguru） |
+| `logging_config.py` | 日志配置（structlog 双模式：生产 JSON / 开发彩色） |
 
 ## 关键模式
 

@@ -97,6 +97,8 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 - Python 依赖管理用 uv（`uv add`），运行/测试必须通过 Docker 容器执行，禁止宿主机直接 `uv run`
 - SQLite 迁移后必须重启 backend 容器
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
+- 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
+- Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
 
 ## Docs（历史经验库）
 
