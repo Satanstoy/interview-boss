@@ -6,6 +6,7 @@ import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
 import { MotionPlugin } from '@vueuse/motion'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+import { logger } from '@/utils/logger'
 
 /**
  * 全局错误捕获 & 白屏检测
@@ -14,16 +15,17 @@ import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
  * - 白屏检测: 页面加载后检测 DOM 是否为空，自动刷新兜底
  */
 
-// 生产环境错误上报（可对接 Sentry 等）
+// 生产环境错误上报（通过 sendBeacon 统一上报到后端）
 function reportError(errorInfo) {
-  // 开发环境 verbose 输出，生产环境只报 error
-  if (import.meta.env.DEV) {
-    console.error('[Global Error]', errorInfo)
-  } else {
-    console.error('[Global Error]', errorInfo.message || errorInfo)
-    // TODO: 接入真实上报服务
-    // navigator.sendBeacon('/api/error-report', JSON.stringify(errorInfo))
-  }
+  logger.error(errorInfo.message || 'Unknown error', {
+    type: errorInfo.type,
+    source: errorInfo.source,
+    lineno: errorInfo.lineno,
+    colno: errorInfo.colno,
+    stack: errorInfo.stack,
+    componentInfo: errorInfo.componentInfo,
+    component: errorInfo.componentName,
+  })
 }
 
 // 捕获 JS 运行时错误
