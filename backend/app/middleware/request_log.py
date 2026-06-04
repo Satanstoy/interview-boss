@@ -1,15 +1,32 @@
+# backend/app/middleware/request_log.py
+import structlog
 import time
-import logging
-from fastapi import Request
+import uuid
 
-logger = logging.getLogger("interview-boss")
+logger = structlog.stdlib.get_logger("middleware")
 
 
-async def log_requests(request: Request, call_next):
-    """记录每个请求的方法、路径、状态码、耗时"""
-    start = time.time()
+async def log_requests(request, call_next):
+    """记录请求日志，绑定 request_id 到上下文"""
+    request_id = uuid.uuid4().hex[:8]
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+    )
+
+    start = time.perf_counter()
     response = await call_next(request)
-    elapsed = round((time.time() - start) * 1000, 1)
-    level = logging.WARNING if response.status_code >= 400 else logging.INFO
-    logger.log(level, "%s %s → %d (%.1fms)", request.method, request.url.path, response.status_code, elapsed)
+    duration_ms = round((time.perf_counter() - start) * 1000, 1)
+
+    log_fn = logger.warning if response.status_code >= 400 else logger.info
+    log_fn(
+        "request_completed",
+        status=response.status_code,
+        duration_ms=duration_ms,
+    )
+
+    response.headers["X-Request-ID"] = request_id
     return response

@@ -84,3 +84,68 @@ def test_contextvars_request_id_propagation(monkeypatch, capsys):
     assert log_entry.get("request_id") == "test123"
 
     structlog.contextvars.clear_contextvars()
+
+
+# ── 请求日志中间件测试 ──
+
+import asyncio
+import json
+import logging
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+@pytest.mark.asyncio
+async def test_request_log_adds_request_id_to_response():
+    """中间件应在响应头中添加 X-Request-ID"""
+    from app.middleware.request_log import log_requests
+
+    async def mock_call_next(request):
+        return Response("ok", status_code=200)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/test",
+        "query_string": b"",
+        "headers": [],
+    }
+    request = Request(scope)
+
+    response = await log_requests(request, mock_call_next)
+
+    assert "x-request-id" in response.headers
+    assert len(response.headers["x-request-id"]) == 8
+
+
+@pytest.mark.asyncio
+async def test_request_log_binds_contextvars(monkeypatch, capsys):
+    """中间件应将 request_id 绑定到 contextvars"""
+    monkeypatch.setenv("ENV", "production")
+    from app.core.logging_config import setup_logging
+    setup_logging()
+
+    from app.middleware.request_log import log_requests
+
+    async def mock_call_next(request):
+        logger = logging.getLogger("interview-boss")
+        logger.info("inside_handler")
+        return Response("ok", status_code=200)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/test",
+        "query_string": b"",
+        "headers": [],
+    }
+    request = Request(scope)
+
+    response = await log_requests(request, mock_call_next)
+
+    captured = capsys.readouterr()
+    lines = [l for l in captured.out.strip().split('\n') if l.strip()]
+    handler_logs = [l for l in lines if "inside_handler" in l]
+    assert len(handler_logs) >= 1
+    log_entry = json.loads(handler_logs[0])
+    assert "request_id" in log_entry
