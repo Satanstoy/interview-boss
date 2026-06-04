@@ -81,3 +81,48 @@ class TestFixLoneIslands:
 
         assert s_oqs.count("问题A") == 1, f"问题A 不应重复, 实际出现 {s_oqs.count('问题A')} 次"
         assert len(s_oqs) == 3, f"应有 3 个不同问题, 实际={len(s_oqs)}"
+
+    def test_singleton_merge_never_writes_frequency_zero(self, test_db):
+        """BUG: 单例合并时 original_questions=[] 不能导致 survivor frequency=0"""
+        from app.services.pipeline.batch import _do_merge_to_existing
+
+        test_db.execute(
+            "INSERT INTO question_bank "
+            "(id, question, cat1, cat2, frequency, sources, original_questions, "
+            "original_question_sources, status) "
+            "VALUES (1, 'Agent 死循环如何恢复？', 'B', 'B6.评估安全与优化', 1, ?, '[]', '[]', 'approved')",
+            (json.dumps([{"url": "https://a.example", "company": "A", "round": "一面"}]),),
+        )
+        test_db.execute(
+            "INSERT INTO question_bank "
+            "(id, question, cat1, cat2, frequency, sources, original_questions, "
+            "original_question_sources, status) "
+            "VALUES (2, '你的 Agent 死循环了怎么办？', 'B', 'B6.评估安全与优化', 1, '[]', '[]', '[]', 'approved')"
+        )
+        test_db.commit()
+
+        _do_merge_to_existing(
+            1,
+            {
+                "id": 2,
+                "question": "你的 Agent 死循环了怎么办？",
+                "cat2": "B6.评估安全与优化",
+                "sources": "[]",
+                "original_questions": "[]",
+                "original_question_sources": "[]",
+            },
+            operation_type="test",
+            phase="unit",
+            confidence=0.95,
+        )
+        test_db.commit()
+
+        row = test_db.execute(
+            "SELECT frequency, original_questions FROM question_bank WHERE id = 1"
+        ).fetchone()
+        originals = json.loads(row["original_questions"])
+
+        assert row["frequency"] == 2
+        assert "Agent 死循环如何恢复？" in originals
+        assert "你的 Agent 死循环了怎么办？" in originals
+        assert test_db.execute("SELECT id FROM question_bank WHERE id = 2").fetchone() is None

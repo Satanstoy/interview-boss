@@ -18,7 +18,7 @@
 | `profile.py` | `/api/profile/*` | 用户配置（公共+管理员） |
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent） |
-| `admin_review.py` | `/api/admin/*` | 管理员审核 |
+| `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
 | `coding.py` | `/api/coding/*` | 手撕代码练习（题目/提交/错误统计） |
 | `health.py` | `/api/health` | 健康检查 |
 

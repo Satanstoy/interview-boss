@@ -120,7 +120,8 @@ nginx (port 80) → backend (port 8000) + worker
 
 - **方法**：纯 LLM 聚类（`_cluster_unmatched`），按 cat2 分组并行处理
 - **性能**：约 2 分钟/轮，134 个孤岛处理约 120 秒
-- **质量**：LLM 判断 + embedding 门控（阈值 0.6），避免误合并
+- **质量**：LLM 判断 + 二次验证；embedding 只能做候选排序/预筛，不能作为自动合并依据
 - **跳过**："其他"和空分类不参与聚类
 - **调用**：`POST /api/master-bank/compact`（SSE 流式推送）
 - **合并历史**：`merge_history` 表记录所有合并操作，支持回滚
+- **数据维护**：`POST /api/master-bank/clustering-maintenance`，默认 dry-run，只自动修确定性元数据和精确重复

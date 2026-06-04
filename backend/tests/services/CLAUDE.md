@@ -8,6 +8,7 @@
 |------|---------|
 | `test_analysis_flow.py` | 数据分析流程 |
 | `test_clustering_stability.py` | 聚类稳定性 |
+| `test_clustering_maintenance.py` | 聚类维护与确定性数据修复 |
 | `test_cluster.py` | 聚类逻辑 |
 | `test_context_builder.py` | Chat 上下文构建 |
 | `test_llm_dual_format.py` | LLM 双格式解析（OpenAI/Anthropic） |
@@ -20,5 +21,5 @@
 ## 运行
 
 ```bash
-uv run pytest backend/tests/services/ -q
+docker compose exec backend pytest backend/tests/services/ -q
 ```

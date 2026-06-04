@@ -18,6 +18,8 @@
 - 批处理入口在 `batch.py`，不要绕过直接调用内部函数
 - 队列状态通过 `queue.py` 管理，禁止直接操作数据库队列表
 - 数据清洗规则在 `sanitize.py` 的 `_BLACKLIST_PHRASES` 中维护
+- 合并写库统一走 `batch.py` 的 helper，`frequency` 必须等于去重后的 `original_questions` 数量且最低为 1
+- compaction 的 LLM 匹配必须二次验证；embedding 阈值不得作为自动合并依据
 
 ## 修改后必做
 

@@ -23,27 +23,115 @@ logger = logging.getLogger("interview-boss")
 _EXISTING_CLUSTERS_PAGE_SIZE = 100
 
 
-def _compute_merge_confidence(survivor_id: int, merged_question: str) -> float:
-    """使用 embedding 相似度计算合并置信度的 fallback。
+async def _run_db(func):
+    """Use the current db.connection.run_db so tests can patch thread behavior."""
+    import app.db.connection as db_module
+    return await db_module.run_db(func)
 
-    当 LLM 验证未返回有效置信度时，使用此函数计算。
+
+def _compute_merge_confidence(survivor_id: int, merged_question: str) -> float:
+    """合并置信度 fallback。
+
+    历史上 embedding 阈值很难稳定控制误合并，这里只做文本包含/精确匹配
+    的保守估算，避免把向量相似度当作自动合并依据。
     """
     try:
-        from app.services.embedding_service import encode_texts, compute_confidence_from_embeddings
         conn = get_db_connection()
         row = conn.execute(
-            "SELECT embedding FROM question_bank WHERE id = ?", (survivor_id,)
+            "SELECT question, original_questions FROM question_bank WHERE id = ?", (survivor_id,)
         ).fetchone()
-        if not row or not row[0]:
+        if not row:
             return 0.70
-        survivor_emb = np.frombuffer(row[0], dtype=np.float32)
-        merged_emb = encode_texts([merged_question])
-        if merged_emb.shape[0] == 0:
-            return 0.70
-        return compute_confidence_from_embeddings(survivor_emb, merged_emb[0])
-    except Exception as e:
-        logger.warning(f"[置信度fallback] embedding 计算失败: {e}")
+        texts = [row["question"] or ""]
+        try:
+            texts.extend(json.loads(row["original_questions"] or "[]"))
+        except Exception:
+            pass
+        merged_question = (merged_question or "").strip()
+        for text in texts:
+            text = (text or "").strip()
+            if merged_question and text == merged_question:
+                return 0.95
+            if merged_question and text and (merged_question in text or text in merged_question):
+                return 0.80
         return 0.70
+    except Exception as e:
+        logger.warning(f"[置信度fallback] 文本估算失败: {e}")
+        return 0.70
+
+
+def _safe_json_list(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _append_unique_text(items: List[str], text: str) -> bool:
+    text = (text or "").strip()
+    if not text or text in items:
+        return False
+    items.append(text)
+    return True
+
+
+def _ensure_original_source_entry(original_sources: List[Dict], question: str, sources: List[Dict]):
+    question = (question or "").strip()
+    if not question:
+        return
+    for item in original_sources:
+        if item.get("question") != question:
+            continue
+        existing = {
+            (s.get("url", ""), s.get("company", ""), s.get("round", ""))
+            for s in item.get("sources", [])
+            if isinstance(s, dict)
+        }
+        for src in sources:
+            if not isinstance(src, dict):
+                continue
+            key = (src.get("url", ""), src.get("company", ""), src.get("round", ""))
+            if key not in existing:
+                item.setdefault("sources", []).append(src)
+                existing.add(key)
+        return
+    original_sources.append({"question": question, "sources": list(sources or [])})
+
+
+def _canonicalize_originals(question: str, sources: List[Dict],
+                            originals: List[str], original_sources: List[Dict]) -> tuple[List[str], List[Dict]]:
+    result = []
+    for oq in originals:
+        _append_unique_text(result, oq)
+    if not result:
+        _append_unique_text(result, question)
+
+    canonical_sources = []
+    for item in original_sources:
+        if not isinstance(item, dict):
+            continue
+        q = (item.get("question") or "").strip()
+        if not q:
+            continue
+        _append_unique_text(result, q)
+        srcs = item.get("sources", [])
+        canonical_sources.append({
+            "question": q,
+            "sources": srcs if isinstance(srcs, list) else [],
+        })
+
+    for oq in result:
+        _ensure_original_source_entry(
+            canonical_sources,
+            oq,
+            sources if oq == (question or "").strip() else []
+        )
+    return result, canonical_sources
 
 
 # ──────────────────────────── 合并历史记录 ────────────────────────────
@@ -73,6 +161,12 @@ def _record_merge_history(
     Returns:
         插入的 merge_history 记录 ID
     """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='merge_history'"
+    ).fetchone()
+    if not exists:
+        logger.warning("[合并记录] merge_history 表不存在，跳过历史记录")
+        return 0
     cursor = conn.execute(
         "INSERT INTO merge_history "
         "(survivor_id, merged_ids, merged_questions, pre_snapshot, post_snapshot, "
@@ -193,7 +287,7 @@ async def cluster_batch(batch: List[Dict], user_id: int = None, skip_clean: bool
             except Exception:
                 c.execute("ROLLBACK")
                 raise
-        await run_db(_pre_clean)
+        await _run_db(_pre_clean)
 
     # ── Step 1: 加载已有聚类 ──
     existing_by_cat2 = await _load_existing_clusters_by_cat2(job_position)
@@ -229,7 +323,7 @@ async def cluster_batch(batch: List[Dict], user_id: int = None, skip_clean: bool
             raise
         return new_qb_ids
 
-    qb_ids = await run_db(_atomic_write)
+    qb_ids = await _run_db(_atomic_write)
 
     del matched, new_clusters, saved_answers, existing_by_cat2
     return len(qb_ids)
@@ -318,7 +412,7 @@ _MATCH_BATCH_SIZE = 40
 _COMPACTION_CONCURRENCY = 8  # mimo RPM=100，可以更激进
 _CAT2_BATCH_SIZE = 5  # Phase 1 每批处理的 cat2 组数
 _PHASE2_BATCH_SIZE = 20  # Phase 2 每批合并的题目数（多个小 cat2 组打包）
-_SKIP_VALIDATION_EMB_THRESHOLD = 0.70  # 低阈值，跳过更多 LLM 验证
+_SKIP_VALIDATION_EMB_THRESHOLD = 1.01  # 保留常量兼容；不再跳过 LLM 验证
 
 
 async def _load_existing_clusters_for_compact() -> Dict[str, List[Dict]]:
@@ -332,7 +426,7 @@ async def _load_existing_clusters_for_compact() -> Dict[str, List[Dict]]:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    rows = await run_db(_query)
+    rows = await _run_db(_query)
     by_cat2: Dict[str, List[Dict]] = {}
     for r in rows:
         cat2 = r.get('cat2') or ''
@@ -350,7 +444,7 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
     """
     conn = get_db_connection()
     existing = conn.execute(
-        "SELECT sources, original_questions, original_question_sources, ai_answer "
+        "SELECT question, sources, original_questions, original_question_sources, ai_answer "
         "FROM question_bank WHERE id = ?", (survivor_id,)
     ).fetchone()
     if not existing:
@@ -359,48 +453,45 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
     # 合并前快照
     pre_snapshot = _snapshot_question(conn, survivor_id)
 
-    try:
-        s_src = json.loads(existing['sources']) if existing['sources'] else []
-    except Exception:
-        s_src = []
-    try:
-        s_oqs = json.loads(existing['original_questions']) if existing['original_questions'] else []
-    except Exception:
-        s_oqs = []
-    try:
-        s_oqs_src = json.loads(existing['original_question_sources']) if existing['original_question_sources'] else []
-    except Exception:
-        s_oqs_src = []
+    s_src = _safe_json_list(existing['sources'])
+    s_oqs = _safe_json_list(existing['original_questions'])
+    s_oqs_src = _safe_json_list(existing['original_question_sources'])
+    s_oqs, s_oqs_src = _canonicalize_originals(
+        existing['question'], s_src, s_oqs, s_oqs_src
+    )
 
     s_ai_answer = existing['ai_answer']
     if not s_ai_answer:
         s_ai_answer = entry.get('ai_answer')
 
     seen_urls = {x.get('url') for x in s_src}
-    try:
-        o_src = json.loads(entry['sources']) if entry['sources'] else []
-    except Exception:
-        o_src = []
+    o_src = _safe_json_list(entry.get('sources'))
     for x in o_src:
         u = x.get('url', '')
         if u and u not in seen_urls:
             s_src.append(x)
             seen_urls.add(u)
 
-    try:
-        o_oqs = json.loads(entry['original_questions']) if entry['original_questions'] else []
-    except Exception:
-        o_oqs = []
+    o_oqs = _safe_json_list(entry.get('original_questions'))
+    o_oqs_src = _safe_json_list(entry.get('original_question_sources'))
+    o_oqs, o_oqs_src = _canonicalize_originals(
+        entry.get('question', ''), o_src, o_oqs, o_oqs_src
+    )
     for oq in o_oqs:
         if oq and oq not in s_oqs:
             s_oqs.append(oq)
 
-    try:
-        o_oqs_src = json.loads(entry['original_question_sources']) if entry['original_question_sources'] else []
-    except Exception:
-        o_oqs_src = []
-    s_oqs_src.extend(o_oqs_src)
+    for oqs_entry in o_oqs_src:
+        _ensure_original_source_entry(
+            s_oqs_src,
+            oqs_entry.get('question', ''),
+            oqs_entry.get('sources', []),
+        )
 
+    try:
+        delete_all_for_qb(conn, entry['id'])
+    except Exception as e:
+        logger.warning(f"[合并] 清理被合并题 normalized 数据失败 (id={entry['id']}): {e}")
     conn.execute("DELETE FROM question_bank WHERE id = ?", (entry['id'],))
     conn.execute("DELETE FROM question_position WHERE question_id = ?", (entry['id'],))
 
@@ -408,7 +499,7 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
         "UPDATE question_bank SET frequency = ?, sources = ?, "
         "original_questions = ?, original_question_sources = ?, "
         "ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (len(s_oqs), json.dumps(s_src, ensure_ascii=False),
+        (max(1, len(s_oqs)), json.dumps(s_src, ensure_ascii=False),
          json.dumps(s_oqs, ensure_ascii=False),
          json.dumps(s_oqs_src, ensure_ascii=False),
          s_ai_answer, survivor_id)
@@ -431,12 +522,12 @@ def _do_merge_to_existing(survivor_id: int, entry: Dict,
 
     # 合并后快照 & 记录历史
     post_snapshot = _snapshot_question(conn, survivor_id)
-    # 置信度 fallback: 当 confidence=0 时用 embedding 相似度估算
+    # 置信度 fallback: 当 confidence=0 时只用保守文本规则估算
     final_confidence = confidence
     if final_confidence <= 0:
         final_confidence = _compute_merge_confidence(survivor_id, entry.get('question', ''))
         if final_confidence > 0:
-            logger.info(f"  [置信度fallback] 原始confidence=0, embedding估算={final_confidence:.2f}")
+            logger.info(f"  [置信度fallback] 原始confidence=0, 文本估算={final_confidence:.2f}")
     _record_merge_history(
         conn, survivor_id,
         merged_ids=[entry['id']],
@@ -525,31 +616,9 @@ async def _match_singletons_to_existing(
                 if not raw_matches:
                     return merge_ops
 
-                # 按 LLM 置信度分流：高置信度直接通过，低置信度需要验证
-                high_conf_matches = []
-                low_conf_matches = []
-                for m in raw_matches:
-                    llm_conf = m.get("confidence", 0)
-                    if llm_conf >= _SKIP_VALIDATION_EMB_THRESHOLD:
-                        high_conf_matches.append(m)
-                    else:
-                        low_conf_matches.append(m)
-
-                # 高置信度直接通过
-                for m in high_conf_matches:
-                    nid = str(m.get("new_id", ""))
-                    cid = m.get("cluster_id")
-                    if cid is None:
-                        continue
-                    entry = new_q_map.get(nid)
-                    if not entry:
-                        continue
-                    conf = m.get("confidence", 0.9)
-                    merge_ops.append((cid, entry, conf))
-                    logger.info(f"[Compaction→Existing] 高置信度直接通过: {entry['question'][:30]} → {cid} (conf={conf})")
-
-                # 低置信度需要 LLM 验证
-                if low_conf_matches:
+                # 所有 LLM 匹配都需要二次验证；embedding/单次置信度不作为自动合并依据。
+                matches_to_validate = raw_matches
+                if matches_to_validate:
                     all_existing_flat = []
                     for _, _, existing in batch_groups:
                         all_existing_flat.extend(existing)
@@ -557,14 +626,14 @@ async def _match_singletons_to_existing(
                     new_q_for_validate = [{"id": r['id'], "question": r['question']}
                                           for r in new_q_map.values()]
                     validated_matches, confidence_map = await _validate_merges(
-                        low_conf_matches, new_q_for_validate, all_existing_flat, user_id
+                        matches_to_validate, new_q_for_validate, all_existing_flat, user_id
                     )
                     validated_keys = {
                         (str(m.get('new_id')), str(m.get('cluster_id')))
                         for m in validated_matches
                     }
 
-                    for m in low_conf_matches:
+                    for m in matches_to_validate:
                         nid = str(m.get("new_id", ""))
                         cid = m.get("cluster_id")
                         if cid is None:
@@ -616,7 +685,7 @@ async def _match_singletons_to_existing(
                     conn.execute("ROLLBACK")
                     raise
 
-            await run_db(_merge)
+            await _run_db(_merge)
             matched_ids.add(entry['id'])
             logger.info(
                 f"[Compaction→Existing] {entry['question'][:40]} → 聚类#{cid} "
@@ -628,6 +697,9 @@ async def _match_singletons_to_existing(
 
 async def compact_singletons_in_db(user_id: int = None, match_existing: bool = False, operator_id: int = None) -> Dict:
     """孤岛碎片整理:对 frequency=1 的独立题按 cat2 做二次合并
+
+    match_existing=True 时会通过 _match_singletons_to_existing 执行 _validate_merges
+    二次验证，禁止 LLM 单次判断直接落库。
 
     Args:
         user_id: LLM 调用使用的用户 ID（None=全局配置，公共题库应始终为 None）
@@ -653,7 +725,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
             ).fetchall()
             return [dict(r) for r in rows]
 
-        page = await run_db(_load_page)
+        page = await _run_db(_load_page)
         if not page:
             break
         singletons.extend(page)
@@ -751,6 +823,55 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
 
     logger.info(f"[Compaction] Phase 2 完成: {len(merge_ops)} 个合并操作")
 
+    if merge_ops:
+        matches_for_validation = []
+        new_questions_for_validation = []
+        existing_for_validation = []
+        pair_lookup = {}
+
+        for survivor, to_merge, confidence, cat2 in merge_ops:
+            existing_for_validation.append({
+                "id": survivor["id"],
+                "question": survivor["question"],
+            })
+            for entry in to_merge:
+                matches_for_validation.append({
+                    "new_id": entry["id"],
+                    "cluster_id": survivor["id"],
+                })
+                new_questions_for_validation.append({
+                    "id": entry["id"],
+                    "question": entry["question"],
+                })
+                pair_lookup[(str(entry["id"]), str(survivor["id"]))] = (
+                    survivor, entry, confidence, cat2
+                )
+
+        validated_matches, confidence_map = await _validate_merges(
+            matches_for_validation,
+            new_questions_for_validation,
+            existing_for_validation,
+            user_id,
+        )
+        validated_keys = {
+            (str(m.get("new_id")), str(m.get("cluster_id")))
+            for m in validated_matches
+        }
+
+        validated_ops = []
+        for key in validated_keys:
+            item = pair_lookup.get(key)
+            if not item:
+                continue
+            survivor, entry, default_confidence, cat2 = item
+            confidence = confidence_map.get(key, default_confidence)
+            validated_ops.append((survivor, [entry], confidence, cat2))
+
+        rejected = len(matches_for_validation) - len(validated_ops)
+        if rejected:
+            logger.info(f"[Compaction] Phase 2 二次验证拒绝 {rejected} 个候选合并")
+        merge_ops = validated_ops
+
     # 执行合并
     total_merged = 0
     for survivor, to_merge, confidence, cat2 in merge_ops:
@@ -770,7 +891,7 @@ async def compact_singletons_in_db(user_id: int = None, match_existing: bool = F
                     conn.execute("ROLLBACK")
                     raise
 
-            await run_db(_do_merge)
+            await _run_db(_do_merge)
             total_merged += 1
 
     return {
