@@ -279,6 +279,8 @@ async def error_report(request: Request):
 
 **路由注册**: 在 `backend/app/asgi.py` 中注册，无需认证（前端匿名上报）。
 
+**CSRF 兼容性**: `sendBeacon` 发送 `Blob` 时 Content-Type 为 `application/json`，现有 CSRF 中间件（`asgi.py:113-114`）检查 `application/json` in content-type 即放行，无需额外豁免。
+
 ### 6. Nginx JSON 日志
 
 **文件**: `nginx/nginx.conf`（修改 http 块）
@@ -310,19 +312,23 @@ http {
 - `$upstream_response_time`：后端实际处理耗时
 - 两者差异 = 网络延迟 + 队列等待
 
-### 7. Docker Compose 日志轮转
+### 7. Docker Compose 日志轮转 + 环境变量
 
 **文件**: `docker-compose.yml`（修改）
 
 ```yaml
 services:
   backend:
+    environment:
+      - ENV=production  # 新增：structlog 双模式判断依据
     logging: &default-logging
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
   worker:
+    environment:
+      - ENV=production  # 新增：worker 共享同一镜像，同样受益
     logging: *default-logging
   nginx:
     logging: *default-logging
@@ -331,6 +337,8 @@ services:
 ```
 
 **效果**: 每服务最多 30MB，四服务总计最多 120MB。使用 YAML anchor 避免重复配置。
+
+**注意**: backend 和 worker 共享同一 Docker 镜像，`logging_config.py` 在模块导入时初始化，两个进程都会受益于 structlog 配置。
 
 ## 文件变更清单
 
@@ -344,7 +352,7 @@ services:
 | `frontend/src/utils/logger.js` | 新增 | ~55 行 |
 | `frontend/src/main.js` | 修改 | ~8 行 |
 | `nginx/nginx.conf` | 修改 | +15 行 |
-| `docker-compose.yml` | 修改 | +12 行 |
+| `docker-compose.yml` | 修改 | +16 行（ENV=production + logging driver） |
 
 ## 日常使用
 
