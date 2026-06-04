@@ -30,7 +30,9 @@ check_docker() {
 do_build() {
   log "构建 Docker 镜像..."
   docker compose build 2>&1
-  log "镜像构建完成"
+  # 自动清理构建产生的悬空镜像，防止磁盘空间耗尽
+  docker image prune -f >/dev/null 2>&1 || true
+  log "镜像构建完成（已清理悬空镜像）"
 }
 
 # ── 启动服务 ──
