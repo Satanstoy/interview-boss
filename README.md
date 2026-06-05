@@ -346,7 +346,7 @@ refactor: 提取 HTTP 客户端为独立模块
 
 ### Docker 部署（推荐）
 
-Docker 一键部署包含 Redis、后端、Worker、Nginx 四个容器，镜像已配置国内加速（阿里云 npm/apt/PyPI 镜像）。
+Docker 一键部署包含 Redis、后端、Nginx 三个核心容器，Worker 通过 profile 按需挂载。镜像已配置国内加速（阿里云 npm/apt/PyPI 镜像）和 BuildKit 本地缓存。
 
 #### 前置条件
 
@@ -366,27 +366,30 @@ cp backend/.env.example backend/.env
 sudo ./deploy/docker-deploy.sh all
 ```
 
-首次构建约 3-5 分钟（含前端构建 + Python 依赖安装），后续更新走缓存很快。
+首次构建会生成两个本地镜像：`interview-boss-app:local`（backend/worker 共用）和 `interview-boss-nginx:local`（内置前端 dist）。后续更新复用 BuildKit 缓存层、inline cache 和 npm/uv cache mounts，依赖未变时不重新下载。
 
 #### 常用运维命令
 
 ```bash
-sudo ./deploy/docker-deploy.sh           # 默认等同于 all（构建 + 启动 + 状态检查）
-sudo ./deploy/docker-deploy.sh status    # 查看服务状态和资源使用
-sudo ./deploy/docker-deploy.sh logs      # 查看日志（可指定: logs backend）
-sudo ./deploy/docker-deploy.sh update    # 代码更新后重新部署
-sudo ./deploy/docker-deploy.sh restart   # 重启所有服务
-sudo ./deploy/docker-deploy.sh backup    # 备份数据库和 Redis 数据
-sudo ./deploy/docker-deploy.sh down      # 停止所有服务
+sudo ./deploy/docker-deploy.sh             # 默认等同于 all（构建 + 启动核心服务）
+sudo ./deploy/docker-deploy.sh status      # 查看服务状态和资源使用
+sudo ./deploy/docker-deploy.sh logs        # 查看日志（可指定: logs backend）
+sudo ./deploy/docker-deploy.sh update      # 代码更新后重新部署核心服务
+sudo ./deploy/docker-deploy.sh restart     # 重启核心服务
+sudo ./deploy/docker-deploy.sh worker-up   # 按需启动 Worker
+sudo ./deploy/docker-deploy.sh worker-down # 停止 Worker
+sudo ./deploy/docker-deploy.sh worker-logs # 查看 Worker 日志
+sudo ./deploy/docker-deploy.sh backup      # 备份数据库和 Redis 数据
+sudo ./deploy/docker-deploy.sh down        # 停止所有服务
 ```
 
 #### 仅更新前端
 
-前端修改后，只需重新构建 dist 并重启 Nginx（无需重建后端镜像）：
+前端修改后，只需重建 nginx 镜像并重启 nginx（无需重建 app 镜像）：
 
 ```bash
-cd frontend && npm run build
-sudo docker compose restart nginx
+DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose build nginx
+sudo docker compose up -d nginx
 ```
 
 #### 资源分配（2c4g 优化）
@@ -395,8 +398,10 @@ sudo docker compose restart nginx
 |------|---------|-----|------|
 | Redis | 128MB | 0.25 | 任务队列 + 缓存 |
 | Backend | 512MB | 0.75 | FastAPI 应用 |
-| Worker | 256MB | 0.5 | ARQ 异步任务 |
+| Worker | 384MB | 0.75 | ARQ 异步任务，按需启动 |
 | Nginx | 64MB | 0.25 | 反向代理 + 静态文件 |
+
+HuggingFace 模型缓存通过只读 volume 挂载到容器内 `/home/appuser/.cache/huggingface`，配合 `HF_HOME` 和 `HF_HUB_OFFLINE=1` 避免运行时联网下载。
 
 #### 从 systemd 迁移
 

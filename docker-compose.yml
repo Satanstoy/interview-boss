@@ -1,9 +1,44 @@
-# InterviewBoss Docker Compose（2c4g 优化版）
+# InterviewBoss Docker Compose（内网高性能部署版）
 # 用法：
-#   首次部署: docker compose up -d --build
-#   更新部署: docker compose up -d --build backend worker nginx
-#   查看日志: docker compose logs -f
-#   停止服务: docker compose down
+#   首次部署: ./deploy/docker-deploy.sh all
+#   更新部署: ./deploy/docker-deploy.sh update
+#   启动 Worker: ./deploy/docker-deploy.sh worker-up
+#   停止 Worker: ./deploy/docker-deploy.sh worker-down
+#   查看日志: ./deploy/docker-deploy.sh logs backend
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+  target: app-runtime
+  args:
+    BUILDKIT_INLINE_CACHE: "1"
+
+x-app-service: &app-service
+  image: interview-boss-app:local
+  build: *app-build
+  env_file: backend/.env
+  environment:
+    - REDIS_URL=redis://redis:6379/0
+    - HF_HUB_OFFLINE=1
+    - HF_HOME=/home/appuser/.cache/huggingface
+    - ENV=production
+  volumes:
+    - ./backend/data:/app/backend/data
+    - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
+  networks:
+    - app-network
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    redis:
+      condition: service_healthy
+  logging: *default-logging
 
 services:
   # ── Redis ──
@@ -24,36 +59,14 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    logging: &default-logging
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
   # ── FastAPI 后端 ──
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-service
     restart: always
-    env_file: backend/.env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - HF_HUB_OFFLINE=1
-      - ENV=production
-    volumes:
-      - ./backend/data:/app/backend/data
-      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
     mem_limit: 512m
     cpus: 0.75
-    networks:
-      - app-network
-    security_opt:
-      - no-new-privileges:true
-    depends_on:
-      redis:
-        condition: service_healthy
-    logging: *default-logging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 15s
@@ -61,41 +74,28 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── ARQ Worker ──
+  # ── ARQ Worker（按需启用：--profile worker）──
   worker:
+    <<: *app-service
+    profiles:
+      - worker
+    restart: unless-stopped
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    mem_limit: 384m
+    cpus: 0.75
+
+  # ── Nginx（前端静态产物 + 反向代理）──
+  nginx:
+    image: interview-boss-nginx:local
     build:
       context: .
       dockerfile: Dockerfile
-    restart: always
-    env_file: backend/.env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - HF_HUB_OFFLINE=1
-      - ENV=production
-    volumes:
-      - ./backend/data:/app/backend/data
-      - /home/ubuntu/.cache/huggingface:/root/.cache/huggingface:ro
-    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
-    mem_limit: 256m
-    cpus: 0.5
-    networks:
-      - app-network
-    security_opt:
-      - no-new-privileges:true
-    depends_on:
-      redis:
-        condition: service_healthy
-    logging: *default-logging
-
-  # ── Nginx（前端 + 反向代理）──
-  nginx:
-    image: nginx:1.27-alpine
+      target: nginx-runtime
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
     restart: always
     ports:
       - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
     mem_limit: 64m
     cpus: 0.25
     networks:

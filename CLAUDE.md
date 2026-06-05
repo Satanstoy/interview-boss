@@ -6,7 +6,7 @@
 
 - **Backend**: Python 3.x (uv) / FastAPI / SQLite (WAL) / LangGraph
 - **Frontend**: Vue 3 (Composition API) / Vite / Tailwind CSS
-- **Deploy**: Docker Compose → nginx (port 80) → backend (8000) + worker + redis (6379)
+- **Deploy**: Docker Compose → nginx 镜像内置前端 (port 80) → backend (8000) + redis (6379)，worker 通过 profile 按需启用
 - **LLM**: OpenAI-compatible API (AsyncOpenAI + tenacity)
 - **Embedding**: BAAI/bge-small-zh-v1.5 (本地 HuggingFace 缓存，离线模式)
 
@@ -18,9 +18,10 @@ docker compose exec backend pytest backend/tests/ -q   # 后端测试
 cd frontend && npm run build                             # 前端构建
 
 # 部署（必须用 Docker，不要用 deploy.sh 的 systemd 模式）
-./deploy/docker-deploy.sh update                         # 重新部署（重建后端/worker/nginx 容器）
+./deploy/docker-deploy.sh update                         # 重新部署核心服务（app/nginx 镜像，worker 按需）
 ./deploy/docker-deploy.sh status                         # 查看容器状态
 ./deploy/docker-deploy.sh logs backend                   # 查看后端日志
+./deploy/docker-deploy.sh worker-up                      # 按需启动 ARQ Worker
 ./deploy/docker-deploy.sh backup                         # 备份数据库
 ```
 
@@ -108,14 +109,15 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 ## 生产环境
 
 ```
-nginx (port 80) → backend (port 8000) + worker
-                  redis (port 6379)
+nginx (port 80, 内置前端 dist) → backend (port 8000)
+                                redis (port 6379)
+worker (--profile worker, 按需启动) → redis/backend data
 ```
 
-- Docker Compose 编排，配置见 `docker-compose.yml`
+- Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
 - Nginx 反代 `/api/` → backend:8000（180s 超时），其余 → 静态文件
-- 数据卷：`./backend/data` → 容器内 `/app/backend/data`
-- HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/root/.cache/huggingface`（只读）
+- 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`
+- HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）
 - 环境变量：`HF_HUB_OFFLINE=1`（强制离线模式，避免访问 huggingface.co）
 
 ## 孤岛碎片整理（Compaction）

@@ -6,7 +6,7 @@ TDD 测试：Docker 部署配置验证
 import pytest
 from pathlib import Path
 
-PROJECT_ROOT = Path("/root/sj/interview-boss")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class TestDockerfile:
@@ -35,6 +35,19 @@ class TestDockerfile:
         content = self._read()
         assert "uv" in content, "应使用 uv 管理 Python 依赖"
 
+
+    def test_multi_target_runtime_images(self):
+        """应拆分 app-runtime 和 nginx-runtime target"""
+        content = self._read()
+        assert "AS app-runtime" in content
+        assert "AS nginx-runtime" in content
+
+    def test_buildkit_cache_mounts(self):
+        """依赖安装应使用 BuildKit cache mount"""
+        content = self._read()
+        assert "--mount=type=cache,target=/root/.cache/uv" in content
+        assert "--mount=type=cache,target=/root/.npm" in content
+
     def test_expose_port(self):
         """应暴露 8000 端口"""
         content = self._read()
@@ -56,6 +69,40 @@ class TestDockerCompose:
 
     def _read(self):
         return (PROJECT_ROOT / "docker-compose.yml").read_text()
+
+
+    def test_app_services_share_explicit_image(self):
+        """Backend/Worker 应共用显式 app 镜像"""
+        content = self._read()
+        assert "image: interview-boss-app:local" in content
+        assert "target: app-runtime" in content
+
+    def test_nginx_uses_static_runtime_image(self):
+        """Nginx 应使用独立静态镜像，不依赖宿主机 frontend/dist"""
+        content = self._read()
+        assert "image: interview-boss-nginx:local" in content
+        assert "target: nginx-runtime" in content
+        assert "./frontend/dist:/usr/share/nginx/html" not in content
+
+    def test_worker_is_profile_gated(self):
+        """Worker 应通过 profile 按需启用"""
+        content = self._read()
+        assert "profiles:" in content
+        assert "worker" in content
+
+    def test_huggingface_cache_is_appuser_readable(self):
+        """HuggingFace 缓存应挂载到 appuser 可读路径"""
+        content = self._read()
+        assert "HF_HOME=/home/appuser/.cache/huggingface" in content
+        assert "/home/appuser/.cache/huggingface:ro" in content
+        assert ":/root/.cache/huggingface" not in content
+
+    def test_inline_cache_configured(self):
+        """Compose 应配置 inline cache 和显式镜像名"""
+        content = self._read()
+        assert "BUILDKIT_INLINE_CACHE" in content
+        assert "interview-boss-app:local" in content
+        assert "interview-boss-nginx:local" in content
 
     def test_has_redis_service(self):
         """应有 Redis 服务"""
@@ -166,6 +213,12 @@ class TestDockerIgnore:
 
     def _read(self):
         return (PROJECT_ROOT / ".dockerignore").read_text()
+
+
+    def test_excludes_docker_cache(self):
+        """应排除本地 BuildKit cache 目录"""
+        content = self._read()
+        assert ".docker-cache" in content
 
     def test_excludes_node_modules(self):
         """应排除 node_modules"""

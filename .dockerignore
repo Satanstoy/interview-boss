@@ -22,6 +22,7 @@ frontend/dist
 Thumbs.db
 
 # Docker
+.docker-cache
 Dockerfile
 docker-compose.yml
 .dockerignore
@@ -37,5 +38,6 @@ backend/data/
 backend/.env
 frontend/.env*
 
-# Nginx (通过 volume 挂载)
-nginx/
+# Nginx (nginx-runtime 镜像需要复制配置)
+!nginx/
+!nginx/nginx.conf
