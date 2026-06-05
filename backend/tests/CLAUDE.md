@@ -5,10 +5,11 @@ TDD 测试基础设施。遵循红-绿-重构循环。
 ## 命令
 
 ```bash
-uv run pytest backend/tests/ -q                    # 全部测试
-uv run pytest backend/tests/<dir>/ -q              # 子目录
-uv run pytest backend/tests/test_xxx.py -v         # 单文件
-uv run pytest backend/tests/test_xxx.py::test_func # 单个测试
+# 通过 Docker 容器执行测试
+docker compose exec backend uv run pytest backend/tests/ -q                    # 全部测试
+docker compose exec backend uv run pytest backend/tests/<dir>/ -q              # 子目录
+docker compose exec backend uv run pytest backend/tests/test_xxx.py -v         # 单文件
+docker compose exec backend uv run pytest backend/tests/test_xxx.py::test_func # 单个测试
 ```
 
 ## Fixtures（conftest.py 自动注入）

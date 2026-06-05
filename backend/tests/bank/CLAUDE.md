@@ -20,5 +20,5 @@
 ## 运行
 
 ```bash
-uv run pytest backend/tests/bank/ -q
+docker compose exec backend uv run pytest backend/tests/bank/ -q
 ```

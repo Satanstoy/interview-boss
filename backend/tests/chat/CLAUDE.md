@@ -18,5 +18,5 @@ Chatbot 功能测试：agent 流程、记忆、预算、路由。
 ## 运行
 
 ```bash
-uv run pytest backend/tests/chat/ -q
+docker compose exec backend uv run pytest backend/tests/chat/ -q
 ```

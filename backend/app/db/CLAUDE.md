@@ -29,5 +29,5 @@ SQLite 数据库层，线程安全，WAL 模式。
 ## 修改后必做
 
 1. 新增 migration → 更新 `migrations.py` 的 `_MIGRATIONS` 列表
-2. 运行 `uv run pytest backend/tests/ -q` 确认不回归
+2. 运行 `docker compose exec backend uv run pytest backend/tests/ -q` 确认不回归
 3. 更新本文件（如新增文件或改变职责）

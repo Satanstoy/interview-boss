@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|worker-up|worker-down|worker-restart|worker-logs|backup|cleanup]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup]
 
 set -euo pipefail
 
@@ -11,10 +11,11 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前至少保留 4GB；构建后尽量恢复到 5GB。
-DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-4096}"
-DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-5120}"
-BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-2GB}"
+# 磁盘保护阈值（单位：MB）。构建前至少保留 8GB；构建后尽量恢复到 10GB。
+# 40GB 小盘机器上，Python/Node 多阶段构建会短时间制造数 GB cache，阈值过低会把根分区打满。
+DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-5120}"
+DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-6144}"
+BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-256MB}"
 
 # 颜色
 GREEN='[0;32m'
@@ -49,7 +50,16 @@ show_disk_usage() {
 
 prune_build_cache() {
   warn "清理 BuildKit 构建缓存，保留约 ${BUILDKIT_RESERVED_SPACE}..."
-  docker builder prune -f --reserved-space "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 ||     docker builder prune -f --keep-storage "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 || true
+  docker builder prune -f --reserved-space "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 || \
+    docker builder prune -f --keep-storage "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 || true
+}
+
+prune_unused_docker() {
+  warn "清理未使用的 Docker 容器、网络、镜像和构建缓存..."
+  docker container prune -f >/dev/null 2>&1 || true
+  docker network prune -f >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache
 }
 
 ensure_disk_before_build() {
@@ -60,9 +70,8 @@ ensure_disk_before_build() {
     return 0
   fi
 
-  warn "根分区可用空间 ${free_mb}MB，低于构建前阈值 ${DEPLOY_MIN_FREE_MB}MB，尝试清理 BuildKit cache..."
-  prune_build_cache
-  docker image prune -f >/dev/null 2>&1 || true
+  warn "根分区可用空间 ${free_mb}MB，低于构建前阈值 ${DEPLOY_MIN_FREE_MB}MB，尝试清理 Docker 未使用资源..."
+  prune_unused_docker
 
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_MIN_FREE_MB" ]; then
@@ -75,19 +84,29 @@ ensure_disk_before_build() {
 
 cleanup_after_build() {
   local free_mb
+  # 每次构建后都收缩 BuildKit cache，避免多次部署后慢慢吃满磁盘。
   docker image prune -f >/dev/null 2>&1 || true
+  prune_build_cache
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，收缩 BuildKit cache..."
-    prune_build_cache
+    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，进一步清理未使用 Docker 资源..."
+    prune_unused_docker
   fi
   show_disk_usage
 }
 
 guarded_compose_build() {
+  local rc
   ensure_disk_before_build
+  set +e
   docker compose build "$@"
+  rc=$?
+  set -e
   cleanup_after_build
+  if [ "$rc" -ne 0 ]; then
+    err "Docker 构建失败，已执行构建后清理；退出码: $rc"
+    exit "$rc"
+  fi
 }
 
 # ── 构建镜像 ──
@@ -152,9 +171,8 @@ do_update() {
 # ── Worker 按需挂载 ──
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
-  ensure_disk_before_build
-  docker compose --profile worker up -d --build worker
-  cleanup_after_build
+  guarded_compose_build backend
+  docker compose --profile worker up -d --no-deps worker
   sleep 2
   do_status
 }
@@ -192,11 +210,18 @@ do_backup() {
   ls -lh "$backup_dir/"*_"${timestamp}"* 2>/dev/null
 }
 
+# ── 运行测试 ──
+do_test() {
+  log "构建测试镜像..."
+  guarded_compose_build test
+  log "运行 pytest..."
+  docker compose --profile test run --rm test uv run pytest backend/tests/ "$@"
+}
+
 # ── 清理旧镜像 ──
 do_cleanup() {
   log "清理未使用的 Docker 资源，并按保留容量收缩 BuildKit cache..."
-  docker system prune -f
-  prune_build_cache
+  prune_unused_docker
   show_disk_usage
   log "清理完成"
 }
@@ -227,6 +252,7 @@ case "$MODE" in
   worker-down)     check_docker; do_worker_down ;;
   worker-restart)  check_docker; do_worker_restart ;;
   worker-logs)     check_docker; do_logs worker ;;
+  test)            check_docker; do_test "${@:2}" ;;
   backup)          check_docker; do_backup ;;
   cleanup)         check_docker; do_cleanup ;;
   migrate)         do_migrate ;;
@@ -252,6 +278,7 @@ case "$MODE" in
     echo "  worker-down     停止并移除 Worker 容器"
     echo "  worker-restart  重建 app 镜像并重启 Worker"
     echo "  worker-logs     查看 Worker 日志"
+    echo "  test            运行 pytest 测试（可传入 pytest 参数）"
     echo "  backup          备份数据库和 Redis 数据"
     echo "  cleanup         清理未使用的 Docker 资源和过量 BuildKit cache"
     echo "  migrate         停止宿主机服务（首次迁移用）"
@@ -261,6 +288,8 @@ case "$MODE" in
     echo "  ./docker-deploy.sh all"
     echo "  ./docker-deploy.sh update"
     echo "  ./docker-deploy.sh worker-up"
+    echo "  ./docker-deploy.sh test"
+    echo "  ./docker-deploy.sh test -k test_login"
     echo "  ./docker-deploy.sh logs backend"
     ;;
 esac

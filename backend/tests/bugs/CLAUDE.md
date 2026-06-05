@@ -17,7 +17,7 @@
 ## 运行
 
 ```bash
-uv run pytest backend/tests/bugs/ -q
+docker compose exec backend uv run pytest backend/tests/bugs/ -q
 ```
 
 ## 修改后必做

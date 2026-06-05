@@ -39,5 +39,5 @@
 ## 修改后必做
 
 1. 新增路由后在 `asgi.py` 注册
-2. 运行 `uv run pytest backend/tests/ -q`
+2. 运行 `docker compose exec backend uv run pytest backend/tests/ -q`
 3. 更新本文件

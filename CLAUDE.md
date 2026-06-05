@@ -17,7 +17,7 @@
 docker compose exec backend pytest backend/tests/ -q   # 后端测试
 cd frontend && npm run build                             # 前端构建
 
-# 部署（必须用 Docker，不要用 deploy.sh 的 systemd 模式）
+# 部署
 ./deploy/docker-deploy.sh update                         # 重新部署核心服务（app/nginx 镜像，worker 按需）
 ./deploy/docker-deploy.sh status                         # 查看容器状态
 ./deploy/docker-deploy.sh logs backend                   # 查看后端日志
@@ -94,7 +94,6 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 
 ## Gotchas
 
-- `deploy/deploy.sh` 是 systemd 模式，**生产必须用** `docker-deploy.sh`
 - Python 依赖管理用 uv（`uv add`），运行/测试必须通过 Docker 容器执行，禁止宿主机直接 `uv run`
 - SQLite 迁移后必须重启 backend 容器
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams

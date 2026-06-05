@@ -40,5 +40,5 @@ agents/
 
 ## 修改后必做
 
-1. 运行 `uv run pytest backend/tests/ -q` 确认 agent 测试通过
+1. 运行 `docker compose exec backend uv run pytest backend/tests/ -q` 确认 agent 测试通过
 2. 更新本文件（如新增 agent 或改变架构）

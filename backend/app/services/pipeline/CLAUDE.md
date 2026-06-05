@@ -23,5 +23,5 @@
 
 ## 修改后必做
 
-1. 运行 `uv run pytest backend/tests/pipeline/ -q`
+1. 运行 `docker compose exec backend uv run pytest backend/tests/pipeline/ -q`
 2. 更新本文件（如新增文件或改变职责）

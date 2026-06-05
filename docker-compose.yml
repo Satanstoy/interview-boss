@@ -84,6 +84,33 @@ services:
     mem_limit: 384m
     cpus: 0.75
 
+  # ── Test（pytest 测试环境，按需启用：--profile test）──
+  test:
+    image: interview-boss-test:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test-runtime
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
+    profiles:
+      - test
+    env_file: backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - HF_HUB_OFFLINE=1
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - ENV=test
+    volumes:
+      - ./backend/data:/app/backend/data
+      - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
+    networks:
+      - app-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
   # ── Nginx（前端静态产物 + 反向代理）──
   nginx:
     image: interview-boss-nginx:local

@@ -45,6 +45,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     find /app/.venv -name '*.pyc' -delete 2>/dev/null; \
     true
 
+# ── 阶段 3b：Python 依赖安装（含 dev 依赖，用于测试）──
+FROM python-base AS deps-builder-dev
+COPY pyproject.toml uv.lock ./
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV UV_HTTP_TIMEOUT=120
+ENV UV_LINK_MODE=copy
+# --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求
+# --no-install-project: 只装第三方依赖，不装项目本身（项目代码变化不触发重装）
+# 不加 --no-dev：安装 dev 依赖（pytest, pytest-asyncio, httpx 等）
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project && \
+    find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; \
+    find /app/.venv -name '*.pyc' -delete 2>/dev/null; \
+    true
+
 # ── 阶段 4：App 运行时镜像（backend + worker 共用）──
 FROM python-base AS app-runtime
 WORKDIR /app
@@ -74,6 +89,29 @@ ENTRYPOINT ["/entrypoint.sh"]
 
 # 双 worker 利用 2c4g 双核（SQLite WAL 模式支持并发读）
 CMD ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+# ── 阶段 4b：Test 运行时镜像（含 dev 依赖，用于 pytest）──
+FROM python-base AS test-runtime
+WORKDIR /app
+
+RUN useradd --create-home --shell /bin/false appuser && \
+    mkdir -p /app/backend/data && \
+    chown -R appuser:appuser /app
+
+COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
+
+COPY --chown=appuser backend/ ./backend/
+COPY --chown=appuser backend/tests/ ./backend/tests/
+
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV PYTHONPATH=/app/backend
+ENV REDIS_URL=redis://redis:6379/0
+ENV PATH="/app/.venv/bin:$PATH"
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 
 # ── 阶段 5：Nginx 运行时镜像（静态产物内置，部署不依赖宿主机 dist）──
 FROM nginx:1.27-alpine AS nginx-runtime

@@ -36,5 +36,5 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 
 ## 修改后必做
 
-1. 运行 `uv run pytest backend/tests/chat/ -q`
+1. 运行 `docker compose exec backend uv run pytest backend/tests/chat/ -q`
 2. 更新本文件

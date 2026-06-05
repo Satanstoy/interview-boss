@@ -157,7 +157,7 @@ API 地址、模型名称、超时时间、相似度阈值等均可通过界面�
 | 样式 | Tailwind CSS |
 | 图表 | ECharts 6 |
 | 认证 | JWT 双 Token（Access + HttpOnly Refresh） |
-| 部署 | Docker Compose / Nginx + systemd |
+| 部署 | Docker Compose |
 | 包管理 | uv (Python) / npm (Node.js) |
 
 ## 项目结构
@@ -193,11 +193,9 @@ interview-boss/
 │   │   └── views/              # 页面级组件
 │   └── tests/                  # 前端测试（Playwright）
 ├── deploy/                     # 部署配置
-│   ├── deploy.sh               # systemd 部署脚本（非生产）
 │   ├── docker-deploy.sh        # Docker 部署脚本（生产推荐）
 │   ├── entrypoint.sh           # Docker 容器入口脚本
 │   ├── nginx-hardened.conf     # Nginx 安全配置参考
-│   └── interview-boss-worker.service  # systemd 服务文件
 ├── docs/                       # 文档（agents、bug-reports、tdd-reports、dev-log）
 ├── nginx/                      # Docker Nginx 配置（API 代理 + SPA + 安全头）
 ├── Dockerfile                  # 多阶段构建（前端 + 后端）
@@ -245,25 +243,35 @@ LLM_MODEL_NAME=gpt-4o                         # 模型名称
 
 > 其他配置（Embedding 模型、相似度阈值、超时时间等）均有默认值，可在启动后通过界面在线修改。
 
-### 3. 启动后端
+### 3. 启动服务（Docker 方式，推荐）
 
 ```bash
-cd backend
-uv sync
-uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000
+# 首次部署
+./deploy/docker-deploy.sh all
+
+# 更新部署
+./deploy/docker-deploy.sh update
 ```
 
 首次启动会自动创建数据库和种子管理员账号。
 
-### 4. 启动前端
+浏览器打开 `http://localhost`，注册账号即可开始使用。
+
+### 4. 本地开发（可选）
+
+如需本地开发调试，可分别启动前后端：
 
 ```bash
+# 后端（通过 Docker 容器执行）
+docker compose exec backend uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000
+
+# 前端
 cd frontend
 npm install
 npm run dev
 ```
 
-浏览器打开 `http://localhost:3000`，注册账号即可开始使用。
+浏览器打开 `http://localhost:3000`。
 
 ### 5. 生产部署（可选）
 
@@ -351,7 +359,7 @@ Docker 一键部署包含 Redis、后端、Nginx 三个核心容器，Worker 通
 #### 前置条件
 
 - Docker + Docker Compose v1（`docker-compose`）或 v2（`docker compose`）
-- 80 端口未被占用（如有系统 Nginx，需先停止：`sudo systemctl stop nginx && sudo systemctl disable nginx`）
+- 80 端口未被占用（如有系统 Nginx，需先停止：`sudo systemctl stop nginx`）
 
 #### 首次部署
 
@@ -405,159 +413,13 @@ sudo docker compose up -d nginx
 
 HuggingFace 模型缓存通过只读 volume 挂载到容器内 `/home/appuser/.cache/huggingface`，配合 `HF_HOME` 和 `HF_HUB_OFFLINE=1` 避免运行时联网下载。
 
-#### 从 systemd 迁移
-
-```bash
-# 停止宿主机服务
-sudo systemctl stop interview-boss
-sudo systemctl disable interview-boss
-
-# 构建并启动 Docker 服务
-sudo ./deploy/docker-deploy.sh all
-```
-
 #### 端口冲突排查
 
 如果启动时报 `address already in use`，检查占用 80 端口的进程：
 
 ```bash
 sudo ss -tlnp | grep ':80 '
-# 常见原因：系统 Nginx → sudo systemctl stop nginx && sudo systemctl disable nginx
-```
-
-### 后端部署（systemd，非 Docker 场景）
-
-#### systemd 服务
-
-```ini
-# /etc/systemd/system/interview-boss.service
-[Unit]
-Description=InterviewBoss Backend
-After=network.target
-
-[Service]
-WorkingDirectory=/root/sj/interview-boss/backend
-ExecStart=/root/.local/bin/uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=5
-EnvironmentFile=/root/sj/interview-boss/backend/.env
-
-[Install]
-WantedBy=multi-user.target
-```
-
-启用并启动：
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable interview-boss
-sudo systemctl start interview-boss
-```
-
-#### 常用运维命令
-
-```bash
-# 查看服务状态
-sudo systemctl status interview-boss
-
-# 重启服务（代码或配置变更后）
-sudo systemctl restart interview-boss
-
-# 查看实时日志
-sudo journalctl -u interview-boss -f
-
-# 查看最近 100 行日志
-sudo journalctl -u interview-boss -n 100
-
-# 查看错误日志
-sudo journalctl -u interview-boss -p err
-```
-
-### 前端部署（systemd，非 Docker 场景）
-
-#### 构建与部署
-
-```bash
-cd frontend
-npm run build
-```
-
-构建完成后，静态文件输出到 `frontend/dist/`。使用部署脚本复制到 Nginx 目录：
-
-```bash
-sudo bash deploy-frontend.sh
-```
-
-或手动操作：
-```bash
-sudo rm -rf /var/www/interview-boss/dist/*
-sudo cp -r frontend/dist/* /var/www/interview-boss/dist/
-sudo chown -R www-data:www-data /var/www/interview-boss/dist/
-```
-
-#### Nginx 配置
-
-生产环境 Nginx 配置参考 `nginx-hardened.conf`，核心配置：
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-
-    ssl_certificate     /etc/nginx/ssl/selfsigned.crt;
-    ssl_certificate_key /etc/nginx/ssl/selfsigned.key;
-
-    client_max_body_size 15m;
-
-    # 前端静态文件
-    location / {
-        root /var/www/interview-boss/dist;
-        try_files $uri $uri/ /index.html;
-
-        # 缓存策略：带 hash 的静态资源长期缓存，index.html 不缓存
-        location ~* \.(?:js|css|woff2?|svg|png|jpg|ico)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-        location = /index.html {
-            expires -1;
-            add_header Cache-Control "no-store, no-cache, must-revalidate";
-        }
-    }
-
-    # API 反向代理
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 180s;
-    }
-
-    # 安全响应头
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'" always;
-}
-```
-
-HTTP → HTTPS 自动跳转：
-```nginx
-server {
-    listen 80;
-    server_name _;
-    return 301 https://$host$request_uri;
-}
-```
-
-配置文件位置：`/etc/nginx/conf.d/interview-boss.conf`
-
-```bash
-# 测试配置
-sudo nginx -t
-
-# 重载配置
-sudo systemctl reload nginx
+# 常见原因：系统 Nginx → sudo systemctl stop nginx
 ```
 
 ## API 概览

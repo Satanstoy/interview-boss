@@ -1,9 +1,11 @@
 #!/bin/bash
-# Entrypoint: 以 root 修复数据目录权限，然后以 appuser 运行主进程
 set -e
 
-# 确保数据目录可写（bind mount 时宿主机目录可能为 root 所有）
+# Fix data directory permissions (bind mount may be owned by root)
 chown -R appuser:appuser /app/backend/data 2>/dev/null || true
 
-# 以 appuser 身份执行 CMD
+# Fix cache directories (may be missing or wrong permissions after volume mount)
+mkdir -p /home/appuser/.cache/uv /home/appuser/.cache/pip 2>/dev/null || true
+chown -R appuser:appuser /home/appuser/.cache 2>/dev/null || true
+
 exec runuser -u appuser -- "$@"
