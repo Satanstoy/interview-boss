@@ -368,6 +368,8 @@ sudo ./deploy/docker-deploy.sh all
 
 首次构建会生成两个本地镜像：`interview-boss-app:local`（backend/worker 共用）和 `interview-boss-nginx:local`（内置前端 dist）。后续更新复用 BuildKit 缓存层、inline cache 和 npm/uv cache mounts，依赖未变时不重新下载。
 
+部署脚本内置磁盘保护：构建前根分区至少保留 4GB，构建后低于 5GB 会自动收缩 BuildKit cache（默认保留 2GB），避免 Docker 部署过程中把磁盘写满。
+
 #### 常用运维命令
 
 ```bash

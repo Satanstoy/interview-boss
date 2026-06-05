@@ -19,5 +19,6 @@
 - 部署命令：`./deploy/docker-deploy.sh update`
 
 - Worker 默认不随核心服务启动；需要后台任务时执行 `./deploy/docker-deploy.sh worker-up`，任务完成后可执行 `worker-down` 释放资源
-- Docker 构建使用 BuildKit、inline cache 和 npm/uv cache mounts；不要用 `docker builder prune`，除非要强制全量重建
+- Docker 构建使用 BuildKit、inline cache 和 npm/uv cache mounts；部署脚本会自动执行磁盘保护和 BuildKit cache 收缩，不要绕过脚本长期直接运行 `docker compose build`
 - Nginx 镜像内置前端 dist，生产不再挂载宿主机 `frontend/dist`
+- 磁盘保护阈值：构建前根分区至少 `DEPLOY_MIN_FREE_MB=4096` MB；构建后低于 `DEPLOY_TARGET_FREE_MB=5120` MB 时自动执行 `docker builder prune`，默认 `BUILDKIT_RESERVED_SPACE=2GB`

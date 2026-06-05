@@ -244,3 +244,32 @@ class TestDockerIgnore:
         """应排除数据目录（运行时挂载）"""
         content = self._read()
         assert "backend/data" in content
+
+
+class TestDockerDeployScript:
+    """docker-deploy.sh 磁盘保护验证"""
+
+    def _read(self):
+        return (PROJECT_ROOT / "deploy" / "docker-deploy.sh").read_text()
+
+    def test_has_pre_build_disk_guard(self):
+        """构建前应检查磁盘并在不足时拒绝部署"""
+        content = self._read()
+        assert "DEPLOY_MIN_FREE_MB" in content
+        assert "ensure_disk_before_build" in content
+        assert "拒绝部署以避免磁盘爆满" in content
+
+    def test_has_post_build_cache_prune(self):
+        """构建后应按阈值收缩 BuildKit cache"""
+        content = self._read()
+        assert "DEPLOY_TARGET_FREE_MB" in content
+        assert "BUILDKIT_RESERVED_SPACE" in content
+        assert "docker builder prune" in content
+        assert "cleanup_after_build" in content
+
+    def test_build_commands_are_guarded(self):
+        """核心构建和 Worker 构建应走磁盘保护包装"""
+        content = self._read()
+        assert "guarded_compose_build backend nginx" in content
+        assert "guarded_compose_build backend" in content
+        assert "docker compose --profile worker up -d --build worker" in content

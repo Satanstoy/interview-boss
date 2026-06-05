@@ -11,6 +11,11 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
+# 磁盘保护阈值（单位：MB）。构建前至少保留 4GB；构建后尽量恢复到 5GB。
+DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-4096}"
+DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-5120}"
+BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-2GB}"
+
 # 颜色
 GREEN='[0;32m'
 YELLOW='[1;33m'
@@ -30,12 +35,65 @@ check_docker() {
   fi
 }
 
+# ── 磁盘保护 ──
+root_free_mb() {
+  df -Pm / | awk 'NR == 2 {print $4}'
+}
+
+show_disk_usage() {
+  local free_mb
+  free_mb=$(root_free_mb)
+  log "根分区可用空间: ${free_mb}MB"
+  docker system df 2>/dev/null || true
+}
+
+prune_build_cache() {
+  warn "清理 BuildKit 构建缓存，保留约 ${BUILDKIT_RESERVED_SPACE}..."
+  docker builder prune -f --reserved-space "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 ||     docker builder prune -f --keep-storage "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 || true
+}
+
+ensure_disk_before_build() {
+  local free_mb
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -ge "$DEPLOY_MIN_FREE_MB" ]; then
+    log "磁盘检查通过: ${free_mb}MB 可用"
+    return 0
+  fi
+
+  warn "根分区可用空间 ${free_mb}MB，低于构建前阈值 ${DEPLOY_MIN_FREE_MB}MB，尝试清理 BuildKit cache..."
+  prune_build_cache
+  docker image prune -f >/dev/null 2>&1 || true
+
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_MIN_FREE_MB" ]; then
+    err "根分区可用空间仍只有 ${free_mb}MB，低于 ${DEPLOY_MIN_FREE_MB}MB，拒绝部署以避免磁盘爆满"
+    show_disk_usage
+    exit 1
+  fi
+  log "清理后磁盘检查通过: ${free_mb}MB 可用"
+}
+
+cleanup_after_build() {
+  local free_mb
+  docker image prune -f >/dev/null 2>&1 || true
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，收缩 BuildKit cache..."
+    prune_build_cache
+  fi
+  show_disk_usage
+}
+
+guarded_compose_build() {
+  ensure_disk_before_build
+  docker compose build "$@"
+  cleanup_after_build
+}
+
 # ── 构建镜像 ──
 do_build() {
   log "构建 app/nginx 镜像（启用 BuildKit 本地缓存）..."
-  docker compose build backend nginx
-  # 自动清理构建产生的悬空镜像，保留 BuildKit cache 目录
-  docker image prune -f >/dev/null 2>&1 || true
+  guarded_compose_build backend nginx
   log "镜像构建完成（backend/worker 共用 app 镜像，nginx 内置前端 dist）"
 }
 
@@ -94,7 +152,9 @@ do_update() {
 # ── Worker 按需挂载 ──
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
+  ensure_disk_before_build
   docker compose --profile worker up -d --build worker
+  cleanup_after_build
   sleep 2
   do_status
 }
@@ -108,7 +168,7 @@ do_worker_down() {
 
 do_worker_restart() {
   log "重建并重启 Worker..."
-  docker compose build backend
+  guarded_compose_build backend
   docker compose --profile worker up -d --no-deps worker
   sleep 2
   do_status
@@ -134,8 +194,10 @@ do_backup() {
 
 # ── 清理旧镜像 ──
 do_cleanup() {
-  log "清理未使用的 Docker 资源（保留 .docker-cache 构建缓存目录）..."
+  log "清理未使用的 Docker 资源，并按保留容量收缩 BuildKit cache..."
   docker system prune -f
+  prune_build_cache
+  show_disk_usage
   log "清理完成"
 }
 
@@ -191,7 +253,7 @@ case "$MODE" in
     echo "  worker-restart  重建 app 镜像并重启 Worker"
     echo "  worker-logs     查看 Worker 日志"
     echo "  backup          备份数据库和 Redis 数据"
-    echo "  cleanup         清理未使用的 Docker 资源"
+    echo "  cleanup         清理未使用的 Docker 资源和过量 BuildKit cache"
     echo "  migrate         停止宿主机服务（首次迁移用）"
     echo "  all             构建 + 启动核心服务（首次部署）"
     echo ""

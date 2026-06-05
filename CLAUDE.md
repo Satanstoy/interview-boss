@@ -100,6 +100,7 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
 - Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
+- Docker 磁盘保护：部署必须走 `./deploy/docker-deploy.sh update/all/worker-up`，脚本会在构建前检查根分区至少 4GB 可用，构建后低于 5GB 时自动收缩 BuildKit cache（默认保留 2GB）。不要绕过脚本直接长期执行 `docker compose build`。
 
 ## Docs（历史经验库）
 
@@ -115,6 +116,7 @@ worker (--profile worker, 按需启动) → redis/backend data
 ```
 
 - Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
+- 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=4096`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
 - Nginx 反代 `/api/` → backend:8000（180s 超时），其余 → 静态文件
 - 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`
 - HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）
