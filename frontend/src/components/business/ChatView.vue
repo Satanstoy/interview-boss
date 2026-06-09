@@ -9,7 +9,7 @@
           <p class="mt-0.5 text-xs text-muted-foreground">AI Interview Copilot</p>
         </div>
         <Button @click="showNewChat = true" class="w-full" size="sm">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
           新建面试
         </Button>
       </div>
@@ -39,7 +39,7 @@
             :class="activeConversationId === conv.id
               ? 'bg-sidebar-accent text-sidebar-accent-foreground'
               : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50'">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold transition-colors"
+            <div class="size-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold transition-colors"
               :class="activeConversationId === conv.id
                 ? 'bg-primary/10 text-primary'
                 : 'bg-muted text-muted-foreground'">
@@ -58,7 +58,7 @@
               @click.stop="handleDelete(conv.id)"
               class="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
             >
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </Button>
           </div>
         </div>
@@ -76,8 +76,8 @@
         >
           <AppEmpty title="开始模拟面试" description="选择一个对话或创建新的面试会话">
             <template #icon>
-              <div class="w-16 h-16 mx-auto mb-5 rounded-2xl bg-card border border-border flex items-center justify-center shadow-sm">
-                <svg class="w-8 h-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+              <div class="size-16 mx-auto mb-5 rounded-2xl bg-card border border-border flex items-center justify-center shadow-sm">
+                <svg class="size-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
               </div>
             </template>
             <Button @click="showNewChat = true" class="mt-2">
@@ -97,7 +97,7 @@
           </div>
           <div class="flex items-center gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+              <span class="size-1.5 rounded-full bg-primary animate-pulse"></span>
               AI 在线
             </span>
             <Button variant="outline" size="sm">
@@ -112,7 +112,7 @@
 
           <!-- Streaming message with step timeline -->
           <div v-if="isSending" class="flex items-start gap-3">
-            <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold bg-card border border-border text-foreground shadow-sm">AI</div>
+            <div class="size-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold bg-card border border-border text-foreground shadow-sm">AI</div>
             <div class="max-w-[75%] min-w-0">
               <!-- Processing steps timeline -->
               <div v-if="!streamingContent && processingSteps.length > 0" class="rounded-xl border border-border bg-card p-3 shadow-sm">
@@ -124,10 +124,10 @@
                   <div v-for="(step, idx) in processingSteps" :key="step.step"
                     class="flex items-center gap-2.5 py-1.5 px-2 rounded-md transition-all duration-300"
                     :class="idx === processingSteps.length - 1 && !step.done ? 'bg-muted/50' : 'opacity-60'">
-                    <div class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-300"
+                    <div class="size-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-300"
                       :class="step.done ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-primary/10'">
-                      <svg v-if="step.done" class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                      <div v-else class="w-2.5 h-2.5 rounded-full bg-primary animate-pulse"></div>
+                      <svg v-if="step.done" class="size-3.5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                      <div v-else class="size-2.5 rounded-full bg-primary animate-pulse"></div>
                     </div>
                     <span class="text-xs" :class="step.done ? 'text-muted-foreground line-through' : 'text-foreground font-medium'">
                       {{ step.message }}
@@ -141,9 +141,9 @@
               <!-- Simple typing indicator -->
               <div v-else-if="!streamingContent" class="flex items-center gap-2.5 px-4 py-3 bg-card rounded-xl border border-border shadow-sm">
                 <div class="flex gap-1">
-                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 300ms"></span>
                 </div>
                 <span class="text-xs text-muted-foreground ml-1">{{ waitingText }}</span>
               </div>

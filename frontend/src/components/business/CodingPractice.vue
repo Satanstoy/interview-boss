@@ -97,7 +97,7 @@
                 {{ selectedProblem.difficulty === 'easy' ? '简单' : selectedProblem.difficulty === 'medium' ? '中等' : '困难' }}
               </span>
             </div>
-            <svg :class="['w-4 h-4 text-ink-400 transition-transform', showDescription ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg :class="['size-4 text-ink-400 transition-transform', showDescription ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>

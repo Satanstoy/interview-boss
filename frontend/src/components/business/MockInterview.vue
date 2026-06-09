@@ -6,8 +6,8 @@
       <!-- Header -->
       <div class="border-b border-border px-5 py-4">
         <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
-            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
+            <svg class="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
           </div>
           <div>
             <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">模拟面试</h3>
@@ -20,7 +20,7 @@
         <!-- Category selection -->
         <div>
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+            <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
             选择领域
           </label>
           <div class="flex flex-wrap gap-2">
@@ -43,7 +43,7 @@
           <!-- Difficulty selection -->
           <div>
             <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
               难度
             </label>
             <div class="flex flex-wrap gap-2">
@@ -59,20 +59,20 @@
           <!-- Count -->
           <div>
             <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
               题目数量
             </label>
             <div class="inline-flex items-center rounded-xl border border-surface-200 dark:border-ink-600 overflow-hidden bg-white dark:bg-ink-800">
-              <button @click="questionCount = Math.max(1, questionCount - 1)" class="w-10 h-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">-</button>
+              <button @click="questionCount = Math.max(1, questionCount - 1)" class="size-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">-</button>
               <input v-model.number="questionCount" type="number" min="1" max="50" class="w-14 text-center border-x border-surface-200 dark:border-ink-600 py-2 text-sm bg-transparent text-ink-800 dark:text-ink-100 focus:ring-0 focus:border-primary-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              <button @click="questionCount = Math.min(50, questionCount + 1)" class="w-10 h-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">+</button>
+              <button @click="questionCount = Math.min(50, questionCount + 1)" class="size-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">+</button>
             </div>
           </div>
         </div>
 
         <!-- Start button -->
         <Button variant="default" class="w-full py-3 text-base" @click="startQuiz">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           开始抽测
         </Button>
       </div>
@@ -234,7 +234,7 @@
             @click="toggleHistory(q)"
             class="w-full py-2.5 text-xs font-medium text-ink-500 dark:text-ink-400 hover:bg-surface-50 dark:hover:bg-primary-900/20 transition flex items-center justify-center gap-2"
           >
-            <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            <svg class="size-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             {{ q._showHistory ? '收起练习记录' : `查看练习记录 (${q.attempt_count}次)` }}
           </button>
           <div v-if="q._showHistory" class="px-5 py-4 bg-surface-50 dark:bg-ink-800 border-t border-primary-100 dark:border-primary-800/50 space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
@@ -255,7 +255,7 @@
                       <div class="h-full rounded-full" :class="scoreColor(h.score)" :style="{ width: h.score + '%' }"></div>
                     </div>
                   </div>
-                  <svg class="w-3.5 h-3.5 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                  <svg class="size-3.5 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 </div>
                 <div v-if="h._expanded" class="pl-6 pr-2 pb-3 space-y-2">
                   <div>

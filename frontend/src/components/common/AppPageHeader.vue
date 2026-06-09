@@ -5,7 +5,7 @@
       <ol class="flex items-center gap-1.5 text-sm text-ink-500 dark:text-ink-400">
         <li v-for="(crumb, idx) in breadcrumbs" :key="idx" class="flex items-center gap-1.5">
           <template v-if="idx > 0">
-            <svg class="w-3.5 h-3.5 text-ink-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="size-3.5 text-ink-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </template>
@@ -32,7 +32,7 @@
             class="inline-flex items-center gap-1.5 text-sm font-medium text-ink-500 dark:text-ink-400 hover:text-ink-800 dark:hover:text-ink-200 transition-colors"
             @click="handleBack"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
             {{ backText }}

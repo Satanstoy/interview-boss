@@ -9,7 +9,7 @@
 
   <!-- Full page loading -->
   <div v-else-if="type === 'page'" class="flex flex-col items-center justify-center py-20">
-    <Loader2 class="w-12 h-12 text-primary animate-spin" />
+    <Loader2 class="size-12 text-primary animate-spin" />
     <p v-if="text" class="mt-4 text-sm font-medium text-ink-500 dark:text-ink-400">{{ text }}</p>
   </div>
 
@@ -32,7 +32,7 @@
     >
       <!-- Card header skeleton -->
       <div class="flex items-center gap-3">
-        <Skeleton class="w-10 h-10 rounded-lg shrink-0" />
+        <Skeleton class="size-10 rounded-lg shrink-0" />
         <div class="flex-1 space-y-2">
           <Skeleton class="h-4 rounded w-3/4" />
           <Skeleton class="h-3 rounded w-1/2" />
@@ -68,9 +68,9 @@
 
   <!-- Default: inline dots -->
   <div v-else class="flex items-center gap-1.5" :class="wrapperClass">
-    <div class="w-2 h-2 rounded-full bg-primary animate-bounce" style="animation-delay: 0ms" />
-    <div class="w-2 h-2 rounded-full bg-primary animate-bounce" style="animation-delay: 150ms" />
-    <div class="w-2 h-2 rounded-full bg-primary animate-bounce" style="animation-delay: 300ms" />
+    <div class="size-2 rounded-full bg-primary animate-bounce" style="animation-delay: 0ms" />
+    <div class="size-2 rounded-full bg-primary animate-bounce" style="animation-delay: 150ms" />
+    <div class="size-2 rounded-full bg-primary animate-bounce" style="animation-delay: 300ms" />
   </div>
 </template>
 

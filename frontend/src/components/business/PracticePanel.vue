@@ -17,7 +17,7 @@
           </Badge>
         </div>
         <button @click="emit('close')" class="p-1.5 rounded-lg text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-200 dark:hover:bg-ink-700 transition shrink-0">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
     </template>
@@ -31,7 +31,7 @@
           <TabsList class="w-full flex shrink-0 bg-surface-50 dark:bg-surface-900">
             <TabsTrigger v-for="tab in leftTabs" :key="tab.key" :value="tab.key">
               {{ tab.label }}
-              <span v-if="tab.key === 'answer' && !question.ai_answer" class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-400 dark:bg-red-400"></span>
+              <span v-if="tab.key === 'answer' && !question.ai_answer" class="ml-1 inline-block size-1.5 rounded-full bg-red-400 dark:bg-red-400"></span>
               <span v-if="tab.key === 'history' && question.attempt_count" class="ml-1 text-[10px] text-ink-400 dark:text-ink-500">({{ question.attempt_count }})</span>
             </TabsTrigger>
           </TabsList>
@@ -48,7 +48,7 @@
               <!-- Sources -->
               <div v-if="question.sources && question.sources.length > 0" class="bg-primary-50/40 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 rounded-xl p-4">
                 <h4 class="text-xs font-bold text-primary-800 dark:text-primary-400 mb-2 flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                  <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
                   出处追溯 ({{ question.sources.length }} 次出现)
                 </h4>
                 <div class="flex flex-wrap gap-1.5 text-[11px]">
@@ -95,7 +95,7 @@
                 <p v-if="isFailedAnswer(question.ai_answer)" class="text-red-500 dark:text-red-400 mb-3 text-sm">上次生成失败，请重试</p>
                 <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">暂无参考答案</p>
                 <Button @click="handleGenerate" size="sm">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                   AI 生成答案
                 </Button>
               </div>
@@ -115,7 +115,7 @@
                         <div class="h-full rounded-full" :class="scoreColor(h.score)" :style="{ width: h.score + '%' }"></div>
                       </div>
                     </div>
-                    <svg class="w-3 h-3 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    <svg class="size-3 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                   </div>
                   <div v-if="h._expanded" class="px-3 pb-3 space-y-2 border-t border-surface-100 dark:border-ink-700 pt-2">
                     <div>
@@ -136,7 +136,7 @@
                 </div>
               </div>
               <div v-else class="text-center py-12 text-ink-400 dark:text-ink-500 text-sm">
-                <svg class="w-10 h-10 mx-auto mb-2 text-ink-300 dark:text-ink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <svg class="size-10 mx-auto mb-2 text-ink-300 dark:text-ink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 暂无练习记录
               </div>
             </TabsContent>
@@ -150,7 +150,7 @@
         <div class="flex-1 flex flex-col overflow-hidden">
           <div class="px-5 pt-4 pb-2 shrink-0">
             <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 uppercase tracking-wider flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
               我的回答
             </h3>
           </div>

@@ -2,8 +2,8 @@
   <div class="rounded-xl border border-border bg-card shadow-sm">
     <div class="flex items-center justify-between border-b border-border px-4 py-3">
       <h3 class="text-sm font-semibold text-card-foreground flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-          <svg class="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
+        <div class="size-6 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+          <svg class="size-3.5 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" /></svg>
         </div>
         考点分布
       </h3>

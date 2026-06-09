@@ -12,7 +12,7 @@
         <div class="p-4 border-b border-surface-200 dark:border-ink-700">
           <button @click="$emit('split')" class="w-full text-left p-3 rounded-xl border-2 border-dashed border-primary-300 dark:border-primary-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-400 dark:hover:border-primary-600 transition-all duration-200">
             <div class="flex items-center gap-2">
-              <svg class="w-4 h-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+              <svg class="size-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
               <span class="text-sm font-medium text-primary-700 dark:text-primary-400">成为新的独立聚类</span>
             </div>
             <p class="text-xs text-ink-400 dark:text-ink-500 mt-1 ml-6">从当前聚类中拆出，作为独立题目</p>

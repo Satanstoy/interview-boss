@@ -1,11 +1,11 @@
 <template>
   <div class="mb-2 flex flex-wrap gap-2 items-center bg-card p-2 rounded-xl border border-border shadow-sm">
     <Button @click="$emit('toggle-select-all')" variant="ghost" size="sm" class="text-xs">
-      <CheckSquare class="w-3.5 h-3.5" />
+      <CheckSquare class="size-3.5" />
       全选
     </Button>
     <Button @click="$emit('invert-selection')" variant="ghost" size="sm" class="text-xs">
-      <ArrowLeftRight class="w-3.5 h-3.5" />
+      <ArrowLeftRight class="size-3.5" />
       反选
     </Button>
     <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>

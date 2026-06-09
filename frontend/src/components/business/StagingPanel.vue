@@ -3,8 +3,8 @@
     <!-- Header -->
     <div class="bg-card px-5 py-3 border-b border-border">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
-          <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        <div class="size-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
+          <svg class="size-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
         </div>
         <div>
           <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">导入面经 / JD</h3>
@@ -66,7 +66,7 @@
             <div v-for="(item, index) in stagedFiles" :key="item.id" class="relative group">
               <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-border shadow-sm" @error="handleImgError" />
               <button @click="removeFile(index)" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow">
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               </button>
             </div>
           </div>
@@ -145,15 +145,15 @@
           <template v-for="(s, idx) in submitStepList" :key="s.key">
             <div class="flex items-center gap-1.5">
               <span
-                class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold transition-all duration-300"
+                class="inline-flex items-center justify-center size-5 rounded-full text-[10px] font-bold transition-all duration-300"
                 :class="s.active ? 'bg-blue-500 text-white animate-pulse-slow' : s.done ? 'bg-blue-500 text-white' : 'bg-surface-200 dark:bg-ink-600 text-ink-400 dark:text-ink-500'"
               >
-                <svg v-if="s.done" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                <svg v-if="s.done" class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 <span v-else>{{ idx + 1 }}</span>
               </span>
               <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-semibold' : s.done ? 'text-ink-500 dark:text-ink-400' : 'text-ink-300 dark:text-ink-600'">{{ s.label }}</span>
             </div>
-            <svg v-if="s.key !== 'save'" class="w-3 h-3 text-surface-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            <svg v-if="s.key !== 'save'" class="size-3 text-surface-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </template>
         </div>
         <!-- 当前步骤消息 + 详情 -->
@@ -165,7 +165,7 @@
 
       <div v-if="uploadResult" class="w-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/40 rounded-xl p-4">
         <div class="flex items-center gap-2 mb-3">
-          <svg class="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <svg class="size-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           <span class="text-green-700 dark:text-green-300 font-semibold text-sm">提交成功</span>
           <span class="text-xs text-green-600/70 dark:text-green-400/60 bg-green-100 dark:bg-green-800/30 px-2 py-0.5 rounded-full">
             {{ uploadResult.doc_type || 'Interview' }} · {{ uploadResult.target === 'public' ? '公共题库' : '个人题库' }}

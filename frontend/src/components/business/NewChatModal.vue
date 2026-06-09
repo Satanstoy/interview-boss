@@ -5,7 +5,7 @@
           <div class="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-ink-600">
             <h3 class="text-base font-bold text-ink-800 dark:text-ink-100">新建面试对话</h3>
             <button @click="emit('close')" class="p-1 rounded-lg text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-700 transition">
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
 
@@ -22,8 +22,8 @@
                     : 'border-surface-200 dark:border-ink-600 hover:border-surface-300 dark:hover:border-ink-500'">
                   <div class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-1">JD + 简历定制</div>
                   <div class="text-xs text-ink-400 dark:text-ink-500">上传目标岗位 JD 和简历，AI 针对性提问</div>
-                  <div v-if="mode === 'jd_resume'" class="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary-500 dark:bg-primary-400 flex items-center justify-center">
-                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  <div v-if="mode === 'jd_resume'" class="absolute top-2 right-2 size-5 rounded-full bg-primary-500 dark:bg-primary-400 flex items-center justify-center">
+                    <svg class="size-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                   </div>
                 </button>
 
@@ -34,8 +34,8 @@
                     : 'border-surface-200 dark:border-ink-600 hover:border-surface-300 dark:hover:border-ink-500'">
                   <div class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-1">自由练习</div>
                   <div class="text-xs text-ink-400 dark:text-ink-500">从题库随机出题，自由练习面试</div>
-                  <div v-if="mode === 'free_practice'" class="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary-500 dark:bg-primary-400 flex items-center justify-center">
-                    <svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  <div v-if="mode === 'free_practice'" class="absolute top-2 right-2 size-5 rounded-full bg-primary-500 dark:bg-primary-400 flex items-center justify-center">
+                    <svg class="size-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                   </div>
                 </button>
               </div>
@@ -89,14 +89,14 @@
                   :class="dragover ? 'border-primary-400 dark:border-primary-500 bg-primary-50/30 dark:bg-primary-900/10' : ''">
                   <input ref="fileInput" type="file" accept=".pdf" class="hidden" @change="handleFileSelect" />
                   <div v-if="!resumeFileName">
-                    <svg class="w-8 h-8 mx-auto text-ink-300 dark:text-ink-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <svg class="size-8 mx-auto text-ink-300 dark:text-ink-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                     <div class="text-xs text-ink-400 dark:text-ink-500">点击上传或拖拽 PDF 文件</div>
                   </div>
                   <div v-else class="flex items-center justify-center gap-2">
-                    <svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <svg class="size-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     <span class="text-sm text-ink-700 dark:text-ink-300">{{ resumeFileName }}</span>
                     <button @click.stop="clearResume" class="text-ink-400 hover:text-red-500 transition">
-                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                   </div>
                 </div>

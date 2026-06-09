@@ -50,8 +50,8 @@
 
         <TableEmpty v-else-if="!loading" :colspan="columns.length">
           <div class="flex flex-col items-center justify-center text-center">
-            <div class="w-14 h-14 mb-4 rounded-2xl bg-surface-100 dark:bg-ink-800 flex items-center justify-center">
-              <Inbox class="w-7 h-7 text-ink-300 dark:text-ink-600" />
+            <div class="size-14 mb-4 rounded-2xl bg-surface-100 dark:bg-ink-800 flex items-center justify-center">
+              <Inbox class="size-7 text-ink-300 dark:text-ink-600" />
             </div>
             <p class="text-sm font-medium text-ink-600 dark:text-ink-400 mb-1">{{ emptyText }}</p>
             <p v-if="emptyDescription" class="text-xs text-ink-400 dark:text-ink-500">{{ emptyDescription }}</p>

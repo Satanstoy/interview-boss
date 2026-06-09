@@ -7,13 +7,13 @@
           <!-- Header -->
           <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-ink-700 shrink-0 bg-gradient-to-r from-primary-50/50 to-accent-50/30 dark:from-primary-900/20 dark:to-accent-900/10">
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center">
-                <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center">
+                <svg class="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
               </div>
               <h2 class="text-lg font-bold text-ink-800 dark:text-ink-100">个人信息</h2>
             </div>
             <button @click="emit('close')" class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-700 transition">
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
 
@@ -23,13 +23,13 @@
             <!-- 基本信息 -->
             <div class="space-y-3 p-4 rounded-2xl border border-surface-200 dark:border-ink-700 bg-surface-50 dark:bg-surface-900">
               <div class="flex items-center gap-3">
-                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-lg font-bold text-white">
+                <div class="size-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-lg font-bold text-white">
                   {{ user?.username?.[0]?.toUpperCase() || '?' }}
                 </div>
                 <div>
                   <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
                   <p class="text-xs text-ink-400 dark:text-ink-500 flex items-center gap-1">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
+                    <span class="size-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
                     {{ user?.is_admin ? '管理员' : '普通用户' }}
                   </p>
                 </div>
@@ -39,7 +39,7 @@
             <!-- 邮箱绑定 -->
             <div class="space-y-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
                 邮箱绑定
               </h3>
 
@@ -86,7 +86,7 @@
             <!-- 简历管理 -->
             <div class="space-y-3.5 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800 bg-gradient-to-b from-emerald-50/50 to-white dark:from-emerald-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 简历管理
               </h3>
 
@@ -114,7 +114,7 @@
                   @click="$refs.resumeInput.click()"
                 >
                   <input ref="resumeInput" type="file" accept=".pdf" class="hidden" @change="onResumeFileSelect" />
-                  <svg class="w-8 h-8 mx-auto text-ink-300 dark:text-ink-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                  <svg class="size-8 mx-auto text-ink-300 dark:text-ink-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                   <div class="text-xs text-ink-400 dark:text-ink-500">点击上传或拖拽 PDF 简历</div>
                   <div class="text-[10px] text-ink-300 dark:text-ink-600 mt-1">上传后，模拟面试时可自动使用</div>
                 </div>
@@ -122,7 +122,7 @@
 
               <!-- 上传进度 -->
               <div v-if="resumeUploading" class="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
-                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <svg class="size-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 上传解析中...
               </div>
               <p v-if="resumeError" class="text-xs text-red-500 dark:text-red-400">{{ resumeError }}</p>
@@ -131,7 +131,7 @@
             <!-- Learning Progress -->
             <div class="space-y-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
                 学习进度
               </h3>
 
@@ -186,11 +186,11 @@
             <div class="space-y-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
               <div class="flex items-center justify-between">
                 <h3 class="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   每日推荐
                 </h3>
                 <button @click="emit('refresh-recommend')" class="text-xs text-ink-400 hover:text-amber-500 dark:hover:text-amber-400 transition p-1 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/30" title="换一批">
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 </button>
               </div>
               <div v-if="recommendations.length === 0" class="text-xs text-ink-400 dark:text-ink-500 text-center py-6">
@@ -221,13 +221,13 @@
             <div class="space-y-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
               <div class="flex items-center justify-between">
                 <h3 class="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+                  <svg class="size-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
                   收藏夹
                 </h3>
                 <span class="text-xs text-ink-400 dark:text-ink-500 tabular-nums">{{ starredItems.length }} 题</span>
               </div>
               <div v-if="starredItems.length === 0" class="text-xs text-ink-400 dark:text-ink-500 text-center py-6">
-                点击题目卡片的 <svg class="inline w-3 h-3 text-ink-300 dark:text-ink-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> 收藏
+                点击题目卡片的 <svg class="inline size-3 text-ink-300 dark:text-ink-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> 收藏
               </div>
               <ul v-else class="space-y-0.5 max-h-40 overflow-y-auto custom-scrollbar">
                 <li
@@ -236,7 +236,7 @@
                   @click="emit('go-to-question', q)"
                   class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all duration-200 text-xs text-ink-600 dark:text-ink-400 hover:text-amber-700 dark:hover:text-amber-400"
                 >
-                  <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+                  <svg class="size-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
                   <span class="truncate">{{ q.question }}</span>
                 </li>
               </ul>

@@ -7,15 +7,15 @@
       class="flex items-center transition-all duration-200 text-ink-700 dark:text-white group"
       :class="buttonClass || 'gap-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-white/5'"
     >
-      <div v-if="compact" class="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground shrink-0">
+      <div v-if="compact" class="size-10 rounded-md bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground shrink-0">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
       <template v-else>
-        <div class="w-[18px] h-[18px] rounded bg-primary flex items-center justify-center text-[9px] font-bold text-primary-foreground leading-none shrink-0">
+        <div class="size-[18px] rounded bg-primary flex items-center justify-center text-[9px] font-bold text-primary-foreground leading-none shrink-0">
           {{ user?.username?.[0]?.toUpperCase() || '?' }}
         </div>
         <span class="text-sm font-medium truncate">{{ user?.username }}</span>
-        <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
+        <svg class="size-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
           <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
         </svg>
       </template>
@@ -38,7 +38,7 @@
         <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
           <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
           <p class="text-xs text-ink-400 dark:text-ink-500 mt-0.5 flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
+            <span class="size-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
             {{ user?.is_admin ? '管理员' : '普通用户' }}
           </p>
         </div>
@@ -67,8 +67,8 @@
           @click="$emit('show-review'); showMenu = false"
           class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
         >
-          <div class="w-7 h-7 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-            <svg class="w-4 h-4 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="size-7 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+            <svg class="size-4 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </div>
@@ -81,8 +81,8 @@
           @click="$emit('show-profile'); showMenu = false"
           class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
         >
-          <div class="w-7 h-7 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-            <svg class="w-4 h-4 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="size-7 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+            <svg class="size-4 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
             </svg>
           </div>
@@ -94,8 +94,8 @@
           @click="handleLogout"
           class="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2.5 transition-colors"
         >
-          <div class="w-7 h-7 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-            <svg class="w-4 h-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="size-7 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+            <svg class="size-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
             </svg>
           </div>

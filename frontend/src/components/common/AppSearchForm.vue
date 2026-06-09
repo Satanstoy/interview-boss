@@ -26,11 +26,11 @@
 
     <div v-if="showButtons" class="flex items-center gap-2 shrink-0">
       <Button variant="outline" size="sm" @click="$emit('reset')">
-        <RotateCcw class="w-3.5 h-3.5" />
+        <RotateCcw class="size-3.5" />
         重置
       </Button>
       <Button size="sm" @click="$emit('search')">
-        <Search class="w-4 h-4" />
+        <Search class="size-4" />
         搜索
       </Button>
     </div>

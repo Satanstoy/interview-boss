@@ -13,7 +13,7 @@
         :disabled="currentPage <= 1"
         @click="go(currentPage - 1)"
       >
-        <ChevronLeft class="w-4 h-4" />
+        <ChevronLeft class="size-4" />
       </Button>
 
       <template v-for="p in visiblePages" :key="p">
@@ -35,7 +35,7 @@
         :disabled="currentPage >= totalPages"
         @click="go(currentPage + 1)"
       >
-        <ChevronRight class="w-4 h-4" />
+        <ChevronRight class="size-4" />
       </Button>
     </div>
 
