@@ -62,8 +62,11 @@
 
     <!-- Simple two-column layout: sidebar left, content right -->
     <div v-else class="flex min-h-screen">
-      <!-- Sidebar: fixed width, full height, fixed position (like ChatGPT) -->
-      <aside class="hidden md:flex w-72 shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0">
+      <!-- Sidebar: dynamic width, collapsible -->
+      <aside
+        class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 transition-all duration-300"
+        :class="sidebarCollapsed ? 'w-[60px]' : 'w-64'"
+      >
         <AppSidebar
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
@@ -73,6 +76,7 @@
           :display-user="displayUser"
           :pending-review-count="pendingReviewCount"
           @update:active-tab="onTabChange"
+          @update:collapsed="sidebarCollapsed = $event"
           @select-tag="onSelectTag"
           @go-to-question="onGoToQuestion"
           @logout="handleLogout"
@@ -116,7 +120,7 @@
                 <div class="skeleton h-3 w-24 rounded"></div>
               </div>
             </div>
-            <div v-for="(w, i) in skeletonCards" :key="i" class="card-smooth p-5 space-y-3">
+            <Card v-for="(w, i) in skeletonCards" :key="i" class="p-5 space-y-3">
               <div class="flex gap-3">
                 <div class="skeleton h-12 w-12 rounded-lg"></div>
                 <div class="flex-1 space-y-2">
@@ -130,7 +134,7 @@
                 <div class="skeleton h-5 w-14 rounded-full"></div>
                 <div class="skeleton h-5 w-24 rounded-full"></div>
               </div>
-            </div>
+            </Card>
           </div>
 
           <!-- Tab content with crossfade transitions (no mode="out-in" to eliminate blank window) -->
@@ -177,6 +181,8 @@
                     :bank-mode="displayUser?.bank_mode"
                     :is-admin="displayUser?.is_admin"
                     :current-user-id="displayUser?.id"
+                    :is-loading-more="isLoadingMore"
+                    :has-more="hasMore"
                     @toggle-select-all="masterSelection.toggleSelectAll()"
                     @invert-selection="masterSelection.invertSelection()"
                     @toggle-item="masterSelection.toggleItem($event)"
@@ -194,21 +200,22 @@
                     @edit-question="editQuestion"
                     @delete-original-question="deleteOriginalQuestion"
                     @update-answer="onUpdateAnswer"
+                    @load-more="loadMoreMasterBank"
                   >
                     <template #actions>
                       <div class="flex flex-wrap items-center gap-2 pt-1">
-                        <button v-if="displayUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
+                        <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
                           {{ isBuilding ? '重建中...' : '重建题库' }}
-                        </button>
-                        <button v-if="!displayUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
+                        </Button>
+                        <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
                           {{ isBuilding ? '重建中...' : '重建题库' }}
-                        </button>
-                        <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
+                        </Button>
+                        <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
                           刷题模式
-                        </button>
-                        <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
+                        </Button>
+                        <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
                           刷新
-                        </button>
+                        </Button>
                       </div>
                     </template>
                   </MasterBankList>
@@ -263,7 +270,7 @@
               </DataTable>
 
               <!-- Interview Tab -->
-              <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-4">
+              <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
                 <template v-if="interviewSeasons.length > 0">
                   <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
                   <RoundedSelect
@@ -488,6 +495,8 @@ import LoginModal from '@/components/business/LoginModal.vue'
 import MergeQuestionDialog from '@/components/business/MergeQuestionDialog.vue'
 import PracticePanel from '@/components/business/PracticePanel.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 
 // 异步组件 loading/error 包装
@@ -568,6 +577,7 @@ const {
   isDataLoading, dataLoadError,
   analytics, practiceStats, popularTags,
   activeSeason, availableSeasons,
+  isLoadingMore, hasMore, loadMoreMasterBank,
   selectedTag, selectedSubTags, searchQuery,
   filterDifficulty, showStarredOnly,
   filterSeason, interviewSortOrder,
@@ -584,6 +594,7 @@ const {
 } = useBuildTrigger({ onRebuildDone: () => { fetchTableData(); fetchAnalytics() } })
 
 // ── UI state ──
+const sidebarCollapsed = ref(false)
 const mockInterviewRef = ref(null)
 const masterBankRef = ref(null)
 const jdCurrentPage = ref(1)
