@@ -34,8 +34,8 @@
         <p class="text-sm text-amber-700 dark:text-amber-300">你的账号尚未绑定邮箱，请绑定邮箱后继续使用。</p>
       </div>
 
-      <div class="space-y-4">
-        <div class="space-y-2">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">邮箱</label>
           <input
             v-model="bindEmail"
@@ -46,7 +46,7 @@
             autocomplete="email"
           />
         </div>
-        <div class="space-y-2">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">验证码</label>
           <div class="flex gap-2">
             <input
@@ -107,8 +107,8 @@
       action="/api/auth/login-form"
       method="post"
     >
-      <div class="space-y-4">
-        <div class="space-y-2">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">用户名</label>
           <input
             ref="usernameInput"
@@ -122,7 +122,7 @@
             autocomplete="username"
           />
         </div>
-        <div class="space-y-2">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">密码</label>
           <input
             v-model="password"
@@ -134,7 +134,7 @@
             autocomplete="current-password"
           />
         </div>
-        <div v-if="isRegister" class="space-y-2">
+        <div v-if="isRegister" class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">
             邮箱 <span class="text-destructive">*</span>
           </label>
@@ -180,8 +180,8 @@
 
     <!-- Email mode -->
     <form v-else-if="!needEmailBind" @submit.prevent="handleEmailSubmit">
-      <div class="space-y-4">
-        <div class="space-y-2">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">邮箱</label>
           <input
             v-model="email"
@@ -192,7 +192,7 @@
             autocomplete="email"
           />
         </div>
-        <div class="space-y-2">
+        <div class="flex flex-col gap-2">
           <label class="text-sm font-medium text-foreground">验证码</label>
           <div class="flex gap-2">
             <input
@@ -214,7 +214,7 @@
           </div>
         </div>
         <template v-if="isRegister">
-          <div class="space-y-2">
+          <div class="flex flex-col gap-2">
             <label class="text-sm font-medium text-foreground">用户名</label>
             <input
               ref="usernameInput"
@@ -227,7 +227,7 @@
               autocomplete="username"
             />
           </div>
-          <div class="space-y-2">
+          <div class="flex flex-col gap-2">
             <label class="text-sm font-medium text-foreground">密码</label>
             <input
               v-model="password"
@@ -324,8 +324,8 @@
               <p class="text-sm text-amber-700 dark:text-amber-300">你的账号尚未绑定邮箱，请绑定邮箱后继续使用。</p>
             </div>
 
-            <div class="space-y-4">
-              <div class="space-y-2">
+            <div class="flex flex-col gap-4">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">邮箱</label>
                 <input
                   v-model="bindEmail"
@@ -336,7 +336,7 @@
                   autocomplete="email"
                 />
               </div>
-              <div class="space-y-2">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">验证码</label>
                 <div class="flex gap-2">
                   <input
@@ -398,8 +398,8 @@
             method="post"
             class="px-6 pb-6"
           >
-            <div class="space-y-4">
-              <div class="space-y-2">
+            <div class="flex flex-col gap-4">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">用户名</label>
                 <input
                   ref="usernameInput"
@@ -413,7 +413,7 @@
                   autocomplete="username"
                 />
               </div>
-              <div class="space-y-2">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">密码</label>
                 <input
                   v-model="password"
@@ -425,7 +425,7 @@
                   autocomplete="current-password"
                 />
               </div>
-              <div v-if="isRegister" class="space-y-2">
+              <div v-if="isRegister" class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">
                   邮箱 <span class="text-destructive">*</span>
                 </label>
@@ -471,8 +471,8 @@
 
           <!-- Email mode Form -->
           <form v-else-if="!needEmailBind" @submit.prevent="handleEmailSubmit" class="px-6 pb-6">
-            <div class="space-y-4">
-              <div class="space-y-2">
+            <div class="flex flex-col gap-4">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">邮箱</label>
                 <input
                   v-model="email"
@@ -483,7 +483,7 @@
                   autocomplete="email"
                 />
               </div>
-              <div class="space-y-2">
+              <div class="flex flex-col gap-2">
                 <label class="text-sm font-medium text-foreground">验证码</label>
                 <div class="flex gap-2">
                   <input
@@ -505,7 +505,7 @@
                 </div>
               </div>
               <template v-if="isRegister">
-                <div class="space-y-2">
+                <div class="flex flex-col gap-2">
                   <label class="text-sm font-medium text-foreground">用户名</label>
                   <input
                     ref="usernameInput"
@@ -518,7 +518,7 @@
                     autocomplete="username"
                   />
                 </div>
-                <div class="space-y-2">
+                <div class="flex flex-col gap-2">
                   <label class="text-sm font-medium text-foreground">密码</label>
                   <input
                     v-model="password"

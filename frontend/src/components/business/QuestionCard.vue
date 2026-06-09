@@ -185,7 +185,7 @@
         </button>
 
         <div ref="sourcesContentRef" :style="{ height: question._showSources ? 'auto' : '0px', overflow: question._showSources ? '' : 'hidden' }">
-        <div class="px-5 pb-5 space-y-2">
+        <div class="px-5 pb-5 flex flex-col gap-2">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
             class="bg-card border border-border rounded-md p-3 flex items-start gap-3">
             <span class="text-caption text-muted-foreground font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>

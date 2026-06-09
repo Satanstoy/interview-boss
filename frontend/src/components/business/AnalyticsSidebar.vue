@@ -9,7 +9,7 @@
         </div>
         分类目录
       </h3>
-      <ul class="space-y-0.5">
+      <ul class="flex flex-col gap-0.5">
         <li
           @click="$emit('select-tag', '全部')"
           class="flex justify-between items-center text-xs cursor-pointer px-2.5 py-2 rounded-lg transition-all duration-200 border border-transparent"
@@ -38,7 +38,7 @@
         </div>
         热门技术栈
       </h3>
-      <ul class="space-y-1">
+      <ul class="flex flex-col gap-1">
         <li v-for="(count, tech) in analytics.tech_trends" :key="tech" class="flex justify-between items-center text-xs px-2.5 py-1.5 rounded-lg hover:bg-surface-50 dark:hover:bg-ink-800 transition-colors">
           <span class="text-ink-600 dark:text-ink-400 break-all mr-2">{{ tech }}</span>
           <span class="text-ink-400 dark:text-ink-500 font-mono text-[11px] whitespace-nowrap bg-surface-200 dark:bg-ink-700 px-2 py-0.5 rounded-md tabular-nums">{{ count }}</span>

@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="flex flex-col gap-4">
     <div class="flex items-center justify-between">
       <p class="text-sm text-ink-500 dark:text-ink-400">
         共 <span class="font-semibold text-ink-700 dark:text-ink-300">{{ nodeCount }}</span> 个知识点，

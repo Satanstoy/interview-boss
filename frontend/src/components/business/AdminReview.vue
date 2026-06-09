@@ -41,7 +41,7 @@
             </div>
 
             <!-- List -->
-            <div v-else v-auto-animate class="space-y-3">
+            <div v-else v-auto-animate class="flex flex-col gap-3">
               <div
                 v-for="item in items"
                 :key="item.id"

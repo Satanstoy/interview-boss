@@ -112,18 +112,18 @@
           </div>
 
           <!-- Loading skeleton -->
-          <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 space-y-4">
+          <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 flex flex-col gap-4">
             <div class="flex items-center gap-3 mb-6">
               <Skeleton class="h-10 w-10 rounded-xl" />
-              <div class="flex-1 space-y-2">
+              <div class="flex-1 flex flex-col gap-2">
                 <Skeleton class="h-5 w-48 rounded" />
                 <Skeleton class="h-3 w-24 rounded" />
               </div>
             </div>
-            <Card v-for="(w, i) in skeletonCards" :key="i" class="p-5 space-y-3">
+            <Card v-for="(w, i) in skeletonCards" :key="i" class="p-5 flex flex-col gap-3">
               <div class="flex gap-3">
                 <Skeleton class="h-12 w-12 rounded-lg" />
-                <div class="flex-1 space-y-2">
+                <div class="flex-1 flex flex-col gap-2">
                   <Skeleton class="h-4 rounded" :style="{ width: w.title }" />
                   <Skeleton class="h-3 rounded" :style="{ width: w.subtitle }" />
                 </div>

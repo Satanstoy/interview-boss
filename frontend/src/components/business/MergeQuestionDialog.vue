@@ -33,7 +33,7 @@
           <div v-if="results.length === 0" class="text-center py-8 text-ink-400 dark:text-ink-500 text-sm">
             {{ searching ? '搜索中...' : '输入关键词搜索目标题目' }}
           </div>
-          <div v-else class="space-y-2">
+          <div v-else class="flex flex-col gap-2">
             <button v-for="item in results" :key="item.id"
               @click="$emit('confirm', item)"
               class="w-full text-left p-3 rounded-xl border border-surface-200 dark:border-ink-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 transition-all duration-200">

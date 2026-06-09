@@ -14,7 +14,7 @@
   </div>
 
   <!-- Skeleton rows -->
-  <div v-else-if="type === 'skeleton'" class="space-y-3" :class="wrapperClass">
+  <div v-else-if="type === 'skeleton'" class="flex flex-col gap-3" :class="wrapperClass">
     <Skeleton
       v-for="i in rows"
       :key="i"
@@ -28,18 +28,18 @@
     <div
       v-for="i in rows"
       :key="i"
-      class="rounded-xl border border-surface-200 dark:border-ink-800 bg-card p-4 space-y-3"
+      class="rounded-xl border border-surface-200 dark:border-ink-800 bg-card p-4 flex flex-col gap-3"
     >
       <!-- Card header skeleton -->
       <div class="flex items-center gap-3">
         <Skeleton class="size-10 rounded-lg shrink-0" />
-        <div class="flex-1 space-y-2">
+        <div class="flex-1 flex flex-col gap-2">
           <Skeleton class="h-4 rounded w-3/4" />
           <Skeleton class="h-3 rounded w-1/2" />
         </div>
       </div>
       <!-- Card body skeleton -->
-      <div class="space-y-2">
+      <div class="flex flex-col gap-2">
         <Skeleton class="h-3 rounded w-full" />
         <Skeleton class="h-3 rounded w-5/6" />
       </div>

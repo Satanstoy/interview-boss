@@ -10,7 +10,7 @@
           </div>
 
           <!-- Body -->
-          <div class="p-6 space-y-5">
+          <div class="p-6 flex flex-col gap-5">
             <!-- Mode selection -->
             <div>
               <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2.5 block">选择面试模式</label>
@@ -42,7 +42,7 @@
             </div>
 
             <!-- JD Resume mode: upload section -->
-            <div v-if="mode === 'jd_resume'" class="space-y-4">
+            <div v-if="mode === 'jd_resume'" class="flex flex-col gap-4">
               <!-- JD selection -->
               <div>
                 <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">选择 JD（可选）</label>

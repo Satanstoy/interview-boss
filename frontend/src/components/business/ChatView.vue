@@ -17,9 +17,9 @@
       <!-- Conversation list -->
       <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
         <!-- Loading skeleton -->
-        <div v-if="loadingConversations" class="p-2 space-y-1">
+        <div v-if="loadingConversations" class="p-2 flex flex-col gap-1">
           <div v-for="i in 4" :key="i" class="flex items-center gap-2 px-3 py-2.5 rounded-lg">
-            <div class="flex-1 space-y-1.5">
+            <div class="flex-1 flex flex-col gap-1.5">
               <Skeleton class="h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }" />
               <Skeleton class="h-2.5 w-16 rounded" />
             </div>
@@ -32,7 +32,7 @@
             </template>
           </AppEmpty>
         </div>
-        <div v-else class="space-y-0.5">
+        <div v-else class="flex flex-col gap-0.5">
           <div v-for="conv in conversations" :key="conv.id"
             @click="selectConversation(conv.id)"
             class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
@@ -107,7 +107,7 @@
         </div>
 
         <!-- Messages area -->
-        <div ref="messagesContainer" class="flex-1 overflow-y-auto custom-scrollbar bg-muted/20 px-6 py-5 space-y-5">
+        <div ref="messagesContainer" class="flex-1 overflow-y-auto custom-scrollbar bg-muted/20 px-6 py-5 flex flex-col gap-5">
           <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
 
           <!-- Streaming message with step timeline -->

@@ -50,7 +50,7 @@
               </div>
               <span class="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Live</span>
             </div>
-            <div class="space-y-3 p-4">
+            <div class="flex flex-col gap-3 p-4">
               <div class="max-w-[78%] rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground">
                 先介绍最近一个项目，以及你承担的核心职责。
               </div>
@@ -62,7 +62,7 @@
                   <span class="font-medium text-foreground">AI Thinking</span>
                   <span class="text-muted-foreground">3 sources</span>
                 </div>
-                <div class="mt-2 space-y-1.5 text-muted-foreground">
+                <div class="mt-2 flex flex-col gap-1.5 text-muted-foreground">
                   <p>检索项目复盘题目：完成</p>
                   <p>分析回答结构：完成</p>
                   <p>生成追问：进行中</p>

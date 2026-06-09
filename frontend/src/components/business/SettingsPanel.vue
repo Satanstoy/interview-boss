@@ -7,10 +7,10 @@
       </DialogHeader>
 
       <!-- Body -->
-      <div class="space-y-6">
+      <div class="flex flex-col gap-6">
 
         <!-- ═══ Per-user LLM Config (所有用户可见) ═══ -->
-        <div class="space-y-3.5 p-5 rounded-xl border border-border bg-card">
+        <div class="flex flex-col gap-3.5 p-5 rounded-xl border border-border bg-card">
           <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
             <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
             我的 LLM 配置
@@ -26,8 +26,8 @@
           </div>
 
           <!-- 已配置：显示摘要 -->
-          <div v-if="myLLM.configured && !myLLM.editing" class="space-y-2">
-            <div class="space-y-2 text-sm">
+          <div v-if="myLLM.configured && !myLLM.editing" class="flex flex-col gap-2">
+            <div class="flex flex-col gap-2 text-sm">
               <div class="flex items-center gap-3">
                 <span class="text-xs text-ink-500 dark:text-ink-400 w-16 shrink-0">API Key</span>
                 <span class="font-mono text-ink-700 dark:text-ink-200 truncate">{{ myLLM.settings.llm_api_key || '未设置' }}</span>
@@ -56,7 +56,7 @@
           </div>
 
           <!-- 编辑表单 -->
-          <div v-if="myLLM.editing" class="space-y-3">
+          <div v-if="myLLM.editing" class="flex flex-col gap-3">
             <div>
               <Label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5">API Key</Label>
               <div v-if="myLLM.settings.llm_api_key_set && !myLLM.editKey" class="flex items-center gap-2">
@@ -101,7 +101,7 @@
         </div>
 
         <!-- ═══ 目标岗位（所有用户可见） ═══ -->
-        <div class="space-y-3.5 p-5 rounded-xl border border-border bg-card">
+        <div class="flex flex-col gap-3.5 p-5 rounded-xl border border-border bg-card">
           <h3 class="text-xs font-bold text-accent-600 dark:text-accent-400 uppercase tracking-wider flex items-center gap-2">
             <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
             目标岗位
@@ -158,12 +158,12 @@
                 <DialogTitle>AI 推荐分类体系</DialogTitle>
                 <DialogDescription>岗位：{{ aiTaxonomyPreview?.position }}</DialogDescription>
               </DialogHeader>
-              <div class="flex-1 overflow-y-auto space-y-3">
+              <div class="flex-1 overflow-y-auto flex flex-col gap-3">
                 <div v-for="(cat, i) in (aiTaxonomyPreview?.categories || [])" :key="i" class="rounded-xl border border-border overflow-hidden">
                   <div class="px-4 py-2.5 bg-accent-50 dark:bg-accent-900/20 font-semibold text-sm text-accent-700 dark:text-accent-300">
                     {{ cat.cat1 }}
                   </div>
-                  <div class="px-4 py-2 space-y-1">
+                  <div class="px-4 py-2 flex flex-col gap-1">
                     <div v-for="(child, j) in cat.children" :key="j" class="text-sm text-ink-600 dark:text-ink-300 pl-4">
                       {{ child }}
                     </div>
@@ -196,7 +196,7 @@
                   暂无公开分类
                 </div>
                 <!-- List -->
-                <div v-else class="space-y-3">
+                <div v-else class="flex flex-col gap-3">
                   <div v-for="tax in publicTaxonomies" :key="tax.id"
                     class="rounded-xl border border-border p-4 hover:border-accent-300 dark:hover:border-accent-700 transition cursor-pointer"
                     @click="onUsePublicTaxonomy(tax)"
@@ -229,7 +229,7 @@
         <!-- ═══ Global settings (Admin only) ═══ -->
         <template v-if="isAdmin">
           <!-- General settings -->
-          <div class="space-y-3.5 p-5 rounded-xl border border-border bg-card">
+          <div class="flex flex-col gap-3.5 p-5 rounded-xl border border-border bg-card">
             <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 uppercase tracking-wider flex items-center gap-2">
               <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
               基础设置
@@ -253,14 +253,14 @@
           </div>
 
           <!-- Taxonomy config (admin only: edit categories) -->
-          <div class="space-y-3.5 p-5 rounded-xl border border-border bg-card">
+          <div class="flex flex-col gap-3.5 p-5 rounded-xl border border-border bg-card">
             <h3 class="text-xs font-bold text-accent-600 dark:text-accent-400 uppercase tracking-wider flex items-center gap-2">
               <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
               分类管理
             </h3>
 
             <!-- Category list -->
-            <div class="space-y-2">
+            <div class="flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <Label class="text-xs font-semibold text-ink-600 dark:text-ink-400">一级大类 / 二级子类</Label>
                 <Button variant="link" size="sm" @click="addCat1" class="text-xs text-accent-600 dark:text-accent-400 h-auto p-0">
@@ -283,7 +283,7 @@
                     <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                   </Button>
                 </div>
-                <div v-if="cat._open" class="p-3 space-y-1.5">
+                <div v-if="cat._open" class="p-3 flex flex-col gap-1.5">
                   <div v-for="(child, ci2) in cat.children" :key="ci2" class="flex items-center gap-2">
                     <span class="text-ink-300 dark:text-ink-600 text-xs">-</span>
                     <input v-model="cat.children[ci2]"
@@ -320,7 +320,7 @@
         </template>
 
         <!-- ═══ 危险操作（仅管理员可见） ═══ -->
-        <div v-if="isAdmin" class="space-y-3.5 p-5 rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10">
+        <div v-if="isAdmin" class="flex flex-col gap-3.5 p-5 rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10">
           <h3 class="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider flex items-center gap-2">
             <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
             危险操作

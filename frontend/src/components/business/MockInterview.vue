@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="flex flex-col gap-4">
     <!-- Config panel -->
     <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-xl border border-border shadow-sm overflow-hidden">
 
@@ -16,7 +16,7 @@
         </div>
       </div>
 
-      <div class="p-5 space-y-5">
+      <div class="p-5 flex flex-col gap-5">
         <!-- Category selection -->
         <div>
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
@@ -186,7 +186,7 @@
           </div>
 
           <!-- Dimension scores -->
-          <div class="space-y-2 mb-4">
+          <div class="flex flex-col gap-2 mb-4">
             <div v-for="(val, key) in q._evaluation.dimensions" :key="key" class="flex items-start gap-2">
               <span class="text-xs text-ink-500 dark:text-ink-400 w-14 shrink-0 pt-0.5">{{ dimLabel[key] || key }}</span>
               <div class="flex-1">
@@ -205,7 +205,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
             <div v-if="q._evaluation.strengths?.length">
               <p class="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">亮点</p>
-              <ul class="space-y-1">
+              <ul class="flex flex-col gap-1">
                 <li v-for="s in q._evaluation.strengths" :key="s" class="text-xs text-ink-600 dark:text-ink-400 flex gap-1.5">
                   <span class="text-green-500 dark:text-green-400 shrink-0">+</span>{{ s }}
                 </li>
@@ -213,7 +213,7 @@
             </div>
             <div v-if="q._evaluation.weaknesses?.length">
               <p class="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">不足</p>
-              <ul class="space-y-1">
+              <ul class="flex flex-col gap-1">
                 <li v-for="w in q._evaluation.weaknesses" :key="w" class="text-xs text-ink-600 dark:text-ink-400 flex gap-1.5">
                   <span class="text-red-500 dark:text-red-400 shrink-0">-</span>{{ w }}
                 </li>
@@ -237,7 +237,7 @@
             <svg class="size-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             {{ q._showHistory ? '收起练习记录' : `查看练习记录 (${q.attempt_count}次)` }}
           </button>
-          <div v-if="q._showHistory" class="px-5 py-4 bg-surface-50 dark:bg-ink-800 border-t border-primary-100 dark:border-primary-800/50 space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+          <div v-if="q._showHistory" class="px-5 py-4 bg-surface-50 dark:bg-ink-800 border-t border-primary-100 dark:border-primary-800/50 flex flex-col gap-2 max-h-64 overflow-y-auto custom-scrollbar">
             <div v-if="q._historyLoading" class="text-center py-3 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
             <div v-else-if="q._history && q._history.length > 0">
               <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-surface-100 dark:border-ink-700 last:border-b-0">
@@ -257,7 +257,7 @@
                   </div>
                   <svg class="size-3.5 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 </div>
-                <div v-if="h._expanded" class="pl-6 pr-2 pb-3 space-y-2">
+                <div v-if="h._expanded" class="pl-6 pr-2 pb-3 flex flex-col gap-2">
                   <div>
                     <p class="text-xs font-semibold text-ink-500 dark:text-ink-400 mb-1">我的回答</p>
                     <p class="text-xs text-ink-600 dark:text-ink-400 bg-white dark:bg-ink-800 rounded p-2 border border-surface-100 dark:border-ink-700 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>

@@ -20,7 +20,7 @@
       </div>
 
       <!-- 题目列表 -->
-      <div class="flex-1 space-y-2 overflow-y-auto custom-scrollbar">
+      <div class="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar">
         <div
           v-for="p in problems"
           :key="p.id"
@@ -57,7 +57,7 @@
       <!-- 错误统计 -->
       <div class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm p-3">
         <h3 class="text-sm font-semibold text-ink-700 dark:text-ink-200 mb-2">错误统计</h3>
-        <div v-if="errorStats" class="space-y-1.5">
+        <div v-if="errorStats" class="flex flex-col gap-1.5">
           <div v-for="(count, cat) in errorStats.error_stats" :key="cat" class="flex items-center gap-2">
             <span class="text-xs text-ink-500 dark:text-ink-400 w-16">{{ categoryLabels[cat] || cat }}</span>
             <div class="flex-1 h-2 bg-surface-100 dark:bg-surface-700 rounded-full overflow-hidden">
@@ -178,7 +178,7 @@
               <span class="text-sm text-ink-400">/100</span>
             </div>
           </div>
-          <div class="space-y-2">
+          <div class="flex flex-col gap-2">
             <div v-for="(score, dim) in scores" :key="dim" class="flex items-center gap-2">
               <span class="text-xs text-ink-500 dark:text-ink-400 w-12">{{ categoryLabels[dim] || dim }}</span>
               <div class="flex-1 h-2 bg-surface-100 dark:bg-surface-700 rounded-full overflow-hidden">

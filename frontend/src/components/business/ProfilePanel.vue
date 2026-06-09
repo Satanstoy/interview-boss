@@ -18,10 +18,10 @@
           </div>
 
           <!-- Body -->
-          <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
+          <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 flex flex-col gap-5">
 
             <!-- 基本信息 -->
-            <div class="space-y-3 p-4 rounded-2xl border border-surface-200 dark:border-ink-700 bg-surface-50 dark:bg-surface-900">
+            <div class="flex flex-col gap-3 p-4 rounded-2xl border border-surface-200 dark:border-ink-700 bg-surface-50 dark:bg-surface-900">
               <div class="flex items-center gap-3">
                 <div class="size-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-lg font-bold text-white">
                   {{ user?.username?.[0]?.toUpperCase() || '?' }}
@@ -37,7 +37,7 @@
             </div>
 
             <!-- 邮箱绑定 -->
-            <div class="space-y-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
+            <div class="flex flex-col gap-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
                 <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
                 邮箱绑定
@@ -57,7 +57,7 @@
               </div>
 
               <!-- 绑定表单 -->
-              <div v-if="emailBinding.editing" class="space-y-3">
+              <div v-if="emailBinding.editing" class="flex flex-col gap-3">
                 <div>
                   <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">邮箱地址</label>
                   <div class="flex gap-2">
@@ -84,7 +84,7 @@
             </div>
 
             <!-- 简历管理 -->
-            <div class="space-y-3.5 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800 bg-gradient-to-b from-emerald-50/50 to-white dark:from-emerald-900/20 dark:to-surface-800">
+            <div class="flex flex-col gap-3.5 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800 bg-gradient-to-b from-emerald-50/50 to-white dark:from-emerald-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
                 <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 简历管理
@@ -129,7 +129,7 @@
             </div>
 
             <!-- Learning Progress -->
-            <div class="space-y-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
+            <div class="flex flex-col gap-3.5 p-4 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
               <h3 class="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider flex items-center gap-2">
                 <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
                 学习进度
@@ -152,7 +152,7 @@
               </div>
 
               <!-- Per-difficulty breakdown -->
-              <div class="space-y-3">
+              <div class="flex flex-col gap-3">
                 <div v-for="diff in diffOrder" :key="diff" class="group">
                   <div class="flex items-center justify-between text-xs mb-1.5">
                     <span class="font-semibold" :class="diffColor(diff)">{{ diff }}</span>
@@ -183,7 +183,7 @@
             </div>
 
             <!-- Daily Recommendation -->
-            <div class="space-y-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
+            <div class="flex flex-col gap-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
               <div class="flex items-center justify-between">
                 <h3 class="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
                   <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
@@ -196,7 +196,7 @@
               <div v-if="recommendations.length === 0" class="text-xs text-ink-400 dark:text-ink-500 text-center py-6">
                 暂无推荐，继续加油
               </div>
-              <ul class="space-y-1.5">
+              <ul class="flex flex-col gap-1.5">
                 <li
                   v-for="q in recommendations"
                   :key="q.id"
@@ -218,7 +218,7 @@
             </div>
 
             <!-- Starred Quick Access -->
-            <div class="space-y-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
+            <div class="flex flex-col gap-3.5 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 bg-gradient-to-b from-amber-50/50 to-white dark:from-amber-900/20 dark:to-surface-800">
               <div class="flex items-center justify-between">
                 <h3 class="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
                   <svg class="size-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
@@ -229,7 +229,7 @@
               <div v-if="starredItems.length === 0" class="text-xs text-ink-400 dark:text-ink-500 text-center py-6">
                 点击题目卡片的 <svg class="inline size-3 text-ink-300 dark:text-ink-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg> 收藏
               </div>
-              <ul v-else class="space-y-0.5 max-h-40 overflow-y-auto custom-scrollbar">
+              <ul v-else class="flex flex-col gap-0.5 max-h-40 overflow-y-auto custom-scrollbar">
                 <li
                   v-for="q in starredItems"
                   :key="q.id"

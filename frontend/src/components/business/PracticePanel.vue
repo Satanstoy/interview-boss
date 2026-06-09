@@ -39,7 +39,7 @@
           <!-- Tab content -->
           <div class="flex-1 overflow-y-auto custom-scrollbar">
             <!-- Description tab -->
-            <TabsContent value="description" class="p-5 space-y-4">
+            <TabsContent value="description" class="p-5 flex flex-col gap-4">
               <div class="flex gap-1.5 flex-wrap">
                 <Badge v-for="tag in (question.tags ? question.tags.split(',') : [])" :key="tag" variant="outline" class="bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border-surface-200/80 dark:border-ink-700 text-[10px]">{{ tag }}</Badge>
               </div>
@@ -104,7 +104,7 @@
             <!-- History tab -->
             <TabsContent value="history" class="p-5">
               <div v-if="qState._historyLoading" class="text-center py-8 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
-              <div v-else-if="qState._history && qState._history.length > 0" class="space-y-2">
+              <div v-else-if="qState._history && qState._history.length > 0" class="flex flex-col gap-2">
                 <div v-for="(h, hIdx) in qState._history" :key="h.id" class="border border-surface-200 dark:border-ink-600 rounded-xl overflow-hidden">
                   <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-surface-50 dark:hover:bg-ink-800 transition" @click="h._expanded = !h._expanded">
                     <span class="text-[10px] text-ink-400 dark:text-ink-500 w-6 text-right shrink-0">#{{ qState._history.length - hIdx }}</span>
@@ -117,7 +117,7 @@
                     </div>
                     <svg class="size-3 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                   </div>
-                  <div v-if="h._expanded" class="px-3 pb-3 space-y-2 border-t border-surface-100 dark:border-ink-700 pt-2">
+                  <div v-if="h._expanded" class="px-3 pb-3 flex flex-col gap-2 border-t border-surface-100 dark:border-ink-700 pt-2">
                     <div>
                       <p class="text-[10px] font-semibold text-ink-500 dark:text-ink-400 mb-1">我的回答</p>
                       <p class="text-xs text-ink-600 dark:text-ink-400 bg-surface-50 dark:bg-ink-800 rounded-lg p-2 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
@@ -177,7 +177,7 @@
 
         <!-- Evaluation result -->
         <div v-if="qState._evaluation" class="border-t border-surface-200 dark:border-ink-600 bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-surface-800 overflow-y-auto custom-scrollbar" style="max-height: 55%;">
-          <div class="p-5 space-y-4">
+          <div class="p-5 flex flex-col gap-4">
             <!-- Overall score -->
             <div class="flex items-center gap-4">
               <span class="text-4xl font-extrabold" :class="scoreTextColor(qState._evaluation.overall_score)">{{ qState._evaluation.overall_score }}</span>
@@ -207,7 +207,7 @@
             <div class="grid grid-cols-2 gap-3">
               <div v-if="qState._evaluation.strengths?.length" class="bg-white dark:bg-ink-800 rounded-xl p-2.5 border border-green-100 dark:border-green-800">
                 <p class="text-[10px] font-semibold text-green-700 dark:text-green-400 mb-1.5">亮点</p>
-                <ul class="space-y-0.5">
+                <ul class="flex flex-col gap-0.5">
                   <li v-for="s in qState._evaluation.strengths" :key="s" class="text-[11px] text-ink-600 dark:text-ink-400 flex gap-1">
                     <span class="text-green-500 dark:text-green-400 shrink-0">+</span>{{ s }}
                   </li>
@@ -215,7 +215,7 @@
               </div>
               <div v-if="qState._evaluation.weaknesses?.length" class="bg-white dark:bg-ink-800 rounded-xl p-2.5 border border-red-100 dark:border-red-800">
                 <p class="text-[10px] font-semibold text-red-700 dark:text-red-400 mb-1.5">不足</p>
-                <ul class="space-y-0.5">
+                <ul class="flex flex-col gap-0.5">
                   <li v-for="w in qState._evaluation.weaknesses" :key="w" class="text-[11px] text-ink-600 dark:text-ink-400 flex gap-1">
                     <span class="text-red-500 dark:text-red-400 shrink-0">-</span>{{ w }}
                   </li>

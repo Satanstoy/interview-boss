@@ -37,7 +37,7 @@
           <span class="group-hover/sources:text-ink-600 dark:group-hover/sources:text-ink-300">参考题目 ({{ message.metadata.retrieved_questions.length }})</span>
         </button>
         <Transition name="expand">
-          <div v-if="showRetrieved" class="mt-1.5 space-y-1.5">
+          <div v-if="showRetrieved" class="mt-1.5 flex flex-col gap-1.5">
             <div v-for="q in message.metadata.retrieved_questions" :key="q.id"
               class="text-xs bg-white dark:bg-surface-900 border border-surface-200 dark:border-ink-800 rounded-lg px-3 py-2 text-ink-600 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800/50 transition-colors">
               <div class="flex items-start gap-2">

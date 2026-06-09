@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="flex flex-col gap-4">
     <!-- Breadcrumb navigation -->
     <nav v-if="breadcrumbs && breadcrumbs.length" aria-label="breadcrumb">
       <ol class="flex items-center gap-1.5 text-sm text-ink-500 dark:text-ink-400">
