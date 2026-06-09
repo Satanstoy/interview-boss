@@ -18,9 +18,11 @@ Vue 3 (Composition API) / Vite / Tailwind CSS / ECharts / Marked + DOMPurify / v
 
 ## UI 方向
 
-- 主界面采用 shadcn-vue dashboard 风格：左侧 workspace sidebar、主内容数据卡片、细边框、低阴影、紧凑信息密度。
-- Tailwind 继续作为唯一样式系统，不引入大型 UI 框架；借鉴 shadcn-vue 的布局、token、组件状态，但保留现有 Vue 组件边界。
-- 高频题库、JD/面经表格、模拟面试优先复用共享组件样式，不逐页堆叠一次性样式。
+- 全面采用 shadcn-vue 组件（reka-vega 风格），禁止手写自定义 UI 组件类
+- Button/Card/Badge/Dialog/Select/Table/AlertDialog/Skeleton 等一律使用 shadcn 组件
+- 图标统一使用 `@lucide/vue`，禁止内联 SVG
+- global.css 仅保留全局基础样式（reset、scrollbar、prose-chat、elevation、动画），不包含组件样式
+- 通用组件在 `components/common/`，shadcn 原始组件在 `components/ui/`
 
 ## 目录结构
 
