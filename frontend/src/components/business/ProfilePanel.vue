@@ -3,7 +3,7 @@
     <transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4">
         <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')"></div>
-        <div class="relative bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-md max-h-[84vh] flex flex-col overflow-hidden animate-slide-up">
+        <div class="relative bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[84vh] flex flex-col overflow-hidden animate-slide-up">
           <!-- Header -->
           <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-ink-700 shrink-0 bg-gradient-to-r from-primary-50/50 to-accent-50/30 dark:from-primary-900/20 dark:to-accent-900/10">
             <div class="flex items-center gap-3">

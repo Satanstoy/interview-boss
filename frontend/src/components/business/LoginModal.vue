@@ -153,7 +153,7 @@
         <input
           v-model="rememberMe"
           type="checkbox"
-          class="h-4 w-4 rounded-[4px] border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
+          class="h-4 w-4 rounded-sm border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
         />
         <span class="text-sm text-muted-foreground group-hover:text-foreground transition">记住我（30 天免登录）</span>
       </label>
@@ -444,7 +444,7 @@
               <input
                 v-model="rememberMe"
                 type="checkbox"
-                class="h-4 w-4 rounded-[4px] border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
+                class="h-4 w-4 rounded-sm border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
               />
               <span class="text-sm text-muted-foreground group-hover:text-foreground transition">记住我（30 天免登录）</span>
             </label>

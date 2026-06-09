@@ -924,9 +924,9 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
 
 <style scoped>
-:deep(pre) { background-color: #2d2a27; color: #faf9f7; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
+:deep(pre) { background-color: #2d2a27; color: #faf9f7; padding: 1rem; border-radius: var(--radius-xl); overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
 :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em; }
-:deep(p code) { @apply bg-surface-100 dark:bg-ink-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: 0.375rem; font-size: 0.8125em; }
+:deep(p code) { @apply bg-surface-100 dark:bg-ink-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: var(--radius-md); font-size: 0.8125em; }
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(strong) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; }

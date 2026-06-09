@@ -2,7 +2,7 @@
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="$emit('close')">
-        <div class="bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-slide-up overflow-hidden">
+        <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-slide-up overflow-hidden">
           <!-- Header -->
           <div class="px-6 py-4 border-b border-surface-100 dark:border-ink-700 flex items-center justify-between bg-gradient-to-r from-orange-50/50 to-amber-50/30 dark:from-orange-900/20 dark:to-amber-900/10">
             <div class="flex items-center gap-3">

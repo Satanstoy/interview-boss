@@ -472,13 +472,13 @@ const dedupedSources = computed(() => {
   background-color: oklch(0.32 0 0);
   color: var(--foreground);
   padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
 }
 .dark :deep(.answer-content pre) {
   background-color: oklch(0.19 0 0);
   color: var(--foreground);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-lg);
   padding: 1rem;
 }
 .dark :deep(.answer-content pre code) {
