@@ -1,10 +1,10 @@
 <template>
   <div class="space-y-4">
     <!-- Config panel -->
-    <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-2xl border border-surface-200/80 dark:border-ink-700/50 shadow-card overflow-hidden">
+    <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-xl border border-border shadow-sm overflow-hidden">
 
       <!-- Header -->
-      <div class="bg-primary-50/60 dark:bg-primary-900/15 px-5 py-4 border-b border-surface-200/60 dark:border-ink-700/40">
+      <div class="border-b border-border px-5 py-4">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
             <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -71,21 +71,21 @@
         </div>
 
         <!-- Start button -->
-        <button @click="startQuiz" class="w-full btn-primary py-3 text-base">
+        <Button variant="default" class="w-full py-3 text-base" @click="startQuiz">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           开始抽测
-        </button>
+        </Button>
       </div>
     </div>
 
     <!-- Quiz mode -->
     <div v-else>
       <!-- Summary bar -->
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4 bg-primary-50/60 dark:bg-primary-900/15 border border-surface-200/60 dark:border-ink-700/40 rounded-xl px-4 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4 bg-primary-50/60 dark:bg-primary-900/15 border border-border rounded-xl px-4 py-3">
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="text-ink-500 dark:text-ink-400">当前：</span>
-          <span class="badge bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedCat || '全部领域' }}</span>
-          <span class="badge bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedDifficultyLabel }}</span>
+          <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedCat || '全部领域' }}</Badge>
+          <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedDifficultyLabel }}</Badge>
           <span class="text-ink-300 dark:text-ink-600">|</span>
           <span class="text-ink-600 dark:text-ink-400">共 {{ mockQuestions.length }} 题</span>
           <template v-if="quizSummary">
@@ -95,8 +95,8 @@
           </template>
         </div>
         <div class="flex gap-2">
-          <button @click="loadQuestions" class="text-sm btn-primary px-4 py-1.5">换一批</button>
-          <button @click="quizStarted = false" class="text-sm btn-secondary px-4 py-1.5">重新配置</button>
+          <Button variant="default" size="sm" class="px-4 py-1.5" @click="loadQuestions">换一批</Button>
+          <Button variant="outline" size="sm" class="px-4 py-1.5" @click="quizStarted = false">重新配置</Button>
         </div>
       </div>
 
@@ -110,12 +110,12 @@
       <div v-else-if="mockQuestions.length === 0" class="text-center py-10 text-ink-400 dark:text-ink-500 border-2 border-dashed border-surface-200 dark:border-ink-600 rounded-xl">
         <p class="mb-2 text-lg">暂无符合条件的题目</p>
         <p class="text-sm">请调整筛选条件或录入更多面经数据。</p>
-        <button @click="quizStarted = false" class="mt-4 text-sm btn-secondary px-4 py-2">返回配置</button>
+        <Button variant="outline" size="sm" class="mt-4 px-4 py-2" @click="quizStarted = false">返回配置</Button>
       </div>
 
       <!-- Questions -->
-      <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-surface-200/80 dark:border-ink-700/50 rounded-xl overflow-hidden bg-white dark:bg-surface-800 shadow-card">
-        <div class="p-4 bg-primary-50/60 dark:bg-primary-900/15">
+      <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-border rounded-xl overflow-hidden bg-white dark:bg-surface-800 shadow-sm">
+        <div class="p-4 border-b border-border">
           <div class="flex items-start gap-3">
             <div class="flex flex-col items-center justify-center bg-primary-100/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 font-bold rounded-lg p-2 min-w-[44px]">
               <span class="text-caption text-primary-400 dark:text-primary-500">第</span>
@@ -150,24 +150,28 @@
             class="w-full border border-surface-200 dark:border-ink-600 rounded-lg p-3 text-sm leading-relaxed bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 dark:focus:border-primary-600 resize-y"
           ></textarea>
           <div class="flex gap-2 mt-2">
-            <button
-              @click="handleEvaluate(q)"
+            <Button
+              variant="default"
+              size="sm"
+              class="px-5 py-2 flex items-center gap-2"
               :disabled="q._isEvaluating"
-              class="btn-primary text-sm px-5 py-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              @click="handleEvaluate(q)"
             >
               <svg v-if="q._isEvaluating" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
               {{ q._isEvaluating ? '评估中...' : '提交评估' }}
-            </button>
-            <button
+            </Button>
+            <Button
               v-if="q._userAnswer"
+              variant="ghost"
+              size="sm"
+              class="px-3 py-2"
               @click="q._userAnswer = ''; q._evaluation = null"
-              class="text-sm btn-ghost px-3 py-2"
-            >清空</button>
+            >清空</Button>
           </div>
         </div>
 
         <!-- Evaluation result -->
-        <div v-if="q._evaluation" class="px-5 py-4 border-t border-surface-200/60 dark:border-ink-700/40 bg-primary-50/40 dark:bg-primary-900/10">
+        <div v-if="q._evaluation" class="px-5 py-4 border-t border-border bg-primary-50/40 dark:bg-primary-900/10">
           <h4 class="text-sm font-bold text-ink-700 dark:text-ink-300 mb-3">评估结果</h4>
 
           <!-- Overall score -->
@@ -329,6 +333,8 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '@/api/index.js'
 import { sanitizeAgainstInjection, validateNumber } from '@/utils/validate.js'
