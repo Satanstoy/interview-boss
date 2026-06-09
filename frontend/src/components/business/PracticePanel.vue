@@ -58,7 +58,7 @@
                     {{ src.company === '未提供' ? '未知' : src.company }}
                     <span class="text-primary-300 dark:text-primary-600 mx-1">|</span>
                     {{ src.round === '未提供' ? '未知轮次' : src.round }}
-                    <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold">[原文]</a>
+                    <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="src.url" target="_blank" rel="noopener noreferrer" class="ml-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-bold transition-colors duration-200">[原文]</a>
                   </span>
                 </div>
               </div>

@@ -130,7 +130,7 @@
                     <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
                     {{ src.round === '未提供' ? '未知轮次' : src.round }}
                   </span>
-                  <a v-if="src.url" :href="src.url" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-600 dark:hover:text-primary-300" title="在新窗口打开">
+                  <a v-if="src.url" :href="src.url" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors duration-200" title="在新窗口打开">
                     <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                   </a>
                 </span>

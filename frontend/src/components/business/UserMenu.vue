@@ -55,7 +55,7 @@
                 'flex-1 px-2 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
                 user?.bank_mode === mode.value
                   ? 'bg-white dark:bg-surface-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300'
+                  : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300 transition-colors duration-200'
               ]"
             >{{ mode.label }}</button>
           </div>

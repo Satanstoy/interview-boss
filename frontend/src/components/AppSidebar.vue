@@ -196,7 +196,7 @@ function handleShowProfile() { emit('show-profile') }
               :class="selectedTag === topic ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-200 dark:border-emerald-800' : 'hover:bg-surface-50 dark:hover:bg-ink-800 text-ink-600 dark:text-ink-400'"
             >
               <span class="break-all mr-2 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{{ topic }}</span>
-              <span class="text-ink-400 dark:text-ink-500 font-mono text-[11px] whitespace-nowrap tabular-nums group-hover:text-emerald-500 dark:group-hover:text-emerald-400">{{ count }}</span>
+              <span class="text-ink-400 dark:text-ink-500 font-mono text-[11px] whitespace-nowrap tabular-nums group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors duration-200">{{ count }}</span>
             </li>
           </ul>
         </div>

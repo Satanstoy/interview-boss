@@ -198,7 +198,7 @@
                   {{ src.company === '未提供' ? '未知' : src.company }}
                   <span class="text-primary/40 dark:text-primary/50 mx-0.5">|</span>
                   {{ src.round === '未提供' ? '未知' : src.round }}
-                  <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary hover:text-primary/80 dark:hover:text-primary/70 font-bold" title="查看原文">[原文]</a>
+                  <a v-if="src.url && src.url !== '未提供链接'" @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary hover:text-primary/80 dark:hover:text-primary/70 font-bold transition-colors duration-200" title="查看原文">[原文]</a>
                 </span>
                 <button v-if="isAdmin && dedupedSources.length > 1" @click.stop="$emit('split-question', { question, originalQuestion: src._origQuestion || question.question })"
                   class="text-caption text-muted-foreground hover:text-orange-500 dark:hover:text-orange-400 px-1.5 py-0.5 rounded transition-colors">

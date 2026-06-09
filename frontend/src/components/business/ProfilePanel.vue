@@ -47,7 +47,7 @@
               <div v-if="myEmail && !emailBinding.editing" class="flex items-center gap-3">
                 <span class="text-sm text-ink-700 dark:text-ink-200 font-mono">{{ myEmail }}</span>
                 <span class="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-lg">已绑定</span>
-                <button @click="startEmailBinding" class="ml-auto text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">更换</button>
+                <button @click="startEmailBinding" class="ml-auto text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium transition-colors duration-200">更换</button>
               </div>
 
               <!-- 未绑定 -->
@@ -96,11 +96,11 @@
                   <p class="text-sm font-medium text-ink-700 dark:text-ink-200 truncate">{{ resumeInfo.filename }}</p>
                   <p class="text-xs text-ink-400 dark:text-ink-500">上传于 {{ formatDate(resumeInfo.created_at) }}</p>
                 </div>
-                <label class="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium cursor-pointer whitespace-nowrap">
+                <label class="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium cursor-pointer whitespace-nowrap transition-colors duration-200">
                   重新上传
                   <input type="file" accept=".pdf" class="hidden" @change="onResumeFileSelect" />
                 </label>
-                <button @click="onDeleteResume" class="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium">删除</button>
+                <button @click="onDeleteResume" class="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium transition-colors duration-200">删除</button>
               </div>
 
               <!-- 无简历 - 上传区域 -->

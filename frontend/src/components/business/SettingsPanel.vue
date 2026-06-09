@@ -20,7 +20,7 @@
           <div v-if="!myLLM.configured && !myLLM.editing" class="flex items-center gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
             <svg class="size-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
             <span class="text-sm text-amber-700 dark:text-amber-300">请先配置 LLM 密钥才能使用 AI 功能</span>
-            <Button variant="outline" size="sm" @click="startEditMyLLM" class="ml-auto border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40">
+            <Button variant="outline" size="sm" @click="startEditMyLLM" class="ml-auto border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors duration-200">
               立即配置
             </Button>
           </div>
@@ -49,7 +49,7 @@
               <Button variant="outline" size="sm" @click="startEditMyLLM" class="border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400">
                 修改配置
               </Button>
-              <Button variant="outline" size="sm" @click="deleteMyLLM" class="border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30">
+              <Button variant="outline" size="sm" @click="deleteMyLLM" class="border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors duration-200">
                 清除配置
               </Button>
             </div>
@@ -122,7 +122,7 @@
                   variant="ghost"
                   size="icon-sm"
                   @click="onDeletePosition(pos)"
-                  class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400"
+                  class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 transition-colors duration-200"
                   title="删除岗位"
                 >
                   <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -172,7 +172,7 @@
               </div>
               <DialogFooter>
                 <Button variant="outline" @click="onCancelTaxonomy">取消</Button>
-                <Button @click="onConfirmTaxonomy" class="bg-accent-500 text-white hover:bg-accent-600">采纳此分类</Button>
+                <Button @click="onConfirmTaxonomy" class="bg-accent-500 text-white hover:bg-accent-600 transition-colors duration-200">采纳此分类</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -207,7 +207,7 @@
                         <span class="text-xs text-ink-400 dark:text-ink-500">分享者: {{ tax.owner_name || '匿名' }}</span>
                         <Button v-if="isAdmin" variant="ghost" size="icon-sm"
                           @click.stop="onDeletePublicTaxonomy(tax)"
-                          class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200"
                           title="删除此公开分类">
                           <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         </Button>
@@ -272,14 +272,14 @@
               <div v-for="(cat, ci) in taxonomy.categories" :key="ci"
                 class="rounded-xl border border-border bg-white dark:bg-surface-900 overflow-hidden">
                 <div class="flex items-center gap-2 px-3 py-2.5 bg-surface-50 dark:bg-surface-800 border-b border-surface-100 dark:border-ink-700">
-                  <Button variant="ghost" size="icon-sm" @click="cat._open = !cat._open" class="text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 h-6 w-6">
+                  <Button variant="ghost" size="icon-sm" @click="cat._open = !cat._open" class="text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 h-6 w-6 transition-colors duration-200">
                     <svg :class="{'rotate-90': cat._open}" class="size-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
                   </Button>
                   <input v-model="cat.cat1"
                     class="flex-1 text-sm font-semibold bg-transparent border-none outline-none text-ink-800 dark:text-ink-100 placeholder-ink-400 dark:placeholder-ink-500"
                     placeholder="如 A.项目经验与设计" />
                   <span class="text-xs text-ink-400 dark:text-ink-500">{{ cat.children.length }} 个子类</span>
-                  <Button variant="ghost" size="icon-sm" @click="removeCat1(ci)" class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 h-6 w-6">
+                  <Button variant="ghost" size="icon-sm" @click="removeCat1(ci)" class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 h-6 w-6 transition-colors duration-200">
                     <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                   </Button>
                 </div>
@@ -289,7 +289,7 @@
                     <input v-model="cat.children[ci2]"
                       class="flex-1 text-sm bg-transparent border-none outline-none text-ink-700 dark:text-ink-200 placeholder-ink-400 dark:placeholder-ink-500"
                       placeholder="如 A1.系统设计" />
-                    <Button variant="ghost" size="icon-sm" @click="cat.children.splice(ci2, 1)" class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 h-5 w-5">
+                    <Button variant="ghost" size="icon-sm" @click="cat.children.splice(ci2, 1)" class="text-ink-300 dark:text-ink-600 hover:text-red-500 dark:hover:text-red-400 h-5 w-5 transition-colors duration-200">
                       <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                     </Button>
                   </div>

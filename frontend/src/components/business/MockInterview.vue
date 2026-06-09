@@ -241,7 +241,7 @@
             <div v-if="q._historyLoading" class="text-center py-3 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
             <div v-else-if="q._history && q._history.length > 0">
               <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-surface-100 dark:border-ink-700 last:border-b-0">
-                <div class="flex items-center gap-3 py-2 cursor-pointer hover:bg-surface-100/50 dark:hover:bg-ink-700/50 px-1 rounded" @click="h._expanded = !h._expanded">
+                <div class="flex items-center gap-3 py-2 cursor-pointer hover:bg-surface-100/50 dark:hover:bg-ink-700/50 px-1 rounded transition-colors duration-200" @click="h._expanded = !h._expanded">
                   <span class="text-xs text-ink-400 dark:text-ink-500 w-5 text-right shrink-0">#{{ q._history.length - hIdx }}</span>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">

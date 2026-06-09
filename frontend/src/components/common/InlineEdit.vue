@@ -31,8 +31,8 @@
         </Select>
         <Input v-else v-model="editValue" @keyup.enter="save" />
         <div class="flex gap-1 shrink-0">
-          <Button variant="ghost" size="sm" @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300" title="保存">保存</Button>
-          <Button variant="ghost" size="sm" @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300" title="取消">取消</Button>
+          <Button variant="ghost" size="sm" @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 transition-colors duration-200" title="保存">保存</Button>
+          <Button variant="ghost" size="sm" @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200" title="取消">取消</Button>
         </div>
       </div>
       <p v-if="validationError" class="text-red-500 dark:text-red-400 text-xs mt-0.5">{{ validationError }}</p>

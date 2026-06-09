@@ -141,7 +141,8 @@
   }
   .animate-float,
   .animate-pulse-slow,
-  .animate-shimmer {
+  .animate-shimmer,
+  .stagger-item {
     animation: none !important;
   }
 }
