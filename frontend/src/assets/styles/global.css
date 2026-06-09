@@ -191,6 +191,13 @@
   }
 }
 
+/* ── Tab content transition container ── */
+.tab-content {
+  will-change: opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
 /* ── Reduced motion: disable animations for accessibility ── */
 @media (prefers-reduced-motion: reduce) {
   *,

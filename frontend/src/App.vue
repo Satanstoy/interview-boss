@@ -134,7 +134,7 @@
           </div>
 
           <!-- SearchFilterBar -->
-          <div v-if="masterBankEverShown" :class="activeTab !== 'MasterBank' ? 'hidden' : ''">
+          <div v-show="masterBankEverShown && activeTab === 'MasterBank'">
             <SearchFilterBar
               :search-query="searchQuery"
               :filter-difficulty="filterDifficulty"
@@ -160,14 +160,14 @@
           </div>
 
           <!-- Exam Distribution Chart -->
-          <div v-if="masterBankEverShown && activeTab === 'MasterBank'">
+          <div v-show="masterBankEverShown && activeTab === 'MasterBank'">
             <ExamDistribution :master-bank="masterBank" />
           </div>
 
           <!-- MasterBankList -->
           <div v-if="masterBankEverShown"
-            class="flex flex-col flex-1 min-h-0"
-            :class="activeTab !== 'MasterBank' ? 'invisible absolute inset-0' : ''">
+            v-show="activeTab === 'MasterBank'"
+            class="flex flex-col flex-1 min-h-0">
             <MasterBankList
               ref="masterBankRef"
               :items="filteredMasterBank"
@@ -215,8 +215,8 @@
             </MasterBankList>
           </div>
 
-          <!-- Tab content with motion-enhanced transitions -->
-          <Transition name="tab-fade" mode="out-in" @after-enter="restoreScroll()">
+          <!-- Tab content with crossfade transitions (no mode="out-in" to eliminate blank window) -->
+          <Transition name="tab-fade" @before-enter="restoreScroll()">
             <div :key="activeTab" class="tab-content" data-motion="tab-transition">
               <!-- JD Tab -->
               <DataTable
@@ -491,12 +491,14 @@ import LoginModal from '@/components/business/LoginModal.vue'
 import MergeQuestionDialog from '@/components/business/MergeQuestionDialog.vue'
 import PracticePanel from '@/components/business/PracticePanel.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
+import AsyncLoading from '@/components/common/AsyncLoading.vue'
 
 // 异步组件 loading/error 包装
 const asyncOptions = {
   delay: 100,
   timeout: 15000,
   suspensible: false,
+  loadingComponent: AsyncLoading,
 }
 
 const MockInterview = defineAsyncComponent({
@@ -925,8 +927,8 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
   100% { margin-left: 85%; width: 15%; }
 }
 .indeterminate-bar { animation: indeterminate-slide 1.8s ease-in-out infinite; }
-.tab-fade-enter-active { transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
-.tab-fade-leave-active { transition: opacity 0.18s ease-in; }
+.tab-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+.tab-fade-leave-active { transition: opacity 0.15s ease-in; position: absolute; width: 100%; }
 .tab-fade-enter-from { opacity: 0; }
 .tab-fade-leave-to { opacity: 0; }
 .fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
