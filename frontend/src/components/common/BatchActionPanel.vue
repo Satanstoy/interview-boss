@@ -1,24 +1,25 @@
 <template>
   <div class="mb-2 flex flex-wrap gap-2 items-center bg-card p-2 rounded-xl border border-border shadow-sm">
     <Button @click="$emit('toggle-select-all')" variant="ghost" size="sm" class="text-xs">
-      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+      <CheckSquare class="w-3.5 h-3.5" />
       全选
     </Button>
     <Button @click="$emit('invert-selection')" variant="ghost" size="sm" class="text-xs">
-      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+      <ArrowLeftRight class="w-3.5 h-3.5" />
       反选
     </Button>
     <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
-    <button
+    <Button
       v-for="action in actions" :key="action.key"
+      variant="outline" size="sm"
       @click="executeAction(action)"
       :disabled="selectedCount === 0 || action.disabled || runningAction !== null"
-      class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
+      class="text-xs font-medium flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
       :class="colorClasses(action.color)"
     >
       {{ action.label }}
       <span class="bg-white/30 dark:bg-white/10 px-1.5 py-0.5 rounded text-[10px] font-bold">{{ selectedCount }}</span>
-    </button>
+    </Button>
     <div v-if="runningAction" class="flex items-center gap-2.5">
       <div class="w-32 h-1.5 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
         <div
@@ -38,6 +39,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
+import { CheckSquare, ArrowLeftRight } from '@lucide/vue'
 
 defineProps({
   selectedCount: { type: Number, default: 0 },
