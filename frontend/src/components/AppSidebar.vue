@@ -10,7 +10,6 @@ import {
   BookUploadIcon,
   BracesIcon,
 } from '@hugeicons/core-free-icons'
-import AnalyticsSidebar from '@/components/business/AnalyticsSidebar.vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 
 const props = defineProps({

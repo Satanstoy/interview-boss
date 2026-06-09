@@ -4,8 +4,6 @@
     <nav v-if="!isAuthenticatedForUi" class="sticky top-0 z-50 bg-background/90 backdrop-blur-xl border-b border-border">
       <div class="max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-6 h-14 flex items-center justify-between overflow-hidden">
         <div class="flex items-center gap-2 min-w-0">
-          <span v-if="isAuthenticatedForUi" class="text-sm text-ink-400 dark:text-ink-500 hidden sm:inline">Dashboard</span>
-          <span v-if="isAuthenticatedForUi" class="text-ink-300 dark:text-ink-700 hidden sm:inline">/</span>
           <span v-if="!isAuthenticatedForUi" class="grid h-8 w-8 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">IB</span>
           <h1 class="text-sm lg:text-base font-semibold tracking-tight text-ink-900 dark:text-ink-100 truncate">
             {{ activeTabLabel }}
@@ -474,7 +472,6 @@ import { useTheme } from '@/composables/useTheme.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
-import SectionCards from '@/components/SectionCards.vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
