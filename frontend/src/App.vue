@@ -133,91 +133,88 @@
             </div>
           </div>
 
-          <!-- SearchFilterBar -->
-          <div v-show="masterBankEverShown && activeTab === 'MasterBank'">
-            <SearchFilterBar
-              :search-query="searchQuery"
-              :filter-difficulty="filterDifficulty"
-              @update:search-query="searchQuery = $event"
-              @update:filter-difficulty="filterDifficulty = $event"
-            />
-            <!-- Sub-tag filter chips -->
-            <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
-              <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
-              <button
-                v-for="st in availableSubTags"
-                :key="st.tag"
-                @click="toggleSubTag(st.tag)"
-                class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
-                :class="selectedSubTags.includes(st.tag)
-                  ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
-                  : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
-              >
-                {{ st.tag }}
-                <span class="ml-1 opacity-50">{{ st.count }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Exam Distribution Chart -->
-          <div v-show="masterBankEverShown && activeTab === 'MasterBank'">
-            <ExamDistribution :master-bank="masterBank" />
-          </div>
-
-          <!-- MasterBankList -->
-          <div v-if="masterBankEverShown"
-            v-show="activeTab === 'MasterBank'"
-            class="flex flex-col flex-1 min-h-0">
-            <MasterBankList
-              ref="masterBankRef"
-              :items="filteredMasterBank"
-              :selected-count="masterSelection.selectedCount.value"
-              :is-selected="isMasterSelected"
-              :batch-actions="masterBatchActions"
-              :practiced-questions="practicedQuestions"
-              :bank-mode="displayUser?.bank_mode"
-              :is-admin="displayUser?.is_admin"
-              :current-user-id="displayUser?.id"
-              @toggle-select-all="masterSelection.toggleSelectAll()"
-              @invert-selection="masterSelection.invertSelection()"
-              @toggle-item="masterSelection.toggleItem($event)"
-              @toggle-star="toggleStar"
-              @retag="retagQuestion"
-              @generate-answer="generateAnswer"
-              @use-reference-answer="useReferenceAnswer"
-              @save-user-answer="saveUserAnswer"
-              @save-field="saveFieldFromEvent"
-              @practice="practiceQuestion = $event"
-              @split-question="splitQuestion"
-              @start-merge="startMerge"
-              @navigate-to-interview="onNavigateToInterview"
-              @delete="deleteQuestion"
-              @edit-question="editQuestion"
-              @delete-original-question="deleteOriginalQuestion"
-              @update-answer="onUpdateAnswer"
-            >
-              <template #actions>
-                <div class="flex flex-wrap items-center gap-2 pt-1">
-                  <button v-if="displayUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
-                    {{ isBuilding ? '重建中...' : '重建题库' }}
-                  </button>
-                  <button v-if="!displayUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
-                    {{ isBuilding ? '重建中...' : '重建题库' }}
-                  </button>
-                  <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
-                    刷题模式
-                  </button>
-                  <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
-                    刷新
-                  </button>
-                </div>
-              </template>
-            </MasterBankList>
-          </div>
-
           <!-- Tab content with crossfade transitions (no mode="out-in" to eliminate blank window) -->
           <Transition name="tab-fade" @before-enter="restoreScroll()">
             <div :key="activeTab" class="tab-content" data-motion="tab-transition">
+              <!-- MasterBank Tab -->
+              <div v-if="activeTab === 'MasterBank' && masterBankEverShown">
+                <!-- SearchFilterBar -->
+                <SearchFilterBar
+                  :search-query="searchQuery"
+                  :filter-difficulty="filterDifficulty"
+                  @update:search-query="searchQuery = $event"
+                  @update:filter-difficulty="filterDifficulty = $event"
+                />
+                <!-- Sub-tag filter chips -->
+                <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
+                  <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
+                  <button
+                    v-for="st in availableSubTags"
+                    :key="st.tag"
+                    @click="toggleSubTag(st.tag)"
+                    class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
+                    :class="selectedSubTags.includes(st.tag)
+                      ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
+                      : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
+                  >
+                    {{ st.tag }}
+                    <span class="ml-1 opacity-50">{{ st.count }}</span>
+                  </button>
+                </div>
+
+                <!-- Exam Distribution Chart -->
+                <ExamDistribution :master-bank="masterBank" />
+
+                <!-- MasterBankList -->
+                <div class="flex flex-col flex-1 min-h-0">
+                  <MasterBankList
+                    ref="masterBankRef"
+                    :items="filteredMasterBank"
+                    :selected-count="masterSelection.selectedCount.value"
+                    :is-selected="isMasterSelected"
+                    :batch-actions="masterBatchActions"
+                    :practiced-questions="practicedQuestions"
+                    :bank-mode="displayUser?.bank_mode"
+                    :is-admin="displayUser?.is_admin"
+                    :current-user-id="displayUser?.id"
+                    @toggle-select-all="masterSelection.toggleSelectAll()"
+                    @invert-selection="masterSelection.invertSelection()"
+                    @toggle-item="masterSelection.toggleItem($event)"
+                    @toggle-star="toggleStar"
+                    @retag="retagQuestion"
+                    @generate-answer="generateAnswer"
+                    @use-reference-answer="useReferenceAnswer"
+                    @save-user-answer="saveUserAnswer"
+                    @save-field="saveFieldFromEvent"
+                    @practice="practiceQuestion = $event"
+                    @split-question="splitQuestion"
+                    @start-merge="startMerge"
+                    @navigate-to-interview="onNavigateToInterview"
+                    @delete="deleteQuestion"
+                    @edit-question="editQuestion"
+                    @delete-original-question="deleteOriginalQuestion"
+                    @update-answer="onUpdateAnswer"
+                  >
+                    <template #actions>
+                      <div class="flex flex-wrap items-center gap-2 pt-1">
+                        <button v-if="displayUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
+                          {{ isBuilding ? '重建中...' : '重建题库' }}
+                        </button>
+                        <button v-if="!displayUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
+                          {{ isBuilding ? '重建中...' : '重建题库' }}
+                        </button>
+                        <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
+                          刷题模式
+                        </button>
+                        <button v-if="!isDataLoading" @click="fetchTableData" :disabled="isDataLoading" class="btn-secondary text-xs">
+                          刷新
+                        </button>
+                      </div>
+                    </template>
+                  </MasterBankList>
+                </div>
+              </div>
+
               <!-- JD Tab -->
               <DataTable
                 v-if="activeTab === 'JD'"
