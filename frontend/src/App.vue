@@ -67,24 +67,18 @@
         <AppSidebar
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
-          :analytics="analytics"
-          :practice-stats="practiceStats"
           :popular-tags="popularTags"
           :selected-tag="selectedTag"
-          :recommend-seed="recommendSeed"
           :master-bank="masterBank"
-          :filtered-master-bank="filteredMasterBank"
           :display-user="displayUser"
           :pending-review-count="pendingReviewCount"
           @update:active-tab="onTabChange"
           @select-tag="onSelectTag"
           @go-to-question="onGoToQuestion"
-          @refresh-recommend="recommendSeed++"
           @logout="handleLogout"
           @bank-mode-changed="handleBankModeChanged"
           @show-review="showReviewPanel = true"
           @show-profile="showProfile = true"
-          @refresh="fetchAnalytics"
         />
       </aside>
 

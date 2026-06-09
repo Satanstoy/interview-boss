@@ -15,13 +15,9 @@ import UserMenu from '@/components/business/UserMenu.vue'
 const props = defineProps({
   activeTab: { type: String, default: 'masterBank' },
   sidebarTabs: { type: Array, default: () => [] },
-  analytics: { type: Object, default: () => ({ tech_trends: {} }) },
-  practiceStats: { type: Object, default: () => ({}) },
   popularTags: { type: Object, default: () => ({}) },
   selectedTag: { type: String, default: '全部' },
-  recommendSeed: { type: Number, default: 0 },
   masterBank: { type: Array, default: () => [] },
-  filteredMasterBank: { type: Array, default: () => [] },
   displayUser: { type: Object, default: null },
   pendingReviewCount: { type: Number, default: 0 },
 })
