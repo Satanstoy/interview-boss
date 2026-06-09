@@ -128,8 +128,6 @@ export default {
         'inner-glow': 'inset 0 1px 2px 0 rgb(var(--c-glow) / 0.1)',
       },
       borderRadius: {
-        'xl': '0.875rem',
-        '2xl': '1rem',
         '3xl': '1.25rem',
       },
       animation: {
