@@ -8,7 +8,7 @@
       <ArrowLeftRight class="size-3.5" />
       反选
     </Button>
-    <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
+    <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
     <Button
       v-for="action in actions" :key="action.key"
       variant="outline" size="sm"
@@ -21,13 +21,13 @@
       <span class="bg-white/30 dark:bg-white/10 px-1.5 py-0.5 rounded text-[10px] font-bold">{{ selectedCount }}</span>
     </Button>
     <div v-if="runningAction" class="flex items-center gap-2.5">
-      <div class="w-32 h-1.5 bg-surface-200 dark:bg-ink-700 rounded-full overflow-hidden">
+      <div class="w-32 h-1.5 bg-muted dark:bg-muted rounded-full overflow-hidden">
         <div
           class="h-full bg-gradient-brand rounded-full transition-all duration-300"
           :style="{ width: progressPct + '%' }"
         ></div>
       </div>
-      <span class="text-xs text-ink-500 dark:text-ink-400 tabular-nums font-medium">{{ progress.current }}/{{ progress.total }}</span>
+      <span class="text-xs text-muted-foreground tabular-nums font-medium">{{ progress.current }}/{{ progress.total }}</span>
     </div>
     <slot />
     <div v-if="$slots.right" class="ml-auto flex items-center gap-2">

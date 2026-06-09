@@ -1,6 +1,6 @@
 <template>
   <div
-    class="overflow-hidden rounded-md border border-border bg-card shadow-sm transition-all duration-200 hover:border-surface-300 dark:hover:border-ink-700"
+    class="overflow-hidden rounded-md border border-border bg-card shadow-sm transition-all duration-200 hover:border-border dark:hover:border-border"
     :class="[
       isSelected(question.id) ? 'border-primary/40 dark:border-primary/30 ring-2 ring-primary/15 dark:ring-primary/20' : '',
     ]"
@@ -37,10 +37,10 @@
           </Badge>
 
           <!-- Tags: neutral, max 3 shown -->
-          <Badge variant="outline" v-for="tag in parsedTags.slice(0, 3)" :key="tag" class="rounded-md bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400 text-label">
+          <Badge variant="outline" v-for="tag in parsedTags.slice(0, 3)" :key="tag" class="rounded-md bg-muted dark:bg-card/80 text-muted-foreground dark:text-muted-foreground text-label">
             {{ tag }}
           </Badge>
-          <span v-if="parsedTags.length > 3" class="text-caption text-muted-foreground dark:text-ink-500">+{{ parsedTags.length - 3 }}</span>
+          <span v-if="parsedTags.length > 3" class="text-caption text-muted-foreground dark:text-muted-foreground">+{{ parsedTags.length - 3 }}</span>
 
           <!-- Ownership badge (mixed mode only) -->
           <Badge variant="outline" v-if="showOwnership" class="text-label"
@@ -51,7 +51,7 @@
           </Badge>
 
           <!-- Position badge -->
-          <Badge variant="outline" v-if="question.job_position" class="rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400">
+          <Badge variant="outline" v-if="question.job_position" class="rounded-md text-label bg-muted dark:bg-card/80 text-muted-foreground dark:text-muted-foreground">
             {{ formatPosition(question.job_position) }}
           </Badge>
 
@@ -65,7 +65,7 @@
             :class="practiceInfo.best_score >= 80 ? 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-600 dark:text-emerald-400' : practiceInfo.best_score >= 60 ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-600 dark:text-amber-400' : 'bg-red-50 dark:bg-red-900/25 text-red-500 dark:text-red-400'">
             {{ practiceInfo.best_score }}
           </Badge>
-          <Badge variant="outline" v-else class="rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-500">New</Badge>
+          <Badge variant="outline" v-else class="rounded-md text-label bg-muted dark:bg-card/80 text-muted-foreground dark:text-muted-foreground">New</Badge>
         </div>
 
         <!-- Actions row: hover-reveal for secondary actions -->
@@ -93,13 +93,13 @@
 
       <!-- Star (always visible, tertiary action) -->
       <button @click.stop="$emit('toggle-star', question)" class="p-1 transition-all duration-200 hover:scale-110 star-btn shrink-0" :title="question.is_starred ? '取消收藏' : '收藏'">
-        <svg class="size-4.5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-border dark:text-ink-700 hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <svg class="size-4.5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-border dark:text-foreground hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
         </svg>
       </button>
 
       <!-- Expand chevron -->
-      <div class="text-muted-foreground dark:text-ink-600 mt-0.5 shrink-0">
+      <div class="text-muted-foreground dark:text-muted-foreground mt-0.5 shrink-0">
         <svg class="size-4 transform transition-transform duration-200" :class="question._showAnswer ? 'rotate-180 text-primary dark:text-primary' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </div>
     </div>
@@ -112,7 +112,7 @@
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
-          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input dark:border-ink-700/50 rounded-md p-4 text-sm focus:ring-2 focus:ring-primary/20 dark:focus:ring-primary/15 focus:border-primary/40 font-mono bg-card text-foreground transition-all duration-200"></textarea>
+          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input dark:border-border/50 rounded-md p-4 text-sm focus:ring-2 focus:ring-primary/20 dark:focus:ring-primary/15 focus:border-primary/40 font-mono bg-card text-foreground transition-all duration-200"></textarea>
           <div class="flex gap-2 justify-end mt-2">
             <Button variant="outline" size="sm" @click="question._isEditingAnswer = false" class="px-5">取消</Button>
             <Button variant="default" size="sm" @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="px-5">保存</Button>
@@ -123,10 +123,10 @@
         <div v-else>
           <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
             <div class="absolute top-0 right-0 flex gap-1 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
                 编辑
               </button>
-              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
+              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
             </div>

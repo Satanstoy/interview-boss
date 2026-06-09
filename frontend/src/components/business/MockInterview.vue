@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-4">
     <!-- Config panel -->
-    <div v-if="!quizStarted" class="bg-white dark:bg-surface-800 rounded-xl border border-border shadow-sm overflow-hidden">
+    <div v-if="!quizStarted" class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
 
       <!-- Header -->
       <div class="border-b border-border px-5 py-4">
@@ -10,8 +10,8 @@
             <svg class="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
           </div>
           <div>
-            <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">模拟面试</h3>
-            <p class="text-caption text-ink-400 dark:text-ink-500">选择领域和难度，开始练习</p>
+            <h3 class="text-sm font-bold text-foreground">模拟面试</h3>
+            <p class="text-caption text-muted-foreground">选择领域和难度，开始练习</p>
           </div>
         </div>
       </div>
@@ -19,7 +19,7 @@
       <div class="p-5 flex flex-col gap-5">
         <!-- Category selection -->
         <div>
-          <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+          <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
             <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
             选择领域
           </label>
@@ -27,13 +27,13 @@
             <button
               @click="selectedCat = ''"
               class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-              :class="selectedCat === '' ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+              :class="selectedCat === '' ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
             >全部领域</button>
             <button
               v-for="(cnt, cat) in popularTags" :key="cat"
               @click="selectedCat = cat"
               class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-              :class="selectedCat === cat ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+              :class="selectedCat === cat ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
             >{{ cat }} <span class="opacity-50 ml-0.5">{{ cnt }}</span></button>
           </div>
         </div>
@@ -42,7 +42,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <!-- Difficulty selection -->
           <div>
-            <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
               <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
               难度
             </label>
@@ -51,21 +51,21 @@
                 v-for="opt in difficultyOptions" :key="opt.value"
                 @click="selectedDifficulty = opt.value"
                 class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-                :class="selectedDifficulty === opt.value ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-white dark:bg-ink-800 text-ink-600 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-ink-700'"
+                :class="selectedDifficulty === opt.value ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
               >{{ opt.label }}</button>
             </div>
           </div>
 
           <!-- Count -->
           <div>
-            <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-2 flex items-center gap-1.5">
+            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
               <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
               题目数量
             </label>
-            <div class="inline-flex items-center rounded-xl border border-surface-200 dark:border-ink-600 overflow-hidden bg-white dark:bg-ink-800">
-              <button @click="questionCount = Math.max(1, questionCount - 1)" class="size-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">-</button>
-              <input v-model.number="questionCount" type="number" min="1" max="50" class="w-14 text-center border-x border-surface-200 dark:border-ink-600 py-2 text-sm bg-transparent text-ink-800 dark:text-ink-100 focus:ring-0 focus:border-primary-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-              <button @click="questionCount = Math.min(50, questionCount + 1)" class="size-10 text-ink-500 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700 flex items-center justify-center text-lg font-bold transition">+</button>
+            <div class="inline-flex items-center rounded-xl border border-border overflow-hidden bg-card">
+              <button @click="questionCount = Math.max(1, questionCount - 1)" class="size-10 text-muted-foreground hover:bg-muted dark:hover:bg-muted flex items-center justify-center text-lg font-bold transition">-</button>
+              <input v-model.number="questionCount" type="number" min="1" max="50" class="w-14 text-center border-x border-border py-2 text-sm bg-transparent text-foreground focus:ring-0 focus:border-primary-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+              <button @click="questionCount = Math.min(50, questionCount + 1)" class="size-10 text-muted-foreground hover:bg-muted dark:hover:bg-muted flex items-center justify-center text-lg font-bold transition">+</button>
             </div>
           </div>
         </div>
@@ -83,14 +83,14 @@
       <!-- Summary bar -->
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4 bg-primary-50/60 dark:bg-primary-900/15 border border-border rounded-xl px-4 py-3">
         <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="text-ink-500 dark:text-ink-400">当前：</span>
+          <span class="text-muted-foreground">当前：</span>
           <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedCat || '全部领域' }}</Badge>
           <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedDifficultyLabel }}</Badge>
-          <span class="text-ink-300 dark:text-ink-600">|</span>
-          <span class="text-ink-600 dark:text-ink-400">共 {{ mockQuestions.length }} 题</span>
+          <span class="text-muted-foreground/50">|</span>
+          <span class="text-muted-foreground">共 {{ mockQuestions.length }} 题</span>
           <template v-if="quizSummary">
-            <span class="text-ink-400 dark:text-ink-500">|</span>
-            <span class="text-ink-600 dark:text-ink-400">已答 {{ quizSummary.answered }}/{{ quizSummary.total }}</span>
+            <span class="text-muted-foreground">|</span>
+            <span class="text-muted-foreground">已答 {{ quizSummary.answered }}/{{ quizSummary.total }}</span>
             <span class="font-bold" :class="scoreTextColor(quizSummary.avgScore)">均分 {{ quizSummary.avgScore }}</span>
           </template>
         </div>
@@ -101,20 +101,20 @@
       </div>
 
       <!-- Loading -->
-      <div v-if="isLoading" class="text-center py-10 text-ink-400 dark:text-ink-500 border-2 border-dashed border-surface-200 dark:border-ink-600 rounded-xl">
+      <div v-if="isLoading" class="text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl">
         <svg class="animate-spin h-8 w-8 text-primary-400 dark:text-primary-400 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
         <p class="text-lg">正在加载题目...</p>
       </div>
 
       <!-- Empty -->
-      <div v-else-if="mockQuestions.length === 0" class="text-center py-10 text-ink-400 dark:text-ink-500 border-2 border-dashed border-surface-200 dark:border-ink-600 rounded-xl">
+      <div v-else-if="mockQuestions.length === 0" class="text-center py-10 text-muted-foreground border-2 border-dashed border-border rounded-xl">
         <p class="mb-2 text-lg">暂无符合条件的题目</p>
         <p class="text-sm">请调整筛选条件或录入更多面经数据。</p>
         <Button variant="outline" size="sm" class="mt-4 px-4 py-2" @click="quizStarted = false">返回配置</Button>
       </div>
 
       <!-- Questions -->
-      <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-border rounded-xl overflow-hidden bg-white dark:bg-surface-800 shadow-sm">
+      <div v-for="(q, qIdx) in mockQuestions" :key="q.id" class="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
         <div class="p-4 border-b border-border">
           <div class="flex items-start gap-3">
             <div class="flex flex-col items-center justify-center bg-primary-100/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 font-bold rounded-lg p-2 min-w-[44px]">
@@ -133,21 +133,21 @@
                 <button @click="handleToggleStar(q)" class="text-lg ml-1 transition-transform hover:scale-125" :title="q.is_starred ? '取消收藏' : '收藏'">
                   {{ q.is_starred ? '★' : '☆' }}
                 </button>
-                <span class="text-xs text-ink-400 dark:text-ink-500 ml-auto">频率 {{ q.frequency }}</span>
+                <span class="text-xs text-muted-foreground ml-auto">频率 {{ q.frequency }}</span>
               </div>
-              <h3 class="text-base lg:text-lg font-bold text-ink-800 dark:text-ink-100 leading-snug">{{ q.question }}</h3>
+              <h3 class="text-base lg:text-lg font-bold text-foreground leading-snug">{{ q.question }}</h3>
             </div>
           </div>
         </div>
 
         <!-- User answer input -->
-        <div class="px-4 py-3 border-t border-surface-100 dark:border-ink-700 bg-white dark:bg-surface-800">
-          <label class="text-xs font-semibold text-ink-500 dark:text-ink-400 mb-1.5 block">你的回答</label>
+        <div class="px-4 py-3 border-t border-border bg-card">
+          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">你的回答</label>
           <textarea
             v-model="q._userAnswer"
             placeholder="在这里输入你的回答，然后点击「提交评估」让 AI 对比参考答案评分..."
             rows="5"
-            class="w-full border border-surface-200 dark:border-ink-600 rounded-lg p-3 text-sm leading-relaxed bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 dark:focus:border-primary-600 resize-y"
+            class="w-full border border-border rounded-lg p-3 text-sm leading-relaxed bg-card text-foreground focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 dark:focus:border-primary-600 resize-y"
           ></textarea>
           <div class="flex gap-2 mt-2">
             <Button
@@ -172,31 +172,31 @@
 
         <!-- Evaluation result -->
         <div v-if="q._evaluation" class="px-5 py-4 border-t border-border bg-primary-50/40 dark:bg-primary-900/10">
-          <h4 class="text-sm font-bold text-ink-700 dark:text-ink-300 mb-3">评估结果</h4>
+          <h4 class="text-sm font-bold text-foreground mb-3">评估结果</h4>
 
           <!-- Overall score -->
           <div class="flex items-center gap-3 mb-4">
             <span class="text-3xl font-extrabold" :class="scoreTextColor(q._evaluation.overall_score)">{{ q._evaluation.overall_score }}</span>
             <div class="flex-1">
-              <div class="bg-surface-200 dark:bg-ink-700 rounded-full h-3 overflow-hidden">
+              <div class="bg-muted dark:bg-muted rounded-full h-3 overflow-hidden">
                 <div class="h-full rounded-full transition-all duration-500" :class="scoreColor(q._evaluation.overall_score)" :style="{ width: q._evaluation.overall_score + '%' }"></div>
               </div>
             </div>
-            <span class="text-xs text-ink-400 dark:text-ink-500">/ 100</span>
+            <span class="text-xs text-muted-foreground">/ 100</span>
           </div>
 
           <!-- Dimension scores -->
           <div class="flex flex-col gap-2 mb-4">
             <div v-for="(val, key) in q._evaluation.dimensions" :key="key" class="flex items-start gap-2">
-              <span class="text-xs text-ink-500 dark:text-ink-400 w-14 shrink-0 pt-0.5">{{ dimLabel[key] || key }}</span>
+              <span class="text-xs text-muted-foreground w-14 shrink-0 pt-0.5">{{ dimLabel[key] || key }}</span>
               <div class="flex-1">
                 <div class="flex items-center gap-2">
-                  <div class="bg-surface-200 dark:bg-ink-700 rounded-full h-2 flex-1 overflow-hidden">
+                  <div class="bg-muted dark:bg-muted rounded-full h-2 flex-1 overflow-hidden">
                     <div class="h-full rounded-full transition-all duration-500" :class="scoreColor(val.score)" :style="{ width: val.score + '%' }"></div>
                   </div>
                   <span class="text-xs font-bold w-8 text-right" :class="scoreTextColor(val.score)">{{ val.score }}</span>
                 </div>
-                <p v-if="val.comment" class="text-xs text-ink-400 dark:text-ink-500 mt-0.5 leading-snug">{{ val.comment }}</p>
+                <p v-if="val.comment" class="text-xs text-muted-foreground mt-0.5 leading-snug">{{ val.comment }}</p>
               </div>
             </div>
           </div>
@@ -206,7 +206,7 @@
             <div v-if="q._evaluation.strengths?.length">
               <p class="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">亮点</p>
               <ul class="flex flex-col gap-1">
-                <li v-for="s in q._evaluation.strengths" :key="s" class="text-xs text-ink-600 dark:text-ink-400 flex gap-1.5">
+                <li v-for="s in q._evaluation.strengths" :key="s" class="text-xs text-muted-foreground flex gap-1.5">
                   <span class="text-green-500 dark:text-green-400 shrink-0">+</span>{{ s }}
                 </li>
               </ul>
@@ -214,7 +214,7 @@
             <div v-if="q._evaluation.weaknesses?.length">
               <p class="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">不足</p>
               <ul class="flex flex-col gap-1">
-                <li v-for="w in q._evaluation.weaknesses" :key="w" class="text-xs text-ink-600 dark:text-ink-400 flex gap-1.5">
+                <li v-for="w in q._evaluation.weaknesses" :key="w" class="text-xs text-muted-foreground flex gap-1.5">
                   <span class="text-red-500 dark:text-red-400 shrink-0">-</span>{{ w }}
                 </li>
               </ul>
@@ -223,8 +223,8 @@
 
           <!-- Suggestions -->
           <div v-if="q._evaluation.suggestions">
-            <p class="text-xs font-semibold text-ink-700 dark:text-ink-300 mb-1">改进建议</p>
-            <div class="text-sm text-ink-600 dark:text-ink-400 leading-relaxed answer-content" v-html="renderMarkdown(q._evaluation.suggestions)"></div>
+            <p class="text-xs font-semibold text-foreground mb-1">改进建议</p>
+            <div class="text-sm text-muted-foreground leading-relaxed answer-content" v-html="renderMarkdown(q._evaluation.suggestions)"></div>
           </div>
         </div>
 
@@ -232,51 +232,51 @@
         <div v-if="q.attempt_count > 0" class="border-t border-primary-100 dark:border-primary-800/50">
           <button
             @click="toggleHistory(q)"
-            class="w-full py-2.5 text-xs font-medium text-ink-500 dark:text-ink-400 hover:bg-surface-50 dark:hover:bg-primary-900/20 transition flex items-center justify-center gap-2"
+            class="w-full py-2.5 text-xs font-medium text-muted-foreground hover:bg-muted dark:hover:bg-primary-900/20 transition flex items-center justify-center gap-2"
           >
             <svg class="size-3.5 transition-transform" :class="{ 'rotate-90': q._showHistory }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             {{ q._showHistory ? '收起练习记录' : `查看练习记录 (${q.attempt_count}次)` }}
           </button>
-          <div v-if="q._showHistory" class="px-5 py-4 bg-surface-50 dark:bg-ink-800 border-t border-primary-100 dark:border-primary-800/50 flex flex-col gap-2 max-h-64 overflow-y-auto custom-scrollbar">
-            <div v-if="q._historyLoading" class="text-center py-3 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
+          <div v-if="q._showHistory" class="px-5 py-4 bg-muted dark:bg-card border-t border-primary-100 dark:border-primary-800/50 flex flex-col gap-2 max-h-64 overflow-y-auto custom-scrollbar">
+            <div v-if="q._historyLoading" class="text-center py-3 text-xs text-muted-foreground">加载中...</div>
             <div v-else-if="q._history && q._history.length > 0">
-              <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-surface-100 dark:border-ink-700 last:border-b-0">
-                <div class="flex items-center gap-3 py-2 cursor-pointer hover:bg-surface-100/50 dark:hover:bg-ink-700/50 px-1 rounded transition-colors duration-200" @click="h._expanded = !h._expanded">
-                  <span class="text-xs text-ink-400 dark:text-ink-500 w-5 text-right shrink-0">#{{ q._history.length - hIdx }}</span>
+              <div v-for="(h, hIdx) in q._history" :key="h.id" class="border-b border-border last:border-b-0">
+                <div class="flex items-center gap-3 py-2 cursor-pointer hover:bg-muted/50 dark:hover:bg-muted/50 px-1 rounded transition-colors duration-200" @click="h._expanded = !h._expanded">
+                  <span class="text-xs text-muted-foreground w-5 text-right shrink-0">#{{ q._history.length - hIdx }}</span>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">
                       <span class="text-xs font-bold" :class="scoreTextColor(h.score)">{{ h.score }}分</span>
-                      <span class="text-xs text-ink-300 dark:text-ink-600">{{ h.created_at?.slice(0, 16)?.replace('T', ' ') }}</span>
+                      <span class="text-xs text-muted-foreground/50">{{ h.created_at?.slice(0, 16)?.replace('T', ' ') }}</span>
                     </div>
-                    <p v-if="!h._expanded" class="text-xs text-ink-500 dark:text-ink-400 truncate">{{ h.user_answer?.slice(0, 80) }}{{ h.user_answer?.length > 80 ? '...' : '' }}</p>
+                    <p v-if="!h._expanded" class="text-xs text-muted-foreground truncate">{{ h.user_answer?.slice(0, 80) }}{{ h.user_answer?.length > 80 ? '...' : '' }}</p>
                   </div>
                   <div class="w-16 shrink-0">
-                    <div class="bg-surface-200 dark:bg-ink-700 rounded-full h-1.5 overflow-hidden">
+                    <div class="bg-muted dark:bg-muted rounded-full h-1.5 overflow-hidden">
                       <div class="h-full rounded-full" :class="scoreColor(h.score)" :style="{ width: h.score + '%' }"></div>
                     </div>
                   </div>
-                  <svg class="size-3.5 text-ink-400 dark:text-ink-500 transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                  <svg class="size-3.5 text-muted-foreground transition-transform shrink-0" :class="{ 'rotate-90': h._expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 </div>
                 <div v-if="h._expanded" class="pl-6 pr-2 pb-3 flex flex-col gap-2">
                   <div>
-                    <p class="text-xs font-semibold text-ink-500 dark:text-ink-400 mb-1">我的回答</p>
-                    <p class="text-xs text-ink-600 dark:text-ink-400 bg-white dark:bg-ink-800 rounded p-2 border border-surface-100 dark:border-ink-700 whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
+                    <p class="text-xs font-semibold text-muted-foreground mb-1">我的回答</p>
+                    <p class="text-xs text-muted-foreground bg-card rounded p-2 border border-border whitespace-pre-wrap leading-relaxed">{{ h.user_answer }}</p>
                   </div>
                   <div v-if="h.evaluation_result">
                     <div class="flex items-center gap-3 mb-1">
-                      <span class="text-xs font-semibold text-ink-500 dark:text-ink-400">维度评分：</span>
-                      <span v-for="(val, key) in h.evaluation_result.dimensions" :key="key" class="text-xs text-ink-500 dark:text-ink-400">
+                      <span class="text-xs font-semibold text-muted-foreground">维度评分：</span>
+                      <span v-for="(val, key) in h.evaluation_result.dimensions" :key="key" class="text-xs text-muted-foreground">
                         {{ dimLabel[key] || key }} <span class="font-bold" :class="scoreTextColor(val.score)">{{ val.score }}</span>
                       </span>
                     </div>
-                    <div v-if="h.evaluation_result.suggestions" class="text-xs text-ink-500 dark:text-ink-400">
+                    <div v-if="h.evaluation_result.suggestions" class="text-xs text-muted-foreground">
                       <span class="font-semibold">建议：</span>{{ h.evaluation_result.suggestions?.slice(0, 200) }}{{ h.evaluation_result.suggestions?.length > 200 ? '...' : '' }}
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-            <div v-else class="text-center py-3 text-xs text-ink-400 dark:text-ink-500">暂无练习记录</div>
+            <div v-else class="text-center py-3 text-xs text-muted-foreground">暂无练习记录</div>
           </div>
         </div>
 
@@ -287,17 +287,17 @@
           >
             {{ q._showAnswer ? '收起答案' : '查看答案' }}
           </button>
-          <div v-if="q._showAnswer" class="p-6 bg-slate-50 dark:bg-ink-800 border-t border-primary-100 dark:border-primary-800/50">
+          <div v-if="q._showAnswer" class="p-6 bg-slate-50 dark:bg-card border-t border-primary-100 dark:border-primary-800/50">
             <!-- Edit mode -->
             <div v-if="q._isEditingAnswer" class="flex flex-col gap-3">
-              <label class="text-xs font-semibold text-ink-600 dark:text-ink-400">编辑参考答案</label>
+              <label class="text-xs font-semibold text-muted-foreground">编辑参考答案</label>
               <textarea
                 v-model="q._editAnswer"
                 rows="10"
-                class="w-full border border-blue-300 dark:border-blue-700 rounded-lg p-3 text-sm leading-relaxed bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-y font-mono"
+                class="w-full border border-blue-300 dark:border-blue-700 rounded-lg p-3 text-sm leading-relaxed bg-card text-foreground focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-y font-mono"
               ></textarea>
               <div class="flex gap-2 justify-end">
-                <button @click="q._isEditingAnswer = false" class="px-4 py-1.5 text-sm text-ink-600 dark:text-ink-400 border border-surface-300 dark:border-ink-600 rounded-lg hover:bg-surface-100 dark:hover:bg-ink-700 transition">取消</button>
+                <button @click="q._isEditingAnswer = false" class="px-4 py-1.5 text-sm text-muted-foreground border border-border rounded-lg hover:bg-muted dark:hover:bg-muted transition">取消</button>
                 <button @click="handleSaveAnswer(q)" :disabled="q._isSavingAnswer" class="px-4 py-1.5 text-sm text-white bg-blue-600 dark:bg-blue-600 rounded-lg hover:bg-blue-700 dark:hover:bg-blue-700 transition disabled:opacity-50">
                   {{ q._isSavingAnswer ? '保存中...' : '保存' }}
                 </button>
@@ -310,15 +310,15 @@
                   @click="q._isEditingAnswer = true; q._editAnswer = q.ai_answer"
                   class="absolute top-0 right-0 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-2.5 py-1 rounded-md transition border border-blue-200 dark:border-blue-800"
                 >编辑答案</button>
-                <div class="text-ink-700 dark:text-ink-300 text-sm leading-relaxed answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
+                <div class="text-foreground text-sm leading-relaxed answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
               </div>
               <div v-else class="text-center py-4">
-                <p class="text-ink-400 dark:text-ink-500 mb-3 text-sm">暂无 AI 答案。</p>
+                <p class="text-muted-foreground mb-3 text-sm">暂无 AI 答案。</p>
                 <div class="flex gap-2 justify-center flex-wrap">
                   <button @click="handleGenerate(q)" :disabled="q._isLoadingAnswer" class="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-bold px-5 py-2 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition text-sm disabled:opacity-50">
                     {{ q._isLoadingAnswer ? '生成中...' : 'AI 生成答案' }}
                   </button>
-                  <button @click="q._isEditingAnswer = true; q._editAnswer = ''" class="bg-surface-100 dark:bg-ink-700 text-ink-600 dark:text-ink-400 font-bold px-5 py-2 rounded-lg hover:bg-surface-200 dark:hover:bg-gray-600 transition text-sm">
+                  <button @click="q._isEditingAnswer = true; q._editAnswer = ''" class="bg-muted dark:bg-muted text-muted-foreground font-bold px-5 py-2 rounded-lg hover:bg-muted dark:hover:bg-gray-600 transition text-sm">
                     手动编写
                   </button>
                 </div>

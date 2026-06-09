@@ -10,7 +10,7 @@
 
     <Table class="rounded-xl border border-border bg-card shadow-sm">
       <TableHeader>
-        <TableRow class="bg-card text-ink-500 dark:text-ink-400 text-xs border-border">
+        <TableRow class="bg-card text-muted-foreground text-xs border-border">
           <TableHead class="h-10 px-3 text-center w-10">选择</TableHead>
           <TableHead v-for="col in columns" :key="col.key" class="h-10 px-3" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
             {{ col.label }}
@@ -24,15 +24,15 @@
           class="text-sm animate-fade-in"
           :class="[
             highlightId != null && highlightId == row.id ? 'highlight-row' : '',
-            isSelected(row.id) ? 'bg-surface-100/80 dark:bg-ink-800/70' : 'bg-white dark:bg-surface-900'
+            isSelected(row.id) ? 'bg-muted/80 dark:bg-card/70' : 'bg-background'
           ]"
           :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
         >
           <TableCell class="px-3 py-2.5 text-center">
             <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
-              class="size-4 text-primary-600 rounded-md border-surface-300 dark:border-ink-600 focus:ring-primary-500 cursor-pointer transition">
+              class="size-4 text-primary-600 rounded-md border-border focus:ring-primary-500 cursor-pointer transition">
           </TableCell>
-          <TableCell v-for="col in columns" :key="col.key" class="px-3 py-2.5 break-words text-ink-700 dark:text-ink-200" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
+          <TableCell v-for="col in columns" :key="col.key" class="px-3 py-2.5 break-words text-foreground" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
             <slot :name="'cell-' + col.key" :row="row" :value="row[col.frontendKey || col.key]">
               {{ row[col.frontendKey || col.key] }}
             </slot>
@@ -44,11 +44,11 @@
         <TableRow v-if="rows.length === 0">
           <TableCell :colspan="columns.length + 2" class="p-16 text-center">
             <div class="flex flex-col items-center">
-              <div class="size-16 rounded-2xl bg-surface-100 dark:bg-ink-800 flex items-center justify-center mb-4">
-                <Inbox class="size-8 text-ink-300 dark:text-ink-600" />
+              <div class="size-16 rounded-2xl bg-muted dark:bg-card flex items-center justify-center mb-4">
+                <Inbox class="size-8 text-muted-foreground/50" />
               </div>
-              <p class="text-ink-500 dark:text-ink-400 font-medium mb-1">暂无数据</p>
-              <p class="text-sm text-ink-400 dark:text-ink-500">试试切换筛选条件或录入更多内容</p>
+              <p class="text-muted-foreground font-medium mb-1">暂无数据</p>
+              <p class="text-sm text-muted-foreground">试试切换筛选条件或录入更多内容</p>
             </div>
           </TableCell>
         </TableRow>

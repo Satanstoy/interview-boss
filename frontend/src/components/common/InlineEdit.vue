@@ -6,7 +6,7 @@
         {{ displayValue || '-' }}
       </span>
       <span v-else :class="{ 'whitespace-pre-wrap break-words flex-1': type === 'textarea' }">{{ displayValue }}</span>
-      <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-ink-400 hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">
+      <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-muted-foreground hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">
         <Pencil class="size-3.5" />
       </Button>
     </div>

@@ -5,7 +5,7 @@
       @update:model-value="handleTabClick"
       class="w-fit"
     >
-      <TabsList class="bg-transparent border-b border-surface-200/80 dark:border-ink-700/50 overflow-x-auto mobile-scroll-x w-full">
+      <TabsList class="bg-transparent border-b border-border/80/50 overflow-x-auto mobile-scroll-x w-full">
         <TabsTrigger
           v-for="tab in tabs"
           :key="tab.key"

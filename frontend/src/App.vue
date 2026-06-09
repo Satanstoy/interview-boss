@@ -1,28 +1,28 @@
 <template>
-  <div class="min-h-screen bg-white dark:bg-surface-900">
+  <div class="min-h-screen bg-background">
     <!-- Top bar -->
     <nav v-if="!isAuthenticatedForUi" class="sticky top-0 z-50 bg-background/90 backdrop-blur-xl border-b border-border">
       <div class="max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-6 h-14 flex items-center justify-between overflow-hidden">
         <div class="flex items-center gap-2 min-w-0">
           <span v-if="!isAuthenticatedForUi" class="grid h-8 w-8 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">IB</span>
-          <h1 class="text-sm lg:text-base font-semibold tracking-tight text-ink-900 dark:text-ink-100 truncate">
+          <h1 class="text-sm lg:text-base font-semibold tracking-tight text-foreground truncate">
             {{ activeTabLabel }}
           </h1>
-          <span v-if="isAuthenticatedForUi && activeSeason" class="hidden md:inline-flex items-center rounded-md bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200 dark:border-ink-700 px-2 py-1 text-xs">
+          <span v-if="isAuthenticatedForUi && activeSeason" class="hidden md:inline-flex items-center rounded-md bg-muted dark:bg-card text-muted-foreground border border-border px-2 py-1 text-xs">
             {{ activeSeason }}
           </span>
         </div>
         <div class="flex items-center gap-1.5 sm:gap-3 min-w-0 shrink-0">
-          <a v-if="!isAuthenticatedForUi" href="?preview=1" class="hidden sm:inline-flex h-8 items-center rounded-md border border-surface-200 dark:border-ink-700 bg-white dark:bg-surface-900 px-3 text-xs font-medium text-ink-600 dark:text-ink-300 shadow-sm hover:bg-surface-50 dark:hover:bg-ink-800 transition">
+          <a v-if="!isAuthenticatedForUi" href="?preview=1" class="hidden sm:inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground shadow-sm hover:bg-muted dark:hover:bg-muted transition">
             预览新版界面
           </a>
-          <button v-if="isAuthenticatedForUi" type="button" class="hidden sm:inline-flex h-8 items-center rounded-md border border-surface-200 dark:border-ink-700 bg-white dark:bg-surface-900 px-3 text-xs font-medium text-ink-600 dark:text-ink-300 shadow-sm hover:bg-surface-50 dark:hover:bg-ink-800 transition">
+          <button v-if="isAuthenticatedForUi" type="button" class="hidden sm:inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground shadow-sm hover:bg-muted dark:hover:bg-muted transition">
             搜索 ⌘K
           </button>
           <!-- Dark mode toggle -->
           <button
             @click="toggleDark()"
-            class="p-2 rounded-md text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
+            class="p-2 rounded-md text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition-all duration-200"
             :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
           >
             <svg v-if="isDark" class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -35,7 +35,7 @@
           <button
             v-if="isAuthenticatedForUi"
             @click="showSettings = true"
-            class="p-2 rounded-md text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
+            class="p-2 rounded-md text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition-all duration-200"
             title="系统配置"
           >
             <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -151,7 +151,7 @@
                 />
                 <!-- Sub-tag filter chips -->
                 <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
-                  <span class="text-xs text-ink-400 dark:text-ink-500 self-center mr-1 font-medium">子标签：</span>
+                  <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
                   <button
                     v-for="st in availableSubTags"
                     :key="st.tag"
@@ -159,7 +159,7 @@
                     class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
                     :class="selectedSubTags.includes(st.tag)
                       ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
-                      : 'bg-white dark:bg-surface-700 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-600 hover:bg-surface-50 dark:hover:bg-surface-600 hover:border-surface-300 dark:hover:border-ink-500'"
+                      : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
                   >
                     {{ st.tag }}
                     <span class="ml-1 opacity-50">{{ st.count }}</span>
@@ -272,7 +272,7 @@
               <!-- Interview Tab -->
               <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
                 <template v-if="interviewSeasons.length > 0">
-                  <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
+                  <label class="text-xs text-muted-foreground">招聘季筛选：</label>
                   <Select v-model="filterSeason">
                     <SelectTrigger class="min-w-[100px] h-8 text-xs">
                       <SelectValue placeholder="全部" />
@@ -282,11 +282,11 @@
                       <SelectItem v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <span class="text-surface-300 dark:text-ink-600">|</span>
+                  <span class="text-muted-foreground/50 dark:text-muted-foreground">|</span>
                 </template>
                 <button
                   @click="interviewSortOrder = interviewSortOrder === 'desc' ? 'asc' : 'desc'"
-                  class="inline-flex items-center gap-1 border border-surface-300 dark:border-ink-600 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-surface-800 text-ink-700 dark:text-ink-200 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors"
+                  class="inline-flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 text-xs bg-card text-foreground hover:bg-muted dark:hover:bg-muted transition-colors"
                   :title="interviewSortOrder === 'desc' ? '当前：最新在前，点击切换' : '当前：最旧在前，点击切换'"
                 >
                   <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -356,7 +356,7 @@
                   <span v-else>{{ row['难易程度'] }}</span>
                 </template>
                 <template #cell-created_at="{ row }">
-                  <span class="text-xs text-ink-500 dark:text-ink-400 whitespace-nowrap">{{ formatDate(row.created_at) }}</span>
+                  <span class="text-xs text-muted-foreground whitespace-nowrap">{{ formatDate(row.created_at) }}</span>
                 </template>
               </DataTable>
 
@@ -448,13 +448,13 @@
     <!-- Reprocessing toast -->
     <Transition name="tab-fade">
       <div v-if="Object.keys(activeReprocessing).length > 0"
-           class="fixed bottom-4 right-4 z-50 bg-white dark:bg-surface-800 rounded-xl shadow-lg border border-surface-200 dark:border-ink-700 p-4 max-w-sm">
+           class="fixed bottom-4 right-4 z-50 bg-card rounded-xl shadow-lg border border-border p-4 max-w-sm">
         <div class="flex items-center gap-3">
           <div class="animate-spin size-5 border-2 border-primary-600 border-t-transparent rounded-full flex-shrink-0"></div>
           <div>
-            <p class="text-sm font-medium text-ink-900 dark:text-ink-100">正在分析面经...</p>
+            <p class="text-sm font-medium text-foreground">正在分析面经...</p>
             <p v-for="(info, id) in activeReprocessing" :key="id"
-               class="text-xs text-ink-500 dark:text-ink-400 mt-0.5">
+               class="text-xs text-muted-foreground mt-0.5">
               {{ info.message || '准备中...' }}
             </p>
           </div>
@@ -926,11 +926,11 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 <style scoped>
 :deep(pre) { background-color: #2d2a27; color: #faf9f7; padding: 1rem; border-radius: var(--radius-xl); overflow-x: auto; margin-top: 0.5rem; margin-bottom: 1rem; }
 :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.875em; }
-:deep(p code) { @apply bg-surface-100 dark:bg-ink-800 text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: var(--radius-md); font-size: 0.8125em; }
+:deep(p code) { @apply bg-muted dark:bg-card text-red-600 dark:text-red-400; padding: 0.125rem 0.375rem; border-radius: var(--radius-md); font-size: 0.8125em; }
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
-:deep(strong) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; }
-:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-ink-900 dark:text-ink-100; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+:deep(strong) { font-weight: 700; @apply text-foreground; }
+:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-foreground; margin-top: 1.5rem; margin-bottom: 0.5rem; }
 :deep(h3) { font-size: 1.125rem; }
 
 @keyframes indeterminate-slide {

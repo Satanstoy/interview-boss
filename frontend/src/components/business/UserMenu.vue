@@ -4,8 +4,8 @@
     <button
       ref="buttonRef"
       @click="showMenu = !showMenu"
-      class="flex items-center transition-all duration-200 text-ink-700 dark:text-white group"
-      :class="buttonClass || 'gap-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-white/5'"
+      class="flex items-center transition-all duration-200 text-foreground dark:text-white group"
+      :class="buttonClass || 'gap-2.5 px-3 py-1.5 rounded-lg hover:bg-muted dark:hover:bg-white/5'"
     >
       <div v-if="compact" class="size-10 rounded-md bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground shrink-0">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
@@ -15,7 +15,7 @@
           {{ user?.username?.[0]?.toUpperCase() || '?' }}
         </div>
         <span class="text-sm font-medium truncate">{{ user?.username }}</span>
-        <svg class="size-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
+        <svg class="size-4 text-muted-foreground dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
           <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
         </svg>
       </template>
@@ -31,22 +31,22 @@
         <div
           v-if="showMenu"
           ref="dropdownRef"
-          class="fixed w-60 bg-white dark:bg-surface-800 rounded-xl shadow-lg border border-border py-1.5 z-50 overflow-hidden"
+          class="fixed w-60 bg-card rounded-xl shadow-lg border border-border py-1.5 z-50 overflow-hidden"
           :style="dropdownStyle"
         >
         <!-- User info -->
-        <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
-          <p class="text-sm font-bold text-ink-800 dark:text-ink-100">{{ user?.username }}</p>
-          <p class="text-xs text-ink-400 dark:text-ink-500 mt-0.5 flex items-center gap-1">
+        <div class="px-4 py-3 border-b border-border">
+          <p class="text-sm font-bold text-foreground">{{ user?.username }}</p>
+          <p class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
             <span class="size-1.5 rounded-full" :class="user?.is_admin ? 'bg-amber-400' : 'bg-emerald-400'"></span>
             {{ user?.is_admin ? '管理员' : '普通用户' }}
           </p>
         </div>
 
         <!-- Bank mode -->
-        <div class="px-4 py-3 border-b border-surface-100 dark:border-ink-700">
-          <p class="text-xs text-ink-400 dark:text-ink-500 mb-2 font-medium uppercase tracking-wider">题库模式</p>
-          <div class="flex gap-1 bg-surface-100 dark:bg-ink-800 rounded-lg p-0.5">
+        <div class="px-4 py-3 border-b border-border">
+          <p class="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">题库模式</p>
+          <div class="flex gap-1 bg-muted dark:bg-card rounded-lg p-0.5">
             <button
               v-for="mode in bankModes"
               :key="mode.value"
@@ -54,8 +54,8 @@
               :class="[
                 'flex-1 px-2 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
                 user?.bank_mode === mode.value
-                  ? 'bg-white dark:bg-surface-700 text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300 transition-colors duration-200'
+                  ? 'bg-white dark:bg-muted text-primary-700 dark:text-primary-400 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/50 transition-colors duration-200'
               ]"
             >{{ mode.label }}</button>
           </div>
@@ -65,7 +65,7 @@
         <button
           v-if="user?.is_admin"
           @click="$emit('show-review'); showMenu = false"
-          class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted dark:hover:bg-muted flex items-center gap-2.5 transition-colors"
         >
           <div class="size-7 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
             <svg class="size-4 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -79,7 +79,7 @@
         <!-- Profile -->
         <button
           @click="$emit('show-profile'); showMenu = false"
-          class="w-full text-left px-4 py-2.5 text-sm text-ink-700 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted dark:hover:bg-muted flex items-center gap-2.5 transition-colors"
         >
           <div class="size-7 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
             <svg class="size-4 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

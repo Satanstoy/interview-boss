@@ -7,32 +7,32 @@
           <svg class="size-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
         </div>
         <div>
-          <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100">导入面经 / JD</h3>
-          <p class="text-xs text-ink-500 dark:text-ink-400">粘贴文本或拖拽图片，AI 自动识别提取面试题</p>
+          <h3 class="text-sm font-bold text-foreground">导入面经 / JD</h3>
+          <p class="text-xs text-muted-foreground">粘贴文本或拖拽图片，AI 自动识别提取面试题</p>
         </div>
       </div>
     </div>
 
-    <div class="bg-surface-50/50 dark:bg-surface-900/50 p-4 border-b border-border flex items-center gap-4">
-      <label class="font-semibold text-ink-700 dark:text-ink-300 whitespace-nowrap text-sm">来源链接</label>
+    <div class="bg-muted/50 dark:bg-background/50 p-4 border-b border-border flex items-center gap-4">
+      <label class="font-semibold text-foreground whitespace-nowrap text-sm">来源链接</label>
       <input
         v-model="sourceUrl"
         type="text"
-        class="flex-1 border border-border rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
+        class="flex-1 border border-border rounded-xl px-3.5 py-2.5 text-sm bg-card text-foreground focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
         placeholder="粘贴小红书/牛客网帖子链接（可选，用于去重）"
       />
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100 dark:divide-gray-700">
       <div class="p-3 lg:p-4 flex flex-col">
-        <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300 mb-2">文本内容</label>
+        <label class="block text-sm font-semibold text-foreground mb-2">文本内容</label>
         <textarea
           v-model="stagedText"
           :maxlength="TEXT_MAX_LENGTH"
-          class="flex-1 w-full border border-border rounded-xl p-3 bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
+          class="flex-1 w-full border border-border rounded-xl p-3 bg-card text-foreground focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
           placeholder="在此处粘贴面经或 JD 的纯文本内容（可与右侧图片组合提交）..."
         ></textarea>
-        <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-ink-400 dark:text-ink-500'">
+        <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-muted-foreground'">
           {{ stagedText.length.toLocaleString() }} / {{ TEXT_MAX_LENGTH.toLocaleString() }} 字符
         </div>
       </div>
@@ -45,17 +45,17 @@
         @drop.prevent="handleDrop"
       >
         <div class="flex justify-between items-center mb-2">
-          <label class="block text-sm font-semibold text-ink-700 dark:text-ink-300">图片 ({{ stagedFiles.length }} 张)</label>
+          <label class="block text-sm font-semibold text-foreground">图片 ({{ stagedFiles.length }} 张)</label>
           <div>
             <input type="file" multiple class="hidden" ref="fileInput" @change="handleFileSelect" accept="image/*" />
-            <button @click="$refs.fileInput.click()" class="text-sm bg-surface-200 dark:bg-ink-700 text-ink-700 dark:text-ink-300 px-4 py-2.5 min-h-[44px] rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+            <button @click="$refs.fileInput.click()" class="text-sm bg-muted dark:bg-muted text-foreground px-4 py-2.5 min-h-[44px] rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">
               + 选择图片
             </button>
           </div>
         </div>
 
-        <div class="flex-1 border-2 border-dashed border-border rounded-xl p-4 overflow-y-auto max-h-48 bg-surface-50 dark:bg-ink-800 custom-scrollbar">
-          <div v-if="stagedFiles.length === 0" class="h-full flex flex-col items-center justify-center text-ink-400 dark:text-ink-500">
+        <div class="flex-1 border-2 border-dashed border-border rounded-xl p-4 overflow-y-auto max-h-48 bg-muted dark:bg-card custom-scrollbar">
+          <div v-if="stagedFiles.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground">
             <svg class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -74,11 +74,11 @@
       </div>
     </div>
 
-    <div class="bg-surface-50/80 dark:bg-surface-900/80 border-t border-border p-4 flex flex-col items-center">
+    <div class="bg-muted/80 dark:bg-background/80 border-t border-border p-4 flex flex-col items-center">
       <!-- 类型和季节选择 -->
       <div class="flex gap-4 w-full mb-4">
         <div class="flex-1">
-          <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">导入类型</label>
+          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">导入类型</label>
           <Select v-model="importType">
             <SelectTrigger class="w-full h-9 text-sm">
               <SelectValue />
@@ -91,7 +91,7 @@
           </Select>
         </div>
         <div class="flex-1">
-          <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">招聘季节</label>
+          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">招聘季节</label>
           <Select v-model="selectedSeason">
             <SelectTrigger class="w-full h-9 text-sm">
               <SelectValue />
@@ -101,10 +101,10 @@
               <SelectItem value="custom">自定义...</SelectItem>
             </SelectContent>
           </Select>
-          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-border rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-border rounded-xl px-3.5 py-2.5 text-sm bg-card text-foreground focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
         </div>
         <div v-if="isAdmin" class="flex-1">
-          <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">提交到</label>
+          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">提交到</label>
           <Select v-model="importTarget">
             <SelectTrigger class="w-full h-9 text-sm">
               <SelectValue />
@@ -118,7 +118,7 @@
       </div>
 
       <div class="flex gap-4 w-full justify-end mb-4">
-        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-ink-600 dark:text-ink-400 hover:bg-surface-200 dark:hover:bg-ink-700 transition border border-border">
+        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-muted-foreground hover:bg-muted dark:hover:bg-muted transition border border-border">
           清空
         </button>
         <button
@@ -134,7 +134,7 @@
       <!-- 进度指示器 -->
       <div v-if="isUploading" class="w-full py-3">
         <!-- 进度条 -->
-        <div class="w-full bg-surface-200 dark:bg-ink-700 rounded-full h-1.5 mb-3 overflow-hidden">
+        <div class="w-full bg-muted dark:bg-muted rounded-full h-1.5 mb-3 overflow-hidden">
           <div
             class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-700 ease-out"
             :style="{ width: `${((submitStepList.findIndex(s => s.active) + 1) / submitStepsDef.length) * 100}%` }"
@@ -146,20 +146,20 @@
             <div class="flex items-center gap-1.5">
               <span
                 class="inline-flex items-center justify-center size-5 rounded-full text-[10px] font-bold transition-all duration-300"
-                :class="s.active ? 'bg-blue-500 text-white animate-pulse-slow' : s.done ? 'bg-blue-500 text-white' : 'bg-surface-200 dark:bg-ink-600 text-ink-400 dark:text-ink-500'"
+                :class="s.active ? 'bg-blue-500 text-white animate-pulse-slow' : s.done ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground'"
               >
                 <svg v-if="s.done" class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 <span v-else>{{ idx + 1 }}</span>
               </span>
-              <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-semibold' : s.done ? 'text-ink-500 dark:text-ink-400' : 'text-ink-300 dark:text-ink-600'">{{ s.label }}</span>
+              <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-semibold' : s.done ? 'text-muted-foreground' : 'text-muted-foreground/50'">{{ s.label }}</span>
             </div>
-            <svg v-if="s.key !== 'save'" class="size-3 text-surface-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            <svg v-if="s.key !== 'save'" class="size-3 text-muted-foreground/50 dark:text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
           </template>
         </div>
         <!-- 当前步骤消息 + 详情 -->
         <div class="text-center">
-          <span class="text-xs text-ink-500 dark:text-ink-400">{{ submitProgress.message }}</span>
-          <span v-if="progressDetail" class="text-xs text-ink-400 dark:text-ink-500 ml-2">· {{ progressDetail }}</span>
+          <span class="text-xs text-muted-foreground">{{ submitProgress.message }}</span>
+          <span v-if="progressDetail" class="text-xs text-muted-foreground ml-2">· {{ progressDetail }}</span>
         </div>
       </div>
 
@@ -173,21 +173,21 @@
         </div>
         <!-- 统计信息 -->
         <div v-if="resultSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-          <div class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.questionCount }}</div>
-            <div class="text-[11px] text-ink-400 dark:text-ink-500">提取题目</div>
+          <div class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-foreground">{{ resultSummary.questionCount }}</div>
+            <div class="text-[11px] text-muted-foreground">提取题目</div>
           </div>
-          <div v-if="resultSummary.matchedCount != null" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.matchedCount }}<span class="text-xs text-ink-400">已有</span> / {{ resultSummary.unmatchedCount }}<span class="text-xs text-ink-400">新题</span></div>
-            <div class="text-[11px] text-ink-400 dark:text-ink-500">匹配结果</div>
+          <div v-if="resultSummary.matchedCount != null" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-foreground">{{ resultSummary.matchedCount }}<span class="text-xs text-muted-foreground">已有</span> / {{ resultSummary.unmatchedCount }}<span class="text-xs text-muted-foreground">新题</span></div>
+            <div class="text-[11px] text-muted-foreground">匹配结果</div>
           </div>
-          <div v-if="resultSummary.qualityScore != null" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+          <div v-if="resultSummary.qualityScore != null" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
             <div class="text-lg font-bold" :class="resultSummary.qualityScore >= 7 ? 'text-green-600 dark:text-green-400' : resultSummary.qualityScore >= 4 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'">{{ resultSummary.qualityScore }}/10</div>
-            <div class="text-[11px] text-ink-400 dark:text-ink-500">质量评分</div>
+            <div class="text-[11px] text-muted-foreground">质量评分</div>
           </div>
-          <div v-if="resultSummary.elapsed" class="bg-white dark:bg-surface-800 rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-ink-800 dark:text-ink-100">{{ resultSummary.elapsed.toFixed(1) }}<span class="text-xs text-ink-400">s</span></div>
-            <div class="text-[11px] text-ink-400 dark:text-ink-500">处理耗时</div>
+          <div v-if="resultSummary.elapsed" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
+            <div class="text-lg font-bold text-foreground">{{ resultSummary.elapsed.toFixed(1) }}<span class="text-xs text-muted-foreground">s</span></div>
+            <div class="text-[11px] text-muted-foreground">处理耗时</div>
           </div>
         </div>
         <!-- 分类分布 -->

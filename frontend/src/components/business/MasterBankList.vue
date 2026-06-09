@@ -8,7 +8,7 @@
       @invert-selection="$emit('invert-selection')"
     >
       <template v-if="items.length > 0" #default>
-        <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
+        <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
         <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
         <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
       </template>
@@ -76,11 +76,11 @@
     </DynamicScroller>
 
     <!-- 加载更多指示器 -->
-    <div v-if="isLoadingMore" class="flex items-center justify-center py-4 gap-2 text-ink-400 dark:text-ink-500">
+    <div v-if="isLoadingMore" class="flex items-center justify-center py-4 gap-2 text-muted-foreground">
       <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
       <span class="text-xs">加载更多题目...</span>
     </div>
-    <div v-else-if="!hasMore && items.length > 0" class="text-center py-3 text-xs text-ink-300 dark:text-ink-600">
+    <div v-else-if="!hasMore && items.length > 0" class="text-center py-3 text-xs text-muted-foreground/50">
       — 已加载全部 {{ items.length }} 道题目 —
     </div>
   </div>
