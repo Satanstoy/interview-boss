@@ -1,5 +1,5 @@
 <template>
-  <BaseModal :visible="visible" size="md" @close="emit('close')">
+  <AppDialog :open="visible" size="md" @update:open="emit('close')">
     <div>
           <!-- Header -->
           <div class="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-ink-600">
@@ -112,7 +112,7 @@
             </button>
           </div>
         </div>
-  </BaseModal>
+  </AppDialog>
 </template>
 
 <script setup>
@@ -120,7 +120,7 @@ import { ref, watch } from 'vue'
 import { upload } from '@/services/http.js'
 import { getResume } from '@/services/resumeApi.js'
 import RoundedSelect from '@/components/common/RoundedSelect.vue'
-import BaseModal from '@/components/common/BaseModal.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 
 defineProps({
   visible: { type: Boolean, default: false },
