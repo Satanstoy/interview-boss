@@ -6,16 +6,16 @@
         {{ displayValue || '-' }}
       </span>
       <span v-else :class="{ 'whitespace-pre-wrap break-words flex-1': type === 'textarea' }">{{ displayValue }}</span>
-      <button @click="startEdit" class="text-ink-400 hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0 text-xs" title="编辑">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-      </button>
+      <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-ink-400 hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">
+        <Pencil class="size-3.5" />
+      </Button>
     </div>
 
     <!-- Edit mode -->
     <div v-else class="flex flex-col gap-1 w-full">
       <div class="flex items-center gap-1">
-        <input v-if="type === 'text'" v-model="editValue" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200" @keyup.enter="save" />
-        <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200"></textarea>
+        <Input v-if="type === 'text'" v-model="editValue" @keyup.enter="save" />
+        <Textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" />
         <Select
           v-else-if="type === 'select'"
           :model-value="editValue"
@@ -29,10 +29,10 @@
             <SelectItem v-for="opt in options" :key="opt" :value="opt">{{ opt }}</SelectItem>
           </SelectContent>
         </Select>
-        <input v-else v-model="editValue" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200" @keyup.enter="save" />
+        <Input v-else v-model="editValue" @keyup.enter="save" />
         <div class="flex gap-1 shrink-0">
-          <button @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 text-sm font-medium" title="保存">保存</button>
-          <button @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 text-sm" title="取消">取消</button>
+          <Button variant="ghost" size="sm" @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300" title="保存">保存</Button>
+          <Button variant="ghost" size="sm" @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300" title="取消">取消</Button>
         </div>
       </div>
       <p v-if="validationError" class="text-red-500 dark:text-red-400 text-xs mt-0.5">{{ validationError }}</p>
@@ -42,7 +42,11 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { Pencil } from '@lucide/vue'
 import { validateTextField } from '@/utils/validate.js'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const props = defineProps({
