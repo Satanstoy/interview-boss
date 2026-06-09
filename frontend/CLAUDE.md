@@ -52,6 +52,8 @@ src/
 | 练习/面试 | `services/practiceApi.js` + `components/business/PracticePanel.vue` |
 | 数据分析 | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `services/profileApi.js` + `components/business/SettingsPanel.vue` |
+| 个人中心 | `components/business/ProfilePanel.vue`（学习进度、每日推荐、收藏夹） |
+| 考点分布 | `components/business/ExamDistribution.vue`（高频题库页面） |
 | HTTP 客户端 | `services/http.js`（`api/index.js` 是 re-export 兼容层） |
 
 ## 修改前必读

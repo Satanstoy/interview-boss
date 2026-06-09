@@ -7,11 +7,12 @@
 | 组件 | 职责 |
 |------|------|
 | `AdminReview.vue` | 管理员审核面板 |
-| `AnalyticsSidebar.vue` | 数据分析侧边栏 |
+| `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
 | `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审） |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染） |
 | `ChatView.vue` | Chat 主视图（SSE 流式） |
+| `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
 | `LoginModal.vue` | 登录弹窗 |
 | `LoginPage.vue` | 登录页面（全屏） |
@@ -20,7 +21,7 @@
 | `NewChatModal.vue` | 新建对话弹窗 |
 | `PracticeMode.vue` | 练习模式选择 |
 | `PracticePanel.vue` | 练习面板 |
-| `ProfilePanel.vue` | 个人信息面板（简历上传） |
+| `ProfilePanel.vue` | 个人信息面板（学习进度、每日推荐、收藏夹、简历上传） |
 | `QuestionCard.vue` | 题目卡片 |
 | `SearchFilterBar.vue` | 搜索过滤栏 |
 | `SettingsPanel.vue` | 系统设置面板（管理员） |
