@@ -9,10 +9,10 @@
           :key="d"
           @click="filterDifficulty = d; loadProblems()"
           :class="[
-            'px-3 py-1 rounded-full text-xs font-medium transition-colors',
+            'px-3 py-1 rounded-full text-xs transition-colors border',
             filterDifficulty === d
-              ? 'bg-primary-600 text-white'
-              : 'bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 dark:hover:bg-surface-600'
+              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold'
+              : 'bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 dark:hover:bg-surface-600 border-surface-200 dark:border-ink-700'
           ]"
         >
           {{ d === '' ? '全部' : d === 'easy' ? '简单' : d === 'medium' ? '中等' : '困难' }}
@@ -26,10 +26,10 @@
           :key="p.id"
           @click="selectProblem(p)"
           :class="[
-            'p-3 rounded-lg cursor-pointer border transition-all',
+            'p-3 rounded-xl cursor-pointer border transition-all',
             selectedProblem?.id === p.id
               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-              : 'border-surface-200 dark:border-surface-600 hover:border-primary-300 bg-white dark:bg-surface-800'
+              : 'border-surface-200 dark:border-ink-700 hover:border-primary-300 bg-white dark:bg-surface-800'
           ]"
         >
           <div class="flex items-center justify-between">
@@ -55,7 +55,7 @@
       </div>
 
       <!-- 错误统计 -->
-      <div class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-3">
+      <div class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm p-3">
         <h3 class="text-sm font-semibold text-ink-700 dark:text-ink-200 mb-2">错误统计</h3>
         <div v-if="errorStats" class="space-y-1.5">
           <div v-for="(count, cat) in errorStats.error_stats" :key="cat" class="flex items-center gap-2">
@@ -69,7 +69,7 @@
             </div>
             <span class="text-xs text-ink-600 dark:text-ink-300 w-6 text-right">{{ count }}</span>
           </div>
-          <div class="text-xs text-ink-400 mt-2 pt-2 border-t border-surface-200 dark:border-surface-600">
+          <div class="text-xs text-ink-400 mt-2 pt-2 border-t border-surface-200 dark:border-ink-700">
             总提交 {{ errorStats.total_submissions }} · 通过 {{ errorStats.passed_submissions }}
           </div>
         </div>
@@ -81,7 +81,7 @@
     <div class="flex-1 flex flex-col gap-3 min-w-0">
       <template v-if="selectedProblem">
         <!-- 题目描述（可折叠） -->
-        <div class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600">
+        <div class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm">
           <button
             @click="showDescription = !showDescription"
             class="w-full flex items-center justify-between p-3 text-left"
@@ -101,7 +101,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
-          <div v-if="showDescription" class="px-3 pb-3 text-sm text-ink-600 dark:text-ink-300 prose-sm max-w-none border-t border-surface-200 dark:border-surface-600 pt-3" v-html="renderedDescription"></div>
+          <div v-if="showDescription" class="px-3 pb-3 text-sm text-ink-600 dark:text-ink-300 prose-sm max-w-none border-t border-surface-200 dark:border-ink-700 pt-3" v-html="renderedDescription"></div>
         </div>
 
         <!-- 语言选择 + 操作按钮 -->
@@ -111,10 +111,10 @@
             :key="lang"
             @click="currentLanguage = lang"
             :class="[
-              'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+              'px-3 py-1.5 rounded-full text-sm font-medium transition-colors border',
               currentLanguage === lang
-                ? 'bg-primary-600 text-white'
-                : 'bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300'
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold'
+                : 'bg-surface-100 text-ink-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-ink-300 border-surface-200 dark:border-ink-700'
             ]"
           >
             {{ langLabels[lang] }}
@@ -158,7 +158,7 @@
         </div>
 
         <!-- Monaco 编辑器 -->
-        <div class="flex-1 min-h-[300px] rounded-lg overflow-hidden border border-surface-200 dark:border-surface-600">
+        <div class="flex-1 min-h-[300px] rounded-xl overflow-hidden border border-surface-200 dark:border-ink-700 shadow-sm">
           <CodeEditor
             v-model="code"
             :language="currentLanguage"
@@ -169,7 +169,7 @@
         <!-- 评分面板 -->
         <div
           v-if="scores && Object.keys(scores).length"
-          class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
+          class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm p-4"
         >
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100">评审评分</h3>
@@ -191,7 +191,7 @@
               <span class="text-xs text-ink-600 dark:text-ink-300 w-8 text-right">{{ score }}/5</span>
             </div>
           </div>
-          <div v-if="lastSubmission?.error_categories?.length" class="flex gap-1 mt-3 pt-3 border-t border-surface-200 dark:border-surface-600">
+          <div v-if="lastSubmission?.error_categories?.length" class="flex gap-1 mt-3 pt-3 border-t border-surface-200 dark:border-ink-700">
             <span
               v-for="cat in lastSubmission.error_categories"
               :key="cat"
@@ -203,7 +203,7 @@
         <!-- AI 评审反馈（流式渲染） -->
         <div
           v-if="feedback"
-          class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
+          class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm p-4"
         >
           <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-3">详细评审</h3>
           <div class="prose-sm max-w-none text-ink-600 dark:text-ink-300" v-html="renderedFeedback"></div>
@@ -213,7 +213,7 @@
         <!-- 参考答案 -->
         <div
           v-if="referenceAnswer"
-          class="bg-white dark:bg-surface-800 rounded-lg border border-surface-200 dark:border-surface-600 p-4"
+          class="bg-white dark:bg-surface-800 rounded-xl border border-surface-200 dark:border-ink-700 shadow-sm p-4"
         >
           <h3 class="text-sm font-semibold text-ink-800 dark:text-ink-100 mb-3">最小改动参考答案</h3>
           <div class="h-[200px] rounded-md overflow-hidden border border-surface-200 dark:border-surface-700">

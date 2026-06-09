@@ -23,10 +23,10 @@
             <input :value="searchQuery" @input="$emit('update:searchQuery', $event.target.value)" @keyup.enter="$emit('search')"
               class="flex-1 px-3 py-2 border border-surface-300 dark:border-ink-600 rounded-lg text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200 focus:ring-2 focus:ring-primary-400 focus:border-primary-400"
               placeholder="搜索目标题目..." />
-            <button @click="$emit('search')" :disabled="searching"
-              class="btn-primary px-4 py-2 text-sm disabled:opacity-50">
+            <Button @click="$emit('search')" :disabled="searching"
+              variant="default" size="sm" class="px-4 py-2 text-sm disabled:opacity-50">
               {{ searching ? '搜索中...' : '搜索' }}
-            </button>
+            </Button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto p-5 custom-scrollbar">
@@ -43,7 +43,7 @@
           </div>
         </div>
         <div class="p-4 border-t border-surface-200 dark:border-ink-700 flex justify-end">
-          <button @click="$emit('close')" class="btn-secondary px-4 py-2 text-sm">取消</button>
+          <Button @click="$emit('close')" variant="outline" size="sm" class="px-4 py-2 text-sm">取消</Button>
         </div>
       </div>
     </div>
@@ -51,6 +51,8 @@
 </template>
 
 <script setup>
+import { Button } from '@/components/ui/button'
+
 defineProps({
   visible: { type: Boolean, default: false },
   sourceQuestion: { type: String, default: '' },

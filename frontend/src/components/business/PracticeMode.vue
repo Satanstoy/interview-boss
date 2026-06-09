@@ -8,11 +8,11 @@
         </button>
         <span class="text-xs font-bold tabular-nums text-primary-600 dark:text-primary-400 shrink-0">{{ currentIndex + 1 }}/{{ questions.length }}</span>
         <h2 class="text-sm font-bold text-ink-800 dark:text-ink-100 truncate">{{ currentQ.question }}</h2>
-        <span class="badge text-[10px] shrink-0"
-          :class="String(currentQ.difficulty).includes('L3') ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800' : String(currentQ.difficulty).includes('L2') ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800'">
+        <Badge variant="outline" class="text-[10px] shrink-0"
+          :class="String(currentQ.difficulty).includes('L3') ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-100 dark:border-red-800' : String(currentQ.difficulty).includes('L2') ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-800'">
           {{ currentQ.difficulty || '-' }}
-        </span>
-        <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 text-[10px] shrink-0 hidden sm:inline">{{ currentQ.cat1 || '未分类' }}</span>
+        </Badge>
+        <Badge variant="outline" class="bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-100 dark:border-primary-800 text-[10px] shrink-0 hidden sm:inline">{{ currentQ.cat1 || '未分类' }}</Badge>
         <span v-if="currentQ.cat2" class="text-[10px] text-ink-400 dark:text-ink-500 shrink-0 hidden md:inline">{{ currentQ.cat2 }}</span>
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
@@ -55,11 +55,11 @@
           >
             <div class="flex items-center gap-2 mb-1">
               <span class="text-[10px] font-bold tabular-nums w-5 text-center" :class="item.id === currentQ.id ? 'text-primary-600 dark:text-primary-400' : 'text-ink-400'">{{ questions.indexOf(item) + 1 }}</span>
-              <span class="badge text-[9px] shrink-0"
+              <Badge variant="outline" class="text-[9px] shrink-0"
                 :class="String(item.difficulty).includes('L3') ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' : String(item.difficulty).includes('L2') ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'">
                 {{ item.difficulty || '-' }}
-              </span>
-              <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 text-[9px] shrink-0">{{ item.cat1 || '未分类' }}</span>
+              </Badge>
+              <Badge variant="outline" class="bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 text-[9px] shrink-0">{{ item.cat1 || '未分类' }}</Badge>
               <span class="text-[10px] text-ink-400 dark:text-ink-500 ml-auto tabular-nums">{{ item.frequency }}</span>
             </div>
             <p class="text-xs text-ink-700 dark:text-ink-300 leading-snug line-clamp-2 ml-7">{{ item.question }}</p>
@@ -75,27 +75,29 @@
       <!-- LEFT PANEL -->
       <div class="flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-surface-200 dark:border-ink-700 min-w-0">
         <!-- Tabs -->
-        <div class="flex border-b border-surface-200 dark:border-ink-600 shrink-0 bg-white dark:bg-surface-800">
-          <button v-for="tab in leftTabs" :key="tab.key" @click="leftTab = tab.key"
-            class="px-4 py-2.5 text-xs font-semibold transition-colors relative"
-            :class="leftTab === tab.key ? 'text-primary-700 dark:text-primary-400' : 'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300'">
-            {{ tab.label }}
-            <span v-if="tab.key === 'answer' && !currentQ.ai_answer" class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-400"></span>
-            <span v-if="tab.key === 'history' && currentQ.attempt_count" class="ml-1 text-[10px] text-ink-400 dark:text-ink-500">({{ currentQ.attempt_count }})</span>
-            <div v-if="leftTab === tab.key" class="absolute bottom-0 left-2 right-2 h-0.5 bg-primary-500 rounded-full"></div>
-          </button>
-        </div>
+        <Tabs default-value="description" v-model:value="leftTab">
+          <TabsList class="flex border-b border-surface-200 dark:border-ink-600 shrink-0 bg-white dark:bg-surface-800 rounded-none">
+            <TabsTrigger value="description">题目</TabsTrigger>
+            <TabsTrigger value="answer">
+              参考答案
+              <span v-if="!currentQ.ai_answer" class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-400"></span>
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              练习记录
+              <span v-if="currentQ.attempt_count" class="ml-1 text-[10px] text-ink-400 dark:text-ink-500">({{ currentQ.attempt_count }})</span>
+            </TabsTrigger>
+          </TabsList>
 
         <!-- Tab content -->
         <div class="flex-1 overflow-y-auto custom-scrollbar">
         <div :key="currentIndex" class="question-content-enter">
           <!-- Description tab -->
-          <div v-if="leftTab === 'description'" class="p-5 space-y-4">
+          <TabsContent value="description">
             <!-- Category badges -->
             <div class="flex gap-1.5 flex-wrap items-center">
-              <span class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800 text-[10px]">{{ currentQ.cat1 || '未分类' }}</span>
-              <span v-if="currentQ.cat2" class="badge bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200 dark:border-ink-700 text-[10px]">{{ currentQ.cat2 }}</span>
-              <span v-for="tag in (currentQ.tags ? currentQ.tags.split(',') : [])" :key="tag" class="badge bg-surface-50 dark:bg-surface-900 text-ink-400 dark:text-ink-500 border border-surface-200/60 dark:border-ink-700/60 text-[10px]">{{ tag }}</span>
+              <Badge variant="outline" class="bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-100 dark:border-primary-800 text-[10px]">{{ currentQ.cat1 || '未分类' }}</Badge>
+              <Badge v-if="currentQ.cat2" variant="outline" class="bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border-surface-200 dark:border-ink-700 text-[10px]">{{ currentQ.cat2 }}</Badge>
+              <Badge v-for="tag in (currentQ.tags ? currentQ.tags.split(',') : [])" :key="tag" variant="outline" class="bg-surface-50 dark:bg-surface-900 text-ink-400 dark:text-ink-500 border-surface-200/60 dark:border-ink-700/60 text-[10px]">{{ tag }}</Badge>
             </div>
             <!-- Question text -->
             <div class="text-sm text-ink-800 dark:text-ink-100 leading-relaxed font-medium">{{ currentQ.question }}</div>
@@ -134,25 +136,25 @@
                 </span>
               </div>
             </div>
-          </div>
+          </TabsContent>
 
           <!-- Answer tab -->
-          <div v-else-if="leftTab === 'answer'" class="p-5">
+          <TabsContent value="answer">
             <div v-if="qState._isEditingAnswer" class="flex flex-col gap-3">
               <textarea v-model="qState._editAnswer" rows="12" class="w-full border border-primary-200 dark:border-primary-800 rounded-xl p-3 text-sm bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-mono resize-y"></textarea>
               <div class="flex gap-2 justify-end">
-                <button @click="qState._isEditingAnswer = false" class="px-4 py-1.5 text-xs text-ink-600 dark:text-ink-400 border border-surface-300 dark:border-ink-600 rounded-lg hover:bg-surface-100 dark:hover:bg-ink-700 transition">取消</button>
-                <button @click="handleSaveAnswer" :disabled="qState._isSavingAnswer" class="px-4 py-1.5 text-xs text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition disabled:opacity-50">
+                <Button variant="outline" size="sm" @click="qState._isEditingAnswer = false">取消</Button>
+                <Button size="sm" @click="handleSaveAnswer" :disabled="qState._isSavingAnswer">
                   {{ qState._isSavingAnswer ? '保存中...' : '保存' }}
-                </button>
+                </Button>
               </div>
             </div>
             <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)">
               <div class="flex items-center justify-between mb-3">
                 <span class="text-xs font-semibold text-ink-500 dark:text-ink-400">AI 参考答案</span>
                 <div class="flex gap-1.5">
-                  <button @click="qState._isEditingAnswer = true; qState._editAnswer = currentQ.ai_answer" class="text-[10px] text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-800 transition">编辑</button>
-                  <button @click="handleGenerate" :disabled="qState._isLoadingAnswer" class="text-[10px] text-ink-600 dark:text-ink-400 hover:text-ink-800 dark:hover:text-ink-300 bg-surface-50 dark:bg-ink-800 hover:bg-surface-100 dark:hover:bg-ink-700 px-2 py-0.5 rounded border border-surface-200 dark:border-ink-600 transition disabled:opacity-30">重新生成</button>
+                  <Button variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5" @click="qState._isEditingAnswer = true; qState._editAnswer = currentQ.ai_answer">编辑</Button>
+                  <Button variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5" @click="handleGenerate" :disabled="qState._isLoadingAnswer">重新生成</Button>
                 </div>
               </div>
               <div class="text-sm text-ink-700 dark:text-ink-300 leading-relaxed answer-content" v-html="renderMarkdown(currentQ.ai_answer)"></div>
@@ -164,15 +166,15 @@
             <div v-else class="text-center py-12">
               <p v-if="isFailedAnswer(currentQ.ai_answer)" class="text-red-500 dark:text-red-400 mb-3 text-sm">上次生成失败，请重试</p>
               <p v-else class="text-ink-400 dark:text-ink-500 mb-4 text-sm">暂无参考答案</p>
-              <button @click="handleGenerate" class="btn-primary px-5 py-2 text-sm">
+              <Button size="sm" @click="handleGenerate">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 AI 生成答案
-              </button>
+              </Button>
             </div>
-          </div>
+          </TabsContent>
 
           <!-- History tab -->
-          <div v-else-if="leftTab === 'history'" class="p-5">
+          <TabsContent value="history">
             <div v-if="qState._historyLoading" class="text-center py-8 text-xs text-ink-400 dark:text-ink-500">加载中...</div>
             <div v-else-if="qState._history && qState._history.length > 0" class="space-y-2">
               <div v-for="(h, hIdx) in qState._history" :key="h.id" v-auto-animate class="border border-surface-200 dark:border-ink-600 rounded-xl overflow-hidden">
@@ -209,9 +211,10 @@
               <svg class="w-10 h-10 mx-auto mb-2 text-ink-300 dark:text-ink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               暂无练习记录
             </div>
-          </div>
+          </TabsContent>
         </div>
       </div>
+      </Tabs>
       </div>
 
       <!-- DRAGGABLE DIVIDER (desktop only) -->
@@ -325,8 +328,11 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { leftTabs, dimLabel, isFailedAnswer, renderMarkdown, scoreColor, scoreTextColor, resetQState, generateAnswerForQuestion, saveAnswerForQuestion, evaluateAnswerForQuestion, loadHistory } from '@/composables/usePractice.js'
+import { dimLabel, isFailedAnswer, renderMarkdown, scoreColor, scoreTextColor, resetQState, generateAnswerForQuestion, saveAnswerForQuestion, evaluateAnswerForQuestion, loadHistory } from '@/composables/usePractice.js'
 import { useToast } from '@/composables/useNotification.js'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import Button from '@/components/ui/button/Button.vue'
+import { Badge } from '@/components/ui/badge'
 
 const toast = useToast()
 

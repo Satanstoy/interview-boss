@@ -49,15 +49,17 @@
 
     <!-- Refresh button -->
     <div class="px-5 pb-5 pt-3">
-      <button @click="$emit('refresh')" class="w-full btn-secondary text-xs py-2">
+      <Button @click="$emit('refresh')" variant="outline" size="sm" class="w-full text-xs py-2">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         刷新数据
-      </button>
+      </Button>
     </div>
   </div>
 </template>
 
 <script setup>
+import { Button } from '@/components/ui/button'
+
 const props = defineProps({
   analytics: { type: Object, default: () => ({ tech_trends: {} }) },
   masterBank: { type: Array, default: () => [] },

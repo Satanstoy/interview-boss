@@ -72,10 +72,10 @@
                   <input v-model="emailBinding.code" type="text" placeholder="6位数字" maxlength="6" class="w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-surface-50 dark:bg-surface-900 text-ink-800 dark:text-ink-100 focus:bg-white dark:focus:bg-surface-800 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
                 </div>
                 <div class="flex gap-2 pt-1">
-                  <button @click="onConfirmBindEmail" :disabled="emailBinding.saving || !emailBinding.code.trim()" class="btn-primary px-4 text-sm">
+                  <Button @click="onConfirmBindEmail" :disabled="emailBinding.saving || !emailBinding.code.trim()" variant="default" size="sm" class="px-4 text-sm">
                     {{ emailBinding.saving ? '绑定中...' : '确认绑定' }}
-                  </button>
-                  <button @click="emailBinding.editing = false" class="btn-secondary px-4 text-sm">取消</button>
+                  </Button>
+                  <Button @click="emailBinding.editing = false" variant="outline" size="sm" class="px-4 text-sm">取消</Button>
                 </div>
                 <p v-if="emailBinding.error" class="text-xs text-red-500 dark:text-red-400">{{ emailBinding.error }}</p>
               </div>
@@ -245,7 +245,7 @@
 
           <!-- Footer -->
           <div class="flex items-center justify-end px-6 py-4 border-t border-surface-100 dark:border-ink-700 bg-surface-50/80 dark:bg-surface-900/80 shrink-0">
-            <button @click="emit('close')" class="btn-secondary px-5">关闭</button>
+            <Button @click="emit('close')" variant="outline" size="sm" class="px-5">关闭</Button>
           </div>
         </div>
       </div>
@@ -257,6 +257,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { getMyEmail, sendBindCode, bindEmail, uploadResume, getResume, deleteResume } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
+import { Button } from '@/components/ui/button'
 
 const toast = useToast()
 

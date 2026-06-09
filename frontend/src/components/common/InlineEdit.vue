@@ -14,8 +14,8 @@
     <!-- Edit mode -->
     <div v-else class="flex flex-col gap-1 w-full">
       <div class="flex items-center gap-1">
-        <input v-if="type === 'text'" v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200" @keyup.enter="save" />
-        <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200"></textarea>
+        <input v-if="type === 'text'" v-model="editValue" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200" @keyup.enter="save" />
+        <textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200"></textarea>
         <RoundedSelect
           v-else-if="type === 'select'"
           v-model="editValue"
@@ -24,7 +24,7 @@
           wrapper-class="flex-1"
           trigger-class="w-full"
         />
-        <input v-else v-model="editValue" class="border border-surface-300 dark:border-ink-600 rounded px-2 py-1 w-full text-sm bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-200" @keyup.enter="save" />
+        <input v-else v-model="editValue" class="border border-input rounded-md px-2 py-1 w-full text-sm bg-transparent text-ink-800 dark:text-ink-200" @keyup.enter="save" />
         <div class="flex gap-1 shrink-0">
           <button @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 text-sm font-medium" title="保存">保存</button>
           <button @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 text-sm" title="取消">取消</button>

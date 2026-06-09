@@ -3,7 +3,7 @@
     <Transition name="fade">
       <div v-if="confirmState.show" class="fixed inset-0 z-[10000] flex items-center justify-center" @keydown.esc="handleCancel" @keydown.enter="handleConfirm" tabindex="-1" ref="dialogEl">
         <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="handleCancel"></div>
-        <div class="relative bg-white dark:bg-surface-800 rounded-2xl shadow-2xl w-[420px] max-w-[90vw] p-6 z-10 animate-slide-up" role="alertdialog" aria-modal="true">
+        <div class="relative bg-white dark:bg-surface-800 rounded-xl shadow-lg w-[420px] max-w-[90vw] p-6 z-10 animate-slide-up" role="alertdialog" aria-modal="true">
           <div class="flex items-start gap-4 mb-5">
             <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center" :class="iconBgClass">
               <!-- Danger icon -->
@@ -20,15 +20,15 @@
               </svg>
             </div>
             <div>
-              <h3 class="text-lg font-bold text-gray-900 dark:text-ink-100">{{ confirmState.title }}</h3>
+              <h3 class="text-lg font-bold text-ink-900 dark:text-ink-100">{{ confirmState.title }}</h3>
               <p class="text-sm text-ink-500 dark:text-ink-400 leading-relaxed mt-1 whitespace-pre-line">{{ confirmState.message }}</p>
             </div>
           </div>
           <div class="flex justify-end gap-3">
-            <button
+            <Button
               @click="handleCancel"
-              class="btn-secondary px-5"
-            >{{ confirmState.cancelLabel || '取消' }}</button>
+              variant="outline" size="sm" class="px-5"
+            >{{ confirmState.cancelLabel || '取消' }}</Button>
             <button
               @click="handleConfirm"
               class="px-5 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] text-white"
@@ -44,6 +44,7 @@
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue'
 import { useConfirm } from '@/composables/useNotification.js'
+import { Button } from '@/components/ui/button'
 
 const { confirmState, handleConfirm, handleCancel } = useConfirm()
 const dialogEl = ref(null)

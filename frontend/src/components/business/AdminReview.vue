@@ -51,9 +51,9 @@
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium text-ink-800 dark:text-ink-100 leading-relaxed">{{ item.question }}</p>
                     <div class="flex flex-wrap gap-1.5 mt-2.5">
-                      <span v-if="item.cat1" class="badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-100 dark:border-primary-800/50">{{ item.cat1 }}</span>
-                      <span v-if="item.difficulty" class="badge bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 border border-accent-100 dark:border-accent-800/50">{{ item.difficulty }}</span>
-                      <span v-if="item.submitted_by_name" class="badge bg-surface-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400">{{ item.submitted_by_name }}</span>
+                      <Badge v-if="item.cat1" variant="outline" class="bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-100 dark:border-primary-800/50">{{ item.cat1 }}</Badge>
+                      <Badge v-if="item.difficulty" variant="outline" class="bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 border-accent-100 dark:border-accent-800/50">{{ item.difficulty }}</Badge>
+                      <Badge v-if="item.submitted_by_name" variant="outline" class="bg-surface-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400">{{ item.submitted_by_name }}</Badge>
                     </div>
                   </div>
                   <div class="flex gap-2 shrink-0">
@@ -76,10 +76,10 @@
           <!-- Footer -->
           <div class="px-6 py-3.5 border-t border-surface-100 dark:border-ink-700 flex justify-between items-center bg-surface-50/80 dark:bg-surface-900/80">
             <span class="text-sm text-ink-500 dark:text-ink-400">共 <span class="font-bold text-ink-700 dark:text-ink-300">{{ items.length }}</span> 条待审核</span>
-            <button @click="loadPending" class="btn-ghost text-primary-600 dark:text-primary-400">
+            <Button @click="loadPending" variant="ghost" size="sm" class="text-primary-600 dark:text-primary-400">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               刷新
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -91,6 +91,8 @@
 import { ref, watch } from 'vue'
 import { fetchPendingQuestions, approveQuestion, rejectQuestion } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close', 'reviewed'])

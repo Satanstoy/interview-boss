@@ -4,16 +4,21 @@
     <button
       ref="buttonRef"
       @click="showMenu = !showMenu"
-      class="flex items-center gap-2.5 transition-all duration-200 text-ink-700 dark:text-white group"
-      :class="buttonClass || 'px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5'"
+      class="flex items-center transition-all duration-200 text-ink-700 dark:text-white group"
+      :class="buttonClass || 'gap-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-white/5'"
     >
-      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground backdrop-blur-sm transition">
+      <div v-if="compact" class="w-10 h-10 rounded-md bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground shrink-0">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
-      <span class="text-sm font-medium hidden sm:inline truncate">{{ user?.username }}</span>
-      <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-      </svg>
+      <template v-else>
+        <div class="w-[18px] h-[18px] rounded bg-primary flex items-center justify-center text-[9px] font-bold text-primary-foreground leading-none shrink-0">
+          {{ user?.username?.[0]?.toUpperCase() || '?' }}
+        </div>
+        <span class="text-sm font-medium truncate">{{ user?.username }}</span>
+        <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+        </svg>
+      </template>
     </button>
 
     <!-- Teleport dropdown + overlay to body to escape overflow-hidden -->
@@ -26,7 +31,7 @@
         <div
           v-if="showMenu"
           ref="dropdownRef"
-          class="fixed w-60 bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-surface-100 dark:border-ink-700 py-1.5 z-50 overflow-hidden"
+          class="fixed w-60 bg-white dark:bg-surface-800 rounded-xl shadow-lg border border-border py-1.5 z-50 overflow-hidden"
           :style="dropdownStyle"
         >
         <!-- User info -->
@@ -112,6 +117,7 @@ const props = defineProps({
   pendingCount: { type: Number, default: 0 },
   placement: { type: String, default: 'bottom' },
   buttonClass: { type: String, default: '' },
+  compact: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed', 'show-profile'])
@@ -185,6 +191,6 @@ async function handleLogout() {
 
 <style>
 /* Transition styles must be global since dropdown is teleported to body */
-.menu-enter-active, .menu-leave-active { transition: all 0.2s cubic-bezier(0.21, 1.02, 0.73, 1); }
-.menu-enter-from, .menu-leave-to { opacity: 0; transform: translateY(-8px) scale(0.95); }
+.menu-enter-active, .menu-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.menu-enter-from, .menu-leave-to { opacity: 0; transform: scale(0.95); }
 </style>

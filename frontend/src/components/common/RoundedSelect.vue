@@ -7,7 +7,7 @@
       @keydown.escape="close"
       @keydown.enter.prevent="toggle"
       @keydown.arrow-down.prevent="openAndFocus(0)"
-      class="flex items-center justify-between gap-2 w-full border border-surface-200 dark:border-ink-600 rounded-xl text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-200 transition-all duration-200 hover:border-surface-300 dark:hover:border-ink-500 focus:outline-none focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400"
+      class="flex items-center justify-between gap-2 w-full border border-input rounded-md shadow-xs text-sm bg-transparent text-ink-800 dark:text-ink-200 transition-all duration-200 hover:border-surface-300 dark:hover:border-ink-500 focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:border-ring"
       :class="[sizeClass, triggerClass]"
     >
       <span class="truncate" :class="!selectedLabel ? 'text-ink-400 dark:text-ink-500' : ''">
@@ -22,7 +22,7 @@
     <Transition name="dropdown">
       <div
         v-if="isOpen"
-        class="absolute z-50 w-full mt-1.5 bg-white dark:bg-surface-800 border border-surface-200 dark:border-ink-600 rounded-xl shadow-lg dark:shadow-glass-dark overflow-hidden"
+        class="absolute z-50 w-full mt-1.5 bg-white dark:bg-surface-800 border border-input rounded-md shadow-md dark:shadow-glass-dark overflow-hidden"
         :class="dropdownClass"
       >
         <div class="max-h-60 overflow-y-auto custom-scrollbar py-1">

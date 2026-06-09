@@ -9,8 +9,8 @@
     >
       <template v-if="items.length > 0" #default>
         <div class="w-px h-5 bg-surface-200 dark:bg-ink-700 mx-1"></div>
-        <button @click="expandAll" class="btn-ghost text-xs">全部展开</button>
-        <button @click="collapseAll" class="btn-ghost text-xs">全部收起</button>
+        <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
+        <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
       </template>
       <template #right>
         <slot name="actions" />
@@ -22,10 +22,10 @@
       title="题库空空如也"
       description="导入面经或 JD，AI 会自动为你生成高频题目"
     >
-      <button @click="$emit('navigate-to-import')" class="btn-primary text-sm mt-4">
+      <Button @click="$emit('navigate-to-import')" variant="default" size="sm" class="text-sm mt-4">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
         开始导入
-      </button>
+      </Button>
     </AppEmpty>
 
     <!-- Virtual scroller: only renders visible cards in DOM -->
@@ -74,6 +74,15 @@
         </DynamicScrollerItem>
       </template>
     </DynamicScroller>
+
+    <!-- 加载更多指示器 -->
+    <div v-if="isLoadingMore" class="flex items-center justify-center py-4 gap-2 text-ink-400 dark:text-ink-500">
+      <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <span class="text-xs">加载更多题目...</span>
+    </div>
+    <div v-else-if="!hasMore && items.length > 0" class="text-center py-3 text-xs text-ink-300 dark:text-ink-600">
+      — 已加载全部 {{ items.length }} 道题目 —
+    </div>
   </div>
 </template>
 
@@ -82,6 +91,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
 import QuestionCard from '@/components/business/QuestionCard.vue'
+import { Button } from '@/components/ui/button'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -92,14 +102,36 @@ const props = defineProps({
   bankMode: { type: String, default: 'public' },
   isAdmin: { type: Boolean, default: false },
   currentUserId: { type: [Number, String], default: null },
+  isLoadingMore: { type: Boolean, default: false },
+  hasMore: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer', 'scroller-visible'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer', 'scroller-visible', 'load-more'])
 
 const containerRef = ref(null)
 const scrollerRef = ref(null)
 let resizeObserver = null
 let lastHeight = 0
+let scrollCheckTimer = null
+
+/** 检测是否滚动到底部附近，触发加载更多 */
+const checkScrollForLoadMore = () => {
+  if (!props.hasMore || props.isLoadingMore) return
+  const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
+  if (!scrollerEl) return
+  const { scrollTop, scrollHeight, clientHeight } = scrollerEl
+  if (scrollHeight - scrollTop - clientHeight < 400) {
+    emit('load-more')
+  }
+}
+
+const onScrollerScroll = () => {
+  if (scrollCheckTimer) return
+  scrollCheckTimer = setTimeout(() => {
+    scrollCheckTimer = null
+    checkScrollForLoadMore()
+  }, 150)
+}
 
 const updateScrollerHeight = () => {
   const container = containerRef.value
@@ -137,6 +169,9 @@ onMounted(() => {
   nextTick(() => {
     updateScrollerHeight()
     setTimeout(updateScrollerHeight, 300)
+    // 绑定滚动事件到虚拟滚动容器
+    const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
+    if (scrollerEl) scrollerEl.addEventListener('scroll', onScrollerScroll, { passive: true })
   })
 
   // Observe panel for size changes (window resize, sidebar toggle)
@@ -150,6 +185,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  if (scrollCheckTimer) clearTimeout(scrollCheckTimer)
+  const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
+  if (scrollerEl) scrollerEl.removeEventListener('scroll', onScrollerScroll)
 })
 
 const toggleAnswer = (question) => {

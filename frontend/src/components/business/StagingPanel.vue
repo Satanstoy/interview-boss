@@ -1,7 +1,7 @@
 <template>
-  <div class="bg-white dark:bg-surface-800 rounded-2xl shadow-md border border-surface-200 dark:border-ink-600 mb-4 overflow-hidden">
+  <div class="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
     <!-- Header -->
-    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 px-5 py-3 border-b border-surface-200 dark:border-ink-600">
+    <div class="bg-card px-5 py-3 border-b border-border">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
           <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -13,12 +13,12 @@
       </div>
     </div>
 
-    <div class="bg-surface-50/50 dark:bg-surface-900/50 p-4 border-b border-surface-200 dark:border-ink-600 flex items-center gap-4">
+    <div class="bg-surface-50/50 dark:bg-surface-900/50 p-4 border-b border-border flex items-center gap-4">
       <label class="font-semibold text-ink-700 dark:text-ink-300 whitespace-nowrap text-sm">来源链接</label>
       <input
         v-model="sourceUrl"
         type="text"
-        class="flex-1 border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
+        class="flex-1 border border-border rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
         placeholder="粘贴小红书/牛客网帖子链接（可选，用于去重）"
       />
     </div>
@@ -29,7 +29,7 @@
         <textarea
           v-model="stagedText"
           :maxlength="TEXT_MAX_LENGTH"
-          class="flex-1 w-full border border-surface-300 dark:border-ink-600 rounded-lg p-3 bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
+          class="flex-1 w-full border border-border rounded-xl p-3 bg-white dark:bg-ink-800 text-ink-800 dark:text-ink-100 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
           placeholder="在此处粘贴面经或 JD 的纯文本内容（可与右侧图片组合提交）..."
         ></textarea>
         <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-ink-400 dark:text-ink-500'">
@@ -54,7 +54,7 @@
           </div>
         </div>
 
-        <div class="flex-1 border-2 border-dashed border-surface-300 dark:border-ink-600 rounded-lg p-4 overflow-y-auto max-h-48 bg-surface-50 dark:bg-ink-800 custom-scrollbar">
+        <div class="flex-1 border-2 border-dashed border-border rounded-xl p-4 overflow-y-auto max-h-48 bg-surface-50 dark:bg-ink-800 custom-scrollbar">
           <div v-if="stagedFiles.length === 0" class="h-full flex flex-col items-center justify-center text-ink-400 dark:text-ink-500">
             <svg class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -64,7 +64,7 @@
 
           <div v-else class="flex flex-wrap gap-3">
             <div v-for="(item, index) in stagedFiles" :key="item.id" class="relative group">
-              <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-surface-300 dark:border-ink-600 shadow-sm" @error="handleImgError" />
+              <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-border shadow-sm" @error="handleImgError" />
               <button @click="removeFile(index)" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               </button>
@@ -74,7 +74,7 @@
       </div>
     </div>
 
-    <div class="bg-surface-50/80 dark:bg-surface-900/80 border-t border-surface-200 dark:border-ink-600 p-4 flex flex-col items-center">
+    <div class="bg-surface-50/80 dark:bg-surface-900/80 border-t border-border p-4 flex flex-col items-center">
       <!-- 类型和季节选择 -->
       <div class="flex gap-4 w-full mb-4">
         <div class="flex-1">
@@ -98,7 +98,7 @@
             wrapper-class="w-full"
             trigger-class="w-full"
           />
-          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-surface-200 dark:border-ink-600 rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-border rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
         </div>
         <div v-if="isAdmin" class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">提交到</label>
@@ -115,7 +115,7 @@
       </div>
 
       <div class="flex gap-4 w-full justify-end mb-4">
-        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-ink-600 dark:text-ink-400 hover:bg-surface-200 dark:hover:bg-ink-700 transition border border-surface-200 dark:border-ink-600">
+        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-ink-600 dark:text-ink-400 hover:bg-surface-200 dark:hover:bg-ink-700 transition border border-border">
           清空
         </button>
         <button

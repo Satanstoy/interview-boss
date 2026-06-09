@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue'
 import { HugeiconsIcon } from '@hugeicons/vue'
 import {
   Book02Icon,
@@ -10,6 +11,7 @@ import {
   BookUploadIcon,
   BracesIcon,
 } from '@hugeicons/core-free-icons'
+import { PanelLeft } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 
 const props = defineProps({
@@ -26,13 +28,20 @@ const emit = defineEmits([
   'update:active-tab',
   'select-tag',
   'go-to-question',
-  'refresh-recommend',
   'logout',
   'bank-mode-changed',
   'show-review',
   'show-profile',
-  'refresh',
+  'update:collapsed',
 ])
+
+const collapsed = ref(false)
+const logoHovered = ref(false)
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  emit('update:collapsed', collapsed.value)
+}
 
 const iconMap = {
   MasterBank: Book02Icon,
@@ -45,101 +54,132 @@ const iconMap = {
   Coding: BracesIcon,
 }
 
-function onTabChange(key) {
-  emit('update:active-tab', key)
-}
-
-function onSelectTag(tag) {
-  emit('select-tag', tag)
-}
-
-function onGoToQuestion(q) {
-  emit('go-to-question', q)
-}
-
-function onRefreshRecommend() {
-  emit('refresh-recommend')
-}
-
-function onRefreshAnalytics() {
-  emit('refresh')
-}
-
-function handleLogout() {
-  emit('logout')
-}
-
-function handleBankModeChanged(val) {
-  emit('bank-mode-changed', val)
-}
-
-function handleShowReview() {
-  emit('show-review')
-}
-
-function handleShowProfile() {
-  emit('show-profile')
-}
+function onTabChange(key) { emit('update:active-tab', key) }
+function onSelectTag(tag) { emit('select-tag', tag) }
+function onGoToQuestion(q) { emit('go-to-question', q) }
+function handleLogout() { emit('logout') }
+function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
+function handleShowReview() { emit('show-review') }
+function handleShowProfile() { emit('show-profile') }
 </script>
 
 <template>
-  <!-- Plain div layout — no shadcn Sidebar wrapper (avoids fixed positioning) -->
-  <div class="flex flex-col h-full overflow-hidden">
-    <!-- Header: Logo -->
-    <div class="p-4 pb-2 shrink-0">
-      <a href="#" class="flex items-center gap-3">
+  <!-- Collapsed: logo + nav icons + avatar -->
+  <div v-if="collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1">
+    <!-- Logo → hover shows PanelLeft icon → click expands -->
+    <button
+      @mouseenter="logoHovered = true"
+      @mouseleave="logoHovered = false"
+      @click="toggleCollapsed"
+      class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-1 overflow-hidden"
+      :class="logoHovered
+        ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
+        : 'bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20'"
+      :title="logoHovered ? '展开侧栏' : undefined"
+    >
+      <!-- IB logo -->
+      <span
+        class="text-sm font-bold transition-all duration-300 ease-out"
+        :class="logoHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'"
+      >IB</span>
+      <!-- PanelLeft icon -->
+      <PanelLeft
+        :size="18"
+        class="absolute transition-all duration-300 ease-out"
+        :class="logoHovered ? 'opacity-100 scale-100' : 'opacity-0 scale-75'"
+      />
+    </button>
+
+    <!-- Navigation icons -->
+    <button
+      v-for="tab in sidebarTabs"
+      :key="tab.key"
+      @click="onTabChange(tab.key)"
+      class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors"
+      :class="activeTab === tab.key
+        ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+        : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+      :title="tab.label"
+    >
+      <HugeiconsIcon
+        v-if="iconMap[tab.key]"
+        :icon="iconMap[tab.key]"
+        :size="18"
+        :class="activeTab === tab.key ? 'text-primary' : ''"
+      />
+    </button>
+
+    <div class="flex-1"></div>
+
+    <!-- User avatar -->
+    <UserMenu
+      v-if="displayUser"
+      :user="displayUser"
+      :pending-count="pendingReviewCount"
+      placement="top"
+      compact
+      button-class="rounded-lg hover:bg-sidebar-accent transition-colors p-0"
+      @logout="handleLogout"
+      @bank-mode-changed="handleBankModeChanged"
+      @show-review="handleShowReview"
+      @show-profile="handleShowProfile"
+    />
+  </div>
+
+  <!-- Expanded: full sidebar -->
+  <div v-else class="flex flex-col h-full overflow-hidden">
+    <!-- Header: logo + PanelLeft toggle -->
+    <div class="flex items-center justify-between px-4 py-3 shrink-0">
+      <a href="#" class="flex items-center gap-3 min-w-0">
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-600 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-transform hover:scale-105">
           IB
         </div>
         <div class="flex flex-col items-start leading-tight">
-          <span class="text-base font-semibold tracking-tight text-sidebar-foreground">InterviewBoss</span>
-          <span class="text-[11px] text-sidebar-foreground/50">AI 面试准备工作台</span>
+          <span class="text-base font-semibold tracking-tight text-sidebar-foreground whitespace-nowrap">InterviewBoss</span>
+          <span class="text-[11px] text-sidebar-foreground/50 whitespace-nowrap">AI 面试准备工作台</span>
         </div>
       </a>
+      <button
+        @click="toggleCollapsed"
+        class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+        title="收起侧栏"
+      >
+        <PanelLeft :size="18" />
+      </button>
     </div>
 
-    <!-- Navigation tabs -->
-    <div class="flex-1 min-h-0 flex flex-col gap-1 py-2 overflow-y-auto custom-scrollbar">
-      <div class="px-2 space-y-0.5">
-        <button
-          v-for="tab in sidebarTabs"
-          :key="tab.key"
-          @click="onTabChange(tab.key)"
-          class="group relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm transition-all duration-150"
-          :class="[
-            activeTab === tab.key
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
-          ]"
+    <!-- Navigation -->
+    <div class="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar py-1 px-2 gap-0.5">
+      <button
+        v-for="tab in sidebarTabs"
+        :key="tab.key"
+        @click="onTabChange(tab.key)"
+        class="group relative flex items-center w-full rounded-lg transition-all duration-150 gap-3 px-3 py-2"
+        :class="activeTab === tab.key
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+          : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+      >
+        <HugeiconsIcon
+          v-if="iconMap[tab.key]"
+          :icon="iconMap[tab.key]"
+          :size="18"
+          class="transition-colors shrink-0"
+          :class="activeTab === tab.key ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
+        />
+        <span class="text-sm whitespace-nowrap">{{ tab.label }}</span>
+        <span
+          v-if="tab.count != null && tab.count !== 0"
+          class="ml-auto text-[11px] font-medium text-sidebar-foreground/50 whitespace-nowrap"
         >
-          <HugeiconsIcon
-            v-if="iconMap[tab.key]"
-            :icon="iconMap[tab.key]"
-            :size="18"
-            class="transition-colors shrink-0"
-            :class="activeTab === tab.key ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
-          />
-          <span class="text-sm">{{ tab.label }}</span>
-          <span
-            v-if="tab.count != null && tab.count !== 0"
-            class="ml-auto text-[11px] font-medium text-sidebar-foreground/50"
-          >
-            {{ tab.count }}
-          </span>
-        </button>
-      </div>
+          {{ tab.count }}
+        </span>
+      </button>
 
-      <div class="mx-4 my-2 h-px bg-sidebar-border/50"></div>
-
-      <!-- Category Directory (simplified) -->
-      <div class="min-h-0 flex-1 overflow-y-auto px-2 custom-scrollbar">
-        <div class="p-4">
-          <h3 class="text-sm font-bold text-ink-800 dark:text-ink-100 mb-2 flex items-center gap-1.5">
-            <div class="w-5 h-5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-              <svg class="w-3 h-3 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
-            </div>
-            分类目录
-          </h3>
+      <!-- Category Directory -->
+      <div class="mx-2 my-2 h-px bg-sidebar-border/50"></div>
+      <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+        <div class="px-2 py-2">
+          <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 mb-2 uppercase tracking-wider px-2">分类目录</h3>
           <ul class="space-y-0.5">
             <li
               @click="onSelectTag('全部')"
@@ -163,21 +203,19 @@ function handleShowProfile() {
       </div>
     </div>
 
-    <!-- Footer: User menu -->
-    <div class="p-4 pt-2 border-t border-sidebar-border/50 shrink-0">
-      <div class="rounded-xl border border-sidebar-border/50 bg-sidebar-accent/30 p-3">
-        <UserMenu
-          v-if="displayUser"
-          :user="displayUser"
-          :pending-count="pendingReviewCount"
-          placement="top"
-          button-class="w-full justify-start rounded-lg hover:bg-sidebar-accent px-3 py-2.5 transition-colors"
-          @logout="handleLogout"
-          @bank-mode-changed="handleBankModeChanged"
-          @show-review="handleShowReview"
-          @show-profile="handleShowProfile"
-        />
-      </div>
+    <!-- Footer: user menu -->
+    <div class="shrink-0 p-3 border-t border-sidebar-border/50">
+      <UserMenu
+        v-if="displayUser"
+        :user="displayUser"
+        :pending-count="pendingReviewCount"
+        placement="top"
+        button-class="w-full justify-start rounded-lg hover:bg-sidebar-accent px-3 py-2 gap-3 transition-colors"
+        @logout="handleLogout"
+        @bank-mode-changed="handleBankModeChanged"
+        @show-review="handleShowReview"
+        @show-profile="handleShowProfile"
+      />
     </div>
   </div>
 </template>

@@ -8,10 +8,10 @@
       @invert-selection="$emit('invert-selection')"
     />
 
-    <div class="rounded-xl border border-surface-200 dark:border-ink-800 bg-white dark:bg-surface-900 overflow-x-auto custom-scrollbar shadow-sm">
+    <div class="rounded-xl border border-border bg-card overflow-x-auto custom-scrollbar shadow-sm">
       <table class="w-full text-left border-collapse">
         <thead>
-          <tr class="border-b border-surface-200 dark:border-ink-800 bg-white dark:bg-surface-900 text-ink-500 dark:text-ink-400 text-xs">
+          <tr class="border-b border-border bg-card text-ink-500 dark:text-ink-400 text-xs">
             <th class="h-10 px-3 align-middle whitespace-nowrap w-10 text-center font-medium">选择</th>
             <th v-for="col in columns" :key="col.key" class="h-10 px-3 align-middle font-medium" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
               {{ col.label }}
@@ -22,7 +22,7 @@
         <tbody v-auto-animate>
           <tr v-for="(row, idx) in paginatedRows" :key="row.id"
             :data-row-id="row.id"
-            class="border-b border-surface-100 dark:border-ink-800/70 text-sm transition-colors duration-150 animate-fade-in hover:bg-surface-50/70 dark:hover:bg-ink-800/40"
+            class="border-b border-border text-sm transition-colors duration-150 animate-fade-in hover:bg-surface-50/70 dark:hover:bg-ink-800/40"
             :class="[
               highlightId != null && highlightId == row.id ? 'highlight-row' : '',
               isSelected(row.id) ? 'bg-surface-100/80 dark:bg-ink-800/70' : 'bg-white dark:bg-surface-900'

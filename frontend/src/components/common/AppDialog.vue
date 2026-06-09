@@ -16,7 +16,7 @@
 
         <!-- Panel -->
         <div
-          class="relative w-full bg-white dark:bg-surface-800 rounded-2xl shadow-xl border border-surface-200/60 dark:border-ink-700/50 overflow-hidden"
+          class="relative w-full bg-white dark:bg-surface-800 rounded-xl shadow-xl border border-border overflow-hidden"
           :class="maxWidthClass"
           :style="maxWidth ? { maxWidth } : {}"
         >
