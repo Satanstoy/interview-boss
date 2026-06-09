@@ -1,55 +1,61 @@
 <template>
-  <div
+  <Card
     :class="cn(
-      'bg-card text-card-foreground rounded-xl border shadow-sm transition-colors duration-200',
+      'transition-colors duration-200',
       hover && 'hover:border-surface-300 dark:hover:border-ink-700 hover:shadow-md',
-      noPadding ? '' : '',
+      noPadding ? 'p-0 gap-0' : '',
       props.class
     )"
   >
     <!-- Header with title/description -->
-    <div
+    <CardHeader
       v-if="title || $slots.header || $slots['card-title']"
       :class="cn(
-        'flex items-start justify-between gap-4',
-        noPadding ? 'px-6 pt-6 pb-0' : 'px-6 pt-6 pb-0 border-b border-border/50 pb-4'
+        noPadding ? '' : 'border-b border-border/50 pb-4'
       )"
     >
-      <div class="min-w-0 flex-1">
-        <slot name="header">
-          <h3 v-if="title" class="text-lg font-semibold leading-none tracking-tight text-ink-900 dark:text-ink-50">
-            <slot name="card-title">{{ title }}</slot>
-          </h3>
-          <p v-if="description" class="mt-1.5 text-sm text-ink-500 dark:text-ink-400">
-            {{ description }}
-          </p>
-        </slot>
-      </div>
-      <div v-if="$slots['card-action']" class="shrink-0">
+      <slot name="header">
+        <CardTitle v-if="title" class="text-ink-900 dark:text-ink-50">
+          <slot name="card-title">{{ title }}</slot>
+        </CardTitle>
+        <CardDescription v-if="description" class="text-ink-500 dark:text-ink-400">
+          {{ description }}
+        </CardDescription>
+      </slot>
+      <CardAction v-if="$slots['card-action']">
         <slot name="card-action" />
-      </div>
-    </div>
+      </CardAction>
+    </CardHeader>
 
     <!-- Content -->
-    <div :class="cn(noPadding ? '' : 'px-6 py-5')">
+    <CardContent :class="cn(noPadding ? 'px-0' : 'py-5')">
       <slot />
-    </div>
+    </CardContent>
 
     <!-- Footer -->
-    <div
+    <CardFooter
       v-if="$slots.footer"
       :class="cn(
-        'flex items-center gap-2',
-        noPadding ? 'px-6 pb-6 pt-0' : 'px-6 py-4 border-t border-border/50'
+        'gap-2',
+        noPadding ? 'py-0 pb-6' : 'py-4 border-t border-border/50'
       )"
     >
       <slot name="footer" />
-    </div>
-  </div>
+    </CardFooter>
+  </Card>
 </template>
 
 <script setup>
 import { cn } from '@/lib/utils'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 
 const props = defineProps({
   title: { type: String, default: '' },
