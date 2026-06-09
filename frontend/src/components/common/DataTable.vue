@@ -8,37 +8,37 @@
       @invert-selection="$emit('invert-selection')"
     />
 
-    <div class="rounded-xl border border-surface-100 dark:border-ink-700 overflow-x-auto custom-scrollbar">
+    <div class="rounded-xl border border-surface-200 dark:border-ink-800 bg-white dark:bg-surface-900 overflow-x-auto custom-scrollbar shadow-sm">
       <table class="w-full text-left border-collapse">
         <thead>
-          <tr class="bg-gradient-to-b from-gray-50 to-gray-50/50 dark:from-surface-700 dark:to-surface-700/50 text-ink-500 dark:text-ink-400 text-xs uppercase tracking-wider">
-            <th class="p-3 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-10 text-center">选择</th>
-            <th v-for="col in columns" :key="col.key" class="p-3 border-b border-surface-100 dark:border-ink-700 font-semibold" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
+          <tr class="border-b border-surface-200 dark:border-ink-800 bg-white dark:bg-surface-900 text-ink-500 dark:text-ink-400 text-xs">
+            <th class="h-10 px-3 align-middle whitespace-nowrap w-10 text-center font-medium">选择</th>
+            <th v-for="col in columns" :key="col.key" class="h-10 px-3 align-middle font-medium" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
               {{ col.label }}
             </th>
-            <th class="p-3 border-b border-surface-100 dark:border-ink-700 whitespace-nowrap w-[100px] text-center">操作</th>
+            <th class="h-10 px-3 align-middle whitespace-nowrap w-[100px] text-center font-medium">操作</th>
           </tr>
         </thead>
         <tbody v-auto-animate>
           <tr v-for="(row, idx) in paginatedRows" :key="row.id"
             :data-row-id="row.id"
-            class="border-b border-gray-50 dark:border-ink-700/50 text-sm transition-colors duration-150 animate-fade-in"
+            class="border-b border-surface-100 dark:border-ink-800/70 text-sm transition-colors duration-150 animate-fade-in hover:bg-surface-50/70 dark:hover:bg-ink-800/40"
             :class="[
               highlightId != null && highlightId == row.id ? 'highlight-row' : '',
-              isSelected(row.id) ? 'bg-primary-50/60 dark:bg-primary-900/20' : idx % 2 === 0 ? 'bg-white dark:bg-surface-800' : 'bg-surface-50/30 dark:bg-surface-900/30'
+              isSelected(row.id) ? 'bg-surface-100/80 dark:bg-ink-800/70' : 'bg-white dark:bg-surface-900'
             ]"
             :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
           >
-            <td class="p-3 whitespace-nowrap text-center">
+            <td class="px-3 py-2.5 whitespace-nowrap text-center">
               <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
                 class="w-4 h-4 text-primary-600 rounded-md border-surface-300 dark:border-ink-600 focus:ring-primary-500 cursor-pointer transition">
             </td>
-            <td v-for="col in columns" :key="col.key" class="p-3 break-words" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
+            <td v-for="col in columns" :key="col.key" class="px-3 py-2.5 break-words text-ink-700 dark:text-ink-200" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
               <slot :name="'cell-' + col.key" :row="row" :value="row[col.frontendKey || col.key]">
                 {{ row[col.frontendKey || col.key] }}
               </slot>
             </td>
-            <td class="p-3 whitespace-nowrap text-center">
+            <td class="px-3 py-2.5 whitespace-nowrap text-center">
               <slot name="actions" :row="row" />
             </td>
           </tr>

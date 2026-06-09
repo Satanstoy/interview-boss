@@ -1,3 +1,10 @@
+const withOpacity = (variable) => ({ opacityValue }) => {
+  if (opacityValue === undefined) return `var(${variable})`
+  const pct = Math.round(Number(opacityValue) * 100)
+  if (isNaN(pct)) return `var(${variable})`
+  return `color-mix(in oklab, var(${variable}) ${pct}%, transparent)`
+}
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
@@ -8,7 +15,50 @@ export default {
   theme: {
     extend: {
       colors: {
+        border: withOpacity('--border'),
+        input: withOpacity('--input'),
+        ring: withOpacity('--ring'),
+        background: withOpacity('--background'),
+        foreground: withOpacity('--foreground'),
+        card: {
+          DEFAULT: withOpacity('--card'),
+          foreground: withOpacity('--card-foreground'),
+        },
+        popover: {
+          DEFAULT: withOpacity('--popover'),
+          foreground: withOpacity('--popover-foreground'),
+        },
+        secondary: {
+          DEFAULT: withOpacity('--secondary'),
+          foreground: withOpacity('--secondary-foreground'),
+        },
+        muted: {
+          DEFAULT: withOpacity('--muted'),
+          foreground: withOpacity('--muted-foreground'),
+        },
+        destructive: {
+          DEFAULT: withOpacity('--destructive'),
+        },
+        sidebar: {
+          DEFAULT: withOpacity('--sidebar'),
+          foreground: withOpacity('--sidebar-foreground'),
+          primary: withOpacity('--sidebar-primary'),
+          'primary-foreground': withOpacity('--sidebar-primary-foreground'),
+          accent: withOpacity('--sidebar-accent'),
+          'accent-foreground': withOpacity('--sidebar-accent-foreground'),
+          border: withOpacity('--sidebar-border'),
+          ring: withOpacity('--sidebar-ring'),
+        },
+        chart: {
+          1: withOpacity('--chart-1'),
+          2: withOpacity('--chart-2'),
+          3: withOpacity('--chart-3'),
+          4: withOpacity('--chart-4'),
+          5: withOpacity('--chart-5'),
+        },
         primary: {
+          DEFAULT: withOpacity('--primary'),
+          foreground: withOpacity('--primary-foreground'),
           50: 'rgb(var(--c-primary-50) / <alpha-value>)',
           100: 'rgb(var(--c-primary-100) / <alpha-value>)',
           200: 'rgb(var(--c-primary-200) / <alpha-value>)',
@@ -21,34 +71,36 @@ export default {
           900: 'rgb(var(--c-primary-900) / <alpha-value>)',
         },
         accent: {
-          50: '#fdf4ef',
-          100: '#fae5d9',
-          200: '#f4c8b1',
-          400: '#e6956a',
-          500: '#d97a46',
-          600: '#c8622d',
-          700: '#a64c24',
+          DEFAULT: withOpacity('--accent'),
+          foreground: withOpacity('--accent-foreground'),
+          50: '#f5f3ff',
+          100: '#ede9fe',
+          200: '#ddd6fe',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#7c3aed',
+          700: '#6d28d9',
         },
         surface: {
-          50: '#faf9f7',
-          100: '#f3f1ed',
-          200: '#e8e4dd',
-          300: '#d5cfc5',
-          700: '#4a4540',
-          800: '#2d2a27',
-          900: '#1a1816',
+          50: '#fafafa',
+          100: '#f5f5f5',
+          200: '#e5e5e5',
+          300: '#d4d4d4',
+          700: '#404040',
+          800: '#262626',
+          900: '#171717',
         },
         ink: {
-          50: '#f6f5f4',
-          100: '#e7e5e2',
-          200: '#cfcac5',
-          300: '#b3aba3',
-          400: '#968b81',
-          500: '#7d7168',
-          600: '#696059',
-          700: '#574f49',
-          800: '#49433e',
-          900: '#3f3a36',
+          50: '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#3f3f46',
+          800: '#27272a',
+          900: '#18181b',
         },
         sage: {
           50: '#f3f7f2',
@@ -62,7 +114,7 @@ export default {
       },
       fontFamily: {
         serif: ['"DM Serif Display"', 'Georgia', 'serif'],
-        sans: ['Outfit', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Figtree', 'Outfit', 'system-ui', '-apple-system', 'sans-serif'],
       },
       boxShadow: {
         'card': '0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.03)',
@@ -117,5 +169,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/container-queries')],
 }

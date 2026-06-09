@@ -1,28 +1,30 @@
 <template>
-  <div class="min-h-screen bg-surface-50 dark:bg-surface-900">
+  <div class="min-h-screen bg-white dark:bg-surface-900">
     <!-- Top bar -->
-    <nav class="sticky top-0 z-50 bg-white/85 dark:bg-surface-900/85 backdrop-blur-xl border-b border-surface-200/60 dark:border-ink-700/40 supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-surface-900/60">
-      <div class="max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-8 h-14 flex items-center justify-between overflow-hidden">
-        <h1 class="text-lg lg:text-xl font-serif font-normal tracking-tight text-ink-900 dark:text-ink-100 shrink-0">
-          Interview<span class="text-primary-600 dark:text-primary-400">Boss</span>
-        </h1>
-        <div class="flex items-center gap-1.5 sm:gap-3 min-w-0 shrink-0">
-          <span v-if="currentUser && activeSeason" class="hidden sm:inline-flex badge bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border border-primary-200 dark:border-primary-800 px-3 py-1">
+    <nav v-if="!isAuthenticatedForUi" class="sticky top-0 z-50 bg-background/90 backdrop-blur-xl border-b border-border">
+      <div class="max-w-[1920px] mx-auto px-3 sm:px-5 lg:px-6 h-14 flex items-center justify-between overflow-hidden">
+        <div class="flex items-center gap-2 min-w-0">
+          <span v-if="isAuthenticatedForUi" class="text-sm text-ink-400 dark:text-ink-500 hidden sm:inline">Dashboard</span>
+          <span v-if="isAuthenticatedForUi" class="text-ink-300 dark:text-ink-700 hidden sm:inline">/</span>
+          <span v-if="!isAuthenticatedForUi" class="grid h-8 w-8 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">IB</span>
+          <h1 class="text-sm lg:text-base font-semibold tracking-tight text-ink-900 dark:text-ink-100 truncate">
+            {{ activeTabLabel }}
+          </h1>
+          <span v-if="isAuthenticatedForUi && activeSeason" class="hidden md:inline-flex items-center rounded-md bg-surface-100 dark:bg-ink-800 text-ink-500 dark:text-ink-400 border border-surface-200 dark:border-ink-700 px-2 py-1 text-xs">
             {{ activeSeason }}
           </span>
-          <UserMenu
-            v-if="currentUser"
-            :user="currentUser"
-            :pending-count="pendingReviewCount"
-            @logout="handleLogout"
-            @bank-mode-changed="handleBankModeChanged"
-            @show-review="showReviewPanel = true"
-            @show-profile="showProfile = true"
-          />
+        </div>
+        <div class="flex items-center gap-1.5 sm:gap-3 min-w-0 shrink-0">
+          <a v-if="!isAuthenticatedForUi" href="?preview=1" class="hidden sm:inline-flex h-8 items-center rounded-md border border-surface-200 dark:border-ink-700 bg-white dark:bg-surface-900 px-3 text-xs font-medium text-ink-600 dark:text-ink-300 shadow-sm hover:bg-surface-50 dark:hover:bg-ink-800 transition">
+            预览新版界面
+          </a>
+          <button v-if="isAuthenticatedForUi" type="button" class="hidden sm:inline-flex h-8 items-center rounded-md border border-surface-200 dark:border-ink-700 bg-white dark:bg-surface-900 px-3 text-xs font-medium text-ink-600 dark:text-ink-300 shadow-sm hover:bg-surface-50 dark:hover:bg-ink-800 transition">
+            搜索 ⌘K
+          </button>
           <!-- Dark mode toggle -->
           <button
             @click="toggleDark()"
-            class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
+            class="p-2 rounded-md text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
             :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
           >
             <svg v-if="isDark" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -33,9 +35,9 @@
             </svg>
           </button>
           <button
-            v-if="currentUser"
+            v-if="isAuthenticatedForUi"
             @click="showSettings = true"
-            class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
+            class="p-2 rounded-md text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-800 transition-all duration-200"
             title="系统配置"
           >
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -48,7 +50,7 @@
     <SettingsPanel
       :visible="showSettings"
       :active-season="activeSeason"
-      :is-admin="currentUser?.is_admin"
+      :is-admin="displayUser?.is_admin"
       :is-building="isBuilding"
       @close="onSettingsClose"
       @update:active-season="activeSeason = $event"
@@ -58,78 +60,51 @@
     />
 
     <!-- Login gate -->
-    <LoginPage v-if="!currentUser" @login-success="handleLoginSuccess" />
+    <LoginPage v-if="!isAuthenticatedForUi" @login-success="handleLoginSuccess" />
 
-    <main v-else class="p-3 lg:p-5 max-w-[1920px] mx-auto">
-      <div class="sidebar-layout flex gap-6 lg:gap-8">
-      <!-- Sidebar + resize handle wrapper -->
-      <div
-        ref="sidebarWrapperRef"
-        class="sidebar-wrapper hidden lg:block"
-        :style="{ width: sidebarCollapsed ? '0px' : sidebarWidth + 'px', flexShrink: 0 }"
-      >
-        <AnalyticsSidebar
-          v-show="!sidebarCollapsed"
-          :sidebar-collapsed="sidebarCollapsed"
-          :sidebar-width="sidebarWidth"
+    <!-- Simple two-column layout: sidebar left, content right -->
+    <div v-else class="flex min-h-screen">
+      <!-- Sidebar: fixed width, full height, fixed position (like ChatGPT) -->
+      <aside class="hidden md:flex w-72 shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0">
+        <AppSidebar
+          :active-tab="activeTab"
+          :sidebar-tabs="sidebarTabs"
           :analytics="analytics"
-          :master-bank="masterBank"
+          :practice-stats="practiceStats"
           :popular-tags="popularTags"
           :selected-tag="selectedTag"
-          :practice-stats="practiceStats"
           :recommend-seed="recommendSeed"
-          @refresh="fetchAnalytics"
-          @select-tag="onSelectTag($event)"
+          :master-bank="masterBank"
+          :filtered-master-bank="filteredMasterBank"
+          :display-user="displayUser"
+          :pending-review-count="pendingReviewCount"
+          @update:active-tab="onTabChange"
+          @select-tag="onSelectTag"
           @go-to-question="onGoToQuestion"
           @refresh-recommend="recommendSeed++"
+          @logout="handleLogout"
+          @bank-mode-changed="handleBankModeChanged"
+          @show-review="showReviewPanel = true"
+          @show-profile="showProfile = true"
+          @refresh="fetchAnalytics"
         />
-      </div>
-      <!-- Resize handle -->
-      <div
-        v-show="!sidebarCollapsed"
-        ref="resizeHandleRef"
-        class="resize-handle hidden lg:flex"
-        :class="{ 'resize-handle--collapsed': sidebarCollapsed, 'resize-handle--dragging': isResizing }"
-        :style="resizeHandleStyle"
-        @pointerdown="onResizeStart"
-      >
-        <div class="resize-handle__grip">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <button
-          v-if="!sidebarCollapsed"
-          class="resize-handle__collapse-btn"
-          @pointerdown.stop
-          @click.stop="sidebarCollapsed = true; localStorage.setItem('sidebar-collapsed', 'true')"
-          title="收起侧栏"
-        >
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-      </div>
+      </aside>
 
-      <!-- Expand button -->
-      <Transition name="expand-btn-fade">
-        <button
-          v-if="sidebarCollapsed"
-          ref="expandBtnRef"
-          class="sidebar-expand-btn hidden lg:flex"
-          @pointerdown="onExpandBtnDragStart"
-          title="展开侧栏（可拖拽调整宽度）"
-        >
-          <svg class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </Transition>
+      <!-- Main content: takes remaining space -->
+      <main class="flex-1 min-w-0 flex flex-col">
+        <SiteHeader
+          :active-tab-label="activeTabLabel"
+          :active-season="activeSeason"
+          :is-dark="isDark"
+          @toggle-dark="toggleDark()"
+          @show-settings="showSettings = true"
+        />
 
-      <div class="relative min-w-0 flex-1 bg-white dark:bg-surface-800 rounded-2xl shadow-card dark:shadow-glass-dark border border-surface-200/80 dark:border-ink-700/50 overflow-hidden flex flex-col h-[calc(100vh-88px)]">
-        <TabBar :active-tab="activeTab" @update:active-tab="onTabChange" />
+        <TabBar class="md:hidden" :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="p-3 lg:p-4 flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar" style="position: relative;">
+        <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
+
+
 
           <!-- Error banner -->
           <div v-if="dataLoadError" class="mb-4 bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
@@ -192,6 +167,11 @@
             </div>
           </div>
 
+          <!-- Exam Distribution Chart -->
+          <div v-if="masterBankEverShown && activeTab === 'MasterBank'">
+            <ExamDistribution :master-bank="masterBank" />
+          </div>
+
           <!-- MasterBankList -->
           <div v-if="masterBankEverShown"
             class="flex flex-col flex-1 min-h-0"
@@ -203,9 +183,9 @@
               :is-selected="isMasterSelected"
               :batch-actions="masterBatchActions"
               :practiced-questions="practicedQuestions"
-              :bank-mode="currentUser?.bank_mode"
-              :is-admin="currentUser?.is_admin"
-              :current-user-id="currentUser?.id"
+              :bank-mode="displayUser?.bank_mode"
+              :is-admin="displayUser?.is_admin"
+              :current-user-id="displayUser?.id"
               @toggle-select-all="masterSelection.toggleSelectAll()"
               @invert-selection="masterSelection.invertSelection()"
               @toggle-item="masterSelection.toggleItem($event)"
@@ -224,12 +204,12 @@
               @delete-original-question="deleteOriginalQuestion"
               @update-answer="onUpdateAnswer"
             >
-              <template #default>
+              <template #actions>
                 <div class="flex flex-wrap items-center gap-2 pt-1">
-                  <button v-if="currentUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
+                  <button v-if="displayUser?.is_admin" @click="triggerBuildMasterBank" :disabled="isBuilding" class="btn-primary text-xs">
                     {{ isBuilding ? '重建中...' : '重建题库' }}
                   </button>
-                  <button v-if="!currentUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
+                  <button v-if="!displayUser?.is_admin" @click="triggerBuildPersonalBank" :disabled="isBuilding" class="btn-primary text-xs">
                     {{ isBuilding ? '重建中...' : '重建题库' }}
                   </button>
                   <button v-if="filteredMasterBank.length > 0" @click="enterPracticeMode" class="btn-secondary text-xs">
@@ -268,18 +248,18 @@
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
-                    <button v-if="currentUser?.is_admin || row.owner_id === currentUser?.id" @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                    <button v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       <span class="text-[10px] leading-tight">删除</span>
                     </button>
                   </div>
                 </template>
                 <template #cell-company="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="公司" db-column="company" table-name="jd" @save="saveField" />
                   <span v-else>{{ row['公司'] }}</span>
                 </template>
                 <template #cell-job_title="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="岗位名称" db-column="job_title" table-name="jd" @save="saveField" />
                   <span v-else>{{ row['岗位名称'] }}</span>
                 </template>
                 <template #cell-salary="{ row }">
@@ -335,7 +315,7 @@
               >
                 <template #actions="{ row }">
                   <div class="flex items-center justify-center gap-1">
-                    <div v-if="currentUser?.is_admin" class="relative flex flex-col items-center">
+                    <div v-if="displayUser?.is_admin" class="relative flex flex-col items-center">
                       <button @click="reprocessInterview(row.id)" :disabled="reprocessingIds[row.id]" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1 disabled:opacity-50" title="重新提取并打标">
                         <svg v-if="reprocessingIds[row.id]" class="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                         <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -346,34 +326,34 @@
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                       <span class="text-[10px] leading-tight">链接</span>
                     </a>
-                    <button v-if="currentUser?.is_admin || row.owner_id === currentUser?.id" @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
+                    <button v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1" title="删除">
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       <span class="text-[10px] leading-tight">删除</span>
                     </button>
                   </div>
                 </template>
                 <template #cell-company="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="公司" db-column="company" table-name="interview" @save="saveField" />
                   <span v-else>{{ row['公司'] }}</span>
                 </template>
                 <template #cell-season="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="season" db-column="season" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="season" db-column="season" table-name="interview" @save="saveField" />
                   <span v-else>{{ row['season'] }}</span>
                 </template>
                 <template #cell-round="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="面试轮次" db-column="round" table-name="interview" @save="saveField" />
                   <span v-else>{{ row['面试轮次'] }}</span>
                 </template>
                 <template #cell-focus="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="考察重点" db-column="focus" table-name="interview" type="textarea" @save="saveField" />
                   <span v-else>{{ row['考察重点'] }}</span>
                 </template>
                 <template #cell-questions_list="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="具体题目清单" db-column="questions_list" table-name="interview" type="textarea" rows="6" @save="saveField" />
                   <span v-else>{{ row['具体题目清单'] }}</span>
                 </template>
                 <template #cell-difficulty="{ row }">
-                  <InlineEdit v-if="currentUser?.is_admin" :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
+                  <InlineEdit v-if="displayUser?.is_admin" :row="row" field="难易程度" db-column="difficulty" table-name="interview" type="select" :options="['简单', '中等', '困难']" @save="saveField" />
                   <span v-else>{{ row['难易程度'] }}</span>
                 </template>
                 <template #cell-created_at="{ row }">
@@ -403,7 +383,8 @@
               <!-- Chat Tab (模拟面试) -->
               <ChatView
                 v-if="activeTab === 'Chat'"
-                :jd-list="jdData"
+              :jd-list="jdData"
+              :preview="isPreviewMode"
               />
 
               <!-- KnowledgeGraph Tab -->
@@ -414,7 +395,7 @@
               />
 
               <!-- Import Tab -->
-              <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" :available-seasons="availableSeasons" :is-admin="currentUser?.is_admin" @submitted="onSubmitted" />
+              <StagingPanel v-if="activeTab === 'Import'" :active-season="activeSeason" :available-seasons="availableSeasons" :is-admin="displayUser?.is_admin" @submitted="onSubmitted" />
 
               <!-- Coding Tab -->
               <CodingPractice v-if="activeTab === 'Coding'" />
@@ -422,22 +403,30 @@
             </div>
           </Transition>
         </div>
-      </div>
+      </main>
     </div>
-    </main>
 
     <Toaster position="top-right" richColors closeButton />
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
-    <ProfilePanel :visible="showProfile" :user="currentUser" @close="showProfile = false" />
+    <ProfilePanel
+      :visible="showProfile"
+      :user="currentUser"
+      :practice-stats="practiceStats"
+      :master-bank="masterBank"
+      :recommend-seed="recommendSeed"
+      @close="showProfile = false"
+      @go-to-question="onGoToQuestion"
+      @refresh-recommend="recommendSeed++"
+    />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" @navigate-to-interview="onNavigateToInterview" />
     <PracticeMode
       v-if="showPracticeMode"
       :questions="filteredMasterBank"
       :start-index="practiceModeIndex"
-      :bank-mode="currentUser?.bank_mode"
-      :is-admin="currentUser?.is_admin"
+      :bank-mode="displayUser?.bank_mode"
+      :is-admin="displayUser?.is_admin"
       @close="handlePracticeModeClose"
       @answer-evaluated="handlePracticeModeEvaluated"
       @toggle-star="toggleStar"
@@ -477,13 +466,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { cancelAllRequests } from '@/services/http.js'
 import { safeUrl } from '@/utils/validate.js'
 import { useSelection } from '@/composables/useSelection.js'
 import { useTheme } from '@/composables/useTheme.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { useSidebar } from '@/composables/useSidebar.js'
+import AppSidebar from '@/components/AppSidebar.vue'
+import SiteHeader from '@/components/SiteHeader.vue'
+import SectionCards from '@/components/SectionCards.vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
@@ -502,22 +493,49 @@ import RoundedSelect from '@/components/common/RoundedSelect.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
+import ExamDistribution from '@/components/business/ExamDistribution.vue'
 import { Toaster } from 'vue-sonner'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoginModal from '@/components/business/LoginModal.vue'
-import UserMenu from '@/components/business/UserMenu.vue'
 import MergeQuestionDialog from '@/components/business/MergeQuestionDialog.vue'
 import PracticePanel from '@/components/business/PracticePanel.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
 
-const MockInterview = defineAsyncComponent(() => import('@/components/business/MockInterview.vue'))
-const KnowledgeGraph = defineAsyncComponent(() => import('@/components/business/KnowledgeGraph.vue'))
-const ChatView = defineAsyncComponent(() => import('@/components/business/ChatView.vue'))
-const ProfilePanel = defineAsyncComponent(() => import('@/components/business/ProfilePanel.vue'))
-const AdminReview = defineAsyncComponent(() => import('@/components/business/AdminReview.vue'))
-const CodingPractice = defineAsyncComponent(() => import('@/components/business/CodingPractice.vue'))
-const PracticeMode = defineAsyncComponent(() => import('@/components/business/PracticeMode.vue'))
-const AnalyticsSidebar = defineAsyncComponent(() => import('@/components/business/AnalyticsSidebar.vue'))
+// 异步组件 loading/error 包装
+const asyncOptions = {
+  delay: 100,
+  timeout: 15000,
+  suspensible: false,
+}
+
+const MockInterview = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/MockInterview.vue'),
+})
+const KnowledgeGraph = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/KnowledgeGraph.vue'),
+})
+const ChatView = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/ChatView.vue'),
+})
+const ProfilePanel = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/ProfilePanel.vue'),
+})
+const AdminReview = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/AdminReview.vue'),
+})
+const CodingPractice = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/CodingPractice.vue'),
+})
+const PracticeMode = defineAsyncComponent({
+  ...asyncOptions,
+  loader: () => import('@/components/business/PracticeMode.vue'),
+})
 
 // ── Composables ──
 const toast = useToast()
@@ -526,12 +544,25 @@ const { isDark, toggleDark } = useTheme()
 
 const activeTab = ref('MasterBank')
 const showPracticeMode = ref(false)
+const isPreviewMode = new URLSearchParams(window.location.search).get('preview') === '1'
+const sidebarTabs = computed(() => [
+  { key: 'MasterBank', label: '高频题库', count: filteredMasterBank.value.length },
+  { key: 'Chat', label: '模拟面试' },
+  { key: 'JD', label: 'JD 筛选', count: jdData.value.length },
+  { key: 'Interview', label: '面经库', count: interviewData.value.length },
+  { key: 'MockInterview', label: '题目抽测' },
+  { key: 'KnowledgeGraph', label: '知识图谱' },
+  { key: 'Import', label: '导入' },
+  { key: 'Coding', label: '手撕代码' },
+])
+const activeTabLabel = computed(() => isAuthenticatedForUi.value ? (sidebarTabs.value.find(tab => tab.key === activeTab.value)?.label || '工作台') : 'InterviewBoss')
+const showWorkspaceOverview = computed(() => ['MasterBank', 'JD', 'Interview'].includes(activeTab.value))
+const practiceProgressPercent = computed(() => {
+  const total = practiceStats.value?.total_questions || masterBank.value.length || 0
+  if (!total) return 0
+  return Math.round(((practiceStats.value?.practiced_questions || 0) / total) * 100)
+})
 
-const {
-  sidebarCollapsed, sidebarWidth, isResizing,
-  resizeHandleRef, expandBtnRef, sidebarWrapperRef,
-  resizeHandleStyle, onResizeStart, onExpandBtnDragStart,
-} = useSidebar()
 const { saveScroll, prepareRestore, restoreScroll } = useTabScroll()
 
 const {
@@ -591,6 +622,97 @@ const {
   onReady: loadAllData,
   onDataRefresh: () => { fetchTableData(); fetchPracticeStats() },
 })
+
+const previewUser = {
+  id: 'preview-user',
+  username: 'Preview',
+  is_admin: true,
+  bank_mode: 'mixed',
+}
+const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))
+const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
+
+const applyPreviewData = () => {
+  activeSeason.value = '2026 春招'
+  availableSeasons.value = ['2026 春招', '2025 秋招']
+  popularTags.value = {
+    前端框架: 318,
+    项目复盘: 126,
+    工程化: 94,
+    浏览器原理: 76,
+    系统设计: 42,
+  }
+  practiceStats.value = {
+    total_questions: 1248,
+    practiced_questions: 426,
+    avg_score: 82,
+    by_difficulty: {
+      'L1-基础': { practiced: 168, total: 320, avg_score: 86 },
+      'L2-中等': { practiced: 202, total: 654, avg_score: 80 },
+      'L3-困难': { practiced: 56, total: 274, avg_score: 74 },
+    },
+  }
+  analytics.value = {
+    tech_trends: { Vue: 128, TypeScript: 96, Vite: 72, 性能优化: 64, 工程化: 58 },
+  }
+  masterBank.value = [
+    {
+      id: 9001,
+      question: 'Vue 3 的响应式系统相比 Vue 2 有哪些关键变化？',
+      frequency: 92,
+      cat1: '前端框架',
+      tags: 'Vue,响应式,Proxy',
+      difficulty: 'L2-中等',
+      job_position: 'frontend',
+      is_personal: false,
+      is_starred: true,
+      has_reference_answer: true,
+      ai_answer: 'Vue 3 使用 Proxy 代替 Object.defineProperty，覆盖新增、删除、数组索引等场景；依赖收集以 effect 为核心组织，配合 ref、reactive、computed 和 scheduler，让组合式 API 下的状态复用更自然。',
+      sources: [{ company: '字节', round: '一面', url: 'https://example.com', _origQuestion: 'Vue3 响应式原理是什么？' }],
+    },
+    {
+      id: 9002,
+      question: '如何介绍你最近一个项目里的性能优化？',
+      frequency: 81,
+      cat1: '项目复盘',
+      tags: '性能优化,项目经验,指标',
+      difficulty: 'L2-中等',
+      job_position: 'frontend',
+      is_personal: true,
+      is_starred: false,
+      has_reference_answer: true,
+      ai_answer: '建议按“问题背景、定位方法、优化动作、量化收益、复盘边界”组织回答，优先给出首屏、接口耗时、打包体积或交互延迟等可验证指标。',
+      sources: [{ company: '美团', round: '二面', url: 'https://example.com', _origQuestion: '项目性能怎么优化？' }],
+    },
+    {
+      id: 9003,
+      question: '前端工程化中如何设计稳定的构建和发布流程？',
+      frequency: 64,
+      cat1: '工程化',
+      tags: 'CI/CD,Vite,质量门禁',
+      difficulty: 'L3-困难',
+      job_position: 'frontend',
+      is_personal: false,
+      is_starred: false,
+      has_reference_answer: false,
+    },
+  ]
+  jdData.value = [
+    { id: 8101, 公司: 'Moonshot AI', 岗位名称: '高级前端工程师', 薪资范围: '35k-55k', 核心技术要求: 'Vue 3 / TypeScript / 大模型应用工程化', 加分项: 'AI 产品经验、性能优化、组件库建设', season: '2026 春招', owner_id: 'preview-user', 来源链接: 'https://example.com' },
+    { id: 8102, 公司: '字节跳动', 岗位名称: '前端基础架构', 薪资范围: '40k-65k', 核心技术要求: '构建系统 / 监控 / 微前端 / Node.js', 加分项: '复杂业务平台治理经验', season: '2026 春招', owner_id: 'preview-user', 来源链接: 'https://example.com' },
+  ]
+  interviewData.value = [
+    { id: 8201, 公司: '腾讯', season: '2026 春招', 面试轮次: '一面', 考察重点: 'Vue 原理、项目复盘、性能优化', 具体题目清单: 'Vue3 响应式原理；项目里如何做性能指标采集；如何处理复杂表格渲染。', 难易程度: '中等', created_at: new Date().toISOString(), owner_id: 'preview-user', 来源链接: 'https://example.com' },
+    { id: 8202, 公司: '美团', season: '2026 春招', 面试轮次: '二面', 考察重点: '工程化、系统设计、团队协作', 具体题目清单: '如何设计导入解析容错；如何回滚异常发布；如何拆分公共组件。', 难易程度: '困难', created_at: new Date(Date.now() - 3600000).toISOString(), owner_id: 'preview-user', 来源链接: 'https://example.com' },
+  ]
+  practicedQuestions.value = {
+    9001: { best_score: 88 },
+    9002: { best_score: 76 },
+  }
+  masterBankEverShown.value = true
+  isDataLoading.value = false
+  dataLoadError.value = ''
+}
 
 // ── Question operations ──
 const {
@@ -654,8 +776,11 @@ watch(activeTab, (newTab, oldTab) => {
 
 // ── Event handlers ──
 const onSubmitted = () => { fetchTableData(); fetchAnalytics() }
+let _tabChangeTimer = null
 const onTabChange = async (tab) => {
   if (tab === activeTab.value) return
+  // 防抖：防止快速点击导致 Transition 竞态
+  if (_tabChangeTimer) return
   // 检查是否有未保存的内联编辑
   const editingInputs = document.querySelectorAll('.tab-content input:not([type="checkbox"]):not([type="hidden"]), .tab-content textarea')
   const hasActiveEdit = Array.from(editingInputs).some(el => {
@@ -677,6 +802,8 @@ const onTabChange = async (tab) => {
   floatingBtnStyle.value = { display: 'none' }
   // 更新浏览器历史，支持后退/前进恢复 Tab
   history.pushState({ tab }, '', `#${tab}`)
+  // 防抖重置
+  _tabChangeTimer = setTimeout(() => { _tabChangeTimer = null }, 300)
 }
 const onSelectTag = (tag) => { selectedTag.value = tag; selectedSubTags.value = []; activeTab.value = 'MasterBank' }
 const onGraphFilterTag = (tagName) => { selectedTag.value = '全部'; selectedSubTags.value = []; searchQuery.value = tagName; activeTab.value = 'MasterBank' }
@@ -764,7 +891,12 @@ const onPositionChanged = () => { loadAllData() }
 
 // ── Lifecycle ──
 onMounted(async () => {
-  await initAuth()
+  if (isPreviewMode) {
+    currentUser.value = previewUser
+    applyPreviewData()
+  } else {
+    await initAuth()
+  }
   // 通知白屏检测器：Vue 应用已完成初始化
   window.__VUE_APP_READY__ = true
   // 从 URL hash 恢复 Tab
@@ -815,49 +947,11 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 .float-pop-enter-from { opacity: 0; transform: scale(0.8) translateX(-8px); }
 .float-pop-leave-to { opacity: 0; transform: scale(0.8) translateX(-8px); }
 
-.sidebar-layout { position: relative; }
-.sidebar-wrapper { transition: width 0.15s ease; }
-.sidebar-wrapper:has(~ .resize-handle--dragging) { transition: none; }
-.resize-handle { position: absolute; top: 0; bottom: 0; z-index: 20; width: 12px; cursor: col-resize; align-items: center; justify-content: center; touch-action: none; user-select: none; }
-.resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; margin-left: -0.5px; background: var(--color-surface-200); }
-:global(.dark) .resize-handle::before { background: var(--color-ink-700); }
-.resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; background: transparent; transition: background 0.15s ease; border-radius: 2px; }
-.resize-handle:hover::after, .resize-handle--dragging::after { background: var(--color-primary-400); opacity: 0.5; }
-.resize-handle__grip { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 3px; padding: 6px 3px; border-radius: 6px; background: var(--color-white); border: 1px solid var(--color-surface-200); box-shadow: 0 1px 3px rgba(0,0,0,0.08); opacity: 0; transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease; }
-.resize-handle:hover .resize-handle__grip, .resize-handle--dragging .resize-handle__grip { opacity: 1; }
-.resize-handle--collapsed .resize-handle__grip { opacity: 1; }
-.resize-handle--collapsed:hover .resize-handle__grip, .resize-handle--collapsed.resize-handle--dragging .resize-handle__grip { box-shadow: 0 2px 8px rgba(0,0,0,0.12); transform: scale(1.05); }
-:global(.dark) .resize-handle__grip { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-.resize-handle__grip span { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--color-surface-400); transition: background 0.15s ease; }
-:global(.dark) .resize-handle__grip span { background: var(--color-ink-500); }
-.resize-handle:hover .resize-handle__grip span, .resize-handle--dragging .resize-handle__grip span { background: var(--color-primary-500); }
-
-.sidebar-expand-btn { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 25; width: 28px; height: 28px; border-radius: 50%; align-items: center; justify-content: center; background: var(--color-white); border: 1px solid var(--color-surface-200); box-shadow: 0 2px 8px rgba(0,0,0,0.1); color: var(--color-surface-400); cursor: pointer; touch-action: none; user-select: none; transition: color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease; }
-.sidebar-expand-btn:hover { color: var(--color-primary-500); box-shadow: 0 2px 12px rgba(0,0,0,0.15); transform: translateY(-50%) scale(1.1); }
-.sidebar-expand-btn:active { transform: translateY(-50%) scale(0.95); }
-:global(.dark) .sidebar-expand-btn { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: 0 2px 8px rgba(0,0,0,0.3); color: var(--color-ink-400); }
-:global(.dark) .sidebar-expand-btn:hover { color: var(--color-primary-400); }
-.expand-btn-fade-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
-.expand-btn-fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.expand-btn-fade-enter-from { opacity: 0; transform: translateY(-50%) scale(0.8); }
-.expand-btn-fade-leave-to { opacity: 0; transform: translateY(-50%) scale(0.8); }
-
-.resize-handle__collapse-btn { position: absolute; left: -16px; top: 50%; transform: translateY(-50%); z-index: 2; width: 20px; height: 36px; border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center; background: var(--color-white); border: 1px solid var(--color-surface-200); border-right: none; box-shadow: -1px 1px 4px rgba(0,0,0,0.06); color: var(--color-surface-400); cursor: pointer; opacity: 0; transition: opacity 0.2s ease, color 0.15s ease, background 0.15s ease; pointer-events: none; }
-.resize-handle:hover .resize-handle__collapse-btn { opacity: 0.7; pointer-events: auto; }
-.resize-handle__collapse-btn:hover { opacity: 1 !important; color: var(--color-primary-500); background: var(--color-primary-50); }
-:global(.dark) .resize-handle__collapse-btn { background: var(--color-surface-800); border-color: var(--color-ink-600); box-shadow: -1px 1px 4px rgba(0,0,0,0.2); color: var(--color-ink-400); }
-:global(.dark) .resize-handle__collapse-btn:hover { color: var(--color-primary-400); background: var(--color-primary-900/30); }
-
 :global(.scroll-restore-highlight) { animation: scroll-glow 2.2s ease-out forwards; }
 
 @media (prefers-reduced-motion: reduce) {
   .tab-fade-enter-active, .tab-fade-leave-active { transition-duration: 0.01ms !important; }
   .fade-slide-enter-active, .fade-slide-leave-active { transition-duration: 0.01ms !important; }
   .float-pop-enter-active, .float-pop-leave-active { transition-duration: 0.01ms !important; }
-  .expand-btn-fade-enter-active, .expand-btn-fade-leave-active { transition-duration: 0.01ms !important; }
-  .sidebar-wrapper { transition: none !important; }
-  .resize-handle::after { transition: none !important; }
-  .resize-handle__grip { transition: none !important; }
-  .sidebar-expand-btn { transition: none !important; }
 }
 </style>

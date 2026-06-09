@@ -1,27 +1,7 @@
 <template>
-  <teleport to="body">
-    <transition name="fade">
-      <div v-if="visible" class="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4" @keydown.esc="emit('close')" tabindex="-1">
-        <!-- Backdrop -->
-        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')"></div>
-
-        <!-- Modal -->
-        <div class="relative bg-white dark:bg-surface-800 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[84vh] flex flex-col overflow-hidden animate-slide-up">
-          <!-- Header -->
-          <div class="flex items-center justify-between px-6 py-4 border-b border-surface-100 dark:border-ink-700 shrink-0 bg-gradient-to-r from-primary-50/50 to-accent-50/30 dark:from-primary-900/20 dark:to-accent-900/10">
-            <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center">
-                <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              </div>
-              <h2 class="text-lg font-bold text-ink-800 dark:text-ink-100">系统配置</h2>
-            </div>
-            <button @click="emit('close')" class="p-2 rounded-xl text-ink-400 hover:text-ink-600 dark:hover:text-ink-300 hover:bg-surface-100 dark:hover:bg-ink-700 transition">
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-
-          <!-- Body -->
-          <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-6">
+  <AppDialog :open="visible" @update:open="emit('close')" title="系统配置" size="xl">
+    <!-- Body -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar space-y-6 -my-2">
 
             <!-- ═══ Per-user LLM Config (所有用户可见) ═══ -->
             <div class="space-y-3.5 p-5 rounded-2xl border border-primary-100 dark:border-primary-800 bg-gradient-to-b from-primary-50/50 to-white dark:from-primary-900/20 dark:to-surface-800">
@@ -354,36 +334,31 @@
             </div>
           </div>
 
-          <!-- Footer -->
-          <div class="flex items-center justify-between px-6 py-4 border-t border-surface-100 dark:border-ink-700 bg-surface-50/80 dark:bg-surface-900/80 shrink-0">
-            <p v-if="saveMessage" class="text-xs font-medium flex items-center gap-1.5" :class="saveSuccess ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
-              <svg v-if="saveSuccess" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              {{ saveMessage }}
-            </p>
-            <span v-else></span>
-            <div class="flex gap-3">
-              <button @click="emit('close')" :disabled="isSaving" class="btn-secondary px-5">关闭</button>
-              <button
-                v-if="isAdmin"
-                @click="saveProfile"
-                :disabled="isSaving"
-                class="btn-primary px-6"
-              >
-                {{ isSaving ? '保存中...' : '保存全局配置' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-  </teleport>
+    <!-- Footer -->
+    <template #footer>
+      <p v-if="saveMessage" class="text-xs font-medium flex items-center gap-1.5 mr-auto" :class="saveSuccess ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
+        <svg v-if="saveSuccess" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        {{ saveMessage }}
+      </p>
+      <button @click="emit('close')" :disabled="isSaving" class="btn-secondary px-5">关闭</button>
+      <button
+        v-if="isAdmin"
+        @click="saveProfile"
+        :disabled="isSaving"
+        class="btn-primary px-6"
+      >
+        {{ isSaving ? '保存中...' : '保存全局配置' }}
+      </button>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { ref, reactive, watch, nextTick } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { fetchProfile, fetchPublicProfile, updateProfile, switchPosition, switchMyPosition, fetchMyLLMConfig, updateMyLLMConfig, generateTaxonomy, confirmTaxonomy, savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, deletePosition } from '@/api/index.js'
 import { invalidateCache } from '@/services/http.js'
+import AppDialog from '@/components/common/AppDialog.vue'
 import RoundedSelect from '@/components/common/RoundedSelect.vue'
 import { validateSeason, validateBaseUrl } from '@/utils/validate.js'
 import { useToast } from '@/composables/useNotification.js'
@@ -395,14 +370,6 @@ const props = defineProps({
   activeSeason: { type: String, default: '' },
   isAdmin: { type: Boolean, default: false },
   isBuilding: { type: Boolean, default: false }
-})
-
-// 弹窗打开时自动聚焦以接收 ESC 键事件
-watch(() => props.visible, (val) => {
-  if (val) nextTick(() => {
-    const modal = document.querySelector('.fixed.inset-0.z-\\[100\\]')
-    if (modal) modal.focus()
-  })
 })
 
 const availablePositions = ref([])
@@ -844,6 +811,5 @@ const addSeason = async () => {
 </script>
 
 <style scoped>
-.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+/* SettingsPanel styles */
 </style>

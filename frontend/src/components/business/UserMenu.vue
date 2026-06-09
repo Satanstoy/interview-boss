@@ -1,12 +1,17 @@
 <template>
   <div class="relative">
     <!-- User button -->
-    <button ref="buttonRef" @click="showMenu = !showMenu" class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5 transition-all duration-200 text-ink-700 dark:text-white group">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 dark:from-white/30 dark:to-white/10 flex items-center justify-center text-sm font-bold text-white backdrop-blur-sm border border-primary-400/30 dark:border-white/20 group-hover:from-primary-600 group-hover:to-primary-800 dark:group-hover:from-white/40 dark:group-hover:to-white/20 transition">
+    <button
+      ref="buttonRef"
+      @click="showMenu = !showMenu"
+      class="flex items-center gap-2.5 transition-all duration-200 text-ink-700 dark:text-white group"
+      :class="buttonClass || 'px-3 py-1.5 rounded-xl hover:bg-surface-100 dark:hover:bg-white/5'"
+    >
+      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-sm font-bold text-primary-foreground backdrop-blur-sm transition">
         {{ user?.username?.[0]?.toUpperCase() || '?' }}
       </div>
-      <span class="text-sm font-medium hidden sm:inline">{{ user?.username }}</span>
-      <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
+      <span class="text-sm font-medium hidden sm:inline truncate">{{ user?.username }}</span>
+      <svg class="w-4 h-4 text-ink-400 dark:text-white transition-transform duration-200 ml-auto" :class="{ 'rotate-180': showMenu }" viewBox="0 0 20 20" fill="currentColor">
         <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
       </svg>
     </button>
@@ -104,7 +109,9 @@ import { setAuthToken } from '@/services/http.js'
 
 const props = defineProps({
   user: Object,
-  pendingCount: { type: Number, default: 0 }
+  pendingCount: { type: Number, default: 0 },
+  placement: { type: String, default: 'bottom' },
+  buttonClass: { type: String, default: '' },
 })
 
 const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed', 'show-profile'])
@@ -132,9 +139,17 @@ function updateDropdownPosition() {
   const btn = buttonRef.value
   if (!btn) return
   const rect = btn.getBoundingClientRect()
+  const right = Math.max(12, window.innerWidth - rect.right)
+  if (props.placement === 'top') {
+    dropdownStyle.value = {
+      bottom: `${window.innerHeight - rect.top + 8}px`,
+      left: `${rect.left}px`,
+    }
+    return
+  }
   dropdownStyle.value = {
     top: `${rect.bottom + 8}px`,
-    right: `${window.innerWidth - rect.right}px`,
+    right: `${right}px`,
   }
 }
 

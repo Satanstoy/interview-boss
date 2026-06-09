@@ -10,6 +10,7 @@
 
 RRF 公式: score(doc) = Σ 1/(k + rank_i), k=60（行业标准）
 """
+
 import re
 import math
 import logging
@@ -67,8 +68,8 @@ def _compute_idf_cache():
                 text = f"{r[0] or ''} {r[1] or ''}".lower()
                 # 提取英文词和中文词
                 tokens = set()
-                tokens.update(re.findall(r'[a-zA-Z][a-zA-Z0-9]{1,}', text))
-                tokens.update(re.findall(r'[一-鿿]{2,4}', text))
+                tokens.update(re.findall(r"[a-zA-Z][a-zA-Z0-9]{1,}", text))
+                tokens.update(re.findall(r"[一-鿿]{2,4}", text))
                 for t in tokens:
                     doc_freq[t] = doc_freq.get(t, 0) + 1
 
@@ -131,7 +132,9 @@ def _adaptive_rrf_weights(keywords: list[str]) -> tuple[float, float]:
     return round(fts_weight, 2), round(vec_weight, 2)
 
 
-def _mmr_diversify(results: list[dict], lambda_param: float = 0.7, limit: int = 5) -> list[dict]:
+def _mmr_diversify(
+    results: list[dict], lambda_param: float = 0.7, limit: int = 5
+) -> list[dict]:
     """MMR (Maximal Marginal Relevance) 多样性去重
 
     确保返回结果在 cat2 维度上有多样性，避免 Top-5 全是同一分类。
@@ -180,21 +183,25 @@ def sync_fts_entry(question_bank_id: int) -> None:
     with get_db_connection() as conn:
         row = conn.execute(
             "SELECT question, cat1, cat2, tags, ai_answer FROM question_bank WHERE id = ?",
-            (question_bank_id,)
+            (question_bank_id,),
         ).fetchone()
         if not row:
             return
 
         # 先删除旧记录（FTS5 delete 需要用原 rowid）
-        conn.execute(
-            "DELETE FROM question_fts WHERE rowid = ?",
-            (question_bank_id,)
-        )
+        conn.execute("DELETE FROM question_fts WHERE rowid = ?", (question_bank_id,))
         # 插入新记录
         conn.execute(
             "INSERT INTO question_fts(rowid, question, cat1, cat2, tags, ai_answer) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (question_bank_id, row[0] or '', row[1] or '', row[2] or '', row[3] or '', row[4] or '')
+            (
+                question_bank_id,
+                row[0] or "",
+                row[1] or "",
+                row[2] or "",
+                row[3] or "",
+                row[4] or "",
+            ),
         )
         conn.commit()
 
@@ -202,14 +209,13 @@ def sync_fts_entry(question_bank_id: int) -> None:
 def delete_fts_entry(question_bank_id: int) -> None:
     """从 FTS5 索引中删除一条题目"""
     with get_db_connection() as conn:
-        conn.execute(
-            "DELETE FROM question_fts WHERE rowid = ?",
-            (question_bank_id,)
-        )
+        conn.execute("DELETE FROM question_fts WHERE rowid = ?", (question_bank_id,))
         conn.commit()
 
 
-def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[str]) -> int:
+def _relevance_score(
+    question: str, tags: str, ai_answer: str, keywords: list[str]
+) -> int:
     """计算搜索结果的相关性分数（用于重排序）。
 
     优先级：question >> tags >> 无匹配 > ai_answer 匹配
@@ -227,7 +233,7 @@ def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[st
         if kw_lower in q_lower:
             score += 10  # question 匹配权重最高
         if kw_lower in t_lower:
-            score += 5   # tags 匹配权重次之
+            score += 5  # tags 匹配权重次之
         # ai_answer 匹配不加分（避免 ai_answer 污染干扰排序）
 
     # 额外惩罚：如果关键词只在 ai_answer 中出现（question 和 tags 都没有），扣分
@@ -239,7 +245,12 @@ def _relevance_score(question: str, tags: str, ai_answer: str, keywords: list[st
     return score
 
 
-def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str = None, exclude_ids: set[int] = None) -> list[dict]:
+def search_questions_fts(
+    keywords: list[str],
+    limit: int = 10,
+    job_position: str = None,
+    exclude_ids: set[int] = None,
+) -> list[dict]:
     """用 FTS5 搜索题库，返回最相关的题目列表。
 
     优化策略：
@@ -273,14 +284,16 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
 
     fts_query = " OR ".join(terms)
 
-    has_cjk = any(re.search(r'[一-鿿]', kw) for kw in keywords)
+    has_cjk = any(re.search(r"[一-鿿]", kw) for kw in keywords)
 
     rows = []
     with get_db_connection() as conn:
         # 检测 CJK 关键词：unicode61 tokenizer 不支持 CJK，直接用 LIKE 搜索
         if has_cjk:
             logger.info(f"FTS 检索: 检测到 CJK 关键词，跳过 FTS5 直接用 LIKE 搜索")
-            results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
+            results = _fallback_like_search(
+                keywords, conn, limit, job_position, exclude_ids
+            )
             logger.info(f"FTS 检索完成(LIKE): 返回 {len(results)} 条结果")
             return results
 
@@ -289,14 +302,14 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
         if job_position:
             try:
                 rows = conn.execute(
-                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank "
+                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank, qb.sources "
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? AND qb.job_position = ? "
                     "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
                     "AND qb.duplicate_of IS NULL "
                     "ORDER BY f.rank LIMIT ?",
-                    (fts_query, job_position, limit)
+                    (fts_query, job_position, limit),
                 ).fetchall()
             except Exception as e:
                 logger.warning(f"FTS5 岗位过滤查询失败: {e}")
@@ -305,7 +318,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
         if len(rows) < 3:
             try:
                 fallback_rows = conn.execute(
-                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank "
+                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank, qb.sources "
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? "
@@ -313,7 +326,7 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
                     "AND qb.duplicate_of IS NULL "
                     "ORDER BY f.rank "
                     "LIMIT ?",
-                    (fts_query, limit)
+                    (fts_query, limit),
                 ).fetchall()
                 # 合并去重
                 existing_ids = {row[0] for row in rows}
@@ -326,8 +339,12 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
                 logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
                 if not rows:
                     logger.info("FTS5 查询异常，降级到 LIKE 搜索")
-                    results = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
-                    logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
+                    results = _fallback_like_search(
+                        keywords, conn, limit, job_position, exclude_ids
+                    )
+                    logger.info(
+                        f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果"
+                    )
                     return results
 
     # 排除已展示的题目
@@ -337,25 +354,33 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
     # 构建结果并按相关性重排序
     results = []
     for row in rows[:limit]:
-        results.append({
-            "id": row[0],
-            "question": row[1],
-            "cat1": row[2],
-            "cat2": row[3],
-            "tags": row[4],
-            "ai_answer": row[5],
-            "rank": row[6],
-        })
+        results.append(
+            {
+                "id": row[0],
+                "question": row[1],
+                "cat1": row[2],
+                "cat2": row[3],
+                "tags": row[4],
+                "ai_answer": row[5],
+                "rank": row[6],
+                "sources": row[7] if len(row) > 7 else "[]",
+            }
+        )
 
     # 按相关性重排序：question/tags 匹配优先于 ai_answer 匹配
-    results.sort(key=lambda r: _relevance_score(
-        r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords
-    ), reverse=True)
+    results.sort(
+        key=lambda r: _relevance_score(
+            r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords
+        ),
+        reverse=True,
+    )
 
     # 如果 FTS 结果太少，用 LIKE 补充
     if len(results) < 3 and keywords:
         existing_ids = {r["id"] for r in results}
-        fallback = _fallback_like_search(keywords, conn, limit, job_position, exclude_ids)
+        fallback = _fallback_like_search(
+            keywords, conn, limit, job_position, exclude_ids
+        )
         for item in fallback:
             if item["id"] not in existing_ids:
                 results.append(item)
@@ -366,7 +391,13 @@ def search_questions_fts(keywords: list[str], limit: int = 10, job_position: str
     return results[:limit]
 
 
-def _fallback_like_search(keywords: list[str], conn, limit: int, job_position: str = None, exclude_ids: set[int] = None) -> list[dict]:
+def _fallback_like_search(
+    keywords: list[str],
+    conn,
+    limit: int,
+    job_position: str = None,
+    exclude_ids: set[int] = None,
+) -> list[dict]:
     """降级搜索：当 FTS5 不可用时用 LIKE 模糊匹配
 
     使用 OR 连接关键词（CJK 查询 AND 过于严格，OR 能召回更多相关题目）。
@@ -386,12 +417,32 @@ def _fallback_like_search(keywords: list[str], conn, limit: int, job_position: s
             split_keywords.append(kw)
         else:
             # 按2-3字窗口滑动切分 CJK 文本
-            cjk_chars = re.findall(r'[一-鿿]', kw)
-            eng_parts = re.findall(r'[a-zA-Z][a-zA-Z0-9]+', kw)
+            cjk_chars = re.findall(r"[一-鿿]", kw)
+            eng_parts = re.findall(r"[a-zA-Z][a-zA-Z0-9]+", kw)
             # CJK: 取2字窗口，跳过停用短语
-            stop_parts = {"的", "了", "是", "在", "和", "与", "从", "到", "中", "把", "被", "让", "给", "对", "向", "往", "用", "以", "为"}
+            stop_parts = {
+                "的",
+                "了",
+                "是",
+                "在",
+                "和",
+                "与",
+                "从",
+                "到",
+                "中",
+                "把",
+                "被",
+                "让",
+                "给",
+                "对",
+                "向",
+                "往",
+                "用",
+                "以",
+                "为",
+            }
             for i in range(len(cjk_chars) - 1):
-                chunk = cjk_chars[i] + cjk_chars[i+1]
+                chunk = cjk_chars[i] + cjk_chars[i + 1]
                 if chunk not in stop_parts:
                     split_keywords.append(chunk)
             split_keywords.extend(eng_parts[:3])
@@ -423,14 +474,16 @@ def _fallback_like_search(keywords: list[str], conn, limit: int, job_position: s
             "cat2": row[3],
             "tags": row[4],
             "ai_answer": row[5],
+            "sources": row[6] if len(row) > 6 else "[]",
             "rank": 0,
         }
         for row in rows[:limit]
     ]
 
 
-def _execute_like_search(keywords: list[str], conn, limit: int, job_position: str = None) -> list:
-    """执行 LIKE 搜索的核心逻辑"""
+def _execute_like_search(
+    keywords: list[str], conn, limit: int, job_position: str = None
+) -> list:
     if not keywords:
         return []
 
@@ -454,12 +507,12 @@ def _execute_like_search(keywords: list[str], conn, limit: int, job_position: st
 
     where = " OR ".join(conditions)
     return conn.execute(
-        f"SELECT id, question, cat1, cat2, tags, ai_answer "
+        f"SELECT id, question, cat1, cat2, tags, ai_answer, sources "
         f"FROM question_bank "
         f"WHERE deleted_at IS NULL AND status = 'approved' AND duplicate_of IS NULL "
         f"{position_filter}AND ({where}) "
         f"LIMIT ?",
-        params + [limit]
+        params + [limit],
     ).fetchall()
 
 
@@ -467,7 +520,10 @@ def _execute_like_search(keywords: list[str], conn, limit: int, job_position: st
 # 混合搜索：FTS5 + 向量 + RRF 融合
 # ═══════════════════════════════════════════════════════════════
 
-def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = RRF_K, weights: list[float] = None) -> list[dict]:
+
+def reciprocal_rank_fusion(
+    result_lists: list[list[dict]], k: int = RRF_K, weights: list[float] = None
+) -> list[dict]:
     """Reciprocal Rank Fusion (RRF) — 融合多个排序列表。
 
     行业标准算法，用于合并 FTS 和向量搜索结果。
@@ -509,7 +565,9 @@ def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = RRF_K, weigh
     return result
 
 
-def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = None) -> list[dict]:
+def _vector_search(
+    query_text: str, top_k: int = 10, exclude_ids: set[int] = None
+) -> list[dict]:
     """向量语义搜索 — 从数据库加载 embedding 并用 FAISS 检索。
 
     Args:
@@ -523,15 +581,18 @@ def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = Non
     import numpy as np
 
     try:
-        from app.services.embedding_service import encode_texts, build_index, search_index
+        from app.services.embedding_service import (
+            encode_texts,
+            build_index,
+            search_index,
+        )
     except ImportError:
         logger.warning("向量搜索: embedding_service 不可用")
         return []
 
     with get_db_connection() as conn:
-        # 加载所有有效题目的 embedding（排除重复题）
         rows = conn.execute(
-            "SELECT id, question, cat1, cat2, tags, embedding "
+            "SELECT id, question, cat1, cat2, tags, embedding, sources "
             "FROM question_bank "
             "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL "
             "AND duplicate_of IS NULL"
@@ -558,6 +619,7 @@ def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = Non
             "cat1": r[2],
             "cat2": r[3],
             "tags": r[4],
+            "sources": r[6] or "[]",
         }
 
     if not vectors:
@@ -581,7 +643,15 @@ def _vector_search(query_text: str, top_k: int = 10, exclude_ids: set[int] = Non
 def _has_question_tag_match(results: list[dict], keywords: list[str]) -> bool:
     """检查搜索结果中是否有 question/tags 匹配（非纯 ai_answer 匹配）"""
     for r in results[:3]:
-        if _relevance_score(r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), keywords) > 0:
+        if (
+            _relevance_score(
+                r.get("question", ""),
+                r.get("tags", ""),
+                r.get("ai_answer", ""),
+                keywords,
+            )
+            > 0
+        ):
             return True
     return False
 
@@ -652,16 +722,26 @@ def hybrid_search(
 
     # ── 优化 2: 自适应 RRF 权重（基于 IDF）──
     fts_weight, vec_weight = _adaptive_rrf_weights(original_keywords or keywords)
-    logger.info(f"自适应权重: FTS={fts_weight}, Vec={vec_weight} (keywords={original_keywords})")
+    logger.info(
+        f"自适应权重: FTS={fts_weight}, Vec={vec_weight} (keywords={original_keywords})"
+    )
 
     # RRF 融合（使用自适应权重）
-    fused = reciprocal_rank_fusion([fts_results, vec_results], weights=[fts_weight, vec_weight])
+    fused = reciprocal_rank_fusion(
+        [fts_results, vec_results], weights=[fts_weight, vec_weight]
+    )
 
     # 相关性重排序（question/tags 匹配优先）
     if keywords:
-        fused.sort(key=lambda r: _relevance_score(
-            r.get("question", ""), r.get("tags", ""), r.get("ai_answer", ""), original_keywords or keywords
-        ), reverse=True)
+        fused.sort(
+            key=lambda r: _relevance_score(
+                r.get("question", ""),
+                r.get("tags", ""),
+                r.get("ai_answer", ""),
+                original_keywords or keywords,
+            ),
+            reverse=True,
+        )
 
     # ── 优化 3: MMR 多样性去重 ──
     fused = _mmr_diversify(fused, lambda_param=0.7, limit=limit * 2)

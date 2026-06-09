@@ -16,6 +16,12 @@ npx playwright test  # 运行 E2E 测试
 
 Vue 3 (Composition API) / Vite / Tailwind CSS / ECharts / Marked + DOMPurify / vue-sonner / vue-virtual-scroller
 
+## UI 方向
+
+- 主界面采用 shadcn-vue dashboard 风格：左侧 workspace sidebar、主内容数据卡片、细边框、低阴影、紧凑信息密度。
+- Tailwind 继续作为唯一样式系统，不引入大型 UI 框架；借鉴 shadcn-vue 的布局、token、组件状态，但保留现有 Vue 组件边界。
+- 高频题库、JD/面经表格、模拟面试优先复用共享组件样式，不逐页堆叠一次性样式。
+
 ## 目录结构
 
 ```

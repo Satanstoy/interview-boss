@@ -1,4 +1,5 @@
 """Chat Agent Nodes — 面试对话状态机的各节点实现"""
+
 import json
 import logging
 from typing import AsyncGenerator
@@ -19,15 +20,15 @@ from app.agents.chat.skills import get_default_registry, build_skill_prompt
 logger = logging.getLogger("interview-boss")
 
 # ── 上下文压缩阈值（字符数）──
-COMPRESS_THRESHOLD = 12000    # Tier 0 上限：不压缩
-SNIP_THRESHOLD = 24000        # Tier 1 上限：模板截断（无 LLM）
-KEEP_RECENT_ROUNDS = 5        # 保留最近完整消息轮数
+COMPRESS_THRESHOLD = 12000  # Tier 0 上限：不压缩
+SNIP_THRESHOLD = 24000  # Tier 1 上限：模板截断（无 LLM）
+KEEP_RECENT_ROUNDS = 5  # 保留最近完整消息轮数
 
 # ── Token Budget（字符数估算，~4 chars/token）──
-SYSTEM_BUDGET = 3000          # ~750 tokens (increased for interview context)
-MEMORY_BUDGET = 800           # ~200 tokens
-COMPRESSED_BUDGET = 1200      # ~300 tokens
-RETRIEVED_BUDGET = 1000       # ~250 tokens
+SYSTEM_BUDGET = 3000  # ~750 tokens (increased for interview context)
+MEMORY_BUDGET = 800  # ~200 tokens
+COMPRESSED_BUDGET = 1200  # ~300 tokens
+RETRIEVED_BUDGET = 1000  # ~250 tokens
 
 
 def _count_chars(messages: list[dict]) -> int:
@@ -51,10 +52,10 @@ def _truncate_to_budget(text: str, budget: int) -> str:
         return text
     search_from = int(budget * 0.8)
     chunk = text[search_from:budget]
-    for sep in ['\n', '。', '；', '. ', '，']:
+    for sep in ["\n", "。", "；", ". ", "，"]:
         idx = chunk.rfind(sep)
         if idx != -1:
-            return text[:search_from + idx + len(sep)]
+            return text[: search_from + idx + len(sep)]
     return text[:budget] + "..."
 
 
@@ -89,6 +90,7 @@ def _format_compressed_brief(compressed_json: dict) -> str:
 #  节点实现
 # ═══════════════════════════════════════════════════
 
+
 async def recall_memories(state: ChatState) -> dict:
     """加载简历记忆（轻量级预加载，其他记忆延迟到意图分类后）"""
     user_id = state["user_id"]
@@ -122,7 +124,7 @@ async def summarize_context(state: ChatState) -> dict:
     if not budget.needs_compression(snapshot):
         # Tier 0: 不需要压缩
         return {
-            "recent_messages": messages[-KEEP_RECENT_ROUNDS * 2:] if messages else [],
+            "recent_messages": messages[-KEEP_RECENT_ROUNDS * 2 :] if messages else [],
             "compressed_context": state.get("compressed_context"),
             "budget_snapshot": snapshot,
         }
@@ -171,7 +173,16 @@ async def classify_intent(state: ChatState) -> dict:
         return {"intent": "practice_request"}
 
     # 追问关键词
-    follow_up_keywords = ["解释", "详细", "具体", "为什么", "怎么", "能再说", "不太明白", "什么意思"]
+    follow_up_keywords = [
+        "解释",
+        "详细",
+        "具体",
+        "为什么",
+        "怎么",
+        "能再说",
+        "不太明白",
+        "什么意思",
+    ]
     if any(kw in user_message for kw in follow_up_keywords) and len(user_message) < 50:
         return {"intent": "follow_up"}
 
@@ -200,6 +211,7 @@ async def extract_keywords(state: ChatState) -> dict:
 
     # 获取题库分类（用于提示）
     from app.db.connection import get_db_connection
+
     with get_db_connection() as conn:
         cats = conn.execute(
             "SELECT DISTINCT cat1 FROM question_bank WHERE deleted_at IS NULL AND cat1 != '' LIMIT 20"
@@ -225,7 +237,8 @@ async def extract_keywords(state: ChatState) -> dict:
 
     # 降级：简单分词
     import re
-    words = re.findall(r'[一-鿿]+|[a-zA-Z]+', user_message)
+
+    words = re.findall(r"[一-鿿]+|[a-zA-Z]+", user_message)
     keywords = [w for w in words if len(w) >= 2][:5]
     return {"keywords": keywords}
 
@@ -245,7 +258,9 @@ async def fts_retrieve(state: ChatState) -> dict:
         logger.info("RAG 检索: 无 search_query 和 keywords，跳过")
         return {"retrieved_questions": []}
 
-    logger.info(f"RAG 检索: search_query='{search_query}', keywords={keywords}, 最终查询词={query_keywords}")
+    logger.info(
+        f"RAG 检索: search_query='{search_query}', keywords={keywords}, 最终查询词={query_keywords}"
+    )
 
     # 收集已展示的题目 ID，避免重复检索
     exclude_ids = {q["id"] for q in state.get("retrieved_questions", []) if "id" in q}
@@ -254,6 +269,7 @@ async def fts_retrieve(state: ChatState) -> dict:
 
     # 混合搜索：FTS5 + 向量 + RRF 融合
     from app.services.fts_service import hybrid_search
+
     results = hybrid_search(
         keywords=query_keywords,
         query_text=search_query or " ".join(keywords),
@@ -266,6 +282,7 @@ async def fts_retrieve(state: ChatState) -> dict:
 
 
 # ── 检索时机门控 ──
+
 
 def should_retrieve(state: ChatState) -> bool:
     """判断当前轮次是否需要 RAG 检索（检索时机门控）
@@ -296,7 +313,9 @@ def should_retrieve(state: ChatState) -> bool:
     return state.get("answer_complete", False)
 
 
-def _determine_interview_phase(recent_count: int, active_skills: list[str] = None) -> str:
+def _determine_interview_phase(
+    recent_count: int, active_skills: list[str] = None
+) -> str:
     """根据对话轮数和激活的 skills 判定当前面试阶段
 
     目标：12-15 个问题，约 30-50 分钟（每题 ~2 条消息）。
@@ -346,7 +365,9 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     logger.info(f"Active skills: {active_skill_names}")
 
     # 用 active skills 判定面试阶段（必须用总消息数，recent 窗口被 KEEP_RECENT_ROUNDS 截断）
-    interview_phase = _determine_interview_phase(total_message_count, active_skill_names)
+    interview_phase = _determine_interview_phase(
+        total_message_count, active_skill_names
+    )
 
     # 构建 system prompt
     if mode == "jd_resume":
@@ -365,9 +386,13 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             weak = [m for m in memory_summaries if m["memory_type"] == "weakness"]
             strong = [m for m in memory_summaries if m["memory_type"] == "strength"]
             if weak:
-                memory_context += "已知弱点: " + "; ".join(m["summary"] for m in weak[:3]) + "\n"
+                memory_context += (
+                    "已知弱点: " + "; ".join(m["summary"] for m in weak[:3]) + "\n"
+                )
             if strong:
-                memory_context += "已知强项: " + "; ".join(m["summary"] for m in strong[:3]) + "\n"
+                memory_context += (
+                    "已知强项: " + "; ".join(m["summary"] for m in strong[:3]) + "\n"
+                )
 
         memory_context = _truncate_to_budget(memory_context, MEMORY_BUDGET)
         system_prompt = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
@@ -389,10 +414,12 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     # 添加压缩上下文（budget 控制）
     if compressed:
         compressed = _truncate_to_budget(compressed, COMPRESSED_BUDGET)
-        messages.append({
-            "role": "system",
-            "content": f"之前的对话摘要:\n{compressed}",
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": f"之前的对话摘要:\n{compressed}",
+            }
+        )
 
     # 添加检索到的题目信息（budget 控制）
     if retrieved:
@@ -401,17 +428,21 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             for q in retrieved[:3]
         )
         questions_text = _truncate_to_budget(questions_text, RETRIEVED_BUDGET)
-        messages.append({
-            "role": "system",
-            "content": f"以下是题库中相关的面试题目，可以参考:\n{questions_text}",
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": f"以下是题库中相关的面试题目，可以参考:\n{questions_text}",
+            }
+        )
 
     # 添加最近消息历史
     for msg in recent:
-        messages.append({
-            "role": msg["role"],
-            "content": msg["content"],
-        })
+        messages.append(
+            {
+                "role": msg["role"],
+                "content": msg["content"],
+            }
+        )
 
     # 添加当前用户消息
     messages.append({"role": "user", "content": user_message})
@@ -430,11 +461,109 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     # 返回完成事件（包含元数据）
     metadata = {}
     if retrieved:
+        import json as _json
+
         metadata["retrieved_questions"] = [
-            {"id": q["id"], "question": q["question"]} for q in retrieved[:3]
+            {
+                "id": q["id"],
+                "question": q["question"],
+                "cat1": q.get("cat1", ""),
+                "company": _extract_company_from_sources(q),
+                "round": _extract_round_from_sources(q),
+            }
+            for q in retrieved[:3]
         ]
 
+    # 检测是否引用了简历或 JD
+    if resume_summary and _response_references_resume(full_response, resume_summary):
+        metadata["resume_ref"] = _get_resume_name(user_id)
+    if state.get("jd_text") and _response_references_jd(
+        full_response, state.get("jd_text", "")
+    ):
+        metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
+
     yield {"type": "done", "metadata": metadata}
+
+
+def _extract_company_from_sources(question: dict) -> str:
+    import json
+
+    sources = question.get("sources", [])
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except:
+            return ""
+    if sources and isinstance(sources, list):
+        return sources[0].get("company", "")
+    return ""
+
+
+def _extract_round_from_sources(question: dict) -> str:
+    import json
+
+    sources = question.get("sources", [])
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except:
+            return ""
+    if sources and isinstance(sources, list):
+        return sources[0].get("round", "")
+    return ""
+
+
+def _response_references_resume(response: str, resume_summary: str) -> bool:
+    if not resume_summary or len(resume_summary) < 20:
+        return False
+    import re
+
+    cjk_words = re.findall(r"[\u4e00-\u9fff]{2,6}", resume_summary[:500])
+    en_words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", resume_summary[:500])
+    keywords = list(set(cjk_words + en_words))[:15]
+    return any(kw in response for kw in keywords)
+
+
+def _response_references_jd(response: str, jd_text: str) -> bool:
+    if not jd_text or len(jd_text) < 20:
+        return False
+    import re
+
+    cjk_words = re.findall(r"[\u4e00-\u9fff]{2,6}", jd_text[:500])
+    en_words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", jd_text[:500])
+    keywords = list(set(cjk_words + en_words))[:15]
+    return any(kw in response for kw in keywords)
+
+
+def _get_resume_name(user_id: int) -> str:
+    try:
+        from app.services import resume_service
+        from app.db.connection import get_db_connection
+
+        with get_db_connection() as conn:
+            resume = resume_service.get_resume_text(user_id)
+            if resume:
+                return "我的简历"
+    except:
+        pass
+    return ""
+
+
+def _get_jd_title(jd_id: int) -> str:
+    if not jd_id:
+        return ""
+    try:
+        from app.db.connection import get_db_connection
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT job_title FROM jd WHERE id = ?", (jd_id,)
+            ).fetchone()
+            if row and row[0]:
+                return row[0]
+    except:
+        pass
+    return ""
 
 
 async def extract_memory(state: ChatState) -> dict:
@@ -474,7 +603,11 @@ async def extract_memory(state: ChatState) -> dict:
             memories = []
 
         for mem in memories:
-            if isinstance(mem, dict) and mem.get("type") in ("weakness", "strength", "preference"):
+            if isinstance(mem, dict) and mem.get("type") in (
+                "weakness",
+                "strength",
+                "preference",
+            ):
                 chat_service.save_memory(
                     user_id=user_id,
                     memory_type=mem["type"],
@@ -485,7 +618,11 @@ async def extract_memory(state: ChatState) -> dict:
         # 累积 session notes（增强增量记忆）
         note_parts = []
         for mem in memories:
-            if isinstance(mem, dict) and mem.get("type") in ("weakness", "strength", "preference"):
+            if isinstance(mem, dict) and mem.get("type") in (
+                "weakness",
+                "strength",
+                "preference",
+            ):
                 note_parts.append(f"[{mem['type']}] {mem['content']}")
 
         # 捕获当前话题（从 keywords）
@@ -502,7 +639,9 @@ async def extract_memory(state: ChatState) -> dict:
         if note_parts:
             current_notes = state.get("session_notes", "")
             new_notes = "\n".join(note_parts)
-            updated_notes = f"{current_notes}\n{new_notes}" if current_notes else new_notes
+            updated_notes = (
+                f"{current_notes}\n{new_notes}" if current_notes else new_notes
+            )
             if len(updated_notes) > 2000:
                 # 在行边界处截断，避免切断 [tag] 标签
                 all_lines = updated_notes.split("\n")

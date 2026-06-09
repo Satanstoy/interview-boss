@@ -442,7 +442,7 @@ watch(leftTab, async (tab) => {
 
 // ── Draggable divider ──
 const mainRef = ref(null)
-const leftWidth = ref(45)
+const leftWidth = ref(50)
 const isDragging = ref(false)
 const isMobile = ref(false)
 

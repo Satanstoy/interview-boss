@@ -32,6 +32,7 @@
 - 业务组件可以依赖 `common/` 组件，但 `common/` 不能依赖 `business/`
 - API 调用通过 `services/` 层，禁止在组件中直接 fetch
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
+- 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
 
 ## 修改后必做
 

@@ -7,6 +7,7 @@
       → classify_and_recall(合并: 意图+记忆+关键词)
       → [intent路由] → fts_retrieve → generate_response(流式) → extract_memory(异步)
 """
+
 import logging
 from typing import AsyncGenerator
 from app.agents.chat.state import ChatState
@@ -22,12 +23,45 @@ from app.agents.chat.nodes import (
     route_after_classify,
 )
 from app.services import chat_service
-from app.services.memory_recall_service import classify_and_recall, classify_and_recall_fast
+from app.services.memory_recall_service import (
+    classify_and_recall,
+    classify_and_recall_fast,
+)
 from app.agents.chat.context_builder import build_interview_context
 
 logger = logging.getLogger("interview-boss")
 
 _FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 API Key"
+
+
+def _extract_company(question: dict) -> str:
+    """从题目 sources 中提取公司名"""
+    import json
+
+    sources = question.get("sources", [])
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except:
+            return ""
+    if sources and isinstance(sources, list):
+        return sources[0].get("company", "")
+    return ""
+
+
+def _extract_round(question: dict) -> str:
+    """从题目 sources 中提取面试轮次"""
+    import json
+
+    sources = question.get("sources", [])
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except:
+            return ""
+    if sources and isinstance(sources, list):
+        return sources[0].get("round", "")
+    return ""
 
 
 def _sanitize_error_message(e: Exception) -> str:
@@ -84,6 +118,7 @@ async def run_chat(
     try:
         # Step 1: 加载简历记忆和历史（并行）
         import asyncio
+
         yield {"type": "step", "step": "loading", "message": "正在加载对话历史..."}
         memory_result, history_result = await asyncio.gather(
             recall_memories(state),
@@ -97,12 +132,17 @@ async def run_chat(
 
         # 构建面试上下文（岗位、分类、练习统计、历史面试）
         yield {"type": "step", "step": "context", "message": "正在加载个人画像..."}
-        interview_context, job_position = build_interview_context(user_id, conversation_id=conversation_id)
+        interview_context, job_position = build_interview_context(
+            user_id, conversation_id=conversation_id
+        )
         state["interview_context"] = interview_context
         state["job_position"] = job_position
 
         if not check_round_limit(state.get("message_history", [])):
-            yield {"type": "error", "message": "对话已达最大轮次限制（50轮），请新建对话继续"}
+            yield {
+                "type": "error",
+                "message": "对话已达最大轮次限制（50轮），请新建对话继续",
+            }
             return
 
         # Step 2: 上下文压缩
@@ -124,16 +164,36 @@ async def run_chat(
 
         if is_first_message:
             # 快速路径：规则分类 + 最近记忆，零 LLM 成本
-            yield {"type": "step", "step": "understanding", "message": "正在理解你的问题..."}
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
+            yield {
+                "type": "step",
+                "step": "understanding",
+                "message": "正在理解你的问题...",
+            }
+            (
+                intent,
+                memory_ids,
+                keywords,
+                search_query,
+                answer_complete,
+            ) = await classify_and_recall_fast(
                 user_message=user_message,
                 memory_summaries=state.get("memory_summaries", []),
                 recent_context=recent_context,
             )
         else:
             # 完整路径：LLM 分类 + 语义记忆召回 + 检索查询改写
-            yield {"type": "step", "step": "understanding", "message": "正在分析你的回答..."}
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+            yield {
+                "type": "step",
+                "step": "understanding",
+                "message": "正在分析你的回答...",
+            }
+            (
+                intent,
+                memory_ids,
+                keywords,
+                search_query,
+                answer_complete,
+            ) = await classify_and_recall(
                 user_message=user_message,
                 recent_context=recent_context,
                 memory_summaries=state.get("memory_summaries", []),
@@ -160,21 +220,31 @@ async def run_chat(
             ]
         else:
             # 降级：使用最近的记忆
-            state["memory_summaries"] = chat_service.get_memory_summaries(user_id, limit=3)
+            state["memory_summaries"] = chat_service.get_memory_summaries(
+                user_id, limit=3
+            )
 
         # Step 3.8: 预笔记（零 LLM 成本，为 session notes 提供当前 turn 的预览）
         if state.get("intent") == "interview_question" and keywords:
             topic_tag = ", ".join(keywords[:3])
             pre_note = f"[pending] 候选人正在回答: {topic_tag}"
             current_notes = state.get("session_notes", "")
-            state["session_notes"] = f"{current_notes}\n{pre_note}" if current_notes else pre_note
+            state["session_notes"] = (
+                f"{current_notes}\n{pre_note}" if current_notes else pre_note
+            )
 
         # Step 4: 显式条件路由（基于 LangGraph 最佳实践）
         route = route_after_classify(state)
-        logger.info(f"路由决策: intent={state.get('intent')}, route={route}, keywords={state.get('keywords')}, search_query='{state.get('search_query')}'")
+        logger.info(
+            f"路由决策: intent={state.get('intent')}, route={route}, keywords={state.get('keywords')}, search_query='{state.get('search_query')}'"
+        )
         if route == "rag_retrieve":
             # 需要 RAG 检索
-            yield {"type": "step", "step": "searching", "message": "正在搜索相关面试题..."}
+            yield {
+                "type": "step",
+                "step": "searching",
+                "message": "正在搜索相关面试题...",
+            }
             retrieve_result = await fts_retrieve(state)
             state.update(retrieve_result)
 
@@ -188,6 +258,8 @@ async def run_chat(
                             "question": q["question"],
                             "cat1": q.get("cat1", ""),
                             "cat2": q.get("cat2", ""),
+                            "company": _extract_company(q),
+                            "round": _extract_round(q),
                         }
                         for q in state["retrieved_questions"][:3]
                     ],

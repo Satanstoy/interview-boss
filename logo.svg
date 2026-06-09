@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">InterviewBoss logo</title>
+  <desc id="desc">InterviewBoss wordmark with a pixel magic wand and a B-shaped treasure chest mimic.</desc>
+  <defs>
+    <style>
+      .pixel { shape-rendering: crispEdges; }
+      .word {
+        fill: #08182b;
+        font-family: "Outfit", "Avenir Next", "Nunito Sans", "Inter", "Segoe UI", sans-serif;
+        font-size: 126px;
+        font-weight: 500;
+        letter-spacing: 3px;
+      }
+    </style>
+  </defs>
+
+  <g class="pixel" transform="translate(42 79) scale(1.42)">
+    <path fill="#08182b" d="M44 4h8v24h16v8h8v8h-8v16H52v96H36V60H20V44h-8v-8h8v-8h16V4z"/>
+    <path fill="#f6c51a" d="M44 12h8v24h16v8h-8v8H52v16h-8V52H28v-8h16z"/>
+    <path fill="#ffd948" d="M36 36h24v8H44v16h-8V44H20v-8z"/>
+    <path fill="#9a6f37" d="M40 64h8v84h-8z"/>
+    <path fill="#f6df99" d="M40 148h8v8h-8z"/>
+    <path fill="#f6c51a" d="M12 0h8v8h8v8h-8v8h-8v-8H4V8h8z"/>
+    <path fill="#f6c51a" d="M84 68h8v8h8v8h-8v8h-8v-8h-8v-8h8z"/>
+  </g>
+
+  <text class="word" x="148" y="230">Interview</text>
+
+  <g class="pixel" transform="translate(724 69) scale(1.28)">
+    <path fill="#071426" d="M28 0h106v8h12v8h8v12h8v80h-10v16h12v82h-8v12H28v-12H16v-82h10v-16H16V28h8V16h4z"/>
+    <path fill="#ffffff" d="M40 8h86v8h12v12h8v16h-8V28H40z"/>
+    <path fill="#92d8ec" d="M48 12h78v8h12v20H48z"/>
+    <path fill="#f4c316" d="M78 38h36v16H78z"/>
+    <path fill="#071426" d="M24 56h126v18H24z"/>
+    <path fill="#102b4f" d="M24 74h118v34H24z"/>
+    <path fill="#12365b" d="M24 116h126v40H24z"/>
+    <path fill="#102b4f" d="M34 156h112v44H34z"/>
+    <path fill="#fff3d3" d="M34 174h112v32H34z"/>
+    <path fill="#f4c316" d="M72 136h36v58H72z"/>
+    <path fill="#071426" d="M84 120h14v16H84z"/>
+    <path fill="#071426" d="M80 144h24v16h-8v22H84v-22h-4z"/>
+    <path fill="#fffdf1" d="M40 84h38v22H40z"/>
+    <path fill="#fffdf1" d="M102 84h38v22h-38z"/>
+    <path fill="#071426" d="M50 92h20v22H50z"/>
+    <path fill="#071426" d="M112 92h20v22h-20z"/>
+    <path fill="#ffffff" d="M52 86h8v8h-8z"/>
+    <path fill="#ffffff" d="M114 86h8v8h-8z"/>
+    <path fill="#f9f0cc" d="M28 28h20v12H28z"/>
+    <path fill="#ffffff" d="M128 28h16v12h-16z"/>
+  </g>
+
+  <text class="word" x="943" y="230">oss</text>
+</svg>

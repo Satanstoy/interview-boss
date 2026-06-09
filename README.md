@@ -11,7 +11,7 @@
 [![Vue](https://img.shields.io/badge/Vue-3-42b883.svg)](https://vuejs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688.svg)](https://fastapi.tiangolo.com)
 
-[快速开始](#快速开始) | [功能详解](#功能详解) | [部署指南](#部署指南) | [API 文档](#api-概览)
+[快速开始](#快速开始) | [功能详解](#功能详解) | [技术架构](#技术架构) | [部署指南](#部署指南) | [API 文档](#api-概览)
 
 </div>
 
@@ -35,7 +35,7 @@ InterviewBoss 帮你把**文本 + 截图**丢进来，自动完成：
 │  拖拽图片    │────▶│  JD / 面经    │────▶│  标签 + 难度  │────▶│  高频排序     │
 │  混合输入    │     │  字段补全     │     │  6 大类归类   │     │  合并来源     │
 └─────────────┘     └──────────────┘     └──────────────┘     └──────┬───────┘
-                                                                     │
+                                                                      │
                     ┌──────────────┐     ┌──────────────┐           │
                     │  模拟面试     │     │  答题评估     │           │
                     │  随机抽题     │◀────│  AI 评分反馈  │◀──────────┘
@@ -49,18 +49,21 @@ InterviewBoss 帮你把**文本 + 截图**丢进来，自动完成：
 <summary><strong>多模态输入</strong> — 纯文本、图片拖拽/粘贴、文本+图片混合</summary>
 
 支持截图型面经（小红书、牛客、Boss 直聘等），LLM 自动识别内容类型并提取结构化字段，缺失字段智能推断补全。
+
 </details>
 
 <details>
 <summary><strong>智能分类 + 标签化</strong> — 6 大类 + 子类自动归类</summary>
 
 面试题自动归入算法、系统设计、基础原理等 6 大类，标注考点标签和难度等级（L1 基础 / L2 中级 / L3 高级）。
+
 </details>
 
 <details>
 <summary><strong>LLM 聚类去重</strong> — 基于大模型的语义聚类合并</summary>
 
-cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并，追踪考频和来源链接。
+cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并，追踪考频和来源链接。Embedding 预筛选（FAISS）加速候选匹配。
+
 </details>
 
 <details>
@@ -71,6 +74,7 @@ cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并
 - 基础理论风格
 
 支持单题生成和批量生成（SSE 实时进度推送）。
+
 </details>
 
 <details>
@@ -80,18 +84,21 @@ cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并
 - 普通用户拥有独立的个人答案（`user_question_view.user_answer`）
 - 管理员已有参考答案时，普通用户可一键「使用参考答案」复制到个人答案
 - 普通用户生成的答案存入个人表，不影响全局参考答案
+
 </details>
 
 <details>
 <summary><strong>模拟面试 + 答题评估</strong> — 实战练习闭环</summary>
 
 加权随机抽题（减少近期重复），支持分类和难度筛选。AI 从完整性、深度、准确性、逻辑性 4 个维度评分并给出改进建议。
+
 </details>
 
 <details>
 <summary><strong>知识图谱 + 数据分析</strong> — 可视化备考全景</summary>
 
 ECharts 6 知识点关联网络、技术栈热度趋势、考点分布、难度分布、14 天练习趋势。
+
 </details>
 
 <details>
@@ -108,43 +115,84 @@ ECharts 6 知识点关联网络、技术栈热度趋势、考点分布、难度�
 - **理论问答** — 基础原理、八股文类问题的结构化追问
 
 **岗位驱动 RAG**：自动注入用户目标岗位、练习薄弱环节、历史面试经验到对话上下文，面试题检索按岗位智能过滤。
+
 </details>
 
 <details>
 <summary><strong>手撕代码</strong> — 在线编程 + SSE 流式评测 + 渐进提示</summary>
 
-内置 50+ 编程题库，支持在线代码提交。AI 从语法、逻辑、算法、复杂度、代码风格 5 个维度评测（每项 1-5 分），SSE 实时流式输出分析过程。支持两种模式：
+内置 50+ 编程题库，支持在线代码提交（Monaco Editor）。AI 从语法、逻辑、算法、复杂度、代码风格 5 个维度评测（每项 1-5 分），SSE 实时流式输出分析过程。支持两种模式：
 - **完整评审**（`full_review`）— 一次性输出完整分析和评分
 - **渐进提示**（`hint`）— 不直接给答案，通过多轮提示链逐步引导思考，支持多轮追问
 
 统计错误类型分布，帮助针对性提升。
+
 </details>
 
 <details>
 <summary><strong>多用户系统</strong> — JWT 双 Token 认证</summary>
 
 三种题库模式（公共/个人/混用），管理员审核机制，Access Token 15 分钟 + Refresh Token HttpOnly Cookie + 服务端 JTI 轮转。
+
 </details>
 
 <details>
 <summary><strong>系统配置热更新</strong> — LLM / Embedding 参数在线修改</summary>
 
 API 地址、模型名称、超时时间、相似度阈值等均可通过界面修改，自动持久化到数据库和 `.env` 文件。支持个人 LLM 配置独立管理。
+
 </details>
 
 <details>
 <summary><strong>数据安全</strong> — 软删除 + 回收站机制</summary>
 
 题库题目删除后进入回收站，支持单条/批量恢复。JD、面经、题目详情均支持软删除，防止数据误删丢失。
+
 </details>
 
 <details>
 <summary><strong>异步任务队列</strong> — Redis + ARQ 后台处理</summary>
 
 聚类去重等耗时任务通过 ARQ 异步执行，不阻塞 API 响应。Redis 不可用时自动降级为同步执行，保证功能可用。Worker 独立进程运行，可单独扩缩容。
+
 </details>
 
-## 技术栈
+## 技术架构
+
+### 整体架构
+
+```
+nginx (port 80, 内置前端 dist) → backend (port 8000)
+                                redis (port 6379)
+worker (--profile worker, 按需启动) → redis/backend data
+```
+
+### 后端架构（4 层，依赖方向向内）
+
+```
+Routers → Services → Core/DB → (external)
+```
+
+| 层级 | 目录 | 职责 |
+|------|------|------|
+| **路由层** | `app/routers/` | HTTP 感知，禁止业务逻辑 |
+| **服务层** | `app/services/` | 业务逻辑（LLM 调用、聚类、pipeline） |
+| **Agent 层** | `app/agents/` | LangGraph 状态机（submit/build/batch_generate/chat） |
+| **核心层** | `app/core/` | 配置、认证、提示词模板 |
+| **数据层** | `app/db/` | SQLite 连接、CRUD、查询、迁移 |
+
+### 前端架构
+
+| 目录 | 职责 |
+|------|------|
+| `src/services/` | API 服务层（按领域拆分），http.js 是 HTTP 客户端 |
+| `src/composables/` | 领域逻辑复用（use* 前缀） |
+| `src/components/common/` | 通用 UI（无业务依赖） |
+| `src/components/business/` | 业务组件 |
+| `src/stores/` | Pinia 状态管理 |
+| `src/utils/` | 纯工具函数 |
+
+### 技术栈
 
 | 层级 | 技术 |
 |------|------|
@@ -153,10 +201,14 @@ API 地址、模型名称、超时时间、相似度阈值等均可通过界面�
 | 任务队列 | Redis + ARQ（异步任务处理，自动降级到同步） |
 | LLM | OpenAI Compatible API（支持代理 / 国产模型） |
 | 聚类去重 | LLM-based Clustering（cat2 预分组 + 两遍聚类） |
+| Embedding | ONNX Runtime + bge-small-zh-v1.5 + FAISS |
+| Agent 框架 | LangGraph（状态机 + 条件路由） |
 | 前端框架 | Vue 3 (Composition API) + Vite |
-| 样式 | Tailwind CSS |
+| UI 组件 | shadcn-vue + Tailwind CSS |
+| 代码编辑器 | Monaco Editor |
 | 图表 | ECharts 6 |
 | 认证 | JWT 双 Token（Access + HttpOnly Refresh） |
+| 日志 | structlog（生产 JSON / 开发彩色） |
 | 部署 | Docker Compose |
 | 包管理 | uv (Python) / npm (Node.js) |
 
@@ -167,7 +219,7 @@ interview-boss/
 ├── backend/                    # Python FastAPI 后端
 │   ├── app/
 │   │   ├── core/               # 认证、配置热更新、LLM 提示词模板、日志
-│   │   ├── routers/            # 14+ API 路由模块（含 profile_pkg / questions_pkg 子路由）
+│   │   ├── routers/            # 16+ API 路由模块（含 profile_pkg / questions_pkg 子路由）
 │   │   ├── services/           # LLM 调用、聚类去重、管道、简历、邮件等业务服务
 │   │   ├── agents/             # LangGraph 状态机（submit / build / batch_generate / chat）
 │   │   │   └── chat/skills/    # 6 种面试技能（自适应难度、算法编码、HR 软技能等）
@@ -183,19 +235,18 @@ interview-boss/
 │   │   ├── components/
 │   │   │   ├── common/         # 通用 UI 组件（DataTable, TabBar, BaseModal 等）
 │   │   │   └── business/       # 业务组件（MasterBankList, PracticePanel, ChatView 等）
-│   │   ├── composables/        # 组合式函数（usePractice, useSelection, useMotionPresets, useTabScroll 等）
+│   │   ├── composables/        # 组合式函数（usePractice, useSelection, useMotionPresets 等）
 │   │   ├── constants/          # 配置常量与枚举（config.js, enums.js）
 │   │   ├── layouts/            # 页面布局（DefaultLayout, BlankLayout）
 │   │   ├── router/             # Vue Router 路由定义
-│   │   ├── services/           # API 服务层 + HTTP 客户端（按领域拆分：chatApi、codingApi 等）
+│   │   ├── services/           # API 服务层 + HTTP 客户端（按领域拆分）
 │   │   ├── stores/             # Pinia 状态管理
 │   │   ├── utils/              # 纯工具函数（markdown、validate、highlight）
 │   │   └── views/              # 页面级组件
 │   └── tests/                  # 前端测试（Playwright）
 ├── deploy/                     # 部署配置
 │   ├── docker-deploy.sh        # Docker 部署脚本（生产推荐）
-│   ├── entrypoint.sh           # Docker 容器入口脚本
-│   ├── nginx-hardened.conf     # Nginx 安全配置参考
+│   └── entrypoint.sh           # Docker 容器入口脚本
 ├── docs/                       # 文档（agents、bug-reports、tdd-reports、dev-log）
 ├── nginx/                      # Docker Nginx 配置（API 代理 + SPA + 安全头）
 ├── Dockerfile                  # 多阶段构建（前端 + 后端）
@@ -287,7 +338,7 @@ npm run dev
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
 | `OPENAI_API_KEY_EMBEDDING` | Embedding API 密钥 | 回退到 LLM 密钥 |
 | `OPENAI_BASE_URL_EMBEDDING` | Embedding API 地址 | 空 |
-| `EMBEDDING_MODEL_NAME` | Embedding 模型 | `text-embedding-3-small` |
+| `EMBEDDING_MODEL_REPO` | Embedding 模型仓库 | `Xenova/bge-small-zh-v1.5` |
 | `SIMILARITY_THRESHOLD` | 去重相似度阈值 | `0.85` |
 | `LLM_TIMEOUT` | LLM 超时（秒） | `120` |
 | `JWT_SECRET` | JWT 签名密钥 | 自动生成 |
@@ -335,13 +386,6 @@ npm run dev
 - `chore`: 构建/工具/依赖变更
 - `style`: 代码格式调整（不影响逻辑）
 - `perf`: 性能优化
-
-示例：
-```
-feat: 添加知识图谱可视化模块
-fix: 修复模拟面试抽题权重计算错误
-refactor: 提取 HTTP 客户端为独立模块
-```
 
 ### PR 流程
 
@@ -443,6 +487,8 @@ sudo ss -tlnp | grep ':80 '
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/submit` | 提交文本/图片，AI 自动识别入库 |
+| POST | `/api/submit-stream` | 流式提交（SSE 进度推送） |
+| POST | `/api/submit-stream-v2` | 流式提交 v2（改进版） |
 
 </details>
 
@@ -453,8 +499,10 @@ sudo ss -tlnp | grep ':80 '
 |------|------|------|
 | GET | `/api/master-bank` | 题库列表（分页、筛选、排序） |
 | POST | `/api/master-bank/build` | 全量重建题库（SSE 进度） |
-| POST | `/api/master-bank/generate-answer/{id}` | AI 生成答案（管理员存全局，普通用户存个人） |
-| POST | `/api/master-bank/use-reference-answer/{id}` | 使用参考答案（复制管理员答案到个人） |
+| POST | `/api/master-bank/compact` | 压缩合并题库（SSE 进度） |
+| POST | `/api/master-bank/build-personal` | 构建个人题库 |
+| POST | `/api/master-bank/generate-answer/{id}` | AI 生成答案 |
+| POST | `/api/master-bank/use-reference-answer/{id}` | 使用参考答案 |
 | PUT | `/api/master-bank/save-user-answer/{id}` | 保存用户个人答案 |
 | POST | `/api/master-bank/batch-generate` | 批量生成答案 |
 | POST | `/api/master-bank/random` | 随机抽题（模拟面试） |
@@ -464,6 +512,10 @@ sudo ss -tlnp | grep ':80 '
 | GET | `/api/master-bank/trash` | 获取回收站列表 |
 | POST | `/api/master-bank/restore/{id}` | 恢复已删除题目 |
 | POST | `/api/master-bank/batch-restore` | 批量恢复题目 |
+| POST | `/api/master-bank/split-question/{id}` | 拆分题目 |
+| POST | `/api/master-bank/merge-question/{id}` | 合并题目 |
+| POST | `/api/master-bank/re-tag/{id}` | 重新标签化 |
+| POST | `/api/master-bank/upload` | 上传题目 |
 
 </details>
 
@@ -504,9 +556,9 @@ sudo ss -tlnp | grep ':80 '
 |------|------|------|
 | GET | `/api/coding/problems` | 题目列表 |
 | GET | `/api/coding/problems/{id}` | 题目详情 |
-| POST | `/api/coding/submit` | 提交代码（SSE 流式 AI 评测，支持 `mode=full_review\|hint`） |
+| POST | `/api/coding/submit` | 提交代码（SSE 流式 AI 评测） |
 | GET | `/api/coding/submissions` | 提交记录列表 |
-| GET | `/api/coding/submissions/{id}` | 提交详情（含 5 维评分 + 参考答案 + 复杂度分析） |
+| GET | `/api/coding/submissions/{id}` | 提交详情（含 5 维评分） |
 | GET | `/api/coding/error-stats` | 错误统计 |
 
 </details>
@@ -526,13 +578,10 @@ sudo ss -tlnp | grep ':80 '
 </details>
 
 <details>
-<summary><strong>题库构建</strong></summary>
+<summary><strong>异步任务</strong></summary>
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/master-bank/build` | 全量重建题库 |
-| POST | `/api/master-bank/compact` | 压缩合并题库 |
-| POST | `/api/master-bank/build-personal` | 构建个人题库 |
 | GET | `/api/jobs/{job_id}` | 查询异步任务状态 |
 | GET | `/api/jobs/{job_id}/stream` | SSE 实时任务进度 |
 
@@ -549,6 +598,32 @@ sudo ss -tlnp | grep ':80 '
 | GET | `/api/profile/llm` | 读取个人 LLM 配置 |
 | PUT | `/api/profile/llm` | 更新个人 LLM 配置 |
 | DELETE | `/api/profile/llm` | 删除个人 LLM 配置 |
+
+</details>
+
+<details>
+<summary><strong>管理员审核</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/master-bank/analysis-status` | 分析状态 |
+| GET | `/api/master-bank/pending` | 待审核列表 |
+| POST | `/api/master-bank/approve/{id}` | 批准题目 |
+| POST | `/api/master-bank/reject/{id}` | 拒绝题目 |
+| GET | `/api/master-bank/merge-history` | 合并历史 |
+| POST | `/api/master-bank/merge-rollback/{id}` | 回滚合并 |
+| POST | `/api/master-bank/merge-feedback` | 合并反馈 |
+| GET | `/api/master-bank/merge-stats` | 合并统计 |
+| POST | `/api/master-bank/clustering-maintenance` | 聚类维护 |
+
+</details>
+
+<details>
+<summary><strong>错误上报</strong></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/error-report` | 前端 JS 错误上报 |
 
 </details>
 
@@ -570,6 +645,7 @@ sudo ss -tlnp | grep ':80 '
 - JWT Refresh Token 使用 HttpOnly Cookie，防止 XSS 窃取。
 - 全局速率限制（200 次/分钟）。
 - 密码使用 bcrypt 加密存储。
+- CSRF 中间件拦截缺少自定义头的跨域请求。
 - 题库操作（生成答案、批量生成、答题评估）均校验用户可见范围（`bank_mode` + `owner_id`），防止权限提升。
 - 分析数据按用户 `bank_mode` 隔离，普通用户仅可见公共/个人数据。
 

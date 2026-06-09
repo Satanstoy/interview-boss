@@ -1,79 +1,107 @@
 <template>
-  <div class="relative min-h-[calc(100vh-56px)] overflow-hidden">
-    <div class="absolute inset-0 overflow-hidden pointer-events-none">
-      <div class="absolute -top-40 -right-40 w-[500px] h-[500px] bg-primary-200/20 dark:bg-primary-900/15 rounded-full blur-[100px] animate-pulse-slow"></div>
-      <div class="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-accent-200/20 dark:bg-accent-900/15 rounded-full blur-[100px] animate-pulse-slow" style="animation-delay: 1.5s"></div>
-      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary-100/10 rounded-full blur-[80px] animate-float"></div>
-    </div>
-
-    <div class="relative flex flex-col lg:flex-row min-h-[calc(100vh-56px)]">
-      <!-- Left: brand showcase -->
-      <div class="flex-1 flex flex-col justify-center px-8 lg:px-16 py-12 lg:py-0">
-        <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :enter="{ opacity: 1, y: 0, transition: { duration: 500, easing: [0.25, 0.46, 0.45, 0.94] } }"
-          class="max-w-md mx-auto lg:mx-0"
-        >
-          <div class="w-20 h-20 mb-8 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-warm transform hover:scale-105 transition-transform duration-300">
-            <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-            </svg>
+  <div class="min-h-[calc(100vh-56px)] bg-background">
+    <div class="mx-auto grid min-h-[calc(100vh-56px)] max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center lg:px-8">
+      <!-- Left side: marketing content -->
+      <section class="hidden lg:block">
+        <div class="max-w-xl">
+          <div class="mb-6 inline-flex items-center rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-sm">
+            shadcn-vue workspace preview
           </div>
-
-          <h2 class="font-serif text-3xl lg:text-[2.5rem] text-ink-900 dark:text-ink-100 mb-3 leading-tight">
-            欢迎使用 InterviewBoss
+          <h2 class="text-3xl font-semibold tracking-tight text-foreground">
+            把面试准备变成一个清晰的学习工作台
           </h2>
-          <p class="text-ink-400 dark:text-ink-400 mb-10 leading-relaxed text-lg font-light">
-            AI 驱动的面试准备平台
+          <p class="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+            InterviewBoss 会把 JD、面经和高频题组织成可筛选、可练习、可复盘的数据界面。新版视觉更接近 shadcn-vue 的 dashboard、table、charts 和 AI chat 组件。
           </p>
 
-          <div class="grid grid-cols-3 gap-4">
-            <div v-for="(feature, idx) in loginFeatures" :key="feature.label"
-              v-motion
-              :initial="{ opacity: 0, y: 20, scale: 0.95 }"
-              :enter="{
-                opacity: 1, y: 0, scale: 1,
-                transition: { duration: 400, delay: 200 + idx * 100, easing: [0.25, 0.46, 0.45, 0.94] }
-              }"
-              class="flex flex-col items-center gap-2.5 p-4 rounded-2xl bg-white/70 dark:bg-surface-800/70 backdrop-blur-sm border border-surface-200/80 dark:border-ink-700/50 shadow-card hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5 cursor-default">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="feature.iconBg">
-                <span class="text-lg">{{ feature.icon }}</span>
+          <!-- Stats cards -->
+          <div class="mt-8 grid gap-3 md:grid-cols-3">
+            <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <p class="text-xs font-medium text-muted-foreground">题库规模</p>
+              <p class="mt-3 text-2xl font-semibold tracking-tight text-foreground">1,248</p>
+              <div class="mt-4 h-2 rounded-full bg-muted">
+                <div class="h-2 w-[72%] rounded-full bg-primary"></div>
               </div>
-              <span class="text-xs font-semibold text-ink-600 dark:text-ink-400">{{ feature.label }}</span>
+            </div>
+            <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <p class="text-xs font-medium text-muted-foreground">本周练习</p>
+              <p class="mt-3 text-2xl font-semibold tracking-tight text-foreground">42</p>
+              <svg viewBox="0 0 160 46" class="mt-3 h-12 w-full text-chart-3">
+                <path d="M0 38 C20 30 28 16 48 21 C72 27 69 7 92 13 C116 19 118 35 138 24 C150 18 154 12 160 10" fill="none" stroke="currentColor" stroke-width="2.5" />
+              </svg>
+            </div>
+            <div class="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <p class="text-xs font-medium text-muted-foreground">模拟面试</p>
+              <p class="mt-3 text-2xl font-semibold tracking-tight text-foreground">82</p>
+              <div class="mt-4 grid grid-cols-3 gap-1.5 text-center text-[10px] text-muted-foreground">
+                <span class="rounded-md bg-muted py-1">表达</span>
+                <span class="rounded-md bg-muted py-1">结构</span>
+                <span class="rounded-md bg-muted py-1">深度</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI Copilot preview -->
+          <div class="mt-4 rounded-xl border border-border bg-card shadow-sm">
+            <div class="flex items-center justify-between border-b border-border/50 px-4 py-3">
+              <div>
+                <p class="text-sm font-semibold text-foreground">AI Interview Copilot</p>
+                <p class="text-xs text-muted-foreground">检索题库、评估回答、生成追问</p>
+              </div>
+              <span class="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Live</span>
+            </div>
+            <div class="space-y-3 p-4">
+              <div class="max-w-[78%] rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground">
+                先介绍最近一个项目，以及你承担的核心职责。
+              </div>
+              <div class="ml-auto max-w-[78%] rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+                我负责题库导入解析、AI 生成答案和模拟面试链路...
+              </div>
+              <div class="rounded-lg border border-border bg-card p-3 text-xs">
+                <div class="flex items-center justify-between">
+                  <span class="font-medium text-foreground">AI Thinking</span>
+                  <span class="text-muted-foreground">3 sources</span>
+                </div>
+                <div class="mt-2 space-y-1.5 text-muted-foreground">
+                  <p>检索项目复盘题目：完成</p>
+                  <p>分析回答结构：完成</p>
+                  <p>生成追问：进行中</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- Right: login form -->
-      <div class="flex items-center justify-center px-8 lg:px-16 py-12 lg:py-0 lg:w-[440px] xl:w-[480px]">
-        <div
-          v-motion
-          :initial="{ opacity: 0, x: 24 }"
-          :enter="{ opacity: 1, x: 0, transition: { duration: 500, delay: 150, easing: [0.25, 0.46, 0.45, 0.94] } }"
-          class="w-full max-w-sm"
-        >
+      <!-- Right side: login form -->
+      <section class="mx-auto w-full max-w-sm lg:mx-0">
+        <div class="mb-6 text-center lg:text-left">
+          <div class="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground lg:mx-0">
+            IB
+          </div>
+          <h1 class="text-xl font-semibold tracking-tight text-foreground">登录 InterviewBoss</h1>
+          <p class="mt-1 text-sm text-muted-foreground">访问你的题库、面经和模拟面试记录</p>
+        </div>
+
+        <!-- Login form card -->
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
           <LoginModal embedded @login-success="$emit('login-success', $event)" />
         </div>
-      </div>
+
+        <!-- Preview link -->
+        <a
+          href="?preview=1"
+          class="mt-3 inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-card text-sm font-medium text-foreground shadow-sm transition hover:bg-muted"
+        >
+          预览新版工作台
+        </a>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
 import LoginModal from '@/components/business/LoginModal.vue'
-
-defineProps({
-  loginFeatures: {
-    type: Array,
-    default: () => [
-      { icon: '📚', label: '智能题库', iconBg: 'bg-primary-100 dark:bg-primary-900/30' },
-      { icon: '🤖', label: 'AI 刷题', iconBg: 'bg-sage-100 dark:bg-sage-700/30' },
-      { icon: '🎯', label: '模拟面试', iconBg: 'bg-accent-100 dark:bg-accent-700/30' },
-    ]
-  }
-})
 
 defineEmits(['login-success'])
 </script>
