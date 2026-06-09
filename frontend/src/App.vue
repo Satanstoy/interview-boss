@@ -114,25 +114,25 @@
           <!-- Loading skeleton -->
           <div v-if="isDataLoading && jdData.length === 0 && interviewData.length === 0 && masterBank.length === 0" class="py-10 space-y-4">
             <div class="flex items-center gap-3 mb-6">
-              <div class="skeleton h-10 w-10 rounded-xl"></div>
+              <Skeleton class="h-10 w-10 rounded-xl" />
               <div class="flex-1 space-y-2">
-                <div class="skeleton h-5 w-48 rounded"></div>
-                <div class="skeleton h-3 w-24 rounded"></div>
+                <Skeleton class="h-5 w-48 rounded" />
+                <Skeleton class="h-3 w-24 rounded" />
               </div>
             </div>
             <Card v-for="(w, i) in skeletonCards" :key="i" class="p-5 space-y-3">
               <div class="flex gap-3">
-                <div class="skeleton h-12 w-12 rounded-lg"></div>
+                <Skeleton class="h-12 w-12 rounded-lg" />
                 <div class="flex-1 space-y-2">
-                  <div class="skeleton h-4 rounded" :style="{ width: w.title }"></div>
-                  <div class="skeleton h-3 rounded" :style="{ width: w.subtitle }"></div>
+                  <Skeleton class="h-4 rounded" :style="{ width: w.title }" />
+                  <Skeleton class="h-3 rounded" :style="{ width: w.subtitle }" />
                 </div>
-                <div class="skeleton h-6 w-16 rounded-full"></div>
+                <Skeleton class="h-6 w-16 rounded-full" />
               </div>
               <div class="flex gap-2">
-                <div class="skeleton h-5 w-20 rounded-full"></div>
-                <div class="skeleton h-5 w-14 rounded-full"></div>
-                <div class="skeleton h-5 w-24 rounded-full"></div>
+                <Skeleton class="h-5 w-20 rounded-full" />
+                <Skeleton class="h-5 w-14 rounded-full" />
+                <Skeleton class="h-5 w-24 rounded-full" />
               </div>
             </Card>
           </div>
@@ -500,6 +500,7 @@ import PracticePanel from '@/components/business/PracticePanel.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 
 // 异步组件 loading/error 包装

@@ -20,8 +20,8 @@
         <div v-if="loadingConversations" class="p-2 space-y-1">
           <div v-for="i in 4" :key="i" class="flex items-center gap-2 px-3 py-2.5 rounded-lg">
             <div class="flex-1 space-y-1.5">
-              <div class="skeleton h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }"></div>
-              <div class="skeleton h-2.5 w-16 rounded"></div>
+              <Skeleton class="h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }" />
+              <Skeleton class="h-2.5 w-16 rounded" />
             </div>
           </div>
         </div>
@@ -198,6 +198,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import ChatMessage from './ChatMessage.vue'
 import NewChatModal from './NewChatModal.vue'
 import AppEmpty from '@/components/common/AppEmpty.vue'

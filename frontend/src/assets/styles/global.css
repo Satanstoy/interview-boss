@@ -11,17 +11,6 @@
 @tailwind utilities;
 
 @layer components {
-  /* Skeleton loader */
-  .skeleton {
-    @apply bg-surface-200 dark:bg-ink-700 rounded animate-pulse;
-    background-image: linear-gradient(90deg, #e5e5e5 0%, #f5f5f5 40%, #e5e5e5 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.8s infinite linear;
-  }
-  .dark .skeleton {
-    background-image: linear-gradient(90deg, #27272a 0%, #3f3f46 40%, #27272a 100%);
-  }
-
   /* Modern scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
@@ -203,21 +192,6 @@
 }
 .dark .elevation-4 {
   box-shadow: 0 8px 28px -4px rgb(0 0 0 / 0.4), 0 20px 48px -8px rgb(0 0 0 / 0.3);
-}
-
-/* ── Empty state visual ── */
-.empty-state {
-  @apply flex flex-col items-center justify-center py-12 text-center;
-}
-.empty-state-icon {
-  @apply w-16 h-16 mb-4 rounded-2xl flex items-center justify-center text-3xl;
-  @apply bg-surface-100 dark:bg-ink-800;
-}
-.empty-state-title {
-  @apply text-base font-semibold text-ink-700 dark:text-ink-300 mb-1;
-}
-.empty-state-desc {
-  @apply text-sm text-ink-400 dark:text-ink-500 max-w-xs;
 }
 
 /* Dark mode native select option styling */
