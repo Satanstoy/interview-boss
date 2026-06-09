@@ -43,13 +43,14 @@
     <!-- Right: page size selector -->
     <div class="flex items-center gap-2 text-xs text-ink-400 dark:text-ink-500">
       <span>每页</span>
-      <RoundedSelect
-        :model-value="pageSize"
-        @update:model-value="$emit('update:pageSize', $event); $emit('update:currentPage', 1)"
-        :options="pageSizeOptions.map(s => ({ value: s, label: String(s) }))"
-        size="sm"
-        trigger-class="min-w-[60px]"
-      />
+      <Select :model-value="String(pageSize)" @update:model-value="$emit('update:pageSize', Number($event)); $emit('update:currentPage', 1)">
+        <SelectTrigger class="h-8 text-xs min-w-[60px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="s in pageSizeOptions" :key="s" :value="String(s)">{{ s }}</SelectItem>
+        </SelectContent>
+      </Select>
       <span>条</span>
     </div>
   </div>
@@ -57,7 +58,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const props = defineProps({
   currentPage: { type: Number, required: true },

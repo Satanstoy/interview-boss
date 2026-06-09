@@ -273,12 +273,15 @@
               <div v-if="activeTab === 'Interview'" class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
                 <template v-if="interviewSeasons.length > 0">
                   <label class="text-xs text-ink-500 dark:text-ink-400">招聘季筛选：</label>
-                  <RoundedSelect
-                    v-model="filterSeason"
-                    :options="[{ value: '', label: '全部' }, ...interviewSeasons.map(s => ({ value: s, label: s }))]"
-                    size="sm"
-                    trigger-class="min-w-[100px]"
-                  />
+                  <Select v-model="filterSeason">
+                    <SelectTrigger class="min-w-[100px] h-8 text-xs">
+                      <SelectValue placeholder="全部" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">全部</SelectItem>
+                      <SelectItem v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <span class="text-surface-300 dark:text-ink-600">|</span>
                 </template>
                 <button
@@ -484,7 +487,7 @@ import StagingPanel from '@/components/business/StagingPanel.vue'
 import SettingsPanel from '@/components/business/SettingsPanel.vue'
 import TabBar from '@/components/common/TabBar.vue'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
-import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import DataTable from '@/components/common/DataTable.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'

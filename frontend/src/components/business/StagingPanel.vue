@@ -79,38 +79,41 @@
       <div class="flex gap-4 w-full mb-4">
         <div class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">导入类型</label>
-          <RoundedSelect
-            v-model="importType"
-            :options="[
-              { value: 'auto', label: '自动识别' },
-              { value: 'jd', label: 'JD (职位描述)' },
-              { value: 'interview', label: '面经' }
-            ]"
-            wrapper-class="w-full"
-            trigger-class="w-full"
-          />
+          <Select v-model="importType">
+            <SelectTrigger class="w-full h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动识别</SelectItem>
+              <SelectItem value="jd">JD (职位描述)</SelectItem>
+              <SelectItem value="interview">面经</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">招聘季节</label>
-          <RoundedSelect
-            v-model="selectedSeason"
-            :options="seasonOptions"
-            wrapper-class="w-full"
-            trigger-class="w-full"
-          />
+          <Select v-model="selectedSeason">
+            <SelectTrigger class="w-full h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="s in availableSeasons" :key="s" :value="s">{{ s }}</SelectItem>
+              <SelectItem value="custom">自定义...</SelectItem>
+            </SelectContent>
+          </Select>
           <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-border rounded-xl px-3.5 py-2.5 text-sm bg-white dark:bg-surface-800 text-ink-800 dark:text-ink-100 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
         </div>
         <div v-if="isAdmin" class="flex-1">
           <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">提交到</label>
-          <RoundedSelect
-            v-model="importTarget"
-            :options="[
-              { value: 'personal', label: '个人题库' },
-              { value: 'public', label: '公共题库' }
-            ]"
-            wrapper-class="w-full"
-            trigger-class="w-full"
-          />
+          <Select v-model="importTarget">
+            <SelectTrigger class="w-full h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="personal">个人题库</SelectItem>
+              <SelectItem value="public">公共题库</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -208,7 +211,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { submitDataSSE } from '@/api/index.js'
-import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '@/utils/validate.js'
 import { getFriendlyError } from '@/services/http.js'
 
@@ -220,10 +223,6 @@ const props = defineProps({
   isAdmin: { type: Boolean, default: false },
 })
 
-const seasonOptions = computed(() => [
-  ...props.availableSeasons.map(s => ({ value: s, label: s })),
-  { value: 'custom', label: '自定义...' },
-])
 
 const TEXT_MAX_LENGTH = 10000
 

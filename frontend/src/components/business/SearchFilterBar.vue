@@ -27,14 +27,17 @@
       </div>
 
       <!-- Difficulty filter -->
-      <RoundedSelect
-        :model-value="filterDifficulty"
-        @update:model-value="$emit('update:filterDifficulty', $event)"
-        :options="difficultyOptions"
-        placeholder="全部难度"
-        size="md"
-        trigger-class="min-w-[120px]"
-      />
+      <Select :model-value="filterDifficulty" @update:model-value="$emit('update:filterDifficulty', $event)">
+        <SelectTrigger class="min-w-[120px] h-9 text-sm">
+          <SelectValue placeholder="全部难度" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">全部难度</SelectItem>
+          <SelectItem value="L1">L1 - 基础</SelectItem>
+          <SelectItem value="L2">L2 - 中等</SelectItem>
+          <SelectItem value="L3">L3 - 困难</SelectItem>
+        </SelectContent>
+      </Select>
 
       <!-- Filter chips slot -->
       <div v-if="$slots.filters" class="flex items-center gap-2 flex-wrap">
@@ -46,14 +49,8 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-const difficultyOptions = [
-  { value: '', label: '全部难度' },
-  { value: 'L1', label: 'L1 - 基础' },
-  { value: 'L2', label: 'L2 - 中等' },
-  { value: 'L3', label: 'L3 - 困难' },
-]
 
 const props = defineProps({
   searchQuery: { type: String, default: '' },

@@ -46,13 +46,15 @@
               <!-- JD selection -->
               <div>
                 <label class="text-xs font-semibold text-ink-600 dark:text-ink-400 mb-1.5 block">选择 JD（可选）</label>
-                <RoundedSelect
-                  v-model="selectedJdId"
-                  :options="[{ value: null, label: '不选择 JD' }, ...jdList.map(jd => ({ value: jd.id, label: (jd.company || '未知公司') + ' · ' + (jd.job_title || '未知岗位') }))]"
-                  placeholder="选择目标 JD"
-                  size="md"
-                  trigger-class="w-full"
-                />
+                <Select :model-value="selectedJdId != null ? String(selectedJdId) : ''" @update:model-value="selectedJdId = $event ? Number($event) : null">
+                  <SelectTrigger class="w-full h-9 text-sm">
+                    <SelectValue placeholder="选择目标 JD" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">不选择 JD</SelectItem>
+                    <SelectItem v-for="jd in jdList" :key="jd.id" :value="String(jd.id)">{{ (jd.company || '未知公司') + ' · ' + (jd.job_title || '未知岗位') }}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <!-- Resume upload -->
@@ -119,7 +121,7 @@
 import { ref, watch } from 'vue'
 import { upload } from '@/services/http.js'
 import { getResume } from '@/services/resumeApi.js'
-import RoundedSelect from '@/components/common/RoundedSelect.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AppDialog from '@/components/common/AppDialog.vue'
 
 defineProps({

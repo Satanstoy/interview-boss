@@ -22,6 +22,12 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const activeSeason = ref('')
   const availableSeasons = ref([])
 
+  // ── Infinite scroll pagination ──
+  const PAGE_SIZE = 30
+  const currentPage = ref(1)
+  const hasMore = ref(true)
+  const isLoadingMore = ref(false)
+
   // ── Filters ──
   const selectedTag = ref('全部')
   const selectedSubTags = ref([])
@@ -36,22 +42,51 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     isDataLoading.value = true
     dataLoadError.value = null
     invalidateCache()
+    currentPage.value = 1
+    hasMore.value = true
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank()
+        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE })
       ])
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
-      masterBank.value = (masterResp.items || masterResp).map(q => ({
+      const items = (masterResp.items || masterResp).map(q => ({
         ...q, _showAnswer: false, _showSources: false,
         _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
       }))
+      masterBank.value = items
+      // 检查是否还有更多数据
+      const total = masterResp.total || 0
+      hasMore.value = items.length < total
+      currentPage.value = 1
       if (masterResp.popular_tags) { popularTagsFromServer.value = masterResp.popular_tags }
       selectedSubTags.value = []
       onAfterFetch?.()
     } catch (e) {
       dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
     } finally { isDataLoading.value = false }
+  }
+
+  /** 加载下一页题库数据（无限滚动） */
+  const loadMoreMasterBank = async () => {
+    if (isLoadingMore.value || !hasMore.value) return
+    isLoadingMore.value = true
+    try {
+      const nextPage = currentPage.value + 1
+      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE })
+      const newItems = (resp.items || resp).map(q => ({
+        ...q, _showAnswer: false, _showSources: false,
+        _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
+      }))
+      if (newItems.length > 0) {
+        masterBank.value = [...masterBank.value, ...newItems]
+        currentPage.value = nextPage
+      }
+      const total = resp.total || 0
+      hasMore.value = masterBank.value.length < total
+    } catch (e) {
+      console.warn('加载更多题目失败', e)
+    } finally { isLoadingMore.value = false }
   }
 
   const fetchAnalytics = async () => {
@@ -160,6 +195,8 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     isDataLoading, dataLoadError,
     analytics, practiceStats, popularTags,
     activeSeason, availableSeasons,
+    // infinite scroll
+    isLoadingMore, hasMore, loadMoreMasterBank,
     // filters
     selectedTag, selectedSubTags, searchQuery,
     filterDifficulty, showStarredOnly,
