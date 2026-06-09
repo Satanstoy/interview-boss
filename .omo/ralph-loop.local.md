@@ -1,16 +1,13 @@
 ---
 active: true
-iteration: 1
+iteration: 2
 max_iterations: 500
-completion_promise: "VERIFIED"
+completion_promise: "DONE"
 initial_completion_promise: "DONE"
-verification_attempt_id: "7857c629-aa32-4a26-bd6a-0107b6b72511"
-verification_session_id: "ses_155c3417bffe9nRNY6gRdbEIrd"
-started_at: "2026-06-09T02:26:20.590Z"
+started_at: "2026-06-09T02:46:20.614Z"
 session_id: "ses_155f34e60ffeg4i4T8mzKh40Oi"
 ultrawork: true
-verification_pending: true
 strategy: "continue"
-message_count_at_start: 90
+message_count_at_start: 151
 ---
 现在各个不同的tab跳转的时候，会有画面闪动的问题，请你做一个全面的、全局的动画优化，来解决动画衔接不流畅的问题

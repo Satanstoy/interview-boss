@@ -134,7 +134,7 @@
           </div>
 
           <!-- Tab content with crossfade transitions (no mode="out-in" to eliminate blank window) -->
-          <Transition name="tab-fade" @before-enter="restoreScroll()">
+          <Transition name="tab-fade" @after-enter="restoreScroll()">
             <div :key="activeTab" class="tab-content" data-motion="tab-transition">
               <!-- MasterBank Tab -->
               <div v-if="activeTab === 'MasterBank' && masterBankEverShown">
