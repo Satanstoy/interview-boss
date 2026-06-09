@@ -7,37 +7,36 @@
 
     <!-- Center: page buttons -->
     <div class="flex items-center gap-1">
-      <button
+      <Button
+        variant="outline"
+        size="icon-sm"
         :disabled="currentPage <= 1"
         @click="go(currentPage - 1)"
-        class="page-btn"
-        :class="currentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-100 dark:hover:bg-ink-700'"
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-      </button>
+        <ChevronLeft class="w-4 h-4" />
+      </Button>
 
       <template v-for="p in visiblePages" :key="p">
         <span v-if="p === '...'" class="px-1 text-ink-300 dark:text-ink-600 text-sm select-none">...</span>
-        <button
+        <Button
           v-else
+          :variant="p === currentPage ? 'default' : 'outline'"
+          size="sm"
+          class="min-w-[32px] tabular-nums"
           @click="go(p)"
-          class="page-btn min-w-[32px] text-xs font-medium tabular-nums"
-          :class="p === currentPage
-            ? 'bg-primary-500 text-white shadow-sm'
-            : 'text-ink-600 dark:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-700'"
         >
           {{ p }}
-        </button>
+        </Button>
       </template>
 
-      <button
+      <Button
+        variant="outline"
+        size="icon-sm"
         :disabled="currentPage >= totalPages"
         @click="go(currentPage + 1)"
-        class="page-btn"
-        :class="currentPage >= totalPages ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-100 dark:hover:bg-ink-700'"
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-      </button>
+        <ChevronRight class="w-4 h-4" />
+      </Button>
     </div>
 
     <!-- Right: page size selector -->
@@ -58,6 +57,8 @@
 
 <script setup>
 import { computed } from 'vue'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const props = defineProps({
@@ -100,8 +101,3 @@ const go = (page) => {
 }
 </script>
 
-<style scoped>
-.page-btn {
-  @apply flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150 select-none;
-}
-</style>
