@@ -1,6 +1,6 @@
 <template>
   <div
-    class="overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all duration-200 hover:border-surface-300 dark:hover:border-ink-700"
+    class="overflow-hidden rounded-md border border-border bg-card shadow-sm transition-all duration-200 hover:border-surface-300 dark:hover:border-ink-700"
     :class="[
       isSelected(question.id) ? 'border-primary/40 dark:border-primary/30 ring-2 ring-primary/15 dark:ring-primary/20' : '',
     ]"
@@ -9,7 +9,7 @@
     <div class="p-4 flex gap-3 items-start cursor-pointer hover:bg-muted/40 dark:hover:bg-muted/20 transition-colors duration-200" @click="$emit('toggle-answer', question)">
       <div class="flex items-center self-stretch" @click.stop>
         <input type="checkbox" :checked="isSelected(question.id)" @change="$emit('toggle-item', question.id)"
-          class="w-4 h-4 text-primary rounded-md border-border dark:border-ink-600 focus:ring-primary/30 cursor-pointer transition bg-white dark:!bg-ink-800">
+          class="w-4 h-4 rounded border-input text-primary shadow-xs focus-visible:ring-3 focus-visible:ring-ring/50 cursor-pointer transition">
       </div>
 
       <div class="flex-1 min-w-0">
@@ -32,64 +32,64 @@
           </span>
 
           <!-- Category tag: primary color, single badge -->
-          <span class="badge rounded-md bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">
+          <Badge variant="outline" class="rounded-md bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">
             {{ question.cat1 || '未分类' }}
-          </span>
+          </Badge>
 
           <!-- Tags: neutral, max 3 shown -->
-          <span v-for="tag in parsedTags.slice(0, 3)" :key="tag" class="badge rounded-md bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400 text-label">
+          <Badge variant="outline" v-for="tag in parsedTags.slice(0, 3)" :key="tag" class="rounded-md bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400 text-label">
             {{ tag }}
-          </span>
+          </Badge>
           <span v-if="parsedTags.length > 3" class="text-caption text-muted-foreground dark:text-ink-500">+{{ parsedTags.length - 3 }}</span>
 
           <!-- Ownership badge (mixed mode only) -->
-          <span v-if="showOwnership" class="badge text-label"
+          <Badge variant="outline" v-if="showOwnership" class="text-label"
             :class="question.is_personal
               ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-600 dark:text-violet-400'
               : 'bg-teal-50 dark:bg-teal-900/25 text-teal-600 dark:text-teal-400'">
             {{ question.is_personal ? '个人' : '公共' }}
-          </span>
+          </Badge>
 
           <!-- Position badge -->
-          <span v-if="question.job_position" class="badge rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400">
+          <Badge variant="outline" v-if="question.job_position" class="rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-400">
             {{ formatPosition(question.job_position) }}
-          </span>
+          </Badge>
 
           <!-- Difficulty: semantic color (the only strong color on the row) -->
-          <span class="badge ml-auto" :class="difficultyClass">
+          <Badge variant="outline" class="ml-auto" :class="difficultyClass">
             {{ question.difficulty || '-' }}
-          </span>
+          </Badge>
 
           <!-- Practice status: compact -->
-          <span v-if="practiceInfo" class="badge text-label"
+          <Badge variant="outline" v-if="practiceInfo" class="text-label"
             :class="practiceInfo.best_score >= 80 ? 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-600 dark:text-emerald-400' : practiceInfo.best_score >= 60 ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-600 dark:text-amber-400' : 'bg-red-50 dark:bg-red-900/25 text-red-500 dark:text-red-400'">
             {{ practiceInfo.best_score }}
-          </span>
-          <span v-else class="badge rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-500">New</span>
+          </Badge>
+          <Badge variant="outline" v-else class="rounded-md text-label bg-muted dark:bg-ink-800/80 text-muted-foreground dark:text-ink-500">New</Badge>
         </div>
 
         <!-- Actions row: hover-reveal for secondary actions -->
         <div class="flex gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <button v-if="isAdmin" @click.stop="$emit('retag', question)" :disabled="question._isRetagging"
-            class="btn-ghost text-xs px-2 py-1 rounded-lg disabled:opacity-50 flex items-center gap-1">
+          <Button variant="ghost" size="sm" v-if="isAdmin" @click.stop="$emit('retag', question)" :disabled="question._isRetagging"
+            class="px-2 py-1 flex items-center gap-1">
             <svg v-if="question._isRetagging" class="animate-spin w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
             {{ question._isRetagging ? '分类中...' : '重新分类' }}
-          </button>
-          <button v-if="canDelete" @click.stop="$emit('delete', question)" class="btn-ghost text-xs px-2 py-1 rounded-lg text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/15 transition-all duration-200" title="删除">
+          </Button>
+          <Button variant="ghost" size="sm" v-if="canDelete" @click.stop="$emit('delete', question)" class="px-2 py-1 text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/15 transition-all duration-200" title="删除">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
             </svg>
-          </button>
+          </Button>
         </div>
       </div>
 
       <!-- Practice button (always visible, primary action) -->
-      <button @click.stop="$emit('practice', question)"
-        class="shrink-0 btn-primary text-xs px-2.5 py-1 font-semibold"
+      <Button variant="default" size="sm" @click.stop="$emit('practice', question)"
+        class="shrink-0 text-xs px-2.5 py-1 font-semibold"
         title="做题">
         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
         做题
-      </button>
+      </Button>
 
       <!-- Star (always visible, tertiary action) -->
       <button @click.stop="$emit('toggle-star', question)" class="p-1 transition-all duration-200 hover:scale-110 star-btn shrink-0" :title="question.is_starred ? '取消收藏' : '收藏'">
@@ -112,10 +112,10 @@
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
-          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input dark:border-ink-700/50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20 dark:focus:ring-primary/15 focus:border-primary/40 font-mono bg-card text-foreground transition-all duration-200"></textarea>
+          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input dark:border-ink-700/50 rounded-md p-4 text-sm focus:ring-2 focus:ring-primary/20 dark:focus:ring-primary/15 focus:border-primary/40 font-mono bg-card text-foreground transition-all duration-200"></textarea>
           <div class="flex gap-2 justify-end mt-2">
-            <button @click="question._isEditingAnswer = false" class="btn-secondary px-5">取消</button>
-            <button @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="btn-primary px-5">保存</button>
+            <Button variant="outline" size="sm" @click="question._isEditingAnswer = false" class="px-5">取消</Button>
+            <Button variant="default" size="sm" @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="px-5">保存</Button>
           </div>
         </div>
 
@@ -123,17 +123,17 @@
         <div v-else>
           <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
             <div class="absolute top-0 right-0 flex gap-1 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-lg hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
                 编辑
               </button>
-              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-lg hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
+              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-surface-700/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-surface-600 transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
             </div>
             <div v-if="(fullUserAnswer || question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
               <span class="text-label text-primary bg-primary/10 dark:bg-primary/15 px-2 py-0.5 rounded">个人答案</span>
             </div>
-            <div class="rounded-lg border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
+            <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
           </div>
 
           <div v-else-if="isLoadingDetail" class="flex flex-col items-center justify-center py-8 text-primary gap-3">
@@ -159,17 +159,17 @@
             </p>
             <p v-else class="text-muted-foreground mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
-              <button v-if="question.has_reference_answer && !(fullUserAnswer || question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="btn-secondary px-5 py-2">
+              <Button variant="outline" size="sm" v-if="question.has_reference_answer && !(fullUserAnswer || question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="px-5 py-2">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 使用参考答案
-              </button>
-              <button @click.stop="$emit('generate-answer', question)" class="btn-primary px-5 py-2">
+              </Button>
+              <Button variant="default" size="sm" @click.stop="$emit('generate-answer', question)" class="px-5 py-2">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 AI 生成答案
-              </button>
-              <button @click="question._isEditingAnswer = true; question._editAnswer = ''" class="btn-ghost px-5 py-2">
+              </Button>
+              <Button variant="ghost" size="sm" @click="question._isEditingAnswer = true; question._editAnswer = ''" class="px-5 py-2">
                 手动编写
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -187,7 +187,7 @@
         <div ref="sourcesContentRef" :style="{ height: question._showSources ? 'auto' : '0px', overflow: question._showSources ? '' : 'hidden' }">
         <div class="px-5 pb-5 space-y-2">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
-            class="bg-card border border-border rounded-lg p-3 flex items-start gap-3">
+            class="bg-card border border-border rounded-md p-3 flex items-start gap-3">
             <span class="text-caption text-muted-foreground font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>
             <div class="flex-1 min-w-0">
               <div v-if="src._origQuestion" class="text-xs text-muted-foreground mb-1 whitespace-pre-line">{{ src._origQuestion }}</div>
@@ -224,6 +224,8 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 
 const sourceBtnRef = ref(null)
 const sourcesContentRef = ref(null)
@@ -453,29 +455,29 @@ const dedupedSources = computed(() => {
 
 /* 暗黑模式：答案区域高对比度 */
 .dark :deep(.answer-content) {
-  color: #f5f5f4;
+  color: var(--foreground);
 }
 .dark :deep(.answer-content p),
 .dark :deep(.answer-content li),
 .dark :deep(.answer-content span) {
-  color: #f5f5f4;
+  color: var(--foreground);
 }
 .dark :deep(.answer-content h1),
 .dark :deep(.answer-content h2),
 .dark :deep(.answer-content h3),
 .dark :deep(.answer-content h4) {
-  color: #fafaf9;
+  color: var(--foreground);
 }
 .dark :deep(.answer-content code) {
-  background-color: #302b28;
-  color: #f5f5f4;
+  background-color: oklch(0.32 0 0);
+  color: var(--foreground);
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
 }
 .dark :deep(.answer-content pre) {
-  background-color: #1c1917;
-  color: #f5f5f4;
-  border: 1px solid #44403c;
+  background-color: oklch(0.19 0 0);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 1rem;
 }
@@ -484,13 +486,13 @@ const dedupedSources = computed(() => {
   padding: 0;
 }
 .dark :deep(.answer-content a) {
-  color: #fdba74;
+  color: oklch(0.78 0.13 55);
 }
 .dark :deep(.answer-content strong) {
-  color: #fafaf9;
+  color: var(--foreground);
 }
 .dark :deep(.answer-content blockquote) {
-  border-left-color: #78716c;
-  color: #d6d3d1;
+  border-left-color: var(--muted-foreground);
+  color: oklch(0.82 0.01 89.876);
 }
 </style>
