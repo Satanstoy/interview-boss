@@ -54,63 +54,6 @@
     background-color: #52525b;
   }
 
-  /* Smooth card — shadcn-like low elevation */
-  .card-smooth {
-    @apply bg-white rounded-xl border border-surface-200 dark:bg-surface-900 dark:border-ink-800 transition-colors duration-200 ease-out;
-    box-shadow:
-      0 1px 3px 0 rgb(0 0 0 / 0.04),
-      0 1px 2px -1px rgb(0 0 0 / 0.03);
-  }
-  .dark .card-smooth {
-    box-shadow:
-      0 1px 3px 0 rgb(0 0 0 / 0.2),
-      0 2px 6px -1px rgb(0 0 0 / 0.15);
-  }
-  .card-smooth:hover {
-    @apply border-surface-300 dark:border-ink-700;
-    box-shadow:
-      0 2px 8px -4px rgb(0 0 0 / 0.08),
-      0 1px 2px -1px rgb(0 0 0 / 0.03);
-  }
-  .dark .card-smooth:hover {
-    box-shadow:
-      0 2px 10px -4px rgb(0 0 0 / 0.3),
-      0 1px 4px -2px rgb(0 0 0 / 0.2);
-  }
-
-  /* Button base — with press micro-interaction */
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
-  }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(0.96);
-    box-shadow: 0 2px 8px -4px rgb(0 0 0 / 0.2);
-  }
-  .btn-primary:active:not(:disabled) {
-    @apply translate-y-0 scale-[0.98];
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-  }
-
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-ink-700 dark:text-ink-300 bg-white dark:bg-surface-900 border border-surface-200 dark:border-ink-700 rounded-md transition-all duration-200 hover:bg-surface-50 dark:hover:bg-ink-800 hover:border-surface-300 dark:hover:border-ink-600;
-  }
-  .btn-secondary:active {
-    @apply scale-[0.98] bg-surface-100 dark:bg-ink-800;
-  }
-
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-sm font-medium text-ink-500 dark:text-ink-400 rounded-lg transition-all duration-200 hover:bg-surface-100 dark:hover:bg-ink-800 hover:text-ink-800 dark:hover:text-ink-200;
-  }
-  .btn-ghost:active {
-    @apply scale-[0.96] bg-surface-200 dark:bg-ink-700;
-  }
-
-  /* Badge */
-  .badge {
-    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md;
-  }
-
   /* Prose chat — unified markdown rendering for chat messages */
   .prose-chat p { margin: 0 0 0.5em; }
   .prose-chat p:last-child { margin-bottom: 0; }
