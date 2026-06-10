@@ -34,7 +34,7 @@
           </button>
           <button
             v-if="isAuthenticatedForUi"
-            @click="showSettings = true"
+            @click="showSettingsPage = true"
             class="p-2 rounded-md text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition-all duration-200"
             title="系统配置"
           >
@@ -44,45 +44,48 @@
       </div>
     </nav>
 
-    <!-- Settings modal -->
-    <SettingsPanel
-      :visible="showSettings"
-      :active-season="activeSeason"
-      :is-admin="displayUser?.is_admin"
-      :is-building="isBuilding"
-      @close="onSettingsClose"
-      @update:active-season="activeSeason = $event"
-      @settings-saved="onSettingsSaved"
-      @position-changed="onPositionChanged"
-      @build-master-bank="triggerBuildMasterBank"
-    />
-
     <!-- Login gate -->
     <LoginPage v-if="!isAuthenticatedForUi" @login-success="handleLoginSuccess" />
+
+    <!-- Settings page (full-page overlay) -->
+    <SettingsPage
+      v-if="isAuthenticatedForUi && showSettingsPage"
+      :display-user="displayUser"
+      :practice-stats="practiceStats"
+      :master-bank="masterBank"
+      :is-admin="displayUser?.is_admin"
+      :active-season="activeSeason"
+      :available-seasons="availableSeasons"
+      :is-building="isBuilding"
+      @close="showSettingsPage = false"
+      @go-to-question="onGoToQuestion"
+      @logout="handleLogout"
+      @bank-mode-changed="handleBankModeChanged"
+      @profile-updated="fetchTableData"
+      @build-master-bank="triggerBuildMasterBank"
+      @update:active-season="activeSeason = $event"
+      @sidebar-collapsed-changed="sidebarCollapsed = $event"
+    />
 
     <!-- Simple two-column layout: sidebar left, content right -->
     <div v-else class="flex min-h-screen">
       <!-- Sidebar: dynamic width, collapsible -->
       <aside
-        class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 transition-all duration-300"
-        :class="sidebarCollapsed ? 'w-[60px]' : 'w-64'"
+        class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 overflow-hidden"
+        :style="{ width: sidebarCollapsed ? '60px' : '256px', transition: 'width 380ms cubic-bezier(0.4, 0, 0.2, 1)' }"
       >
         <AppSidebar
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
-          :popular-tags="popularTags"
-          :selected-tag="selectedTag"
-          :master-bank="masterBank"
           :display-user="displayUser"
           :pending-review-count="pendingReviewCount"
           @update:active-tab="onTabChange"
           @update:collapsed="sidebarCollapsed = $event"
-          @select-tag="onSelectTag"
           @go-to-question="onGoToQuestion"
           @logout="handleLogout"
           @bank-mode-changed="handleBankModeChanged"
           @show-review="showReviewPanel = true"
-          @show-profile="showProfile = true"
+          @show-settings="showSettingsPage = true"
         />
       </aside>
 
@@ -91,9 +94,7 @@
         <SiteHeader
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
-          :is-dark="isDark"
-          @toggle-dark="toggleDark()"
-          @show-settings="showSettings = true"
+          @show-settings="showSettingsPage = true"
         />
 
         <TabBar class="md:hidden" :active-tab="activeTab" @update:active-tab="onTabChange" />
@@ -149,6 +150,32 @@
                   @update:search-query="searchQuery = $event"
                   @update:filter-difficulty="filterDifficulty = $event"
                 />
+
+                <!-- Category tags (migrated from sidebar) -->
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                  <button
+                    @click="onSelectTag('全部')"
+                    class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium"
+                    :class="selectedTag === '全部'
+                      ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
+                      : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+                  >
+                    全部
+                    <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBank.length }}</span>
+                  </button>
+                  <button
+                    v-for="(count, topic) in popularTags" :key="topic"
+                    @click="onSelectTag(topic)"
+                    class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group"
+                    :class="selectedTag === topic
+                      ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
+                      : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
+                  >
+                    {{ topic }}
+                    <span class="ml-1 opacity-60 font-mono tabular-nums">{{ count }}</span>
+                  </button>
+                </div>
+
                 <!-- Sub-tag filter chips -->
                 <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
                   <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
@@ -158,7 +185,7 @@
                     @click="toggleSubTag(st.tag)"
                     class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
                     :class="selectedSubTags.includes(st.tag)
-                      ? 'bg-sage-50 dark:bg-sage-700/20 text-sage-700 dark:text-sage-400 border-sage-200 dark:border-sage-700 font-semibold shadow-sm'
+                      ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
                       : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
                   >
                     {{ st.tag }}
@@ -166,8 +193,8 @@
                   </button>
                 </div>
 
-                <!-- Exam Distribution Chart -->
-                <ExamDistribution :master-bank="masterBank" />
+                <!-- Exam Distribution Chart (collapsible) -->
+                <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
 
                 <!-- MasterBankList -->
                 <div class="flex flex-col flex-1 min-h-0">
@@ -408,16 +435,6 @@
     <Toaster position="top-right" richColors closeButton />
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
-    <ProfilePanel
-      :visible="showProfile"
-      :user="currentUser"
-      :practice-stats="practiceStats"
-      :master-bank="masterBank"
-      :recommend-seed="recommendSeed"
-      @close="showProfile = false"
-      @go-to-question="onGoToQuestion"
-      @refresh-recommend="recommendSeed++"
-    />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" @answer-evaluated="handlePracticeEvaluated" @navigate-to-interview="onNavigateToInterview" />
     <PracticeMode
@@ -484,7 +501,7 @@ import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 
 import { defineAsyncComponent } from 'vue'
 import StagingPanel from '@/components/business/StagingPanel.vue'
-import SettingsPanel from '@/components/business/SettingsPanel.vue'
+import SettingsPage from '@/components/business/SettingsPage.vue'
 import TabBar from '@/components/common/TabBar.vue'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -522,10 +539,6 @@ const KnowledgeGraph = defineAsyncComponent({
 const ChatView = defineAsyncComponent({
   ...asyncOptions,
   loader: () => import('@/components/business/ChatView.vue'),
-})
-const ProfilePanel = defineAsyncComponent({
-  ...asyncOptions,
-  loader: () => import('@/components/business/ProfilePanel.vue'),
 })
 const AdminReview = defineAsyncComponent({
   ...asyncOptions,
@@ -598,15 +611,14 @@ const {
 } = useBuildTrigger({ onRebuildDone: () => { fetchTableData(); fetchAnalytics() } })
 
 // ── UI state ──
-const sidebarCollapsed = ref(false)
+const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
+const showSettingsPage = ref(false)
 const mockInterviewRef = ref(null)
 const masterBankRef = ref(null)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
 const interviewPageSize = ref(20)
-const showSettings = ref(false)
-const showProfile = ref(false)
 const recommendSeed = ref(0)
 const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
@@ -775,6 +787,10 @@ const enterPracticeMode = () => {
 const handlePracticeModeClose = () => { showPracticeMode.value = false; fetchPracticeStats() }
 const handlePracticeModeEvaluated = async ({ questionId, score }) => { await fetchPracticeStats() }
 
+watch(sidebarCollapsed, (val) => {
+  localStorage.setItem('sidebar-collapsed', String(val))
+})
+
 watch(activeTab, (newTab, oldTab) => {
   if (oldTab === 'MockInterview' && newTab === 'MasterBank') { fetchPracticeStats() }
 })
@@ -888,11 +904,6 @@ const onNavigateToInterview = (event) => {
   }
   scrollAndHighlight()
 }
-
-// ── Settings callbacks ──
-const onSettingsClose = () => { showSettings.value = false }
-const onSettingsSaved = () => { loadAllData() }
-const onPositionChanged = () => { loadAllData() }
 
 // ── Lifecycle ──
 onMounted(async () => {

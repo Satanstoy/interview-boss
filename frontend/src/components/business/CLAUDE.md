@@ -12,6 +12,7 @@
 | `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审） |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染） |
 | `ChatView.vue` | Chat 主视图（SSE 流式） |
+| `ThinkingBlock.vue` | AI 思维链展示组件（可展开/折叠） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
 | `LoginModal.vue` | 登录弹窗 |
@@ -21,10 +22,15 @@
 | `NewChatModal.vue` | 新建对话弹窗 |
 | `PracticeMode.vue` | 练习模式选择 |
 | `PracticePanel.vue` | 练习面板 |
-| `ProfilePanel.vue` | 个人信息面板（学习进度、每日推荐、收藏夹、简历上传） |
 | `QuestionCard.vue` | 题目卡片 |
 | `SearchFilterBar.vue` | 搜索过滤栏 |
-| `SettingsPanel.vue` | 系统设置面板（管理员） |
+| `SettingsPage.vue` | 统一设置页面（个人信息、面试偏好、AI 配置、账户安全、管理员设置） |
+| `SettingsNav.vue` | 设置页左侧导航栏 |
+| `SettingsProfile.vue` | 设置 - 个人信息（邮箱、简历、进度、题库模式、外观） |
+| `SettingsInterview.vue` | 设置 - 面试偏好（岗位、收藏夹、AI 分类） |
+| `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数） |
+| `SettingsSecurity.vue` | 设置 - 账户安全（密码修改、退出登录） |
+| `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作） |
 | `StagingPanel.vue` | 暂存面板 |
 | `UserMenu.vue` | 用户菜单 |
 

@@ -27,6 +27,7 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 ## 核心模式
 
 - **流式输出**：通过 SSE yield 每个 chunk
+- **Thinking 支持**：`stream_llm_messages(yield_thinking=True)` 支持 DeepSeek reasoning_content 和 Anthropic ThinkingBlock，事件类型：`thinking_start` → `thinking` → `thinking_done` → `chunk`
 - **记忆系统**：`chat_memories` 表存储用户长期记忆，每次对话自动召回
 - **Token 预算**：`budget.py` 控制上下文窗口大小，优先保留最近消息
 - **面试流程**：开场(自我介绍) → 提问(一次一题) → 收尾(反问)，由 `_determine_interview_phase()` 根据消息数自动切换

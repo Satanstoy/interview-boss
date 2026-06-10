@@ -447,16 +447,67 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     # 添加当前用户消息
     messages.append({"role": "user", "content": user_message})
 
-    # 流式生成回复
+    # 流式生成回复（支持 thinking）
     full_response = ""
+    thinking_content = ""
+    is_thinking = False
+    import time
+
+    thinking_start_time = None
+
     try:
-        async for chunk in stream_llm_messages(messages, user_id=user_id):
-            full_response += chunk
-            yield {"type": "chunk", "content": chunk}
+        async for event in stream_llm_messages(
+            messages, user_id=user_id, yield_thinking=True
+        ):
+            if not isinstance(event, dict):
+                # 向后兼容：如果不是 dict，当作普通 content
+                full_response += event
+                yield {"type": "chunk", "content": event}
+                continue
+
+            event_type = event.get("type")
+            content = event.get("content", "")
+
+            if event_type == "thinking_start":
+                # ThinkingBlock 开始
+                is_thinking = True
+                thinking_start_time = time.time()
+                yield {"type": "thinking_start", "content": ""}
+            elif event_type == "thinking":
+                # ThinkingBlock 内容
+                thinking_content += content
+                yield {"type": "thinking", "content": content}
+            elif event_type == "content":
+                # TextBlock 内容（thinking 结束后的正式回答）
+                if is_thinking:
+                    is_thinking = False
+                    duration = (
+                        round(time.time() - thinking_start_time, 1)
+                        if thinking_start_time
+                        else 0
+                    )
+                    yield {
+                        "type": "thinking_done",
+                        "duration": duration,
+                        "content": thinking_content,
+                    }
+                full_response += content
+                yield {"type": "chunk", "content": content}
     except Exception as e:
         logger.error(f"生成回复失败: {e}")
         yield {"type": "error", "message": "生成回复时出现错误，请稍后重试。"}
         return
+
+    # 如果 thinking 还没结束（模型没有显式结束 thinking）
+    if is_thinking:
+        duration = (
+            round(time.time() - thinking_start_time, 1) if thinking_start_time else 0
+        )
+        yield {
+            "type": "thinking_done",
+            "duration": duration,
+            "content": thinking_content,
+        }
 
     # 返回完成事件（包含元数据）
     metadata = {}

@@ -6,7 +6,7 @@
 ## 子目录
 
 - `common/` — 通用 UI 组件（DataTable、TabBar、PaginationBar 等），无业务依赖
-- `business/` — 业务组件（MasterBankList、PracticePanel、SettingsPanel 等）
+- `business/` — 业务组件（MasterBankList、PracticePanel、SettingsPage 等）
 
 ## 规则
 

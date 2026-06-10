@@ -1,6 +1,8 @@
 #!/bin/bash
-# InterviewBoss Docker 部署脚本
+# InterviewBoss Docker 部署脚本（多项目安全版）
 # 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup]
+# 不使用全局 prune（docker system prune / container prune / network prune / image prune），
+# 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
 set -euo pipefail
 
@@ -11,10 +13,10 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前至少保留 8GB；构建后尽量恢复到 10GB。
-# 40GB 小盘机器上，Python/Node 多阶段构建会短时间制造数 GB cache，阈值过低会把根分区打满。
-DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-5120}"
-DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-6144}"
+# 磁盘保护阈值（单位：MB）。构建前至少保留 3GB；构建后尽量恢复到 4GB。
+# 多项目安全：只用 docker builder prune 收缩缓存，不用全局 prune。
+DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-3072}"
+DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-4096}"
 BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-256MB}"
 
 # 颜色
@@ -55,10 +57,10 @@ prune_build_cache() {
 }
 
 prune_unused_docker() {
-  warn "清理未使用的 Docker 容器、网络、镜像和构建缓存..."
-  docker container prune -f >/dev/null 2>&1 || true
-  docker network prune -f >/dev/null 2>&1 || true
-  docker image prune -f >/dev/null 2>&1 || true
+  warn "清理本项目的未使用资源（多项目安全，不使用全局 prune）..."
+  # Only remove images built locally by this compose project.
+  # Does NOT use docker system prune / container prune / network prune / image prune.
+  docker compose down --rmi local 2>/dev/null || true
   prune_build_cache
 }
 
@@ -70,7 +72,7 @@ ensure_disk_before_build() {
     return 0
   fi
 
-  warn "根分区可用空间 ${free_mb}MB，低于构建前阈值 ${DEPLOY_MIN_FREE_MB}MB，尝试清理 Docker 未使用资源..."
+  warn "根分区可用空间 ${free_mb}MB，低于构建前阈值 ${DEPLOY_MIN_FREE_MB}MB，尝试清理构建缓存..."
   prune_unused_docker
 
   free_mb=$(root_free_mb)
@@ -84,13 +86,12 @@ ensure_disk_before_build() {
 
 cleanup_after_build() {
   local free_mb
-  # 每次构建后都收缩 BuildKit cache，避免多次部署后慢慢吃满磁盘。
-  docker image prune -f >/dev/null 2>&1 || true
   prune_build_cache
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，进一步清理未使用 Docker 资源..."
-    prune_unused_docker
+    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，进一步清理本项目资源..."
+    docker compose down --rmi local 2>/dev/null || true
+    prune_build_cache
   fi
   show_disk_usage
 }
@@ -220,7 +221,7 @@ do_test() {
 
 # ── 清理旧镜像 ──
 do_cleanup() {
-  log "清理未使用的 Docker 资源，并按保留容量收缩 BuildKit cache..."
+  log "清理本项目资源（多项目安全）..."
   prune_unused_docker
   show_disk_usage
   log "清理完成"
@@ -280,7 +281,7 @@ case "$MODE" in
     echo "  worker-logs     查看 Worker 日志"
     echo "  test            运行 pytest 测试（可传入 pytest 参数）"
     echo "  backup          备份数据库和 Redis 数据"
-    echo "  cleanup         清理未使用的 Docker 资源和过量 BuildKit cache"
+    echo "  cleanup         清理本项目资源（不影响其他项目）和 BuildKit cache"
     echo "  migrate         停止宿主机服务（首次迁移用）"
     echo "  all             构建 + 启动核心服务（首次部署）"
     echo ""

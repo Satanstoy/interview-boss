@@ -43,24 +43,6 @@
           </p>
         </div>
 
-        <!-- Bank mode -->
-        <div class="px-4 py-3 border-b border-border">
-          <p class="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">题库模式</p>
-          <div class="flex gap-1 bg-muted dark:bg-card rounded-lg p-0.5">
-            <button
-              v-for="mode in bankModes"
-              :key="mode.value"
-              @click="switchBankMode(mode.value)"
-              :class="[
-                'flex-1 px-2 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
-                user?.bank_mode === mode.value
-                  ? 'bg-white dark:bg-muted text-primary-700 dark:text-primary-400 shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground/50 transition-colors duration-200'
-              ]"
-            >{{ mode.label }}</button>
-          </div>
-        </div>
-
         <!-- Admin review -->
         <button
           v-if="user?.is_admin"
@@ -76,17 +58,18 @@
           <span v-if="pendingCount > 0" class="ml-auto bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs px-2 py-0.5 rounded-full font-bold">{{ pendingCount }}</span>
         </button>
 
-        <!-- Profile -->
+        <!-- Settings -->
         <button
-          @click="$emit('show-profile'); showMenu = false"
+          @click="$emit('show-settings'); showMenu = false"
           class="w-full text-left px-4 py-2.5 text-sm text-foreground hover:bg-muted dark:hover:bg-muted flex items-center gap-2.5 transition-colors"
         >
           <div class="size-7 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
             <svg class="size-4 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          个人信息
+          设置
         </button>
 
         <!-- Logout -->
@@ -109,7 +92,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
-import { authUpdateBankMode, authLogout } from '@/api/index.js'
+import { authLogout } from '@/api/index.js'
 import { setAuthToken } from '@/services/http.js'
 
 const props = defineProps({
@@ -120,18 +103,12 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['logout', 'show-review', 'bank-mode-changed', 'show-profile'])
+const emit = defineEmits(['logout', 'show-review', 'show-settings'])
 
 const showMenu = ref(false)
 const buttonRef = ref(null)
 const dropdownRef = ref(null)
 const dropdownStyle = ref({})
-
-const bankModes = [
-  { value: 'public', label: '公共' },
-  { value: 'personal', label: '个人' },
-  { value: 'mixed', label: '混用' }
-]
 
 // Calculate dropdown position when menu opens
 watch(showMenu, async (open) => {
@@ -169,17 +146,6 @@ onUnmounted(() => {
   window.removeEventListener('scroll', onScrollOrResize, true)
   window.removeEventListener('resize', onScrollOrResize)
 })
-
-async function switchBankMode(mode) {
-  if (mode === props.user?.bank_mode) return
-  try {
-    await authUpdateBankMode(mode)
-    const updated = { ...props.user, bank_mode: mode }
-    emit('bank-mode-changed', updated)
-  } catch (e) {
-    console.error('切换题库模式失败:', e)
-  }
-}
 
 async function handleLogout() {
   showMenu.value = false

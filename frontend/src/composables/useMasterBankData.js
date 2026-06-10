@@ -5,7 +5,7 @@
  *       标签/难度/搜索/招聘季等过滤逻辑、analytic s/practiceStats
  * 不负责：认证、selection、UI 模态框状态
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invalidateCache, getFriendlyError } from '@/services/http.js'
 import * as api from '@/api/index.js'
 
@@ -46,7 +46,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     hasMore.value = true
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE })
+        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
       ])
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
@@ -73,7 +73,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     isLoadingMore.value = true
     try {
       const nextPage = currentPage.value + 1
-      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE })
+      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
       const newItems = (resp.items || resp).map(q => ({
         ...q, _showAnswer: false, _showSources: false,
         _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
@@ -103,6 +103,11 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     } catch (e) { console.warn('加载招聘季失败', e) }
   }
   const loadAllData = () => { fetchTableData(); fetchAnalytics(); fetchPracticeStats(); loadActiveSeason() }
+
+  // ── Re-fetch when tag filter changes (server-side filtering) ──
+  watch(selectedTag, () => {
+    fetchTableData()
+  })
 
   // ── Computed: tags ──
   const popularTags = computed(() => {

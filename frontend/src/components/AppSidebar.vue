@@ -17,29 +17,26 @@ import UserMenu from '@/components/business/UserMenu.vue'
 const props = defineProps({
   activeTab: { type: String, default: 'masterBank' },
   sidebarTabs: { type: Array, default: () => [] },
-  popularTags: { type: Object, default: () => ({}) },
-  selectedTag: { type: String, default: '全部' },
-  masterBank: { type: Array, default: () => [] },
   displayUser: { type: Object, default: null },
   pendingReviewCount: { type: Number, default: 0 },
 })
 
 const emit = defineEmits([
   'update:active-tab',
-  'select-tag',
   'go-to-question',
   'logout',
   'bank-mode-changed',
   'show-review',
-  'show-profile',
+  'show-settings',
   'update:collapsed',
 ])
 
-const collapsed = ref(false)
+const collapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
 const logoHovered = ref(false)
 
 function toggleCollapsed() {
   collapsed.value = !collapsed.value
+  logoHovered.value = false
   emit('update:collapsed', collapsed.value)
 }
 
@@ -55,17 +52,16 @@ const iconMap = {
 }
 
 function onTabChange(key) { emit('update:active-tab', key) }
-function onSelectTag(tag) { emit('select-tag', tag) }
 function onGoToQuestion(q) { emit('go-to-question', q) }
 function handleLogout() { emit('logout') }
 function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
 function handleShowReview() { emit('show-review') }
-function handleShowProfile() { emit('show-profile') }
+function handleShowSettings() { emit('show-settings') }
 </script>
 
 <template>
   <!-- Collapsed: logo + nav icons + avatar -->
-  <div v-if="collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1">
+  <div v-if="collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1 animate-sidebar-collapse">
     <!-- Logo → hover shows PanelLeft icon → click expands -->
     <button
       @mouseenter="logoHovered = true"
@@ -95,7 +91,7 @@ function handleShowProfile() { emit('show-profile') }
       v-for="tab in sidebarTabs"
       :key="tab.key"
       @click="onTabChange(tab.key)"
-      class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors"
+      class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
       :class="activeTab === tab.key
         ? 'bg-sidebar-accent text-sidebar-accent-foreground'
         : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
@@ -122,12 +118,12 @@ function handleShowProfile() { emit('show-profile') }
       @logout="handleLogout"
       @bank-mode-changed="handleBankModeChanged"
       @show-review="handleShowReview"
-      @show-profile="handleShowProfile"
+      @show-settings="handleShowSettings"
     />
   </div>
 
   <!-- Expanded: full sidebar -->
-  <div v-else class="flex flex-col h-full overflow-hidden">
+  <div v-else class="flex flex-col h-full overflow-hidden animate-sidebar-expand">
     <!-- Header: logo + PanelLeft toggle -->
     <div class="flex items-center justify-between px-4 py-3 shrink-0">
       <a href="#" class="flex items-center gap-3 min-w-0">
@@ -154,7 +150,7 @@ function handleShowProfile() { emit('show-profile') }
         v-for="tab in sidebarTabs"
         :key="tab.key"
         @click="onTabChange(tab.key)"
-        class="group relative flex items-center w-full rounded-lg transition-all duration-150 gap-3 px-3 py-2"
+        class="group relative flex items-center w-full rounded-lg transition-all duration-200 gap-3 px-3 py-2"
         :class="activeTab === tab.key
           ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
           : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
@@ -174,33 +170,6 @@ function handleShowProfile() { emit('show-profile') }
           {{ tab.count }}
         </span>
       </button>
-
-      <!-- Category Directory -->
-      <div class="mx-2 my-2 h-px bg-sidebar-border/50"></div>
-      <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-        <div class="px-2 py-2">
-          <h3 class="text-xs font-bold text-ink-500 dark:text-ink-400 mb-2 uppercase tracking-wider px-2">分类目录</h3>
-          <ul class="space-y-0.5">
-            <li
-              @click="onSelectTag('全部')"
-              class="flex justify-between items-center text-xs cursor-pointer px-2.5 py-2 rounded-lg transition-all duration-200 border border-transparent"
-              :class="selectedTag === '全部' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-200 dark:border-emerald-800' : 'hover:bg-surface-50 dark:hover:bg-ink-800 text-ink-600 dark:text-ink-400'"
-            >
-              <span>全部</span>
-              <span class="text-ink-400 dark:text-ink-500 font-mono text-[11px] tabular-nums">{{ masterBank.length }}</span>
-            </li>
-            <li
-              v-for="(count, topic) in popularTags" :key="topic"
-              @click="onSelectTag(topic)"
-              class="flex justify-between items-center text-xs cursor-pointer px-2.5 py-2 rounded-lg transition-all duration-200 border border-transparent group"
-              :class="selectedTag === topic ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-200 dark:border-emerald-800' : 'hover:bg-surface-50 dark:hover:bg-ink-800 text-ink-600 dark:text-ink-400'"
-            >
-              <span class="break-all mr-2 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{{ topic }}</span>
-              <span class="text-ink-400 dark:text-ink-500 font-mono text-[11px] whitespace-nowrap tabular-nums group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors duration-200">{{ count }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
     </div>
 
     <!-- Footer: user menu -->
@@ -214,8 +183,34 @@ function handleShowProfile() { emit('show-profile') }
         @logout="handleLogout"
         @bank-mode-changed="handleBankModeChanged"
         @show-review="handleShowReview"
-        @show-profile="handleShowProfile"
+        @show-settings="handleShowSettings"
       />
     </div>
   </div>
 </template>
+
+<style scoped>
+/*
+  Sidebar animation strategy:
+  - Container width: handled by App.vue's inline transition (380ms cubic-bezier(0.4,0,0.2,1))
+  - Content entrance: 300ms ease-out (decelerate into place)
+  - Content exit: 250ms ease-in (accelerate out)
+  - Per NN/G and Material Design: ease-out for entrances, ease-in for exits
+  - "Side panels stay nearby" → use standard easing, not exit easing
+*/
+.animate-sidebar-expand {
+  animation: sidebarExpand 300ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+.animate-sidebar-collapse {
+  animation: sidebarCollapse 250ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes sidebarExpand {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sidebarCollapse {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+</style>

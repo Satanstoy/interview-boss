@@ -53,8 +53,8 @@ src/
 | 题目操作 | `composables/useQuestionOps.js` + `services/masterBankApi.js` |
 | 练习/面试 | `services/practiceApi.js` + `components/business/PracticePanel.vue` |
 | 数据分析 | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
-| 用户配置 | `services/profileApi.js` + `components/business/SettingsPanel.vue` |
-| 个人中心 | `components/business/ProfilePanel.vue`（学习进度、每日推荐、收藏夹） |
+| 用户配置 | `services/profileApi.js` + `components/business/SettingsPage.vue` |
+| 个人中心 | `components/business/SettingsPage.vue`（个人信息、面试偏好、AI 配置、账户安全） |
 | 考点分布 | `components/business/ExamDistribution.vue`（高频题库页面） |
 | HTTP 客户端 | `services/http.js`（`api/index.js` 是 re-export 兼容层） |
 
@@ -68,7 +68,7 @@ src/
 | 改题目操作 | `composables/useQuestionOps.js` | `components/business/MasterBankList.vue` |
 | 改练习/面试 | `services/practiceApi.js` | `components/business/PracticePanel.vue` + `MockInterview.vue` |
 | 改数据分析 | `services/analyticsApi.js` | `components/business/AnalyticsSidebar.vue` |
-| 改用户配置 | `services/profileApi.js` | `components/business/SettingsPanel.vue` |
+| 改用户配置 | `services/profileApi.js` | `components/business/SettingsPage.vue` |
 | 改 App.vue 编排 | `App.vue` | 对应的 composable 或 component |
 | 新增页面/Tab | `App.vue`（Tab 切换逻辑） | 新建 `components/business/*.vue` + 对应 composable |
 

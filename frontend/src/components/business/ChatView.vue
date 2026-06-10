@@ -1,65 +1,103 @@
 <template>
   <div class="flex h-[calc(100vh-132px)] bg-background rounded-xl border border-border overflow-hidden shadow-card">
     <!-- Sidebar -->
-    <div class="w-72 shrink-0 border-r border-border flex flex-col bg-sidebar">
-      <!-- Header -->
-      <div class="border-b border-border p-4">
-        <div class="mb-3">
-          <h2 class="text-sm font-semibold text-sidebar-foreground">模拟面试</h2>
-          <p class="mt-0.5 text-xs text-muted-foreground">AI Interview Copilot</p>
-        </div>
-        <Button @click="showNewChat = true" class="w-full" size="sm">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-          新建面试
-        </Button>
+    <div 
+      class="shrink-0 border-r border-border flex flex-col bg-sidebar overflow-hidden"
+      :style="{ width: sidebarCollapsed ? '60px' : '288px', transition: 'width 380ms cubic-bezier(0.4, 0, 0.2, 1)' }"
+    >
+      <!-- Collapsed state -->
+      <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 h-full animate-sidebar-collapse">
+        <!-- Expand button -->
+        <button
+          @click="toggleSidebar"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-2 bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20 hover:scale-105"
+          title="展开侧栏"
+        >
+          <PanelLeft :size="18" />
+        </button>
+
+        <!-- New chat button -->
+        <button
+          @click="showNewChat = true"
+          class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          title="新建面试"
+        >
+          <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        </button>
+
+        <div class="flex-1"></div>
       </div>
 
-      <!-- Conversation list -->
-      <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
-        <!-- Loading skeleton -->
-        <div v-if="loadingConversations" class="p-2 flex flex-col gap-1">
-          <div v-for="i in 4" :key="i" class="flex items-center gap-2 px-3 py-2.5 rounded-lg">
-            <div class="flex-1 flex flex-col gap-1.5">
-              <Skeleton class="h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }" />
-              <Skeleton class="h-2.5 w-16 rounded" />
+      <!-- Expanded state -->
+      <div v-else class="flex flex-col h-full animate-sidebar-expand">
+        <!-- Header -->
+        <div class="border-b border-border p-4 shrink-0">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="text-sm font-semibold text-sidebar-foreground">模拟面试</h2>
+              <p class="mt-0.5 text-xs text-muted-foreground">AI Interview Copilot</p>
             </div>
+            <button
+              @click="toggleSidebar"
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-600 text-white shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25 hover:scale-105 transition-all duration-200"
+              title="收起侧栏"
+            >
+              <PanelLeft :size="16" />
+            </button>
           </div>
+          <Button @click="showNewChat = true" class="w-full" size="sm">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            新建面试
+          </Button>
         </div>
-        <div v-else-if="conversations.length === 0" class="p-4">
-          <AppEmpty title="暂无对话" description="点击上方按钮开始模拟面试" icon="💬">
-            <template #icon>
-              <span class="text-2xl">💬</span>
-            </template>
-          </AppEmpty>
-        </div>
-        <div v-else class="flex flex-col gap-0.5">
-          <div v-for="conv in conversations" :key="conv.id"
-            @click="selectConversation(conv.id)"
-            class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
-            :class="activeConversationId === conv.id
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50'">
-            <div class="size-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold transition-colors"
-              :class="activeConversationId === conv.id
-                ? 'bg-primary/10 text-primary'
-                : 'bg-muted text-muted-foreground'">
-              {{ conv.mode === 'jd_resume' ? 'JD' : 'AI' }}
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium truncate">{{ conv.title || '新对话' }}</div>
-              <div class="text-[11px] mt-0.5 truncate"
-                :class="activeConversationId === conv.id ? 'text-muted-foreground' : 'text-muted-foreground/60'">
-                {{ conv.mode === 'jd_resume' ? 'JD定制' : '自由练习' }} · {{ formatRelativeTime(conv.updated_at) }}
+
+        <!-- Conversation list -->
+        <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
+          <!-- Loading skeleton -->
+          <div v-if="loadingConversations" class="p-2 flex flex-col gap-1">
+            <div v-for="i in 4" :key="i" class="flex items-center gap-2 px-3 py-2.5 rounded-lg">
+              <div class="flex-1 flex flex-col gap-1.5">
+                <Skeleton class="h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }" />
+                <Skeleton class="h-2.5 w-16 rounded" />
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              @click.stop="handleDelete(conv.id)"
-              class="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
-            >
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            </Button>
+          </div>
+          <div v-else-if="conversations.length === 0" class="p-4">
+            <AppEmpty title="暂无对话" description="点击上方按钮开始模拟面试" icon="💬">
+              <template #icon>
+                <span class="text-2xl">💬</span>
+              </template>
+            </AppEmpty>
+          </div>
+          <div v-else class="flex flex-col gap-0.5">
+            <div v-for="conv in conversations" :key="conv.id"
+              @click="selectConversation(conv.id)"
+              class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
+              :class="activeConversationId === conv.id
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50'">
+              <div class="size-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold transition-colors"
+                :class="activeConversationId === conv.id
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-muted text-muted-foreground'">
+                {{ conv.mode === 'jd_resume' ? 'JD' : 'AI' }}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium truncate">{{ conv.title || '新对话' }}</div>
+                <div class="text-[11px] mt-0.5 truncate"
+                  :class="activeConversationId === conv.id ? 'text-muted-foreground' : 'text-muted-foreground/60'">
+                  {{ conv.mode === 'jd_resume' ? 'JD定制' : '自由练习' }} · {{ formatRelativeTime(conv.updated_at) }}
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                @click.stop="handleDelete(conv.id)"
+                class="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
+              >
+                <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -110,12 +148,20 @@
         <div ref="messagesContainer" class="flex-1 overflow-y-auto custom-scrollbar bg-muted/20 px-6 py-5 flex flex-col gap-5">
           <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
 
-          <!-- Streaming message with step timeline -->
+          <!-- Streaming message with thinking and content -->
           <div v-if="isSending" class="flex items-start gap-3">
             <div class="size-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold bg-card border border-border text-foreground shadow-sm">AI</div>
             <div class="max-w-[75%] min-w-0">
-              <!-- Processing steps timeline -->
-              <div v-if="!streamingContent && processingSteps.length > 0" class="rounded-xl border border-border bg-card p-3 shadow-sm">
+              <!-- Thinking block (real LLM thinking) -->
+              <ThinkingBlock
+                v-if="isThinking || thinkingContent"
+                :is-streaming="isThinking"
+                :content="thinkingContent"
+                :duration="thinkingDuration"
+              />
+
+              <!-- Processing steps timeline (simulated thinking) -->
+              <div v-else-if="!streamingContent && processingSteps.length > 0" class="rounded-xl border border-border bg-card p-3 shadow-sm">
                 <div class="mb-2 flex items-center justify-between">
                   <p class="text-xs font-semibold text-foreground">AI Thinking</p>
                   <span class="text-[11px] text-muted-foreground">RAG + Eval</span>
@@ -148,7 +194,7 @@
                 <span class="text-xs text-muted-foreground ml-1">{{ waitingText }}</span>
               </div>
               <!-- Streaming content -->
-              <div class="rounded-xl rounded-tl-md px-4 py-3 text-sm leading-relaxed bg-card text-foreground border border-border shadow-sm">
+              <div v-if="streamingContent" class="rounded-xl rounded-tl-md px-4 py-3 text-sm leading-relaxed bg-card text-foreground border border-border shadow-sm">
                 <div class="prose-chat streaming-content" v-html="renderStreamingContent"></div>
                 <span class="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle rounded-sm"></span>
               </div>
@@ -199,7 +245,9 @@ import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PanelLeft } from '@lucide/vue'
 import ChatMessage from './ChatMessage.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
 import NewChatModal from './NewChatModal.vue'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import * as chatApi from '@/services/chatApi.js'
@@ -225,6 +273,17 @@ const pendingResumeRef = ref(null)
 const pendingJdRef = ref(null)
 const autoScrollEnabled = ref(true)
 const processingSteps = ref([])
+
+// Thinking state
+const isThinking = ref(false)
+const thinkingContent = ref('')
+const thinkingDuration = ref(0)
+
+// Sidebar state
+const sidebarCollapsed = ref(false)
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
 
 const inputPlaceholder = computed(() => {
   const conv = conversations.value.find(c => c.id === activeConversationId.value)
@@ -359,6 +418,11 @@ async function handleSend() {
   processingSteps.value = []
   autoScrollEnabled.value = true
 
+  // Reset thinking state
+  isThinking.value = false
+  thinkingContent.value = ''
+  thinkingDuration.value = 0
+
   // Add user message to UI immediately
   const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
   messages.value.push(userMsg)
@@ -370,6 +434,17 @@ async function handleSend() {
         processingSteps.value.forEach(s => { s.done = true })
         processingSteps.value.push({ step: event.step, message: event.message, done: false })
         scrollToBottom()
+      } else if (event.type === 'thinking_start') {
+        isThinking.value = true
+        thinkingContent.value = ''
+        thinkingDuration.value = 0
+      } else if (event.type === 'thinking') {
+        thinkingContent.value += event.content
+        scrollToBottom()
+      } else if (event.type === 'thinking_done') {
+        isThinking.value = false
+        thinkingDuration.value = event.duration || 0
+        // Keep thinking content for display
       } else if (event.type === 'chunk') {
         streamingContent.value += event.content
         scrollToBottom()
@@ -394,6 +469,10 @@ async function handleSend() {
       if (pendingJdRef.value) {
         metadata.jd_ref = pendingJdRef.value
       }
+      if (thinkingContent.value) {
+        metadata.thinking = thinkingContent.value
+        metadata.thinking_duration = thinkingDuration.value
+      }
       messages.value.push({
         id: Date.now() + 1,
         role: 'assistant',
@@ -416,6 +495,9 @@ async function handleSend() {
   } finally {
     streamingContent.value = ''
     isSending.value = false
+    isThinking.value = false
+    thinkingContent.value = ''
+    thinkingDuration.value = 0
     await scrollToBottom()
   }
 }
@@ -505,6 +587,31 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ── Sidebar expand/collapse animations ── */
+/*
+   Timing rationale:
+   - Width: 380ms cubic-bezier(0.4,0,0.2,1) — Material "standard decelerate"
+     Feels fast-start then gentle-settle, avoids the rubber-band jerk of ease-in-out
+   - Content expand: 280ms cubic-bezier(0,0,0.2,1) with 100ms delay
+     Width starts widening first, then content fades in 100ms later
+   - Content collapse: 180ms ease-in — quick fade-out before width shrinks
+*/
+.animate-sidebar-expand {
+  animation: sidebarExpand 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+.animate-sidebar-collapse {
+  animation: sidebarCollapse 200ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+@keyframes sidebarExpand {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sidebarCollapse {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
 /* Step transition animations */
 .step-enter-active {
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);

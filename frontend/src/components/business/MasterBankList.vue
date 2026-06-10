@@ -32,7 +32,6 @@
     <DynamicScroller
       v-if="items.length > 0"
       ref="scrollerRef"
-      :key="items.map(i => i.id).join(',')"
       :items="items"
       :min-item-size="130"
       key-field="id"
@@ -114,7 +113,6 @@ let resizeObserver = null
 let lastHeight = 0
 let scrollCheckTimer = null
 
-/** 检测是否滚动到底部附近，触发加载更多 */
 const checkScrollForLoadMore = () => {
   if (!props.hasMore || props.isLoadingMore) return
   const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
@@ -150,14 +148,19 @@ const updateScrollerHeight = () => {
   const idx = Array.from(container.children).indexOf(scroller)
   const gapPx = idx > 0 ? idx * 8 : 0
 
-  // Navigate up: container → wrapper → panel (fixed height via CSS)
-  const wrapper = container.parentElement
-  const panel = wrapper?.parentElement
-  if (!panel) return
+  // Navigate up to find the ACTUAL scroll container (overflow-y-auto)
+  // container → wrapper (App.vue line 200) → v-if div → tab-content → Transition → scroll container
+  const scrollContainer = container.closest('.overflow-y-auto')
+  if (!scrollContainer) return
 
-  const panelH = panel.clientHeight
+  const scrollH = scrollContainer.clientHeight
+  const scrollPad = parseFloat(getComputedStyle(scrollContainer).paddingTop) + parseFloat(getComputedStyle(scrollContainer).paddingBottom)
+
+  // Calculate height of elements above the scroll container's content
+  const wrapper = container.parentElement
   const wrapperPad = parseFloat(getComputedStyle(wrapper).paddingTop) + parseFloat(getComputedStyle(wrapper).paddingBottom)
-  const h = panelH - wrapperPad - aboveH - gapPx - 8
+
+  const h = scrollH - scrollPad - wrapperPad - aboveH - gapPx - 8
 
   if (Math.abs(h - lastHeight) > 2) {
     lastHeight = h
@@ -176,10 +179,10 @@ onMounted(() => {
 
   // Observe panel for size changes (window resize, sidebar toggle)
   const container = containerRef.value
-  const panel = container?.parentElement?.parentElement
-  if (panel) {
+  const scrollContainer = container?.closest('.overflow-y-auto')
+  if (scrollContainer) {
     resizeObserver = new ResizeObserver(updateScrollerHeight)
-    resizeObserver.observe(panel)
+    resizeObserver.observe(scrollContainer)
   }
 })
 

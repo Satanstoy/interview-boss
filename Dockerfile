@@ -26,8 +26,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl libmagic1 && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends curl libmagic1
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com uv
 

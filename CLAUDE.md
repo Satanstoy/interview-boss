@@ -79,7 +79,7 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
 | 练习/模拟面试 | `routers/practice.py` + `routers/interview.py` | `components/business/PracticePanel.vue` + `MockInterview.vue` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
-| 用户配置 | `routers/profile.py` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPanel.vue` |
+| 用户配置 | `routers/profile.py` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
 | 手撕代码 | `routers/coding.py` | `services/codingApi.js` + `components/business/CodingPractice.vue` |
 | 题目去重 | `services/clustering.py` | — |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |

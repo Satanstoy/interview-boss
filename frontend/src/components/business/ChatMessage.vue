@@ -10,6 +10,14 @@
 
     <!-- Message bubble -->
     <div class="max-w-[75%] min-w-0 group">
+      <!-- Thinking block (for saved messages with thinking metadata) -->
+      <ThinkingBlock
+        v-if="!isUser && message.metadata?.thinking"
+        :is-streaming="false"
+        :content="message.metadata.thinking"
+        :duration="message.metadata.thinking_duration || 0"
+      />
+
       <div class="rounded-xl px-4 py-3 text-sm leading-relaxed relative shadow-sm"
         :class="isUser
           ? 'bg-primary text-primary-foreground rounded-tr-md'
@@ -82,6 +90,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
+import ThinkingBlock from './ThinkingBlock.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
