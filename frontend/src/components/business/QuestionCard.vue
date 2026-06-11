@@ -112,7 +112,7 @@
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
-          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input dark:border-border/50 rounded-md p-4 text-sm focus:ring-2 focus:ring-primary/20 dark:focus:ring-primary/15 focus:border-primary/40 font-mono bg-card text-foreground transition-all duration-200"></textarea>
+          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input rounded-lg p-4 text-sm focus:outline-none focus:ring-1 focus:ring-ring font-mono bg-transparent text-foreground transition-all duration-200"></textarea>
           <div class="flex gap-2 justify-end mt-2">
             <Button variant="outline" size="sm" @click="question._isEditingAnswer = false" class="px-5">取消</Button>
             <Button variant="default" size="sm" @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="px-5">保存</Button>

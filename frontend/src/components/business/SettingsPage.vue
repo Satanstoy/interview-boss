@@ -49,8 +49,6 @@ const sections = computed(() => {
         <ArrowLeft :size="16" />
         <span>返回工作台</span>
       </button>
-      <div class="h-4 w-px bg-border" />
-      <h1 class="text-base font-semibold text-foreground">设置</h1>
     </div>
 
     <!-- Body: nav + content — nav stays fixed, only content scrolls -->

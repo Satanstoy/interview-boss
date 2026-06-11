@@ -18,7 +18,7 @@
       <input
         v-model="sourceUrl"
         type="text"
-        class="flex-1 border border-border rounded-xl px-3.5 py-2.5 text-sm bg-card text-foreground focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 focus:border-blue-400 transition-all duration-200"
+        class="flex-1 border border-input rounded-lg px-3.5 py-2.5 text-sm bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all duration-200"
         placeholder="粘贴小红书/牛客网帖子链接（可选，用于去重）"
       />
     </div>
@@ -29,7 +29,7 @@
         <textarea
           v-model="stagedText"
           :maxlength="TEXT_MAX_LENGTH"
-          class="flex-1 w-full border border-border rounded-xl p-3 bg-card text-foreground focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 resize-none"
+          class="flex-1 w-full border border-input rounded-lg p-3 bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
           placeholder="在此处粘贴面经或 JD 的纯文本内容（可与右侧图片组合提交）..."
         ></textarea>
         <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-muted-foreground'">
@@ -101,7 +101,7 @@
               <SelectItem value="custom">自定义...</SelectItem>
             </SelectContent>
           </Select>
-          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-border rounded-xl px-3.5 py-2.5 text-sm bg-card text-foreground focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 transition-all duration-200" />
+          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-input rounded-lg px-3.5 py-2.5 text-sm bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all duration-200" />
         </div>
         <div v-if="isAdmin" class="flex-1">
           <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">提交到</label>

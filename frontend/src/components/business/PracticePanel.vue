@@ -67,7 +67,7 @@
             <!-- Answer/Solution tab -->
             <TabsContent value="answer" class="p-5">
               <div v-if="qState._isEditingAnswer" class="flex flex-col gap-3">
-                <textarea v-model="qState._editAnswer" rows="12" class="w-full border border-primary-200 dark:border-primary-800 rounded-xl p-3 text-sm bg-card text-foreground focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 font-mono resize-y"></textarea>
+                <textarea v-model="qState._editAnswer" rows="12" class="w-full border border-input rounded-lg p-3 text-sm bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono resize-y"></textarea>
                 <div class="flex gap-2 justify-end">
                   <Button @click="qState._isEditingAnswer = false" variant="outline" size="sm">取消</Button>
                   <Button @click="handleSaveAnswer" :disabled="qState._isSavingAnswer" size="sm">
@@ -157,7 +157,7 @@
           <div class="flex-1 px-5 pb-3 overflow-hidden">
             <textarea
               v-model="qState._userAnswer"
-              class="w-full h-full border border-border rounded-xl p-3.5 text-sm leading-relaxed focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 resize-none transition-all duration-200 bg-muted dark:bg-background text-foreground focus:bg-white dark:focus:bg-card"
+              class="w-full h-full border border-input rounded-lg p-3.5 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring resize-none transition-all duration-200 bg-transparent text-foreground"
               placeholder="在此输入你的回答，完成后点击下方「提交评估」..."
             ></textarea>
           </div>

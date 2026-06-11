@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-xl border border-border bg-card shadow-sm p-3 mb-3">
+  <div class="rounded-xl border border-border bg-background shadow-sm p-3 mb-3">
     <div class="flex flex-wrap gap-3 items-center">
       <!-- Search input using AppSearchForm pattern -->
       <div class="flex-1 min-w-[200px] relative">

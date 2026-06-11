@@ -147,7 +147,7 @@
             v-model="q._userAnswer"
             placeholder="在这里输入你的回答，然后点击「提交评估」让 AI 对比参考答案评分..."
             rows="5"
-            class="w-full border border-border rounded-lg p-3 text-sm leading-relaxed bg-card text-foreground focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-800 focus:border-primary-400 dark:focus:border-primary-600 resize-y"
+            class="w-full border border-input rounded-lg p-3 text-sm leading-relaxed bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y"
           ></textarea>
           <div class="flex gap-2 mt-2">
             <Button

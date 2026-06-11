@@ -111,13 +111,13 @@
       <!-- Active chat -->
       <template v-else>
       <!-- Chat header -->
-      <div class="flex min-h-14 items-center justify-between px-6 py-3 shrink-0">
-        <div class="min-w-0">
+      <div class="flex items-center justify-between px-6 py-1.5 shrink-0">
+        <div class="min-w-0 flex-1">
           <form v-if="isRenamingHeader" @submit.prevent="saveHeaderRename" class="flex items-center gap-1.5">
             <input
               ref="headerTitleInput"
               v-model="headerTitleDraft"
-              class="h-8 min-w-0 max-w-[420px] rounded-md border border-input bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
+              class="h-7 min-w-0 max-w-[420px] rounded-md border border-input bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
               @keydown.esc.prevent="cancelHeaderRename"
               @blur="saveHeaderRename"
             />
@@ -138,13 +138,13 @@
             <span class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</span>
             <Pencil :size="13" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
-          <span class="inline-block bg-muted/60 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground">{{ activeConversationMode }}</span>
         </div>
+        <span class="shrink-0 bg-muted/60 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground">{{ activeConversationMode }}</span>
       </div>
 
       <!-- Messages area -->
       <div ref="messagesContainer" @scroll="onMessagesScroll" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <div class="max-w-3xl mx-auto px-6 pt-8 pb-28">
+        <div class="max-w-3xl mx-auto px-6 pt-8 pb-8">
           <!-- Grouped messages -->
           <template v-for="(group, groupIndex) in groupedMessages" :key="groupIndex">
             <!-- Time separator -->
@@ -211,12 +211,10 @@
       </div>
 
       <!-- Input area -->
-      <div class="shrink-0 relative">
-        <!-- Gradient overlay: fades messages into input area -->
-        <div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-muted to-transparent pointer-events-none"></div>
-        <div class="relative max-w-3xl mx-auto px-6 pb-4">
+      <div class="shrink-0">
+        <div class="max-w-3xl mx-auto px-6 pb-4">
           <form @submit.prevent="handleSend">
-            <div class="flex flex-col gap-2 p-2 bg-muted border border-border rounded-2xl focus-within:ring-1 focus-within:ring-ring focus-within:border-input transition-all shadow-sm">
+            <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-2xl">
               <!-- Textarea -->
               <textarea
                 ref="inputRef"
@@ -226,7 +224,7 @@
                 @keydown="onInputKeydown"
                 @input="autoResize"
                 rows="1"
-                class="w-full px-3 py-2 text-sm bg-transparent focus:outline-none disabled:opacity-50 resize-none overflow-hidden"
+                class="w-full px-3 py-2 text-sm resize-none overflow-hidden"
                 style="min-height: 32px; max-height: 120px;"
               ></textarea>
 
@@ -914,5 +912,28 @@ onActivated(async () => {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* Chat input textarea — strip all browser defaults, blend with container */
+.chat-input-area textarea {
+  background-color: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  font-family: inherit;
+  color: var(--foreground);
+}
+.chat-input-area textarea:focus,
+.chat-input-area textarea:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.chat-input-area textarea:disabled {
+  opacity: 0.5;
+}
+.chat-input-area textarea::placeholder {
+  color: var(--muted-foreground);
 }
 </style>
