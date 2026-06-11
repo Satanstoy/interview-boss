@@ -138,13 +138,13 @@
             <span class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</span>
             <Pencil :size="13" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
-          <p class="px-1 text-xs text-muted-foreground">{{ activeConversationMode }}</p>
+          <span class="inline-block bg-muted/60 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground">{{ activeConversationMode }}</span>
         </div>
       </div>
 
       <!-- Messages area -->
-      <div ref="messagesContainer" @scroll="onMessagesScroll" class="flex-1 overflow-y-auto custom-scrollbar">
-        <div class="max-w-3xl mx-auto px-6 py-8">
+      <div ref="messagesContainer" @scroll="onMessagesScroll" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div class="max-w-3xl mx-auto px-6 pt-8 pb-28">
           <!-- Grouped messages -->
           <template v-for="(group, groupIndex) in groupedMessages" :key="groupIndex">
             <!-- Time separator -->
@@ -211,13 +211,15 @@
       </div>
 
       <!-- Input area -->
-      <div class="shrink-0 border-t border-border bg-background">
-        <div class="max-w-3xl mx-auto px-6 py-4">
+      <div class="shrink-0 relative">
+        <!-- Gradient overlay: fades messages into input area -->
+        <div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-muted to-transparent pointer-events-none"></div>
+        <div class="relative max-w-3xl mx-auto px-6 pb-4">
           <form @submit.prevent="handleSend">
-            <div class="relative flex flex-col gap-2 p-2 bg-background border border-border rounded-2xl focus-within:ring-1 focus-within:ring-ring focus-within:border-input transition-all shadow-sm">
+            <div class="flex flex-col gap-2 p-2 bg-muted border border-border rounded-2xl focus-within:ring-1 focus-within:ring-ring focus-within:border-input transition-all shadow-sm">
               <!-- Textarea -->
-              <textarea 
-                ref="inputRef" 
+              <textarea
+                ref="inputRef"
                 v-model="inputText"
                 :placeholder="inputPlaceholder"
                 :disabled="isSending"
@@ -227,39 +229,39 @@
                 class="w-full px-3 py-2 text-sm bg-transparent focus:outline-none disabled:opacity-50 resize-none overflow-hidden"
                 style="min-height: 32px; max-height: 120px;"
               ></textarea>
-              
+
               <!-- Action buttons -->
               <div class="flex items-center justify-between gap-2">
                 <div class="flex items-center gap-1">
                   <!-- Attachment button -->
-                  <button 
+                  <button
                     type="button"
-                    class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
                     title="上传文件"
                   >
                     <Paperclip :size="16" />
                   </button>
                   <!-- Model selector -->
-                  <ModelSelector 
-                    :current-model="selectedModel" 
+                  <ModelSelector
+                    :current-model="selectedModel"
                     @select="handleModelSelect"
                   />
                 </div>
                 <!-- Send button -->
-                <Button 
-                  v-if="isSending" 
-                  type="button" 
-                  @click="handleStop" 
-                  variant="destructive" 
+                <Button
+                  v-if="isSending"
+                  type="button"
+                  @click="handleStop"
+                  variant="destructive"
                   size="icon"
                   class="rounded-lg size-8 shrink-0"
                 >
                   <Square :size="14" />
                 </Button>
-                <Button 
-                  v-else 
-                  type="submit" 
-                  :disabled="!inputText.trim()" 
+                <Button
+                  v-else
+                  type="submit"
+                  :disabled="!inputText.trim()"
                   size="icon"
                   class="rounded-lg size-8 shrink-0"
                 >
