@@ -706,11 +706,13 @@ def _parse_basis_from_response(response: str) -> dict:
 
     raw_ids = data.get("question_ids", [])
     if isinstance(raw_ids, list):
-        question_ids = [
-            max(1, min(999999, int(qid)))
-            for qid in raw_ids
-            if isinstance(qid, (int, float))
-        ]
+        question_ids = []
+        for qid in raw_ids:
+            try:
+                val = int(float(qid))
+                question_ids.append(max(1, min(999999, val)))
+            except (ValueError, TypeError, OverflowError):
+                continue
     else:
         question_ids = []
 
