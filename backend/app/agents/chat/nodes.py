@@ -652,12 +652,21 @@ def _parse_basis_from_response(response: str) -> dict:
         "clean_response": response,
     }
 
+    # Try full [BASIS]...[/BASIS] pattern first
     match = _re.search(r"\[BASIS\](.*?)\[/BASIS\]", response, _re.DOTALL)
+    if not match:
+        # Fallback: [BASIS] followed by JSON object (LLM may omit closing tag)
+        match = _re.search(r"\[BASIS\](\{[^}]*\})", response, _re.DOTALL)
     if not match:
         return defaults
 
-    basis_block = match.group(1)
+    basis_block = match.group(1).strip()
+    # Strip markdown code fences if present
+    basis_block = _re.sub(r"^```(?:json)?\s*", "", basis_block)
+    basis_block = _re.sub(r"\s*```$", "", basis_block)
     clean_response = (response[: match.start()] + response[match.end() :]).strip()
+    # Remove trailing markdown code fences from clean response
+    clean_response = _re.sub(r"\s*```\s*$", "", clean_response)
 
     try:
         data = _json.loads(basis_block)
