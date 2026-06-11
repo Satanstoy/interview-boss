@@ -1,255 +1,331 @@
 <template>
-  <div class="flex h-[calc(100vh-132px)] bg-background rounded-xl border border-border overflow-hidden shadow-card">
-    <!-- Sidebar -->
+  <div class="flex h-full bg-background">
+    <!-- Conversation list sidebar (always visible) -->
     <div 
-      class="shrink-0 border-r border-border flex flex-col bg-sidebar overflow-hidden"
-      :style="{ width: sidebarCollapsed ? '60px' : '288px', transition: 'width 380ms cubic-bezier(0.4, 0, 0.2, 1)' }"
+      class="sidebar-container border-r border-border flex flex-col shrink-0 overflow-hidden"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+      :style="{ width: sidebarCollapsed ? '0px' : '288px' }"
     >
-      <!-- Collapsed state -->
-      <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 h-full animate-sidebar-collapse">
-        <!-- Expand button -->
-        <button
-          @click="toggleSidebar"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-2 bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20 hover:scale-105"
-          title="展开侧栏"
-        >
-          <PanelLeft :size="18" />
-        </button>
-
-        <!-- New chat button -->
-        <button
-          @click="showNewChat = true"
-          class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-          title="新建面试"
-        >
-          <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-        </button>
-
-        <div class="flex-1"></div>
+      <div class="p-4 border-b border-border flex items-center gap-2 sidebar-content">
+        <Button @click="showNewChat = true" class="flex-1" size="sm">
+          <Plus :size="16" />
+          新建面试
+        </Button>
+        <Button variant="ghost" size="icon" @click="sidebarCollapsed = true" class="shrink-0">
+          <PanelLeftClose :size="16" />
+        </Button>
       </div>
-
-      <!-- Expanded state -->
-      <div v-else class="flex flex-col h-full animate-sidebar-expand">
-        <!-- Header -->
-        <div class="border-b border-border p-4 shrink-0">
-          <div class="flex items-center justify-between mb-3">
-            <div>
-              <h2 class="text-sm font-semibold text-sidebar-foreground">模拟面试</h2>
-              <p class="mt-0.5 text-xs text-muted-foreground">AI Interview Copilot</p>
-            </div>
-            <button
-              @click="toggleSidebar"
-              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-600 text-white shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25 hover:scale-105 transition-all duration-200"
-              title="收起侧栏"
-            >
-              <PanelLeft :size="16" />
-            </button>
-          </div>
-          <Button @click="showNewChat = true" class="w-full" size="sm">
-            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-            新建面试
-          </Button>
+      <div class="flex-1 overflow-y-auto custom-scrollbar p-2 sidebar-content">
+        <div v-if="conversations.length === 0" class="p-4 text-center text-sm text-muted-foreground">
+          暂无对话
         </div>
-
-        <!-- Conversation list -->
-        <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
-          <!-- Loading skeleton -->
-          <div v-if="loadingConversations" class="p-2 flex flex-col gap-1">
-            <div v-for="i in 4" :key="i" class="flex items-center gap-2 px-3 py-2.5 rounded-lg">
-              <div class="flex-1 flex flex-col gap-1.5">
-                <Skeleton class="h-4 rounded" :style="{ width: 50 + Math.random() * 40 + '%' }" />
-                <Skeleton class="h-2.5 w-16 rounded" />
+        <div v-else class="flex flex-col gap-0.5">
+          <div v-for="conv in conversations" :key="conv.id"
+            @click="selectConversation(conv.id)"
+            class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
+            :class="activeConversationId === conv.id ? 'bg-accent' : 'hover:bg-accent/50'">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium truncate text-foreground">{{ conv.title || '新对话' }}</div>
+              <div class="text-[11px] mt-0.5 truncate text-muted-foreground">
+                {{ conv.mode === 'jd_resume' ? 'JD定制' : '自由练习' }} · {{ formatRelativeTime(conv.updated_at) }}
               </div>
             </div>
-          </div>
-          <div v-else-if="conversations.length === 0" class="p-4">
-            <AppEmpty title="暂无对话" description="点击上方按钮开始模拟面试" icon="💬">
-              <template #icon>
-                <span class="text-2xl">💬</span>
-              </template>
-            </AppEmpty>
-          </div>
-          <div v-else class="flex flex-col gap-0.5">
-            <div v-for="conv in conversations" :key="conv.id"
-              @click="selectConversation(conv.id)"
-              class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
-              :class="activeConversationId === conv.id
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50'">
-              <div class="size-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-semibold transition-colors"
-                :class="activeConversationId === conv.id
-                  ? 'bg-primary/10 text-primary'
-                  : 'bg-muted text-muted-foreground'">
-                {{ conv.mode === 'jd_resume' ? 'JD' : 'AI' }}
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium truncate">{{ conv.title || '新对话' }}</div>
-                <div class="text-[11px] mt-0.5 truncate"
-                  :class="activeConversationId === conv.id ? 'text-muted-foreground' : 'text-muted-foreground/60'">
-                  {{ conv.mode === 'jd_resume' ? 'JD定制' : '自由练习' }} · {{ formatRelativeTime(conv.updated_at) }}
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                @click.stop="handleDelete(conv.id)"
-                class="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
-              >
-                <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-              </Button>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button 
+                  variant="ghost" 
+                  size="icon-xs" 
+                  class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  @click.stop
+                >
+                  <MoreHorizontal :size="14" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-40">
+                <DropdownMenuItem @click.stop="handlePin(conv.id)">
+                  <Pin :size="14" class="mr-2" />
+                  <span>置顶</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem @click.stop="handleRename(conv.id, conv.title)">
+                  <Pencil :size="14" class="mr-2" />
+                  <span>重命名</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem @click.stop="handleDelete(conv.id)" class="text-destructive focus:text-destructive">
+                  <Trash2 :size="14" class="mr-2" />
+                  <span>删除</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Chat area -->
+    <!-- Sidebar collapsed: show expand button -->
+    <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons">
+      <Button variant="ghost" size="icon" @click="sidebarCollapsed = false" class="shrink-0">
+        <PanelLeft :size="16" />
+      </Button>
+      <Button variant="ghost" size="icon" @click="showNewChat = true" class="shrink-0">
+        <Plus :size="16" />
+      </Button>
+    </div>
+
+    <!-- Main content area -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Empty state -->
-      <div v-if="!activeConversationId" class="flex-1 flex items-center justify-center bg-muted/30">
+      <div v-if="!activeConversationId" class="flex-1 flex items-center justify-center">
         <div
           v-motion
           :initial="{ opacity: 0, y: 16 }"
           :enter="{ opacity: 1, y: 0, transition: { duration: 400, easing: [0.25, 0.46, 0.45, 0.94] } }"
+          class="flex flex-col items-center max-w-2xl mx-auto px-6"
         >
-          <AppEmpty title="开始模拟面试" description="选择一个对话或创建新的面试会话">
-            <template #icon>
-              <div class="size-16 mx-auto mb-5 rounded-2xl bg-card border border-border flex items-center justify-center shadow-sm">
-                <svg class="size-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          <div class="size-20 mx-auto mb-6 rounded-2xl bg-primary/10 flex items-center justify-center">
+            <MessageSquare :size="40" class="text-primary" />
+          </div>
+          <h2 class="text-3xl font-bold text-foreground mb-3 text-center">开始模拟面试</h2>
+          <p class="text-muted-foreground mb-8 text-center text-lg">选择左侧对话或创建新的面试会话</p>
+          
+          <!-- Prompt suggestions -->
+          <div class="grid grid-cols-2 gap-4 w-full max-w-lg">
+            <button
+              v-for="suggestion in promptSuggestions"
+              :key="suggestion.text"
+              @click="startWithSuggestion(suggestion.text)"
+              class="flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 hover:border-primary/30 transition-all text-left group"
+            >
+              <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                <component :is="suggestion.icon" :size="20" class="text-primary" />
               </div>
-            </template>
-            <Button @click="showNewChat = true" class="mt-2">
-              新建面试
-            </Button>
-          </AppEmpty>
+              <div>
+                <div class="text-sm font-semibold text-foreground">{{ suggestion.title }}</div>
+                <div class="text-xs text-muted-foreground mt-1">{{ suggestion.description }}</div>
+              </div>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Active chat -->
       <template v-else>
-        <!-- Chat header -->
-        <div class="flex h-14 items-center justify-between border-b border-border bg-card px-5 shrink-0">
-          <div class="min-w-0">
-            <h2 class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</h2>
-            <p class="text-xs text-muted-foreground">{{ activeConversationMode }} · 基于题库和 JD 上下文追问</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              <span class="size-1.5 rounded-full bg-primary animate-pulse"></span>
-              AI 在线
-            </span>
-            <Button variant="outline" size="sm">
-              复盘
+      <!-- Chat header -->
+      <div class="flex min-h-14 items-center justify-between px-6 py-3 shrink-0">
+        <div class="min-w-0">
+          <form v-if="isRenamingHeader" @submit.prevent="saveHeaderRename" class="flex items-center gap-1.5">
+            <input
+              ref="headerTitleInput"
+              v-model="headerTitleDraft"
+              class="h-8 min-w-0 max-w-[420px] rounded-md border border-input bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-ring"
+              @keydown.esc.prevent="cancelHeaderRename"
+              @blur="saveHeaderRename"
+            />
+            <Button type="submit" variant="ghost" size="icon-xs" title="保存标题">
+              <Check :size="14" />
             </Button>
-          </div>
+            <Button type="button" variant="ghost" size="icon-xs" title="取消" @mousedown.prevent @click="cancelHeaderRename">
+              <X :size="14" />
+            </Button>
+          </form>
+          <button
+            v-else
+            type="button"
+            @click="startHeaderRename"
+            class="group flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-muted/70 transition-colors"
+            title="重命名对话"
+          >
+            <span class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</span>
+            <Pencil :size="13" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          </button>
+          <p class="px-1 text-xs text-muted-foreground">{{ activeConversationMode }}</p>
         </div>
+      </div>
 
-        <!-- Messages area -->
-        <div ref="messagesContainer" class="flex-1 overflow-y-auto custom-scrollbar bg-muted/20 px-6 py-5 flex flex-col gap-5">
-          <ChatMessage v-for="msg in messages" :key="msg.id" :message="msg" />
+      <!-- Messages area -->
+      <div ref="messagesContainer" @scroll="onMessagesScroll" class="flex-1 overflow-y-auto custom-scrollbar">
+        <div class="max-w-3xl mx-auto px-6 py-8">
+          <!-- Grouped messages -->
+          <template v-for="(group, groupIndex) in groupedMessages" :key="groupIndex">
+            <!-- Time separator -->
+            <div v-if="group.showTime" class="flex items-center justify-center my-8">
+              <div class="px-3 py-1 rounded-full bg-muted text-xs text-muted-foreground">
+                {{ group.timeLabel }}
+              </div>
+            </div>
 
-          <!-- Streaming message with thinking and content -->
-          <div v-if="isSending" class="flex items-start gap-3">
-            <div class="size-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold bg-card border border-border text-foreground shadow-sm">AI</div>
-            <div class="max-w-[75%] min-w-0">
-              <!-- Thinking block (real LLM thinking) -->
-              <ThinkingBlock
-                v-if="isThinking || thinkingContent"
-                :is-streaming="isThinking"
-                :content="thinkingContent"
-                :duration="thinkingDuration"
-              />
+            <!-- Messages in group -->
+            <ChatMessage 
+              v-for="msg in group.messages" 
+              :key="msg.id" 
+              :message="msg"
+              @regenerate="handleRegenerate"
+              @like="handleLike"
+            />
+          </template>
 
-              <!-- Processing steps timeline (simulated thinking) -->
-              <div v-else-if="!streamingContent && processingSteps.length > 0" class="rounded-xl border border-border bg-card p-3 shadow-sm">
-                <div class="mb-2 flex items-center justify-between">
-                  <p class="text-xs font-semibold text-foreground">AI Thinking</p>
-                  <span class="text-[11px] text-muted-foreground">RAG + Eval</span>
-                </div>
+          <!-- Streaming message -->
+          <div v-if="isSending" class="mb-6">
+            <!-- Thinking block -->
+            <ThinkingBlock
+              v-if="isThinking || thinkingContent"
+              :is-streaming="isThinking"
+              :content="thinkingContent"
+              :duration="thinkingDuration"
+            />
+
+            <!-- Processing steps -->
+            <div v-else-if="!streamingContent && processingSteps.length > 0" class="mb-4">
+              <div class="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                <Loader2 :size="14" class="animate-spin" />
+                <span>{{ waitingText }}</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
                 <TransitionGroup name="step">
-                  <div v-for="(step, idx) in processingSteps" :key="step.step"
-                    class="flex items-center gap-2.5 py-1.5 px-2 rounded-md transition-all duration-300"
-                    :class="idx === processingSteps.length - 1 && !step.done ? 'bg-muted/50' : 'opacity-60'">
-                    <div class="size-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-300"
-                      :class="step.done ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-primary/10'">
-                      <svg v-if="step.done" class="size-3.5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                      <div v-else class="size-2.5 rounded-full bg-primary animate-pulse"></div>
-                    </div>
-                    <span class="text-xs" :class="step.done ? 'text-muted-foreground line-through' : 'text-foreground font-medium'">
-                      {{ step.message }}
-                    </span>
-                    <div v-if="!step.done" class="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-                      <div class="h-full bg-primary rounded-full animate-shimmer" style="width: 40%"></div>
-                    </div>
+                  <div v-for="step in processingSteps" :key="step.step"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-all duration-300"
+                    :class="step.done 
+                      ? 'bg-primary/10 text-primary' 
+                      : 'bg-muted text-muted-foreground animate-pulse'">
+                    <CheckCircle2 v-if="step.done" :size="12" />
+                    <Loader2 v-else :size="12" class="animate-spin" />
+                    <span>{{ step.message }}</span>
                   </div>
                 </TransitionGroup>
               </div>
-              <!-- Simple typing indicator -->
-              <div v-else-if="!streamingContent" class="flex items-center gap-2.5 px-4 py-3 bg-card rounded-xl border border-border shadow-sm">
-                <div class="flex gap-1">
-                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-                  <span class="size-2 bg-primary rounded-full animate-bounce" style="animation-delay: 300ms"></span>
-                </div>
-                <span class="text-xs text-muted-foreground ml-1">{{ waitingText }}</span>
-              </div>
-              <!-- Streaming content -->
-              <div v-if="streamingContent" class="rounded-xl rounded-tl-md px-4 py-3 text-sm leading-relaxed bg-card text-foreground border border-border shadow-sm">
-                <div class="prose-chat streaming-content" v-html="renderStreamingContent"></div>
-                <span class="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle rounded-sm"></span>
-              </div>
+            </div>
+
+            <!-- Simple thinking indicator -->
+            <div v-else-if="!streamingContent" class="flex items-center gap-2 text-xs text-muted-foreground mb-4">
+              <Loader2 :size="14" class="animate-spin" />
+              <span>思考中...</span>
+            </div>
+
+            <!-- Streaming content -->
+            <div v-if="streamingContent" class="prose-chat">
+              <div v-html="renderStreamingContent"></div>
+              <span class="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle rounded-sm"></span>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Input area -->
-        <div class="shrink-0 border-t border-border bg-card px-5 py-4">
-          <form @submit.prevent="handleSend" class="rounded-xl border border-border bg-background p-2 shadow-inner-glow focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all">
-            <textarea ref="inputRef" v-model="inputText"
-              :placeholder="inputPlaceholder"
-              :disabled="isSending"
-              @keydown="onInputKeydown"
-              @input="autoResize"
-              rows="1"
-              class="w-full px-3 py-2 text-sm bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 resize-none overflow-hidden"
-              style="min-height: 56px; max-height: 160px;"></textarea>
-            <div class="mt-2 flex items-center justify-between border-t border-border/50 pt-2">
-              <span class="px-2 text-[11px] text-muted-foreground">Context: JD / 面经 / 高频题库</span>
-              <div class="flex items-center gap-2">
-                <Button v-if="isSending" type="button" @click="handleStop" variant="destructive" size="sm">
-                  停止
+      <!-- Input area -->
+      <div class="shrink-0 border-t border-border bg-background">
+        <div class="max-w-3xl mx-auto px-6 py-4">
+          <form @submit.prevent="handleSend">
+            <div class="relative flex flex-col gap-2 p-2 bg-background border border-border rounded-2xl focus-within:ring-1 focus-within:ring-ring focus-within:border-input transition-all shadow-sm">
+              <!-- Textarea -->
+              <textarea 
+                ref="inputRef" 
+                v-model="inputText"
+                :placeholder="inputPlaceholder"
+                :disabled="isSending"
+                @keydown="onInputKeydown"
+                @input="autoResize"
+                rows="1"
+                class="w-full px-3 py-2 text-sm bg-transparent focus:outline-none disabled:opacity-50 resize-none overflow-hidden"
+                style="min-height: 32px; max-height: 120px;"
+              ></textarea>
+              
+              <!-- Action buttons -->
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1">
+                  <!-- Attachment button -->
+                  <button 
+                    type="button"
+                    class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="上传文件"
+                  >
+                    <Paperclip :size="16" />
+                  </button>
+                  <!-- Model selector -->
+                  <ModelSelector 
+                    :current-model="selectedModel" 
+                    @select="handleModelSelect"
+                  />
+                </div>
+                <!-- Send button -->
+                <Button 
+                  v-if="isSending" 
+                  type="button" 
+                  @click="handleStop" 
+                  variant="destructive" 
+                  size="icon"
+                  class="rounded-lg size-8 shrink-0"
+                >
+                  <Square :size="14" />
                 </Button>
-                <Button v-else type="submit" :disabled="!inputText.trim()" size="sm">
-                  发送
+                <Button 
+                  v-else 
+                  type="submit" 
+                  :disabled="!inputText.trim()" 
+                  size="icon"
+                  class="rounded-lg size-8 shrink-0"
+                >
+                  <ArrowUp :size="16" />
                 </Button>
               </div>
             </div>
+            <div class="mt-2 flex items-center justify-between px-1">
+              <span class="text-[11px] text-muted-foreground">按 Enter 发送，Shift+Enter 换行</span>
+              <span class="text-[11px] text-muted-foreground">基于题库和 JD 上下文追问</span>
+            </div>
           </form>
         </div>
-      </template>
+      </div>
+    </template>
     </div>
 
     <!-- New Chat Modal -->
     <NewChatModal
       :visible="showNewChat"
       :jd-list="jdList"
-      @close="showNewChat = false"
+      :initial-message="pendingInitialMessage"
+      @close="showNewChat = false; pendingInitialMessage = ''"
       @create="handleCreateConversation"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { PanelLeft } from '@lucide/vue'
+import { 
+  Plus, 
+  MessageSquare, 
+  Paperclip, 
+  Square, 
+  ArrowUp,
+  ArrowLeft,
+  BookOpen,
+  Code,
+  Briefcase,
+  Brain,
+  CheckCircle2,
+  Check,
+  X,
+  Loader2,
+  PanelLeft,
+  PanelLeftClose,
+  MoreHorizontal,
+  Pin,
+  Pencil,
+  Trash2
+} from '@lucide/vue'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import ChatMessage from './ChatMessage.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import NewChatModal from './NewChatModal.vue'
-import AppEmpty from '@/components/common/AppEmpty.vue'
+import ModelSelector from './ModelSelector.vue'
 import * as chatApi from '@/services/chatApi.js'
 
 const props = defineProps({
@@ -265,29 +341,52 @@ const inputText = ref('')
 const isSending = ref(false)
 const streamingContent = ref('')
 const showNewChat = ref(false)
-const loadingConversations = ref(false)
 const messagesContainer = ref(null)
 const inputRef = ref(null)
 const pendingRetrievedQuestions = ref(null)
 const pendingResumeRef = ref(null)
 const pendingJdRef = ref(null)
+const pendingInitialMessage = ref('')
 const autoScrollEnabled = ref(true)
 const processingSteps = ref([])
+const selectedModel = ref('')
+const sidebarCollapsed = ref(false)
+const isRenamingHeader = ref(false)
+const headerTitleDraft = ref('')
+const headerTitleInput = ref(null)
 
 // Thinking state
 const isThinking = ref(false)
 const thinkingContent = ref('')
 const thinkingDuration = ref(0)
 
-// Sidebar state
-const sidebarCollapsed = ref(false)
-const toggleSidebar = () => {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-}
+const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
+
+// Prompt suggestions
+const promptSuggestions = [
+  { 
+    icon: BookOpen, 
+    title: '项目介绍', 
+    description: '如何介绍一个复杂业务项目？' 
+  },
+  { 
+    icon: Code, 
+    title: '算法练习', 
+    description: '帮我复习 React Hooks 相关题目' 
+  },
+  { 
+    icon: Briefcase, 
+    title: 'JD 分析', 
+    description: '分析这个 JD 的考察重点' 
+  },
+  { 
+    icon: Brain, 
+    title: '行为面试', 
+    description: '用 STAR 法则回答软技能问题' 
+  },
+]
 
 const inputPlaceholder = computed(() => {
-  const conv = conversations.value.find(c => c.id === activeConversationId.value)
-  if (conv?.mode === 'jd_resume') return '回答面试问题，或输入你想练习的内容...'
   return '回答面试问题，或输入你想练习的内容...'
 })
 
@@ -300,7 +399,7 @@ const activeConversationTitle = computed(() =>
 )
 
 const activeConversationMode = computed(() =>
-  activeConversation.value?.mode === 'jd_resume' ? 'JD 定制' : '自由练习'
+  activeConversation.value?.mode === 'jd_resume' ? 'JD 定制面试' : '自由练习'
 )
 
 const renderStreamingContent = computed(() => {
@@ -308,21 +407,62 @@ const renderStreamingContent = computed(() => {
   return renderSafeMarkdown(streamingContent.value)
 })
 
-// Contextual waiting text based on processing steps
 const waitingText = computed(() => {
   if (processingSteps.value.length === 0) return '正在连接...'
   const lastStep = processingSteps.value[processingSteps.value.length - 1]
   if (!lastStep) return '正在思考...'
   const stepTextMap = {
-    'retrieve': '正在检索相关题目...',
-    'evaluate': '正在评估你的答案...',
-    'generate': '正在生成回答...',
-    'search': '正在搜索知识库...',
-    'analyze': '正在分析问题...',
-    'think': '正在深度思考...',
+    'retrieve': '检索相关题目...',
+    'evaluate': '评估答案...',
+    'generate': '生成回答...',
+    'search': '搜索知识库...',
+    'analyze': '分析问题...',
+    'think': '深度思考...',
   }
-  return stepTextMap[lastStep.step] || lastStep.message || '正在思考...'
+  return stepTextMap[lastStep.step] || lastStep.message || '思考中...'
 })
+
+// Message grouping by time
+const groupedMessages = computed(() => {
+  if (!messages.value.length) return []
+  
+  const groups = []
+  let currentGroup = null
+  let lastTime = null
+  
+  for (const msg of messages.value) {
+    const msgTime = new Date(msg.created_at + (msg.created_at.includes('Z') || msg.created_at.includes('+') ? '' : 'Z'))
+    const timeDiff = lastTime ? (msgTime - lastTime) / 1000 / 60 : Infinity
+    
+    if (!currentGroup || timeDiff > 30) {
+      currentGroup = {
+        showTime: true,
+        timeLabel: formatGroupTime(msgTime),
+        messages: []
+      }
+      groups.push(currentGroup)
+    }
+    
+    currentGroup.messages.push(msg)
+    lastTime = msgTime
+  }
+  
+  return groups
+})
+
+function formatGroupTime(date) {
+  const now = new Date()
+  const diff = now - date
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+  
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  if (hours < 24) return `${hours} 小时前`
+  if (days < 7) return `${days} 天前`
+  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+}
 
 // Load conversations
 async function loadConversations() {
@@ -330,7 +470,6 @@ async function loadConversations() {
     conversations.value = [
       { id: 'preview-1', title: '前端一面模拟', mode: 'jd_resume', updated_at: new Date().toISOString() },
       { id: 'preview-2', title: '项目深挖', mode: 'free', updated_at: new Date(Date.now() - 1200000).toISOString() },
-      { id: 'preview-3', title: '工程化复盘', mode: 'free', updated_at: new Date(Date.now() - 7200000).toISOString() },
     ]
     activeConversationId.value = 'preview-1'
     messages.value = [
@@ -360,22 +499,23 @@ async function loadConversations() {
         metadata: { jd_ref: '高级前端工程师 JD', resume_ref: '项目经历：AI 面试准备平台' },
       },
     ]
-    processingSteps.value = [
-      { step: 'retrieve', message: '检索相关题目', done: true },
-      { step: 'evaluate', message: '评估回答结构', done: true },
-      { step: 'generate', message: '生成追问方向', done: false },
-    ]
     await scrollToBottom(true)
     return
   }
-  loadingConversations.value = true
   try {
     const res = await chatApi.getConversations()
     conversations.value = res.data || []
+
+    // Preserve active selection: only clear if conversation no longer exists
+    if (activeConversationId.value) {
+      const stillExists = conversations.value.some(c => c.id === activeConversationId.value)
+      if (!stillExists) {
+        activeConversationId.value = null
+        messages.value = []
+      }
+    }
   } catch (e) {
     console.error('加载对话列表失败:', e)
-  } finally {
-    loadingConversations.value = false
   }
 }
 
@@ -397,13 +537,25 @@ async function handleCreateConversation(data) {
   try {
     const res = await chatApi.createConversation(data)
     showNewChat.value = false
+    pendingInitialMessage.value = ''
     await loadConversations()
     if (res.data?.id) {
       await selectConversation(res.data.id)
+      if (data.initial_message) {
+        inputText.value = data.initial_message
+        await nextTick()
+        await handleSend()
+      }
     }
   } catch (e) {
     console.error('创建对话失败:', e)
   }
+}
+
+// Start with suggestion
+async function startWithSuggestion(text) {
+  pendingInitialMessage.value = text
+  showNewChat.value = true
 }
 
 // Send message
@@ -412,52 +564,54 @@ async function handleSend() {
   if (!text || isSending.value || !activeConversationId.value) return
 
   inputText.value = ''
+  resetInputHeight()
   isSending.value = true
   streamingContent.value = ''
   pendingRetrievedQuestions.value = null
   processingSteps.value = []
   autoScrollEnabled.value = true
 
-  // Reset thinking state
   isThinking.value = false
   thinkingContent.value = ''
   thinkingDuration.value = 0
 
-  // Add user message to UI immediately
   const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
   messages.value.push(userMsg)
   await scrollToBottom()
 
   try {
-    await chatApi.sendMessage(activeConversationId.value, text, (event) => {
-      if (event.type === 'step') {
-        processingSteps.value.forEach(s => { s.done = true })
-        processingSteps.value.push({ step: event.step, message: event.message, done: false })
-        scrollToBottom()
-      } else if (event.type === 'thinking_start') {
-        isThinking.value = true
-        thinkingContent.value = ''
-        thinkingDuration.value = 0
-      } else if (event.type === 'thinking') {
-        thinkingContent.value += event.content
-        scrollToBottom()
-      } else if (event.type === 'thinking_done') {
-        isThinking.value = false
-        thinkingDuration.value = event.duration || 0
-        // Keep thinking content for display
-      } else if (event.type === 'chunk') {
-        streamingContent.value += event.content
-        scrollToBottom()
-      } else if (event.type === 'retrieved') {
-        pendingRetrievedQuestions.value = event.questions || []
-      } else if (event.type === 'resume_ref') {
-        pendingResumeRef.value = event.name || null
-      } else if (event.type === 'jd_ref') {
-        pendingJdRef.value = event.title || null
-      }
-    })
+    await chatApi.sendMessage(
+      activeConversationId.value,
+      text,
+      (event) => {
+        if (event.type === 'step') {
+          processingSteps.value.forEach(s => { s.done = true })
+          processingSteps.value.push({ step: event.step, message: event.message, done: false })
+          scrollToBottom()
+        } else if (event.type === 'thinking_start') {
+          isThinking.value = true
+          thinkingContent.value = ''
+          thinkingDuration.value = 0
+        } else if (event.type === 'thinking') {
+          thinkingContent.value += event.content
+          scrollToBottom()
+        } else if (event.type === 'thinking_done') {
+          isThinking.value = false
+          thinkingDuration.value = event.duration || 0
+        } else if (event.type === 'chunk') {
+          streamingContent.value += event.content
+          scrollToBottom()
+        } else if (event.type === 'retrieved') {
+          pendingRetrievedQuestions.value = event.questions || []
+        } else if (event.type === 'resume_ref') {
+          pendingResumeRef.value = event.name || null
+        } else if (event.type === 'jd_ref') {
+          pendingJdRef.value = event.title || null
+        }
+      },
+      selectedModel.value || null
+    )
 
-    // Streaming done - add final message
     if (streamingContent.value) {
       const metadata = {}
       if (pendingRetrievedQuestions.value?.length > 0) {
@@ -502,7 +656,97 @@ async function handleSend() {
   }
 }
 
-// Delete conversation
+// Regenerate message
+async function handleRegenerate(messageId) {
+  const msgIndex = messages.value.findIndex(m => m.id === messageId)
+  if (msgIndex === -1) return
+  
+  let userMessageIndex = -1
+  for (let i = msgIndex - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      userMessageIndex = i
+      break
+    }
+  }
+  
+  if (userMessageIndex === -1) return
+  
+  const userMessage = messages.value[userMessageIndex]
+  messages.value = messages.value.slice(0, userMessageIndex)
+  
+  inputText.value = userMessage.content
+  await handleSend()
+}
+
+function handleLike({ id, liked }) {
+  console.log('Like message:', id, liked)
+}
+
+function handleModelSelect(modelId) {
+  selectedModel.value = modelId
+}
+
+async function handlePin(id) {
+  try {
+    await chatApi.pinConversation(id)
+    await loadConversations()
+  } catch (e) {
+    console.error('置顶对话失败:', e)
+  }
+}
+
+async function handleRename(id, currentTitle) {
+  const newTitle = prompt('请输入新标题', currentTitle || '新对话')
+  if (!newTitle || newTitle === currentTitle) return
+  try {
+    if (props.preview) {
+      const conv = conversations.value.find(c => c.id === id)
+      if (conv) conv.title = newTitle
+      return
+    }
+    await chatApi.updateTitle(id, newTitle)
+    await loadConversations()
+  } catch (e) {
+    console.error('重命名对话失败:', e)
+  }
+}
+
+async function startHeaderRename() {
+  headerTitleDraft.value = activeConversationTitle.value
+  isRenamingHeader.value = true
+  await nextTick()
+  headerTitleInput.value?.focus()
+  headerTitleInput.value?.select()
+}
+
+function cancelHeaderRename() {
+  isRenamingHeader.value = false
+  headerTitleDraft.value = ''
+}
+
+async function saveHeaderRename() {
+  if (!isRenamingHeader.value || !activeConversationId.value) return
+  const newTitle = headerTitleDraft.value.trim()
+  const currentTitle = activeConversationTitle.value
+  if (!newTitle || newTitle === currentTitle) {
+    cancelHeaderRename()
+    return
+  }
+  try {
+    if (props.preview) {
+      const conv = conversations.value.find(c => c.id === activeConversationId.value)
+      if (conv) conv.title = newTitle
+    } else {
+      await chatApi.updateTitle(activeConversationId.value, newTitle)
+      await loadConversations()
+    }
+  } catch (e) {
+    console.error('重命名对话失败:', e)
+  } finally {
+    cancelHeaderRename()
+  }
+}
+
 async function handleDelete(id) {
   if (!confirm('确定要删除这个对话吗？')) return
   try {
@@ -517,7 +761,6 @@ async function handleDelete(id) {
   }
 }
 
-// Stop generation (cancel SSE stream)
 function handleStop() {
   cancelAllRequests()
   if (streamingContent.value) {
@@ -533,7 +776,6 @@ function handleStop() {
   isSending.value = false
 }
 
-// Auto-resize textarea
 function autoResize() {
   const el = inputRef.value
   if (!el) return
@@ -541,7 +783,12 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
-// Keyboard handling: Enter to send, Shift+Enter for newline
+function resetInputHeight() {
+  nextTick(() => {
+    if (inputRef.value) inputRef.value.style.height = '32px'
+  })
+}
+
 function onInputKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
@@ -549,7 +796,6 @@ function onInputKeydown(e) {
   }
 }
 
-// Smart auto-scroll: detect user scroll position
 function onMessagesScroll() {
   const el = messagesContainer.value
   if (!el) return
@@ -557,7 +803,6 @@ function onMessagesScroll() {
   autoScrollEnabled.value = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
 }
 
-// Scroll to bottom (respects smart auto-scroll)
 async function scrollToBottom(force = false) {
   await nextTick()
   if (messagesContainer.value && (force || autoScrollEnabled.value)) {
@@ -565,7 +810,6 @@ async function scrollToBottom(force = false) {
   }
 }
 
-// Format relative time
 function formatRelativeTime(ts) {
   if (!ts) return ''
   const d = new Date(ts + (ts.includes('Z') || ts.includes('+') ? '' : 'Z'))
@@ -577,41 +821,49 @@ function formatRelativeTime(ts) {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-// Init
-onMounted(() => {
-  loadConversations()
-  watch(activeConversationId, () => {
+// Restore active conversation from localStorage
+const savedId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+if (savedId) {
+  activeConversationId.value = savedId
+}
+
+// Load conversations on mount
+onMounted(async () => {
+  await loadConversations()
+
+  // If we have a saved ID and it exists in the list, load its messages
+  if (activeConversationId.value) {
+    const exists = conversations.value.some(c => c.id === activeConversationId.value)
+    if (exists) {
+      try {
+        const res = await chatApi.getMessages(activeConversationId.value)
+        messages.value = res.data || []
+        await scrollToBottom(true)
+      } catch (e) {
+        console.error('加载消息失败:', e)
+      }
+    } else {
+      activeConversationId.value = null
+    }
+  }
+
+  watch(activeConversationId, (id) => {
     autoScrollEnabled.value = true
+    if (id) {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_ID, id)
+    } else {
+      localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+    }
   })
+})
+
+// Refresh conversations when returning to this tab (KeepAlive)
+onActivated(async () => {
+  await loadConversations()
 })
 </script>
 
 <style scoped>
-/* ── Sidebar expand/collapse animations ── */
-/*
-   Timing rationale:
-   - Width: 380ms cubic-bezier(0.4,0,0.2,1) — Material "standard decelerate"
-     Feels fast-start then gentle-settle, avoids the rubber-band jerk of ease-in-out
-   - Content expand: 280ms cubic-bezier(0,0,0.2,1) with 100ms delay
-     Width starts widening first, then content fades in 100ms later
-   - Content collapse: 180ms ease-in — quick fade-out before width shrinks
-*/
-.animate-sidebar-expand {
-  animation: sidebarExpand 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
-}
-.animate-sidebar-collapse {
-  animation: sidebarCollapse 200ms cubic-bezier(0, 0, 0.2, 1) both;
-}
-
-@keyframes sidebarExpand {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes sidebarCollapse {
-  from { opacity: 0; transform: scale(0.95); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
 /* Step transition animations */
 .step-enter-active {
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -628,18 +880,32 @@ onMounted(() => {
   transform: translateY(8px) scale(0.95);
 }
 
-/* Streaming content fade-in */
-.streaming-content {
-  animation: contentFadeIn 0.3s ease-out;
-}
-@keyframes contentFadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Sidebar animation */
+.sidebar-container {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Shimmer animation for step progress */
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Shimmer animation */
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent 0%, rgb(var(--c-primary-400) / 0.6) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--primary) 40%, transparent) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
