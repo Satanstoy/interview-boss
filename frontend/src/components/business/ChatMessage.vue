@@ -181,6 +181,7 @@ const hasAnyReference = computed(() => {
 
 const basisQuestions = computed(() => {
   const m = props.message.metadata
+  if (m?.selected_basis_questions?.length) return m.selected_basis_questions
   if (!m?.basis_question_ids?.length || !m?.retrieved_questions?.length) return []
   return m.retrieved_questions.filter(q => m.basis_question_ids.includes(q.id))
 })

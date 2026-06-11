@@ -539,6 +539,33 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             for q in retrieved[:3]
         ]
 
+    if basis["basis_question_ids"] and retrieved:
+        basis_id_set = set(basis["basis_question_ids"])
+        basis_qs = [q for q in retrieved if q["id"] in basis_id_set]
+        if not basis_qs:
+            from app.db.connection import get_db_connection
+
+            with get_db_connection() as conn:
+                placeholders = ",".join("?" * len(basis["basis_question_ids"]))
+                rows = conn.execute(
+                    f"SELECT id, question, cat1, cat2 FROM question_bank WHERE id IN ({placeholders})",
+                    basis["basis_question_ids"],
+                ).fetchall()
+                basis_qs = [
+                    {"id": r[0], "question": r[1], "cat1": r[2], "cat2": r[3]}
+                    for r in rows
+                ]
+        metadata["selected_basis_questions"] = [
+            {
+                "id": q["id"],
+                "question": q["question"],
+                "cat1": q.get("cat1", ""),
+                "company": _extract_company_from_sources(q),
+                "round": _extract_round_from_sources(q),
+            }
+            for q in basis_qs
+        ]
+
     if resume_summary and _response_references_resume(full_response, resume_summary):
         metadata["resume_ref"] = _get_resume_name(user_id)
     if state.get("jd_text") and _response_references_jd(
