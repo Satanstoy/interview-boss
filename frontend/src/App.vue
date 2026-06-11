@@ -68,7 +68,7 @@
     />
 
     <!-- Simple two-column layout: sidebar left, content right -->
-    <div v-else class="flex min-h-screen">
+    <div v-else class="flex h-screen overflow-hidden">
       <!-- Sidebar: dynamic width, collapsible -->
       <aside
         class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 overflow-hidden"
@@ -94,12 +94,24 @@
         <SiteHeader
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
+          :no-border="activeTab === 'Chat'"
           @show-settings="showSettingsPage = true"
         />
 
         <TabBar class="md:hidden" :active-tab="activeTab" @update:active-tab="onTabChange" />
 
-        <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
+        <!-- ChatView: fills entire right side without padding -->
+        <KeepAlive>
+          <ChatView
+            v-if="activeTab === 'Chat'"
+            :jd-list="jdData"
+            :preview="isPreviewMode"
+            class="flex-1 min-h-0"
+          />
+        </KeepAlive>
+
+        <!-- Other tabs: with padding -->
+        <div v-else class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
 
 
 
@@ -161,10 +173,10 @@
                       : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
                   >
                     全部
-                    <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBank.length }}</span>
+                    <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBankOverallTotal || masterBank.length }}</span>
                   </button>
                   <button
-                    v-for="(count, topic) in popularTags" :key="topic"
+                    v-for="(count, topic) in categoryCounts" :key="topic"
                     @click="onSelectTag(topic)"
                     class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group"
                     :class="selectedTag === topic
@@ -406,13 +418,6 @@
                 :popular-tags="popularTags"
               />
 
-              <!-- Chat Tab (模拟面试) -->
-              <ChatView
-                v-if="activeTab === 'Chat'"
-              :jd-list="jdData"
-              :preview="isPreviewMode"
-              />
-
               <!-- KnowledgeGraph Tab -->
               <KnowledgeGraph
                 v-if="activeTab === 'KnowledgeGraph'"
@@ -562,7 +567,7 @@ const activeTab = ref('MasterBank')
 const showPracticeMode = ref(false)
 const isPreviewMode = new URLSearchParams(window.location.search).get('preview') === '1'
 const sidebarTabs = computed(() => [
-  { key: 'MasterBank', label: '高频题库', count: filteredMasterBank.value.length },
+  { key: 'MasterBank', label: '高频题库', count: masterBankTotal.value || filteredMasterBank.value.length },
   { key: 'Chat', label: '模拟面试' },
   { key: 'JD', label: 'JD 筛选', count: jdData.value.length },
   { key: 'Interview', label: '面经库', count: interviewData.value.length },
@@ -592,7 +597,8 @@ let afterFetchCleanup = () => {}
 const {
   jdData, interviewData, masterBank,
   isDataLoading, dataLoadError,
-  analytics, practiceStats, popularTags,
+  analytics, practiceStats, popularTags, categoryCounts,
+  masterBankTotal, masterBankOverallTotal,
   activeSeason, availableSeasons,
   isLoadingMore, hasMore, loadMoreMasterBank,
   selectedTag, selectedSubTags, searchQuery,
