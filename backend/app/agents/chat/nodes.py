@@ -517,9 +517,20 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     basis = _parse_basis_from_response(full_response)
     full_response = basis["clean_response"]
 
-    # 返回完成事件（包含元数据）
-    metadata = {}
+    if not basis["basis_type"] and retrieved:
+        basis["basis_type"] = "interview_question"
+        basis["basis_question_ids"] = [q["id"] for q in retrieved[:2]]
+        basis["basis_confidence"] = 0.6
+        basis["should_show_references"] = True
 
+    if not basis["basis_type"]:
+        if resume_summary:
+            basis["basis_type"] = "resume"
+        else:
+            basis["basis_type"] = "knowledge"
+        basis["basis_confidence"] = 0.5
+
+    metadata = {}
     metadata["basis_type"] = basis["basis_type"]
     metadata["basis_question_ids"] = basis["basis_question_ids"]
     metadata["basis_confidence"] = basis["basis_confidence"]
