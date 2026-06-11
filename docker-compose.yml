@@ -34,7 +34,7 @@ x-app-service: &app-service
   volumes:
     - ./backend/data:/app/backend/data
     - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
-    - /home/ubuntu/.cache/huggingface/hub/models--Xenova--bge-small-zh-v1.5:/app/models/bge-small-zh-v1.5:ro
+    - /home/ubuntu/.cache/huggingface/hub/models--Xenova--bge-small-zh-v1.5/snapshots/main:/app/models/bge-small-zh-v1.5:ro
   networks:
     - app-network
   security_opt:

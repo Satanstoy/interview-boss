@@ -649,6 +649,9 @@ def _vector_search(
     except ImportError:
         logger.warning("向量搜索: embedding_service 不可用")
         return []
+    except Exception as e:
+        logger.warning(f"向量搜索: embedding_service 导入失败: {e}")
+        return []
 
     with get_db_connection() as conn:
         rows = conn.execute(
@@ -686,10 +689,19 @@ def _vector_search(
         return []
 
     vectors_np = np.array(vectors, dtype=np.float32)
-    index = build_index(vectors_np)
+    try:
+        index = build_index(vectors_np)
+    except Exception as e:
+        logger.warning(f"向量搜索: FAISS 索引构建失败: {e}")
+        return []
 
     # 编码查询文本
-    query_emb = encode_texts([query_text])
+    try:
+        query_emb = encode_texts([query_text])
+    except Exception as e:
+        logger.warning(f"向量搜索: encode_texts 失败（模型不可用）: {e}")
+        return []
+
     indices, scores = search_index(index, query_emb, top_k=top_k)
 
     results = []
