@@ -101,9 +101,8 @@
         <TabBar class="md:hidden" :active-tab="activeTab" @update:active-tab="onTabChange" />
 
         <!-- ChatView: fills entire right side without padding -->
-        <KeepAlive>
+        <KeepAlive v-if="activeTab === 'Chat'">
           <ChatView
-            v-if="activeTab === 'Chat'"
             :jd-list="jdData"
             :preview="isPreviewMode"
             class="flex-1 min-h-0"
