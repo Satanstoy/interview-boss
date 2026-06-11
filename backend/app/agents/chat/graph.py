@@ -79,6 +79,7 @@ async def run_chat(
     jd_id: int = None,
     resume_text: str = None,
     jd_text: str = None,
+    model: str = None,
 ) -> AsyncGenerator[dict, None]:
     """运行面试对话流程，yield SSE 事件。
 
@@ -97,6 +98,7 @@ async def run_chat(
         "jd_id": jd_id,
         "jd_text": jd_text,
         "resume_text": resume_text,
+        "model": model,
         "memories": [],
         "memory_summaries": [],
         "resume_summary": None,

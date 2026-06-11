@@ -425,10 +425,14 @@ async def stream_llm_messages(
     Args:
         yield_thinking: 如果为 True，yield dict {"type": "thinking"/"content", "content": "..."}，
                        用于支持 DeepSeek 等模型的 reasoning_content。默认 False（向后兼容，yield str）。
+        model: 可选，覆盖用户默认模型。
     """
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
         user_id
     )
+
+    if kwargs.get("model"):
+        model = kwargs.pop("model")
 
     if provider == "anthropic":
         # Anthropic 流式：转换消息格式

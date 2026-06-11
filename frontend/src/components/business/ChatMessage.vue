@@ -1,87 +1,109 @@
 <template>
-  <div class="flex items-start gap-3" :class="isUser ? 'flex-row-reverse' : ''">
-    <!-- Avatar -->
-    <div class="size-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold border"
-      :class="isUser
-        ? 'bg-primary text-primary-foreground border-primary'
-        : 'bg-white dark:bg-ink-800 text-ink-700 dark:text-ink-200 border-surface-200 dark:border-ink-700'">
-      {{ isUser ? '你' : 'AI' }}
+  <div class="mb-8 group">
+    <!-- User message -->
+    <div v-if="isUser" class="flex justify-end">
+      <div class="max-w-[80%]">
+        <div class="bg-primary/10 rounded-2xl rounded-tr-md px-4 py-3">
+          <div class="prose-chat text-sm" v-html="renderedContent"></div>
+        </div>
+        <div class="text-[11px] text-muted-foreground mt-1 text-right">
+          {{ formatTime(message.created_at) }}
+        </div>
+      </div>
     </div>
 
-    <!-- Message bubble -->
-    <div class="max-w-[75%] min-w-0 group">
-      <!-- Thinking block (for saved messages with thinking metadata) -->
+    <!-- Assistant message -->
+    <div v-else>
+      <!-- Thinking block -->
       <ThinkingBlock
-        v-if="!isUser && message.metadata?.thinking"
+        v-if="message.metadata?.thinking"
         :is-streaming="false"
         :content="message.metadata.thinking"
         :duration="message.metadata.thinking_duration || 0"
       />
 
-      <div class="rounded-xl px-4 py-3 text-sm leading-relaxed relative shadow-sm"
-        :class="isUser
-          ? 'bg-primary text-primary-foreground rounded-tr-md'
-          : 'bg-white dark:bg-surface-900 text-ink-800 dark:text-ink-100 rounded-tl-md border border-surface-200 dark:border-ink-800'">
-        <div v-if="isUser" class="prose-chat" v-html="renderedContent"></div>
-        <div v-else class="prose-chat" v-html="renderedContent"></div>
+      <!-- Message content -->
+      <div class="prose-chat text-sm leading-relaxed">
+        <div v-html="renderedContent"></div>
       </div>
 
-      <!-- Message actions (AI messages only) -->
-      <div v-if="!isUser && message.content" class="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button @click="copyContent" class="p-1 rounded-md text-ink-300 dark:text-ink-600 hover:text-ink-500 dark:hover:text-ink-400 hover:bg-surface-100 dark:hover:bg-ink-800 transition" title="复制">
-          <svg v-if="!copied" class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-          <svg v-else class="size-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      <!-- Message actions -->
+      <div class="flex items-center gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button 
+          @click="copyContent" 
+          class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+          title="复制"
+        >
+          <Copy v-if="!copied" :size="14" />
+          <Check v-else :size="14" class="text-emerald-500" />
         </button>
+        <button 
+          @click="$emit('regenerate', message.id)" 
+          class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+          title="重新生成"
+        >
+          <RotateCcw :size="14" />
+        </button>
+        <button 
+          @click="toggleLike" 
+          class="p-1.5 rounded-md transition-colors"
+          :class="liked ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+          title="点赞"
+        >
+          <ThumbsUp :size="14" />
+        </button>
+        <span class="text-[11px] text-muted-foreground ml-2">{{ formatTime(message.created_at) }}</span>
       </div>
 
-      <!-- Retrieved questions -->
-      <div v-if="!isUser && message.metadata?.retrieved_questions?.length" class="mt-2">
-        <button @click="showRetrieved = !showRetrieved"
-          class="text-[11px] text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300 flex items-center gap-1.5 transition group/sources">
-          <svg class="size-3 transition-transform" :class="showRetrieved ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-          </svg>
-          <svg class="size-3 text-primary-400 dark:text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
-          <span class="group-hover/sources:text-ink-600 dark:group-hover/sources:text-ink-300">参考题目 ({{ message.metadata.retrieved_questions.length }})</span>
-        </button>
-        <Transition name="expand">
-          <div v-if="showRetrieved" class="mt-1.5 flex flex-col gap-1.5">
-            <div v-for="q in message.metadata.retrieved_questions" :key="q.id"
-              class="text-xs bg-white dark:bg-surface-900 border border-surface-200 dark:border-ink-800 rounded-lg px-3 py-2 text-ink-600 dark:text-ink-300 hover:bg-surface-50 dark:hover:bg-ink-800/50 transition-colors">
-              <div class="flex items-start gap-2">
-                <span v-if="q.cat1" class="text-primary-600 dark:text-primary-400 font-medium shrink-0">[{{ q.cat1 }}]</span>
-                <span class="flex-1">{{ q.question }}</span>
-              </div>
-              <div v-if="q.source || q.company" class="mt-1 flex items-center gap-1.5 text-[10px] text-ink-400 dark:text-ink-500">
-                <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                <span>{{ q.company || '未知来源' }}{{ q.round ? ' · ' + q.round : '' }}</span>
+      <!-- Citations: Sources -->
+      <div v-if="hasAnyReference" class="mt-4 pt-4 border-t border-border/50">
+        <!-- Retrieved questions -->
+        <div v-if="message.metadata?.retrieved_questions?.length" class="mb-3">
+          <button 
+            @click="showRetrieved = !showRetrieved"
+            class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <BookOpen :size="14" class="text-primary" />
+            <span class="font-medium">参考了 {{ message.metadata.retrieved_questions.length }} 个题目</span>
+            <ChevronDown :size="14" class="transition-transform" :class="showRetrieved ? 'rotate-180' : ''" />
+          </button>
+          
+          <Transition name="expand">
+            <div v-if="showRetrieved" class="mt-2 flex flex-col gap-2">
+              <div 
+                v-for="q in message.metadata.retrieved_questions" 
+                :key="q.id"
+                class="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors"
+              >
+                <div class="size-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                  <span class="text-xs font-bold text-primary">{{ q.cat1?.[0] || 'Q' }}</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm text-foreground">{{ q.question }}</div>
+                  <div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                    <span v-if="q.company" class="font-medium">{{ q.company }}</span>
+                    <span v-if="q.round">{{ q.round }}</span>
+                    <span v-if="q.cat1" class="text-primary">[{{ q.cat1 }}]</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </Transition>
-      </div>
-
-      <!-- Resume reference -->
-      <div v-if="!isUser && message.metadata?.resume_ref" class="mt-2">
-        <div class="flex items-center gap-1.5 text-[11px] text-ink-400 dark:text-ink-500 bg-amber-50/60 dark:bg-amber-900/15 border border-amber-100 dark:border-amber-800/30 rounded-lg px-3 py-1.5">
-          <svg class="size-3 text-amber-500 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-          <span class="font-medium text-amber-600 dark:text-amber-400">参考简历：</span>
-          <span>{{ message.metadata.resume_ref }}</span>
+          </Transition>
         </div>
-      </div>
 
-      <!-- JD reference -->
-      <div v-if="!isUser && message.metadata?.jd_ref" class="mt-2">
-        <div class="flex items-center gap-1.5 text-[11px] text-ink-400 dark:text-ink-500 bg-blue-50/60 dark:bg-blue-900/15 border border-blue-100 dark:border-blue-800/30 rounded-lg px-3 py-1.5">
-          <svg class="size-3 text-blue-500 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          <span class="font-medium text-blue-600 dark:text-blue-400">参考 JD：</span>
-          <span>{{ message.metadata.jd_ref }}</span>
+        <!-- Resume reference -->
+        <div v-if="message.metadata?.resume_ref" class="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+          <FileText :size="14" class="text-amber-500 shrink-0" />
+          <span>参考简历：</span>
+          <span class="text-foreground font-medium truncate">{{ message.metadata.resume_ref }}</span>
         </div>
-      </div>
 
-      <!-- Timestamp -->
-      <div class="text-[10px] text-ink-300 dark:text-ink-600 mt-1" :class="isUser ? 'text-right' : ''">
-        {{ formatTime(message.created_at) }}
+        <!-- JD reference -->
+        <div v-if="message.metadata?.jd_ref" class="flex items-center gap-2 text-xs text-muted-foreground">
+          <Briefcase :size="14" class="text-blue-500 shrink-0" />
+          <span>参考 JD：</span>
+          <span class="text-foreground font-medium truncate">{{ message.metadata.jd_ref }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -90,15 +112,33 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
+import { 
+  Copy, 
+  Check, 
+  RotateCcw, 
+  ThumbsUp, 
+  ChevronDown, 
+  BookOpen, 
+  FileText, 
+  Briefcase 
+} from '@lucide/vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
 })
 
+const emit = defineEmits(['regenerate', 'like'])
+
 const isUser = computed(() => props.message.role === 'user')
 const showRetrieved = ref(false)
 const copied = ref(false)
+const liked = ref(false)
+
+const hasAnyReference = computed(() => {
+  const m = props.message.metadata
+  return m?.retrieved_questions?.length || m?.resume_ref || m?.jd_ref
+})
 
 const renderedContent = computed(() => {
   return renderSafeMarkdown(props.message.content)
@@ -112,6 +152,11 @@ async function copyContent() {
   } catch { /* ignore */ }
 }
 
+function toggleLike() {
+  liked.value = !liked.value
+  emit('like', { id: props.message.id, liked: liked.value })
+}
+
 function formatTime(ts) {
   if (!ts) return ''
   const d = new Date(ts + (ts.includes('Z') || ts.includes('+') ? '' : 'Z'))
@@ -120,7 +165,6 @@ function formatTime(ts) {
 </script>
 
 <style scoped>
-/* Expand transition for retrieved questions */
 .expand-enter-active {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -129,12 +173,12 @@ function formatTime(ts) {
 }
 .expand-enter-from {
   opacity: 0;
-  transform: translateY(-8px) scaleY(0.95);
+  transform: translateY(-8px);
   max-height: 0;
 }
 .expand-leave-to {
   opacity: 0;
-  transform: translateY(-4px) scaleY(0.98);
+  transform: translateY(-4px);
   max-height: 0;
 }
 .expand-enter-to,

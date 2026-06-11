@@ -9,19 +9,16 @@ export const getConversation = (id) => get(`${API}/conversations/${id}`)
 export const updateTitle = (id, title) => put(`${API}/conversations/${id}/title`, { title })
 export const archiveConversation = (id) => put(`${API}/conversations/${id}/archive`)
 export const deleteConversation = (id) => del(`${API}/conversations/${id}`)
+export const pinConversation = (id) => put(`${API}/conversations/${id}/pin`)
 
 // ── 消息 ──
 export const getMessages = (conversationId) => get(`${API}/conversations/${conversationId}/messages`, { noCache: true })
 
-/**
- * 发送消息并接收 SSE 流式回复
- * @param {string} conversationId
- * @param {string} content
- * @param {function} onEvent - 事件回调: ({type, content?, questions?, message?}) => void
- * @returns {Promise}
- */
-export const sendMessage = (conversationId, content, onEvent) =>
-  postSSE(`${API}/conversations/${conversationId}/messages`, { content }, onEvent)
+export const sendMessage = (conversationId, content, onEvent, model = null) => {
+  const body = { content }
+  if (model) body.model = model
+  return postSSE(`${API}/conversations/${conversationId}/messages`, body, onEvent)
+}
 
 // ── 记忆 ──
 export const getMemories = (memoryType) => {

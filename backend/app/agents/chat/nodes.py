@@ -351,6 +351,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     memory_summaries = state.get("memory_summaries", [])
     resume_summary = state.get("resume_summary")
     retrieved = state.get("retrieved_questions", [])
+    model_override = state.get("model")
 
     # 构建面试上下文（岗位、分类、练习统计）
     interview_context = state.get("interview_context", "")
@@ -457,7 +458,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     try:
         async for event in stream_llm_messages(
-            messages, user_id=user_id, yield_thinking=True
+            messages, user_id=user_id, yield_thinking=True, model=model_override
         ):
             if not isinstance(event, dict):
                 # 向后兼容：如果不是 dict，当作普通 content

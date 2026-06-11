@@ -124,9 +124,10 @@ import { getResume } from '@/services/resumeApi.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AppDialog from '@/components/common/AppDialog.vue'
 
-defineProps({
+const props = defineProps({
   visible: { type: Boolean, default: false },
   jdList: { type: Array, default: () => [] },
+  initialMessage: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'create'])
 
@@ -195,6 +196,7 @@ async function handleCreate() {
       mode: mode.value,
       jd_id: selectedJdId.value,
       resume_text: finalResumeText,
+      initial_message: props.initialMessage || null,
     })
   } finally {
     creating.value = false

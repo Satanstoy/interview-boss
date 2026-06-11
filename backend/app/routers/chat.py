@@ -27,6 +27,7 @@ class CreateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
+    model: Optional[str] = None
 
 
 # ── 会话管理 ──
@@ -219,6 +220,7 @@ async def send_message(
                 jd_id=conv.get("jd_id"),
                 resume_text=conv.get("resume_text"),
                 jd_text=jd_text,
+                model=req.model,
             ):
                 event_type = event.get("type", "chunk")
 
@@ -240,13 +242,18 @@ async def send_message(
                     yield f"data: {json.dumps({'type': 'retrieved', 'questions': event.get('questions', [])}, ensure_ascii=False)}\n\n"
 
                 elif event_type == "done":
+                    meta = event.get("metadata", {})
+                    if meta.get("resume_ref"):
+                        yield f"data: {json.dumps({'type': 'resume_ref', 'name': meta['resume_ref']}, ensure_ascii=False)}\n\n"
+                    if meta.get("jd_ref"):
+                        yield f"data: {json.dumps({'type': 'jd_ref', 'title': meta['jd_ref']}, ensure_ascii=False)}\n\n"
                     if full_response:
                         await run_db(
                             lambda: chat_service.save_message(
                                 conversation_id,
                                 "assistant",
                                 full_response,
-                                metadata=event.get("metadata", {}),
+                                metadata=meta,
                             )
                         )
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"

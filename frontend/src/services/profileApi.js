@@ -25,3 +25,4 @@ export const deletePublicTaxonomy = (taxonomyId) => del(`${API}/profile/taxonomy
 export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)
 export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, settings)
 export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
+export const fetchAvailableModels = () => get(`${API}/profile/llm/models`)
