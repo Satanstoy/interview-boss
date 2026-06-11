@@ -24,23 +24,23 @@
     color: rgb(var(--c-primary-100));
   }
 
-  /* Dark mode: force all form elements to dark background */
+  /* Dark mode: force all form elements to neutral dark surface */
   .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
   .dark textarea,
   .dark select {
-    background-color: #252220 !important;
+    background-color: oklch(0.205 0 0) !important;
   }
   .dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
   .dark textarea:focus,
   .dark select:focus {
-    background-color: #302b28 !important;
+    background-color: oklch(0.24 0 0) !important;
   }
 
   /* Dark mode: checkbox & radio styling */
   .dark input[type="checkbox"],
   .dark input[type="radio"] {
-    background-color: #3f3a36 !important;
-    border-color: #574f49 !important;
+    background-color: oklch(0.269 0 0) !important;
+    border-color: oklch(0.4 0 0) !important;
   }
   .dark input[type="checkbox"]:checked,
   .dark input[type="radio"]:checked {

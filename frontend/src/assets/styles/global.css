@@ -195,12 +195,12 @@
   box-shadow: 0 8px 28px -4px rgb(0 0 0 / 0.4), 0 20px 48px -8px rgb(0 0 0 / 0.3);
 }
 
-/* Form input background — use --card (white in light, dark surface in dark) instead of --muted */
+/* Form input background — use --card token for neutral surface in both modes */
 input[type="text"], input[type="email"], input[type="password"], input[type="number"], input:not([type]), textarea, select {
-  background-color: hsl(var(--card)) !important;
+  background-color: var(--card);
 }
 input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, input[type="number"]:focus, input:not([type]):focus, textarea:focus, select:focus {
-  background-color: hsl(var(--card)) !important;
+  background-color: var(--card);
 }
 
 /* Dark mode native select option styling */
