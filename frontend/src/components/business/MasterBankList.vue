@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import AppEmpty from '@/components/common/AppEmpty.vue'
 import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
 import QuestionCard from '@/components/business/QuestionCard.vue'
@@ -112,23 +112,34 @@ const scrollerRef = ref(null)
 let resizeObserver = null
 let lastHeight = 0
 let scrollCheckTimer = null
+let outerScrollContainer = null
+let scrollerScrollEl = null
 
 const checkScrollForLoadMore = () => {
   if (!props.hasMore || props.isLoadingMore) return
-  const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
-  if (!scrollerEl) return
-  const { scrollTop, scrollHeight, clientHeight } = scrollerEl
-  if (scrollHeight - scrollTop - clientHeight < 400) {
+  const scrollEl = scrollerScrollEl || containerRef.value?.querySelector('.vue-recycle-scroller')
+  if (!scrollEl) return
+  const { scrollTop, scrollHeight, clientHeight } = scrollEl
+  if (scrollHeight - scrollTop - clientHeight < 600) {
     emit('load-more')
   }
 }
 
-const onScrollerScroll = () => {
+const onScroll = () => {
   if (scrollCheckTimer) return
   scrollCheckTimer = setTimeout(() => {
     scrollCheckTimer = null
     checkScrollForLoadMore()
   }, 150)
+}
+
+const bindScrollerScroll = () => {
+  const nextEl = containerRef.value?.querySelector('.vue-recycle-scroller')
+  if (!nextEl || nextEl === scrollerScrollEl) return
+  if (scrollerScrollEl) scrollerScrollEl.removeEventListener('scroll', onScroll)
+  scrollerScrollEl = nextEl
+  scrollerScrollEl.addEventListener('scroll', onScroll, { passive: true })
+  checkScrollForLoadMore()
 }
 
 const updateScrollerHeight = () => {
@@ -171,26 +182,31 @@ const updateScrollerHeight = () => {
 onMounted(() => {
   nextTick(() => {
     updateScrollerHeight()
+    bindScrollerScroll()
     setTimeout(updateScrollerHeight, 300)
-    // 绑定滚动事件到虚拟滚动容器
-    const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
-    if (scrollerEl) scrollerEl.addEventListener('scroll', onScrollerScroll, { passive: true })
+    setTimeout(bindScrollerScroll, 300)
   })
 
-  // Observe panel for size changes (window resize, sidebar toggle)
   const container = containerRef.value
-  const scrollContainer = container?.closest('.overflow-y-auto')
-  if (scrollContainer) {
+  outerScrollContainer = container?.closest('.overflow-y-auto')
+  if (outerScrollContainer) {
     resizeObserver = new ResizeObserver(updateScrollerHeight)
-    resizeObserver.observe(scrollContainer)
+    resizeObserver.observe(outerScrollContainer)
   }
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   if (scrollCheckTimer) clearTimeout(scrollCheckTimer)
-  const scrollerEl = containerRef.value?.querySelector('.vue-recycle-scroller')
-  if (scrollerEl) scrollerEl.removeEventListener('scroll', onScrollerScroll)
+  if (scrollerScrollEl) scrollerScrollEl.removeEventListener('scroll', onScroll)
+})
+
+watch(() => [props.items.length, props.isLoadingMore, props.hasMore], () => {
+  nextTick(() => {
+    updateScrollerHeight()
+    bindScrollerScroll()
+    checkScrollForLoadMore()
+  })
 })
 
 const toggleAnswer = (question) => {

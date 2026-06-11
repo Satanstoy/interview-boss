@@ -6,11 +6,15 @@ const API = '/api'
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
 export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
 export const fetchMasterBank = (params = {}) => {
+  // Filter out undefined values to prevent URLSearchParams from converting them to "undefined" string
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, v]) => v !== undefined)
+  )
   const query = new URLSearchParams({
     page: params.page || 1,
     page_size: params.page_size || 500,
     sort: params.sort || 'frequency_desc',
-    ...params,
+    ...cleanParams,
     compact: 'true',  // Always use compact mode to reduce bandwidth
   })
   return get(`${API}/master-bank?${query}`)

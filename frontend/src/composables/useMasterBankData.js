@@ -18,6 +18,10 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const dataLoadError = ref(null)
   const analytics = ref({ tech_trends: {} })
   const popularTagsFromServer = ref([])
+  const categoryCountsFromServer = ref([])
+  const filteredTagCountsFromServer = ref([])
+  const masterBankTotal = ref(0)
+  const masterBankOverallTotal = ref(0)
   const practiceStats = ref({})
   const activeSeason = ref('')
   const availableSeasons = ref([])
@@ -37,6 +41,20 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const filterSeason = ref('')
   const interviewSortOrder = ref('desc')
 
+  const decorateQuestion = (q) => ({
+    ...q, _showAnswer: false, _showSources: false,
+    _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
+  })
+
+  const applyMasterBankMeta = (resp) => {
+    const total = Number(resp.total || 0)
+    masterBankTotal.value = total
+    if (resp.overall_total !== undefined) masterBankOverallTotal.value = Number(resp.overall_total || total)
+    if (resp.popular_tags) popularTagsFromServer.value = resp.popular_tags
+    if (resp.category_counts) categoryCountsFromServer.value = resp.category_counts
+    if (resp.filtered_tag_counts) filteredTagCountsFromServer.value = resp.filtered_tag_counts
+  }
+
   // ── Data fetching ──
   const fetchTableData = async () => {
     isDataLoading.value = true
@@ -44,22 +62,19 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     invalidateCache()
     currentPage.value = 1
     hasMore.value = true
+    filteredTagCountsFromServer.value = []
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
         api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
       ])
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
-      const items = (masterResp.items || masterResp).map(q => ({
-        ...q, _showAnswer: false, _showSources: false,
-        _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
-      }))
+      const items = (masterResp.items || masterResp).map(decorateQuestion)
       masterBank.value = items
       // 检查是否还有更多数据
-      const total = masterResp.total || 0
-      hasMore.value = items.length < total
+      applyMasterBankMeta(masterResp)
+      hasMore.value = items.length < masterBankTotal.value
       currentPage.value = 1
-      if (masterResp.popular_tags) { popularTagsFromServer.value = masterResp.popular_tags }
       selectedSubTags.value = []
       onAfterFetch?.()
     } catch (e) {
@@ -74,16 +89,13 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     try {
       const nextPage = currentPage.value + 1
       const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
-      const newItems = (resp.items || resp).map(q => ({
-        ...q, _showAnswer: false, _showSources: false,
-        _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
-      }))
+      const newItems = (resp.items || resp).map(decorateQuestion)
       if (newItems.length > 0) {
         masterBank.value = [...masterBank.value, ...newItems]
         currentPage.value = nextPage
       }
-      const total = resp.total || 0
-      hasMore.value = masterBank.value.length < total
+      applyMasterBankMeta(resp)
+      hasMore.value = masterBank.value.length < masterBankTotal.value
     } catch (e) {
       console.warn('加载更多题目失败', e)
     } finally { isLoadingMore.value = false }
@@ -124,8 +136,25 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     })
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
   })
+  const categoryCounts = computed(() => {
+    if (categoryCountsFromServer.value.length > 0) {
+      const result = {}
+      for (const item of categoryCountsFromServer.value) result[item.category] = item.count
+      return result
+    }
+    const counts = {}
+    masterBank.value.forEach(q => {
+      const cats = (q.cat1 || '未分类').split(',').map(c => c.trim()).filter(c => c)
+      if (cats.length === 0) counts['未分类'] = (counts['未分类'] || 0) + 1
+      else cats.forEach(cat => counts[cat] = (counts[cat] || 0) + 1)
+    })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
+  })
   const availableSubTags = computed(() => {
     if (selectedTag.value === '全部') return []
+    if (filteredTagCountsFromServer.value.length > 0) {
+      return filteredTagCountsFromServer.value.map(({ tag, count }) => ({ tag, count }))
+    }
     const catItems = masterBank.value.filter(q =>
       (q.cat1 || '未分类').split(',').map(c => c.trim()).includes(selectedTag.value)
     )
@@ -198,7 +227,8 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     // data
     jdData, interviewData, masterBank,
     isDataLoading, dataLoadError,
-    analytics, practiceStats, popularTags,
+    analytics, practiceStats, popularTags, categoryCounts,
+    masterBankTotal, masterBankOverallTotal,
     activeSeason, availableSeasons,
     // infinite scroll
     isLoadingMore, hasMore, loadMoreMasterBank,

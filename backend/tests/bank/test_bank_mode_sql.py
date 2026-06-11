@@ -266,3 +266,28 @@ class TestFallbackPaths:
             assert '((qb.owner_id IS NULL' in where_clause
             assert 'OR qb.owner_id = ?)' in where_clause
             assert 'qb.deleted_at IS NULL' in where_clause
+
+
+class TestMasterBankListParamOrder:
+    """题库列表追加 user_question_view JOIN 时，参数顺序不能打乱岗位过滤。"""
+
+    def test_splits_position_join_param_before_where_params(self):
+        from app.routers.questions import _split_join_and_where_params
+
+        from_clause = (
+            "FROM question_bank qb JOIN question_position qp "
+            "ON qb.id = qp.question_id AND qp.position_id = ?"
+        )
+
+        join_params, where_params = _split_join_and_where_params(from_clause, [7, 42, "%前端%"])
+
+        assert join_params == [7]
+        assert where_params == [42, "%前端%"]
+
+    def test_keeps_fallback_params_as_where_params(self):
+        from app.routers.questions import _split_join_and_where_params
+
+        join_params, where_params = _split_join_and_where_params("FROM question_bank qb", [42, "前端"])
+
+        assert join_params == []
+        assert where_params == [42, "前端"]
