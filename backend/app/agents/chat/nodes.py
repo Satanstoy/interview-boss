@@ -14,6 +14,7 @@ from app.agents.chat.prompts import (
     KEYWORD_EXTRACT_PROMPT,
     CONTEXT_COMPRESS_PROMPT,
     MEMORY_EXTRACT_PROMPT,
+    BASIS_EXTRACT_GUIDANCE,
 )
 from app.agents.chat.skills import get_default_registry, build_skill_prompt
 
@@ -377,6 +378,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             resume_text=resume_summary or state.get("resume_text", "未提供简历"),
             interview_context=interview_context or "",
             interview_phase=interview_phase,
+            basis_guidance=BASIS_EXTRACT_GUIDANCE,
         )
     else:
         # 构建记忆上下文（使用摘要而非完整内容）
@@ -400,6 +402,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             memory_context=memory_context or "暂无用户背景信息",
             interview_context=interview_context or "",
             interview_phase=interview_phase,
+            basis_guidance=BASIS_EXTRACT_GUIDANCE,
         )
 
     system_prompt = _truncate_to_budget(system_prompt, SYSTEM_BUDGET)
@@ -511,8 +514,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         }
 
     # 解析生成依据（basis）
-    retrieved_ids = [q["id"] for q in retrieved[:5] if "id" in q]
-    basis = _parse_basis_from_response(full_response, retrieved_ids)
+    basis = _parse_basis_from_response(full_response)
     full_response = basis["clean_response"]
 
     # 返回完成事件（包含元数据）
@@ -628,70 +630,59 @@ def _get_jd_title(jd_id: int) -> str:
     return ""
 
 
-def _parse_basis_from_response(full_response: str, retrieved_ids: list[int]) -> dict:
-    """从 LLM 回复中解析生成依据（basis）。
-
-    Args:
-        full_response: LLM 生成的完整回复文本
-        retrieved_ids: 检索到的题目 ID 列表（最多 5 个）
+def _parse_basis_from_response(response: str) -> dict:
+    """从 LLM 回复中提取 [BASIS]...[/BASIS] 块并解析为结构化数据。
 
     Returns:
-        dict with keys: basis_type, basis_question_ids, basis_confidence,
-                        should_show_references, clean_response
+        dict with keys:
+            - basis_type: str (题型分类)
+            - basis_question_ids: list[int] (关联题目ID，clamped 1-999999)
+            - basis_confidence: float (置信度 0-1)
+            - should_show_references: bool (是否展示参考资料)
+            - clean_response: str (去除 [BASIS] 块后的回复文本)
     """
-    import re
+    import re as _re
+    import json as _json
 
-    referenced_ids: list[int] = []
+    defaults = {
+        "basis_type": "",
+        "basis_question_ids": [],
+        "basis_confidence": 0.0,
+        "should_show_references": False,
+        "clean_response": response,
+    }
 
-    # 策略 1: 匹配 [题目ID:123] 或 [题号:123] 标记
-    for m in re.finditer(r"\[题目[号ID]*[:：](\d+)\]", full_response):
-        try:
-            referenced_ids.append(int(m.group(1)))
-        except ValueError:
-            pass
+    match = _re.search(r"\[BASIS\](.*?)\[/BASIS\]", response, _re.DOTALL)
+    if not match:
+        return defaults
 
-    # 策略 2: 匹配 "参考题目 ID:123" 或 "源自题目#123"
-    for m in re.finditer(
-        r"(?:参考|源自|基于)[\s]*题目[\s]*[#：:ID]*(\d+)", full_response
-    ):
-        try:
-            referenced_ids.append(int(m.group(1)))
-        except ValueError:
-            pass
+    basis_block = match.group(1)
+    clean_response = (response[: match.start()] + response[match.end() :]).strip()
 
-    # 去重，保留在 retrieved_ids 范围内的
-    referenced_ids = list(
-        dict.fromkeys(rid for rid in referenced_ids if rid in retrieved_ids)
-    )
+    try:
+        data = _json.loads(basis_block)
+    except (ValueError, _json.JSONDecodeError):
+        return {**defaults, "clean_response": clean_response}
 
-    # 判断依据类型
-    if referenced_ids:
-        basis_type = "question"
-        basis_confidence = 0.8
-    elif retrieved_ids:
-        # 有检索但 LLM 未显式引用 — 低置信度 question 依据
-        basis_type = "question"
-        basis_confidence = 0.3
-        referenced_ids = []
+    basis_type = data.get("type", "")
+    confidence = data.get("confidence", 0.0)
+    show_refs = data.get("show_refs", False)
+
+    raw_ids = data.get("question_ids", [])
+    if isinstance(raw_ids, list):
+        question_ids = [
+            max(1, min(999999, int(qid)))
+            for qid in raw_ids
+            if isinstance(qid, (int, float))
+        ]
     else:
-        basis_type = "none"
-        basis_confidence = 0.0
-
-    should_show_references = bool(referenced_ids) and basis_confidence >= 0.5
-
-    # 清理响应中的 basis 标记（如 [题目ID:123]）
-    clean_response = full_response
-    clean_response = re.sub(r"\[题目[号ID]*[:：]\d+\]", "", clean_response)
-    clean_response = re.sub(
-        r"(?:参考|源自|基于)[\s]*题目[\s]*[#：:ID]*\d+", "", clean_response
-    )
-    clean_response = clean_response.strip()
+        question_ids = []
 
     return {
         "basis_type": basis_type,
-        "basis_question_ids": referenced_ids,
-        "basis_confidence": basis_confidence,
-        "should_show_references": should_show_references,
+        "basis_question_ids": question_ids,
+        "basis_confidence": confidence,
+        "should_show_references": show_refs,
         "clean_response": clean_response,
     }
 

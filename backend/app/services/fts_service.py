@@ -178,6 +178,66 @@ def _mmr_diversify(
     return selected
 
 
+def _heuristic_rerank(
+    results: list[dict],
+    keywords: list[str],
+    intent_categories: list[str],
+) -> list[dict]:
+    """启发式重排：基于关键词重叠 + 意图对齐 + 位置稳定性。
+
+    轻量级启发式（非神经模型），在 MMR 去重后进一步微调排序。
+
+    评分规则：
+    - keyword_overlap: question 中匹配 +10/词，tags/cat1/cat2 中匹配 +5/词
+    - intent_alignment: cat1 或 cat2 匹配 intent_categories 时 +5
+    - stability: 原始列表位置越靠前，微弱加分（+1 递减），用于打破平局
+
+    Args:
+        results: 已排序的结果列表
+        keywords: 查询关键词
+        intent_categories: 用户意图分类（cat1/cat2）
+
+    Returns:
+        重排后的结果列表（新 list，不修改原列表）
+    """
+    if not results or not keywords:
+        return [{**r, "_heuristic_score": 0} for r in results]
+
+    intent_set = {c.lower() for c in intent_categories if c}
+    scored = []
+
+    for idx, r in enumerate(results):
+        q_lower = (r.get("question") or "").lower()
+        t_lower = (r.get("tags") or "").lower()
+        c1_lower = (r.get("cat1") or "").lower()
+        c2_lower = (r.get("cat2") or "").lower()
+
+        score = 0
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in q_lower:
+                score += 10
+            if kw_lower in t_lower:
+                score += 5
+            if kw_lower in c1_lower:
+                score += 5
+            if kw_lower in c2_lower:
+                score += 5
+
+        if intent_set:
+            if c1_lower in intent_set or c2_lower in intent_set:
+                score += 5
+
+        if score > 0:
+            stability = max(0, 1.0 - idx * 0.1)
+            score += stability
+
+        scored.append({**r, "_heuristic_score": round(score, 2)})
+
+    scored.sort(key=lambda x: x["_heuristic_score"], reverse=True)
+    return scored
+
+
 def sync_fts_entry(question_bank_id: int) -> None:
     """同步单条题目到 FTS5 索引（新增或更新时调用）"""
     with get_db_connection() as conn:
@@ -745,6 +805,9 @@ def hybrid_search(
 
     # ── 优化 3: MMR 多样性去重 ──
     fused = _mmr_diversify(fused, lambda_param=0.7, limit=limit * 2)
+
+    # ── 优化 4: 启发式重排（关键词重叠 + 意图对齐）──
+    fused = _heuristic_rerank(fused, original_keywords or keywords, [])
 
     logger.info(
         f"混合搜索完成: FTS={len(fts_results)}, 向量={len(vec_results)}, "
