@@ -510,8 +510,19 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             "content": thinking_content,
         }
 
+    # 解析生成依据（basis）
+    retrieved_ids = [q["id"] for q in retrieved[:5] if "id" in q]
+    basis = _parse_basis_from_response(full_response, retrieved_ids)
+    full_response = basis["clean_response"]
+
     # 返回完成事件（包含元数据）
     metadata = {}
+
+    metadata["basis_type"] = basis["basis_type"]
+    metadata["basis_question_ids"] = basis["basis_question_ids"]
+    metadata["basis_confidence"] = basis["basis_confidence"]
+    metadata["should_show_references"] = basis["should_show_references"]
+
     if retrieved:
         import json as _json
 
@@ -526,7 +537,6 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             for q in retrieved[:3]
         ]
 
-    # 检测是否引用了简历或 JD
     if resume_summary and _response_references_resume(full_response, resume_summary):
         metadata["resume_ref"] = _get_resume_name(user_id)
     if state.get("jd_text") and _response_references_jd(
@@ -616,6 +626,74 @@ def _get_jd_title(jd_id: int) -> str:
     except:
         pass
     return ""
+
+
+def _parse_basis_from_response(full_response: str, retrieved_ids: list[int]) -> dict:
+    """从 LLM 回复中解析生成依据（basis）。
+
+    Args:
+        full_response: LLM 生成的完整回复文本
+        retrieved_ids: 检索到的题目 ID 列表（最多 5 个）
+
+    Returns:
+        dict with keys: basis_type, basis_question_ids, basis_confidence,
+                        should_show_references, clean_response
+    """
+    import re
+
+    referenced_ids: list[int] = []
+
+    # 策略 1: 匹配 [题目ID:123] 或 [题号:123] 标记
+    for m in re.finditer(r"\[题目[号ID]*[:：](\d+)\]", full_response):
+        try:
+            referenced_ids.append(int(m.group(1)))
+        except ValueError:
+            pass
+
+    # 策略 2: 匹配 "参考题目 ID:123" 或 "源自题目#123"
+    for m in re.finditer(
+        r"(?:参考|源自|基于)[\s]*题目[\s]*[#：:ID]*(\d+)", full_response
+    ):
+        try:
+            referenced_ids.append(int(m.group(1)))
+        except ValueError:
+            pass
+
+    # 去重，保留在 retrieved_ids 范围内的
+    referenced_ids = list(
+        dict.fromkeys(rid for rid in referenced_ids if rid in retrieved_ids)
+    )
+
+    # 判断依据类型
+    if referenced_ids:
+        basis_type = "question"
+        basis_confidence = 0.8
+    elif retrieved_ids:
+        # 有检索但 LLM 未显式引用 — 低置信度 question 依据
+        basis_type = "question"
+        basis_confidence = 0.3
+        referenced_ids = []
+    else:
+        basis_type = "none"
+        basis_confidence = 0.0
+
+    should_show_references = bool(referenced_ids) and basis_confidence >= 0.5
+
+    # 清理响应中的 basis 标记（如 [题目ID:123]）
+    clean_response = full_response
+    clean_response = re.sub(r"\[题目[号ID]*[:：]\d+\]", "", clean_response)
+    clean_response = re.sub(
+        r"(?:参考|源自|基于)[\s]*题目[\s]*[#：:ID]*\d+", "", clean_response
+    )
+    clean_response = clean_response.strip()
+
+    return {
+        "basis_type": basis_type,
+        "basis_question_ids": referenced_ids,
+        "basis_confidence": basis_confidence,
+        "should_show_references": should_show_references,
+        "clean_response": clean_response,
+    }
 
 
 async def extract_memory(state: ChatState) -> dict:

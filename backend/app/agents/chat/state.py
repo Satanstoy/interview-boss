@@ -59,5 +59,11 @@ class ChatState(TypedDict, total=False):
     response: str  # AI 面试官回复
     metadata: dict  # 回复元数据（检索到的题目等）
 
+    # === 生成依据（basis） ===
+    basis_type: str  # 'question' | 'resume' | 'conversation' | 'mixed' | 'none'
+    basis_question_ids: list[int]  # 实际引用的题目 ID 列表
+    basis_confidence: float  # 0.0-1.0，LLM 对依据的置信度
+    should_show_references: bool  # 是否在前端显示参考信息
+
     # === Skills ===
     active_skills: list[str]  # 当前激活的 skill 名称列表

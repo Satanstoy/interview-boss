@@ -115,6 +115,11 @@ async def run_chat(
         "retrieved_questions": [],
         "response": "",
         "metadata": {},
+        # === 生成依据（basis） ===
+        "basis_type": "none",
+        "basis_question_ids": [],
+        "basis_confidence": 0.0,
+        "should_show_references": False,
     }
 
     try:

@@ -60,6 +60,8 @@ INTERVIEW_SYSTEM_PROMPT_JD = """你是一位资深技术面试官，风格冷峻
 - 用中文，保持面试官口吻
 - 简洁，不要废话
 - 适当用 Markdown（代码块、列表）
+
+{basis_guidance}
 """
 
 
@@ -121,6 +123,8 @@ INTERVIEW_SYSTEM_PROMPT_PRACTICE = """你是一位资深技术面试官，风格
 - 用中文，保持面试官口吻
 - 简洁，不要废话
 - 适当用 Markdown（代码块、列表）
+
+{basis_guidance}
 """
 
 
@@ -201,4 +205,30 @@ MEMORY_EXTRACT_PROMPT = """分析以下面试对话，提取需要长期记住�
 [{{"type": "weakness|strength|preference", "content": "具体内容"}}]
 
 如果没有值得记住的信息，返回空数组: []
+"""
+
+
+# ── 回复依据提取指引 ──
+BASIS_EXTRACT_GUIDANCE = """
+## 回复依据（必须在回答末尾输出）
+在你的回答的最后一行，必须输出一个 JSON 块，格式如下：
+```json
+[BASIS]{"type":"<type>","question_ids":[<ids>],"confidence":<0.0-1.0>,"show_refs":<true/false>}[/BASIS]
+```
+
+字段说明：
+- type: 回答依据类型，取值：
+  - "interview_question" — 基于面试题库中的题目回答
+  - "resume" — 基于候选人简历内容回答
+  - "jd" — 基于岗位 JD 回答
+  - "knowledge" — 基于通用技术知识回答（不在题库/简历/JD 中）
+  - "clarification" — 追问、澄清、压力测试（不需要依据）
+- question_ids: 关联的题库题目 ID 列表，仅 type="interview_question" 时填写，其他类型为空数组 []
+- confidence: 你对当前回答的自信程度（0.0-1.0），0.5 以下表示不确定
+- show_refs: 是否向用户展示参考资料，面试官模式始终为 false，练习模式由上下文决定
+
+规则：
+- 每条回复必须包含且仅包含一个 [BASIS]...[/BASIS] 块
+- 该块必须是回复的最后一行，不要添加额外文字
+- 该块用于前端渲染参考资料和评分，不是给候选人看的
 """

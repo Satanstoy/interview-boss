@@ -243,10 +243,16 @@ async def send_message(
 
                 elif event_type == "done":
                     meta = event.get("metadata", {})
+
+                    basis_type = meta.get("basis_type")
+                    if basis_type:
+                        yield f"data: {json.dumps({'type': 'basis', 'basis_type': basis_type, 'basis_question_ids': meta.get('basis_question_ids', []), 'basis_confidence': meta.get('basis_confidence', 0.0), 'should_show_references': meta.get('should_show_references', False)}, ensure_ascii=False)}\n\n"
+
                     if meta.get("resume_ref"):
                         yield f"data: {json.dumps({'type': 'resume_ref', 'name': meta['resume_ref']}, ensure_ascii=False)}\n\n"
                     if meta.get("jd_ref"):
                         yield f"data: {json.dumps({'type': 'jd_ref', 'title': meta['jd_ref']}, ensure_ascii=False)}\n\n"
+
                     if full_response:
                         await run_db(
                             lambda: chat_service.save_message(

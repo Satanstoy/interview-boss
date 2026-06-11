@@ -347,6 +347,10 @@ const pendingRetrievedQuestions = ref(null)
 const pendingResumeRef = ref(null)
 const pendingJdRef = ref(null)
 const pendingInitialMessage = ref('')
+const pendingBasisType = ref(null)
+const pendingBasisQuestionIds = ref([])
+const pendingBasisConfidence = ref(0)
+const pendingShouldShowReferences = ref(false)
 const autoScrollEnabled = ref(true)
 const processingSteps = ref([])
 const selectedModel = ref('')
@@ -568,6 +572,10 @@ async function handleSend() {
   isSending.value = true
   streamingContent.value = ''
   pendingRetrievedQuestions.value = null
+  pendingBasisType.value = null
+  pendingBasisQuestionIds.value = []
+  pendingBasisConfidence.value = 0
+  pendingShouldShowReferences.value = false
   processingSteps.value = []
   autoScrollEnabled.value = true
 
@@ -607,6 +615,11 @@ async function handleSend() {
           pendingResumeRef.value = event.name || null
         } else if (event.type === 'jd_ref') {
           pendingJdRef.value = event.title || null
+        } else if (event.type === 'basis') {
+          pendingBasisType.value = event.basis_type || 'none'
+          pendingBasisQuestionIds.value = event.basis_question_ids || []
+          pendingBasisConfidence.value = event.basis_confidence || 0
+          pendingShouldShowReferences.value = event.should_show_references || false
         }
       },
       selectedModel.value || null
@@ -627,6 +640,12 @@ async function handleSend() {
         metadata.thinking = thinkingContent.value
         metadata.thinking_duration = thinkingDuration.value
       }
+      if (pendingBasisType.value && pendingBasisType.value !== 'none') {
+        metadata.basis_type = pendingBasisType.value
+        metadata.basis_question_ids = pendingBasisQuestionIds.value
+        metadata.basis_confidence = pendingBasisConfidence.value
+        metadata.should_show_references = pendingShouldShowReferences.value
+      }
       messages.value.push({
         id: Date.now() + 1,
         role: 'assistant',
@@ -637,6 +656,10 @@ async function handleSend() {
       pendingRetrievedQuestions.value = null
       pendingResumeRef.value = null
       pendingJdRef.value = null
+      pendingBasisType.value = null
+      pendingBasisQuestionIds.value = []
+      pendingBasisConfidence.value = 0
+      pendingShouldShowReferences.value = false
     }
   } catch (e) {
     console.error('发送消息失败:', e)
