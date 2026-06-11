@@ -10,6 +10,10 @@ const props = defineProps({
   activeSeason: {
     type: String,
     default: null
+  },
+  noBorder: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -17,7 +21,10 @@ const emit = defineEmits(['show-settings'])
 </script>
 
 <template>
-  <header class="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-background/80 backdrop-blur-xl px-4 lg:px-6">
+  <header
+    class="flex h-14 shrink-0 items-center gap-4 bg-background/80 backdrop-blur-xl px-4 lg:px-6"
+    :class="{ 'border-b border-border': !noBorder }"
+  >
     <div class="flex min-w-0 items-center gap-3">
       <h1 class="text-sm font-semibold text-foreground">
         {{ activeTabLabel }}
