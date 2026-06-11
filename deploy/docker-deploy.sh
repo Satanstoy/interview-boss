@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -169,6 +169,16 @@ do_update() {
   log "更新完成"
 }
 
+# ── 前端快速更新（跳过 Docker 构建，直接替换 nginx 内的 dist） ──
+do_frontend() {
+  log "快速更新前端（仅构建 + 拷贝到 nginx 容器）..."
+  cd "$PROJECT_DIR/frontend"
+  npm run build
+  cd "$PROJECT_DIR"
+  docker cp frontend/dist/. interview-boss-nginx-1:/usr/share/nginx/html/
+  log "前端已更新，无需重建镜像或重启容器"
+}
+
 # ── Worker 按需挂载 ──
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
@@ -249,6 +259,7 @@ case "$MODE" in
   status)          check_docker; do_status ;;
   logs)            check_docker; do_logs "${2:-}" ;;
   update)          check_docker; do_update ;;
+  frontend)        check_docker; do_frontend ;;
   worker-up)       check_docker; do_worker_up ;;
   worker-down)     check_docker; do_worker_down ;;
   worker-restart)  check_docker; do_worker_restart ;;
@@ -275,6 +286,7 @@ case "$MODE" in
     echo "  status          查看服务状态和资源使用"
     echo "  logs            查看日志（可指定服务名: logs backend）"
     echo "  update          更新核心服务（不中断 Redis，不默认启动 worker）"
+    echo "  frontend        快速更新前端（npm build + docker cp，跳过镜像构建）"
     echo "  worker-up       按需启动 Worker"
     echo "  worker-down     停止并移除 Worker 容器"
     echo "  worker-restart  重建 app 镜像并重启 Worker"

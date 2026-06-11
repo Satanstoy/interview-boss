@@ -18,12 +18,18 @@ docker compose exec backend pytest backend/tests/ -q   # 后端测试
 cd frontend && npm run build                             # 前端构建
 
 # 部署
-./deploy/docker-deploy.sh update                         # 重新部署核心服务（app/nginx 镜像，worker 按需）
+./deploy/docker-deploy.sh update                         # 完整部署（重建镜像，后端/依赖变更时用）
+./deploy/docker-deploy.sh frontend                       # 快速更新前端（npm build + docker cp，几秒生效）
 ./deploy/docker-deploy.sh status                         # 查看容器状态
 ./deploy/docker-deploy.sh logs backend                   # 查看后端日志
 ./deploy/docker-deploy.sh worker-up                      # 按需启动 ARQ Worker
 ./deploy/docker-deploy.sh backup                         # 备份数据库
 ```
+
+**部署策略：**
+- 仅改前端样式/组件 → `./deploy/docker-deploy.sh frontend`（几秒）
+- 改后端代码/依赖 → `./deploy/docker-deploy.sh update`（完整构建）
+- 两种都改 → 先 `frontend` 验证前端，再 `update` 完整部署
 
 ## 核心规范
 
