@@ -18,13 +18,8 @@ from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.nodes import (
     build_react_system_prompt,
     extract_memory,
-    fts_retrieve,
-    generate_direct_response,
-    generate_response,
-    llm_rerank_questions,
     load_history,
     recall_memories,
-    resolve_active_skills,
     summarize_context,
 )
 from app.agents.chat.tools import (
@@ -638,13 +633,24 @@ async def run_chat(
             # 2. 意图分类 + 关键词
             await _step_classify(state)
 
-            # 3. 匹配 skills
-            _step_resolve_skills(state)
+            # 3-5. ReAct 循环（替代 resolve_skills + route_and_generate）
+            response = ""
+            metadata = {}
+            async for event in _react_loop(state):
+                event_type = event.get("type")
+                if event_type == "done":
+                    metadata = event.get("metadata", {})
+                    _emit({"type": "basis", **_basis_event_payload(metadata)})
+                    _emit({"type": "done", "metadata": metadata})
+                    continue
+                if event_type in {"chunk", "thinking", "thinking_start", "thinking_done", "error"}:
+                    if event_type == "chunk":
+                        response += event.get("content", "")
+                    _emit(event)
+            state["response"] = response
+            state["metadata"] = metadata
 
-            # 4. 路由 + 检索 + 生成
-            await _route_and_generate(state)
-
-            # 5. 后台记忆提取
+            # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
 
             elapsed = time.monotonic() - t0
