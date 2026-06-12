@@ -221,10 +221,14 @@ async def send_message(
                 resume_text=conv.get("resume_text"),
                 jd_text=jd_text,
                 model=req.model,
+                bank_mode=user.get("bank_mode", "public"),
             ):
                 event_type = event.get("type", "chunk")
 
-                if event_type == "chunk":
+                if event_type == "step":
+                    yield f"data: {json.dumps({'type': 'step', 'step': event.get('step', ''), 'message': event.get('message', '')}, ensure_ascii=False)}\n\n"
+
+                elif event_type == "chunk":
                     content = event.get("content", "")
                     full_response += content
                     yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}\n\n"
@@ -246,7 +250,7 @@ async def send_message(
 
                     basis_type = meta.get("basis_type")
                     if basis_type:
-                        yield f"data: {json.dumps({'type': 'basis', 'basis_type': basis_type, 'basis_question_ids': meta.get('basis_question_ids', []), 'basis_confidence': meta.get('basis_confidence', 0.0), 'should_show_references': meta.get('should_show_references', False)}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'basis', 'basis_type': basis_type, 'basis_question_ids': meta.get('basis_question_ids', []), 'basis_confidence': meta.get('basis_confidence', 0.0), 'should_show_references': meta.get('should_show_references', False), 'selected_basis_questions': meta.get('selected_basis_questions', []), 'resume_ref': meta.get('resume_ref', ''), 'jd_ref': meta.get('jd_ref', '')}, ensure_ascii=False)}\n\n"
 
                     if meta.get("resume_ref"):
                         yield f"data: {json.dumps({'type': 'resume_ref', 'name': meta['resume_ref']}, ensure_ascii=False)}\n\n"
@@ -254,11 +258,28 @@ async def send_message(
                         yield f"data: {json.dumps({'type': 'jd_ref', 'title': meta['jd_ref']}, ensure_ascii=False)}\n\n"
 
                     if full_response:
+                        import re as _re
+
+                        clean_for_persist = _re.sub(
+                            r"\[BASIS\].*?\[/BASIS\]",
+                            "",
+                            full_response,
+                            flags=_re.DOTALL,
+                        ).strip()
+                        clean_for_persist = _re.sub(
+                            r"\[BASIS\]\{[^}]*\}", "", clean_for_persist
+                        ).strip()
+                        clean_for_persist = _re.sub(
+                            r'"?\\?\[BASIS\\?\].*?\\?\[/BASIS\\?\]"?',
+                            "",
+                            clean_for_persist,
+                            flags=_re.DOTALL,
+                        ).strip()
                         await run_db(
                             lambda: chat_service.save_message(
                                 conversation_id,
                                 "assistant",
-                                full_response,
+                                clean_for_persist or full_response,
                                 metadata=meta,
                             )
                         )

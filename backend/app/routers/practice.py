@@ -1,16 +1,14 @@
 import json
-import time
-import random as _random
 import logging
 import openai
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.auth import get_current_user
 from app.core.prompts import EVAL_PROMPT
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_dynamic_frequency_sql
-from app.db.question_bank_sources import get_sources
+from app.db.connection import get_db_connection, run_db
 from app.models.schemas import EvaluateAnswerRequest
 from app.routers.questions import _build_bank_where_clause
+from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
 
 logger = logging.getLogger("interview-boss")
@@ -68,124 +66,14 @@ async def get_random_questions(
     user: dict = Depends(get_current_user)
 ):
     """加权随机抽题，避免重复抽取近期练过的题目"""
-
-    from_clause, where_clause, base_params = _build_bank_where_clause(user, "qb")
-    bank_mode = user.get('bank_mode', 'public')
-
-    def _query():
-        with get_db_connection() as conn:
-            conditions = []
-            params = list(base_params)
-            if cat1:
-                conditions.append("(qb.cat1 LIKE ? OR qb.tags LIKE ?)")
-                params.append(f"%{cat1}%")
-                params.append(f"%{cat1}%")
-            if difficulty:
-                conditions.append("qb.difficulty LIKE ?")
-                params.append(f"%{difficulty}%")
-
-            if conditions:
-                where_with_extra = f"{where_clause} AND {' AND '.join(conditions)}"
-            else:
-                where_with_extra = where_clause
-
-            dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user['id'])
-            candidates = conn.execute(
-                f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as frequency, qb.ai_answer {from_clause} {where_with_extra}",
-                params
-            ).fetchall()
-
-            if not candidates:
-                return [], {}
-
-            ids = [r['id'] for r in candidates]
-            placeholders = ",".join("?" * len(ids))
-
-            # 查询当前用户的练习历史
-            uid = user['id'] if user else None
-            if uid:
-                stats = conn.execute(
-                    f"SELECT question_bank_id, COUNT(*) as cnt, MAX(created_at) as last_at FROM user_practice_history WHERE user_id = ? AND question_bank_id IN ({placeholders}) GROUP BY question_bank_id",
-                    [uid] + ids
-                ).fetchall()
-            else:
-                stats = []
-
-            practice_map = {}
-            now = time.time()
-            for s in stats:
-                qid = s['question_bank_id']
-                try:
-                    from datetime import datetime
-                    last_dt = datetime.fromisoformat(s['last_at'])
-                    hours_ago = (now - last_dt.timestamp()) / 3600
-                except Exception:
-                    hours_ago = 9999
-                practice_map[qid] = {"count": s['cnt'], "hours_ago": hours_ago}
-
-            return candidates, practice_map
-
-    candidates, practice_map = await run_db(_query)
-
-    if not candidates:
-        return []
-
-    # 计算每个题目的抽选权重
-    weights = []
-    for r in candidates:
-        qid = r['id']
-        if qid not in practice_map:
-            w = 1.5  # 未练习过的题目加权
-        else:
-            info = practice_map[qid]
-            w = 1.0 / (1 + info['count'] * 0.3)  # 重复因子
-            if info['hours_ago'] < 24:
-                w *= 0.3  # 24h 内练过，大幅降权
-            elif info['hours_ago'] < 72:
-                w *= 0.7  # 1-3 天内，适度降权
-        weights.append(max(w, 0.01))
-
-    # 加权无放回采样
-    selected_indices = []
-    remaining = list(range(len(candidates)))
-    remaining_weights = list(weights)
-    for _ in range(min(count, len(candidates))):
-        total = sum(remaining_weights)
-        if total <= 0:
-            break
-        r = _random.random() * total
-        cumulative = 0
-        chosen_idx = 0
-        for i, w in enumerate(remaining_weights):
-            cumulative += w
-            if cumulative >= r:
-                chosen_idx = i
-                break
-        selected_indices.append(remaining[chosen_idx])
-        remaining.pop(chosen_idx)
-        remaining_weights.pop(chosen_idx)
-
-    # Fetch sources from normalized tables for selected questions
-    selected_ids = [candidates[idx]['id'] for idx in selected_indices]
-    def _fetch_sources():
-        with get_db_connection() as conn2:
-            try:
-                return {qid: get_sources(conn2, qid) for qid in selected_ids}
-            except Exception:
-                return {}
-    sources_map = await run_db(_fetch_sources)
-
-    result = []
-    for idx in selected_indices:
-        r = candidates[idx]
-        d = dict(r)
-        d['sources'] = sources_map.get(r['id'], [])
-        info = practice_map.get(r['id'])
-        d['attempt_count'] = info['count'] if info else 0
-        d['last_practiced_at'] = info.get('last_at') if info else None
-        result.append(d)
-
-    return result
+    return await run_db(
+        lambda: draw_questions(
+            user=user,
+            count=count,
+            cat1=cat1,
+            difficulty=difficulty,
+        )
+    )
 
 
 @router.post("/api/evaluate-answer")
