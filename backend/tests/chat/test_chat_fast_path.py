@@ -14,7 +14,7 @@ class TestClassifyAndRecallFast:
         """第一条消息应通过规则快速分类"""
         from app.services.memory_recall_service import classify_and_recall_fast
 
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
+        intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall_fast(
             user_message="请介绍一下 Redis 的五种数据结构",
             memory_summaries=[],
         )
@@ -30,7 +30,7 @@ class TestClassifyAndRecallFast:
         """问候消息应快速返回 chat 意图"""
         from app.services.memory_recall_service import classify_and_recall_fast
 
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
+        intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall_fast(
             user_message="你好",
             memory_summaries=[],
         )
@@ -50,7 +50,7 @@ class TestClassifyAndRecallFast:
             {"id": 4, "memory_type": "weakness", "summary": "SQL 不熟"},
         ]
 
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
+        intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall_fast(
             user_message="请介绍一下 Redis",
             memory_summaries=summaries,
         )
@@ -64,7 +64,7 @@ class TestClassifyAndRecallFast:
         """应从消息中提取技术关键词"""
         from app.services.memory_recall_service import classify_and_recall_fast
 
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall_fast(
+        intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall_fast(
             user_message="Redis 的缓存策略和分布式锁怎么实现",
             memory_summaries=[],
         )

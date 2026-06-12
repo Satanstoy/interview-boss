@@ -163,6 +163,30 @@ class TestChatServiceMessages:
         messages = get_messages(conv["id"])
         assert messages[0]["metadata"] == metadata
 
+    def test_get_conversation_question_ids_from_metadata(self, test_db):
+        """已问/已抽题目 ID 应能从 assistant metadata 中收集。"""
+        from app.services.chat_service import (
+            create_conversation,
+            get_conversation_question_ids,
+            save_message,
+        )
+
+        conv = create_conversation(user_id=1, mode="free_practice")
+        save_message(
+            conv["id"],
+            "assistant",
+            "问题",
+            metadata={
+                "basis_question_ids": [1],
+                "llm_rerank": {"selected_basis_ids": [2]},
+                "retrieved_questions": [{"id": 3, "question": "q3"}],
+                "selected_basis_questions": [{"id": 4, "question": "q4"}],
+                "next_question_plan": {"question_id": 5},
+            },
+        )
+
+        assert get_conversation_question_ids(conv["id"]) == {1, 2, 3, 4, 5}
+
     def test_get_message_count(self, test_db):
         """T-003e: get_message_count 应返回消息总数"""
         from app.services.chat_service import (

@@ -341,6 +341,33 @@ class TestReciprocalRankFusion:
         assert result[0]["_rrf_score"] > result[1]["_rrf_score"]
         assert abs(result[0]["_rrf_score"] - 1.0/61) < 0.0001
 
+    def test_rrf_primary_order_not_overridden_by_heuristic(self):
+        """最终排序应以 RRF 为主，启发式只做小幅调整"""
+        from app.services.fts_service import _combine_rrf_with_heuristic_score
+
+        results = [
+            {"id": 1, "question": "RAG 检索", "_rrf_score": 0.035, "_heuristic_score": 0},
+            {"id": 2, "question": "Redis LRU", "_rrf_score": 0.03, "_heuristic_score": 20},
+        ]
+
+        ranked = _combine_rrf_with_heuristic_score(results)
+
+        assert ranked[0]["id"] == 1
+        assert ranked[0]["_combined_rank_score"] > ranked[1]["_combined_rank_score"]
+
+    def test_split_keywords_keeps_fts_terms_when_cjk_expands(self):
+        """中文扩展词不应导致英文技术词放弃 FTS5"""
+        from app.services.fts_service import _split_keywords_by_script
+
+        fts_terms, cjk_terms = _split_keywords_by_script(
+            ["RAG", "LangGraph", "检索增强", "知识检索"]
+        )
+
+        assert "RAG" in fts_terms
+        assert "LangGraph" in fts_terms
+        assert "检索增强" in cjk_terms
+        assert "知识检索" in cjk_terms
+
 
 class TestHybridSearch:
     """混合搜索集成测试"""

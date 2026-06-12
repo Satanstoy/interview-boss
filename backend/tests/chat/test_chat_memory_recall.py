@@ -33,7 +33,7 @@ class TestClassifyAndRecall:
         with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+            intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
                 user_message="请介绍一下 Redis 的缓存策略",
                 recent_context="面试官: 我们来聊聊中间件",
                 memory_summaries=summaries,
@@ -60,7 +60,7 @@ class TestClassifyAndRecall:
         with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = Exception("API 超时")
 
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+            intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
                 user_message="请介绍一下 Redis",
                 recent_context="",
                 memory_summaries=summaries,
@@ -91,7 +91,7 @@ class TestClassifyAndRecall:
         with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+            intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
                 user_message="测试消息",
                 recent_context="",
                 memory_summaries=summaries,
@@ -107,16 +107,20 @@ class TestClassifyAndRecall:
         """M-004: 无记忆时应跳过召回，仅返回 intent"""
         from app.services.memory_recall_service import classify_and_recall
 
-        # Use rule-based shortcut for greeting
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
-            user_message="你好",
-            recent_context="",
-            memory_summaries=[],
-            user_id=1,
-        )
+        with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+            intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
+                user_message="我在项目里用 RRF 融合 FTS5 和向量召回，然后用 selected_basis 校验引用。",
+                recent_context="",
+                memory_summaries=[],
+                user_id=1,
+            )
 
-        assert intent == "chat"
+            mock_llm.assert_not_called()
+
+        assert intent == "interview_question"
         assert memory_ids == []
+        assert answer_complete is True
+        assert search_query
 
     @pytest.mark.asyncio
     async def test_combined_prompt_extracts_keywords(self):
@@ -138,7 +142,7 @@ class TestClassifyAndRecall:
         with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_response
 
-            intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+            intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
                 user_message="Redis 的缓存策略有哪些？",
                 recent_context="",
                 memory_summaries=summaries,
@@ -159,7 +163,7 @@ class TestClassifyAndRecall:
 
         # "谢谢" matches rule-based keyword exactly, returns early without LLM
         # Keywords are empty because the rule returns before _extract_keywords_fallback
-        intent, memory_ids, keywords, search_query, answer_complete = await classify_and_recall(
+        intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
             user_message="谢谢",
             recent_context="面试官: ...",
             memory_summaries=summaries,

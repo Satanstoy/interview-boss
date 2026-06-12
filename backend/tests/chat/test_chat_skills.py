@@ -16,6 +16,7 @@ Progressive Disclosure 架构：
 - T-007: SkillRegistry — 空注册表兼容
 - T-008: SkillRegistry — 优先级排序
 """
+
 import pytest
 
 
@@ -155,7 +156,9 @@ class TestSkillRegistryMetadata:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(name="project", description="项目深挖技能", priority=80))
+        registry.register(
+            Skill(name="project", description="项目深挖技能", priority=80)
+        )
 
         metadata = registry.get_all_metadata()
         assert "project" in metadata
@@ -196,11 +199,13 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="project",
-            description="项目深挖",
-            triggers=["项目", "GLEAR"],
-        ))
+        registry.register(
+            Skill(
+                name="project",
+                description="项目深挖",
+                triggers=["项目", "GLEAR"],
+            )
+        )
 
         state = {"user_message": "我做了GLEAR这个项目", "keywords": []}
         matched = registry.match_skills(state)
@@ -211,11 +216,13 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="algorithm",
-            description="算法手撕",
-            triggers=["LRU", "排序", "算法"],
-        ))
+        registry.register(
+            Skill(
+                name="algorithm",
+                description="算法手撕",
+                triggers=["LRU", "排序", "算法"],
+            )
+        )
 
         state = {"user_message": "", "keywords": ["LRU", "缓存"]}
         matched = registry.match_skills(state)
@@ -226,7 +233,9 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(name="project", description="项目深挖", triggers=["项目"]))
+        registry.register(
+            Skill(name="project", description="项目深挖", triggers=["项目"])
+        )
 
         state = {"user_message": "你好", "keywords": []}
         matched = registry.match_skills(state)
@@ -237,8 +246,12 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(name="project", description="项目深挖", triggers=["项目"]))
-        registry.register(Skill(name="theory", description="八股问答", triggers=["Redis"]))
+        registry.register(
+            Skill(name="project", description="项目深挖", triggers=["项目"])
+        )
+        registry.register(
+            Skill(name="theory", description="八股问答", triggers=["Redis"])
+        )
 
         state = {"user_message": "项目中用了Redis", "keywords": ["Redis"]}
         matched = registry.match_skills(state)
@@ -265,12 +278,14 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="rhythm",
-            description="节奏控制",
-            triggers=["面试", "开始"],
-            always_active=True,
-        ))
+        registry.register(
+            Skill(
+                name="rhythm",
+                description="节奏控制",
+                triggers=["面试", "开始"],
+                always_active=True,
+            )
+        )
 
         state = {"user_message": "你好，我叫施杰", "keywords": []}
         matched = registry.match_skills(state)
@@ -281,7 +296,11 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(name="rhythm", description="节奏", triggers=["面试"], always_active=True))
+        registry.register(
+            Skill(
+                name="rhythm", description="节奏", triggers=["面试"], always_active=True
+            )
+        )
         registry.register(Skill(name="project", description="项目", triggers=["项目"]))
 
         state = {"user_message": "我做了个项目", "keywords": []}
@@ -306,12 +325,14 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="hr-soft-skills",
-            description="HR 软素质",
-            triggers=["职业规划", "团队"],
-            priority=30,
-        ))
+        registry.register(
+            Skill(
+                name="hr-soft-skills",
+                description="HR 软素质",
+                triggers=["职业规划", "团队"],
+                priority=30,
+            )
+        )
 
         # 11 条消息 → 不自动激活
         state = {"user_message": "技术问题", "keywords": [], "message_count": 11}
@@ -328,14 +349,20 @@ class TestSkillRegistryMatch:
         from app.agents.chat.skills.base import Skill, SkillRegistry
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="hr-soft-skills",
-            description="HR 软素质",
-            triggers=["职业规划"],
-            priority=30,
-        ))
+        registry.register(
+            Skill(
+                name="hr-soft-skills",
+                description="HR 软素质",
+                triggers=["职业规划"],
+                priority=30,
+            )
+        )
 
-        state = {"user_message": "我想聊聊职业规划", "keywords": [], "message_count": 14}
+        state = {
+            "user_message": "我想聊聊职业规划",
+            "keywords": [],
+            "message_count": 14,
+        }
         matched = registry.match_skills(state)
         hr_matches = [s for s in matched if s.name == "hr-soft-skills"]
         assert len(hr_matches) == 1
@@ -370,7 +397,10 @@ class TestAdaptiveDifficultySkill:
         registry = get_default_registry()
         skill = registry.get("adaptive-difficulty")
         assert skill.instruction_template is not None
-        assert "Funnel" in skill.instruction_template or "funnel" in skill.instruction_template
+        assert (
+            "Funnel" in skill.instruction_template
+            or "funnel" in skill.instruction_template
+        )
 
     def test_adaptive_difficulty_always_in_matched(self):
         """adaptive-difficulty 应该始终出现在匹配结果中"""
@@ -446,18 +476,22 @@ class TestBuildSkillPrompt:
         from app.agents.chat.skills.builder import build_skill_prompt
 
         registry = SkillRegistry()
-        registry.register(Skill(
-            name="rhythm",
-            description="节奏控制",
-            priority=100,
-            instruction_template="采用穿插式节奏提问。",
-        ))
-        registry.register(Skill(
-            name="project",
-            description="项目深挖",
-            priority=80,
-            instruction_template="连续追问3-5层。",
-        ))
+        registry.register(
+            Skill(
+                name="rhythm",
+                description="节奏控制",
+                priority=100,
+                instruction_template="采用穿插式节奏提问。",
+            )
+        )
+        registry.register(
+            Skill(
+                name="project",
+                description="项目深挖",
+                priority=80,
+                instruction_template="连续追问3-5层。",
+            )
+        )
 
         prompt = build_skill_prompt(registry, active_skills=["rhythm", "project"])
         assert "穿插式节奏提问" in prompt
@@ -469,7 +503,9 @@ class TestBuildSkillPrompt:
         from app.agents.chat.skills.builder import build_skill_prompt
 
         registry = SkillRegistry()
-        registry.register(Skill(name="test", description="desc", instruction_template="指令"))
+        registry.register(
+            Skill(name="test", description="desc", instruction_template="指令")
+        )
 
         prompt = build_skill_prompt(registry, active_skills=[])
         assert prompt == ""
@@ -480,7 +516,9 @@ class TestBuildSkillPrompt:
         from app.agents.chat.skills.builder import build_skill_prompt
 
         registry = SkillRegistry()
-        registry.register(Skill(name="real", description="真实", instruction_template="真实指令"))
+        registry.register(
+            Skill(name="real", description="真实", instruction_template="真实指令")
+        )
 
         prompt = build_skill_prompt(registry, active_skills=["real", "fake"])
         assert "真实指令" in prompt
@@ -494,6 +532,77 @@ class TestBuildSkillPrompt:
         registry = SkillRegistry()
         prompt = build_skill_prompt(registry, active_skills=["any"])
         assert prompt == ""
+
+    def test_build_prompt_wraps_examples_as_illustrative(self):
+        """few-shot 应保留，但必须被结构化标记为示例而非当前事实。"""
+        from app.agents.chat.skills.base import Skill, SkillRegistry
+        from app.agents.chat.skills.builder import build_skill_prompt
+
+        registry = SkillRegistry()
+        registry.register(
+            Skill(
+                name="rhythm",
+                description="节奏控制",
+                instruction_template=(
+                    "## Instructions\n"
+                    "- 根据候选人的真实回答追问。\n\n"
+                    "## Example Sequence\n"
+                    'R4: Switch — "You mentioned HNSW, explain efConstruction"\n\n'
+                    "## Rules\n"
+                    "- 不要使用示例作为真实题目。"
+                ),
+            )
+        )
+
+        prompt = build_skill_prompt(registry, active_skills=["rhythm"])
+
+        assert "根据候选人的真实回答追问" in prompt
+        assert "不要使用示例作为真实题目" in prompt
+        assert "HNSW" in prompt
+        assert "efConstruction" in prompt
+        assert "<skill_instructions>" in prompt
+        assert '<skill_instruction name="rhythm">' in prompt
+        assert "illustrative few-shot examples, not facts" in prompt
+
+    def test_build_prompt_preserves_sequence_sections(self):
+        """Pattern/Sequence few-shot 应保留，用结构化边界降低误读。"""
+        from app.agents.chat.skills.base import Skill, SkillRegistry
+        from app.agents.chat.skills.builder import build_skill_prompt
+
+        registry = SkillRegistry()
+        registry.register(
+            Skill(
+                name="rhythm",
+                description="节奏控制",
+                instruction_template=(
+                    "## Instructions\n"
+                    "- 根据当前上下文发问。\n\n"
+                    "## Pattern Sequence\n"
+                    "R1: Self-intro -> ask about GLEAR project\n\n"
+                    "## Boundaries\n"
+                    "- 不要使用模式序列作为真实题目。"
+                ),
+            )
+        )
+
+        prompt = build_skill_prompt(registry, active_skills=["rhythm"])
+
+        assert "根据当前上下文发问" in prompt
+        assert "不要使用模式序列作为真实题目" in prompt
+        assert "GLEAR" in prompt
+        assert "illustrative few-shot examples, not facts" in prompt
+
+    def test_default_interview_rhythm_prompt_uses_generic_examples(self):
+        """默认节奏 skill 的 few-shot 应保留结构，但不含具体硬编码题目。"""
+        from app.agents.chat.skills import build_skill_prompt, get_default_registry
+
+        prompt = build_skill_prompt(get_default_registry(), ["interview-rhythm"])
+
+        assert "Pattern Sequence" in prompt
+        assert "<one project from the candidate's resume or self-introduction>" in prompt
+        assert "HNSW" not in prompt
+        assert "efConstruction" not in prompt
+        assert "GLEAR" not in prompt
 
 
 # ═══════════════════════════════════════════════════
@@ -559,6 +668,7 @@ class TestSkillLoader:
         skill_dir.mkdir()
 
         import pytest
+
         with pytest.raises(FileNotFoundError):
             load_skill_from_file(skill_dir)
 
@@ -591,14 +701,136 @@ class TestSkillLoader:
             "hr-soft-skills",
         ]
         for name in expected_skills:
-            assert registry.get(name) is not None, f"Skill '{name}' not found in registry"
+            assert registry.get(name) is not None, (
+                f"Skill '{name}' not found in registry"
+            )
 
     def test_get_default_registry_skills_have_instructions(self):
         """所有从文件加载的 skill 都应有 instruction_template"""
         from app.agents.chat.skills.defaults import get_default_registry
 
         registry = get_default_registry()
-        for name in ["interview-rhythm", "adaptive-difficulty", "project-deep-dive",
-                      "theory-qa", "algorithm-coding", "hr-soft-skills"]:
+        for name in [
+            "interview-rhythm",
+            "adaptive-difficulty",
+            "project-deep-dive",
+            "theory-qa",
+            "algorithm-coding",
+            "hr-soft-skills",
+        ]:
             skill = registry.get(name)
-            assert skill.instruction_template is not None, f"Skill '{name}' has no instruction"
+            assert skill.instruction_template is not None, (
+                f"Skill '{name}' has no instruction"
+            )
+
+
+# ═══════════════════════════════════════════════════
+#  T-011: Skill — strategy_rules 字段
+# ═══════════════════════════════════════════════════
+class TestSkillStrategyRules:
+    """Skill 的 strategy_rules 字段和 get_strategy_rules() 方法测试"""
+
+    def test_skill_with_strategy_rules(self):
+        """创建 skill 时传入 strategy_rules 应正确存储"""
+        from app.agents.chat.skills.base import Skill
+
+        rules = {
+            "deep_dive": {"max_depth": 5, "signal": "candidate elaborates"},
+            "topic_shift": {"trigger": "silence > 10s"},
+        }
+        skill = Skill(
+            name="test",
+            description="desc",
+            strategy_rules=rules,
+        )
+        assert skill.strategy_rules == rules
+
+    def test_skill_strategy_rules_default_none(self):
+        """不传 strategy_rules 时默认为 None"""
+        from app.agents.chat.skills.base import Skill
+
+        skill = Skill(name="test", description="desc")
+        assert skill.strategy_rules is None
+
+    def test_get_strategy_rules_returns_dict(self):
+        """有 strategy_rules 时 get_strategy_rules() 返回 dict"""
+        from app.agents.chat.skills.base import Skill
+
+        rules = {"deep_dive": {"max_depth": 5}}
+        skill = Skill(name="test", description="desc", strategy_rules=rules)
+        assert skill.get_strategy_rules() == rules
+
+    def test_get_strategy_rules_returns_empty_dict_when_none(self):
+        """strategy_rules 为 None 时 get_strategy_rules() 返回空 dict"""
+        from app.agents.chat.skills.base import Skill
+
+        skill = Skill(name="test", description="desc")
+        assert skill.get_strategy_rules() == {}
+
+    def test_get_strategy_rules_returns_empty_dict_when_empty(self):
+        """strategy_rules 为空 dict 时 get_strategy_rules() 返回空 dict"""
+        from app.agents.chat.skills.base import Skill
+
+        skill = Skill(name="test", description="desc", strategy_rules={})
+        assert skill.get_strategy_rules() == {}
+
+
+# ═══════════════════════════════════════════════════
+#  T-012: Loader — 解析 strategy_rules
+# ═══════════════════════════════════════════════════
+class TestSkillLoaderStrategyRules:
+    """SKILL.md 加载器对 strategy_rules 的解析测试"""
+
+    def test_loader_parses_strategy_rules_from_yaml(self, tmp_path):
+        """应从 YAML frontmatter 解析 strategy_rules"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: test-skill\n"
+            'description: "测试技能"\n'
+            "strategy_rules:\n"
+            "  deep_dive:\n"
+            "    max_depth: 5\n"
+            '    signal: "candidate elaborates"\n'
+            "  clarification:\n"
+            '    trigger: "ambiguous answer"\n'
+            "---\n\n指令内容。",
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+        assert skill.strategy_rules is not None
+        assert skill.strategy_rules["deep_dive"]["max_depth"] == 5
+        assert skill.strategy_rules["clarification"]["trigger"] == "ambiguous answer"
+
+    def test_loader_handles_missing_strategy_rules(self, tmp_path):
+        """没有 strategy_rules 时应向后兼容（默认 None）"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "no-rules"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: no-rules\ndescription: "无规则"\n---\n\n指令。',
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+        assert skill.strategy_rules is None
+        assert skill.get_strategy_rules() == {}
+
+    def test_loader_strategy_rules_with_empty_dict(self, tmp_path):
+        """空 strategy_rules 字段应解析为空 dict"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "empty-rules"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: empty-rules\ndescription: "空规则"\nstrategy_rules: {}\n---\n\n指令。',
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+        assert skill.strategy_rules == {}

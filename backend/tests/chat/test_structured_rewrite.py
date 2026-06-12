@@ -97,6 +97,40 @@ class TestParseStructuredRewrite:
 
         assert result["retrieval_intent"] == "find_similar"
 
+    def test_polluted_field_names_are_rejected(self):
+        """SR-005b: LLM 把字段名当 query 时应拒绝结构化改写"""
+        from app.services.memory_recall_service import _parse_structured_rewrite
+
+        llm_output = json.dumps(
+            {
+                "retrieval_intent": "find_similar",
+                "main_topic": "intent answer complete search query",
+                "positive_terms": ["intent", "answer", "search_query"],
+                "negative_terms": ["用户在讲 RAG 项目"],
+            }
+        )
+
+        result = _parse_structured_rewrite(llm_output)
+
+        assert result is None
+
+    def test_polluted_negative_terms_are_filtered(self):
+        """SR-005c: negative_terms 只能保留真实技术词"""
+        from app.services.memory_recall_service import _parse_structured_rewrite
+
+        llm_output = json.dumps(
+            {
+                "retrieval_intent": "find_similar",
+                "main_topic": "RRF 融合",
+                "positive_terms": ["RRF", "reciprocal rank fusion"],
+                "negative_terms": ["用户在讲 RAG 项目", "一个题在 FTS 里排第 1", "Redis"],
+            }
+        )
+
+        result = _parse_structured_rewrite(llm_output)
+
+        assert result["negative_terms"] == ["Redis"]
+
     def test_positive_terms_max_limit(self):
         """SR-006: positive_terms 最多保留 5 个"""
         from app.services.memory_recall_service import _parse_structured_rewrite
@@ -272,6 +306,7 @@ class TestClassifyAndRecallIntegration:
                 keywords,
                 search_query,
                 answer_complete,
+                _structured_rewrite,
             ) = await classify_and_recall(
                 user_message="面试官好，我来回答一下关于 Redis 缓存穿透和布隆过滤器的技术问题",
                 recent_context="",
@@ -315,6 +350,7 @@ class TestClassifyAndRecallIntegration:
                 keywords,
                 search_query,
                 answer_complete,
+                _structured_rewrite,
             ) = await classify_and_recall(
                 user_message="Redis 有哪些数据结构",
                 recent_context="",
@@ -357,6 +393,7 @@ class TestClassifyAndRecallIntegration:
                 keywords,
                 search_query,
                 answer_complete,
+                _structured_rewrite,
             ) = await classify_and_recall(
                 user_message="测试消息",
                 recent_context="",
@@ -366,3 +403,201 @@ class TestClassifyAndRecallIntegration:
 
         assert intent in {"interview_question", "practice_request", "chat", "follow_up"}
         assert isinstance(search_query, str)
+
+
+class TestNegativeTermsFiltering:
+    """_filter_negative_terms 过滤负向排除词"""
+
+    def test_filter_excludes_matching_results(self):
+        from app.services.fts_service import _filter_negative_terms
+
+        results = [
+            {
+                "id": 1,
+                "question": "Redis 缓存穿透怎么解决",
+                "tags": "Redis",
+                "cat1": "数据库",
+                "cat2": "",
+            },
+            {
+                "id": 2,
+                "question": "MySQL 索引优化",
+                "tags": "MySQL",
+                "cat1": "数据库",
+                "cat2": "",
+            },
+            {
+                "id": 3,
+                "question": "Redis 持久化机制",
+                "tags": "Redis",
+                "cat1": "数据库",
+                "cat2": "",
+            },
+        ]
+        filtered = _filter_negative_terms(results, ["MySQL"])
+        assert len(filtered) == 2
+        assert all(r["id"] != 2 for r in filtered)
+
+    def test_filter_no_match_keeps_all(self):
+        from app.services.fts_service import _filter_negative_terms
+
+        results = [
+            {"id": 1, "question": "Redis 缓存穿透", "tags": "", "cat1": "", "cat2": ""},
+            {"id": 2, "question": "LRU 缓存设计", "tags": "", "cat1": "", "cat2": ""},
+        ]
+        filtered = _filter_negative_terms(results, ["MySQL"])
+        assert len(filtered) == 2
+
+    def test_filter_empty_negative_terms(self):
+        from app.services.fts_service import _filter_negative_terms
+
+        results = [{"id": 1, "question": "测试", "tags": "", "cat1": "", "cat2": ""}]
+        filtered = _filter_negative_terms(results, [])
+        assert len(filtered) == 1
+
+    def test_filter_checks_all_fields(self):
+        from app.services.fts_service import _filter_negative_terms
+
+        results = [
+            {"id": 1, "question": "问题", "tags": "MySQL优化", "cat1": "", "cat2": ""},
+            {"id": 2, "question": "问题", "tags": "", "cat1": "MySQL相关", "cat2": ""},
+            {"id": 3, "question": "问题", "tags": "", "cat1": "", "cat2": "MySQL专题"},
+        ]
+        filtered = _filter_negative_terms(results, ["MySQL"])
+        assert len(filtered) == 0
+
+
+class TestInferRuleBasedRewrite:
+    """_infer_rule_based_rewrite 轻量规则推断"""
+
+    def test_project_keywords_infer_project_followup(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "说说你的项目架构是怎么设计的",
+            ["架构", "设计"],
+            "interview_question",
+        )
+        assert result["question_type"] == "project_followup"
+        assert result["retrieval_intent"] == "find_similar"
+
+    def test_knowledge_keywords_infer_knowledge_probe(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "Redis 缓存穿透怎么解决",
+            ["Redis", "缓存穿透"],
+            "interview_question",
+        )
+        assert result["question_type"] == "knowledge_probe"
+
+    def test_practice_request_infer_find_similar(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "出一道算法题",
+            ["算法"],
+            "practice_request",
+        )
+        assert result["retrieval_intent"] == "find_similar"
+
+    def test_follow_up_infer_expand_knowledge(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "能再详细说说吗",
+            [],
+            "follow_up",
+        )
+        assert result["retrieval_intent"] == "expand_knowledge"
+
+    def test_negative_pattern_extracts_example_words(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            '这个参考题不对，"AI Coding" 是例子',
+            ["参考题"],
+            "interview_question",
+        )
+        assert "AI Coding" in result["negative_terms"]
+
+    def test_short_message_infer_review_weakness(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "不太清楚",
+            [],
+            "interview_question",
+        )
+        assert result["retrieval_intent"] == "review_weakness"
+
+    def test_no_project_or_knowledge_defaults_to_new_question(self):
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "介绍一下你自己",
+            ["自我介绍"],
+            "interview_question",
+        )
+        assert result["question_type"] == "new_question"
+
+    def test_state_fields_not_in_positive_terms(self):
+        """状态字段不能作为核心关键词"""
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "conversation_id 和 retrieved_questions 不是关键词",
+            ["conversation_id", "retrieved_questions", "id"],
+            "interview_question",
+        )
+        # 状态字段应该被过滤掉
+        for term in result["positive_terms"]:
+            assert term.lower() not in {
+                "conversation_id",
+                "retrieved_questions",
+                "id",
+                "selected_basis_questions",
+                "basis_type",
+                "metadata",
+            }
+
+    def test_noise_example_extracts_negative_terms(self):
+        """噪声示例应该进入 negative_terms"""
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "比如 LRU、Redis、AI Coding 工具使用这种噪声不该被召回",
+            ["RAG", "混合检索"],
+            "interview_question",
+        )
+        assert "LRU" in result["negative_terms"]
+        assert "Redis" in result["negative_terms"]
+
+    def test_noise_example_with_quotes(self):
+        """引号中的噪声示例应该进入 negative_terms"""
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            '这个参考题不对，"AI Coding" 是例子',
+            ["参考题"],
+            "interview_question",
+        )
+        assert "AI Coding" in result["negative_terms"]
+
+    def test_negative_terms_do_not_affect_question_type(self):
+        """negative_terms 不应该影响 question_type 判断"""
+        from app.services.memory_recall_service import _infer_rule_based_rewrite
+
+        result = _infer_rule_based_rewrite(
+            "比如 LRU、Redis 这种噪声不该被召回，我想问的是 RAG 混合检索",
+            ["RAG", "混合检索", "检索"],
+            "interview_question",
+        )
+        # question_type 应该基于 positive_terms，不是 negative_terms
+        assert result["question_type"] in {
+            "project_followup",
+            "knowledge_probe",
+            "new_question",
+        }
+        # negative_terms 应该包含噪声词
+        assert len(result["negative_terms"]) > 0
