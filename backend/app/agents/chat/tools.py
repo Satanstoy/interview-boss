@@ -153,7 +153,7 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
         elif func_name == "search_questions":
             return _execute_search_questions(args, state)
         elif func_name == "draw_questions":
-            return _execute_draw_questions(args, state)
+            return await _execute_draw_questions(args, state)
         else:
             return json.dumps({"error": f"Unknown tool: {func_name}"})
     except Exception as e:
@@ -186,7 +186,7 @@ def _execute_search_questions(args: dict, state: ChatState) -> str:
     return json.dumps(results[:3])
 
 
-def _execute_draw_questions(args: dict, state: ChatState) -> str:
+async def _execute_draw_questions(args: dict, state: ChatState) -> str:
     """Draw random questions, update state, return results."""
     draw_args: dict[str, Any] = {
         "user": {"id": state.get("user_id", 0)},
@@ -195,6 +195,6 @@ def _execute_draw_questions(args: dict, state: ChatState) -> str:
     if args.get("difficulty"):
         draw_args["difficulty"] = args["difficulty"]
 
-    results = _draw_questions(**draw_args)
+    results = await asyncio.to_thread(_draw_questions, **draw_args)
     state["retrieved_questions"] = results
     return json.dumps(results)
