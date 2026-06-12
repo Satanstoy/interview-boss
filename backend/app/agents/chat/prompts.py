@@ -210,25 +210,77 @@ MEMORY_EXTRACT_PROMPT = """分析以下面试对话，提取需要长期记住�
 
 # ── 回复依据提取指引 ──
 BASIS_EXTRACT_GUIDANCE = """
-## 回复依据（必须在回答末尾输出）
-在你的回答的最后一行，必须输出一个 JSON 块，格式如下：
-```json
-[BASIS]{"type":"<type>","question_ids":[<ids>],"confidence":<0.0-1.0>,"show_refs":<true/false>}[/BASIS]
-```
+## 内部元数据规则
+不要在回复正文中输出 JSON、[BASIS]、[/BASIS]、metadata、question_ids 或任何内部标签。
+回复正文只包含面试官要对候选人说的话。题目依据、简历/JD 引用和参考题展示由后端根据当前节点状态单独生成。
+"""
 
-字段说明：
-- type: 回答依据类型，取值：
-  - "interview_question" — 基于面试题库中的题目回答
-  - "resume" — 基于候选人简历内容回答
-  - "jd" — 基于岗位 JD 回答
-  - "knowledge" — 基于通用技术知识回答（不在题库/简历/JD 中）
-  - "clarification" — 追问、澄清、压力测试（不需要依据）
-- question_ids: 整数数组，必须是题目 id 字段的数值（如 [6314, 5903]），不是分类代码或字符串。仅 type="interview_question" 时填写，其他类型为空数组 []
-- confidence: 你对当前回答的自信程度（0.0-1.0），0.5 以下表示不确定
-- show_refs: 是否向用户展示参考资料
 
-规则：
-- 每条回复必须包含且仅包含一个 [BASIS] 块
-- question_ids 必须是整数数组，从检索结果的 id 字段获取，禁止使用分类代码
-- 该块是回复的最后一行，不要添加额外文字
+# ── LLM Rerank Prompt（重排序候选题目） ──
+LLM_RERANK_PROMPT = """你是一个面试题重排序专家。根据面试策略和对话上下文，从候选题目中选出最合适的题目并排序。
+
+## 用户最新消息
+{user_message}
+
+## 对话摘要
+{conversation_summary}
+
+## 当前激活的 Skill
+{active_skills}
+
+## 面试策略
+策略类型: {strategy}
+目标话题: {target_topic}
+精排目标: {rerank_goal}
+
+## 检索查询
+{search_query}
+
+## 排除词（不得出现的话题）
+{negative_terms}
+
+## 期望题目类型
+{question_type}
+
+## 候选题目列表
+{candidates}
+
+## 策略特定规则
+
+### deep_dive（项目深挖）
+- 优先选择与用户项目经验直接相关的题目
+- 排除与排除词相关的噪声题目
+- 偏好追问链（同一项目不同层次的追问）
+- 优先级: 项目实战 > 项目架构 > 项目难点
+
+### topic_shift（话题切换）
+- 允许选择不同技术领域的新题目
+- 严格排除包含排除词的题目
+- 追求话题多样性，避免重复已讨论过的话题
+- 优先级: 新话题 > 基础知识 > 扩展知识
+- 不要求和用户上一句话完全相似，但必须和“目标话题/期望题型/岗位高频”相关
+- 如果某个词出现在排除词中，不能把它作为跳题目标
+
+### clarification（澄清追问）
+- 不选择新题目，仅从已有问题中选择需要澄清的方向
+- 不生成新的候选题目
+- should_show_references 必须为 false
+- 优先级: 回答完整性 > 深度 > 广度
+
+## 输出要求
+严格返回以下 JSON 格式，不要包含其他内容:
+{{
+  "ranked_question_ids": [题目 ID 列表，按推荐顺序排列],
+  "selected_basis_ids": [作为回答依据的题目 ID 列表],
+  "confidence": 0.0-1.0,
+  "reasoning_summary": "选择原因的简短说明",
+  "should_show_references": true/false
+}}
+
+规则:
+- ranked_question_ids 必须使用候选题目中的实际 ID，禁止编造
+- selected_basis_ids 必须来自 ranked_question_ids，且最多 2 个
+- confidence 反映选择的确定性，0.5 以下表示不确定
+- should_show_references: clarification 策略时为 false，其他策略根据相关性决定
+- 每次最多返回 5 个 ranked_question_ids
 """

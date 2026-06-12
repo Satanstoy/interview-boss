@@ -187,6 +187,10 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
         if result_collector is not None:
             result_collector["answer_tasks"] = state_values.get("answer_tasks", [])
             result_collector["user_id"] = input_state.get("user_id")
+            # 保存 config 供调用方后续读取 final state
+            result_collector["_graph_config"] = config
+            # 直接保存完整 state_values 供非 SSE 调用方使用
+            result_collector["final_state"] = state_values
 
     except Exception as e:
         logger.exception("LangGraph 流式执行失败")

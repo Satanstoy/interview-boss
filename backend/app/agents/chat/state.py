@@ -31,6 +31,7 @@ class ChatState(TypedDict, total=False):
     jd_text: Optional[str]  # JD 文本内容
     resume_text: Optional[str]  # 简历文本
     model: Optional[str]  # 用户选择的模型（覆盖默认配置）
+    bank_mode: Optional[str]  # 题库模式 public/personal/mixed
 
     # === 记忆 ===
     memories: list[dict]  # 用户长期记忆列表（按需加载完整内容）
@@ -53,6 +54,14 @@ class ChatState(TypedDict, total=False):
     # === RAG 检索 ===
     keywords: list[str]  # LLM 提取的检索关键词
     search_query: Optional[str]  # 基于对话上下文改写的检索查询
+    retrieval_intent: Optional[
+        str
+    ]  # 检索意图: find_similar / expand_knowledge / review_weakness
+    search_positive_terms: list[str]  # 结构化改写的正向检索词
+    search_negative_terms: list[str]  # 结构化改写的负向排除词
+    question_type: Optional[
+        str
+    ]  # 题目类型: project_followup / knowledge_probe / new_question
     retrieved_questions: list[dict]  # FTS5 检索到的相关题目
 
     # === 输出 ===
@@ -67,3 +76,20 @@ class ChatState(TypedDict, total=False):
 
     # === Skills ===
     active_skills: list[str]  # 当前激活的 skill 名称列表
+    suppressed_skills: list[str]  # 被策略抑制的 skill 名称列表
+    effective_skills: list[str]  # 实际注入 prompt 的 skill 名称列表
+    active_skill_strategy_rules: dict  # active skills 的结构化策略规则
+    skill_decision: dict  # 统一 skill 决策输出，供路由和日志使用
+
+    # === 面试策略（由 skill_strategist 节点产出） ===
+    strategy: str  # "deep_dive" | "topic_shift" | "clarification"
+    tool_policy: str  # "none" | "retrieve_related" | "draw_question"
+    strategy_reason: str  # 策略选择原因
+    strategy_target_topic: str  # 目标话题
+    strategy_preferred_question_type: str  # preferred question type override
+    strategy_should_retrieve: bool  # 是否需要检索
+    strategy_rerank_goal: str  # rerank 优化目标
+    drawn_questions: list[dict]  # 随机/加权抽题得到的题目
+    selected_basis_questions: list[dict]  # 本轮真正展示给前端的依据题目
+    rerank_metadata: dict  # LLM rerank 结构化结果
+    next_question_plan: dict  # 本轮生成前确定的出题计划
