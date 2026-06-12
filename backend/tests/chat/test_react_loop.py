@@ -220,3 +220,130 @@ class TestReactLoop:
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         assert len(chunk_events) > 0
         assert chunk_events[0]["content"] == "Final answer after max steps"
+
+
+# ── Fixtures ───────────────────────────────────────────────
+
+
+@pytest.fixture
+def base_state():
+    return {
+        "conversation_id": "test-conv-1",
+        "user_id": 1,
+        "user_message": "你好",
+        "mode": "free_practice",
+        "jd_id": None,
+        "jd_text": None,
+        "resume_text": None,
+        "model": None,
+        "bank_mode": "public",
+        "memories": [],
+        "memory_summaries": [],
+        "resume_summary": None,
+        "session_notes": "",
+        "interview_context": "目标岗位：后端开发",
+        "job_position": "后端开发",
+        "message_history": [],
+        "compressed_context": None,
+        "recent_messages": [],
+        "budget_snapshot": None,
+        "intent": "chat",
+        "answer_complete": False,
+        "keywords": [],
+        "search_query": "",
+        "retrieval_intent": None,
+        "search_positive_terms": [],
+        "search_negative_terms": [],
+        "question_type": None,
+        "retrieved_questions": [],
+        "selected_basis_questions": [],
+        "rerank_metadata": {},
+        "response": "",
+        "metadata": {},
+        "basis_type": "none",
+        "basis_question_ids": [],
+        "basis_confidence": 0.0,
+        "should_show_references": False,
+        "active_skills": [],
+    }
+
+
+# ── TestReactLoopIntegration ───────────────────────────────
+
+
+class TestReactLoopIntegration:
+    """Integration tests for the full ReAct loop tool chain."""
+
+    async def test_load_skill_then_search_then_answer(self, base_state):
+        """LLM loads skill, searches questions, then answers."""
+        from app.agents.chat.pipeline import _react_loop
+
+        # Step 1: load_skill
+        step1 = {
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "function": {
+                    "name": "load_skill",
+                    "arguments": json.dumps({"skill_name": "algorithm-coding"}),
+                },
+            }],
+            "finish_reason": "tool_calls",
+        }
+
+        # Step 2: search_questions
+        step2 = {
+            "content": None,
+            "tool_calls": [{
+                "id": "call_2",
+                "function": {
+                    "name": "search_questions",
+                    "arguments": json.dumps({"keywords": ["排序算法"]}),
+                },
+            }],
+            "finish_reason": "tool_calls",
+        }
+
+        # Step 3: answer
+        step3 = {
+            "content": "好的，请实现一个快速排序。",
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+        call_count = 0
+
+        async def mock_llm(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return [step1, step2, step3][call_count - 1]
+
+        async def mock_stream(*args, **kwargs):
+            yield "好的，"
+            yield "请实现一个快速排序。"
+
+        collected = []
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with patch("app.agents.chat.pipeline.build_react_system_prompt", return_value="Test prompt."):
+                with patch("app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm):
+                    with patch("app.agents.chat.pipeline.stream_llm_messages", side_effect=mock_stream):
+                        with patch("app.agents.chat.pipeline.execute_tool", new_callable=AsyncMock, return_value="mock result"):
+                            async for event in _react_loop(base_state):
+                                collected.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        # Combine emitted (step) and yielded (chunk, done) events
+        all_events = emitted + collected
+        types = [e.get("type") for e in all_events]
+        assert "step" in types
+        assert "chunk" in types
+        assert "done" in types
+
+        # llm_with_tools called 3 times
+        assert call_count == 3
