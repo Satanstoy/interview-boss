@@ -237,6 +237,59 @@ def get_message_count(conversation_id: str) -> int:
     return row[0] if row else 0
 
 
+def get_conversation_question_ids(conversation_id: str) -> set[int]:
+    """Return question ids already surfaced in a conversation.
+
+    This covers questions used as final basis plus candidate retrieved/drawn
+    questions saved in assistant metadata, so later draw calls can avoid repeats.
+    """
+    ids: set[int] = set()
+
+    def _add(raw_id) -> None:
+        try:
+            qid = int(raw_id)
+        except (TypeError, ValueError):
+            return
+        if qid > 0:
+            ids.add(qid)
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT metadata FROM chat_messages "
+            "WHERE conversation_id = ? AND role = 'assistant'",
+            (conversation_id,),
+        ).fetchall()
+
+    for row in rows:
+        meta = _safe_json_loads(row[0])
+        for key in ("basis_question_ids",):
+            value = meta.get(key)
+            if isinstance(value, list):
+                for qid in value:
+                    _add(qid)
+
+        rerank = meta.get("llm_rerank")
+        if isinstance(rerank, dict):
+            for key in ("selected_basis_ids",):
+                value = rerank.get(key)
+                if isinstance(value, list):
+                    for qid in value:
+                        _add(qid)
+
+        for key in ("retrieved_questions", "selected_basis_questions"):
+            value = meta.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        _add(item.get("id"))
+
+        plan = meta.get("next_question_plan")
+        if isinstance(plan, dict):
+            _add(plan.get("question_id"))
+
+    return ids
+
+
 # ═══════════════════════════════════════════════════
 #  用户记忆管理
 # ═══════════════════════════════════════════════════

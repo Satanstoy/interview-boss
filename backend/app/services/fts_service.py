@@ -1,12 +1,13 @@
 """FTS5 + 向量混合检索服务 — 面试题库 RAG 检索
 
 混合检索架构（参考 vstash / Supabase / Digital Applied 2026 最佳实践）:
-1. FTS5/LIKE 关键词检索（精确匹配）
-2. FAISS 向量语义检索（语义相似）
-3. Reciprocal Rank Fusion (RRF) 融合两路结果
-4. 自适应 IDF 加权（稀有词偏 FTS，常见词偏向量）
-5. 查询扩展（缩写/同义词映射）
-6. MMR 多样性去重（按 cat2 分散结果）
+1. 英文/技术词 FTS5 检索（精确匹配）
+2. 中文关键词 LIKE 检索（避免 CJK 词拖垮 FTS5）
+3. FAISS 向量语义检索（语义相似）
+4. Reciprocal Rank Fusion (RRF) 按名次融合多路结果
+5. 自适应 RRF 加权（稀有词偏 FTS，常见词偏向量）
+6. 查询扩展（缩写/同义词映射）
+7. 小权重启发式 rerank + MMR 多样性去重
 
 RRF 公式: score(doc) = Σ 1/(k + rank_i), k=60（行业标准）
 """
@@ -19,6 +20,7 @@ from app.db.connection import get_db_connection
 logger = logging.getLogger("interview-boss")
 
 RRF_K = 60  # RRF 平滑常数（行业标准值）
+HEURISTIC_RERANK_WEIGHT = 0.0001  # 只做小幅调整，不能覆盖 RRF 主排序
 
 # ── 查询扩展：缩写/同义词映射（零 LLM 成本）──
 QUERY_EXPANSION_MAP = {
@@ -94,6 +96,41 @@ def _expand_query(keywords: list[str]) -> list[str]:
         if kw_lower in QUERY_EXPANSION_MAP:
             expanded.extend(QUERY_EXPANSION_MAP[kw_lower])
     return expanded
+
+
+def _split_keywords_by_script(keywords: list[str]) -> tuple[list[str], list[str]]:
+    """将查询词拆成 FTS5 友好的英文/技术词和中文 LIKE 词。
+
+    之前把扩展后的中英文词一起交给 search_questions_fts，会因为包含 CJK
+    而整条查询跳过 FTS5。这里分流后，RAG/LangGraph/FTS 等技术词仍可走
+    FTS5，中文扩展词单独走 LIKE，再由 RRF 融合。
+    """
+    ascii_terms = []
+    cjk_terms = []
+    seen_ascii = set()
+    seen_cjk = set()
+
+    for raw in keywords or []:
+        kw = (raw or "").strip()
+        if not kw:
+            continue
+        if re.search(r"[一-鿿]", kw):
+            if kw not in seen_cjk:
+                cjk_terms.append(kw)
+                seen_cjk.add(kw)
+            # 混合词中的英文片段也保留下来，例如 "LangGraph 状态机"
+            for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{1,}", kw):
+                token_lower = token.lower()
+                if token_lower not in seen_ascii:
+                    ascii_terms.append(token)
+                    seen_ascii.add(token_lower)
+        else:
+            token_lower = kw.lower()
+            if token_lower not in seen_ascii:
+                ascii_terms.append(kw)
+                seen_ascii.add(token_lower)
+
+    return ascii_terms, cjk_terms
 
 
 def _adaptive_rrf_weights(keywords: list[str]) -> tuple[float, float]:
@@ -182,28 +219,42 @@ def _heuristic_rerank(
     results: list[dict],
     keywords: list[str],
     intent_categories: list[str],
+    retrieval_intent: str = None,
+    question_type: str = None,
 ) -> list[dict]:
-    """启发式重排：基于关键词重叠 + 意图对齐 + 位置稳定性。
+    """启发式重排：基于关键词重叠 + 意图对齐 + 位置稳定性 + retrieval_intent 调整。
 
     轻量级启发式（非神经模型），在 MMR 去重后进一步微调排序。
 
     评分规则：
     - keyword_overlap: question 中匹配 +10/词，tags/cat1/cat2 中匹配 +5/词
     - intent_alignment: cat1 或 cat2 匹配 intent_categories 时 +5
+    - question_type_boost: 根据 question_type 对特定分类加分
+    - retrieval_intent_adjustment:
+      - find_similar/new_question: 保留题库原题相关性（默认行为）
+      - expand_knowledge: 放宽相似表达，避免过度依赖 FTS exact match
+      - review_weakness: 优先基础知识、八股、薄弱点相关题
     - stability: 原始列表位置越靠前，微弱加分（+1 递减），用于打破平局
 
     Args:
         results: 已排序的结果列表
         keywords: 查询关键词
         intent_categories: 用户意图分类（cat1/cat2）
+        retrieval_intent: 检索意图 (find_similar / expand_knowledge / review_weakness)
+        question_type: 题目类型 (project_followup / knowledge_probe / new_question)
 
     Returns:
         重排后的结果列表（新 list，不修改原列表）
     """
-    if not results or not keywords:
+    if not results:
         return [{**r, "_heuristic_score": 0} for r in results]
 
+    keywords = keywords or []
     intent_set = {c.lower() for c in intent_categories if c}
+    project_cat1 = {"项目复盘", "系统设计", "agent", "rag"}
+    project_cat2 = {"项目复盘", "系统设计", "agent", "rag", "微服务", "分布式"}
+    knowledge_cat1 = {"基础原理", "八股", "算法", "数据结构"}
+    knowledge_cat2 = {"基础原理", "八股", "算法", "数据结构", "网络", "操作系统"}
     scored = []
 
     for idx, r in enumerate(results):
@@ -227,6 +278,29 @@ def _heuristic_rerank(
         if intent_set:
             if c1_lower in intent_set or c2_lower in intent_set:
                 score += 5
+
+        if question_type == "project_followup":
+            if c1_lower in project_cat1 or c2_lower in project_cat2:
+                score += 8
+        elif question_type == "knowledge_probe":
+            if c1_lower in knowledge_cat1 or c2_lower in knowledge_cat2:
+                score += 8
+        elif question_type == "new_question":
+            if c1_lower not in project_cat1 and c2_lower not in project_cat2:
+                score += 3
+
+        # retrieval_intent 调整
+        if retrieval_intent == "expand_knowledge":
+            # 放宽：对基础知识题额外加分（鼓励广度）
+            if c1_lower in knowledge_cat1 or c2_lower in knowledge_cat2:
+                score += 3
+        elif retrieval_intent == "review_weakness":
+            # 优先基础知识、八股
+            if c1_lower in knowledge_cat1 or c2_lower in knowledge_cat2:
+                score += 6
+            # 对项目题降权（弱点回顾不优先项目深挖）
+            if c1_lower in project_cat1 or c2_lower in project_cat2:
+                score -= 3
 
         if score > 0:
             stability = max(0, 1.0 - idx * 0.1)
@@ -728,20 +802,80 @@ def _has_question_tag_match(results: list[dict], keywords: list[str]) -> bool:
     return False
 
 
+def _filter_negative_terms(
+    results: list[dict], negative_terms: list[str]
+) -> list[dict]:
+    """过滤掉明显包含负向排除词的结果。"""
+    if not negative_terms:
+        return results
+
+    filtered = []
+    neg_lower = [t.lower() for t in negative_terms if t]
+
+    for r in results:
+        q_lower = (r.get("question") or "").lower()
+        t_lower = (r.get("tags") or "").lower()
+        c1_lower = (r.get("cat1") or "").lower()
+        c2_lower = (r.get("cat2") or "").lower()
+
+        should_exclude = False
+        for neg in neg_lower:
+            if neg in q_lower or neg in t_lower or neg in c1_lower or neg in c2_lower:
+                should_exclude = True
+                break
+
+        if not should_exclude:
+            filtered.append(r)
+
+    if len(filtered) < len(results):
+        logger.info(
+            f"负向过滤: {len(results)} → {len(filtered)} (排除词: {negative_terms})"
+        )
+
+    return filtered
+
+
+def _combine_rrf_with_heuristic_score(results: list[dict]) -> list[dict]:
+    """RRF 为主、启发式为辅的最终排序。
+
+    原始 FTS rank、LIKE 命中和向量 cosine 不可比，所以主排序必须来自 RRF。
+    启发式分只允许做小幅业务修正，避免再次退化成 score fusion。
+    """
+    ranked = []
+    for idx, item in enumerate(results):
+        rrf_score = float(item.get("_rrf_score") or 0)
+        heuristic_score = float(item.get("_heuristic_score") or 0)
+        combined = rrf_score + heuristic_score * HEURISTIC_RERANK_WEIGHT
+        ranked.append(
+            {
+                **item,
+                "_combined_rank_score": round(combined, 6),
+                "_pre_final_rank": idx + 1,
+            }
+        )
+
+    ranked.sort(
+        key=lambda r: (
+            r.get("_combined_rank_score", 0),
+            r.get("_rrf_score", 0),
+            -r.get("_pre_final_rank", 0),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
 def hybrid_search(
     keywords: list[str],
     query_text: str = None,
     limit: int = 5,
     job_position: str = None,
     exclude_ids: set[int] = None,
+    negative_terms: list[str] = None,
+    question_type: str = None,
+    retrieval_intent: str = None,
 ) -> list[dict]:
-    """FTS5 + 向量 + RRF 混合搜索（含 4 项轻量优化）。
-
-    优化技术（零额外 LLM 调用）：
-    1. 自适应 IDF 加权（vstash）：稀有词偏 FTS，常见词偏向量
-    2. 查询扩展：缩写/同义词映射（LLM→大模型, RAG→检索增强）
-    3. MMR 多样性：按 cat2 分散结果，避免 Top-5 全是同一分类
-    4. FTS 质量检测：FTS 无 question/tags 匹配时，降低 FTS 权重
+    """FTS5 + 向量 + RRF 混合搜索。
 
     Args:
         keywords: FTS 关键词列表
@@ -749,6 +883,9 @@ def hybrid_search(
         limit: 返回结果数
         job_position: 岗位过滤
         exclude_ids: 排除 ID
+        negative_terms: 负向排除词列表
+        question_type: 题目类型 (project_followup / knowledge_probe / new_question)
+        retrieval_intent: 检索意图 (find_similar / expand_knowledge / review_weakness)
 
     Returns:
         融合后的搜索结果列表
@@ -756,26 +893,40 @@ def hybrid_search(
     if not keywords and not query_text:
         return []
 
-    # ── 优化 1: 查询扩展（缩写→完整术语）──
-    original_keywords = keywords
+    original_keywords = keywords or []
     if keywords:
         expanded = _expand_query(keywords)
         if len(expanded) > len(keywords):
             logger.info(f"查询扩展: {keywords} → {expanded}")
             keywords = expanded
 
-    # 过采样：每路检索取 limit*2 个候选，给 RRF 更多信号
-    oversample = limit * 3  # 增加过采样给 MMR 更多选择
-
-    # 路径 1: FTS/LIKE 关键词检索
-    fts_results = search_questions_fts(
-        keywords=keywords or [query_text],
-        limit=oversample,
-        job_position=job_position,
-        exclude_ids=exclude_ids,
+    oversample = limit * 3
+    fts_keywords, cjk_keywords = _split_keywords_by_script(keywords or [])
+    logger.info(
+        f"混合搜索分流: fts_keywords={fts_keywords}, cjk_keywords={cjk_keywords}, "
+        f"query_text='{query_text}'"
     )
 
-    # 路径 2: 向量语义检索（如果 query_text 可用）
+    fts_results = []
+    if fts_keywords:
+        fts_results = search_questions_fts(
+            keywords=fts_keywords,
+            limit=oversample,
+            job_position=job_position,
+            exclude_ids=exclude_ids,
+        )
+
+    cjk_results = []
+    if cjk_keywords:
+        with get_db_connection() as conn:
+            cjk_results = _fallback_like_search(
+                cjk_keywords,
+                conn,
+                oversample,
+                job_position=job_position,
+                exclude_ids=exclude_ids,
+            )
+
     vec_results = []
     if query_text:
         vec_results = _vector_search(
@@ -784,45 +935,54 @@ def hybrid_search(
             exclude_ids=exclude_ids,
         )
 
-    # 如果只有一路有结果，直接返回
-    if not vec_results:
-        logger.info(f"混合搜索: 向量无结果，降级到纯 FTS ({len(fts_results)} 条)")
-        return fts_results[:limit]
-    if not fts_results:
-        logger.info(f"混合搜索: FTS 无结果，降级到纯向量 ({len(vec_results)} 条)")
-        return vec_results[:limit]
+    retrieval_lists = []
+    weights = []
 
-    # ── 优化 2: 自适应 RRF 权重（基于 IDF）──
-    fts_weight, vec_weight = _adaptive_rrf_weights(original_keywords or keywords)
+    fts_weight, vec_weight = _adaptive_rrf_weights(original_keywords or keywords or [])
+    cjk_weight = min(1.0, fts_weight)
     logger.info(
-        f"自适应权重: FTS={fts_weight}, Vec={vec_weight} (keywords={original_keywords})"
+        f"自适应 RRF 权重: FTS={fts_weight}, CJK_LIKE={cjk_weight}, "
+        f"Vec={vec_weight} (keywords={original_keywords})"
     )
 
-    # RRF 融合（使用自适应权重）
-    fused = reciprocal_rank_fusion(
-        [fts_results, vec_results], weights=[fts_weight, vec_weight]
-    )
+    if fts_results:
+        retrieval_lists.append(fts_results)
+        weights.append(fts_weight)
+    if cjk_results:
+        retrieval_lists.append(cjk_results)
+        weights.append(cjk_weight)
+    if vec_results:
+        retrieval_lists.append(vec_results)
+        weights.append(vec_weight)
 
-    # 相关性重排序（question/tags 匹配优先）
-    if keywords:
-        fused.sort(
-            key=lambda r: _relevance_score(
-                r.get("question", ""),
-                r.get("tags", ""),
-                r.get("ai_answer", ""),
-                original_keywords or keywords,
-            ),
-            reverse=True,
+    if not retrieval_lists:
+        logger.info(
+            f"混合搜索: 三路均无结果 (FTS={len(fts_results)}, "
+            f"CJK_LIKE={len(cjk_results)}, 向量={len(vec_results)})"
         )
+        return []
 
-    # ── 优化 3: MMR 多样性去重 ──
+    fused = reciprocal_rank_fusion(retrieval_lists, weights=weights)
+
+    fused = _heuristic_rerank(
+        fused,
+        original_keywords or keywords or [],
+        [],
+        retrieval_intent=retrieval_intent,
+        question_type=question_type,
+    )
+
+    fused = _combine_rrf_with_heuristic_score(fused)
+
     fused = _mmr_diversify(fused, lambda_param=0.7, limit=limit * 2)
 
-    # ── 优化 4: 启发式重排（关键词重叠 + 意图对齐）──
-    fused = _heuristic_rerank(fused, original_keywords or keywords, [])
+    if negative_terms:
+        fused = _filter_negative_terms(fused, negative_terms)
 
     logger.info(
-        f"混合搜索完成: FTS={len(fts_results)}, 向量={len(vec_results)}, "
-        f"融合后={len(fused)}, 返回={min(limit, len(fused))}"
+        f"混合搜索完成(RRF主排序): FTS={len(fts_results)}, "
+        f"CJK_LIKE={len(cjk_results)}, 向量={len(vec_results)}, "
+        f"融合后={len(fused)}, 返回={min(limit, len(fused))}, "
+        f"top={[{'id': r.get('id'), 'rrf': round(r.get('_rrf_score', 0), 5), 'h': r.get('_heuristic_score', 0), 'title': r.get('question', '')[:30]} for r in fused[:limit]]}"
     )
     return fused[:limit]

@@ -71,20 +71,21 @@ def _parse_structured_rewrite(llm_output: str | None) -> dict | None:
         intent = "find_similar"
 
     # positive_terms: 最多 5 个，过滤空值
-    positive = parsed.get("positive_terms", [])
-    if not isinstance(positive, list):
-        positive = []
-    positive = [str(t) for t in positive if t][:5]
+    positive = _clean_terms(parsed.get("positive_terms", []), limit=5)
 
     # negative_terms: 最多 3 个，过滤空值
-    negative = parsed.get("negative_terms", [])
-    if not isinstance(negative, list):
-        negative = []
-    negative = [str(t) for t in negative if t][:3]
+    negative = _clean_terms(parsed.get("negative_terms", []), limit=3)
+
+    main_topic = str(parsed["main_topic"]).strip()
+    if _is_polluted_term(main_topic):
+        if positive:
+            main_topic = positive[0]
+        else:
+            return None
 
     return {
         "retrieval_intent": intent,
-        "main_topic": str(parsed["main_topic"]),
+        "main_topic": main_topic,
         "positive_terms": positive,
         "negative_terms": negative,
     }
@@ -121,6 +122,247 @@ def _build_search_params(rewrite: dict) -> dict:
         "query": query,
         "exclude_keywords": negative,
         "boost": boost,
+    }
+
+
+def _infer_question_type(rewrite: dict) -> str:
+    """从结构化改写中推断题目类型（用于 rerank boost）。"""
+    intent = rewrite.get("retrieval_intent", "find_similar")
+    positive = [t.lower() for t in rewrite.get("positive_terms", [])]
+
+    project_keywords = {"项目", "架构", "系统设计", "agent", "rag", "微服务", "分布式"}
+    if intent == "find_similar" and any(
+        kw in " ".join(positive) for kw in project_keywords
+    ):
+        return "project_followup"
+
+    if intent == "review_weakness":
+        return "knowledge_probe"
+
+    return "new_question"
+
+
+# ── 项目/架构相关关键词（用于规则推断 question_type）──
+_PROJECT_KEYWORDS = {
+    "项目",
+    "架构",
+    "系统设计",
+    "langgraph",
+    "rag",
+    "检索",
+    "引用",
+    "状态",
+    "链路",
+    "agent",
+    "微服务",
+    "分布式",
+    "图",
+    "workflow",
+}
+_KNOWLEDGE_KEYWORDS = {
+    "redis",
+    "mysql",
+    "网络",
+    "操作系统",
+    "jvm",
+    "算法",
+    "数据结构",
+    "tcp",
+    "http",
+    "缓存",
+    "数据库",
+    "线程",
+    "进程",
+    "内存",
+}
+_NEGATIVE_PATTERNS = [
+    "这个参考题不对",
+    "参考题不对",
+    "题目不对",
+    "AI Coding 是例子",
+    "是例子",
+    "举例",
+    "比如说",
+    "例如",
+    "比如",
+    "像",
+    "不要召回",
+    "不该召回",
+    "噪声",
+    "无关",
+    "不是",
+    "排除",
+]
+
+# 状态字段和内部术语（不能作为核心关键词）
+_STATE_FIELDS = {
+    "intent",
+    "answer",
+    "complete",
+    "answer_complete",
+    "keywords",
+    "search",
+    "query",
+    "search_query",
+    "rewrite",
+    "retrieval_intent",
+    "main_topic",
+    "positive_terms",
+    "negative_terms",
+    "conversation_id",
+    "retrieved_questions",
+    "selected_basis_questions",
+    "basis_type",
+    "basis_question_ids",
+    "metadata",
+    "payload",
+    "message_id",
+    "request_id",
+    "id",
+    "json",
+    "question_ids",
+    "rrf_score",
+    "heuristic_score",
+    "frequency",
+    "sources",
+    "true",
+    "false",
+}
+
+_META_TERM_PATTERNS = [
+    "用户",
+    "面试官",
+    "候选人",
+    "回答",
+    "问题",
+    "字段",
+    "比如",
+    "例如",
+    "一个题",
+    "在讲",
+]
+
+
+def _is_polluted_term(term: str, *, allow_space: bool = True) -> bool:
+    term = str(term or "").strip()
+    if not term:
+        return True
+    lower = term.lower().strip("`\"'[]{}():：，,。.；;")
+    if lower in _STATE_FIELDS:
+        return True
+    parts = re.findall(r"[a-zA-Z_]+|[一-鿿]+", lower)
+    if parts and all(part in _STATE_FIELDS for part in parts):
+        return True
+    if len(term) > 32:
+        return True
+    if not allow_space and re.search(r"\s", term):
+        return True
+    if any(pattern in term for pattern in _META_TERM_PATTERNS):
+        return True
+    return False
+
+
+def _clean_terms(terms: list, *, limit: int, allow_space: bool = True) -> list[str]:
+    if not isinstance(terms, list):
+        return []
+    cleaned = []
+    seen = set()
+    for term in terms:
+        text = str(term or "").strip()
+        if _is_polluted_term(text, allow_space=allow_space):
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _sanitize_search_query(query: str, fallback_terms: list[str]) -> str:
+    query = str(query or "").strip()
+    fallback = " ".join(_clean_terms(fallback_terms, limit=5))
+    if not query:
+        return fallback
+    tokens = re.findall(r"[a-zA-Z_]+|[一-鿿]+", query)
+    if tokens and all(t.lower() in _STATE_FIELDS for t in tokens):
+        return fallback
+    if _is_polluted_term(query):
+        return fallback
+    return query[:200]
+
+
+def _infer_rule_based_rewrite(
+    user_message: str, keywords: list[str], intent: str
+) -> dict:
+    """轻量规则推断 structured rewrite（零 LLM 成本）。
+
+    用于 classify_and_recall_fast 和 classify_and_recall 的非 LLM 路径。
+    """
+    msg_lower = user_message.lower()
+    kw_lower = [k.lower() for k in keywords]
+
+    all_text = " ".join(kw_lower) + " " + msg_lower
+    has_project = any(kw in all_text for kw in _PROJECT_KEYWORDS)
+    has_knowledge = any(kw in all_text for kw in _KNOWLEDGE_KEYWORDS)
+
+    if intent == "practice_request":
+        retrieval_intent = "find_similar"
+    elif intent == "follow_up":
+        retrieval_intent = "expand_knowledge"
+    elif has_project or has_knowledge:
+        retrieval_intent = "find_similar"
+    elif len(user_message.strip()) < 20:
+        retrieval_intent = "review_weakness"
+    else:
+        retrieval_intent = "find_similar"
+
+    if has_project:
+        question_type = "project_followup"
+    elif has_knowledge:
+        question_type = "knowledge_probe"
+    else:
+        question_type = "new_question"
+
+    # 提取 negative_terms（用户举错误例子时）
+    negative_terms = []
+    for pattern in _NEGATIVE_PATTERNS:
+        if pattern.lower() in msg_lower:
+            # 从用户消息中提取例子词作为 negative_term
+            import re
+
+            # 提取引号中的词或 "AI Coding" 这类例子
+            example_words = re.findall(r'["""「」]([^"""「」]+)["""「」]', user_message)
+            negative_terms.extend(example_words[:2])
+
+            # 提取 "比如/例如/举例" 后面到 "这种/这类/噪声/不该/不要" 之前的内容
+            noise_match = re.search(
+                r"(?:比如|例如|举例|像)\s*[，,：:\s]*(.+?)(?:\s*(?:这种|这类|作为|是例子|噪声|不该|不要|不要召回|不该召回|无关|排除)|[，,。.；;]|$)",
+                user_message,
+            )
+            if noise_match:
+                noise_text = noise_match.group(1).strip()
+                # 按顿号、逗号分割
+                noise_items = re.split(r"[、，,]", noise_text)
+                for item in noise_items:
+                    item = item.strip()
+                    if len(item) >= 2 and item not in negative_terms:
+                        negative_terms.append(item)
+            break
+
+    # 过滤掉状态字段和内部术语
+    negative_terms = _clean_terms(negative_terms, limit=3)
+
+    # 过滤 positive_terms 中的状态字段
+    positive_terms = _clean_terms(keywords, limit=5)
+
+    return {
+        "retrieval_intent": retrieval_intent,
+        "positive_terms": positive_terms,
+        "negative_terms": negative_terms[:3],
+        "question_type": question_type,
     }
 
 
@@ -245,7 +487,7 @@ def _rule_based_intent(message: str) -> str | None:
 def _extract_keywords_fallback(message: str) -> list[str]:
     """降级关键词提取（纯规则，零 LLM 成本）
 
-    提取 2-4 字的中文技术词和英文单词，排除常见停用词。
+    提取 2-4 字的中文技术词和英文单词，排除常见停用词和状态字段。
     """
     # 英文技术术语（优先）
     eng_words = re.findall(r"[a-zA-Z][a-zA-Z0-9]{1,}", message)
@@ -281,6 +523,8 @@ def _extract_keywords_fallback(message: str) -> list[str]:
         "如何",
         "什么",
     }
+    # 合并状态字段到 stop_words
+    stop_words.update(_STATE_FIELDS)
     cjk_keywords = [w for w in cjk_words if w not in stop_words and len(w) >= 2]
 
     keywords = eng_keywords + cjk_keywords
@@ -291,31 +535,28 @@ async def classify_and_recall_fast(
     user_message: str,
     memory_summaries: list[dict],
     recent_context: str = "",
-) -> tuple[str, list[int], list[str], str, bool]:
+) -> tuple[str, list[int], list[str], str, bool, dict]:
     """快速分类 + 记忆召回（零 LLM 成本）
 
-    用于第一条消息或规则可判断的场景，跳过 LLM 调用。
-    使用规则分类 + 最近记忆（不经过 LLM 选择）。
-
     Returns:
-        (intent, memory_ids, keywords, search_query, answer_complete)
+        (intent, memory_ids, keywords, search_query, answer_complete, structured_rewrite)
     """
-    # 1. 规则分类
     intent = _rule_based_intent(user_message) or "interview_question"
-
-    # 2. 关键词提取（纯规则）
     keywords = _extract_keywords_fallback(user_message)
-
-    # 3. 检索查询：用关键词拼接（快速路径无法做上下文改写）
     search_query = " ".join(keywords) if keywords else ""
-
-    # 4. 记忆选择：直接用最近的记忆（不经过 LLM 选择）
     memory_ids = [m["id"] for m in memory_summaries[:3]] if memory_summaries else []
-
-    # 5. 回答完整性：快速路径默认 True（第一条消息视为完整）
     answer_complete = True
 
-    return intent, memory_ids, keywords, search_query, answer_complete
+    structured_rewrite = _infer_rule_based_rewrite(user_message, keywords, intent)
+
+    return (
+        intent,
+        memory_ids,
+        keywords,
+        search_query,
+        answer_complete,
+        structured_rewrite,
+    )
 
 
 async def classify_and_recall(
@@ -323,30 +564,32 @@ async def classify_and_recall(
     recent_context: str,
     memory_summaries: list[dict],
     user_id: int,
-) -> tuple[str, list[int], list[str], str, bool]:
+) -> tuple[str, list[int], list[str], str, bool, dict]:
     """合并意图分类 + 记忆召回 + 检索查询生成 + 回答完整性判断（单次 LLM 调用）
 
     Returns:
-        (intent, relevant_memory_ids, keywords, search_query, answer_complete)
+        (intent, relevant_memory_ids, keywords, search_query, answer_complete, structured_rewrite)
     """
-    # 1. 规则预判断（零 LLM 成本）
     rule_intent = _rule_based_intent(user_message)
     if rule_intent == "chat":
-        return "chat", [], [], "", False
+        structured = _infer_rule_based_rewrite(user_message, [], "chat")
+        return "chat", [], [], "", False, structured
     if rule_intent == "practice_request":
         kw = _extract_keywords_fallback(user_message)
-        return "practice_request", [], kw, " ".join(kw), False
+        structured = _infer_rule_based_rewrite(user_message, kw, "practice_request")
+        return "practice_request", [], kw, " ".join(kw), False, structured
     if rule_intent == "follow_up":
         kw = _extract_keywords_fallback(user_message)
-        return "follow_up", [], kw, " ".join(kw), False
+        structured = _infer_rule_based_rewrite(user_message, kw, "follow_up")
+        return "follow_up", [], kw, " ".join(kw), False, structured
 
-    # 2. 无记忆时，跳过召回，仅用 LLM 做意图分类
     if not memory_summaries:
-        intent = await _classify_intent_only(user_message, recent_context, user_id)
+        intent = rule_intent or "interview_question"
         keywords = _extract_keywords_fallback(user_message)
         search_query = " ".join(keywords)
         answer_complete = len(user_message.strip()) >= 20
-        return intent, [], keywords, search_query, answer_complete
+        structured = _infer_rule_based_rewrite(user_message, keywords, intent)
+        return intent, [], keywords, search_query, answer_complete, structured
 
     # 3. 合并 LLM 调用：意图 + 记忆选择 + 检索查询
     memory_list = "\n".join(
@@ -381,38 +624,53 @@ async def classify_and_recall(
         keywords = parsed.get("keywords", [])
         if not isinstance(keywords, list):
             keywords = []
-        keywords = [str(k) for k in keywords if k][:5]
+        keywords = _clean_terms(keywords, limit=5)
         if not keywords:
             keywords = _extract_keywords_fallback(user_message)
 
         # 验证 search_query
-        search_query = parsed.get("search_query", "")
-        if not search_query or not isinstance(search_query, str):
-            search_query = " ".join(keywords)
-        search_query = search_query.strip()[:200]
+        search_query = _sanitize_search_query(parsed.get("search_query", ""), keywords)
 
         # 尝试用结构化改写优化 search_query
+        structured_rewrite = {}
         rewrite = parsed.get("rewrite")
         if rewrite and isinstance(rewrite, dict):
             parsed_rewrite = _parse_structured_rewrite(json.dumps(rewrite))
             if parsed_rewrite:
                 search_params = _build_search_params(parsed_rewrite)
                 if search_params["query"]:
-                    search_query = search_params["query"].strip()[:200]
+                    search_query = _sanitize_search_query(
+                        search_params["query"], keywords
+                    )
+                structured_rewrite = {
+                    "retrieval_intent": parsed_rewrite.get(
+                        "retrieval_intent", "find_similar"
+                    ),
+                    "positive_terms": parsed_rewrite.get("positive_terms", []),
+                    "negative_terms": parsed_rewrite.get("negative_terms", []),
+                    "question_type": _infer_question_type(parsed_rewrite),
+                }
 
-        # 验证 answer_complete
         answer_complete = parsed.get("answer_complete", False)
         if not isinstance(answer_complete, bool):
             answer_complete = False
 
-        return intent, memory_ids, keywords, search_query, answer_complete
+        return (
+            intent,
+            memory_ids,
+            keywords,
+            search_query,
+            answer_complete,
+            structured_rewrite,
+        )
 
     except Exception as e:
         logger.warning(f"合并意图+召回 LLM 调用失败，降级到规则: {e}")
         intent = await _classify_intent_only(user_message, recent_context, user_id)
         keywords = _extract_keywords_fallback(user_message)
         answer_complete = len(user_message.strip()) >= 20
-        return intent, [], keywords, " ".join(keywords), answer_complete
+        structured = _infer_rule_based_rewrite(user_message, keywords, intent)
+        return intent, [], keywords, " ".join(keywords), answer_complete, structured
 
 
 async def _classify_intent_only(
