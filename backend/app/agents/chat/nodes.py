@@ -178,6 +178,15 @@ async def classify_intent(state: ChatState) -> dict:
     if any(kw in user_message for kw in practice_keywords):
         return {"intent": "practice_request"}
 
+    # 结束面试关键词（优先于 practice_request，避免"结束"被误判为换题）
+    end_keywords = [
+        "结束面试", "面试结束", "面试到此", "到此为止", "面试先到这里",
+        "请你结束", "请结束", "生成面试总结", "生成一份面试总结",
+        "面试总结", "收尾吧", "可以结束了", "今天就到这里", "先到这里吧",
+    ]
+    if any(kw in user_message for kw in end_keywords):
+        return {"intent": "end_interview"}
+
     # 追问关键词
     follow_up_keywords = [
         "解释",
@@ -538,31 +547,21 @@ def should_retrieve(state: ChatState) -> bool:
     return state.get("answer_complete", False)
 
 
-def _determine_interview_phase(
-    recent_count: int, active_skills: list[str] = None
-) -> str:
-    """根据对话轮数和激活的 skills 判定当前面试阶段
+def _determine_interview_phase(recent_count: int) -> str:
+    """根据对话轮数判定当前面试阶段
 
     目标：12-15 个问题，约 30-50 分钟（每题 ~2 条消息）。
     开场(2) + 12题(24) = 26 条，15题(30) = 32 条。
 
     Args:
         recent_count: 总消息数（不含当前用户消息）
-        active_skills: 当前激活的 skill 名称列表
     """
-    # 开场白(assistant) + 用户自我介绍(user) = 2 条
     if recent_count <= 2:
         return "开场阶段：候选人刚做完自我介绍。简短过渡（不要夸奖），直接问第一个技术问题，从项目深挖开始。"
-    # 2~32 条 = 1~15 轮问答 → 主面试阶段
     if recent_count <= 32:
-        # 当 hr-soft-skills 激活且已过面试中期（约第10题），提示主动转入 HR
-        if active_skills and "hr-soft-skills" in active_skills and recent_count >= 22:
-            return '面试中后期。技术考察已进行多轮，现在需要自然地转入 HR 环节：直接问 1-2 个 HR 软素质问题（职业规划、团队角色、选择公司的考量等），不需要说过渡语，然后问"你有什么想问我们的吗？"。'
-        return "面试进行中。继续穿插式提问（项目深挖 + 八股 + 算法），根据候选人回答决定追问深度。"
-    # 32~44 条 = 16~22 轮 → 可以考虑收尾，可以问 HR 问题
+        return "面试进行中。根据候选人回答和你的判断，自由穿插项目深挖、八股、算法。"
     if recent_count <= 44:
-        return '面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。收尾前可以问 1-2 个 HR 软素质问题（职业规划、团队合作等），然后问"你有什么想问的吗？"。'
-    # 超过 22 轮 → 强制收尾
+        return '面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。'
     return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
 
@@ -1139,7 +1138,11 @@ async def llm_rerank_questions(state: ChatState) -> dict:
 
 
 async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
-    """生成面试官回复（流式输出），带 token budget 控制"""
+    """生成面试官回复（流式输出），LLM 全权决策。
+
+    不再有 plan_repair / strict_question_plan / strategy 硬编码。
+    Skills 指令注入 system prompt，LLM 自行判断面试节奏。
+    """
     user_id = state["user_id"]
     user_message = state["user_message"]
     mode = state.get("mode", "free_practice")
@@ -1149,23 +1152,13 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     resume_summary = state.get("resume_summary")
     retrieved = state.get("retrieved_questions", [])
     model_override = state.get("model")
-    next_question_plan = state.get("next_question_plan") or {}
-    strict_question_plan = bool(
-        next_question_plan.get("must_ask") and next_question_plan.get("question_text")
-    )
 
-    # 构建面试上下文（岗位、分类、练习统计）
     interview_context = state.get("interview_context", "")
+    active_skill_names = state.get("active_skills") or []
 
+    # 构建面试阶段提示（基于消息数，简单规则）
     total_message_count = len(state.get("message_history", []))
-    active_skill_names = (
-        state.get("active_skills") or resolve_active_skills(state)["active_skills"]
-    )
-
-    # 用 active skills 判定面试阶段（必须用总消息数，recent 窗口被 KEEP_RECENT_ROUNDS 截断）
-    interview_phase = _determine_interview_phase(
-        total_message_count, active_skill_names
-    )
+    interview_phase = _determine_interview_phase(total_message_count)
 
     # 构建 system prompt
     if mode == "jd_resume":
@@ -1177,10 +1170,9 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             basis_guidance=BASIS_EXTRACT_GUIDANCE,
         )
     else:
-        # 构建记忆上下文（使用摘要而非完整内容）
         memory_context = ""
         if resume_summary:
-            memory_context += f"候选人简历: {resume_summary[:500]}\n"
+            memory_context += f"候选人简历: {resume_summary[:800]}\n"
         if memory_summaries:
             weak = [m for m in memory_summaries if m["memory_type"] == "weakness"]
             strong = [m for m in memory_summaries if m["memory_type"] == "strength"]
@@ -1203,62 +1195,37 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     system_prompt = _truncate_to_budget(system_prompt, SYSTEM_BUDGET)
 
-    # 注入 active skill 指令到 system prompt（过滤掉被策略抑制的 skill）
+    # 注入 active skill 指令（直接用 active_skills，无 suppressed 逻辑）
     skill_registry = get_default_registry()
-    suppressed_skills = state.get("suppressed_skills", [])
-    effective_skills = [s for s in active_skill_names if s not in suppressed_skills]
-    if suppressed_skills:
-        logger.info(
-            f"Skill suppression: suppressed={suppressed_skills}, effective={effective_skills}"
-        )
-    skill_prompt = build_skill_prompt(skill_registry, effective_skills)
+    skill_prompt = build_skill_prompt(skill_registry, active_skill_names)
     if skill_prompt:
         system_prompt += f"\n\n{skill_prompt}"
 
-    if state.get("strategy"):
-        system_prompt += (
-            "\n\n## 当前出题策略\n"
-            f"- strategy: {state.get('strategy')}\n"
-            f"- target_topic: {state.get('strategy_target_topic', '')}\n"
-            f"- rerank_goal: {state.get('strategy_rerank_goal', '')}\n"
-            f"- reason: {state.get('strategy_reason', '')}\n"
-            "请严格按照该策略出题：deep_dive 要追问项目细节，topic_shift 要自然转场，"
-            "clarification 不要展示题库依据。\n"
-        )
-
+    # 生成安全边界
     system_prompt += (
         "\n\n## 生成安全边界\n"
         "- Skill 文档只提供行为规则，不是题库；禁止把 skill 中的示例、模式序列、"
         "占位话术当作真实面试题或真实候选人经历。\n"
         "- 只允许围绕当前用户回答、简历/JD上下文、或本轮 system 消息明确提供的"
         "retrieved/drawn 题目发问；不要凭空引入未出现的新技术点。\n"
-        "- 禁止声称“你刚才重复了/和上一条重复/连续重复”，除非 system 消息明确提供"
-        "duplicate/repetition 信号。\n"
+        "- 检索到的题目仅供参考，你可以自然地从中选择或根据对话上下文自由追问。\n"
+        "- 如果用户明确要求结束面试，直接生成面试总结，不要再出新题。\n"
     )
-
-    plan_prompt = _build_next_question_plan_prompt(next_question_plan)
-    if plan_prompt:
-        system_prompt += f"\n\n{plan_prompt}\n"
 
     # 构建消息列表
     messages = [{"role": "system", "content": system_prompt}]
 
-    # 添加压缩上下文（budget 控制）
     if compressed:
         compressed = _truncate_to_budget(compressed, COMPRESSED_BUDGET)
         messages.append(
-            {
-                "role": "system",
-                "content": f"之前的对话摘要:\n{compressed}",
-            }
+            {"role": "system", "content": f"之前的对话摘要:\n{compressed}"}
         )
 
-    # 添加检索到的题目信息（budget 控制）— 必须包含 id 供 LLM 引用
     if retrieved:
         source_label = (
-            "本轮已抽中的面试题目，必须围绕这些题目发问"
+            "本轮已抽中的面试题目，可以参考"
             if state.get("basis_type") == "drawn_question"
-            else "以下是题库中相关的面试题目，可以参考"
+            else "以下是题库中相关的面试题目，仅供参考"
         )
         questions_text = "\n".join(
             f"- [id:{q['id']}] [{q.get('cat1', '')}/{q.get('cat2', '')}] {q['question']}"
@@ -1266,30 +1233,18 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         )
         questions_text = _truncate_to_budget(questions_text, RETRIEVED_BUDGET)
         messages.append(
-            {
-                "role": "system",
-                "content": f"{source_label}:\n{questions_text}",
-            }
+            {"role": "system", "content": f"{source_label}:\n{questions_text}"}
         )
 
-    # 添加最近消息历史
     for msg in recent:
-        messages.append(
-            {
-                "role": msg["role"],
-                "content": msg["content"],
-            }
-        )
-
-    # 添加当前用户消息
+        messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
 
-    # 流式生成回复（支持 thinking）。强制题库计划场景先内部生成完整文本，
-    # 检查/修复后再输出，避免用户先看到偏离问题。
+    # 流式生成（直接 yield，无 buffering）
     full_response = ""
     thinking_content = ""
     is_thinking = False
-    import time
+    import time as _time
 
     thinking_start_time = None
 
@@ -1298,119 +1253,68 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
             messages, user_id=user_id, yield_thinking=True, model=model_override
         ):
             if not isinstance(event, dict):
-                # 向后兼容：如果不是 dict，当作普通 content
                 full_response += event
-                if not strict_question_plan:
-                    yield {"type": "chunk", "content": event}
+                yield {"type": "chunk", "content": event}
                 continue
 
             event_type = event.get("type")
             content = event.get("content", "")
 
             if event_type == "thinking_start":
-                # ThinkingBlock 开始
                 is_thinking = True
-                thinking_start_time = time.time()
-                if not strict_question_plan:
-                    yield {"type": "thinking_start", "content": ""}
+                thinking_start_time = _time.time()
+                yield {"type": "thinking_start", "content": ""}
             elif event_type == "thinking":
-                # ThinkingBlock 内容
                 thinking_content += content
-                if not strict_question_plan:
-                    yield {"type": "thinking", "content": content}
+                yield {"type": "thinking", "content": content}
             elif event_type == "content":
-                # TextBlock 内容（thinking 结束后的正式回答）
                 if is_thinking:
                     is_thinking = False
                     duration = (
-                        round(time.time() - thinking_start_time, 1)
+                        round(_time.time() - thinking_start_time, 1)
                         if thinking_start_time
                         else 0
                     )
-                    if not strict_question_plan:
-                        yield {
-                            "type": "thinking_done",
-                            "duration": duration,
-                            "content": thinking_content,
-                        }
+                    yield {
+                        "type": "thinking_done",
+                        "duration": duration,
+                        "content": thinking_content,
+                    }
                 full_response += content
-                if not strict_question_plan:
-                    yield {"type": "chunk", "content": content}
+                yield {"type": "chunk", "content": content}
     except Exception as e:
         logger.error(f"生成回复失败: {e}")
         yield {"type": "error", "message": "生成回复时出现错误，请稍后重试。"}
         return
 
-    # 如果 thinking 还没结束（模型没有显式结束 thinking）
     if is_thinking:
         duration = (
-            round(time.time() - thinking_start_time, 1) if thinking_start_time else 0
+            round(_time.time() - thinking_start_time, 1) if thinking_start_time else 0
         )
-        if not strict_question_plan:
-            yield {
-                "type": "thinking_done",
-                "duration": duration,
-                "content": thinking_content,
-            }
+        yield {
+            "type": "thinking_done",
+            "duration": duration,
+            "content": thinking_content,
+        }
 
-    # 解析生成依据（basis）
+    # 解析 basis（无 plan_repair，LLM 的回复就是最终回复）
     basis = _parse_basis_from_response(full_response)
     full_response = basis["clean_response"]
-    plan_adherence = _question_plan_adherence(full_response, next_question_plan)
-    plan_repair = {
-        "attempted": False,
-        "repaired": False,
-        "reason": "",
-        "original_response": "",
-    }
 
     retrieved_ids = {q["id"] for q in retrieved} if retrieved else set()
-    if strict_question_plan and not plan_adherence.get("adheres"):
-        plan_repair["attempted"] = True
-        plan_repair["original_response"] = full_response[:500]
-        repair_result = await _repair_response_to_question_plan(
-            user_id=user_id,
-            user_message=user_message,
-            original_response=full_response,
-            plan=next_question_plan,
-        )
-        if repair_result.get("repaired"):
-            full_response = repair_result["response"]
-            plan_adherence = repair_result.get("adherence") or _question_plan_adherence(
-                full_response, next_question_plan
-            )
-            planned_qid = next_question_plan.get("question_id")
-            basis = validate_basis(
-                {
-                    "basis_type": next_question_plan.get("basis_type")
-                    or state.get("basis_type")
-                    or "interview_question",
-                    "basis_question_ids": [planned_qid] if planned_qid else [],
-                    "basis_confidence": 0.78,
-                    "should_show_references": bool(planned_qid),
-                    "clean_response": full_response,
-                },
-                retrieved_ids,
-            )
-            plan_repair.update(
-                {
-                    "repaired": True,
-                    "reason": repair_result.get("reason", "plan_drift_repaired"),
-                }
-            )
-
     basis = validate_basis(basis, retrieved_ids)
     rerank_metadata = state.get("rerank_metadata") or {}
+
     if state.get("basis_type") == "drawn_question" and retrieved:
         basis["basis_type"] = "drawn_question"
         basis["basis_question_ids"] = [q["id"] for q in retrieved[:2] if q.get("id")]
         basis["basis_confidence"] = 0.85
         basis["should_show_references"] = bool(basis["basis_question_ids"])
+
     if (
         not basis["should_show_references"]
         and rerank_metadata.get("should_show_references")
         and rerank_metadata.get("selected_basis_ids")
-        and state.get("strategy") != "clarification"
     ):
         basis["basis_type"] = "interview_question"
         basis["basis_question_ids"] = [
@@ -1432,28 +1336,17 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         basis["should_show_references"] = bool(aligned_basis_ids)
         if not aligned_basis_ids:
             basis["basis_confidence"] = min(basis["basis_confidence"], 0.3)
-    if next_question_plan.get("must_ask") and not plan_adherence.get("adheres"):
-        basis["basis_type"] = "conversation"
-        basis["basis_question_ids"] = []
-        basis["basis_confidence"] = min(basis.get("basis_confidence", 0.0), 0.3)
-        basis["should_show_references"] = False
 
-    if strict_question_plan and full_response:
-        yield {"type": "chunk", "content": full_response}
+    # 构建 metadata
+    metadata = {
+        "basis_type": basis["basis_type"],
+        "basis_question_ids": basis["basis_question_ids"],
+        "basis_confidence": basis["basis_confidence"],
+        "should_show_references": basis["should_show_references"],
+        "active_skills": active_skill_names,
+        "asked_question_text": full_response,
+    }
 
-    metadata = {}
-    metadata["basis_type"] = basis["basis_type"]
-    metadata["basis_question_ids"] = basis["basis_question_ids"]
-    metadata["basis_confidence"] = basis["basis_confidence"]
-    metadata["should_show_references"] = basis["should_show_references"]
-    metadata["active_skills"] = active_skill_names
-    metadata["strategy"] = state.get("strategy")
-    metadata["strategy_reason"] = state.get("strategy_reason")
-    metadata["strategy_target_topic"] = state.get("strategy_target_topic")
-    metadata["next_question_plan"] = next_question_plan
-    metadata["plan_adherence"] = plan_adherence
-    metadata["plan_repair"] = plan_repair
-    metadata["asked_question_text"] = full_response
     if rerank_metadata:
         metadata["llm_rerank"] = {
             "ranked_question_ids": rerank_metadata.get("ranked_question_ids", []),
@@ -1515,26 +1408,15 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     ):
         metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
 
-    # 综合日志：每轮完整记录
     logger.info(
         f"Chat round complete: "
         f"conversation_id={state.get('conversation_id')}, "
         f"active_skills={active_skill_names}, "
-        f"strategy={state.get('strategy')}, "
-        f"strategy_reason={state.get('strategy_reason', '')[:100]}, "
-        f"strategy_target_topic='{state.get('strategy_target_topic', '')}', "
+        f"intent={state.get('intent')}, "
         f"search_query='{state.get('search_query', '')}', "
-        f"negative_terms={state.get('search_negative_terms', [])}, "
-        f"RRF_top5={[{'id': q.get('id'), 'title': q.get('question', '')[:30], 'rrf': round(q.get('_rrf_score', 0), 5), 'cat1': q.get('cat1', ''), 'cat2': q.get('cat2', '')} for q in retrieved[:5]]}, "
-        f"llm_rerank_ranked={rerank_metadata.get('ranked_question_ids', [])}, "
-        f"selected_basis_ids={basis['basis_question_ids']}, "
-        f"selected_basis_titles={[q.get('question', '')[:30] for q in metadata.get('selected_basis_questions', [])]}, "
-        f"next_question_plan={next_question_plan}, "
-        f"plan_adherence={plan_adherence}, "
-        f"plan_repair={plan_repair}, "
+        f"basis_ids={basis['basis_question_ids']}, "
         f"basis_confidence={basis['basis_confidence']}, "
-        f"should_show_references={basis['should_show_references']}, "
-        f"filtered_reasons={rerank_metadata.get('filtered_reasons', [])}"
+        f"should_show_references={basis['should_show_references']}"
     )
 
     yield {"type": "done", "metadata": metadata}
@@ -1886,3 +1768,64 @@ async def generate_direct_response(state: ChatState) -> AsyncGenerator[dict, Non
 
     async for event in generate_response(state_copy):
         yield event
+
+
+def build_react_system_prompt(state: ChatState) -> str:
+    """Build system prompt for the ReAct loop.
+
+    Structure:
+    1. Base prompt (interviewer role + context)
+    2. Memory summaries
+    3. Session notes
+    4. Compressed context
+    5. Skill catalog + tool guidance
+    """
+    from app.agents.shared.skills.builder import build_skill_catalog
+
+    mode = state.get("mode", "free_practice")
+    interview_context = state.get("interview_context", "")
+    session_notes = state.get("session_notes", "")
+    memory_summaries = state.get("memory_summaries", [])
+    compressed = state.get("compressed_context")
+
+    # Layer 1: Base prompt
+    if mode == "jd_resume" and state.get("jd_text"):
+        base = INTERVIEW_SYSTEM_PROMPT_JD.format(
+            jd_text=state.get("jd_text", ""),
+            resume_text=state.get("resume_text", ""),
+            interview_context=interview_context,
+            interview_phase="面试进行中",
+            basis_guidance="",
+        )
+    else:
+        base = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
+            interview_context=interview_context,
+            interview_phase="面试进行中",
+            memory_context="",
+            basis_guidance="",
+        )
+
+    parts = [base]
+
+    # Layer 2: Memory summaries
+    if memory_summaries:
+        memory_text = "\n".join(
+            f"- [{m.get('memory_type', '')}] {m.get('summary', '')}"
+            for m in memory_summaries[:3]
+        )
+        parts.append(f"## 候选人相关记忆\n{memory_text}")
+
+    # Layer 3: Session notes
+    if session_notes:
+        parts.append(f"## 本次面试笔记\n{session_notes}")
+
+    # Layer 4: Compressed context
+    if compressed:
+        parts.append(f"## 历史对话摘要\n{compressed}")
+
+    # Layer 5: Skill catalog + tool guidance
+    catalog = build_skill_catalog()
+    if catalog:
+        parts.append(catalog)
+
+    return "\n\n".join(parts)
