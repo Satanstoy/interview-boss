@@ -151,7 +151,7 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
         if func_name == "load_skill":
             return _execute_load_skill(args)
         elif func_name == "search_questions":
-            return _execute_search_questions(args, state)
+            return await _execute_search_questions(args, state)
         elif func_name == "draw_questions":
             return await _execute_draw_questions(args, state)
         else:
@@ -175,21 +175,25 @@ def _execute_load_skill(args: dict) -> str:
     return json.dumps({"instruction": skill.get_instruction()})
 
 
-def _execute_search_questions(args: dict, state: ChatState) -> str:
+async def _execute_search_questions(args: dict, state: ChatState) -> str:
     """Search questions via hybrid_search, update state, return top 3."""
     search_args: dict[str, Any] = {"keywords": args.get("keywords", [])}
     if args.get("question_type"):
         search_args["question_type"] = args["question_type"]
 
-    results = _hybrid_search(**search_args)
+    results = await asyncio.to_thread(_hybrid_search, **search_args)
     state["retrieved_questions"] = results
     return json.dumps(results[:3])
 
 
 async def _execute_draw_questions(args: dict, state: ChatState) -> str:
     """Draw random questions, update state, return results."""
+    user_id = state.get("user_id")
+    if not user_id:
+        return json.dumps({"error": "user_id is required for draw_questions"})
+
     draw_args: dict[str, Any] = {
-        "user": {"id": state.get("user_id", 0)},
+        "user": {"id": user_id},
         "count": args.get("count", 3),
     }
     if args.get("difficulty"):
