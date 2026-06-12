@@ -18,6 +18,9 @@ router = APIRouter()  # NO prefix - paths include both /api/jobs/... and /api/ma
 @router.get("/api/jobs/{job_id}/stream")
 async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user)):
     """Stream job progress via SSE."""
+    is_admin = user.get("is_admin", 0)
+    user_id = user["id"]
+
     async def event_generator():
         last_update = None
         while True:
@@ -25,7 +28,8 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 with get_db_connection() as conn:
                     return conn.execute(
                         "SELECT status, progress_current, progress_total, progress_message, result, error "
-                        "FROM jobs WHERE id = ?", (job_id,)
+                        "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
+                        (job_id, is_admin, user_id)
                     ).fetchone()
 
             job = await run_db(_check)
@@ -48,11 +52,16 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
 
             if job['status'] in ('completed', 'failed'):
                 if job['error']:
-                    yield f"data: {json.dumps({'type': 'error', 'message': job['error']})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['error']}, ensure_ascii=False)}\n\n"
                 elif job['result']:
-                    yield f"data: {json.dumps({'type': 'done', 'message': job['result']})}\n\n"
+                    # 尝试解析 JSON result（submit_import 等任务会存 JSON）
+                    try:
+                        result_data = json.loads(job['result'])
+                        yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'job_id': job_id, 'result': result_data}, ensure_ascii=False)}\n\n"
+                    except (json.JSONDecodeError, TypeError):
+                        yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'job_id': job_id, 'message': job['result']}, ensure_ascii=False)}\n\n"
                 else:
-                    yield f"data: {json.dumps({'type': 'done', 'message': '重建完成'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'job_id': job_id, 'message': '任务完成'}, ensure_ascii=False)}\n\n"
                 break
 
             await asyncio.sleep(2)  # Poll every 2 seconds
@@ -63,11 +72,15 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
 @router.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: int, user: dict = Depends(get_current_user)):
     """Get job status (non-streaming)."""
+    is_admin = user.get("is_admin", 0)
+    user_id = user["id"]
+
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, job_type, status, progress_current, progress_total, progress_message, error, created_at, completed_at "
-                "FROM jobs WHERE id = ?", (job_id,)
+                "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
+                (job_id, is_admin, user_id)
             ).fetchone()
 
     job = await run_db(_query)

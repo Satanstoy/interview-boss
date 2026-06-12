@@ -502,6 +502,7 @@ import { useTabScroll } from '@/composables/useTabScroll.js'
 import { useAuth } from '@/composables/useAuth.js'
 import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
+import { useSubmitJobs, setOnJobDone } from '@/composables/useSubmitJobs.js'
 
 import { defineAsyncComponent } from 'vue'
 import StagingPanel from '@/components/business/StagingPanel.vue'
@@ -910,6 +911,12 @@ const onNavigateToInterview = (event) => {
   scrollAndHighlight()
 }
 
+// ── 全局上传任务恢复 ──
+setOnJobDone((_jobId, _result) => {
+  fetchTableData()
+  fetchAnalytics()
+})
+
 // ── Lifecycle ──
 onMounted(async () => {
   if (isPreviewMode) {
@@ -917,6 +924,10 @@ onMounted(async () => {
     applyPreviewData()
   } else {
     await initAuth()
+    // 恢复未完成的上传任务
+    try {
+      await restoreActiveJobs()
+    } catch {}
   }
   // 通知白屏检测器：Vue 应用已完成初始化
   window.__VUE_APP_READY__ = true

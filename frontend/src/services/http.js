@@ -519,10 +519,31 @@ export async function uploadSSE(url, formData, onEvent, _isRetry = false) {
 
 /**
  * GET 请求，返回 SSE 流式响应
+ * @param {string} url
+ * @param {Function} onEvent - 回调 (data, eventType)
+ * @param {object} options - 可选配置
+ * @param {AbortSignal} options.signal - 外部 AbortSignal，用于取消 SSE
+ * @param {boolean} _isRetry - 内部标记
  */
-export async function getSSE(url, onEvent, _isRetry = false) {
+export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
+  // 支持旧的 3 参数调用: getSSE(url, onEvent, true)
+  if (options === true) {
+    options = {}
+    _isRetry = true
+  }
+
+  // 如果外部 signal 已经 aborted，直接退出
+  if (options.signal?.aborted) return
+
   const controller = new AbortController()
   pendingControllers.add(controller)
+
+  // 如果传了外部 signal，外部 abort 时也 abort 内部 controller
+  let onExternalAbort
+  if (options.signal) {
+    onExternalAbort = () => controller.abort()
+    options.signal.addEventListener('abort', onExternalAbort, { once: true })
+  }
 
   try {
     const authHeaders = {}
@@ -539,7 +560,7 @@ export async function getSSE(url, onEvent, _isRetry = false) {
     // 401 → 尝试刷新 token 并重试一次
     if (res.status === 401 && !_isRetry) {
       const refreshResult = await tryRefreshToken()
-      if (refreshResult) return getSSE(url, onEvent, true)
+      if (refreshResult) return getSSE(url, onEvent, options, true)
       if (onUnauthorized) onUnauthorized()
       throw new Error(getStatusMessage(401))
     }
@@ -553,6 +574,9 @@ export async function getSSE(url, onEvent, _isRetry = false) {
 
     return await _consumeSSEStream(res.body.getReader(), onEvent)
   } finally {
+    if (options.signal && onExternalAbort) {
+      options.signal.removeEventListener('abort', onExternalAbort)
+    }
     pendingControllers.delete(controller)
   }
 }

@@ -7,6 +7,7 @@ ARQ Worker 配置
 import os
 import time
 import json
+import base64
 import shutil
 import asyncio
 import logging
@@ -48,6 +49,15 @@ async def enqueue_build_job(job_id: int):
     pool = await _get_redis_pool()
     try:
         return await pool.enqueue_job("build_master_bank_task", job_id)
+    finally:
+        await pool.close()
+
+
+async def enqueue_submit_import_job(job_id: int):
+    """将上传导入任务入队"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("submit_import_task", job_id)
     finally:
         await pool.close()
 
@@ -297,6 +307,178 @@ async def build_master_bank_task(ctx, job_id: int):
         raise
 
 
+async def submit_import_task(ctx, job_id: int):
+    """后台任务：执行上传导入（面经/JD 提取 + 打标 + 聚类）
+
+    从 job_payloads 读取 input_state，调用 LangGraph submit graph，
+    将进度写入 jobs 表，最终结果写入 jobs.result。
+    """
+    from app.db.connection import get_db_connection, run_db
+
+    def _load_payload():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            return json.loads(row['payload']) if row else None
+
+    payload = await asyncio.to_thread(_load_payload)
+    if not payload:
+        _mark_job_complete(job_id, 'failed', error='任务数据不存在')
+        return
+
+    try:
+        from app.agents.submit.graph import stream_submit_graph
+
+        # 构建 input_state（将 base64 图片还原为 bytes）
+        raw_images = payload.get("image_data", [])
+        image_data = []
+        for img in raw_images:
+            if "content_b64" in img:
+                image_data.append({"content": base64.b64decode(img["content_b64"]), "mime": img["mime"]})
+            else:
+                image_data.append(img)  # 兼容直接传 bytes 的场景
+
+        input_state = {
+            "raw_text": payload.get("raw_text", ""),
+            "image_data": image_data,
+            "url": payload.get("url", ""),
+            "season": payload.get("season", ""),
+            "content_type_hint": payload.get("content_type_hint", ""),
+            "target": payload.get("target", "personal"),
+            "user_id": payload.get("user_id"),
+            "is_admin": payload.get("is_admin", False),
+            "job_position": payload.get("job_position", ""),
+        }
+
+        # 阶段映射
+        PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
+        phase_index = {p: i for i, p in enumerate(PHASES)}
+
+        def _update_progress(phase, message=''):
+            idx = phase_index.get(phase, 0)
+            with get_db_connection() as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, progress_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (idx + 1, len(PHASES), message, job_id)
+                )
+                conn.commit()
+
+        _update_progress("extract", "正在提取内容...")
+
+        result_collector = {}
+        last_phase = ""
+        emitted_error = None
+        saw_done = False
+
+        # 消费 graph 事件流（只读取事件，不产出 SSE）
+        try:
+            async for sse_data in stream_submit_graph(input_state, result_collector=result_collector):
+                try:
+                    # sse_data 格式: "data: {json}\n\n"
+                    if sse_data.startswith("data: "):
+                        event = json.loads(sse_data[6:].strip())
+                        etype = event.get("type", "")
+
+                        if etype == "error":
+                            emitted_error = event.get("message") or "处理失败"
+                            break
+
+                        if etype == "done":
+                            saw_done = True
+
+                        step = event.get("step", "")
+                        message = event.get("message", "")
+                        if step and step in phase_index:
+                            _update_progress(step, message)
+                            last_phase = step
+                        elif etype == "progress" and message:
+                            # 有 message 但没有已知 step
+                            _update_progress(last_phase or "extract", message)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        except Exception as e:
+            logger.exception(f"graph 流式执行异常: job_id={job_id}")
+            emitted_error = str(e)[:500] or "任务执行异常"
+
+        # 如果 graph yield 了 error 事件，立刻标记失败
+        if emitted_error:
+            _mark_job_complete(job_id, 'failed', error=emitted_error)
+            return
+
+        # 读取最终结果（从 result_collector 获取，避免 thread_id 不匹配）
+        final_state_values = result_collector.get("final_state") or {}
+
+        if final_state_values.get("error"):
+            _mark_job_complete(job_id, 'failed', error=final_state_values["error"])
+            return
+
+        if not final_state_values and not saw_done:
+            _mark_job_complete(job_id, 'failed', error="任务未返回有效结果")
+            return
+
+        doc_type = final_state_values.get("doc_type", "Interview")
+        doc_type = {"jd": "JD", "interview": "Interview"}.get(doc_type, doc_type)
+        target = final_state_values.get("target", "personal")
+        extracted_data = final_state_values.get("extracted_data", {})
+
+        # 构建结果 JSON（包含尽可能多的有用信息）
+        result_data = {
+            "doc_type": doc_type,
+            "target": target,
+            "saved_data": extracted_data,
+            "interview_id": final_state_values.get("saved_interview_id"),
+            "question_count": len(extracted_data.get("具体题目清单", [])) if extracted_data else 0,
+        }
+
+        # 聚类信息（公共题库）
+        cluster_result = final_state_values.get("cluster_result", {})
+        if cluster_result:
+            result_data["new_qb_count"] = cluster_result.get("new_qb_count", 0)
+
+        # 匹配结果摘要（如果 final_state 里有）
+        match_result = final_state_values.get("match_result")
+        if match_result and isinstance(match_result, dict):
+            result_data["match_result"] = {
+                "matched_count": match_result.get("matched_count", len(match_result.get("matched", []))),
+                "unmatched_count": match_result.get("unmatched_count", len(match_result.get("unmatched", []))),
+            }
+
+        # 耗时信息（如果 final_state 里有）
+        if final_state_values.get("node_timings"):
+            result_data["node_timings"] = final_state_values["node_timings"]
+        if final_state_values.get("elapsed_seconds"):
+            result_data["elapsed_seconds"] = final_state_values["elapsed_seconds"]
+
+        _mark_job_complete(job_id, 'completed', result=json.dumps(result_data, ensure_ascii=False))
+
+        # 派发后台答案生成
+        answer_tasks = final_state_values.get("answer_tasks", [])
+        uid = result_collector.get("user_id") or payload.get("user_id")
+        if answer_tasks and uid:
+            from app.routers.submit import background_generate_answer
+            for qid, qtext in answer_tasks:
+                try:
+                    await background_generate_answer(qid, qtext, uid)
+                except Exception as e:
+                    logger.warning(f"后台答案生成失败 [ID:{qid}]: {e}")
+
+    except Exception as e:
+        logger.exception(f"上传导入任务失败: job_id={job_id}")
+        _mark_job_complete(job_id, 'failed', error=str(e)[:500])
+
+
+def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
+    """标记任务完成/失败"""
+    from app.db.connection import get_db_connection
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, result, error, job_id)
+        )
+        conn.commit()
+
+
 async def scheduled_compaction_task(ctx):
     """定时 compaction 任务：每天凌晨 3 点自动运行"""
     from app.services.pipeline import compact_singletons_in_db
@@ -345,6 +527,7 @@ class WorkerSettings:
         cluster_questions_task,
         force_cluster_all_task,
         build_master_bank_task,
+        submit_import_task,
         scheduled_compaction_task
     ]
     on_startup = startup
