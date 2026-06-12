@@ -351,6 +351,7 @@ const pendingBasisType = ref(null)
 const pendingBasisQuestionIds = ref([])
 const pendingBasisConfidence = ref(0)
 const pendingShouldShowReferences = ref(false)
+const pendingSelectedBasisQuestions = ref([])
 const autoScrollEnabled = ref(true)
 const processingSteps = ref([])
 const selectedModel = ref('')
@@ -408,7 +409,11 @@ const activeConversationMode = computed(() =>
 
 const renderStreamingContent = computed(() => {
   if (!streamingContent.value) return ''
-  return renderSafeMarkdown(streamingContent.value)
+  const cleaned = streamingContent.value
+    .replace(/\[BASIS\][\s\S]*?\[\/BASIS\]/g, '')
+    .replace(/\[BASIS\]\{[^}]*\}/g, '')
+    .trim()
+  return renderSafeMarkdown(cleaned || streamingContent.value)
 })
 
 const waitingText = computed(() => {
@@ -576,6 +581,7 @@ async function handleSend() {
   pendingBasisQuestionIds.value = []
   pendingBasisConfidence.value = 0
   pendingShouldShowReferences.value = false
+  pendingSelectedBasisQuestions.value = []
   processingSteps.value = []
   autoScrollEnabled.value = true
 
@@ -607,7 +613,13 @@ async function handleSend() {
           isThinking.value = false
           thinkingDuration.value = event.duration || 0
         } else if (event.type === 'chunk') {
-          streamingContent.value += event.content
+          // Strip [BASIS] blocks from streaming content to prevent leakage
+          const rawContent = event.content
+          const cleanedContent = rawContent
+            .replace(/\[BASIS\][\s\S]*?\[\/BASIS\]/g, '')
+            .replace(/\[BASIS\]\{[^}]*$/g, '')  // Partial [BASIS]{ at end of chunk
+            .replace(/^\{[^}]*\}?\[\/BASIS\]/g, '')  // Partial }[/BASIS] at start
+          streamingContent.value += cleanedContent
           scrollToBottom()
         } else if (event.type === 'retrieved') {
           pendingRetrievedQuestions.value = event.questions || []
@@ -620,6 +632,9 @@ async function handleSend() {
           pendingBasisQuestionIds.value = event.basis_question_ids || []
           pendingBasisConfidence.value = event.basis_confidence || 0
           pendingShouldShowReferences.value = event.should_show_references || false
+          pendingSelectedBasisQuestions.value = event.selected_basis_questions || []
+          if (event.resume_ref) pendingResumeRef.value = event.resume_ref
+          if (event.jd_ref) pendingJdRef.value = event.jd_ref
         }
       },
       selectedModel.value || null
@@ -645,6 +660,9 @@ async function handleSend() {
         metadata.basis_question_ids = pendingBasisQuestionIds.value
         metadata.basis_confidence = pendingBasisConfidence.value
         metadata.should_show_references = pendingShouldShowReferences.value
+        if (pendingSelectedBasisQuestions.value?.length > 0) {
+          metadata.selected_basis_questions = pendingSelectedBasisQuestions.value
+        }
       }
       messages.value.push({
         id: Date.now() + 1,
@@ -660,6 +678,7 @@ async function handleSend() {
       pendingBasisQuestionIds.value = []
       pendingBasisConfidence.value = 0
       pendingShouldShowReferences.value = false
+      pendingSelectedBasisQuestions.value = []
     }
   } catch (e) {
     console.error('发送消息失败:', e)

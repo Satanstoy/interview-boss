@@ -502,7 +502,7 @@ import { useTabScroll } from '@/composables/useTabScroll.js'
 import { useAuth } from '@/composables/useAuth.js'
 import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
-import { useSubmitJobs, setOnJobDone } from '@/composables/useSubmitJobs.js'
+import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
 
 import { defineAsyncComponent } from 'vue'
 import StagingPanel from '@/components/business/StagingPanel.vue'

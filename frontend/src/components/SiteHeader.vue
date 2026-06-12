@@ -1,6 +1,8 @@
 <script setup>
+import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Settings } from '@lucide/vue'
+import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 
 const props = defineProps({
   activeTabLabel: {
@@ -18,6 +20,20 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['show-settings'])
+
+// ── 全局上传任务进度 ──
+const { activeJobs } = useSubmitJobs()
+const showJobPanel = ref(false)
+
+const primaryJob = computed(() => {
+  if (activeJobs.value.length === 0) return null
+  // 优先显示 running 状态的任务
+  return activeJobs.value.find(j => j.status === 'running') || activeJobs.value[0]
+})
+
+const onCloseJob = (jobId) => {
+  removeJob(jobId)
+}
 </script>
 
 <template>
@@ -31,6 +47,71 @@ const emit = defineEmits(['show-settings'])
     </div>
 
     <div class="flex h-8 flex-1 items-center justify-end gap-1.5">
+      <!-- 全局上传任务进度胶囊 -->
+      <div v-if="activeJobs.length > 0" class="relative">
+        <button
+          @click="showJobPanel = !showJobPanel"
+          class="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-muted/50 hover:bg-muted transition text-xs"
+        >
+          <svg v-if="primaryJob?.status === 'running'" class="animate-spin size-3.5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <svg v-else-if="primaryJob?.status === 'failed'" class="size-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <svg v-else class="size-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span class="font-medium text-foreground">{{ activeJobs.length }}</span>
+          <span v-if="primaryJob?.percent > 0" class="text-muted-foreground">{{ primaryJob.percent }}%</span>
+        </button>
+
+        <!-- 展开的任务列表面板 -->
+        <Transition name="fade-slide">
+          <div
+            v-if="showJobPanel"
+            class="absolute right-0 top-full mt-1 z-50 w-80 bg-card rounded-xl shadow-lg border border-border p-3"
+          >
+            <div class="text-xs font-semibold text-foreground mb-2 px-1">后台任务</div>
+            <div v-for="job in activeJobs" :key="job.id" class="flex flex-col gap-1.5 p-2 rounded-lg bg-muted/50 mb-1.5 last:mb-0">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span
+                    class="size-2 rounded-full flex-shrink-0"
+                    :class="{
+                      'bg-blue-500 animate-pulse': job.status === 'running',
+                      'bg-amber-500': job.status === 'pending',
+                      'bg-green-500': job.status === 'completed',
+                      'bg-red-500': job.status === 'failed',
+                    }"
+                  />
+                  <span class="text-xs font-medium text-foreground truncate max-w-[180px]">
+                    {{ job.status === 'completed' ? '处理完成' : job.status === 'failed' ? '处理失败' : job.message || '处理中...' }}
+                  </span>
+                </div>
+                <button
+                  v-if="job.status === 'completed' || job.status === 'failed'"
+                  @click="onCloseJob(job.id)"
+                  class="text-muted-foreground hover:text-foreground transition p-0.5"
+                >
+                  <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <!-- 进度条 -->
+              <div v-if="job.status === 'running' || job.status === 'pending'" class="w-full bg-muted rounded-full h-1 overflow-hidden">
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out"
+                  :style="{ width: `${job.percent}%` }"
+                />
+              </div>
+              <!-- 错误信息 -->
+              <p v-if="job.error" class="text-[11px] text-red-500 truncate">{{ job.error }}</p>
+            </div>
+          </div>
+        </Transition>
+      </div>
+
       <!-- Season badge — h-8 matches settings button for visual center alignment -->
       <span
         v-if="activeSeason"
@@ -53,3 +134,10 @@ const emit = defineEmits(['show-settings'])
     </div>
   </header>
 </template>
+
+<style scoped>
+.fade-slide-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.fade-slide-enter-from { opacity: 0; transform: translateY(-4px); }
+.fade-slide-leave-to { opacity: 0; transform: translateY(-4px); }
+</style>

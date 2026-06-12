@@ -33,6 +33,8 @@ export {
   fetchMasterBank,
   submitData,
   submitDataSSE,
+  createSubmitJob,
+  fetchActiveSubmitJobs,
   deleteRecord,
   updateRecord,
   restoreRecord,

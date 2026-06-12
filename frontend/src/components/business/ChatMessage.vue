@@ -91,40 +91,6 @@
           </Transition>
         </div>
 
-        <!-- Legacy: Retrieved questions (old format, no basis_type) -->
-        <div v-else-if="message.metadata?.retrieved_questions?.length && !message.metadata?.basis_type" class="mb-3">
-          <button 
-            @click="showRetrieved = !showRetrieved"
-            class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <BookOpen :size="14" class="text-primary" />
-            <span class="font-medium">参考了 {{ message.metadata.retrieved_questions.length }} 个题目</span>
-            <ChevronDown :size="14" class="transition-transform" :class="showRetrieved ? 'rotate-180' : ''" />
-          </button>
-          
-          <Transition name="expand">
-            <div v-if="showRetrieved" class="mt-2 flex flex-col gap-2">
-              <div 
-                v-for="q in message.metadata.retrieved_questions" 
-                :key="q.id"
-                class="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/50 hover:bg-muted/50 transition-colors"
-              >
-                <div class="size-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                  <span class="text-xs font-bold text-primary">{{ q.cat1?.[0] || 'Q' }}</span>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm text-foreground">{{ q.question }}</div>
-                  <div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                    <span v-if="q.company" class="font-medium">{{ q.company }}</span>
-                    <span v-if="q.round">{{ q.round }}</span>
-                    <span v-if="q.cat1" class="text-primary">[{{ q.cat1 }}]</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Transition>
-        </div>
-
         <!-- Resume reference -->
         <div v-if="message.metadata?.resume_ref" class="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <FileText :size="14" class="text-amber-500 shrink-0" />
@@ -171,19 +137,17 @@ const liked = ref(false)
 
 const hasAnyReference = computed(() => {
   const m = props.message.metadata
-  // New: basis-based display
-  if (m?.should_show_references && m?.basis_question_ids?.length) return true
-  // Legacy: old messages with retrieved_questions
-  if (m?.retrieved_questions?.length && !m?.basis_type) return true
+  // Only show references when should_show_references=true AND selected_basis_questions non-empty
+  if (m?.should_show_references && m?.selected_basis_questions?.length) return true
   // Resume/JD refs
   return m?.resume_ref || m?.jd_ref
 })
 
 const basisQuestions = computed(() => {
   const m = props.message.metadata
+  // Only use selected_basis_questions (no fallback to retrieved_questions)
   if (m?.selected_basis_questions?.length) return m.selected_basis_questions
-  if (!m?.basis_question_ids?.length || !m?.retrieved_questions?.length) return []
-  return m.retrieved_questions.filter(q => m.basis_question_ids.includes(q.id))
+  return []
 })
 
 const renderedContent = computed(() => {

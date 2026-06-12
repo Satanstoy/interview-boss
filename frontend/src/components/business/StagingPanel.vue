@@ -1,112 +1,396 @@
+<script setup>
+import { ref, reactive, computed, watch } from 'vue'
+import { toast } from 'vue-sonner'
+import {
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  Image as ImageIcon,
+  Link,
+  Loader2,
+  Sparkles,
+  Upload,
+  X,
+} from '@lucide/vue'
+
+import { createSubmitJob } from '@/services/dataApi.js'
+import { useSubmitJobs, attachJob } from '@/composables/useSubmitJobs.js'
+import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
+
+import Badge from '@/components/ui/badge/Badge.vue'
+import Button from '@/components/ui/button/Button.vue'
+import Input from '@/components/ui/input/Input.vue'
+import Label from '@/components/ui/label/Label.vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import Textarea from '@/components/ui/textarea/Textarea.vue'
+
+const props = defineProps({
+  activeSeason: { type: String, default: '' },
+  availableSeasons: { type: Array, default: () => [] },
+  isAdmin: { type: Boolean, default: false },
+})
+
+const emit = defineEmits(['submitted'])
+
+const { activeJobs } = useSubmitJobs()
+
+const TEXT_MAX_LENGTH = 50000
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+const MAX_FILES = 20
+
+const rawText = ref('')
+const sourceUrl = ref('')
+const fileInput = ref(null)
+const images = ref([])
+const isDragging = ref(false)
+const isSubmitting = ref(false)
+const submitError = ref('')
+const submitSuccess = ref(false)
+
+const importConfig = reactive({
+  type: 'auto',
+  season: props.activeSeason || '2027届暑期实习',
+  target: 'personal',
+})
+
+const seasonOptions = computed(() => {
+  const fromProps = props.availableSeasons.filter(Boolean)
+  return fromProps.length ? fromProps : ['2027届暑期实习', '2026 春招', '2025 秋招']
+})
+
+const activeJobCount = computed(() =>
+  activeJobs.value.filter(j => j.status === 'pending' || j.status === 'running').length
+)
+
+const textLineCount = computed(() =>
+  rawText.value.split(/\r?\n/).filter(line => line.trim()).length
+)
+
+const inputValid = computed(() =>
+  rawText.value.trim().length > 0 || images.value.length > 0
+)
+
+const submitLabel = computed(() => isSubmitting.value ? '提交中...' : '提交解析')
+
+watch(() => props.activeSeason, (season) => {
+  if (season) importConfig.season = season
+})
+
+watch(() => props.isAdmin, (isAdmin) => {
+  if (!isAdmin) importConfig.target = 'personal'
+}, { immediate: true })
+
+function onDragOver(e) {
+  e.preventDefault()
+  isDragging.value = true
+  e.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(e) {
+  e.preventDefault()
+  isDragging.value = false
+}
+
+function onDrop(e) {
+  e.preventDefault()
+  isDragging.value = false
+  handleFiles(Array.from(e.dataTransfer.files || []))
+}
+
+function onPaste(e) {
+  const items = Array.from(e.clipboardData?.items || [])
+  const imageFiles = items
+    .filter(item => item.type.startsWith('image/'))
+    .map(item => item.getAsFile())
+    .filter(Boolean)
+  if (imageFiles.length > 0) handleFiles(imageFiles)
+}
+
+function onFileChange(e) {
+  handleFiles(Array.from(e.target.files || []))
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function handleFiles(files) {
+  submitError.value = ''
+
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    if (images.value.length >= MAX_FILES) {
+      submitError.value = `最多上传 ${MAX_FILES} 张图片`
+      break
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      submitError.value = `图片 "${file.name}" 超过 10MB 限制`
+      continue
+    }
+
+    images.value.push({
+      id: `${Date.now()}-${Math.random()}`,
+      file,
+      preview: URL.createObjectURL(file),
+    })
+  }
+}
+
+function removeImage(index) {
+  const item = images.value[index]
+  if (item?.preview) URL.revokeObjectURL(item.preview)
+  images.value.splice(index, 1)
+}
+
+function clearImages() {
+  images.value.forEach(item => {
+    if (item.preview) URL.revokeObjectURL(item.preview)
+  })
+  images.value = []
+}
+
+function triggerFileInput() {
+  if (!isSubmitting.value) fileInput.value?.click()
+}
+
+function resetForm() {
+  rawText.value = ''
+  sourceUrl.value = ''
+  clearImages()
+  submitError.value = ''
+  submitSuccess.value = false
+}
+
+async function onSubmit() {
+  if (!inputValid.value || isSubmitting.value) return
+
+  submitError.value = ''
+  submitSuccess.value = false
+
+  if (sourceUrl.value.trim()) {
+    const urlResult = validateUrl(sourceUrl.value.trim())
+    if (!urlResult.valid) {
+      submitError.value = urlResult.error
+      return
+    }
+  }
+
+  if (rawText.value.trim()) {
+    try {
+      sanitizeAgainstInjection(rawText.value, '文本内容')
+    } catch (error) {
+      submitError.value = error.message
+      return
+    }
+  }
+
+  isSubmitting.value = true
+  try {
+    const formData = new FormData()
+    formData.append('url', sourceUrl.value.trim())
+    formData.append('text', rawText.value.slice(0, TEXT_MAX_LENGTH))
+    formData.append('season', importConfig.season || props.activeSeason || '2027届暑期实习')
+    formData.append('target', props.isAdmin ? importConfig.target : 'personal')
+
+    if (importConfig.type !== 'auto') {
+      formData.append('content_type', importConfig.type)
+    }
+
+    images.value.forEach(item => formData.append('files', item.file))
+
+    const result = await createSubmitJob(formData)
+    attachJob(result.job_id)
+    emit('submitted', result)
+    resetForm()
+    submitSuccess.value = true
+    toast.success('任务已提交，正在后台处理中')
+    setTimeout(() => { submitSuccess.value = false }, 3000)
+  } catch (error) {
+    submitError.value = error.message || '提交失败'
+    toast.error(submitError.value)
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+defineExpose({ onSubmit, isSubmitting })
+</script>
+
 <template>
-  <div class="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
-    <!-- Header -->
-    <div class="bg-card px-5 py-3 border-b border-border">
-      <div class="flex items-center gap-3">
-        <div class="size-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-sm">
-          <svg class="size-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        </div>
-        <div>
-          <h3 class="text-sm font-bold text-foreground">导入面经 / JD</h3>
-          <p class="text-xs text-muted-foreground">粘贴文本或拖拽图片，AI 自动识别提取面试题</p>
-        </div>
-      </div>
+  <div class="flex min-h-0 flex-1 flex-col gap-4">
+    <!-- Header bar -->
+    <div class="flex flex-wrap items-center gap-2">
+      <Badge v-if="activeJobCount > 0" variant="secondary" class="gap-1.5 text-xs">
+        <span class="relative flex h-2 w-2">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+          <span class="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+        </span>
+        {{ activeJobCount }} 个任务处理中
+      </Badge>
+      <p class="text-xs text-muted-foreground">
+        粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。
+      </p>
     </div>
 
-    <div class="bg-muted/50 dark:bg-background/50 p-4 border-b border-border flex items-center gap-4">
-      <label class="font-semibold text-foreground whitespace-nowrap text-sm">来源链接</label>
-      <input
-        v-model="sourceUrl"
-        type="text"
-        class="flex-1 border border-input rounded-lg px-3.5 py-2.5 text-sm bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all duration-200"
-        placeholder="粘贴小红书/牛客网帖子链接（可选，用于去重）"
-      />
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100 dark:divide-gray-700">
-      <div class="p-3 lg:p-4 flex flex-col">
-        <label class="block text-sm font-semibold text-foreground mb-2">文本内容</label>
-        <textarea
-          v-model="stagedText"
+    <!-- Main: two equal columns -->
+    <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+      <!-- Left: text -->
+      <section class="flex min-h-0 flex-col gap-2">
+        <div class="flex items-center gap-2">
+          <FileText class="h-4 w-4 text-muted-foreground" />
+          <Label class="text-sm font-medium">文本内容</Label>
+          <span class="ml-auto text-xs tabular-nums text-muted-foreground">
+            {{ rawText.length.toLocaleString() }} / {{ TEXT_MAX_LENGTH.toLocaleString() }}
+            <template v-if="rawText"> · {{ textLineCount }} 行</template>
+          </span>
+        </div>
+        <Textarea
+          v-model="rawText"
           :maxlength="TEXT_MAX_LENGTH"
-          class="flex-1 w-full border border-input rounded-lg p-3 bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-          placeholder="在此处粘贴面经或 JD 的纯文本内容（可与右侧图片组合提交）..."
-        ></textarea>
-        <div class="text-xs mt-1 text-right" :class="stagedText.length > TEXT_MAX_LENGTH * 0.9 ? 'text-red-500 font-medium' : 'text-muted-foreground'">
-          {{ stagedText.length.toLocaleString() }} / {{ TEXT_MAX_LENGTH.toLocaleString() }} 字符
-        </div>
-      </div>
+          placeholder="粘贴面经或 JD 内容..."
+          class="min-h-0 flex-1 text-sm leading-relaxed"
+          :disabled="isSubmitting"
+          @paste="onPaste"
+        />
+      </section>
 
-      <div
-        class="p-3 lg:p-4 flex flex-col transition-colors relative"
-        :class="isDragging ? 'bg-blue-50 dark:bg-blue-900/30' : ''"
-        @dragover.prevent="isDragging = true"
-        @dragleave.prevent="isDragging = false"
-        @drop.prevent="handleDrop"
-      >
-        <div class="flex justify-between items-center mb-2">
-          <label class="block text-sm font-semibold text-foreground">图片 ({{ stagedFiles.length }} 张)</label>
-          <div>
-            <input type="file" multiple class="hidden" ref="fileInput" @change="handleFileSelect" accept="image/*" />
-            <button @click="$refs.fileInput.click()" class="text-sm bg-muted dark:bg-muted text-foreground px-4 py-2.5 min-h-[44px] rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">
-              + 选择图片
-            </button>
+      <!-- Right: images -->
+      <section class="flex min-h-0 flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <ImageIcon class="h-4 w-4 text-muted-foreground" />
+            <Label class="text-sm font-medium">截图补充</Label>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs tabular-nums text-muted-foreground">{{ images.length }} / {{ MAX_FILES }}</span>
+            <Button
+              v-if="images.length > 0"
+              variant="ghost"
+              size="sm"
+              class="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+              :disabled="isSubmitting"
+              @click="clearImages"
+            >
+              清空
+            </Button>
           </div>
         </div>
 
-        <div class="flex-1 border-2 border-dashed border-border rounded-xl p-4 overflow-y-auto max-h-48 bg-muted dark:bg-card custom-scrollbar">
-          <div v-if="stagedFiles.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground">
-            <svg class="h-8 w-8 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <p class="text-sm">拖拽图片到此处，或使用 Ctrl+V 粘贴（移动端点击上方按钮选择）</p>
+        <!-- Drop zone: fills remaining space -->
+        <div
+          class="group relative flex min-h-0 flex-1 cursor-pointer flex-col rounded-lg border-2 border-dashed transition-all"
+          :class="[
+            isDragging
+              ? 'border-primary bg-primary/5'
+              : 'border-muted-foreground/20 hover:border-primary/40 hover:bg-muted/30',
+            isSubmitting && 'pointer-events-none opacity-60'
+          ]"
+          @click="triggerFileInput"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
+        >
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/*"
+            multiple
+            class="hidden"
+            :disabled="isSubmitting"
+            @change="onFileChange"
+          />
+
+          <!-- Empty state -->
+          <div v-if="images.length === 0" class="flex flex-1 flex-col items-center justify-center p-4">
+            <div
+              class="rounded-full p-2.5 transition-colors"
+              :class="isDragging ? 'bg-primary/10' : 'bg-muted group-hover:bg-primary/10'"
+            >
+              <Upload
+                class="h-5 w-5 transition-colors"
+                :class="isDragging ? 'text-primary' : 'text-muted-foreground group-hover:text-primary'"
+              />
+            </div>
+            <p class="mt-2.5 text-sm font-medium text-foreground">
+              {{ isDragging ? '释放以上传图片' : '拖拽图片到此处，或点击选择' }}
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground">PNG / JPG / GIF，单张 ≤ 10MB</p>
+            <p class="mt-0.5 text-xs text-muted-foreground/60">支持 Ctrl+V 粘贴截图</p>
           </div>
 
-          <div v-else class="flex flex-wrap gap-3">
-            <div v-for="(item, index) in stagedFiles" :key="item.id" class="relative group">
-              <img :src="item.preview" class="h-24 w-24 object-cover rounded-md border border-border shadow-sm" @error="handleImgError" />
-              <button @click="removeFile(index)" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow">
-                <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          <!-- Image grid: fills dropzone -->
+          <div v-else class="grid flex-1 grid-cols-2 content-start gap-2 overflow-y-auto p-3 sm:grid-cols-3">
+            <div
+              v-for="(img, index) in images"
+              :key="img.id"
+              class="group/img relative aspect-square overflow-hidden rounded-md border bg-muted"
+            >
+              <img :src="img.preview" :alt="`图片 ${index + 1}`" class="h-full w-full object-cover" />
+              <button
+                type="button"
+                class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover/img:opacity-100"
+                :disabled="isSubmitting"
+                @click.stop="removeImage(index)"
+              >
+                <X class="h-3 w-3" />
               </button>
+              <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 to-transparent px-1 py-0.5">
+                <p class="truncate text-[10px] text-white/85">{{ img.file.name }}</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div class="bg-muted/80 dark:bg-background/80 border-t border-border p-4 flex flex-col items-center">
-      <!-- 类型和季节选择 -->
-      <div class="flex gap-4 w-full mb-4">
-        <div class="flex-1">
-          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">导入类型</label>
-          <Select v-model="importType">
-            <SelectTrigger class="w-full h-9 text-sm">
+    <!-- Bottom bar: URL + settings + actions -->
+    <div class="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-end sm:p-4">
+      <!-- Source URL -->
+      <div class="flex-1 space-y-1.5">
+        <Label class="text-xs font-medium text-muted-foreground">来源链接（可选）</Label>
+        <div class="relative">
+          <Link class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            v-model="sourceUrl"
+            type="url"
+            placeholder="https://..."
+            class="pl-9"
+            :disabled="isSubmitting"
+          />
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div class="flex flex-wrap gap-2">
+        <div class="space-y-1.5">
+          <Label class="text-xs font-medium text-muted-foreground">类型</Label>
+          <Select v-model="importConfig.type" :disabled="isSubmitting">
+            <SelectTrigger class="h-9 w-[110px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="auto">自动识别</SelectItem>
-              <SelectItem value="jd">JD (职位描述)</SelectItem>
               <SelectItem value="interview">面经</SelectItem>
+              <SelectItem value="jd">JD</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <div class="flex-1">
-          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">招聘季节</label>
-          <Select v-model="selectedSeason">
-            <SelectTrigger class="w-full h-9 text-sm">
+
+        <div class="space-y-1.5">
+          <Label class="text-xs font-medium text-muted-foreground">季节</Label>
+          <Select v-model="importConfig.season" :disabled="isSubmitting">
+            <SelectTrigger class="h-9 w-[140px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="s in availableSeasons" :key="s" :value="s">{{ s }}</SelectItem>
-              <SelectItem value="custom">自定义...</SelectItem>
+              <SelectItem v-for="season in seasonOptions" :key="season" :value="season">
+                {{ season }}
+              </SelectItem>
             </SelectContent>
           </Select>
-          <input v-if="selectedSeason === 'custom'" v-model="customSeason" placeholder="输入招聘季名称" class="mt-2 w-full border border-input rounded-lg px-3.5 py-2.5 text-sm bg-transparent text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all duration-200" />
         </div>
-        <div v-if="isAdmin" class="flex-1">
-          <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">提交到</label>
-          <Select v-model="importTarget">
-            <SelectTrigger class="w-full h-9 text-sm">
+
+        <div v-if="props.isAdmin" class="space-y-1.5">
+          <Label class="text-xs font-medium text-muted-foreground">提交到</Label>
+          <Select v-model="importConfig.target" :disabled="isSubmitting">
+            <SelectTrigger class="h-9 w-[110px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -117,328 +401,70 @@
         </div>
       </div>
 
-      <div class="flex gap-4 w-full justify-end mb-4">
-        <button @click="clearStaging" :disabled="isUploading" class="px-5 py-2.5 rounded-xl text-muted-foreground hover:bg-muted dark:hover:bg-muted transition border border-border">
-          清空
-        </button>
-        <button
-          @click="submitAll"
-          :disabled="isUploading || stagedText.length > TEXT_MAX_LENGTH || (!stagedText.trim() && stagedFiles.length === 0)"
-          class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold px-8 py-2.5 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg disabled:from-blue-300 disabled:to-indigo-300 dark:disabled:from-blue-800 dark:disabled:to-indigo-800 disabled:cursor-not-allowed flex items-center gap-2 active:scale-[0.98]"
+      <!-- Actions -->
+      <div class="flex items-center gap-2 sm:self-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="text-muted-foreground"
+          :disabled="isSubmitting"
+          @click="resetForm"
         >
-          <svg v-if="isUploading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-          {{ isUploading ? '处理中...' : '提交解析' }}
-        </button>
-      </div>
-
-      <!-- 进度指示器 -->
-      <div v-if="isUploading" class="w-full py-3">
-        <!-- 进度条 -->
-        <div class="w-full bg-muted dark:bg-muted rounded-full h-1.5 mb-3 overflow-hidden">
-          <div
-            class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-700 ease-out"
-            :style="{ width: `${((submitStepList.findIndex(s => s.active) + 1) / submitStepsDef.length) * 100}%` }"
-          ></div>
-        </div>
-        <!-- 步骤标签 -->
-        <div class="flex items-center justify-center gap-2 mb-2">
-          <template v-for="(s, idx) in submitStepList" :key="s.key">
-            <div class="flex items-center gap-1.5">
-              <span
-                class="inline-flex items-center justify-center size-5 rounded-full text-[10px] font-bold transition-all duration-300"
-                :class="s.active ? 'bg-blue-500 text-white animate-pulse-slow' : s.done ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground'"
-              >
-                <svg v-if="s.done" class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                <span v-else>{{ idx + 1 }}</span>
-              </span>
-              <span class="text-xs whitespace-nowrap" :class="s.active ? 'text-blue-600 dark:text-blue-400 font-semibold' : s.done ? 'text-muted-foreground' : 'text-muted-foreground/50'">{{ s.label }}</span>
-            </div>
-            <svg v-if="s.key !== 'save'" class="size-3 text-muted-foreground/50 dark:text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-          </template>
-        </div>
-        <!-- 当前步骤消息 + 详情 -->
-        <div class="text-center">
-          <span class="text-xs text-muted-foreground">{{ submitProgress.message }}</span>
-          <span v-if="progressDetail" class="text-xs text-muted-foreground ml-2">· {{ progressDetail }}</span>
-        </div>
-      </div>
-
-      <div v-if="uploadResult" class="w-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/40 rounded-xl p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <svg class="size-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <span class="text-green-700 dark:text-green-300 font-semibold text-sm">提交成功</span>
-          <span class="text-xs text-green-600/70 dark:text-green-400/60 bg-green-100 dark:bg-green-800/30 px-2 py-0.5 rounded-full">
-            {{ uploadResult.doc_type || 'Interview' }} · {{ uploadResult.target === 'public' ? '公共题库' : '个人题库' }}
-          </span>
-        </div>
-        <!-- 统计信息 -->
-        <div v-if="resultSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-          <div class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-foreground">{{ resultSummary.questionCount }}</div>
-            <div class="text-[11px] text-muted-foreground">提取题目</div>
-          </div>
-          <div v-if="resultSummary.matchedCount != null" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-foreground">{{ resultSummary.matchedCount }}<span class="text-xs text-muted-foreground">已有</span> / {{ resultSummary.unmatchedCount }}<span class="text-xs text-muted-foreground">新题</span></div>
-            <div class="text-[11px] text-muted-foreground">匹配结果</div>
-          </div>
-          <div v-if="resultSummary.qualityScore != null" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold" :class="resultSummary.qualityScore >= 7 ? 'text-green-600 dark:text-green-400' : resultSummary.qualityScore >= 4 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'">{{ resultSummary.qualityScore }}/10</div>
-            <div class="text-[11px] text-muted-foreground">质量评分</div>
-          </div>
-          <div v-if="resultSummary.elapsed" class="bg-card rounded-lg px-3 py-2 text-center border border-green-100 dark:border-green-800/30">
-            <div class="text-lg font-bold text-foreground">{{ resultSummary.elapsed.toFixed(1) }}<span class="text-xs text-muted-foreground">s</span></div>
-            <div class="text-[11px] text-muted-foreground">处理耗时</div>
-          </div>
-        </div>
-        <!-- 分类分布 -->
-        <div v-if="resultSummary?.categories" class="flex flex-wrap gap-1.5">
-          <span
-            v-for="(count, cat) in resultSummary.categories"
-            :key="cat"
-            class="inline-flex items-center gap-1 text-xs bg-green-100 dark:bg-green-800/30 text-green-700 dark:text-green-300 px-2 py-1 rounded-md"
-          >
-            {{ cat }}<span class="font-semibold">×{{ count }}</span>
-          </span>
-        </div>
-      </div>
-      <div v-if="uploadError" class="text-red-600 dark:text-red-400 font-medium w-full text-center bg-red-50 dark:bg-red-900/30 p-2 rounded">
-        {{ uploadError }}
+          清空
+        </Button>
+        <Button
+          size="sm"
+          class="gap-1.5"
+          :disabled="!inputValid || isSubmitting || rawText.length > TEXT_MAX_LENGTH"
+          @click="onSubmit"
+        >
+          <Loader2 v-if="isSubmitting" class="h-3.5 w-3.5 animate-spin" />
+          <Sparkles v-else class="h-3.5 w-3.5" />
+          {{ submitLabel }}
+        </Button>
       </div>
     </div>
+
+    <!-- Messages -->
+    <Transition
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="opacity-0 translate-y-1"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition-all duration-200 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 translate-y-1"
+    >
+      <div
+        v-if="submitSuccess"
+        class="flex items-center gap-2.5 rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300"
+      >
+        <CheckCircle2 class="h-4 w-4 shrink-0" />
+        <span>已提交成功，任务正在后台处理。可继续提交或离开页面，右上角显示进度。</span>
+      </div>
+    </Transition>
+
+    <Transition
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="opacity-0 translate-y-1"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition-all duration-200 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 translate-y-1"
+    >
+      <div
+        v-if="submitError"
+        class="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive"
+      >
+        <AlertCircle class="h-4 w-4 shrink-0" />
+        <span>{{ submitError }}</span>
+        <button
+          type="button"
+          class="ml-auto shrink-0 rounded p-0.5 transition-colors hover:bg-destructive/10"
+          @click="submitError = ''"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
-
-<script setup>
-import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import { submitDataSSE } from '@/api/index.js'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { validateUrl, validateFiles, sanitizeText, sanitizeAgainstInjection } from '@/utils/validate.js'
-import { getFriendlyError } from '@/services/http.js'
-
-const emit = defineEmits(['submitted'])
-
-const props = defineProps({
-  activeSeason: { type: String, default: '' },
-  availableSeasons: { type: Array, default: () => [] },
-  isAdmin: { type: Boolean, default: false },
-})
-
-
-const TEXT_MAX_LENGTH = 10000
-
-const sourceUrl = ref('')
-const stagedText = ref('')
-const stagedFiles = ref([])
-const isDragging = ref(false)
-const isUploading = ref(false)
-const uploadResult = ref(null)
-const uploadError = ref(null)
-const submitProgress = ref({ step: '', message: '', data: null })
-const progressHistory = ref([]) // 收集所有步骤的数据用于成功后展示
-const submitStepsDef = [
-  { key: 'extract', label: '提取内容' },
-  { key: 'fill', label: '补全信息' },
-  { key: 'tag', label: '标注题目' },
-  { key: 'match', label: '匹配聚类' },
-  { key: 'save', label: '保存入库' },
-]
-const submitStepList = computed(() => {
-  const curIdx = submitStepsDef.findIndex(s => s.key === submitProgress.value.step)
-  return submitStepsDef.map((s, i) => ({
-    ...s,
-    active: i === curIdx,
-    done: curIdx >= 0 && i < curIdx,
-  }))
-})
-
-const progressDetail = computed(() => {
-  const d = submitProgress.value.data
-  if (!d) return ''
-  const parts = []
-  if (d.question_count != null) parts.push(`${d.question_count}题`)
-  if (d.categories) {
-    const cats = Object.entries(d.categories).map(([k, v]) => `${k}×${v}`).join(', ')
-    if (cats) parts.push(cats)
-  }
-  if (d.quality_score != null) parts.push(`质量 ${d.quality_score}/10`)
-  if (d.elapsed_seconds != null) parts.push(`${d.elapsed_seconds}s`)
-  if (d.matched_count != null) parts.push(`${d.matched_count}道已有, ${d.unmatched_count}道新题`)
-  return parts.join(' | ')
-})
-
-const resultSummary = computed(() => {
-  if (!uploadResult.value?._history) return null
-  const hist = uploadResult.value._history
-  const result = {}
-  for (const evt of hist) {
-    if (evt.question_count != null) result.questionCount = evt.question_count
-    if (evt.categories) result.categories = evt.categories
-    if (evt.quality_score != null) result.qualityScore = evt.quality_score
-    if (evt.matched_count != null) { result.matchedCount = evt.matched_count; result.unmatchedCount = evt.unmatched_count }
-    if (evt.elapsed_seconds != null) result.elapsed = (result.elapsed || 0) + evt.elapsed_seconds
-  }
-  return result.questionCount != null ? result : null
-})
-
-// 类型和季节选择
-const importType = ref('auto')
-const selectedSeason = ref(props.activeSeason || '')
-const customSeason = ref('')
-const importTarget = ref('personal')
-
-// 监听 activeSeason 变化
-watch(() => props.activeSeason, (val) => {
-  if (val && !selectedSeason.value) {
-    selectedSeason.value = val
-  }
-})
-
-const handleImgError = (e) => {
-  e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2U1ZTdlYiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOWNhM2FmIiBmb250LXNpemU9IjE0Ij7lm77niYc8L3RleHQ+PC9zdmc+'
-  e.target.alt = '图片加载失败'
-}
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB per file
-const MAX_FILES = 20
-
-const addFileToStaging = (file) => {
-  if (!file.type.startsWith('image/')) return
-  if (stagedFiles.value.length >= MAX_FILES) {
-    uploadError.value = `最多上传 ${MAX_FILES} 张图片`
-    return
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    uploadError.value = `图片 "${file.name}" 超过 10MB 限制`
-    return
-  }
-  stagedFiles.value.push({
-    id: Date.now() + Math.random(),
-    file,
-    preview: URL.createObjectURL(file)
-  })
-}
-
-const handleDrop = (e) => {
-  isDragging.value = false
-  Array.from(e.dataTransfer.files).forEach(addFileToStaging)
-}
-
-const handleFileSelect = (e) => {
-  Array.from(e.target.files).forEach(addFileToStaging)
-  e.target.value = null
-}
-
-const removeFile = (index) => {
-  URL.revokeObjectURL(stagedFiles.value[index].preview)
-  stagedFiles.value.splice(index, 1)
-}
-
-const clearStaging = () => {
-  stagedFiles.value.forEach(item => URL.revokeObjectURL(item.preview))
-  stagedFiles.value = []
-  stagedText.value = ''
-  sourceUrl.value = ''
-  uploadResult.value = null
-  uploadError.value = null
-}
-
-const submitAll = async () => {
-  if (!stagedText.value.trim() && stagedFiles.value.length === 0) return
-
-  // 验证 URL（如果提供）
-  if (sourceUrl.value.trim()) {
-    const urlResult = validateUrl(sourceUrl.value)
-    if (!urlResult.valid) {
-      uploadError.value = urlResult.error
-      return
-    }
-  }
-
-  // 检测文本内容中的注入攻击
-  if (stagedText.value.trim()) {
-    try {
-      sanitizeAgainstInjection(stagedText.value, '文本内容')
-    } catch (e) {
-      uploadError.value = e.message
-      return
-    }
-  }
-
-  // 验证文件
-  if (stagedFiles.value.length > 0) {
-    const fileResult = validateFiles(stagedFiles.value.map(f => f.file))
-    if (!fileResult.valid) {
-      uploadError.value = fileResult.error
-      return
-    }
-  }
-
-  isUploading.value = true
-  uploadResult.value = null
-  uploadError.value = null
-  submitProgress.value = { step: '', message: '', data: null }
-
-  // 强制等两帧渲染：nextTick 确保 Vue 更新 DOM，requestAnimationFrame 确保浏览器绘制
-  await nextTick()
-  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-
-  const formData = new FormData()
-  formData.append('url', sanitizeText(sourceUrl.value, 2048))
-  formData.append('text', stagedText.value.slice(0, 100000)) // 100KB text limit
-
-  // 处理季节选择
-  let season = selectedSeason.value
-  if (season === 'custom') {
-    season = customSeason.value.trim()
-  }
-  formData.append('season', season || props.activeSeason || '2027届暑期实习')
-
-  // 处理类型选择
-  if (importType.value !== 'auto') {
-    formData.append('content_type', importType.value)
-  }
-
-  // 处理目标选择
-  formData.append('target', importTarget.value)
-
-  stagedFiles.value.forEach(item => formData.append('files', item.file))
-
-  try {
-    const data = await submitDataSSE(formData, (event) => {
-      if (event.step) {
-        submitProgress.value = { step: event.step, message: event.message || '', data: event.data || null }
-        if (event.data) {
-          progressHistory.value.push({ step: event.step, message: event.message, ...event.data })
-        }
-      }
-    })
-    uploadResult.value = { ...data, _history: progressHistory.value }
-    stagedFiles.value.forEach(item => URL.revokeObjectURL(item.preview))
-    stagedFiles.value = []
-    stagedText.value = ''
-    emit('submitted')
-  } catch (err) {
-    uploadError.value = getFriendlyError(err, '提交失败，请稍后重试')
-  } finally {
-    isUploading.value = false
-    submitProgress.value = { step: '', message: '', data: null }
-    progressHistory.value = []
-  }
-}
-
-const handleGlobalPaste = (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-  for (const item of e.clipboardData.items) {
-    if (item.type.indexOf('image') !== -1) {
-      addFileToStaging(item.getAsFile())
-    } else if (item.type === 'text/plain') {
-      item.getAsString((text) => {
-        stagedText.value += (stagedText.value ? '\n' : '') + text
-      })
-    }
-  }
-}
-
-onMounted(() => window.addEventListener('paste', handleGlobalPaste))
-onUnmounted(() => window.removeEventListener('paste', handleGlobalPaste))
-</script>

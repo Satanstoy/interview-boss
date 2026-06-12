@@ -40,7 +40,9 @@ function _loadStoredJobIds() {
  * 将活跃 job ids 写入 localStorage
  */
 function _persistJobIds() {
-  const ids = activeJobs.value.map(j => j.id)
+  const ids = activeJobs.value
+    .filter(j => j.status === 'pending' || j.status === 'running')
+    .map(j => j.id)
   if (ids.length > 0) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
   } else {

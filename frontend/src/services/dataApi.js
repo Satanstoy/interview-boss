@@ -24,6 +24,10 @@ export const fetchMasterBank = (params = {}) => {
 export const submitData = (formData) => upload(`${API}/submit`, formData)
 export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-stream-v2`, formData, onEvent)
 
+// ── Submit jobs (后台任务模式) ──
+export const createSubmitJob = (formData) => upload(`${API}/submit-jobs`, formData, { timeout: 120_000, noRetry: true })
+export const fetchActiveSubmitJobs = () => get(`${API}/submit-jobs/active`, { noCache: true })
+
 // ── Data mutations ──
 export const deleteRecord = (type, id) => del(`${API}/data/${type}/${id}`)
 export const updateRecord = (data) => put(`${API}/data/update`, data)
