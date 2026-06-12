@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import List, Dict, Any
 
 from app.db.connection import get_db_connection
@@ -13,6 +14,8 @@ logger = logging.getLogger("interview-boss")
 MAX_CONCURRENCY = 8  # 增加并发
 RECENT_DAYS = 7  # 默认匹配最近 7 天的 frequency=1 题目
 VALIDATION_CONFIDENCE_THRESHOLD = 0.8  # 验证置信度阈值
+DIRECT_ACCEPT_CONFIDENCE_THRESHOLD = 0.92  # 高置信同类匹配直接通过
+VALIDATION_BATCH_SIZE = 20  # 二次验证分块，避免长 JSON 漏项
 _PREFILTER_TOP_K = 30  # Embedding 预筛选保留的候选 centroid 数量
 
 
@@ -22,6 +25,34 @@ def _extract_id(raw) -> str:
     s = str(raw or "").strip()
     m = _re.search(r'\d+', s)
     return m.group(0) if m else s
+
+
+def _normalize_question_text(text: str) -> str:
+    """用于零成本精确命中的轻量文本标准化。"""
+    text = (text or "").strip().lower()
+    replacements = {
+        "？": "?",
+        "！": "!",
+        "，": ",",
+        "。": ".",
+        "：": ":",
+        "；": ";",
+        "（": "(",
+        "）": ")",
+        "、": ",",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return re.sub(r"[\s\?？!！。.,，、:：;；]+", "", text)
+
+
+def _safe_confidence(match: Dict) -> float | None:
+    try:
+        if match.get("confidence") is None:
+            return None
+        return float(match.get("confidence"))
+    except (TypeError, ValueError):
+        return None
 
 
 # ──────────────────────────── Prompts ────────────────────────────
@@ -160,44 +191,76 @@ async def _validate_merges(matches: List[Dict], new_questions: List[Dict],
     cluster_map = {str(c['id']): c for c in existing_clusters}
 
     # 构建验证对
-    pairs_text = []
+    validation_items = []
     pair_lookup = {}
     for match in matches:
-        new_id = str(match.get('new_id', ''))
-        cluster_id = str(match.get('cluster_id', ''))
+        new_id = _extract_id(match.get('new_id', ''))
+        cluster_id = _extract_id(match.get('cluster_id', ''))
 
         new_q = new_q_map.get(new_id)
         cluster_q = cluster_map.get(cluster_id)
 
         if new_q and cluster_q:
-            pairs_text.append(f"题目A (ID={new_id}): {new_q['question']}\n题目B (ID={cluster_id}): {cluster_q['question']}")
+            validation_items.append({
+                "match": match,
+                "new_id": new_id,
+                "cluster_id": cluster_id,
+                "pair_text": f"题目A (ID={new_id}): {new_q['question']}\n题目B (ID={cluster_id}): {cluster_q['question']}",
+            })
             pair_lookup[(new_id, cluster_id)] = (new_q, cluster_q)
 
-    if not pairs_text:
+    if not validation_items:
         # 没有可验证的对时，拒绝所有匹配（而非放行）
         logger.warning(f"[验证] 无法构建验证对 ({len(matches)} 匹配被拒绝)")
         return ([], {})
 
-    # 调用 LLM 验证
-    prompt = VALIDATE_MERGES_PROMPT.format(
-        pairs="\n\n".join(pairs_text)
-    )
+    chunks = [
+        validation_items[i:i + VALIDATION_BATCH_SIZE]
+        for i in range(0, len(validation_items), VALIDATION_BATCH_SIZE)
+    ]
 
-    try:
+    async def _validate_chunk(chunk):
+        prompt = VALIDATE_MERGES_PROMPT.format(
+            pairs="\n\n".join(item["pair_text"] for item in chunk)
+        )
         content = await _call_llm_with_retry(
             prompt, response_format={"type": "json_object"}, user_id=user_id
         )
         result = _extract_json(content)
+        return result.get("validations", [])
+
+    try:
+        if len(chunks) == 1:
+            validations = await _validate_chunk(chunks[0])
+        else:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+            async def _guarded_validate(chunk):
+                async with semaphore:
+                    try:
+                        return await _validate_chunk(chunk)
+                    except Exception as e:
+                        logger.warning(f"验证分块失败，拒绝该分块 {len(chunk)} 对合并: {e}")
+                        return []
+
+            chunk_results = await asyncio.gather(
+                *[_guarded_validate(chunk) for chunk in chunks],
+                return_exceptions=False
+            )
+            validations = [
+                validation
+                for chunk_validations in chunk_results
+                for validation in chunk_validations
+            ]
 
         # 过滤验证通过的合并（带置信度阈值）
         validated_matches = []
         confidence_map = {}
-        validations = result.get("validations", [])
         rejected_for_review = []
 
         for match in matches:
-            new_id = str(match.get('new_id', ''))
-            cluster_id = str(match.get('cluster_id', ''))
+            new_id = _extract_id(match.get('new_id', ''))
+            cluster_id = _extract_id(match.get('cluster_id', ''))
 
             # 查找对应的验证结果（用纯数字 ID 匹配，兼容 LLM 带前缀）
             validation = next(
@@ -320,6 +383,83 @@ async def calculate_dynamic_recent_days(cat2: str) -> int:
         return RECENT_DAYS
 
 
+def _build_matched_item(q: Dict, cluster_id: str, cat2: str) -> Dict:
+    return {
+        "qd_id": q['id'],
+        "cluster_id": cluster_id,
+        "question": q['question'],
+        "cat1": q.get('cat1', ''),
+        "cat2": q.get('cat2', cat2),
+        "tags": q.get('tags', ''),
+        "diff_tag": q.get('diff_tag', ''),
+        "url": q.get('url', ''),
+        "company": q.get('company', ''),
+        "round": q.get('round', ''),
+    }
+
+
+def _apply_exact_candidate_matches(
+    cat2: str,
+    questions: List[Dict],
+    candidates: List[Dict],
+    unmatched_ids: set[str],
+) -> tuple[List[Dict], set[str]]:
+    """对完全相同的问题文本零成本匹配，优先使用已成型聚类。"""
+    candidate_by_text = {}
+    for c in candidates:
+        key = _normalize_question_text(c.get("question", ""))
+        if key and key not in candidate_by_text:
+            candidate_by_text[key] = str(c["id"])
+
+    matched = []
+    matched_ids = set()
+    for q in questions:
+        qid = str(q["id"])
+        if qid not in unmatched_ids:
+            continue
+        cid = candidate_by_text.get(_normalize_question_text(q.get("question", "")))
+        if not cid:
+            continue
+        matched.append(_build_matched_item(q, cid, cat2))
+        matched_ids.add(qid)
+
+    return matched, matched_ids
+
+
+def _extract_raw_matches(result: Dict, unmatched_ids: set[str]) -> List[Dict]:
+    raw_matches = []
+    processed_new_ids = set()
+    for m in result.get("matches", []):
+        nid = _extract_id(m.get("new_id", ""))
+        cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
+        if not cid and m.get("target_id") is not None:
+            cid = _extract_id(m.get("target_id", ""))
+        if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
+            processed_new_ids.add(nid)
+            normalized = dict(m)
+            normalized["new_id"] = nid
+            normalized["cluster_id"] = cid
+            raw_matches.append(normalized)
+    return raw_matches
+
+
+def _partition_matches_by_risk(matches: List[Dict], cat2: str) -> tuple[List[Dict], List[Dict]]:
+    direct_matches = []
+    needs_validation = []
+    conservative_cat = cat2 in ("", "其他")
+    for m in matches:
+        confidence = _safe_confidence(m)
+        if (
+            confidence is not None
+            and confidence >= DIRECT_ACCEPT_CONFIDENCE_THRESHOLD
+            and not conservative_cat
+        ):
+            direct_matches.append(m)
+        elif confidence is None or confidence >= VALIDATION_CONFIDENCE_THRESHOLD:
+            needs_validation.append(m)
+    return direct_matches, needs_validation
+
+
 async def process_incremental_batch(
     new_rows: List[Dict],
     existing_by_cat2: Dict[str, List[Dict]],
@@ -393,16 +533,17 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
         user_id: 用户 ID
         recent_days: 匹配最近 N 天的 frequency=1 题目
     """
+    if isinstance(existing_clusters, dict):
+        existing_clusters = existing_clusters.get(cat2, [])
+    existing_clusters = existing_clusters or []
+
     matched = []
     unmatched_ids = {str(q['id']) for q in new_questions}
 
-    # Phase 1: 匹配已有聚类
+    filtered_clusters = existing_clusters
     if existing_clusters:
         try:
-            # Embedding 预筛选：从全部 centroid 中选出最可能匹配的 top-K
-            filtered_clusters = existing_clusters
             if len(existing_clusters) > _PREFILTER_TOP_K:
-                # 批量预筛选：建一次 FAISS index，对所有新题统一查 top-K 并集
                 batch_results = prefilter_centroids_batch(
                     query_texts=[q['question'] for q in new_questions],
                     centroids=existing_clusters,
@@ -413,139 +554,88 @@ async def _match_and_cluster_cat2(cat2, new_questions, existing_clusters, user_i
                     candidate_ids.update(c['id'] for c in qi_results)
                 filtered_clusters = [c for c in existing_clusters if c['id'] in candidate_ids]
                 logger.info(f"  [{cat2 or '无分类'}] Embedding 预筛选: {len(existing_clusters)} → {len(filtered_clusters)} 个候选 centroid")
+        except Exception as e:
+            logger.warning(f"  [{cat2 or '无分类'}] Embedding 预筛选失败，降级为全量候选: {e}")
+            filtered_clusters = existing_clusters
 
+    recent_singletons = []
+    effective_days = recent_days
+    if recent_days > 0:
+        effective_days = await calculate_dynamic_recent_days(cat2) if recent_days == RECENT_DAYS else recent_days
+        try:
+            recent_singletons = await _load_recent_singletons(cat2, days=effective_days)
+        except Exception as e:
+            logger.warning(f"  [{cat2 or '无分类'}] 加载最近题目失败: {e}")
+
+    all_exact_candidates = []
+    seen_candidate_ids = set()
+    for c in list(existing_clusters or []) + list(recent_singletons or []):
+        cid = str(c.get("id"))
+        if cid not in seen_candidate_ids:
+            all_exact_candidates.append(c)
+            seen_candidate_ids.add(cid)
+
+    exact_matches, exact_matched_ids = _apply_exact_candidate_matches(
+        cat2, new_questions, all_exact_candidates, unmatched_ids
+    )
+    if exact_matches:
+        matched.extend(exact_matches)
+        unmatched_ids -= exact_matched_ids
+        logger.info(f"  [{cat2 or '无分类'}] 精确文本命中候选: {len(exact_matches)} 题")
+
+    candidate_pool = []
+    seen_candidate_ids = set()
+    for c in list(filtered_clusters or []) + list(recent_singletons or []):
+        cid = str(c.get("id"))
+        if cid not in seen_candidate_ids:
+            candidate_pool.append(c)
+            seen_candidate_ids.add(cid)
+
+    unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]
+    if candidate_pool and unmatched_questions:
+        try:
             prompt = MATCH_EXISTING_PROMPT.format(
-                existing_clusters=_format_existing_clusters(filtered_clusters),
-                new_questions=_format_new_questions(new_questions),
-                count=len(new_questions),
+                existing_clusters=_format_existing_clusters(candidate_pool),
+                new_questions=_format_new_questions(unmatched_questions),
+                count=len(unmatched_questions),
             )
             content = await _call_llm_with_retry(
                 prompt, response_format={"type": "json_object"}, user_id=user_id
             )
             result = _extract_json(content)
+            raw_matches = _extract_raw_matches(result, unmatched_ids)
+            direct_matches, matches_to_validate = _partition_matches_by_risk(raw_matches, cat2)
 
-            matched_cluster_ids = set()
-            processed_new_ids = set()
-            low_confidence_matches = []  # 需要二次验证的低置信度匹配
-            high_confidence_matches = []  # 直接通过的高置信度匹配
+            if matches_to_validate:
+                logger.info(f"  [{cat2 or '无分类'}] 中置信/保守匹配需二次验证: {len(matches_to_validate)} 题")
+                validated_matches, _confidence_map = await _validate_merges(
+                    matches_to_validate, unmatched_questions, candidate_pool, user_id
+                )
+            else:
+                validated_matches = []
 
-            for m in result.get("matches", []):
+            accepted_matches = list(direct_matches) + list(validated_matches)
+            accepted_ids = set()
+            q_by_id = {str(q['id']): q for q in unmatched_questions}
+            for m in accepted_matches:
                 nid = _extract_id(m.get("new_id", ""))
                 cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
-                conf = float(m.get("confidence", 0))
-                if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
-                    processed_new_ids.add(nid)
-                    if conf >= VALIDATION_CONFIDENCE_THRESHOLD:
-                        # 高置信度直接通过，省掉二次 LLM 验证
-                        matched_cluster_ids.add(nid)
-                        high_confidence_matches.append(m)
-                        q = next((q for q in new_questions if str(q['id']) == nid), None)
-                        if q:
-                            matched.append({
-                                "qd_id": q['id'],
-                                "cluster_id": cid,
-                                "question": q['question'],
-                                "cat1": q.get('cat1', ''),
-                                "cat2": q.get('cat2', cat2),
-                                "tags": q.get('tags', ''),
-                                "diff_tag": q.get('diff_tag', ''),
-                                "url": q.get('url', ''),
-                                "company": q.get('company', ''),
-                                "round": q.get('round', ''),
-                            })
-                    else:
-                        low_confidence_matches.append(m)
+                q = q_by_id.get(nid)
+                if not q or not cid or nid in accepted_ids:
+                    continue
+                accepted_ids.add(nid)
+                matched.append(_build_matched_item(q, cid, cat2))
 
-            # 只对低置信度匹配调用二次 LLM 验证（节省 API 调用）
-            if low_confidence_matches:
-                logger.info(f"  [{cat2 or '无分类'}] 低置信度匹配需二次验证: {len(low_confidence_matches)} 题")
-                validated_matches, _confidence_map = await _validate_merges(
-                    low_confidence_matches, new_questions, existing_clusters, user_id
+            unmatched_ids -= accepted_ids
+            if accepted_ids:
+                logger.info(
+                    f"  [{cat2 or '无分类'}] 候选池匹配: {len(accepted_ids)} 题 "
+                    f"(高置信直通={len(direct_matches)}, 验证通过={len(validated_matches)}, "
+                    f"最近窗口={effective_days if recent_days > 0 else 0}天)"
                 )
-                for m in validated_matches:
-                    nid = _extract_id(m.get("new_id", ""))
-                    cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
-                    if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
-                        matched_cluster_ids.add(nid)
-                        q = next((q for q in new_questions if str(q['id']) == nid), None)
-                        if q:
-                            matched.append({
-                                "qd_id": q['id'],
-                                "cluster_id": cid,
-                                "question": q['question'],
-                                "cat1": q.get('cat1', ''),
-                                "cat2": q.get('cat2', cat2),
-                                "tags": q.get('tags', ''),
-                                "diff_tag": q.get('diff_tag', ''),
-                                "url": q.get('url', ''),
-                                "company": q.get('company', ''),
-                                "round": q.get('round', ''),
-                            })
-
-            unmatched_ids -= matched_cluster_ids
-            if matched_cluster_ids:
-                logger.info(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类: {len(matched_cluster_ids)} 题 "
-                            f"(高置信度={len(high_confidence_matches)}, 低置信度通过={len(matched_cluster_ids)-len(high_confidence_matches)})")
 
         except Exception as e:
-            logger.warning(f"  [{cat2 or '无分类'}] Phase 1 匹配已有聚类失败: {e}")
-
-    # Phase 1.5: 匹配最近 N 天的 frequency=1 题目（动态时间窗口）
-    unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]
-    if unmatched_questions and recent_days > 0:
-        # 动态调整时间窗口
-        effective_days = await calculate_dynamic_recent_days(cat2) if recent_days == RECENT_DAYS else recent_days
-        try:
-            recent_singletons = await _load_recent_singletons(cat2, days=effective_days)
-            if recent_singletons:
-                prompt = MATCH_EXISTING_PROMPT.format(
-                    existing_clusters=_format_existing_clusters(recent_singletons),
-                    new_questions=_format_new_questions(unmatched_questions),
-                    count=len(unmatched_questions),
-                )
-                content = await _call_llm_with_retry(
-                    prompt, response_format={"type": "json_object"}, user_id=user_id
-                )
-                result = _extract_json(content)
-
-                # 验证 Phase 1.5 匹配（使用 recent_singletons 作为 cluster 列表）
-                raw_matches = result.get("matches", [])
-                if raw_matches:
-                    validated_matches, conf_map = await _validate_merges(
-                        raw_matches, unmatched_questions, recent_singletons, user_id
-                    )
-                else:
-                    validated_matches = []
-
-                matched_recent_ids = set()
-                processed_new_ids = set()
-                for m in validated_matches:
-                    nid = _extract_id(m.get("new_id", ""))
-                    cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
-                    if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
-                        processed_new_ids.add(nid)
-                        matched_recent_ids.add(nid)
-                        q = next((q for q in unmatched_questions if str(q['id']) == nid), None)
-                        if q:
-                            matched.append({
-                                "qd_id": q['id'],
-                                "cluster_id": cid,
-                                "question": q['question'],
-                                "cat1": q.get('cat1', ''),
-                                "cat2": q.get('cat2', cat2),
-                                "tags": q.get('tags', ''),
-                                "diff_tag": q.get('diff_tag', ''),
-                                "url": q.get('url', ''),
-                                "company": q.get('company', ''),
-                                "round": q.get('round', ''),
-                            })
-
-                unmatched_ids -= matched_recent_ids
-                if matched_recent_ids:
-                    logger.info(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近 {effective_days} 天题目: {len(matched_recent_ids)} 题")
-
-        except Exception as e:
-            logger.warning(f"  [{cat2 or '无分类'}] Phase 1.5 匹配最近题目失败: {e}")
+            logger.warning(f"  [{cat2 or '无分类'}] 候选池匹配失败: {e}")
 
     # Phase 2: 剩余新题内部聚类
     unmatched_questions = [q for q in new_questions if str(q['id']) in unmatched_ids]
@@ -562,6 +652,38 @@ async def _cluster_unmatched(unmatched_questions, user_id):
         return [{"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
                 for q in unmatched_questions]
 
+    exact_groups = {}
+    for q in unmatched_questions:
+        key = _normalize_question_text(q.get("question", ""))
+        if key:
+            exact_groups.setdefault(key, []).append(q)
+
+    exact_clusters = []
+    exact_clustered_ids = set()
+    for group in exact_groups.values():
+        if len(group) < 2:
+            continue
+        ids = [str(q["id"]) for q in group]
+        exact_clustered_ids.update(ids)
+        exact_clusters.append({
+            "ids": ids,
+            "representative": max((q["question"] for q in group), key=len),
+            "items": group,
+        })
+
+    if exact_clusters:
+        unmatched_questions = [
+            q for q in unmatched_questions
+            if str(q["id"]) not in exact_clustered_ids
+        ]
+        logger.info(f"    内部聚类精确文本命中: {len(exact_clusters)} 个聚类")
+        if len(unmatched_questions) < 2:
+            singles = [
+                {"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
+                for q in unmatched_questions
+            ]
+            return exact_clusters + singles
+
     prompt = CLUSTER_NEW_PROMPT.format(
         unmatched_questions=_format_new_questions(unmatched_questions),
         count=len(unmatched_questions),
@@ -575,15 +697,19 @@ async def _cluster_unmatched(unmatched_questions, user_id):
 
         # 预编码所有题目 embedding（一次批量调用）
         try:
-            from app.services.embedding_service import encode_texts
+            from app.services import embedding_service
             import numpy as np
             texts = [q['question'] for q in unmatched_questions]
-            embeddings = encode_texts(texts)
-            emb_map = {str(q['id']): embeddings[i] for i, q in enumerate(unmatched_questions)}
+            embeddings = embedding_service.encode_texts(texts)
+            # hash fallback 只适合测试/降级检索，不能否决 LLM 的语义聚类。
+            if getattr(embedding_service, "_SESSION", None) is None:
+                emb_map = {}
+            else:
+                emb_map = {str(q['id']): embeddings[i] for i, q in enumerate(unmatched_questions)}
         except Exception:
             emb_map = {}
 
-        clusters = []
+        clusters = list(exact_clusters)
         clustered_ids = set()
 
         for c in result.get("clusters", []):

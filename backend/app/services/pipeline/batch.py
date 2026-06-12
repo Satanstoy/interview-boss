@@ -13,6 +13,7 @@ from app.services.clustering import (
     process_incremental_batch, _cluster_unmatched,
     _call_llm_with_retry, _extract_json, MATCH_EXISTING_PROMPT,
     _validate_merges, VALIDATION_CONFIDENCE_THRESHOLD,
+    DIRECT_ACCEPT_CONFIDENCE_THRESHOLD, _extract_id,
 )
 from .sanitize import BATCH_SIZE, sanitize_batch
 from .queue import dequeue_batch, mark_batch_done, mark_batch_failed, should_trigger_clustering
@@ -616,8 +617,37 @@ async def _match_singletons_to_existing(
                 if not raw_matches:
                     return merge_ops
 
-                # 所有 LLM 匹配都需要二次验证；embedding/单次置信度不作为自动合并依据。
-                matches_to_validate = raw_matches
+                direct_matches = []
+                matches_to_validate = []
+                for m in raw_matches:
+                    nid = _extract_id(m.get("new_id", ""))
+                    cid = _extract_id(m.get("cluster_id", "")) if m.get("cluster_id") is not None else None
+                    if not nid or cid is None or nid not in new_q_map:
+                        continue
+                    normalized = dict(m)
+                    normalized["new_id"] = nid
+                    normalized["cluster_id"] = cid
+                    try:
+                        conf = float(m.get("confidence")) if m.get("confidence") is not None else None
+                    except (TypeError, ValueError):
+                        conf = None
+                    entry_cat2 = new_q_map[nid].get("cat2") or ""
+                    if (
+                        conf is not None
+                        and conf >= DIRECT_ACCEPT_CONFIDENCE_THRESHOLD
+                        and entry_cat2 not in ("", "其他")
+                    ):
+                        direct_matches.append(normalized)
+                    elif conf is None or conf >= VALIDATION_CONFIDENCE_THRESHOLD:
+                        matches_to_validate.append(normalized)
+
+                for m in direct_matches:
+                    nid = str(m.get("new_id", ""))
+                    cid = m.get("cluster_id")
+                    entry = new_q_map.get(nid)
+                    if entry:
+                        merge_ops.append((cid, entry, float(m.get("confidence", 0.9))))
+
                 if matches_to_validate:
                     all_existing_flat = []
                     for _, _, existing in batch_groups:
@@ -629,21 +659,22 @@ async def _match_singletons_to_existing(
                         matches_to_validate, new_q_for_validate, all_existing_flat, user_id
                     )
                     validated_keys = {
-                        (str(m.get('new_id')), str(m.get('cluster_id')))
+                        (_extract_id(m.get('new_id')), _extract_id(m.get('cluster_id')))
                         for m in validated_matches
                     }
 
                     for m in matches_to_validate:
-                        nid = str(m.get("new_id", ""))
+                        nid = _extract_id(m.get("new_id", ""))
                         cid = m.get("cluster_id")
                         if cid is None:
                             continue
-                        if (nid, str(cid)) not in validated_keys:
+                        cid = _extract_id(cid)
+                        if (nid, cid) not in validated_keys:
                             continue
                         entry = new_q_map.get(nid)
                         if not entry:
                             continue
-                        conf = confidence_map.get((nid, str(cid)), 0.0)
+                        conf = confidence_map.get((nid, cid), 0.0)
                         merge_ops.append((cid, entry, conf))
 
             except Exception as e:

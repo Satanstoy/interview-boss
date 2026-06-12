@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from app.services.clustering import (
     process_incremental_batch,
     _match_and_cluster_cat2,
+    _cluster_unmatched,
+    _validate_merges,
     _load_recent_singletons,
     RECENT_DAYS
 )
@@ -121,6 +123,27 @@ class TestMatchAndClusterCat2:
     """测试 _match_and_cluster_cat2 函数（包含 Phase 1.5）"""
 
     @pytest.mark.asyncio
+    async def test_exact_existing_match_skips_llm(self, sample_new_questions):
+        """完全相同的候选题直接匹配，不调用 LLM"""
+        new_questions = [sample_new_questions[0]]
+        existing_clusters = [{"id": 1, "question": "Redis持久化方式有哪些?"}]
+
+        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = []
+            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+                result = await _match_and_cluster_cat2(
+                    "C3.数据库基础",
+                    new_questions,
+                    existing_clusters,
+                    user_id=None,
+                    recent_days=0,
+                )
+
+        assert len(result["matched"]) == 1
+        assert result["matched"][0]["cluster_id"] == "1"
+        mock_llm.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_phase1_5_matches_recent_singletons(self, sample_new_questions, sample_existing_clusters, sample_recent_singletons):
         """测试：Phase 1.5 能匹配到最近 7 天的相似题"""
         new_questions = [sample_new_questions[0]]
@@ -203,6 +226,58 @@ class TestMatchAndClusterCat2:
         mock_load.assert_called_once_with("C3.数据库基础", days=14)
 
 
+class TestClusterUnmatchedFastPath:
+    """测试未匹配题内部聚类的零成本路径"""
+
+    @pytest.mark.asyncio
+    async def test_exact_duplicate_questions_skip_llm(self):
+        questions = [
+            {"id": 1, "question": "TCP 三次握手的作用是什么？"},
+            {"id": 2, "question": "TCP三次握手的作用是什么?"},
+            {"id": 3, "question": "Redis 缓存穿透是什么？"},
+        ]
+
+        with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            clusters = await _cluster_unmatched(questions, user_id=None)
+
+        assert any(set(c["ids"]) == {"1", "2"} for c in clusters)
+        assert any(c["ids"] == ["3"] for c in clusters)
+        mock_llm.assert_not_called()
+
+
+class TestValidateMergesBatching:
+    """测试二次验证分块"""
+
+    @pytest.mark.asyncio
+    async def test_validate_merges_splits_large_batches(self):
+        matches = [{"new_id": str(i), "cluster_id": str(1000 + i)} for i in range(25)]
+        new_questions = [{"id": i, "question": f"问题 {i}"} for i in range(25)]
+        existing_clusters = [{"id": 1000 + i, "question": f"问题 {i} 变体"} for i in range(25)]
+        validations_1 = [
+            {"new_id": str(i), "cluster_id": str(1000 + i), "valid": True, "confidence": 0.95}
+            for i in range(20)
+        ]
+        validations_2 = [
+            {"new_id": str(i), "cluster_id": str(1000 + i), "valid": True, "confidence": 0.95}
+            for i in range(20, 25)
+        ]
+
+        with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = ["{}", "{}"]
+            with patch('app.services.clustering._extract_json') as mock_json:
+                mock_json.side_effect = [
+                    {"validations": validations_1},
+                    {"validations": validations_2},
+                ]
+                validated, confidence_map = await _validate_merges(
+                    matches, new_questions, existing_clusters, user_id=None
+                )
+
+        assert len(validated) == 25
+        assert confidence_map[("24", "1024")] == 0.95
+        assert mock_llm.call_count == 2
+
+
 class TestProcessIncrementalBatch:
     """测试 process_incremental_batch 函数（主入口）"""
 
@@ -258,7 +333,7 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_full_flow_with_phase1_and_phase15(self, sample_new_questions):
-        """测试：Phase 1 匹配已有聚类 + Phase 1.5 匹配最近题目 + Phase 2 内部聚类"""
+        """测试：候选池一次匹配已有聚类 + 最近题目"""
         # 准备
         new_questions = sample_new_questions
         existing_clusters = [
@@ -268,36 +343,30 @@ class TestIntegration:
             {"id": 50, "question": "TCP 为什么是三次握手？", "cat2": "C4.操作系统与网络"},
         ]
 
-        # 模拟 Phase 1 返回（匹配到已有聚类）
-        phase1_response = '{"matches": [{"new_id": "101", "cluster_id": "1"}]}'
-        # 模拟验证返回（验证通过，含置信度）
-        validate_response = '{"validations": [{"new_id": "101", "cluster_id": "1", "valid": true, "confidence": 0.95}]}'
-        # 模拟 Phase 1.5 返回（匹配到最近题目）
-        phase15_response = '{"matches": [{"new_id": "102", "cluster_id": "50"}]}'
-        # 模拟 Phase 2 返回（内部聚类）
+        match_response = '{"matches": [{"new_id": "101", "cluster_id": "1", "confidence": 0.95}, {"new_id": "102", "cluster_id": "50", "confidence": 0.95}]}'
         phase2_response = '{"clusters": []}'
 
         # 执行
         with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
             with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
-                # Phase 1 matching, Phase 1.5 matching, Phase 2 clustering
-                # (Phase 1 validation is handled by mock_validate, not LLM)
-                mock_llm.side_effect = [phase1_response, phase15_response, phase2_response]
+                mock_llm.side_effect = [match_response, phase2_response]
                 with patch('app.services.clustering._extract_json') as mock_json:
                     mock_json.side_effect = [
-                        {"matches": [{"new_id": "101", "cluster_id": "1"}]},
-                        {"matches": [{"new_id": "102", "cluster_id": "50"}]},
+                        {"matches": [
+                            {"new_id": "101", "cluster_id": "1", "confidence": 0.95},
+                            {"new_id": "102", "cluster_id": "50", "confidence": 0.95},
+                        ]},
                         {"clusters": []}
                     ]
-                    # Mock _validate_merges: first call for Phase 1, second for Phase 1.5
                     with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
-                        mock_validate.side_effect = [
-                            # Phase 1 validation
-                            ([{"new_id": "101", "cluster_id": "1"}], {("101", "1"): 0.95}),
-                            # Phase 1.5 validation
-                            ([{"new_id": "102", "cluster_id": "50"}], {("102", "50"): 0.95}),
-                        ]
+                        mock_validate.return_value = (
+                            [
+                                {"new_id": "101", "cluster_id": "1"},
+                                {"new_id": "102", "cluster_id": "50"},
+                            ],
+                            {("101", "1"): 0.95, ("102", "50"): 0.95},
+                        )
 
                         result = await _match_and_cluster_cat2(
                             "C3.数据库基础",
@@ -315,7 +384,7 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_phase1_failure_does_not_block_phase15(self, sample_new_questions, sample_recent_singletons):
-        """测试：Phase 1 失败不影响 Phase 1.5 执行"""
+        """测试：已有聚类输入异常兼容，不影响最近题加载"""
         # 准备
         new_questions = [sample_new_questions[0]]
         existing_clusters = {
@@ -326,11 +395,9 @@ class TestIntegration:
         with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = sample_recent_singletons
             with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
-                # Phase 1 抛出异常
-                mock_llm.side_effect = [Exception("LLM 调用失败"), '{"matches": []}', '{"clusters": []}']
+                mock_llm.side_effect = ['{"matches": []}', '{"clusters": []}']
                 with patch('app.services.clustering._extract_json') as mock_json:
                     mock_json.side_effect = [
-                        Exception("JSON 解析失败"),
                         {"matches": []},
                         {"clusters": []}
                     ]
