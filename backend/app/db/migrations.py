@@ -1638,6 +1638,21 @@ def _migration_035_split_e_category(conn):
     logger.info(f"migration_035: 拆分 E 分类完成 — E1.数据结构={e1_count}, E2.算法手撕={e2_count}")
 
 
+def _migration_036_job_payloads(conn):
+    """Create job_payloads table for storing submit import task payloads.
+    Add composite index on jobs for active submit job queries."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS job_payloads (
+            job_id INTEGER PRIMARY KEY,
+            payload TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        )
+    ''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_creator_type_status ON jobs(created_by, job_type, status)")
+    logger.info("已创建 job_payloads 表和 jobs 复合索引")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1674,6 +1689,7 @@ _MIGRATIONS = [
     (33, 'cluster_id',                   _migration_033_cluster_id),
     (34, 'backfill_confidence',          _migration_034_backfill_confidence),
     (35, 'split_e_category',             _migration_035_split_e_category),
+    (36, 'job_payloads',                 _migration_036_job_payloads),
 ]
 
 
