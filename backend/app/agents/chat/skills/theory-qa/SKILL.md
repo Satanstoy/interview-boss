@@ -3,6 +3,16 @@ name: theory-qa
 description: "MUST test CS fundamentals — OS, networking, databases, data structures, algorithms theory. Activate when the candidate mentions concepts like processes, threads, TCP, HTTP, MySQL, Redis, caching, locks, memory, IO, indexing, or any computer science foundation."
 triggers: ["进程", "线程", "TCP", "HTTP", "MySQL", "Redis", "索引", "缓存", "锁", "内存", "IO", "数据库", "操作系统", "网络", "算法", "数据结构", "事务", "隔离", "GC", "JVM"]
 priority: 60
+strategy_rules:
+  topic_shift:
+    trigger: "strategy=topic_shift AND target_topic 明确是基础知识（如 TCP、HTTP、MySQL、Redis 原理、进程线程等）"
+    preferred_topics: ["TCP", "HTTP", "MySQL", "Redis", "进程", "线程", "索引", "缓存", "GC", "JVM"]
+    reason: "候选人回答完整，可以自然切到基础理论题"
+  deep_dive:
+    trigger: "strategy=deep_dive AND 项目讨论中自然引出理论问题（如'你用了 Redis，那缓存穿透怎么解决？'）"
+    allowed: true
+    constraint: "只允许从项目自然引出理论题，不能硬切"
+  negative_filter: "negative_terms 命中的主题不能作为理论题目标"
 ---
 
 ## Why Theory Matters

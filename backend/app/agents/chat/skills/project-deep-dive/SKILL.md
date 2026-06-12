@@ -3,6 +3,10 @@ name: project-deep-dive
 description: "MUST drill into candidate's project experience 3-5 layers deep, examining architecture decisions, tech choices, and problem-solving. Activate when the candidate mentions any project, internship, system design, framework, Agent, RAG, or technical implementation."
 triggers: ["项目", "实习", "做了", "开发", "设计", "系统", "框架", "Agent", "RAG", "架构", "搭建", "重构"]
 priority: 80
+strategy_rules:
+  deep_dive:
+    preferred_topics: ["RAG", "LangGraph", "状态机", "混合检索", "RRF", "LLM rerank", "selected_basis", "references", "日志", "失败 case"]
+    basis_policy: "selected_basis must strongly support the follow-up question"
 ---
 
 ## Why Deep-Drill
@@ -36,6 +40,9 @@ Candidate: "Dense vectors miss exact keyword matches for technical terms..."
 - Ask trade-offs ("Why not use X instead?")
 - Ask about personal contribution ("Which part did you specifically build?")
 - Use the candidate's own words as follow-up anchors ("You mentioned chunking — how did you choose the chunk size?")
+- During `deep_dive`, rerank retrieved questions by whether they can support a natural project-detail follow-up, not by raw semantic similarity alone.
+- If the candidate mentions LRU, Redis, or AI coding tools as examples of retrieval noise, treat those terms as negative examples, not as project deep-dive targets.
+- Do not show `selected_basis` unless it clearly supports the actual follow-up question.
 
 ## Boundaries
 
