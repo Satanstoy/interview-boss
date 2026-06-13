@@ -1653,6 +1653,15 @@ def _migration_036_job_payloads(conn):
     logger.info("已创建 job_payloads 表和 jobs 复合索引")
 
 
+def _migration_037_conversation_metadata(conn):
+    """Add metadata column to chat_conversations for persisting active skill names etc."""
+    cursor = conn.cursor()
+    col_set = {row[1] for row in cursor.execute("PRAGMA table_info('chat_conversations')").fetchall()}
+    if "metadata" not in col_set:
+        conn.execute("ALTER TABLE chat_conversations ADD COLUMN metadata TEXT DEFAULT '{}'")
+    logger.info("已添加 chat_conversations.metadata 列")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1690,6 +1699,7 @@ _MIGRATIONS = [
     (34, 'backfill_confidence',          _migration_034_backfill_confidence),
     (35, 'split_e_category',             _migration_035_split_e_category),
     (36, 'job_payloads',                 _migration_036_job_payloads),
+    (37, 'conversation_metadata',        _migration_037_conversation_metadata),
 ]
 
 

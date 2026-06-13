@@ -483,6 +483,14 @@ async def _step_load_context(state: ChatState) -> ChatState:
         state["conversation_id"]
     )
 
+    # 恢复上一轮持久化的 active skill names
+    conversation_metadata = await asyncio.to_thread(
+        chat_service.get_conversation_metadata,
+        state["conversation_id"],
+    )
+    from app.agents.chat.nodes import _restore_active_skills_from_metadata
+    _restore_active_skills_from_metadata(state, conversation_metadata)
+
     _step("context", "正在加载个人画像...")
     interview_context, job_position = build_interview_context(
         state["user_id"], conversation_id=state["conversation_id"]
@@ -601,6 +609,28 @@ async def _step_extract_memory(state: ChatState) -> None:
 # ═══════════════════════════════════════════════════
 
 MAX_REACT_STEPS = 5
+
+
+async def _persist_active_skills(state: ChatState) -> None:
+    """Persist active skill names to conversation metadata for cross-round recovery.
+
+    Only skill names are persisted (not full instructions). On next round,
+    instructions are reloaded from the skill registry so edits are picked up.
+    """
+    try:
+        conversation_id = state.get("conversation_id")
+        if not conversation_id:
+            return
+        active_skills = state.get("active_skills", [])
+        if not active_skills:
+            return
+        await asyncio.to_thread(
+            chat_service.update_conversation_metadata,
+            conversation_id,
+            {"active_skill_names": active_skills},
+        )
+    except Exception:
+        logger.exception("Failed to persist active_skills")
 
 
 async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
@@ -812,6 +842,10 @@ async def run_chat(
                     _emit(event)
             state["response"] = response
             state["metadata"] = metadata
+
+            # 持久化 active skill names 到 conversation metadata
+            if state.get("active_skills"):
+                await _persist_active_skills(state)
 
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))

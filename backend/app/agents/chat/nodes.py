@@ -92,6 +92,37 @@ def _format_compressed_brief(compressed_json: dict) -> str:
     return "\n".join(parts) if parts else ""
 
 
+def _restore_active_skills_from_metadata(
+    state: ChatState,
+    metadata: dict,
+    registry=None,
+) -> None:
+    """Restore active skills from persisted names and load latest instructions.
+
+    Called at start of each round to re-activate skills that were active at end
+    of the previous round.  Loads fresh instructions from the registry so
+    edits to SKILL.md are picked up immediately.
+    """
+    persisted_skill_names = metadata.get("active_skill_names", [])
+    if not persisted_skill_names:
+        return
+    if registry is None:
+        from app.agents.chat.skills import get_default_registry
+        registry = get_default_registry()
+    restored_instructions: list[dict] = []
+    valid_skill_names: list[str] = []
+    for name in persisted_skill_names:
+        skill = registry.get(name)
+        if not skill:
+            continue
+        valid_skill_names.append(name)
+        instruction = skill.get_instruction()
+        if instruction:
+            restored_instructions.append({"skill_name": name, "instruction": instruction})
+    state["active_skills"] = valid_skill_names
+    state["active_skill_instructions"] = restored_instructions
+
+
 # ═══════════════════════════════════════════════════
 #  节点实现
 # ═══════════════════════════════════════════════════

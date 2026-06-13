@@ -148,6 +148,35 @@ def delete_conversation(conversation_id: str, user_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def update_conversation_metadata(conversation_id: str, new_metadata: dict) -> None:
+    """Merge new_metadata into the conversation's metadata JSON column.
+
+    Reads existing metadata, merges new keys (shallow), and writes back.
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT metadata FROM chat_conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        existing = _safe_json_loads(row[0]) if row else {}
+        existing.update(new_metadata)
+        conn.execute(
+            "UPDATE chat_conversations SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(existing, ensure_ascii=False), conversation_id),
+        )
+        conn.commit()
+
+
+def get_conversation_metadata(conversation_id: str) -> dict:
+    """Get the conversation's metadata JSON field."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT metadata FROM chat_conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+    return _safe_json_loads(row[0]) if row else {}
+
+
 # ═══════════════════════════════════════════════════
 #  消息管理
 # ═══════════════════════════════════════════════════

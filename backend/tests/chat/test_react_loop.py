@@ -30,6 +30,71 @@ async def _mock_stream_strings(*chunks: str):
         yield c
 
 
+# ── TestActiveSkillsPersistence ──────────────────────────
+
+
+class TestActiveSkillsPersistence:
+    def test_restore_active_skills_loads_latest_instruction_from_registry(self):
+        """Restoring from metadata should load latest skill instructions by name."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
+        state = {}
+        metadata = {"active_skill_names": ["project-deep-dive"]}
+
+        mock_skill = MagicMock()
+        mock_skill.get_instruction.return_value = "## Project Deep Dive\nLatest instruction."
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_skill
+
+        _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
+
+        assert state["active_skills"] == ["project-deep-dive"]
+        assert state["active_skill_instructions"] == [
+            {"skill_name": "project-deep-dive", "instruction": "## Project Deep Dive\nLatest instruction."}
+        ]
+        mock_registry.get.assert_called_once_with("project-deep-dive")
+
+    def test_restore_skips_unknown_skills(self):
+        """Unknown skill names in metadata should be silently ignored."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
+        state = {}
+        metadata = {"active_skill_names": ["nonexistent-skill", "theory-qa"]}
+
+        mock_skill = MagicMock()
+        mock_skill.get_instruction.return_value = "## Theory QA\nAsk deep theory."
+        mock_registry = MagicMock()
+        # First call returns None (unknown), second returns mock_skill
+        mock_registry.get.side_effect = [None, mock_skill]
+
+        _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
+
+        assert state["active_skills"] == ["theory-qa"]
+        assert state["active_skill_instructions"] == [
+            {"skill_name": "theory-qa", "instruction": "## Theory QA\nAsk deep theory."}
+        ]
+
+    def test_restore_noop_when_metadata_empty(self):
+        """No-op when metadata has no active_skill_names key."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
+        state = {"active_skills": ["existing"]}
+        _restore_active_skills_from_metadata(state, {})
+
+        # State should be untouched
+        assert state["active_skills"] == ["existing"]
+
+    def test_restore_noop_when_skill_names_empty_list(self):
+        """No-op when active_skill_names is an empty list."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
+        state = {}
+        _restore_active_skills_from_metadata(state, {"active_skill_names": []})
+
+        assert "active_skills" not in state
+        assert "active_skill_instructions" not in state
+
+
 # ── TestReactLoop ─────────────────────────────────────────
 
 
