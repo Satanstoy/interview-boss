@@ -4,7 +4,7 @@
 
 **Goal:** 把 ReAct 面试 agent 从"能跑"升级到"行为稳定、可解释、可持续优化"——通过强化 tool schema、升级 skill 注入机制、增加 tool 选择策略。
 
-**Architecture:** 四阶段渐进式改动：Phase 1 纯 prompt/schema 文本改动（零逻辑变更）；Phase 2 改 load_skill 执行逻辑 + 当前 ReAct loop 内 system prompt 注入（不跨会话）；Phase 2.5 持久化 active_skills 到 conversation metadata 实现跨轮生效；Phase 3 增加 answer_complete heuristic + 基于 intent 的 tool 策略注入。
+**Architecture:** 四阶段渐进式改动：Phase 1 纯 prompt/schema 文本改动（零逻辑变更）；Phase 2 改 load_skill 执行逻辑 + 当前 ReAct loop 内 system prompt 注入（不跨会话）；Phase 2.5 持久化 active skill names 到 conversation metadata，并在下一轮从 registry 重新加载指令；Phase 3 增加 answer_complete heuristic + 基于 intent 的 tool 策略注入。
 
 **Tech Stack:** Python / FastAPI / OpenAI function calling / pytest
 
@@ -18,7 +18,7 @@
 |------|--------|---------------|
 | `backend/app/agents/chat/tools.py` | Modify | Tool schemas (Phase 1) + load_skill 执行逻辑 (Phase 2) |
 | `backend/app/agents/shared/skills/builder.py` | Modify | Tool guidance 文本 (Phase 1) |
-| `backend/app/agents/chat/state.py` | Modify | 新增 `active_skill_instructions` 字段 (Phase 2) |
+| `backend/app/agents/chat/state.py` | Modify | 新增 `active_skill_instructions` 字段（当前 ReAct loop 待注入指令，不做跨轮持久化） |
 | `backend/app/agents/chat/nodes.py` | Modify | `build_react_system_prompt` 注入 active skills (Phase 2) + tool strategy (Phase 3) |
 | `backend/app/agents/chat/pipeline.py` | Modify | ReAct loop 重建 system prompt (Phase 2) + 持久化 (Phase 2.5) |
 | `backend/app/agents/chat/prompts.py` | Modify | `INTENT_CLASSIFY_PROMPT` 微调 (Phase 3) |
@@ -27,7 +27,7 @@
 | `backend/tests/chat/test_tools.py` | Modify | Phase 1/2 测试 |
 | `backend/tests/chat/test_skill_catalog.py` | Modify | Phase 1 测试 |
 | `backend/tests/chat/test_react_loop.py` | Modify | Phase 2/3 集成测试 |
-| `backend/tests/chat/test_react_e2e.py` | Create | 真实链路端到端测试 (Phase 验证) |
+| `backend/tests/chat/test_react_e2e.py` | Modify | 真实链路端到端测试 (Phase 验证) |
 
 ---
 
@@ -66,6 +66,15 @@ class TestToolSchemas:
         qt_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["question_type"]["description"]
         assert "project_followup" in qt_desc
         assert "knowledge_probe" in qt_desc
+
+    def test_search_questions_schema_explains_result_usage(self):
+        """search_questions description should tell the model how to use returned questions."""
+        from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
+
+        desc = SEARCH_QUESTIONS_SCHEMA["function"]["description"]
+        assert "如何使用返回结果" in desc
+        assert "top 3" in desc
+        assert "不要机械复述" in desc
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -95,7 +104,11 @@ SEARCH_QUESTIONS_SCHEMA = {
             "【参数示例】\n"
             "- 追问项目：keywords=['微服务', '服务拆分', 'DDD'], question_type='project_followup'\n"
             "- 知识探测：keywords=['Redis', '持久化', 'RDB'], question_type='knowledge_probe'\n"
-            "- 新话题：keywords=['算法', '动态规划'], question_type='new_question'"
+            "- 新话题：keywords=['算法', '动态规划'], question_type='new_question'\n\n"
+            "【如何使用返回结果】\n"
+            "- 工具返回 top 3 候选题。选择最贴近当前对话的一题，改写成自然的面试官追问。\n"
+            "- 不要机械复述题库原文；要结合候选人刚才的回答承接发问。\n"
+            "- 如果结果和当前回答不匹配，可以忽略检索结果并直接追问。"
         ),
         "parameters": {
             "type": "object",
@@ -460,7 +473,7 @@ Expected: FAIL（当前 load_skill 返回 `{"instruction": ...}`，不存 state�
 在 `state.py:78`（`active_skills` 之后）新增：
 
 ```python
-    active_skill_instructions: list[dict]  # [{"skill_name": str, "instruction": str}] 待注入 system prompt
+    active_skill_instructions: list[dict]  # [{"skill_name": str, "instruction": str}] 当前 ReAct loop 待注入 system prompt；跨轮只持久化 skill_name
 ```
 
 - [ ] **Step 4: Commit state 变更**
@@ -488,7 +501,7 @@ Expected: FAIL（state 字段有了但执行逻辑没改）
 
 ```python
 def _execute_load_skill(args: dict, state: ChatState) -> str:
-    """Load a skill's instruction, store in state for system prompt injection."""
+    """Load a skill's instruction, store as current-loop pending system prompt injection."""
     skill_name = args.get("skill_name", "")
     registry = _get_skill_registry()
     skill = registry.get(skill_name)
@@ -504,7 +517,7 @@ def _execute_load_skill(args: dict, state: ChatState) -> str:
     # Mark active
     active_skills.append(skill_name)
 
-    # Store instruction for system prompt injection (not as tool result)
+    # Store instruction for current-loop system prompt injection (not as tool result)
     instruction = skill.get_instruction()
     if instruction:
         state.setdefault("active_skill_instructions", []).append({
@@ -515,7 +528,7 @@ def _execute_load_skill(args: dict, state: ChatState) -> str:
     return json.dumps({
         "status": "loaded",
         "skill": skill_name,
-        "summary": f"技能「{skill.description}」已激活，将注入到当前对话的系统提示中。",
+        "summary": f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。",
     })
 ```
 
@@ -644,7 +657,7 @@ Expected: FAIL（当前 build_react_system_prompt 不注入 active skill 指令�
 在 `nodes.py:1620`（Layer 6 basis guidance 之前）插入新 Layer：
 
 ```python
-    # Layer 5.5: Active skill instructions (injected from load_skill tool results)
+    # Layer 5.5: Active skill instructions (current-loop pending instructions)
     active_skill_instructions = state.get("active_skill_instructions", [])
     if active_skill_instructions:
         skill_parts = []
@@ -696,55 +709,54 @@ git commit -m "feat(chat): inject active skill instructions into system prompt"
 
 ---
 
-## Phase 2.5: 持久化 active_skills 到 conversation metadata
+## Phase 2.5: 持久化 active skill names 到 conversation metadata
 
-> Phase 2 只在当前 ReAct loop 内注入 skill。Phase 2.5 让 active_skills 跨轮持久化——用户下一次发消息时，已加载的 skill 自动注入 system prompt。
+> Phase 2 只在当前 ReAct loop 内注入 skill。Phase 2.5 让 active skill names 跨轮持久化——用户下一次发消息时，根据 skill name 从 registry 重新加载最新指令并注入 system prompt。不要把完整 skill instruction 长期写入 conversation metadata。
 
-### Task 7.5: 持久化 active_skills + 跨轮恢复
+### Task 7.5: 持久化 active skill names + 跨轮恢复
 
 **Files:**
-- Modify: `backend/app/agents/chat/pipeline.py`（`run_chat` 结束时持久化）
-- Modify: `backend/app/agents/chat/nodes.py`（`_step_load_context` 恢复 active_skills）
+- Modify: `backend/app/agents/chat/pipeline.py`（`run_chat` 结束时持久化 active skill names）
+- Modify: `backend/app/agents/chat/nodes.py`（`_step_load_context` 恢复 active skill names 并从 registry 加载指令）
 - Modify: `backend/app/services/chat_service.py`（conversation metadata 读写）
 - Test: `backend/tests/chat/test_react_loop.py`
 
 **背景**：当前 `active_skills` 只存在于内存中的 `ChatState`。一轮对话结束后，下一轮重新初始化 state，active_skills 丢失。需要：
-1. 在 `run_chat` 结束时，把 `active_skills` 写入 conversation metadata
-2. 在 `_step_load_context` 时，从 conversation metadata 恢复 `active_skills` 和对应的 skill 指令
+1. 在 `run_chat` 结束时，只把 `active_skill_names` 写入 conversation metadata
+2. 在 `_step_load_context` 时，从 conversation metadata 恢复 skill names，并从 skill registry 重新加载最新 skill 指令
 
-- [ ] **Step 1: 写失败测试 — 跨轮恢复 active_skills**
+- [ ] **Step 1: 写失败测试 — 从 metadata 中的 skill names 跨轮恢复 active_skills**
 
 ```python
 # tests/chat/test_react_loop.py — 新增
 class TestActiveSkillsPersistence:
-    def test_active_skills_restored_from_metadata(self):
-        """_step_load_context should restore active_skills from conversation metadata."""
-        from app.agents.chat.nodes import build_react_system_prompt
+    def test_restore_active_skills_loads_latest_instruction_from_registry(self):
+        """Restoring from metadata should load latest skill instructions by name."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
 
-        # 模拟从 conversation metadata 恢复的 state
-        state = {
-            "mode": "free_practice",
-            "interview_context": "",
-            "session_notes": "",
-            "memory_summaries": [],
-            "compressed_context": None,
-            "active_skills": ["project-deep-dive"],
-            "active_skill_instructions": [
-                {"skill_name": "project-deep-dive", "instruction": "## Project Deep Dive\nDrill 4 layers."},
-            ],
-        }
+        state = {}
+        metadata = {"active_skill_names": ["project-deep-dive"]}
 
-        prompt = build_react_system_prompt(state)
-        assert "project-deep-dive" in prompt
-        assert "Drill 4 layers" in prompt
+        mock_skill = MagicMock()
+        mock_skill.get_instruction.return_value = "## Project Deep Dive\nLatest instruction."
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_skill
+
+        _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
+
+        assert state["active_skills"] == ["project-deep-dive"]
+        assert state["active_skill_instructions"] == [
+            {"skill_name": "project-deep-dive", "instruction": "## Project Deep Dive\nLatest instruction."}
+        ]
+        mock_registry.get.assert_called_once_with("project-deep-dive")
 ```
 
 - [ ] **Step 2: 运行测试确认失败或通过**
 
 Run: `docker compose exec backend pytest backend/tests/chat/test_react_loop.py::TestActiveSkillsPersistence -v`
-Expected: 这个测试在 Phase 2 之后应该已经 PASS（build_react_system_prompt 已经支持注入）。关键是验证跨轮恢复逻辑。
+Expected: FAIL（`_restore_active_skills_from_metadata` 不存在）
 
-- [ ] **Step 3: 在 run_chat 结束时持久化 active_skills**
+- [ ] **Step 3: 在 run_chat 结束时持久化 active skill names**
 
 在 `pipeline.py` 的 `_run_pipeline()` 中，response 保存之后、记忆提取之前，加入持久化逻辑：
 
@@ -752,7 +764,7 @@ Expected: 这个测试在 Phase 2 之后应该已经 PASS（build_react_system_p
             state["response"] = response
             state["metadata"] = metadata
 
-            # 持久化 active_skills 到 conversation metadata
+            # 持久化 active skill names 到 conversation metadata
             if state.get("active_skills"):
                 await _persist_active_skills(state)
 
@@ -764,7 +776,7 @@ Expected: 这个测试在 Phase 2 之后应该已经 PASS（build_react_system_p
 
 ```python
 async def _persist_active_skills(state: ChatState) -> None:
-    """Persist active_skills to conversation metadata for cross-round recovery."""
+    """Persist active skill names to conversation metadata for cross-round recovery."""
     try:
         conversation_id = state.get("conversation_id")
         if not conversation_id:
@@ -772,40 +784,52 @@ async def _persist_active_skills(state: ChatState) -> None:
         active_skills = state.get("active_skills", [])
         if not active_skills:
             return
-        # 保存 skill 指令以便跨轮恢复
-        registry = _get_skill_registry()
-        skill_data = []
-        for name in active_skills:
-            skill = registry.get(name)
-            if skill:
-                skill_data.append({
-                    "skill_name": name,
-                    "instruction": skill.get_instruction(),
-                })
+        # 只保存 skill names；下一轮从 registry 重新加载最新 instruction
         await asyncio.to_thread(
             chat_service.update_conversation_metadata,
             conversation_id,
-            {"active_skills": skill_data},
+            {"active_skill_names": active_skills},
         )
     except Exception:
         logger.exception("Failed to persist active_skills")
 ```
 
-- [ ] **Step 4: 在 _step_load_context 恢复 active_skills**
+- [ ] **Step 4: 在 nodes.py 新增恢复 helper，并在 _step_load_context 调用**
 
-在 `nodes.py` 的 `_step_load_context` 或相关上下文加载函数中，读取 conversation metadata 并恢复：
+在 `nodes.py` 新增 helper，读取 conversation metadata 并恢复：
 
 ```python
-# 从 conversation metadata 恢复 active_skills
-metadata = conversation.get("metadata", {})
-persisted_skills = metadata.get("active_skills", [])
-if persisted_skills:
-    state["active_skills"] = [s["skill_name"] for s in persisted_skills]
-    state["active_skill_instructions"] = [
-        {"skill_name": s["skill_name"], "instruction": s["instruction"]}
-        for s in persisted_skills
-        if s.get("instruction")
-    ]
+def _restore_active_skills_from_metadata(
+    state: ChatState,
+    metadata: dict,
+    registry=None,
+) -> None:
+    """Restore active skills from persisted names and load latest instructions."""
+    persisted_skill_names = metadata.get("active_skill_names", [])
+    if not persisted_skill_names:
+        return
+    if registry is None:
+        from app.agents.chat.skills import get_default_registry
+
+        registry = get_default_registry()
+    restored_instructions = []
+    valid_skill_names = []
+    for name in persisted_skill_names:
+        skill = registry.get(name)
+        if not skill:
+            continue
+        valid_skill_names.append(name)
+        instruction = skill.get_instruction()
+        if instruction:
+            restored_instructions.append({"skill_name": name, "instruction": instruction})
+    state["active_skills"] = valid_skill_names
+    state["active_skill_instructions"] = restored_instructions
+```
+
+然后在 `_step_load_context` 或相关上下文加载函数中，读取 conversation metadata 后调用：
+
+```python
+_restore_active_skills_from_metadata(state, conversation.get("metadata", {}) or {})
 ```
 
 - [ ] **Step 5: 检查 chat_service 是否有 metadata 读写接口**
@@ -821,7 +845,7 @@ Expected: PASS
 
 ```bash
 git add backend/app/agents/chat/pipeline.py backend/app/agents/chat/nodes.py backend/app/services/chat_service.py backend/tests/chat/test_react_loop.py
-git commit -m "feat(chat): persist active_skills to conversation metadata for cross-round recovery"
+git commit -m "feat(chat): persist active skill names for cross-round recovery"
 ```
 
 ---
@@ -1114,6 +1138,13 @@ class TestAnswerCompleteHeuristic:
 
         assert _heuristic_answer_complete("你是说用 Redis 吗？") is False
         assert _heuristic_answer_complete("能不能再解释一下") is False
+
+    def test_substantive_answer_with_how_why_words_is_complete(self):
+        """Substantive answers containing 怎么/为什么 should not be misclassified."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        msg = "我是这么解决的：先分析为什么慢，再看怎么优化缓存和接口调用链路，最后做压测验证"
+        assert _heuristic_answer_complete(msg) is True
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -1129,7 +1160,7 @@ Expected: FAIL（`_heuristic_answer_complete` 不存在）
 # answer_complete 启发式判断
 _EXPLICIT_COMPLETE_MARKERS = {"就这些", "答完了", "大概就是这样", "大概就是这样吧", "说完了", "完了", "没有了"}
 _EXPLICIT_INCOMPLETE_MARKERS = {"嗯", "好的", "对", "是的", "没错", "ok", "OK"}
-_QUESTION_INDICATORS = {"？", "?", "能不能", "你是说", "怎么", "为什么", "可以再", "再解释"}
+_QUESTION_PREFIXES = ("你是说", "能不能", "可以再", "再解释", "怎么", "为什么")
 
 def _heuristic_answer_complete(message: str) -> bool:
     """Heuristic for answer_complete when LLM classification is unavailable.
@@ -1153,10 +1184,13 @@ def _heuristic_answer_complete(message: str) -> bool:
     if len(text) < 15:
         return False
 
-    # Questions
-    for q in _QUESTION_INDICATORS:
-        if q in text:
-            return False
+    # Questions / confirmations. Be conservative: full answers often contain
+    # words like "怎么" or "为什么", so only treat them as questions at the
+    # beginning or when the message ends with a question mark.
+    if text.endswith(("?", "？")):
+        return False
+    if text.startswith(_QUESTION_PREFIXES):
+        return False
 
     # Long substantive
     if len(text) >= 30:
