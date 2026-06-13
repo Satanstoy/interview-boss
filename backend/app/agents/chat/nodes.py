@@ -1588,6 +1588,70 @@ async def generate_direct_response(state: ChatState) -> AsyncGenerator[dict, Non
         yield event
 
 
+def _build_tool_strategy(state: ChatState) -> str:
+    """Build tool usage strategy guidance based on current intent and state.
+
+    核心原则：默认检索，但项目连续深挖时可直接追问（不检索）。
+    """
+    intent = state.get("intent", "chat")
+    answer_complete = state.get("answer_complete", False)
+    has_retrieved = bool(state.get("retrieved_questions"))
+    active_skills = state.get("active_skills", [])
+    is_deep_dive = "project-deep-dive" in active_skills
+
+    if intent == "interview_question" and answer_complete and not has_retrieved:
+        if is_deep_dive:
+            return (
+                "<tool_strategy>\n"
+                "当前状态：用户回答完毕，项目深挖模式。\n"
+                "建议：默认调用 search_questions 检索追问题。"
+                "但如果用户回答中包含明确的技术细节可以直接追问，也可以不检索直接追问。\n"
+                "</tool_strategy>"
+            )
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户刚回答完面试问题。\n"
+            "必须：从用户回答中提取 2-5 个技术关键词，调用 search_questions 检索追问题。\n"
+            "如果需要切换面试类型（如从项目深挖转理论），先调用 load_skill。\n"
+            "</tool_strategy>"
+        )
+    elif intent == "interview_question" and answer_complete and has_retrieved:
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户回答完毕，已有检索结果。\n"
+            "建议：直接使用已检索的题目进行追问，无需再次检索。\n"
+            "</tool_strategy>"
+        )
+    elif intent == "interview_question" and not answer_complete:
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户尚未回答完毕。\n"
+            "建议：不调用工具，等待用户完成回答或给出追问引导。\n"
+            "</tool_strategy>"
+        )
+    elif intent == "practice_request":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户请求练习。\n"
+            "必须：调用 search_questions 检索相关题目，结果不足时用 draw_questions 补充。\n"
+            "</tool_strategy>"
+        )
+    elif intent == "follow_up":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户在追问或确认。\n"
+            "建议：基于上下文直接回答，如需补充题目再调用 search_questions。\n"
+            "</tool_strategy>"
+        )
+    else:  # chat
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户在闲聊或过渡。\n"
+            "建议：不调用工具，自然回复后引导回面试。\n"
+            "</tool_strategy>"
+        )
+
+
 def build_react_system_prompt(state: ChatState) -> str:
     """Build system prompt for the ReAct loop.
 
@@ -1647,6 +1711,11 @@ def build_react_system_prompt(state: ChatState) -> str:
     catalog = build_skill_catalog()
     if catalog:
         parts.append(catalog)
+
+    # Layer 5.25: Tool strategy (intent-based guidance)
+    tool_strategy = _build_tool_strategy(state)
+    if tool_strategy:
+        parts.append(tool_strategy)
 
     # Layer 5.5: Active skill instructions (current-loop pending instructions)
     active_skill_instructions = state.get("active_skill_instructions", [])

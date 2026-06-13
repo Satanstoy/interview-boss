@@ -409,6 +409,67 @@ class TestReactLoop:
         assert "internal_marker_filtered" in caplog.text
 
 
+class TestBuildToolStrategy:
+    def test_interview_question_answer_complete_default_search(self):
+        """Should require search_questions when user completed their answer (default)."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [], "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "search_questions" in strategy
+        assert "必须" in strategy
+
+    def test_interview_question_deep_dive_allows_direct_followup(self):
+        """Project deep-dive mode: can directly follow up without search."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [], "active_skills": ["project-deep-dive"]}
+        strategy = _build_tool_strategy(state)
+        assert "search_questions" in strategy
+        assert "直接追问" in strategy or "不检索" in strategy
+
+    def test_interview_question_answer_incomplete_suggests_wait(self):
+        """Should suggest waiting when user hasn't finished answering."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "interview_question", "answer_complete": False, "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "不调用工具" in strategy or "等待" in strategy
+
+    def test_practice_request_requires_search(self):
+        """Practice requests must search (required, not suggested)."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "practice_request", "answer_complete": False, "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "search_questions" in strategy
+        assert "必须" in strategy
+
+    def test_chat_suggests_no_tools(self):
+        """Should suggest no tools for casual chat."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "chat", "answer_complete": False, "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "不调用工具" in strategy
+
+    def test_follow_up_suggests_contextual_answer(self):
+        """Should suggest contextual answer for follow-ups."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "follow_up", "answer_complete": False, "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "上下文" in strategy or "直接回答" in strategy
+
+    def test_already_retrieved_suggests_no_search(self):
+        """Should not suggest search when retrieved_questions is non-empty."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [{"id": 1}], "active_skills": []}
+        strategy = _build_tool_strategy(state)
+        assert "search_questions" not in strategy
+
+
 # ── TestBuildReactSystemPrompt ────────────────────────────
 
 
@@ -449,6 +510,45 @@ class TestBuildReactSystemPrompt:
 
         prompt = build_react_system_prompt(state)
         assert "<active_skill_instructions>" not in prompt
+
+    def test_injects_tool_strategy(self):
+        """build_react_system_prompt should inject tool strategy based on intent."""
+        from app.agents.chat.nodes import build_react_system_prompt
+
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": [],
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+        }
+
+        prompt = build_react_system_prompt(state)
+        assert "<tool_strategy>" in prompt
+        assert "search_questions" in prompt
+
+    def test_no_tool_strategy_for_chat(self):
+        """build_react_system_prompt should inject no-tools strategy for chat."""
+        from app.agents.chat.nodes import build_react_system_prompt
+
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": [],
+            "intent": "chat",
+            "answer_complete": False,
+        }
+
+        prompt = build_react_system_prompt(state)
+        assert "<tool_strategy>" in prompt
+        assert "不调用工具" in prompt
 
 
 # ── Fixtures ───────────────────────────────────────────────
