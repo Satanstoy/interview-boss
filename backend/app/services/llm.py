@@ -162,6 +162,275 @@ def _resolve_client_and_model(user_id: int = None):
     return client, LLM_MODEL, LLM_TIMEOUT, LLM_BASE_URL, _detect_provider(LLM_BASE_URL)
 
 
+# --------------- Tool Calling 基础设施 ---------------
+
+
+def _convert_tools_to_anthropic(openai_tools: list) -> list:
+    """将 OpenAI 格式 tools schema 转换为 Anthropic 格式。
+
+    OpenAI: {"type": "function", "function": {"name", "description", "parameters"}}
+    Anthropic: {"name", "description", "input_schema"}
+    """
+    anthropic_tools = []
+    for t in openai_tools:
+        func = t.get("function", t)
+        anthropic_tools.append({
+            "name": func["name"],
+            "description": func.get("description", ""),
+            "input_schema": func["parameters"],
+        })
+    return anthropic_tools
+
+
+def _convert_messages_with_tools_to_anthropic(messages: list) -> tuple[str, list]:
+    """将含 tool_calls / tool role 的 OpenAI 消息转换为 Anthropic 格式。
+
+    处理:
+    - assistant.content + assistant.tool_calls → assistant.content [text_block, tool_use_block, ...]
+    - role=tool → role=user, content=[tool_result_block]
+    - 连续的 tool result 合并为单条 user 消息（Anthropic 要求 user/assistant 严格交替）
+    - 支持 is_error 标记（tool 执行失败时传给 LLM）
+
+    Returns:
+        (system_text, anthropic_messages)
+    """
+    system_text = ""
+    anthropic_messages = []
+
+    for msg in messages:
+        role = msg["role"]
+
+        if role == "system":
+            system_text += (
+                msg["content"]
+                if isinstance(msg["content"], str)
+                else str(msg["content"])
+            ) + "\n"
+
+        elif role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                # 有 tool_calls：构建 content blocks
+                content_blocks = []
+                if msg.get("content"):
+                    content_blocks.append({"type": "text", "text": msg["content"]})
+                for tc in tool_calls:
+                    arguments = tc["function"]["arguments"]
+                    if isinstance(arguments, str):
+                        arguments = json.loads(arguments)
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "input": arguments,
+                    })
+                anthropic_messages.append({"role": "assistant", "content": content_blocks})
+            elif msg.get("content"):
+                # 无 tool_calls：保持原样（兼容旧逻辑）
+                anthropic_messages.append({"role": "assistant", "content": msg["content"]})
+
+        elif role == "tool":
+            # OpenAI tool result → Anthropic user message with tool_result block
+            tool_result_block = {
+                "type": "tool_result",
+                "tool_use_id": msg["tool_call_id"],
+                "content": msg["content"],
+            }
+            if msg.get("is_error"):
+                tool_result_block["is_error"] = True
+            anthropic_messages.append({
+                "role": "user",
+                "content": [tool_result_block],
+            })
+
+        elif role == "user":
+            content = msg["content"]
+            # 处理 multimodal content
+            if isinstance(content, list):
+                anthropic_blocks = []
+                for block in content:
+                    if block.get("type") == "text":
+                        anthropic_blocks.append({"type": "text", "text": block["text"]})
+                    elif block.get("type") == "image_url":
+                        url_data = block.get("image_url", {})
+                        url = url_data.get("url", "") if isinstance(url_data, dict) else url_data
+                        if url.startswith("data:"):
+                            header, b64data = url.split(",", 1)
+                            media_type = header.split(";")[0].replace("data:", "")
+                            anthropic_blocks.append({
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": media_type, "data": b64data},
+                            })
+                        else:
+                            anthropic_blocks.append({"type": "text", "text": f"[图片链接: {url}]"})
+                content = anthropic_blocks
+            anthropic_messages.append({"role": "user", "content": content})
+
+    # Anthropic 严格要求 user/assistant 交替，合并连续的 user 消息
+    # （多个 tool_result 时 OpenAI 会产生连续 role=tool → 转为连续 user，需合并）
+    merged = []
+    for msg in anthropic_messages:
+        if merged and merged[-1]["role"] == "user" and msg["role"] == "user":
+            prev_content = merged[-1]["content"]
+            new_content = msg["content"]
+            if isinstance(prev_content, str):
+                prev_content = [{"type": "text", "text": prev_content}]
+            if isinstance(new_content, str):
+                new_content = [{"type": "text", "text": new_content}]
+            merged[-1]["content"] = prev_content + new_content
+        else:
+            merged.append(msg)
+
+    return system_text.strip(), merged
+
+
+def _extract_tool_calls(response, provider: str) -> list[dict] | None:
+    """从 LLM 响应中提取 tool calls，统一为 OpenAI 格式。
+
+    Returns:
+        [{"id": str, "function": {"name": str, "arguments": str}}] 或 None
+    """
+    if provider == "anthropic":
+        tool_calls = []
+        for block in response.content:
+            if hasattr(block, "type") and block.type == "tool_use":
+                tool_calls.append({
+                    "id": block.id,
+                    "function": {
+                        "name": block.name,
+                        "arguments": json.dumps(block.input, ensure_ascii=False),
+                    },
+                })
+        return tool_calls or None
+
+    # OpenAI
+    msg = response.choices[0].message
+    if msg.tool_calls:
+        return [
+            {
+                "id": tc.id,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in msg.tool_calls
+        ]
+    return None
+
+
+def make_tool_result_message(tool_call_id: str, result: str) -> dict:
+    """构造 tool result 消息（OpenAI 格式）。
+
+    传给 _convert_messages_with_tools_to_anthropic 时会自动转为 Anthropic 格式。
+    """
+    return {"role": "tool", "tool_call_id": tool_call_id, "content": result}
+
+
+@retry(
+    stop=stop_after_attempt(4) | stop_after_delay(60),
+    wait=wait_exponential(multiplier=2, min=3, max=15),
+    retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
+    before_sleep=lambda retry_state: logger.warning(
+        f"llm_with_tools 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
+    ),
+)
+async def _llm_with_tools_call(
+    resolved_client, model, messages, tools, provider, max_tokens, temperature, system_text
+) -> dict:
+    """带重试的 tool calling LLM 调用（内部函数）。"""
+    if provider == "anthropic":
+        anthropic_tools = _convert_tools_to_anthropic(tools) if tools else []
+        call_kwargs = dict(
+            model=model,
+            system=system_text or "你是一个面试官。",
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if anthropic_tools:
+            call_kwargs["tools"] = anthropic_tools
+        response = await resolved_client.messages.create(**call_kwargs)
+
+        tool_calls = _extract_tool_calls(response, "anthropic")
+        text_content = _extract_anthropic_text(response)
+
+        # 统一 finish_reason 为 OpenAI 术语，并检查 max_tokens 截断
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason == "max_tokens":
+            finish_reason = "length"
+        elif tool_calls:
+            finish_reason = "tool_calls"
+        else:
+            finish_reason = "stop"
+
+        return {
+            "content": text_content if text_content else None,
+            "tool_calls": tool_calls,
+            "finish_reason": finish_reason,
+        }
+
+    # OpenAI path
+    call_kwargs = dict(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    if tools:
+        call_kwargs["tools"] = tools
+    response = await resolved_client.chat.completions.create(**call_kwargs)
+
+    msg = response.choices[0].message
+    tool_calls = _extract_tool_calls(response, "openai")
+    return {
+        "content": msg.content,
+        "tool_calls": tool_calls,
+        "finish_reason": response.choices[0].finish_reason,
+    }
+
+
+async def llm_with_tools(
+    messages: list,
+    tools: list,
+    user_id: int = None,
+    **kwargs,
+) -> dict:
+    """带 tool calling 的 LLM 调用（自动适配 OpenAI / Anthropic，带指数退避重试）。
+
+    Args:
+        messages: OpenAI 格式消息列表
+        tools: OpenAI 格式 tools schema
+        user_id: 用户 ID（用于获取用户配置的 LLM client）
+
+    Returns:
+        {
+            "content": str | None,   # LLM 文本回复（tool calling 时可能为 None）
+            "tool_calls": list | None,  # [{"id", "function": {"name", "arguments"}}]
+            "finish_reason": "stop" | "tool_calls" | "length",
+        }
+    """
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
+        user_id
+    )
+    model = kwargs.pop("model", None) or model
+    max_tokens = kwargs.get("max_tokens", 4096)
+    temperature = kwargs.get("temperature", 0.7)
+
+    # Anthropic 需要预先转换消息格式
+    if provider == "anthropic":
+        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(messages)
+        return await _llm_with_tools_call(
+            resolved_client, model, anthropic_msgs, tools, provider,
+            max_tokens, temperature, system_text,
+        )
+
+    return await _llm_with_tools_call(
+        resolved_client, model, messages, tools, provider,
+        max_tokens, temperature, None,
+    )
+
+
 # --------------- JSON 提取 ---------------
 
 
