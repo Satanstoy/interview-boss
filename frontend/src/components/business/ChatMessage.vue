@@ -63,6 +63,30 @@
 
       <!-- Citations: Sources -->
       <div v-if="hasAnyReference" class="mt-4 pt-4 border-t border-border/50">
+        <!-- Selected question -->
+        <div v-if="selectedQuestion" class="mb-3">
+          <div class="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <BookOpen :size="14" class="text-primary" />
+            <span class="font-medium">本轮采用题</span>
+            <span v-if="message.metadata?.question_source" class="text-muted-foreground">
+              {{ message.metadata.question_source === 'draw' ? '抽题' : message.metadata.question_source === 'search' ? '检索' : '上下文追问' }}
+            </span>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+            <div class="size-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="text-xs font-bold text-primary">{{ selectedQuestion.cat1?.[0] || 'Q' }}</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-foreground">{{ selectedQuestion.question }}</div>
+              <div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                <span v-if="selectedQuestion.company" class="font-medium">{{ selectedQuestion.company }}</span>
+                <span v-if="selectedQuestion.round">{{ selectedQuestion.round }}</span>
+                <span v-if="selectedQuestion.cat1" class="text-primary">[{{ selectedQuestion.cat1 }}]</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Basis questions (new format) -->
         <div v-if="basisQuestions.length" class="mb-3">
           <button 
@@ -181,10 +205,14 @@ const hasAnyReference = computed(() => {
   const m = props.message.metadata
   // Only show references when should_show_references=true AND selected_basis_questions non-empty
   if (m?.should_show_references && m?.selected_basis_questions?.length) return true
+  if (m?.selected_question) return true
   if (m?.retrieved_questions?.length) return true
+  if (m?.candidate_questions?.length) return true
   // Resume/JD refs
   return m?.resume_ref || m?.jd_ref
 })
+
+const selectedQuestion = computed(() => props.message.metadata?.selected_question || null)
 
 const basisQuestions = computed(() => {
   const m = props.message.metadata
@@ -195,9 +223,10 @@ const basisQuestions = computed(() => {
 
 const retrievedQuestions = computed(() => {
   const m = props.message.metadata
-  const retrieved = m?.retrieved_questions || []
+  const retrieved = m?.candidate_questions || m?.retrieved_questions || []
   if (!retrieved.length) return []
   const basisIds = new Set((m?.selected_basis_questions || []).map(q => q.id))
+  if (m?.selected_question?.id) basisIds.add(m.selected_question.id)
   return retrieved.filter(q => !basisIds.has(q.id))
 })
 

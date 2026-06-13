@@ -378,6 +378,10 @@ const showNewChat = ref(false)
 const messagesContainer = ref(null)
 const inputRef = ref(null)
 const pendingRetrievedQuestions = ref(null)
+const pendingCandidateQuestions = ref(null)
+const pendingSelectedQuestion = ref(null)
+const pendingQuestionSource = ref(null)
+const pendingQuestionSourceReason = ref(null)
 const pendingResumeRef = ref(null)
 const pendingJdRef = ref(null)
 const pendingInitialMessage = ref('')
@@ -622,6 +626,10 @@ async function handleSend() {
   isSending.value = true
   streamingContent.value = ''
   pendingRetrievedQuestions.value = null
+  pendingCandidateQuestions.value = null
+  pendingSelectedQuestion.value = null
+  pendingQuestionSource.value = null
+  pendingQuestionSourceReason.value = null
   pendingBasisType.value = null
   pendingBasisQuestionIds.value = []
   pendingBasisConfidence.value = 0
@@ -669,6 +677,12 @@ async function handleSend() {
           scrollToBottom()
         } else if (event.type === 'retrieved') {
           pendingRetrievedQuestions.value = event.questions || []
+        } else if (event.type === 'candidates') {
+          pendingCandidateQuestions.value = event.questions || []
+        } else if (event.type === 'selected_question') {
+          pendingSelectedQuestion.value = event.question || null
+          pendingQuestionSource.value = event.source || null
+          pendingQuestionSourceReason.value = event.reason || null
         } else if (event.type === 'resume_ref') {
           pendingResumeRef.value = event.name || null
         } else if (event.type === 'jd_ref') {
@@ -692,6 +706,17 @@ async function handleSend() {
       const metadata = {}
       if (pendingRetrievedQuestions.value?.length > 0) {
         metadata.retrieved_questions = pendingRetrievedQuestions.value
+      }
+      if (pendingCandidateQuestions.value?.length > 0) {
+        metadata.candidate_questions = pendingCandidateQuestions.value
+        if (!metadata.retrieved_questions) {
+          metadata.retrieved_questions = pendingCandidateQuestions.value
+        }
+      }
+      if (pendingSelectedQuestion.value) {
+        metadata.selected_question = pendingSelectedQuestion.value
+        metadata.question_source = pendingQuestionSource.value
+        metadata.question_source_reason = pendingQuestionSourceReason.value
       }
       if (pendingResumeRef.value) {
         metadata.resume_ref = pendingResumeRef.value
@@ -723,6 +748,10 @@ async function handleSend() {
         created_at: new Date().toISOString(),
       })
       pendingRetrievedQuestions.value = null
+      pendingCandidateQuestions.value = null
+      pendingSelectedQuestion.value = null
+      pendingQuestionSource.value = null
+      pendingQuestionSourceReason.value = null
       pendingResumeRef.value = null
       pendingJdRef.value = null
       pendingInsights.value = []

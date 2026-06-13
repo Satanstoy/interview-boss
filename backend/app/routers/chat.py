@@ -251,6 +251,11 @@ async def send_message(
                 elif event_type == "done":
                     meta = event.get("metadata", {})
 
+                    if meta.get("candidate_questions"):
+                        yield f"data: {json.dumps({'type': 'candidates', 'questions': meta.get('candidate_questions', [])}, ensure_ascii=False)}\n\n"
+                    if "selected_question" in meta:
+                        yield f"data: {json.dumps({'type': 'selected_question', 'question': meta.get('selected_question'), 'source': meta.get('question_source', ''), 'reason': meta.get('question_source_reason', '')}, ensure_ascii=False)}\n\n"
+
                     basis_type = meta.get("basis_type")
                     if basis_type:
                         yield f"data: {json.dumps({'type': 'basis', 'basis_type': basis_type, 'basis_question_ids': meta.get('basis_question_ids', []), 'basis_confidence': meta.get('basis_confidence', 0.0), 'should_show_references': meta.get('should_show_references', False), 'selected_basis_questions': meta.get('selected_basis_questions', []), 'resume_ref': meta.get('resume_ref', ''), 'jd_ref': meta.get('jd_ref', '')}, ensure_ascii=False)}\n\n"
