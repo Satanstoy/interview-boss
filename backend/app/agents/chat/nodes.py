@@ -35,6 +35,7 @@ COMPRESSED_BUDGET = 1200  # ~300 tokens
 RETRIEVED_BUDGET = 1000  # ~250 tokens
 RERANK_CANDIDATE_LIMIT = 15
 RERANK_RETURN_LIMIT = 5
+PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
 
 
 def _count_chars(messages: list[dict]) -> int:
@@ -103,7 +104,16 @@ def _restore_active_skills_from_metadata(
     of the previous round.  Loads fresh instructions from the registry so
     edits to SKILL.md are picked up immediately.
     """
-    persisted_skill_names = metadata.get("active_skill_names", [])
+    persisted_skill_names = metadata.get("persistent_skill_names")
+    if persisted_skill_names is None:
+        # Older conversations persisted every loaded skill. Only restore skills
+        # that are safe to carry across turns; interview modes such as
+        # algorithm-coding/project-deep-dive must be decided again each turn.
+        persisted_skill_names = [
+            name
+            for name in metadata.get("active_skill_names", [])
+            if name in PERSISTENT_SKILLS
+        ]
     if not persisted_skill_names:
         return
     if registry is None:
@@ -114,6 +124,8 @@ def _restore_active_skills_from_metadata(
     for name in persisted_skill_names:
         skill = registry.get(name)
         if not skill:
+            continue
+        if name not in PERSISTENT_SKILLS:
             continue
         valid_skill_names.append(name)
         instruction = skill.get_instruction()
@@ -1605,7 +1617,8 @@ def _build_tool_strategy(state: ChatState) -> str:
                 "<tool_strategy>\n"
                 "当前状态：用户回答完毕，项目深挖模式。\n"
                 "建议：默认调用 search_questions 检索追问题。"
-                "但如果用户回答中包含明确的技术细节可以直接追问，也可以不检索直接追问。\n"
+                "但如果用户回答中包含明确的技术细节，可以不检索、直接基于对话追问；"
+                "这种情况下不要声称问题来自题库，也不要引用候选题作为依据。\n"
                 "</tool_strategy>"
             )
         return (
@@ -1671,6 +1684,8 @@ def build_react_system_prompt(state: ChatState) -> str:
     session_notes = state.get("session_notes", "")
     memory_summaries = state.get("memory_summaries", [])
     compressed = state.get("compressed_context")
+    total_message_count = len(state.get("message_history", []))
+    interview_phase = _determine_interview_phase(total_message_count)
 
     # Layer 1: Base prompt
     if mode == "jd_resume" and state.get("jd_text"):
@@ -1678,13 +1693,13 @@ def build_react_system_prompt(state: ChatState) -> str:
             jd_text=state.get("jd_text", ""),
             resume_text=state.get("resume_text", ""),
             interview_context=interview_context,
-            interview_phase="面试进行中",
+            interview_phase=interview_phase,
             basis_guidance="",
         )
     else:
         base = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
             interview_context=interview_context,
-            interview_phase="面试进行中",
+            interview_phase=interview_phase,
             memory_context="",
             basis_guidance="",
         )
@@ -1717,7 +1732,16 @@ def build_react_system_prompt(state: ChatState) -> str:
     if tool_strategy:
         parts.append(tool_strategy)
 
-    # Layer 5.5: Active skill instructions (current-loop pending instructions)
+    # Layer 5.5: Active skill instructions (loaded from registry for persistence)
+    active_skill_names = state.get("active_skills", [])
+    if active_skill_names:
+        skill_registry = get_default_registry()
+        from app.agents.shared.skills.builder import build_skill_prompt as _build_sp
+        skill_instr = _build_sp(skill_registry, active_skill_names)
+        if skill_instr:
+            parts.append(skill_instr)
+
+    # Layer 5.6: Mid-loop pending skill instructions (not yet in active_skills)
     from html import escape as _html_escape
 
     active_skill_instructions = state.get("active_skill_instructions", [])

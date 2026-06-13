@@ -62,7 +62,11 @@ class ChatState(TypedDict, total=False):
     question_type: Optional[
         str
     ]  # 题目类型: project_followup / knowledge_probe / new_question
-    retrieved_questions: list[dict]  # FTS5 检索到的相关题目
+    retrieved_questions: list[dict]  # 兼容旧字段：最近一次检索/抽题候选
+    candidate_questions: list[dict]  # 本轮工具得到的候选题（不代表实际采用）
+    selected_question: Optional[dict]  # 本轮最终采用的题目（如能从候选中确认）
+    question_source: Optional[str]  # search | draw | conversation | generated
+    question_source_reason: Optional[str]  # 简短说明采用/未采用候选题的原因
 
     # === 输出 ===
     response: str  # AI 面试官回复

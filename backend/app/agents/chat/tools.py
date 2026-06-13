@@ -139,6 +139,7 @@ DRAW_QUESTIONS_SCHEMA = {
             "【何时使用】\n"
             "- search_questions 结果不足或为空时补充\n"
             "- 用户请求「随机出题」「来几道题」\n"
+            "- 用户要求写代码、进入算法题环节，或需要全新题目\n"
             "- 需要跨话题混合出题\n\n"
             "【何时不用】\n"
             "- 已有未使用的检索结果\n"
@@ -157,6 +158,29 @@ DRAW_QUESTIONS_SCHEMA = {
                     "type": "string",
                     "enum": ["easy", "medium", "hard"],
                     "description": "难度筛选。不指定则根据用户水平自动加权。",
+                },
+                "cat1": {
+                    "type": "string",
+                    "description": "一级分类筛选，如 B.Agent与LLM应用、E.算法与数据结构。可选。",
+                },
+                "cat2": {
+                    "type": "string",
+                    "description": "二级分类筛选，如 E2.算法手撕、B2.RAG系统设计。可选。",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "希望抽取的主题关键词，如 LRU、RAG、MCP。可选。",
+                },
+                "question_type": {
+                    "type": "string",
+                    "enum": [
+                        "algorithm_coding",
+                        "project_followup",
+                        "knowledge_probe",
+                        "system_design",
+                        "hr",
+                    ],
+                    "description": "抽题场景。algorithm_coding 必须用于手撕代码题。",
                 },
             },
         },
@@ -283,7 +307,10 @@ async def _execute_search_questions(args: dict, state: ChatState) -> str:
             search_args["exclude_ids"] = exclude_ids
 
     results = await asyncio.to_thread(_hybrid_search, **search_args)
+    state["candidate_questions"] = results
     state["retrieved_questions"] = results
+    state["question_source"] = "search"
+    state["question_source_reason"] = "search_questions returned candidate questions"
     return json.dumps(results[:3])
 
 
@@ -302,6 +329,9 @@ async def _execute_draw_questions(args: dict, state: ChatState) -> str:
     }
     if args.get("difficulty"):
         draw_args["difficulty"] = args["difficulty"]
+    for key in ("cat1", "cat2", "topic", "question_type"):
+        if args.get(key):
+            draw_args[key] = args[key]
     if state.get("retrieved_questions"):
         exclude_ids = {
             q.get("id")
@@ -312,5 +342,8 @@ async def _execute_draw_questions(args: dict, state: ChatState) -> str:
             draw_args["exclude_ids"] = exclude_ids
 
     results = await asyncio.to_thread(_draw_questions, **draw_args)
+    state["candidate_questions"] = results
     state["retrieved_questions"] = results
+    state["question_source"] = "draw"
+    state["question_source_reason"] = "draw_questions returned candidate questions"
     return json.dumps(results)

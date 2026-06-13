@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import AsyncGenerator
@@ -64,6 +65,7 @@ _INTERNAL_REACT_MARKERS = frozenset(
 )
 
 _ALLOWED_TOOL_NAMES = frozenset({"load_skill", "search_questions", "draw_questions"})
+_PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
 
 
 def validate_tool_call(tool_call: dict) -> dict:
@@ -150,6 +152,172 @@ def _extract_round(question: dict) -> str:
     if sources and isinstance(sources, list):
         return sources[0].get("round", "")
     return ""
+
+
+def _public_question(question: dict | None) -> dict | None:
+    if not question:
+        return None
+    return {
+        "id": question.get("id"),
+        "question": question.get("question", ""),
+        "cat1": question.get("cat1", ""),
+        "cat2": question.get("cat2", ""),
+        "company": _extract_company(question),
+        "round": _extract_round(question),
+    }
+
+
+def _tokenize_for_overlap(text: str) -> set[str]:
+    lowered = (text or "").lower()
+    tokens = set(re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{1,}", lowered))
+    tokens.update(re.findall(r"[\u4e00-\u9fff]{2,4}", lowered))
+    return {t for t in tokens if len(t.strip()) >= 2}
+
+
+def _normalize_question_text(text: str) -> str:
+    return re.sub(r"[\s`'\"“”‘’。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or "").lower()
+
+
+def _infer_selected_question(
+    response_text: str,
+    basis_question_ids: list[int],
+    candidates: list[dict],
+) -> tuple[dict | None, str]:
+    if not candidates:
+        return None, "no_candidate_questions"
+
+    if basis_question_ids:
+        basis_id_set = set(basis_question_ids)
+        for q in candidates:
+            if q.get("id") in basis_id_set:
+                return q, "basis_question_id"
+
+    response_norm = _normalize_question_text(response_text)
+    if not response_norm:
+        return None, "response_has_no_text"
+
+    for q in candidates:
+        question_norm = _normalize_question_text(str(q.get("question") or ""))
+        if question_norm and (
+            question_norm in response_norm
+            or (
+                len(question_norm) >= 12
+                and response_norm in question_norm
+                and len(response_norm) / max(len(question_norm), 1) >= 0.75
+            )
+        ):
+            return q, "question_text_match"
+    return None, "candidate_not_explicitly_used"
+
+
+def _is_bare_coding_prompt(text: str, state: ChatState) -> bool:
+    stripped = (text or "").strip()
+    if len(stripped) > 40:
+        return False
+    wants_coding = (
+        "algorithm-coding" in state.get("active_skills", [])
+        or state.get("question_type") == "algorithm_coding"
+        or bool(re.search(r"(写代码|手撕|代码题|coding)", stripped, re.I))
+    )
+    if not wants_coding:
+        return False
+    return bool(re.search(r"(写代码|手撕|代码题|coding)", stripped, re.I))
+
+
+def _fallback_coding_question(state: ChatState) -> str:
+    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
+    coding_candidate = None
+    for q in candidates:
+        haystack = " ".join(
+            str(q.get(k) or "") for k in ("question", "cat1", "cat2", "tags")
+        )
+        if re.search(r"(算法|代码|手撕|LRU|二分|链表|栈|队列|动态规划)", haystack, re.I):
+            coding_candidate = q
+            break
+    if coding_candidate:
+        state["selected_question"] = coding_candidate
+        state["question_source_reason"] = "fallback_selected_coding_candidate"
+        return (
+            f"来写一道代码题：{coding_candidate.get('question', '')}\n\n"
+            "请直接写代码，并说明你的数据结构选择、关键边界条件，以及时间和空间复杂度。"
+        )
+    state["question_source"] = state.get("question_source") or "generated"
+    state["question_source_reason"] = "fallback_generated_coding_question"
+    return (
+        "来写一道代码题：实现一个 LRU Cache，支持 get(key) 和 put(key, value) 两个操作，要求平均 O(1) 时间复杂度。\n\n"
+        "请直接写代码，并说明你为什么选择哈希表加双向链表，以及 capacity 为 0、更新已有 key、淘汰尾部节点这些边界情况怎么处理。"
+    )
+
+
+def _ensure_final_answer_quality(text: str, state: ChatState) -> str:
+    if _is_bare_coding_prompt(text, state):
+        logger.warning(
+            "ReAct trace: event=bare_coding_prompt_fallback conversation_id=%s",
+            state.get("conversation_id"),
+        )
+        return _fallback_coding_question(state)
+    return text
+
+
+def _fallback_react_answer(state: ChatState, reason: str) -> str:
+    """Return a safe interviewer turn when ReAct/tool/final generation fails."""
+    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
+    if candidates:
+        selected = candidates[0]
+        state["selected_question"] = selected
+        state["question_source"] = state.get("question_source") or "search"
+        state["question_source_reason"] = f"fallback_after_{reason}"
+        return (
+            f"我们先收束到一道具体题：{selected.get('question', '')}\n\n"
+            "你不用展开太泛，直接说核心思路、关键取舍，以及你会怎么验证这个方案。"
+        )
+
+    state["question_source"] = "conversation"
+    state["question_source_reason"] = f"fallback_after_{reason}"
+    keywords = state.get("keywords") or []
+    topic = "、".join(keywords[:3]) if keywords else "你刚才提到的项目"
+    return (
+        f"我们先围绕「{topic}」继续追问。请你挑一个最核心的模块，"
+        "说明它的输入输出、关键流程、主要取舍，以及你是怎么验证效果的。"
+    )
+
+
+def _last_assistant_message(state: ChatState) -> str:
+    for msg in reversed(state.get("message_history", []) or []):
+        if msg.get("role") == "assistant":
+            return str(msg.get("content") or "")
+    return ""
+
+
+def _looks_like_candidate_question(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if stripped.endswith(("?", "？")):
+        return True
+    return bool(re.search(r"(想问|请问|了解一下|团队|实习生|培养|业务|落地)", stripped))
+
+
+def _forced_closing_response(state: ChatState) -> str:
+    """Hard-stop overlong interviews so ReAct cannot drift back to tech rounds."""
+    message_count = len(state.get("message_history", []) or [])
+    if message_count <= 44:
+        return ""
+
+    state["question_source"] = "conversation"
+    state["question_source_reason"] = "forced_closing_by_message_count"
+
+    last_assistant = _last_assistant_message(state)
+    user_message = state.get("user_message", "")
+    if "你有什么想问" in last_assistant or _looks_like_candidate_question(user_message):
+        return (
+            "这个问题简单回应一下：真实业务里的 Agent 落地，团队通常最看重稳定性和可评估性，"
+            "工具调用、权限边界、状态管理和业务系统集成都要能闭环。实习生一般会从一个可控模块切入，"
+            "比如评测体系、badcase 分析、某个工具接入或一条业务链路优化。\n\n"
+            "今天的模拟面试就到这里。感谢你的时间，后续可以根据刚才暴露的问题继续针对性复盘。"
+        )
+
+    return "面试时间差不多了，技术问题先到这里。你有什么想问我们的吗？"
 
 
 def _sanitize_error_message(e: Exception) -> str:
@@ -339,6 +507,7 @@ async def _stream_final_answer(
     final_text = "".join(chunks)
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
+    final_text = _ensure_final_answer_quality(final_text, state)
 
     for event in buffered_events:
         yield event
@@ -352,6 +521,7 @@ def _final_answer_events_from_text(
 ) -> list[dict]:
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
+    final_text = _ensure_final_answer_quality(final_text, state)
     if not final_text:
         return []
     return [{"type": "chunk", "content": final_text}]
@@ -378,6 +548,7 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     parsed = _parse_basis_from_response(response_text)
     clean_response = parsed.get("clean_response", response_text)
     retrieved = state.get("retrieved_questions", []) or []
+    candidates = state.get("candidate_questions") or retrieved
     retrieved_ids = {q.get("id") for q in retrieved if q.get("id")}
 
     basis = validate_basis(parsed, retrieved_ids)
@@ -453,6 +624,39 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             for q in basis_qs
         ]
 
+    selected_question, selected_reason = _infer_selected_question(
+        clean_response,
+        basis["basis_question_ids"],
+        candidates,
+    )
+    if not selected_question and state.get("selected_question"):
+        selected_question = state.get("selected_question")
+        selected_reason = state.get("question_source_reason") or "state_selected_question"
+
+    if selected_question:
+        state["selected_question"] = selected_question
+        metadata["selected_question"] = _public_question(selected_question)
+        metadata["question_source"] = state.get("question_source") or "search"
+        metadata["question_source_reason"] = selected_reason
+    else:
+        source = state.get("question_source")
+        metadata["selected_question"] = None
+        metadata["question_source"] = (
+            "conversation" if source in {"search", "draw"} else (source or "conversation")
+        )
+        metadata["question_source_reason"] = (
+            state.get("question_source_reason")
+            if source not in {"search", "draw"}
+            else "candidate_questions_not_explicitly_used"
+        )
+
+    if candidates:
+        metadata["candidate_questions"] = [
+            _public_question(q)
+            for q in candidates[:3]
+            if _public_question(q) is not None
+        ]
+
     if state.get("resume_summary") and _response_references_resume(
         clean_response, state["resume_summary"]
     ):
@@ -504,6 +708,10 @@ def _initial_state(
         "question_type": None,
         "answer_complete": False,
         "retrieved_questions": [],
+        "candidate_questions": [],
+        "selected_question": None,
+        "question_source": None,
+        "question_source_reason": None,
         "selected_basis_questions": [],
         "rerank_metadata": {},
         "response": "",
@@ -663,22 +871,28 @@ MAX_REACT_STEPS = 5
 
 
 async def _persist_active_skills(state: ChatState) -> None:
-    """Persist active skill names to conversation metadata for cross-round recovery.
+    """Persist only cross-turn skills to conversation metadata.
 
-    Only skill names are persisted (not full instructions). On next round,
-    instructions are reloaded from the skill registry so edits are picked up.
+    Mode skills such as algorithm-coding/project-deep-dive are turn-scoped; if
+    they are persisted, the next unrelated turn can inherit the wrong mode.
     """
     try:
         conversation_id = state.get("conversation_id")
         if not conversation_id:
             return
-        active_skills = state.get("active_skills", [])
-        if not active_skills:
-            return
+        active_skills = [
+            name
+            for name in state.get("active_skills", [])
+            if name in _PERSISTENT_SKILLS
+        ]
         await asyncio.to_thread(
             chat_service.update_conversation_metadata,
             conversation_id,
-            {"active_skill_names": active_skills},
+            {
+                "persistent_skill_names": active_skills,
+                "active_skill_names": active_skills,
+                "last_turn_skills": state.get("active_skills", []),
+            },
         )
     except Exception:
         logger.exception("Failed to persist active_skills")
@@ -693,6 +907,13 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     3. ReAct loop: LLM calls tools or answers directly
     4. Stream final answer
     """
+    forced_closing = _forced_closing_response(state)
+    if forced_closing:
+        _emit({"type": "step", "step": "closing", "message": "正在收尾面试..."})
+        yield {"type": "chunk", "content": forced_closing}
+        yield {"type": "done"}
+        return
+
     # 1. Build system prompt
     system_prompt = build_react_system_prompt(state)
     state["active_skill_instructions"] = []  # consumed; skills baked into system prompt
@@ -893,12 +1114,28 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
     # 4. Stream final answer
     _emit({"type": "step", "step": "generating", "message": "正在生成回答..."})
-    if final_answer_text:
-        for event in _final_answer_events_from_text(final_answer_text, state):
-            yield event
-    else:
-        async for event in _stream_final_answer(messages, state):
-            yield event
+    try:
+        if stop_reason == "max_seconds":
+            yield {
+                "type": "chunk",
+                "content": _fallback_react_answer(state, stop_reason),
+            }
+        elif final_answer_text:
+            for event in _final_answer_events_from_text(final_answer_text, state):
+                yield event
+        else:
+            async for event in _stream_final_answer(messages, state):
+                yield event
+    except Exception as e:
+        logger.exception(
+            "ReAct trace: event=final_answer_failed conversation_id=%s reason=%s",
+            state.get("conversation_id"),
+            type(e).__name__,
+        )
+        yield {
+            "type": "chunk",
+            "content": _fallback_react_answer(state, type(e).__name__),
+        }
 
     yield {"type": "done"}
 
@@ -964,9 +1201,8 @@ async def run_chat(
             state["response"] = response
             state["metadata"] = metadata
 
-            # 持久化 active skill names 到 conversation metadata
-            if state.get("active_skills"):
-                await _persist_active_skills(state)
+            # Persist/clear cross-turn skills so turn-scoped modes do not stick.
+            await _persist_active_skills(state)
 
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
