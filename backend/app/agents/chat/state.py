@@ -75,21 +75,9 @@ class ChatState(TypedDict, total=False):
     should_show_references: bool  # 是否在前端显示参考信息
 
     # === Skills ===
-    active_skills: list[str]  # 当前激活的 skill 名称列表
-    suppressed_skills: list[str]  # 被策略抑制的 skill 名称列表
-    effective_skills: list[str]  # 实际注入 prompt 的 skill 名称列表
-    active_skill_strategy_rules: dict  # active skills 的结构化策略规则
-    skill_decision: dict  # 统一 skill 决策输出，供路由和日志使用
+    active_skills: list[str]  # 当前激活的 skill 名称列表（用于 prompt 注入）
+    active_skill_instructions: list[dict]  # [{"skill_name": str, "instruction": str}] 当前 ReAct loop 待注入 system prompt；跨轮只持久化 skill_name
 
-    # === 面试策略（由 skill_strategist 节点产出） ===
-    strategy: str  # "deep_dive" | "topic_shift" | "clarification"
-    tool_policy: str  # "none" | "retrieve_related" | "draw_question"
-    strategy_reason: str  # 策略选择原因
-    strategy_target_topic: str  # 目标话题
-    strategy_preferred_question_type: str  # preferred question type override
-    strategy_should_retrieve: bool  # 是否需要检索
-    strategy_rerank_goal: str  # rerank 优化目标
-    drawn_questions: list[dict]  # 随机/加权抽题得到的题目
-    selected_basis_questions: list[dict]  # 本轮真正展示给前端的依据题目
-    rerank_metadata: dict  # LLM rerank 结构化结果
-    next_question_plan: dict  # 本轮生成前确定的出题计划
+    # === 检索元数据 ===
+    retrieved_questions: list[dict]  # RAG 检索到的相关题目
+    rerank_metadata: dict  # Rerank 结构化结果
