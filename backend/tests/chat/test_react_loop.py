@@ -34,45 +34,58 @@ async def _mock_stream_strings(*chunks: str):
 
 
 class TestActiveSkillsPersistence:
-    def test_restore_active_skills_loads_latest_instruction_from_registry(self):
-        """Restoring from metadata should load latest skill instructions by name."""
+    def test_restore_only_persistent_skills_from_metadata(self):
+        """Restoring should ignore turn-scoped mode skills."""
         from app.agents.chat.nodes import _restore_active_skills_from_metadata
 
         state = {}
-        metadata = {"active_skill_names": ["project-deep-dive"]}
+        metadata = {"persistent_skill_names": ["interview-rhythm"], "active_skill_names": ["project-deep-dive"]}
 
         mock_skill = MagicMock()
-        mock_skill.get_instruction.return_value = "## Project Deep Dive\nLatest instruction."
+        mock_skill.get_instruction.return_value = "## Interview Rhythm\nLatest instruction."
         mock_registry = MagicMock()
         mock_registry.get.return_value = mock_skill
 
         _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
 
-        assert state["active_skills"] == ["project-deep-dive"]
+        assert state["active_skills"] == ["interview-rhythm"]
         assert state["active_skill_instructions"] == [
-            {"skill_name": "project-deep-dive", "instruction": "## Project Deep Dive\nLatest instruction."}
+            {"skill_name": "interview-rhythm", "instruction": "## Interview Rhythm\nLatest instruction."}
         ]
-        mock_registry.get.assert_called_once_with("project-deep-dive")
+        mock_registry.get.assert_called_once_with("interview-rhythm")
 
     def test_restore_skips_unknown_skills(self):
         """Unknown skill names in metadata should be silently ignored."""
         from app.agents.chat.nodes import _restore_active_skills_from_metadata
 
         state = {}
-        metadata = {"active_skill_names": ["nonexistent-skill", "theory-qa"]}
+        metadata = {"persistent_skill_names": ["nonexistent-skill", "interview-rhythm"]}
 
         mock_skill = MagicMock()
-        mock_skill.get_instruction.return_value = "## Theory QA\nAsk deep theory."
+        mock_skill.get_instruction.return_value = "## Rhythm\nKeep pacing."
         mock_registry = MagicMock()
         # First call returns None (unknown), second returns mock_skill
         mock_registry.get.side_effect = [None, mock_skill]
 
         _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
 
-        assert state["active_skills"] == ["theory-qa"]
+        assert state["active_skills"] == ["interview-rhythm"]
         assert state["active_skill_instructions"] == [
-            {"skill_name": "theory-qa", "instruction": "## Theory QA\nAsk deep theory."}
+            {"skill_name": "interview-rhythm", "instruction": "## Rhythm\nKeep pacing."}
         ]
+
+    def test_legacy_metadata_does_not_restore_turn_scoped_skills(self):
+        """Legacy active_skill_names should not make algorithm mode sticky."""
+        from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
+        state = {}
+        metadata = {"active_skill_names": ["algorithm-coding", "project-deep-dive"]}
+
+        mock_registry = MagicMock()
+        _restore_active_skills_from_metadata(state, metadata, registry=mock_registry)
+
+        assert "active_skills" not in state
+        mock_registry.get.assert_not_called()
 
     def test_restore_noop_when_metadata_empty(self):
         """No-op when metadata has no active_skill_names key."""
@@ -100,6 +113,60 @@ class TestActiveSkillsPersistence:
 
 class TestReactLoop:
     """Tests for the _react_loop async generator."""
+
+    async def test_overlong_interview_asks_final_candidate_question(self):
+        """Overlong interviews should hard-stop tech questioning before tools run."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "我会检查 prompt、上下文截断和模型是否混用法条。",
+            "message_history": [
+                {"role": "assistant", "content": "技术问题"}
+                if i % 2 == 0
+                else {"role": "user", "content": "候选人回答"}
+                for i in range(46)
+            ],
+            "model": None,
+        }
+
+        with patch("app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock) as mock_llm:
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        assert [e["type"] for e in events] == ["chunk", "done"]
+        assert "你有什么想问我们的吗" in events[0]["content"]
+        assert state["question_source_reason"] == "forced_closing_by_message_count"
+        mock_llm.assert_not_called()
+
+    async def test_overlong_interview_closes_after_candidate_question(self):
+        """If the final candidate question was already asked, answer and end."""
+        from app.agents.chat.pipeline import _react_loop
+
+        history = [
+            {"role": "assistant", "content": "技术问题"}
+            if i % 2 == 0
+            else {"role": "user", "content": "候选人回答"}
+            for i in range(45)
+        ]
+        history.append({"role": "assistant", "content": "你有什么想问我们的吗？"})
+        state = {
+            "user_id": 1,
+            "user_message": "我想了解团队做 Agent 落地最看重什么？",
+            "message_history": history,
+            "model": None,
+        }
+
+        with patch("app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock) as mock_llm:
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        assert [e["type"] for e in events] == ["chunk", "done"]
+        assert "今天的模拟面试就到这里" in events[0]["content"]
+        assert state["question_source_reason"] == "forced_closing_by_message_count"
+        mock_llm.assert_not_called()
 
     async def test_direct_answer_no_tools(self):
         """LLM returns no tool_calls -> should stream final answer directly."""
@@ -240,16 +307,13 @@ class TestReactLoop:
             "model": None,
         }
 
-        # Always return a tool call
-        tc = _tc("load_skill", {"skill_name": "theory-qa"})
-
         tool_responses = [
             {
                 "content": None,
-                "tool_calls": [tc],
+                "tool_calls": [_tc("load_skill", {"skill_name": "theory-qa", "turn": i})],
                 "finish_reason": "tool_calls",
             }
-            for _ in range(MAX_REACT_STEPS)
+            for i in range(MAX_REACT_STEPS)
         ]
 
         mock_llm = AsyncMock(side_effect=tool_responses)
@@ -509,6 +573,69 @@ class TestBuildToolStrategy:
         assert "search_questions" not in strategy
 
 
+class TestFinalAnswerQuality:
+    def test_bare_coding_prompt_gets_full_fallback_question(self):
+        from app.agents.chat.pipeline import _final_answer_events_from_text
+
+        state = {
+            "conversation_id": "conv",
+            "active_skills": ["algorithm-coding"],
+            "candidate_questions": [],
+        }
+
+        events = _final_answer_events_from_text("来，写代码吧。", state)
+
+        assert events[0]["type"] == "chunk"
+        assert "实现一个 LRU Cache" in events[0]["content"]
+        assert "get(key)" in events[0]["content"]
+        assert state["question_source"] == "generated"
+
+    async def test_final_answer_failure_falls_back_to_candidate_question(self):
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "conv",
+            "user_id": 1,
+            "user_message": "继续",
+            "model": None,
+            "candidate_questions": [
+                {"id": 7, "question": "介绍一下 RAG 的完整流程", "sources": []}
+            ],
+            "retrieved_questions": [
+                {"id": 7, "question": "介绍一下 RAG 的完整流程", "sources": []}
+            ],
+            "question_source": "search",
+        }
+
+        async def broken_stream(*args, **kwargs):
+            raise RuntimeError("upstream failed")
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "app.agents.chat.pipeline.build_react_system_prompt",
+                return_value="Prompt.",
+            ),
+            patch(
+                "app.agents.chat.pipeline.llm_with_tools",
+                new_callable=AsyncMock,
+                return_value={"content": None, "tool_calls": None, "finish_reason": "stop"},
+            ),
+            patch(
+                "app.agents.chat.pipeline.stream_llm_messages",
+                side_effect=broken_stream,
+            ),
+        ):
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        chunk = next(e for e in events if e["type"] == "chunk")
+        assert "介绍一下 RAG 的完整流程" in chunk["content"]
+        assert state["selected_question"]["id"] == 7
+        assert state["question_source_reason"] == "fallback_after_RuntimeError"
+
+
 # ── TestBuildReactSystemPrompt ────────────────────────────
 
 
@@ -530,7 +657,6 @@ class TestBuildReactSystemPrompt:
         }
 
         prompt = build_react_system_prompt(state)
-        assert "<active_skill_instructions>" in prompt
         assert "Theory QA" in prompt
         assert "Ask deep theory questions." in prompt
 

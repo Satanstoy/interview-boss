@@ -292,6 +292,9 @@ class TestReactE2E:
         assert state["retrieved_questions"] == search_results
         assert state["metadata"]["basis_type"] == "interview_question"
         assert len(state["metadata"]["retrieved_questions"]) == 3
+        assert len(state["metadata"]["candidate_questions"]) == 3
+        assert state["metadata"]["selected_question"]["id"] == 101
+        assert state["metadata"]["question_source"] == "search"
         assert len(state["metadata"]["selected_basis_questions"]) == 2
         assert "[BASIS]" not in state["response"]
         assert llm_mock.call_count == 2
@@ -361,7 +364,8 @@ class TestReactE2E:
         assert draw_mock.call_args.kwargs["user"]["bank_mode"] == "public"
         assert draw_mock.call_args.kwargs["count"] == 2
 
-        assert [e["type"] for e in events] == [
+        visible_events = [e for e in events if e["type"] != "insight"]
+        assert [e["type"] for e in visible_events] == [
             "step",
             "step",
             "retrieved",
@@ -390,6 +394,8 @@ class TestReactE2E:
         assert state["active_skills"] == ["algorithm-coding"]
         assert state["retrieved_questions"] == draw_results
         assert state["metadata"]["basis_type"] == "interview_question"
+        assert state["metadata"]["selected_question"]["id"] == 202
+        assert state["metadata"]["question_source"] == "draw"
         assert len(state["metadata"]["selected_basis_questions"]) == 1
         assert "[BASIS]" not in state["response"]
         assert mock_skill.get_instruction.call_count == 1
@@ -468,10 +474,10 @@ class TestReactE2E:
             llm_responses=[
                 {
                     "content": None,
-                    "tool_calls": [_tool_call("load_skill", {"skill_name": "theory-qa"})],
+                    "tool_calls": [_tool_call("load_skill", {"skill_name": "theory-qa", "turn": i})],
                     "finish_reason": "tool_calls",
                 }
-                for _ in range(MAX_REACT_STEPS)
+                for i in range(MAX_REACT_STEPS)
             ],
             stream_chunks=("工具轮次已满，我直接给出最终结论。",),
             tool_patches=[
@@ -550,7 +556,6 @@ class TestRealLinkSkillInjection:
         assert len(state["active_skill_instructions"]) == 1
 
         prompt = build_react_system_prompt(state)
-        assert "<active_skill_instructions>" in prompt
         assert "Theory QA" in prompt
         assert "Ask deep theory questions" in prompt
 

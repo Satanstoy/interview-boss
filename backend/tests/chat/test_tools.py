@@ -230,6 +230,8 @@ class TestExecuteToolSearchQuestions:
         assert isinstance(parsed, list)
         assert len(parsed) == 3  # top 3 only
         assert sample_state["retrieved_questions"] == mock_results
+        assert sample_state["candidate_questions"] == mock_results
+        assert sample_state["question_source"] == "search"
 
     async def test_search_with_question_type(self, sample_state):
         """search_questions should pass question_type through to hybrid_search."""
@@ -281,6 +283,34 @@ class TestExecuteToolDrawQuestions:
         assert isinstance(parsed, list)
         assert len(parsed) == 2
         assert sample_state["retrieved_questions"] == mock_results
+        assert sample_state["candidate_questions"] == mock_results
+        assert sample_state["question_source"] == "draw"
+
+    async def test_draw_passes_topic_and_question_type(self, sample_state):
+        """draw_questions should support directed question drawing."""
+        from app.agents.chat.tools import execute_tool
+
+        tool_call = {
+            "function": {
+                "name": "draw_questions",
+                "arguments": json.dumps({
+                    "count": 1,
+                    "cat1": "E.算法与数据结构",
+                    "cat2": "E2.算法手撕",
+                    "topic": "LRU",
+                    "question_type": "algorithm_coding",
+                }),
+            }
+        }
+
+        with patch("app.agents.chat.tools._draw_questions", return_value=[]) as mock_draw:
+            await execute_tool(tool_call, sample_state)
+
+        mock_draw.assert_called_once()
+        assert mock_draw.call_args.kwargs["cat1"] == "E.算法与数据结构"
+        assert mock_draw.call_args.kwargs["cat2"] == "E2.算法手撕"
+        assert mock_draw.call_args.kwargs["topic"] == "LRU"
+        assert mock_draw.call_args.kwargs["question_type"] == "algorithm_coding"
 
     async def test_unknown_tool_returns_error(self, sample_state):
         """execute_tool should return error for unknown tool names."""
