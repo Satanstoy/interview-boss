@@ -22,6 +22,12 @@
         :duration="message.metadata.thinking_duration || 0"
       />
 
+      <InsightBlock
+        v-if="message.metadata?.insights?.length"
+        :items="message.metadata.insights"
+        :is-streaming="false"
+      />
+
       <!-- Message content -->
       <div class="prose-chat text-sm leading-relaxed">
         <div v-html="renderedContent"></div>
@@ -91,6 +97,40 @@
           </Transition>
         </div>
 
+        <!-- Retrieved candidate questions -->
+        <div v-if="retrievedQuestions.length" class="mb-3">
+          <button
+            @click="showCandidates = !showCandidates"
+            class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <BookOpen :size="14" class="text-sky-500" />
+            <span class="font-medium">检索到 {{ retrievedQuestions.length }} 个候选题</span>
+            <ChevronDown :size="14" class="transition-transform" :class="showCandidates ? 'rotate-180' : ''" />
+          </button>
+
+          <Transition name="expand">
+            <div v-if="showCandidates" class="mt-2 flex flex-col gap-2">
+              <div
+                v-for="q in retrievedQuestions"
+                :key="q.id || q.question"
+                class="flex items-start gap-3 p-3 rounded-lg bg-sky-500/5 border border-sky-500/20 hover:bg-sky-500/10 transition-colors"
+              >
+                <div class="size-8 rounded-md bg-sky-500/10 flex items-center justify-center shrink-0">
+                  <span class="text-xs font-bold text-sky-600 dark:text-sky-400">{{ q.cat1?.[0] || 'Q' }}</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm text-foreground">{{ q.question }}</div>
+                  <div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                    <span v-if="q.company" class="font-medium">{{ q.company }}</span>
+                    <span v-if="q.round">{{ q.round }}</span>
+                    <span v-if="q.cat1" class="text-sky-600 dark:text-sky-400">[{{ q.cat1 }}]</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
         <!-- Resume reference -->
         <div v-if="message.metadata?.resume_ref" class="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <FileText :size="14" class="text-amber-500 shrink-0" />
@@ -123,6 +163,7 @@ import {
   Briefcase 
 } from '@lucide/vue'
 import ThinkingBlock from './ThinkingBlock.vue'
+import InsightBlock from './InsightBlock.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -132,6 +173,7 @@ const emit = defineEmits(['regenerate', 'like'])
 
 const isUser = computed(() => props.message.role === 'user')
 const showRetrieved = ref(false)
+const showCandidates = ref(false)
 const copied = ref(false)
 const liked = ref(false)
 
@@ -139,6 +181,7 @@ const hasAnyReference = computed(() => {
   const m = props.message.metadata
   // Only show references when should_show_references=true AND selected_basis_questions non-empty
   if (m?.should_show_references && m?.selected_basis_questions?.length) return true
+  if (m?.retrieved_questions?.length) return true
   // Resume/JD refs
   return m?.resume_ref || m?.jd_ref
 })
@@ -148,6 +191,14 @@ const basisQuestions = computed(() => {
   // Only use selected_basis_questions (no fallback to retrieved_questions)
   if (m?.selected_basis_questions?.length) return m.selected_basis_questions
   return []
+})
+
+const retrievedQuestions = computed(() => {
+  const m = props.message.metadata
+  const retrieved = m?.retrieved_questions || []
+  if (!retrieved.length) return []
+  const basisIds = new Set((m?.selected_basis_questions || []).map(q => q.id))
+  return retrieved.filter(q => !basisIds.has(q.id))
 })
 
 const renderedContent = computed(() => {

@@ -13,6 +13,7 @@
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染） |
 | `ChatView.vue` | Chat 主视图（SSE 流式） |
 | `ThinkingBlock.vue` | AI 思维链展示组件（可展开/折叠） |
+| `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
 | `LoginModal.vue` | 登录弹窗 |

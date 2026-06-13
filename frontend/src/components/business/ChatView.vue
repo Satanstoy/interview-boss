@@ -201,6 +201,40 @@
               <span>思考中...</span>
             </div>
 
+            <!-- Retrieved questions while streaming -->
+            <div v-if="pendingRetrievedQuestions?.length" class="mb-4 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3">
+              <div class="text-xs font-medium text-sky-700 dark:text-sky-300 mb-2">
+                已检索到 {{ pendingRetrievedQuestions.length }} 个候选题
+              </div>
+              <div class="space-y-2">
+                <div
+                  v-for="q in pendingRetrievedQuestions"
+                  :key="q.id || q.question"
+                  class="rounded-lg bg-background/70 border border-border/50 px-3 py-2"
+                >
+                  <div class="text-sm text-foreground">{{ q.question }}</div>
+                  <div class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    <span v-if="q.company">{{ q.company }}</span>
+                    <span v-if="q.round">{{ q.round }}</span>
+                    <span v-if="q.cat1" class="text-sky-600 dark:text-sky-400">[{{ q.cat1 }}]</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Insight cards during streaming -->
+            <div v-if="pendingInsights.length > 0 && !isThinking && !thinkingContent" class="mb-2">
+              <div
+                v-for="(item, i) in pendingInsights"
+                :key="i"
+                class="flex items-start gap-2 px-3 py-1.5 text-xs text-muted-foreground
+                       bg-amber-500/5 rounded-lg mb-1"
+              >
+                <span class="text-amber-500/70">&#x1F4A1;</span>
+                <span>{{ item.text }}</span>
+              </div>
+            </div>
+
             <!-- Streaming content -->
             <div v-if="streamingContent" class="prose-chat">
               <div v-html="renderStreamingContent"></div>
@@ -350,6 +384,7 @@ const pendingInitialMessage = ref('')
 const pendingBasisType = ref(null)
 const pendingBasisQuestionIds = ref([])
 const pendingBasisConfidence = ref(0)
+const pendingInsights = ref([])
 const pendingShouldShowReferences = ref(false)
 const pendingSelectedBasisQuestions = ref([])
 const autoScrollEnabled = ref(true)
@@ -424,9 +459,19 @@ const waitingText = computed(() => {
     'retrieve': '检索相关题目...',
     'evaluate': '评估答案...',
     'generate': '生成回答...',
+    'generating': '正在组织面试官回复...',
     'search': '搜索知识库...',
     'analyze': '分析问题...',
     'think': '深度思考...',
+    'load_skill': '正在加载面试策略...',
+    'search_questions': '正在检索相关面试题...',
+    'draw_questions': '正在从题库抽题...',
+    'project-deep-dive': '正在切换到项目深挖...',
+    'algorithm-coding': '正在切换到算法面试...',
+    'interview-rhythm': '正在调整面试节奏...',
+    'theory-qa': '正在准备理论追问...',
+    'hr-soft-skills': '正在准备软技能追问...',
+    'adaptive-difficulty': '正在调整题目难度...',
   }
   return stepTextMap[lastStep.step] || lastStep.message || '思考中...'
 })
@@ -582,6 +627,7 @@ async function handleSend() {
   pendingBasisConfidence.value = 0
   pendingShouldShowReferences.value = false
   pendingSelectedBasisQuestions.value = []
+  pendingInsights.value = []
   processingSteps.value = []
   autoScrollEnabled.value = true
 
@@ -635,6 +681,8 @@ async function handleSend() {
           pendingSelectedBasisQuestions.value = event.selected_basis_questions || []
           if (event.resume_ref) pendingResumeRef.value = event.resume_ref
           if (event.jd_ref) pendingJdRef.value = event.jd_ref
+        } else if (event.type === 'insight') {
+          pendingInsights.value.push({ text: event.text })
         }
       },
       selectedModel.value || null
@@ -655,6 +703,9 @@ async function handleSend() {
         metadata.thinking = thinkingContent.value
         metadata.thinking_duration = thinkingDuration.value
       }
+      if (pendingInsights.value.length > 0) {
+        metadata.insights = [...pendingInsights.value]
+      }
       if (pendingBasisType.value && pendingBasisType.value !== 'none') {
         metadata.basis_type = pendingBasisType.value
         metadata.basis_question_ids = pendingBasisQuestionIds.value
@@ -674,6 +725,7 @@ async function handleSend() {
       pendingRetrievedQuestions.value = null
       pendingResumeRef.value = null
       pendingJdRef.value = null
+      pendingInsights.value = []
       pendingBasisType.value = null
       pendingBasisQuestionIds.value = []
       pendingBasisConfidence.value = 0
