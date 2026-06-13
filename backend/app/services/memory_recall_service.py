@@ -14,6 +14,50 @@ from app.agents.chat.prompts import INTENT_CLASSIFY_PROMPT
 
 logger = logging.getLogger("interview-boss")
 
+# answer_complete 启发式判断
+_EXPLICIT_COMPLETE_MARKERS = {"就这些", "答完了", "大概就是这样", "大概就是这样吧", "说完了", "完了", "没有了"}
+_EXPLICIT_INCOMPLETE_MARKERS = {"嗯", "好的", "对", "是的", "没错", "ok", "OK"}
+_QUESTION_PREFIXES = ("你是说", "能不能", "可以再", "再解释", "怎么", "为什么")
+
+
+def _heuristic_answer_complete(message: str) -> bool:
+    """Heuristic for answer_complete when LLM classification is unavailable.
+
+    Rules:
+    - Explicit completion markers → True
+    - Very short messages / filler words → False
+    - Questions → False
+    - Long substantive messages (> 30 chars) → True
+    """
+    text = message.strip()
+
+    # Explicit completion
+    for marker in _EXPLICIT_COMPLETE_MARKERS:
+        if marker in text:
+            return True
+
+    # Filler / short
+    if text in _EXPLICIT_INCOMPLETE_MARKERS:
+        return False
+    if len(text) < 15:
+        return False
+
+    # Questions / confirmations. Be conservative: full answers often contain
+    # words like "怎么" or "为什么", so only treat them as questions at the
+    # beginning or when the message ends with a question mark.
+    if text.endswith(("?", "？")):
+        return False
+    if text.startswith(_QUESTION_PREFIXES):
+        return False
+
+    # Long substantive
+    if len(text) >= 30:
+        return True
+
+    # Default: not complete
+    return False
+
+
 # ── 结构化查询改写 ──
 
 STRUCTURED_REWRITE_PROMPT = """基于面试官的问题，生成结构化检索查询。
@@ -373,6 +417,7 @@ INTENT_AND_MEMORY_PROMPT = """分析用户的最新消息，完成四个任务�
 ## 任务1: 意图分类
 从以下类别中选择一个:
 - interview_question: 面试问题回答（用户在回答面试官的问题）
+- end_interview: 结束面试（用户明确要求结束面试、生成面试总结、收尾等）
 - practice_request: 练习请求（用户想换题、出题）
 - chat: 闲聊（打招呼、感谢、告别）
 - follow_up: 追问（用户要求解释或补充）
@@ -419,9 +464,12 @@ search_query = keywords 用空格拼接即可。
 ## 任务5: 回答完整性判断
 判断用户对当前面试问题的回答是否完整（面试官可以出下一道题了）。
 
-判断标准:
-- answer_complete=true: 用户给出了较完整的回答（有结论、有解释、有示例），或者用户明确表示不知道/跳过
-- answer_complete=false: 用户只回答了一部分、回答很短（<20字且无实质内容）、或者明显在思考/打字中
+answer_complete 判断标准：
+- true: 用户明确表示回答完毕（"就这些"、"答完了"、"大概就是这样"）
+- true: 用户给出了完整的项目描述或技术方案（有开头有结尾，超过 30 字）
+- false: 用户只说了几个关键词或片段（"用了 Redis"、"微服务"）
+- false: 用户在反问或确认（"你是说...？"、"这样对吗？"）
+- false: 用户说"嗯"、"好的"等过渡词（可能是思考中）
 
 注意: 如果意图不是 interview_question（如闲聊、追问），answer_complete 设为 false。
 
@@ -463,6 +511,22 @@ _FOLLOW_UP_KEYWORDS = [
     "不太明白",
     "什么意思",
 ]
+_END_INTERVIEW_KEYWORDS = [
+    "结束面试",
+    "面试结束",
+    "面试到此",
+    "到此为止",
+    "面试先到这里",
+    "请你结束",
+    "请结束",
+    "生成面试总结",
+    "生成一份面试总结",
+    "面试总结",
+    "收尾吧",
+    "可以结束了",
+    "今天就到这里",
+    "先到这里吧",
+]
 
 
 def _rule_based_intent(message: str) -> str | None:
@@ -472,6 +536,11 @@ def _rule_based_intent(message: str) -> str | None:
     for kw in _CHAT_KEYWORDS:
         if kw == lower:
             return "chat"
+
+    # end_interview 检测优先于 practice_request（"结束面试" 包含 "结束" 但不是换题）
+    for kw in _END_INTERVIEW_KEYWORDS:
+        if kw in message:
+            return "end_interview"
 
     for kw in _PRACTICE_KEYWORDS:
         if kw in message:
@@ -545,7 +614,7 @@ async def classify_and_recall_fast(
     keywords = _extract_keywords_fallback(user_message)
     search_query = " ".join(keywords) if keywords else ""
     memory_ids = [m["id"] for m in memory_summaries[:3]] if memory_summaries else []
-    answer_complete = True
+    answer_complete = _heuristic_answer_complete(user_message)
 
     structured_rewrite = _infer_rule_based_rewrite(user_message, keywords, intent)
 
@@ -574,6 +643,9 @@ async def classify_and_recall(
     if rule_intent == "chat":
         structured = _infer_rule_based_rewrite(user_message, [], "chat")
         return "chat", [], [], "", False, structured
+    if rule_intent == "end_interview":
+        structured = _infer_rule_based_rewrite(user_message, [], "end_interview")
+        return "end_interview", [], [], "", False, structured
     if rule_intent == "practice_request":
         kw = _extract_keywords_fallback(user_message)
         structured = _infer_rule_based_rewrite(user_message, kw, "practice_request")
@@ -587,7 +659,7 @@ async def classify_and_recall(
         intent = rule_intent or "interview_question"
         keywords = _extract_keywords_fallback(user_message)
         search_query = " ".join(keywords)
-        answer_complete = len(user_message.strip()) >= 20
+        answer_complete = _heuristic_answer_complete(user_message)
         structured = _infer_rule_based_rewrite(user_message, keywords, intent)
         return intent, [], keywords, search_query, answer_complete, structured
 
@@ -611,7 +683,7 @@ async def classify_and_recall(
 
         # 验证 intent
         intent = parsed.get("intent", "interview_question")
-        valid_intents = {"interview_question", "practice_request", "chat", "follow_up"}
+        valid_intents = {"interview_question", "end_interview", "practice_request", "chat", "follow_up"}
         if intent not in valid_intents:
             intent = "interview_question"
 
@@ -668,7 +740,7 @@ async def classify_and_recall(
         logger.warning(f"合并意图+召回 LLM 调用失败，降级到规则: {e}")
         intent = await _classify_intent_only(user_message, recent_context, user_id)
         keywords = _extract_keywords_fallback(user_message)
-        answer_complete = len(user_message.strip()) >= 20
+        answer_complete = _heuristic_answer_complete(user_message)
         structured = _infer_rule_based_rewrite(user_message, keywords, intent)
         return intent, [], keywords, " ".join(keywords), answer_complete, structured
 
@@ -687,7 +759,7 @@ async def _classify_intent_only(
         result = await _call_llm_with_retry(prompt, user_id=user_id)
         intent = result.strip().lower()
 
-        valid_intents = {"interview_question", "practice_request", "chat", "follow_up"}
+        valid_intents = {"interview_question", "end_interview", "practice_request", "chat", "follow_up"}
         if intent in valid_intents:
             return intent
     except Exception as e:

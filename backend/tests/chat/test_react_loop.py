@@ -409,6 +409,45 @@ class TestReactLoop:
         assert "internal_marker_filtered" in caplog.text
 
 
+class TestAnswerCompleteHeuristic:
+    def test_short_message_not_complete(self):
+        """Short messages (< 15 chars) should be answer_complete=False."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        assert _heuristic_answer_complete("嗯") is False
+        assert _heuristic_answer_complete("用了 Redis") is False
+        assert _heuristic_answer_complete("这样对吗？") is False
+
+    def test_long_message_likely_complete(self):
+        """Long messages (> 30 chars with substance) should be answer_complete=True."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        msg = "我在项目中使用了 Redis 做缓存层，通过布隆过滤器解决缓存穿透，用分布式锁解决缓存击穿"
+        assert _heuristic_answer_complete(msg) is True
+
+    def test_explicit_completion_markers(self):
+        """Messages with explicit completion markers should be True."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        assert _heuristic_answer_complete("就这些") is True
+        assert _heuristic_answer_complete("答完了") is True
+        assert _heuristic_answer_complete("大概就是这样吧") is True
+
+    def test_question_marks_not_complete(self):
+        """Questions/confirmations should be False."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        assert _heuristic_answer_complete("你是说用 Redis 吗？") is False
+        assert _heuristic_answer_complete("能不能再解释一下") is False
+
+    def test_substantive_answer_with_how_why_words_is_complete(self):
+        """Substantive answers containing 怎么/为什么 should not be misclassified."""
+        from app.services.memory_recall_service import _heuristic_answer_complete
+
+        msg = "我是这么解决的：先分析为什么慢，再看怎么优化缓存和接口调用链路，最后做压测验证"
+        assert _heuristic_answer_complete(msg) is True
+
+
 class TestBuildToolStrategy:
     def test_interview_question_answer_complete_default_search(self):
         """Should require search_questions when user completed their answer (default)."""

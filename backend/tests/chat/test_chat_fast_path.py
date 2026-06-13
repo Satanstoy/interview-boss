@@ -23,7 +23,7 @@ class TestClassifyAndRecallFast:
         assert isinstance(keywords, list)
         assert len(keywords) > 0
         assert isinstance(search_query, str)
-        assert answer_complete is True
+        assert answer_complete is False  # short question (< 30 chars), not a complete answer
 
     @pytest.mark.asyncio
     async def test_fast_path_chat_message(self):
