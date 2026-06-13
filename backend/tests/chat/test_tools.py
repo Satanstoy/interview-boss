@@ -75,6 +75,22 @@ class TestToolSchemas:
         count_desc = DRAW_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["count"]["description"]
         assert "默认" in count_desc
 
+    def test_load_skill_schema_has_usage_guidance(self):
+        """load_skill description should explain when to use and when not to."""
+        from app.agents.chat.tools import LOAD_SKILL_SCHEMA
+
+        desc = LOAD_SKILL_SCHEMA["function"]["description"]
+        assert "何时使用" in desc or "WHEN TO USE" in desc
+        assert "何时不用" in desc or "WHEN NOT TO USE" in desc
+
+    def test_load_skill_enum_descriptions(self):
+        """skill_name description should list all skills with their purposes."""
+        from app.agents.chat.tools import LOAD_SKILL_SCHEMA
+
+        skill_desc = LOAD_SKILL_SCHEMA["function"]["parameters"]["properties"]["skill_name"]["description"]
+        assert "project-deep-dive" in skill_desc
+        assert "algorithm-coding" in skill_desc
+
 
 # ── TestExecuteToolLoadSkill ─────────────────────────────
 

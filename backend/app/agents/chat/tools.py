@@ -55,14 +55,32 @@ LOAD_SKILL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "load_skill",
-        "description": "Load a skill's full instruction by name. Use this to get detailed guidance on how to conduct a specific type of interview.",
+        "description": (
+            "加载面试技能的完整指导。技能指令将注入到当前 ReAct loop 的系统提示中。\n\n"
+            "【何时使用】\n"
+            "- 需要切换面试模式（如从普通问答切到项目深挖）\n"
+            "- 用户的回答涉及需要特殊追问策略的领域（算法、HR、项目经历）\n"
+            "- 当前面试节奏需要调整（如难度过高/过低）\n\n"
+            "【何时不用】\n"
+            "- 技能已在 active_skills 中（不要重复加载）\n"
+            "- 普通知识问答不需要特殊技能\n"
+            "- 用户在闲聊"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "skill_name": {
                     "type": "string",
                     "enum": SKILL_NAMES,
-                    "description": "The name of the skill to load",
+                    "description": (
+                        "要加载的技能名称。各技能用途：\n"
+                        "- adaptive-difficulty: 动态调整面试难度\n"
+                        "- algorithm-coding: 手撕代码/算法题面试\n"
+                        "- hr-soft-skills: HR 行为面试/软技能\n"
+                        "- interview-rhythm: 面试节奏控制（始终激活）\n"
+                        "- project-deep-dive: 项目经历深度追问\n"
+                        "- theory-qa: 技术理论问答"
+                    ),
                 },
             },
             "required": ["skill_name"],
