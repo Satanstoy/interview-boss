@@ -116,18 +116,29 @@ DRAW_QUESTIONS_SCHEMA = {
     "type": "function",
     "function": {
         "name": "draw_questions",
-        "description": "Draw weighted random questions from the question bank. Use when you need fresh questions not found via search.",
+        "description": (
+            "从题库中加权随机抽取题目。用于需要新鲜题目的场景。\n\n"
+            "【何时使用】\n"
+            "- search_questions 结果不足或为空时补充\n"
+            "- 用户请求「随机出题」「来几道题」\n"
+            "- 需要跨话题混合出题\n\n"
+            "【何时不用】\n"
+            "- 已有未使用的检索结果\n"
+            "- 需要特定技术主题的题目（应优先用 search_questions）\n"
+            "- 用户在闲聊或还没回答完"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "count": {
                     "type": "integer",
-                    "description": "Number of questions to draw (default: 3)",
+                    "description": "抽取题目数量，默认 3，最大 5",
+                    "default": 3,
                 },
                 "difficulty": {
                     "type": "string",
                     "enum": ["easy", "medium", "hard"],
-                    "description": "Filter by difficulty level",
+                    "description": "难度筛选。不指定则根据用户水平自动加权。",
                 },
             },
         },

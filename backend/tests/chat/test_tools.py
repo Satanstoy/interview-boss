@@ -60,6 +60,21 @@ class TestToolSchemas:
         assert "top 3" in desc
         assert "不要机械复述" in desc
 
+    def test_draw_questions_schema_has_when_to_use(self):
+        """draw_questions description should contain usage guidance."""
+        from app.agents.chat.tools import DRAW_QUESTIONS_SCHEMA
+
+        desc = DRAW_QUESTIONS_SCHEMA["function"]["description"]
+        assert "何时使用" in desc or "WHEN TO USE" in desc
+        assert "何时不用" in desc or "WHEN NOT TO USE" in desc
+
+    def test_draw_questions_count_has_default_description(self):
+        """count parameter should mention default value in Chinese."""
+        from app.agents.chat.tools import DRAW_QUESTIONS_SCHEMA
+
+        count_desc = DRAW_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["count"]["description"]
+        assert "默认" in count_desc
+
 
 # ── TestExecuteToolLoadSkill ─────────────────────────────
 
