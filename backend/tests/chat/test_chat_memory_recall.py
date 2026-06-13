@@ -103,11 +103,21 @@ class TestClassifyAndRecall:
         assert 5 in memory_ids
 
     @pytest.mark.asyncio
-    async def test_empty_summaries_skips_recall(self):
-        """M-004: 无记忆时应跳过召回，仅返回 intent"""
+    async def test_empty_summaries_still_calls_llm(self):
+        """M-004: 无记忆时仍应调用 LLM 分类（记忆列表为空）"""
         from app.services.memory_recall_service import classify_and_recall
 
+        mock_response = json.dumps({
+            "intent": "interview_question",
+            "relevant_memory_ids": [],
+            "keywords": ["RRF", "FTS5", "向量"],
+            "search_query": "RRF FTS5 向量召回",
+            "answer_complete": True,
+        })
+
         with patch("app.services.memory_recall_service._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = mock_response
+
             intent, memory_ids, keywords, search_query, answer_complete, _structured_rewrite = await classify_and_recall(
                 user_message="我在项目里用 RRF 融合 FTS5 和向量召回，然后用 selected_basis 校验引用。",
                 recent_context="",
@@ -115,7 +125,7 @@ class TestClassifyAndRecall:
                 user_id=1,
             )
 
-            mock_llm.assert_not_called()
+            mock_llm.assert_called_once()
 
         assert intent == "interview_question"
         assert memory_ids == []

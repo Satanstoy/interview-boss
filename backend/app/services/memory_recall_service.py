@@ -476,6 +476,8 @@ answer_complete 判断标准：
 ## 可用记忆
 {memory_list}
 
+{rule_hint}
+
 ## 用户消息
 {user_message}
 
@@ -646,33 +648,23 @@ async def classify_and_recall(
     if rule_intent == "end_interview":
         structured = _infer_rule_based_rewrite(user_message, [], "end_interview")
         return "end_interview", [], [], "", False, structured
-    if rule_intent == "practice_request":
-        kw = _extract_keywords_fallback(user_message)
-        structured = _infer_rule_based_rewrite(user_message, kw, "practice_request")
-        return "practice_request", [], kw, " ".join(kw), False, structured
-    if rule_intent == "follow_up":
-        kw = _extract_keywords_fallback(user_message)
-        structured = _infer_rule_based_rewrite(user_message, kw, "follow_up")
-        return "follow_up", [], kw, " ".join(kw), False, structured
 
-    if not memory_summaries:
-        intent = rule_intent or "interview_question"
-        keywords = _extract_keywords_fallback(user_message)
-        search_query = " ".join(keywords)
-        answer_complete = _heuristic_answer_complete(user_message)
-        structured = _infer_rule_based_rewrite(user_message, keywords, intent)
-        return intent, [], keywords, search_query, answer_complete, structured
+    # Rules are now only hints, not authoritative
+    rule_hint = ""
+    if rule_intent in ("practice_request", "follow_up"):
+        rule_hint = f"\n注意：规则预判为 {rule_intent}，但请根据完整上下文重新判断，规则可能误判。"
 
     # 3. 合并 LLM 调用：意图 + 记忆选择 + 检索查询
     memory_list = "\n".join(
         f"[id:{m['id']} {m['memory_type']}] {m['summary']}" for m in memory_summaries
-    )
+    ) if memory_summaries else ""
 
     try:
         prompt = INTENT_AND_MEMORY_PROMPT.format(
             memory_list=memory_list,
             user_message=user_message,
             recent_context=recent_context,
+            rule_hint=rule_hint,
         )
         result = await _call_llm_with_retry(
             prompt,
