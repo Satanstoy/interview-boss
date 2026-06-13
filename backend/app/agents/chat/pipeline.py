@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import AsyncGenerator
@@ -24,6 +25,7 @@ from app.agents.chat.nodes import (
 )
 from app.agents.chat.tools import (
     ALL_TOOLS,
+    SKILL_NAMES,
     execute_tool,
     tool_progress_message,
 )
@@ -40,6 +42,25 @@ logger = logging.getLogger("interview-boss")
 
 _FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 API Key"
 _SENTINEL = object()
+_TRACE_STRING_LIMIT = 120
+_TRACE_LIST_LIMIT = 5
+_SAFE_TOOL_ARG_KEYS = {
+    "cat1",
+    "count",
+    "difficulty",
+    "keywords",
+    "question_type",
+    "skill_name",
+    "topic",
+}
+_INTERNAL_REACT_MARKERS = frozenset(
+    {
+        "load_skill",
+        "search_questions",
+        "draw_questions",
+        *SKILL_NAMES,
+    }
+)
 
 
 def _emit(event: dict) -> None:
@@ -97,6 +118,299 @@ def _basis_event_payload(meta: dict) -> dict:
         "resume_ref": meta.get("resume_ref", ""),
         "jd_ref": meta.get("jd_ref", ""),
     }
+
+
+def _trace_safe_value(value):
+    """Keep ReAct trace fields compact and free of arbitrary payloads."""
+    if isinstance(value, str):
+        return value[:_TRACE_STRING_LIMIT]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return [_trace_safe_value(v) for v in list(value)[:_TRACE_LIST_LIMIT]]
+    if isinstance(value, dict):
+        return {
+            str(k)[:40]: _trace_safe_value(v)
+            for k, v in list(value.items())[:_TRACE_LIST_LIMIT]
+        }
+    return str(type(value).__name__)
+
+
+def _sanitize_tool_args(tool_call: dict) -> dict:
+    raw_args = tool_call.get("function", {}).get("arguments", "{}")
+    try:
+        args = json.loads(raw_args or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {"_parse_error": "invalid_json"}
+
+    if not isinstance(args, dict):
+        return {"_shape": type(args).__name__}
+
+    sanitized = {}
+    for key, value in args.items():
+        if key in _SAFE_TOOL_ARG_KEYS:
+            sanitized[key] = _trace_safe_value(value)
+        else:
+            sanitized[key] = "<redacted>"
+    return sanitized
+
+
+def _summarize_tool_output(tool_name: str, output: str, state: ChatState) -> dict:
+    summary: dict[str, object] = {"ok": True}
+    try:
+        parsed = json.loads(output or "null")
+    except (TypeError, json.JSONDecodeError):
+        parsed = None
+        summary["ok"] = False
+        summary["error"] = "invalid_json_output"
+
+    if isinstance(parsed, dict) and parsed.get("error"):
+        summary["ok"] = False
+        summary["error"] = str(parsed["error"])[:_TRACE_STRING_LIMIT]
+
+    if tool_name == "load_skill":
+        summary["active_skills"] = list(state.get("active_skills", []))
+        return summary
+
+    if tool_name in {"search_questions", "draw_questions"}:
+        results = [] if not summary["ok"] else state.get("retrieved_questions", []) or []
+        summary["result_count"] = len(results)
+        summary["result_ids"] = [
+            q.get("id")
+            for q in results[:_TRACE_LIST_LIMIT]
+            if isinstance(q, dict) and q.get("id") is not None
+        ]
+        return summary
+
+    if parsed is not None:
+        summary["output_type"] = type(parsed).__name__
+    return summary
+
+
+def _log_react_llm_step(
+    state: ChatState,
+    *,
+    react_step: int,
+    finish_reason: str | None,
+    tool_count: int,
+    elapsed_ms: int,
+) -> None:
+    logger.info(
+        "ReAct trace: event=llm_step conversation_id=%s react_step=%s "
+        "finish_reason=%s tool_count=%s elapsed_ms=%s",
+        state.get("conversation_id"),
+        react_step,
+        finish_reason,
+        tool_count,
+        elapsed_ms,
+    )
+
+
+def _log_react_tool_call(
+    state: ChatState,
+    *,
+    react_step: int,
+    tool_name: str,
+    args: dict,
+    result: dict,
+    elapsed_ms: int,
+) -> None:
+    logger.info(
+        "ReAct trace: event=tool_call conversation_id=%s react_step=%s "
+        "tool_name=%s args=%s result=%s elapsed_ms=%s",
+        state.get("conversation_id"),
+        react_step,
+        tool_name,
+        args,
+        result,
+        elapsed_ms,
+    )
+
+
+def _normalize_react_marker(text: str) -> str:
+    return text.strip().strip("`'\"“”‘’").lower()
+
+
+def _is_internal_react_marker(text: str) -> bool:
+    normalized = _normalize_react_marker(text)
+    if not normalized:
+        return False
+    return normalized in _INTERNAL_REACT_MARKERS
+
+
+def _fallback_interviewer_response(marker: str, state: ChatState) -> str:
+    """Replace leaked internal markers with a safe interviewer turn."""
+    normalized = _normalize_react_marker(marker)
+    logger.warning(
+        "ReAct trace: event=internal_marker_filtered conversation_id=%s marker=%s",
+        state.get("conversation_id"),
+        normalized[:_TRACE_STRING_LIMIT],
+    )
+
+    if normalized == "project-deep-dive":
+        return (
+            "我们继续围绕你的项目做深挖。你刚才提到“AI 追问编排”和“题库/JD 匹配”，"
+            "请具体讲一下：一次候选人回答进入后端后，从意图判断、关键词提取、题库检索到生成追问，"
+            "完整链路是怎么设计的？中间你做过哪些取舍？"
+        )
+
+    if normalized == "algorithm-coding":
+        return (
+            "我们切到算法面试。我会先从基础思路开始考察：请你口述一下两数之和这类题的解法，"
+            "包括数据结构选择、时间复杂度和边界情况。"
+        )
+
+    return (
+        "我继续追问一个具体问题：请结合你刚才的项目，说明其中一个核心模块的设计方案、"
+        "关键取舍，以及你如何验证它确实解决了问题。"
+    )
+
+
+async def _stream_final_answer(
+    messages: list[dict],
+    state: ChatState,
+) -> AsyncGenerator[dict, None]:
+    """Stream final answer while guarding against internal ReAct marker leakage."""
+    buffered_events: list[dict] = []
+    chunks: list[str] = []
+
+    async for event in stream_llm_messages(
+        messages, user_id=state["user_id"], model=state.get("model")
+    ):
+        if isinstance(event, dict):
+            if event.get("type") == "chunk":
+                chunks.append(event.get("content", ""))
+            else:
+                buffered_events.append(event)
+        else:
+            chunks.append(event)
+
+    final_text = "".join(chunks)
+    if _is_internal_react_marker(final_text):
+        final_text = _fallback_interviewer_response(final_text, state)
+
+    for event in buffered_events:
+        yield event
+    if final_text:
+        yield {"type": "chunk", "content": final_text}
+
+
+def _final_answer_events_from_text(
+    final_text: str,
+    state: ChatState,
+) -> list[dict]:
+    if _is_internal_react_marker(final_text):
+        final_text = _fallback_interviewer_response(final_text, state)
+    if not final_text:
+        return []
+    return [{"type": "chunk", "content": final_text}]
+
+
+def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, str]:
+    """Build done-event metadata from the final streamed response.
+
+    Reuses the existing basis parsing contract so the router can keep emitting
+    the same SSE shape as the previous pipeline.
+    """
+    from app.agents.chat.nodes import (
+        _extract_company_from_sources,
+        _extract_round_from_sources,
+        _filter_basis_ids_by_response,
+        _get_jd_title,
+        _get_resume_name,
+        _parse_basis_from_response,
+        _response_references_jd,
+        _response_references_resume,
+        validate_basis,
+    )
+
+    parsed = _parse_basis_from_response(response_text)
+    clean_response = parsed.get("clean_response", response_text)
+    retrieved = state.get("retrieved_questions", []) or []
+    retrieved_ids = {q.get("id") for q in retrieved if q.get("id")}
+
+    basis = validate_basis(parsed, retrieved_ids)
+    if basis.get("should_show_references") and basis.get("basis_question_ids"):
+        aligned_basis_ids = _filter_basis_ids_by_response(
+            clean_response, basis["basis_question_ids"], retrieved
+        )
+        if len(aligned_basis_ids) != len(basis["basis_question_ids"]):
+            logger.info(
+                "ReAct basis alignment filtered ids: "
+                f"before={basis['basis_question_ids']}, after={aligned_basis_ids}"
+            )
+        basis["basis_question_ids"] = aligned_basis_ids
+        basis["should_show_references"] = bool(aligned_basis_ids)
+        if not aligned_basis_ids:
+            basis["basis_confidence"] = min(basis["basis_confidence"], 0.3)
+
+    metadata: dict[str, object] = {
+        "basis_type": basis["basis_type"],
+        "basis_question_ids": basis["basis_question_ids"],
+        "basis_confidence": basis["basis_confidence"],
+        "should_show_references": basis["should_show_references"],
+        "active_skills": state.get("active_skills", []),
+        "asked_question_text": clean_response,
+    }
+
+    if retrieved:
+        metadata["retrieved_questions"] = [
+            {
+                "id": q.get("id"),
+                "question": q.get("question", ""),
+                "cat1": q.get("cat1", ""),
+                "company": _extract_company_from_sources(q),
+                "round": _extract_round_from_sources(q),
+            }
+            for q in retrieved[:3]
+        ]
+
+    if basis["basis_question_ids"]:
+        basis_id_set = set(basis["basis_question_ids"])
+        basis_qs = [q for q in retrieved if q.get("id") in basis_id_set]
+        if not basis_qs:
+            try:
+                from app.db.connection import get_db_connection
+
+                with get_db_connection() as conn:
+                    placeholders = ",".join("?" * len(basis["basis_question_ids"]))
+                    rows = conn.execute(
+                        f"SELECT id, question, cat1, cat2 FROM question_bank "
+                        f"WHERE id IN ({placeholders}) AND deleted_at IS NULL AND status = 'approved'",
+                        basis["basis_question_ids"],
+                    ).fetchall()
+                    basis_qs = [
+                        {
+                            "id": r[0],
+                            "question": r[1],
+                            "cat1": r[2],
+                            "cat2": r[3],
+                        }
+                        for r in rows
+                    ]
+            except Exception as e:
+                logger.debug(f"ReAct basis DB fallback failed: {e}")
+
+        metadata["selected_basis_questions"] = [
+            {
+                "id": q.get("id"),
+                "question": q.get("question", ""),
+                "cat1": q.get("cat1", ""),
+                "company": _extract_company_from_sources(q),
+                "round": _extract_round_from_sources(q),
+            }
+            for q in basis_qs
+        ]
+
+    if state.get("resume_summary") and _response_references_resume(
+        clean_response, state["resume_summary"]
+    ):
+        metadata["resume_ref"] = _get_resume_name(state["user_id"])
+
+    if state.get("jd_text") and _response_references_jd(clean_response, state["jd_text"]):
+        metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
+
+    return metadata, clean_response
 
 
 def _initial_state(
@@ -321,7 +635,16 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     messages.append({"role": "user", "content": state["user_message"]})
 
     # 3. ReAct loop
+    hit_step_limit = False
+    final_answer_text = ""
     for step in range(MAX_REACT_STEPS):
+        react_step = step + 1
+        # Rebuild system prompt if skills were loaded in previous step
+        if step > 0 and state.get("active_skill_instructions"):
+            system_prompt = build_react_system_prompt(state)
+            messages[0] = {"role": "system", "content": system_prompt}
+            state["active_skill_instructions"] = []  # consumed
+        llm_started = time.monotonic()
         try:
             result = await llm_with_tools(
                 messages,
@@ -333,7 +656,19 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             logger.error(f"ReAct step {step} LLM call failed: {e}")
             break
 
-        if not result.get("tool_calls"):
+        tool_calls = result.get("tool_calls") or []
+        _log_react_llm_step(
+            state,
+            react_step=react_step,
+            finish_reason=result.get("finish_reason"),
+            tool_count=len(tool_calls),
+            elapsed_ms=int((time.monotonic() - llm_started) * 1000),
+        )
+
+        if not tool_calls:
+            content = result.get("content")
+            if isinstance(content, str) and content.strip():
+                final_answer_text = content
             break  # LLM decided to answer directly
 
         # Append assistant message with tool_calls
@@ -341,13 +676,14 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             {
                 "role": "assistant",
                 "content": result.get("content"),
-                "tool_calls": result["tool_calls"],
+                "tool_calls": tool_calls,
             }
         )
 
         # Execute each tool call
-        for tc in result["tool_calls"]:
+        for tc in tool_calls:
             tool_name = tc["function"]["name"]
+            tool_args = _sanitize_tool_args(tc)
 
             # Emit progress
             _emit(
@@ -359,7 +695,16 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             )
 
             # Execute tool
+            tool_started = time.monotonic()
             output = await execute_tool(tc, state)
+            _log_react_tool_call(
+                state,
+                react_step=react_step,
+                tool_name=tool_name,
+                args=tool_args,
+                result=_summarize_tool_output(tool_name, output, state),
+                elapsed_ms=int((time.monotonic() - tool_started) * 1000),
+            )
 
             # Emit retrieved events for search/draw results
             if tool_name in (
@@ -385,15 +730,24 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
             messages.append(make_tool_result_message(tc["id"], output))
 
+        if react_step == MAX_REACT_STEPS:
+            hit_step_limit = True
+
+    if hit_step_limit:
+        logger.warning(
+            "ReAct trace: event=max_steps conversation_id=%s max_steps=%s",
+            state.get("conversation_id"),
+            MAX_REACT_STEPS,
+        )
+
     # 4. Stream final answer
     _emit({"type": "step", "step": "generating", "message": "正在生成回答..."})
-    async for event in stream_llm_messages(
-        messages, user_id=state["user_id"], model=state.get("model")
-    ):
-        if isinstance(event, dict):
+    if final_answer_text:
+        for event in _final_answer_events_from_text(final_answer_text, state):
             yield event
-        else:
-            yield {"type": "chunk", "content": event}
+    else:
+        async for event in _stream_final_answer(messages, state):
+            yield event
 
     yield {"type": "done"}
 
@@ -443,6 +797,12 @@ async def run_chat(
                 event_type = event.get("type")
                 if event_type == "done":
                     metadata = event.get("metadata", {})
+                    built_metadata, clean_response = _build_react_metadata(
+                        state, response
+                    )
+                    if built_metadata:
+                        metadata = {**built_metadata, **metadata}
+                    response = clean_response
                     _emit({"type": "basis", **_basis_event_payload(metadata)})
                     _emit({"type": "done", "metadata": metadata})
                     continue

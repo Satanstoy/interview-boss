@@ -1566,8 +1566,10 @@ def build_react_system_prompt(state: ChatState) -> str:
     3. Session notes
     4. Compressed context
     5. Skill catalog + tool guidance
+    6. Basis extraction guidance (so the final answer can still emit metadata)
     """
     from app.agents.shared.skills.builder import build_skill_catalog
+    from app.agents.chat.prompts import BASIS_EXTRACT_GUIDANCE
 
     mode = state.get("mode", "free_practice")
     interview_context = state.get("interview_context", "")
@@ -1614,5 +1616,25 @@ def build_react_system_prompt(state: ChatState) -> str:
     catalog = build_skill_catalog()
     if catalog:
         parts.append(catalog)
+
+    # Layer 5.5: Active skill instructions (current-loop pending instructions)
+    active_skill_instructions = state.get("active_skill_instructions", [])
+    if active_skill_instructions:
+        skill_parts = []
+        for item in active_skill_instructions:
+            name = item.get("skill_name", "")
+            instruction = item.get("instruction", "")
+            if instruction:
+                skill_parts.append(f'<skill name="{name}">\n{instruction}\n</skill>')
+        if skill_parts:
+            parts.append(
+                "<active_skill_instructions>\n"
+                + "\n\n".join(skill_parts)
+                + "\n</active_skill_instructions>"
+            )
+
+    # Layer 6: Preserve the existing basis metadata contract
+    if BASIS_EXTRACT_GUIDANCE.strip():
+        parts.append(BASIS_EXTRACT_GUIDANCE)
 
     return "\n\n".join(parts)

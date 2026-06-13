@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -71,9 +72,8 @@ class TestReactLoop:
                 events.append(event)
 
         chunk_events = [e for e in events if e.get("type") == "chunk"]
-        assert len(chunk_events) == 2
-        assert chunk_events[0]["content"] == "Hello"
-        assert chunk_events[1]["content"] == " World"
+        assert len(chunk_events) == 1
+        assert chunk_events[0]["content"] == "Hello World"
         # Last event should be "done"
         assert events[-1]["type"] == "done"
 
@@ -220,6 +220,170 @@ class TestReactLoop:
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         assert len(chunk_events) > 0
         assert chunk_events[0]["content"] == "Final answer after max steps"
+
+    async def test_react_trace_is_backend_only_and_sanitized(self, caplog):
+        """Trace logs should help debugging without leaking tool payloads to SSE."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "trace-conv",
+            "user_id": 1,
+            "user_message": "Start algorithm interview",
+            "model": None,
+            "active_skills": [],
+        }
+
+        tc_load = _tc(
+            "load_skill",
+            {
+                "skill_name": "algorithm-coding",
+                "secret_prompt": "SHOULD_NOT_BE_LOGGED",
+            },
+        )
+
+        mock_llm = AsyncMock(
+            side_effect=[
+                {
+                    "content": None,
+                    "tool_calls": [tc_load],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "Final answer",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        async def mock_execute_tool(tc, st):
+            st["active_skills"] = ["algorithm-coding"]
+            return json.dumps({"instruction": "SECRET SKILL INSTRUCTION"})
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                caplog.at_level(logging.INFO, logger="interview-boss"),
+                patch(
+                    "app.agents.chat.pipeline.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
+                patch("app.agents.chat.pipeline.llm_with_tools", mock_llm),
+                patch(
+                    "app.agents.chat.pipeline.execute_tool",
+                    side_effect=mock_execute_tool,
+                ),
+                patch(
+                    "app.agents.chat.pipeline.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings("Final answer"),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+        assert "ReAct trace: event=llm_step" in caplog.text
+        assert "ReAct trace: event=tool_call" in caplog.text
+        assert "tool_name=load_skill" in caplog.text
+        assert "algorithm-coding" in caplog.text
+        assert "<redacted>" in caplog.text
+        assert "SHOULD_NOT_BE_LOGGED" not in caplog.text
+        assert "SECRET SKILL INSTRUCTION" not in caplog.text
+        assert not any(e.get("type") == "react_trace" for e in all_events)
+
+    async def test_final_answer_filters_internal_skill_marker(self, caplog):
+        """Bare skill names are internal control signals and must not reach SSE."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "marker-conv",
+            "user_id": 1,
+            "user_message": "Tell me about your project",
+            "model": None,
+        }
+
+        with (
+            caplog.at_level(logging.WARNING, logger="interview-boss"),
+            patch(
+                "app.agents.chat.pipeline.build_react_system_prompt",
+                return_value="Prompt.",
+            ),
+            patch(
+                "app.agents.chat.pipeline.llm_with_tools",
+                new_callable=AsyncMock,
+                return_value={
+                    "content": None,
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ),
+            patch(
+                "app.agents.chat.pipeline.stream_llm_messages",
+                side_effect=lambda *a, **kw: _mock_stream_strings(
+                    "project-deep-dive"
+                ),
+            ),
+        ):
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        chunk_text = "".join(
+            e.get("content", "") for e in events if e.get("type") == "chunk"
+        )
+        assert chunk_text
+        assert chunk_text != "project-deep-dive"
+        assert "项目做深挖" in chunk_text
+        assert "internal_marker_filtered" in caplog.text
+
+
+# ── TestBuildReactSystemPrompt ────────────────────────────
+
+
+class TestBuildReactSystemPrompt:
+    def test_injects_active_skill_instructions(self):
+        """build_react_system_prompt should inject active skill instructions."""
+        from app.agents.chat.nodes import build_react_system_prompt
+
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": ["theory-qa"],
+            "active_skill_instructions": [
+                {"skill_name": "theory-qa", "instruction": "## Theory QA\nAsk deep theory questions."},
+            ],
+        }
+
+        prompt = build_react_system_prompt(state)
+        assert "<active_skill_instructions>" in prompt
+        assert "Theory QA" in prompt
+        assert "Ask deep theory questions." in prompt
+
+    def test_no_active_skills_no_injection(self):
+        """build_react_system_prompt should not inject when no active skills."""
+        from app.agents.chat.nodes import build_react_system_prompt
+
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": [],
+        }
+
+        prompt = build_react_system_prompt(state)
+        assert "<active_skill_instructions>" not in prompt
 
 
 # ── Fixtures ───────────────────────────────────────────────
