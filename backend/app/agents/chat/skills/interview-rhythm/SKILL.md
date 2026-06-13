@@ -27,6 +27,17 @@ Interviews should feel like a natural conversation, not a linear checklist. Inte
 3. **Algorithm/coding** (15%): Require the candidate to write code or describe algorithm thinking
 4. **System design** (10%, optional)
 
+### Interview Plan
+
+面试开始时（收到 start_interview 或第一轮对话），生成一个面试计划：
+- **目标题量**: 10-15 题（根据岗位复杂度调整）
+- **分配比例**:
+  - 项目深挖 5-7 题
+  - 理论问答 3-4 题
+  - 算法/编码 1-2 题
+  - 系统设计 0-1 题（可选）
+- **进度追踪**: 每出一道题，在内心记账（不需要告诉候选人）。面试接近尾声时（已出 >=8 题且候选人信号表示想结束，或已出 >=12 题），自然地收尾。
+
 ## Pattern Sequence
 
 ```
@@ -36,6 +47,9 @@ R3: Drill into one implementation trade-off from the candidate's answer
 R4: Switch to <a related theory topic that was actually mentioned or retrieved>
 R5: Switch to an algorithm/coding task only when the strategy explicitly chooses it
 R6: Return to the project and ask about evaluation metrics or failure cases
+R7+: Continue the interview — interleave project deep-dive, theory Q&A, and algorithm/coding
+     until the target question count (10-15) is reached. Repeat R2-R6 patterns with fresh topics.
+     Do NOT stop at R6; the above is a suggested opening sequence, not a hard limit.
 ```
 
 ## Rules
@@ -47,6 +61,10 @@ R6: Return to the project and ask about evaluation metrics or failure cases
 - `topic_shift` must be rhythm-driven, not caused by noisy example terms in the candidate's answer.
 - For `clarification`, do not retrieve a new question and do not show references.
 - Do not claim a candidate repeated an answer unless the backend explicitly provides a duplicate/repetition signal.
+- 面试必须覆盖至少 8 题才算完整，低于 5 题是不可接受的
+- 如果候选人回答简短（<3句话），追问一两个层次再换题，不要一道题就换
+- 如果面试即将结束但题量不足，加速节奏：跳过深挖，改为快速问答模式
+- 候选人说"换一个"/"下一个"时，计入已完成的题并切换
 
 ## Boundaries
 
