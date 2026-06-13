@@ -152,6 +152,8 @@ def update_conversation_metadata(conversation_id: str, new_metadata: dict) -> No
     """Merge new_metadata into the conversation's metadata JSON column.
 
     Reads existing metadata, merges new keys (shallow), and writes back.
+    NOTE: Shallow merge only — top-level keys in new_metadata overwrite existing
+    values. If nested structures are needed in the future, switch to deep merge.
     """
     with get_db_connection() as conn:
         row = conn.execute(

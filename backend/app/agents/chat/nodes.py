@@ -1718,11 +1718,13 @@ def build_react_system_prompt(state: ChatState) -> str:
         parts.append(tool_strategy)
 
     # Layer 5.5: Active skill instructions (current-loop pending instructions)
+    from html import escape as _html_escape
+
     active_skill_instructions = state.get("active_skill_instructions", [])
     if active_skill_instructions:
         skill_parts = []
         for item in active_skill_instructions:
-            name = item.get("skill_name", "")
+            name = _html_escape(item.get("skill_name", ""), quote=True)
             instruction = item.get("instruction", "")
             if instruction:
                 skill_parts.append(f'<skill name="{name}">\n{instruction}\n</skill>')
