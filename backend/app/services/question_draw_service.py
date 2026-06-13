@@ -18,6 +18,8 @@ def draw_questions(
     user: dict,
     count: int = 5,
     cat1: Optional[str] = None,
+    cat2: Optional[str] = None,
+    topic: Optional[str] = None,
     difficulty: Optional[str] = None,
     question_type: Optional[str] = None,
     exclude_ids: Optional[set[int]] = None,
@@ -38,14 +40,22 @@ def draw_questions(
         if cat1 and cat1 != "全部":
             conditions.append("(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)")
             params.extend([f"%{cat1}%", f"%{cat1}%", f"%{cat1}%"])
+        if cat2 and cat2 != "全部":
+            conditions.append("(qb.cat2 LIKE ? OR qb.tags LIKE ?)")
+            params.extend([f"%{cat2}%", f"%{cat2}%"])
+        if topic:
+            conditions.append(
+                "(qb.question LIKE ? OR qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)"
+            )
+            params.extend([f"%{topic}%"] * 4)
         if difficulty:
             conditions.append("qb.difficulty LIKE ?")
             params.append(f"%{difficulty}%")
         if question_type:
-            conditions.append("(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)")
-            params.extend(
-                [f"%{question_type}%", f"%{question_type}%", f"%{question_type}%"]
-            )
+            type_conditions, type_params = _question_type_filter(question_type)
+            if type_conditions:
+                conditions.append(type_conditions)
+                params.extend(type_params)
         if exclude_ids:
             placeholders = ",".join("?" * len(exclude_ids))
             conditions.append(f"qb.id NOT IN ({placeholders})")
@@ -111,6 +121,39 @@ def draw_questions(
         item["last_practiced_at"] = info.get("last_at") if info else None
         result.append(item)
     return result
+
+
+def _question_type_filter(question_type: str) -> tuple[str, list[str]]:
+    """Map agent question_type to coarse question bank filters."""
+    if question_type == "algorithm_coding":
+        return (
+            "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ? OR qb.question LIKE ?)",
+            ["%算法%", "%算法%", "%算法%", "%代码%"],
+        )
+    if question_type == "project_followup":
+        return (
+            "(qb.cat1 LIKE ? OR qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
+            ["%项目%", "%Agent%", "%系统设计%", "%项目%"],
+        )
+    if question_type == "knowledge_probe":
+        return (
+            "(qb.cat1 LIKE ? OR qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
+            ["%基础%", "%Agent%", "%RAG%", "%原理%"],
+        )
+    if question_type == "system_design":
+        return (
+            "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
+            ["%系统设计%", "%系统设计%", "%架构%"],
+        )
+    if question_type == "hr":
+        return (
+            "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
+            ["%HR%", "%行为%", "%软技能%"],
+        )
+    return (
+        "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
+        [f"%{question_type}%", f"%{question_type}%", f"%{question_type}%"],
+    )
 
 
 def _weighted_sample_without_replacement(
