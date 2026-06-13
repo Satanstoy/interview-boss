@@ -25,6 +25,42 @@ def sample_skill():
     return skill
 
 
+# ── TestToolSchemas ────────────────────────────────────────
+
+class TestToolSchemas:
+    def test_search_questions_schema_has_when_to_use(self):
+        """search_questions description should contain usage guidance."""
+        from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
+
+        desc = SEARCH_QUESTIONS_SCHEMA["function"]["description"]
+        assert "何时使用" in desc or "WHEN TO USE" in desc
+        assert "何时不用" in desc or "WHEN NOT TO USE" in desc
+
+    def test_search_questions_keywords_description_is_specific(self):
+        """keywords parameter description should guide against generic terms."""
+        from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
+
+        kw_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["keywords"]["description"]
+        assert "2-5" in kw_desc or "具体" in kw_desc
+
+    def test_search_questions_question_type_has_enum_descriptions(self):
+        """question_type description should explain each enum value."""
+        from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
+
+        qt_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["question_type"]["description"]
+        assert "project_followup" in qt_desc
+        assert "knowledge_probe" in qt_desc
+
+    def test_search_questions_schema_explains_result_usage(self):
+        """search_questions description should tell the model how to use returned questions."""
+        from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
+
+        desc = SEARCH_QUESTIONS_SCHEMA["function"]["description"]
+        assert "如何使用返回结果" in desc
+        assert "top 3" in desc
+        assert "不要机械复述" in desc
+
+
 # ── TestExecuteToolLoadSkill ─────────────────────────────
 
 class TestExecuteToolLoadSkill:
@@ -170,3 +206,27 @@ class TestExecuteToolDrawQuestions:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "unknown_tool" in parsed["error"]
+
+
+class TestToolProgressMessage:
+    def test_progress_messages_are_user_friendly_chinese(self):
+        from app.agents.chat.tools import tool_progress_message
+
+        assert tool_progress_message({
+            "function": {
+                "name": "load_skill",
+                "arguments": json.dumps({"skill_name": "project-deep-dive"}),
+            }
+        }) == "正在加载项目深挖策略..."
+        assert tool_progress_message({
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps({"keywords": ["Redis"]}),
+            }
+        }) == "正在检索相关面试题..."
+        assert tool_progress_message({
+            "function": {
+                "name": "draw_questions",
+                "arguments": json.dumps({"count": 2}),
+            }
+        }) == "正在从题库抽题..."
