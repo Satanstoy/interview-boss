@@ -245,6 +245,9 @@ async def send_message(
                 elif event_type == "retrieved":
                     yield f"data: {json.dumps({'type': 'retrieved', 'questions': event.get('questions', [])}, ensure_ascii=False)}\n\n"
 
+                elif event_type == "insight":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
                 elif event_type == "done":
                     meta = event.get("metadata", {})
 

@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
@@ -61,6 +62,56 @@ _INTERNAL_REACT_MARKERS = frozenset(
         *SKILL_NAMES,
     }
 )
+
+_ALLOWED_TOOL_NAMES = frozenset({"load_skill", "search_questions", "draw_questions"})
+
+
+def validate_tool_call(tool_call: dict) -> dict:
+    """Validate a tool call from the LLM before execution.
+
+    Enforces allowlist, required fields, and arg type safety.
+    Returns the validated tool call dict, or raises StopRun.
+    """
+    func = tool_call.get("function")
+    if not isinstance(func, dict):
+        raise StopRun("invalid_tool_call:no_function")
+
+    name = func.get("name")
+    if not isinstance(name, str) or not name:
+        raise StopRun("invalid_tool_call:missing_name")
+
+    if name not in _ALLOWED_TOOL_NAMES:
+        raise StopRun(f"tool_denied:{name}")
+
+    # Validate JSON parseability (downstream expects string format)
+    raw_args = func.get("arguments", "{}")
+    if isinstance(raw_args, str):
+        try:
+            json.loads(raw_args)
+        except (json.JSONDecodeError, TypeError):
+            raise StopRun(f"invalid_args:{name}")
+    elif not isinstance(raw_args, dict):
+        raise StopRun(f"invalid_args:{name}")
+
+    return tool_call  # return original; downstream expects string arguments
+
+
+# ── ReAct Budget & Control ──────────────────────────────
+
+@dataclass(frozen=True)
+class Budget:
+    """Three-dimensional runtime budget for the ReAct loop."""
+    max_steps: int = 5
+    max_tool_calls: int = 10
+    max_seconds: float = 30.0
+
+class StopRun(Exception):
+    """Raised when the ReAct loop must stop for a governance reason."""
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+REACT_BUDGET = Budget()
 
 
 def _emit(event: dict) -> None:
@@ -644,6 +695,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     """
     # 1. Build system prompt
     system_prompt = build_react_system_prompt(state)
+    state["active_skill_instructions"] = []  # consumed; skills baked into system prompt
 
     # 2. Build messages
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -665,10 +717,20 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     messages.append({"role": "user", "content": state["user_message"]})
 
     # 3. ReAct loop
-    hit_step_limit = False
+    react_started = time.monotonic()
+    tool_call_count = 0
+    seen_tool_calls: set[str] = set()
+    stop_reason = ""
     final_answer_text = ""
-    for step in range(MAX_REACT_STEPS):
+    for step in range(REACT_BUDGET.max_steps):
         react_step = step + 1
+        # Budget checks
+        if tool_call_count >= REACT_BUDGET.max_tool_calls:
+            stop_reason = "max_tool_calls"
+            break
+        if time.monotonic() - react_started > REACT_BUDGET.max_seconds:
+            stop_reason = "max_seconds"
+            break
         # Rebuild system prompt if skills were loaded in previous step
         if step > 0 and state.get("active_skill_instructions"):
             system_prompt = build_react_system_prompt(state)
@@ -712,6 +774,46 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         # Execute each tool call
         for tc in tool_calls:
+            # Validate before execution
+            try:
+                tc = validate_tool_call(tc)
+            except StopRun as exc:
+                stop_reason = exc.reason
+                logger.warning(
+                    "ReAct trace: event=validation_failed conversation_id=%s "
+                    "react_step=%s reason=%s",
+                    state.get("conversation_id"), react_step, exc.reason,
+                )
+                messages.append(make_tool_result_message(
+                    tc.get("id", "invalid"),
+                    json.dumps({"error": exc.reason}),
+                ))
+                break  # break inner loop, outer loop will check stop_reason
+
+            # Loop detection
+            try:
+                sig_args = tc["function"]["arguments"]
+                if isinstance(sig_args, str):
+                    sig_args = json.loads(sig_args)
+                call_sig = f"{tc['function']['name']}:{json.dumps(sig_args, sort_keys=True, ensure_ascii=False)}"
+            except (json.JSONDecodeError, TypeError, KeyError):
+                call_sig = f"{tc.get('function', {}).get('name', '?')}:unparseable"
+            if call_sig in seen_tool_calls:
+                stop_reason = "loop_detected"
+                logger.warning(
+                    "ReAct trace: event=loop_detected conversation_id=%s "
+                    "react_step=%s tool=%s",
+                    state.get("conversation_id"), react_step, tc["function"]["name"],
+                )
+                messages.append(make_tool_result_message(
+                    tc.get("id", "loop"),
+                    json.dumps({"error": "loop_detected", "message": "Same tool call repeated — stopping."}),
+                ))
+                break
+            seen_tool_calls.add(call_sig)
+
+            tool_call_count += 1
+
             tool_name = tc["function"]["name"]
             tool_args = _sanitize_tool_args(tc)
 
@@ -758,16 +860,35 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     }
                 )
 
+            # Emit insight events for user-visible decision points
+            if tool_name == "load_skill":
+                skill_label = tool_progress_message(tc).replace("正在加载", "").replace("...", "")
+                _emit({"type": "insight", "text": f"切换到{skill_label}模式"})
+            elif tool_name in ("search_questions", "draw_questions") and state.get("retrieved_questions"):
+                top_q = state["retrieved_questions"][0] if state["retrieved_questions"] else None
+                if top_q:
+                    topic = top_q.get("cat2") or top_q.get("cat1") or "相关技术"
+                    _emit({"type": "insight", "text": f"从题库检索到关于「{topic}」的题目"})
+
             messages.append(make_tool_result_message(tc["id"], output))
 
-        if react_step == MAX_REACT_STEPS:
-            hit_step_limit = True
+        # If inner loop broke due to validation failure or loop detection, exit outer loop
+        if stop_reason:
+            break
 
-    if hit_step_limit:
+        if react_step == REACT_BUDGET.max_steps:
+            stop_reason = "max_steps"
+
+    # Log stop reason
+    if stop_reason:
         logger.warning(
-            "ReAct trace: event=max_steps conversation_id=%s max_steps=%s",
+            "ReAct trace: event=stopped conversation_id=%s reason=%s "
+            "steps=%s tool_calls=%s elapsed_ms=%s",
             state.get("conversation_id"),
-            MAX_REACT_STEPS,
+            stop_reason,
+            react_step,
+            tool_call_count,
+            int((time.monotonic() - react_started) * 1000),
         )
 
     # 4. Stream final answer
