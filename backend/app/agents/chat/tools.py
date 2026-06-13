@@ -225,7 +225,7 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
 # ── Tool Implementations ─────────────────────────────────
 
 def _execute_load_skill(args: dict, state: ChatState) -> str:
-    """Load a skill's instruction from the registry."""
+    """Load a skill's instruction, store as current-loop pending system prompt injection."""
     skill_name = args.get("skill_name", "")
     registry = _get_skill_registry()
     skill = registry.get(skill_name)
@@ -233,11 +233,27 @@ def _execute_load_skill(args: dict, state: ChatState) -> str:
     if skill is None:
         return json.dumps({"error": f"Unknown skill: {skill_name}"})
 
+    # Already active — skip
     active_skills = state.setdefault("active_skills", [])
-    if skill_name and skill_name not in active_skills:
-        active_skills.append(skill_name)
+    if skill_name in active_skills:
+        return json.dumps({"status": "already_active", "skill": skill_name})
 
-    return json.dumps({"instruction": skill.get_instruction()})
+    # Mark active
+    active_skills.append(skill_name)
+
+    # Store instruction for current-loop system prompt injection (not as tool result)
+    instruction = skill.get_instruction()
+    if instruction:
+        state.setdefault("active_skill_instructions", []).append({
+            "skill_name": skill_name,
+            "instruction": instruction,
+        })
+
+    return json.dumps({
+        "status": "loaded",
+        "skill": skill_name,
+        "summary": f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。",
+    })
 
 
 async def _execute_search_questions(args: dict, state: ChatState) -> str:

@@ -21,6 +21,7 @@ def sample_skill():
     """A mock Skill object."""
     skill = MagicMock()
     skill.name = "theory-qa"
+    skill.description = "理论问答策略"
     skill.get_instruction.return_value = "## Theory QA Instruction\n\nAsk theory questions."
     return skill
 
@@ -96,8 +97,8 @@ class TestToolSchemas:
 
 class TestExecuteToolLoadSkill:
 
-    async def test_load_skill_returns_instruction(self, sample_state, sample_skill):
-        """load_skill should return the skill instruction text from registry."""
+    async def test_load_skill_returns_confirmation(self, sample_state, sample_skill):
+        """load_skill should return confirmation with status, not full instruction."""
         from app.agents.chat.tools import execute_tool
 
         tool_call = {
@@ -114,9 +115,10 @@ class TestExecuteToolLoadSkill:
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert "instruction" in parsed
-        assert parsed["instruction"] == "## Theory QA Instruction\n\nAsk theory questions."
-        mock_registry.get.assert_called_once_with("theory-qa")
+        assert parsed["status"] == "loaded"
+        assert parsed["skill"] == "theory-qa"
+        assert "summary" in parsed
+        assert "instruction" not in parsed
 
     async def test_load_skill_unknown_name(self, sample_state):
         """load_skill should return error when skill is not found."""
@@ -138,6 +140,65 @@ class TestExecuteToolLoadSkill:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "nonexistent" in parsed["error"]
+
+
+class TestLoadSkillStateInjection:
+    async def test_load_skill_stores_instruction_in_state(self, sample_state):
+        """load_skill should store instruction in state for system prompt injection."""
+        from app.agents.chat.tools import execute_tool
+
+        sample_skill_obj = MagicMock()
+        sample_skill_obj.name = "theory-qa"
+        sample_skill_obj.description = "理论问答策略"
+        sample_skill_obj.get_instruction.return_value = "## Theory QA full instruction"
+
+        tool_call = {
+            "function": {
+                "name": "load_skill",
+                "arguments": json.dumps({"skill_name": "theory-qa"}),
+            }
+        }
+
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = sample_skill_obj
+
+        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+            result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert parsed["status"] == "loaded"
+        assert parsed["skill"] == "theory-qa"
+        assert "instruction" not in parsed
+
+        assert "active_skill_instructions" in sample_state
+        assert len(sample_state["active_skill_instructions"]) == 1
+        assert sample_state["active_skill_instructions"][0]["skill_name"] == "theory-qa"
+        assert sample_state["active_skill_instructions"][0]["instruction"] == "## Theory QA full instruction"
+
+    async def test_load_skill_already_active_returns_already_active(self, sample_state):
+        """load_skill should return already_active if skill is already loaded."""
+        from app.agents.chat.tools import execute_tool
+
+        sample_state["active_skills"] = ["theory-qa"]
+
+        tool_call = {
+            "function": {
+                "name": "load_skill",
+                "arguments": json.dumps({"skill_name": "theory-qa"}),
+            }
+        }
+
+        mock_registry = MagicMock()
+        mock_skill_obj = MagicMock()
+        mock_skill_obj.get_instruction.return_value = "instruction"
+        mock_registry.get.return_value = mock_skill_obj
+
+        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+            result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert parsed["status"] == "already_active"
+        assert "active_skill_instructions" not in sample_state or sample_state.get("active_skill_instructions") == []
 
 
 # ── TestExecuteToolSearchQuestions ────────────────────────
