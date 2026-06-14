@@ -20,6 +20,7 @@
 | `email_service.py` | 邮箱验证码发送/验证 | `core/config` |
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
+| `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级） | `db/connection`, `routers/questions` |
 
 ## 核心规则
 

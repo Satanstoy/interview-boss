@@ -118,6 +118,7 @@ def _restore_active_skills_from_metadata(
         return
     if registry is None:
         from app.agents.chat.skills import get_default_registry
+
         registry = get_default_registry()
     restored_instructions: list[dict] = []
     valid_skill_names: list[str] = []
@@ -130,7 +131,9 @@ def _restore_active_skills_from_metadata(
         valid_skill_names.append(name)
         instruction = skill.get_instruction()
         if instruction:
-            restored_instructions.append({"skill_name": name, "instruction": instruction})
+            restored_instructions.append(
+                {"skill_name": name, "instruction": instruction}
+            )
     state["active_skills"] = valid_skill_names
     state["active_skill_instructions"] = restored_instructions
 
@@ -223,9 +226,20 @@ async def classify_intent(state: ChatState) -> dict:
 
     # 结束面试关键词（优先于 practice_request，避免"结束"被误判为换题）
     end_keywords = [
-        "结束面试", "面试结束", "面试到此", "到此为止", "面试先到这里",
-        "请你结束", "请结束", "生成面试总结", "生成一份面试总结",
-        "面试总结", "收尾吧", "可以结束了", "今天就到这里", "先到这里吧",
+        "结束面试",
+        "面试结束",
+        "面试到此",
+        "到此为止",
+        "面试先到这里",
+        "请你结束",
+        "请结束",
+        "生成面试总结",
+        "生成一份面试总结",
+        "面试总结",
+        "收尾吧",
+        "可以结束了",
+        "今天就到这里",
+        "先到这里吧",
     ]
     if any(kw in user_message for kw in end_keywords):
         return {"intent": "end_interview"}
@@ -391,7 +405,7 @@ def _determine_interview_phase(recent_count: int) -> str:
     if recent_count <= 32:
         return "面试进行中。根据候选人回答和你的判断，自由穿插项目深挖、八股、算法。"
     if recent_count <= 44:
-        return '面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。'
+        return "面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。"
     return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
 
@@ -535,7 +549,7 @@ def _question_plan_adherence(response_text: str, plan: dict) -> dict:
     overlap = response_tokens & expected
     response_lower = (response_text or "").lower()
     phrase_hits = set()
-    for term in (plan.get("allowed_focus", []) or []):
+    for term in plan.get("allowed_focus", []) or []:
         text = str(term or "").strip().lower()
         if len(text) >= 2 and text in response_lower:
             phrase_hits.add(text)
@@ -1047,9 +1061,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     if compressed:
         compressed = _truncate_to_budget(compressed, COMPRESSED_BUDGET)
-        messages.append(
-            {"role": "system", "content": f"之前的对话摘要:\n{compressed}"}
-        )
+        messages.append({"role": "system", "content": f"之前的对话摘要:\n{compressed}"})
 
     if retrieved:
         source_label = (
@@ -1642,6 +1654,14 @@ def _build_tool_strategy(state: ChatState) -> str:
             "建议：不调用工具，等待用户完成回答或给出追问引导。\n"
             "</tool_strategy>"
         )
+    elif intent == "end_interview":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户明确要求结束面试。\n"
+            "严格禁止：不得调用任何工具（load_skill / search_questions / draw_questions）。\n"
+            "必须：直接生成面试总结或简单收尾，然后结束。\n"
+            "</tool_strategy>"
+        )
     elif intent == "practice_request":
         return (
             "<tool_strategy>\n"
@@ -1737,6 +1757,7 @@ def build_react_system_prompt(state: ChatState) -> str:
     if active_skill_names:
         skill_registry = get_default_registry()
         from app.agents.shared.skills.builder import build_skill_prompt as _build_sp
+
         skill_instr = _build_sp(skill_registry, active_skill_names)
         if skill_instr:
             parts.append(skill_instr)

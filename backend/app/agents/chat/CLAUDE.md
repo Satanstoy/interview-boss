@@ -35,6 +35,12 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
 - **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 metadata 始终加载，Layer 2 instruction 按需注入，Layer 3 resources 条件触发。每个 skill 是一个目录 + `SKILL.md` 文件（YAML frontmatter + Markdown body），遵循 AgentSkills.io 规范。`SkillRegistry` 管理所有 skill，`build_skill_prompt()` 合并 active skills 指令
 
+## 质量保护机制
+
+- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，直接生成总结
+- **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
+- **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
+
 ## 修改后必做
 
 1. 运行 `docker compose exec backend uv run pytest backend/tests/chat/ -q`

@@ -39,10 +39,15 @@ class TestActiveSkillsPersistence:
         from app.agents.chat.nodes import _restore_active_skills_from_metadata
 
         state = {}
-        metadata = {"persistent_skill_names": ["interview-rhythm"], "active_skill_names": ["project-deep-dive"]}
+        metadata = {
+            "persistent_skill_names": ["interview-rhythm"],
+            "active_skill_names": ["project-deep-dive"],
+        }
 
         mock_skill = MagicMock()
-        mock_skill.get_instruction.return_value = "## Interview Rhythm\nLatest instruction."
+        mock_skill.get_instruction.return_value = (
+            "## Interview Rhythm\nLatest instruction."
+        )
         mock_registry = MagicMock()
         mock_registry.get.return_value = mock_skill
 
@@ -50,7 +55,10 @@ class TestActiveSkillsPersistence:
 
         assert state["active_skills"] == ["interview-rhythm"]
         assert state["active_skill_instructions"] == [
-            {"skill_name": "interview-rhythm", "instruction": "## Interview Rhythm\nLatest instruction."}
+            {
+                "skill_name": "interview-rhythm",
+                "instruction": "## Interview Rhythm\nLatest instruction.",
+            }
         ]
         mock_registry.get.assert_called_once_with("interview-rhythm")
 
@@ -130,7 +138,9 @@ class TestReactLoop:
             "model": None,
         }
 
-        with patch("app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock
+        ) as mock_llm:
             events = []
             async for event in _react_loop(state):
                 events.append(event)
@@ -158,7 +168,9 @@ class TestReactLoop:
             "model": None,
         }
 
-        with patch("app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock
+        ) as mock_llm:
             events = []
             async for event in _react_loop(state):
                 events.append(event)
@@ -194,9 +206,7 @@ class TestReactLoop:
             ),
             patch(
                 "app.agents.chat.pipeline.stream_llm_messages",
-                side_effect=lambda *a, **kw: _mock_stream_strings(
-                    "Hello", " World"
-                ),
+                side_effect=lambda *a, **kw: _mock_stream_strings("Hello", " World"),
             ),
         ):
             events = []
@@ -310,7 +320,9 @@ class TestReactLoop:
         tool_responses = [
             {
                 "content": None,
-                "tool_calls": [_tc("load_skill", {"skill_name": "theory-qa", "turn": i})],
+                "tool_calls": [
+                    _tc("load_skill", {"skill_name": "theory-qa", "turn": i})
+                ],
                 "finish_reason": "tool_calls",
             }
             for i in range(MAX_REACT_STEPS)
@@ -455,9 +467,7 @@ class TestReactLoop:
             ),
             patch(
                 "app.agents.chat.pipeline.stream_llm_messages",
-                side_effect=lambda *a, **kw: _mock_stream_strings(
-                    "project-deep-dive"
-                ),
+                side_effect=lambda *a, **kw: _mock_stream_strings("project-deep-dive"),
             ),
         ):
             events = []
@@ -517,7 +527,12 @@ class TestBuildToolStrategy:
         """Should require search_questions when user completed their answer (default)."""
         from app.agents.chat.nodes import _build_tool_strategy
 
-        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [], "active_skills": []}
+        state = {
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+            "active_skills": [],
+        }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
         assert "必须" in strategy
@@ -526,7 +541,12 @@ class TestBuildToolStrategy:
         """Project deep-dive mode: can directly follow up without search."""
         from app.agents.chat.nodes import _build_tool_strategy
 
-        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [], "active_skills": ["project-deep-dive"]}
+        state = {
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+            "active_skills": ["project-deep-dive"],
+        }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
         assert "直接追问" in strategy or "不检索" in strategy
@@ -535,7 +555,11 @@ class TestBuildToolStrategy:
         """Should suggest waiting when user hasn't finished answering."""
         from app.agents.chat.nodes import _build_tool_strategy
 
-        state = {"intent": "interview_question", "answer_complete": False, "active_skills": []}
+        state = {
+            "intent": "interview_question",
+            "answer_complete": False,
+            "active_skills": [],
+        }
         strategy = _build_tool_strategy(state)
         assert "不调用工具" in strategy or "等待" in strategy
 
@@ -543,7 +567,11 @@ class TestBuildToolStrategy:
         """Practice requests must search (required, not suggested)."""
         from app.agents.chat.nodes import _build_tool_strategy
 
-        state = {"intent": "practice_request", "answer_complete": False, "active_skills": []}
+        state = {
+            "intent": "practice_request",
+            "answer_complete": False,
+            "active_skills": [],
+        }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
         assert "必须" in strategy
@@ -568,7 +596,12 @@ class TestBuildToolStrategy:
         """Should not suggest search when retrieved_questions is non-empty."""
         from app.agents.chat.nodes import _build_tool_strategy
 
-        state = {"intent": "interview_question", "answer_complete": True, "retrieved_questions": [{"id": 1}], "active_skills": []}
+        state = {
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [{"id": 1}],
+            "active_skills": [],
+        }
         strategy = _build_tool_strategy(state)
         assert "search_questions" not in strategy
 
@@ -619,7 +652,11 @@ class TestFinalAnswerQuality:
             patch(
                 "app.agents.chat.pipeline.llm_with_tools",
                 new_callable=AsyncMock,
-                return_value={"content": None, "tool_calls": None, "finish_reason": "stop"},
+                return_value={
+                    "content": None,
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
             ),
             patch(
                 "app.agents.chat.pipeline.stream_llm_messages",
@@ -652,7 +689,10 @@ class TestBuildReactSystemPrompt:
             "compressed_context": None,
             "active_skills": ["theory-qa"],
             "active_skill_instructions": [
-                {"skill_name": "theory-qa", "instruction": "## Theory QA\nAsk deep theory questions."},
+                {
+                    "skill_name": "theory-qa",
+                    "instruction": "## Theory QA\nAsk deep theory questions.",
+                },
             ],
         }
 
@@ -775,26 +815,30 @@ class TestReactLoopIntegration:
         # Step 1: load_skill
         step1 = {
             "content": None,
-            "tool_calls": [{
-                "id": "call_1",
-                "function": {
-                    "name": "load_skill",
-                    "arguments": json.dumps({"skill_name": "algorithm-coding"}),
-                },
-            }],
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "function": {
+                        "name": "load_skill",
+                        "arguments": json.dumps({"skill_name": "algorithm-coding"}),
+                    },
+                }
+            ],
             "finish_reason": "tool_calls",
         }
 
         # Step 2: search_questions
         step2 = {
             "content": None,
-            "tool_calls": [{
-                "id": "call_2",
-                "function": {
-                    "name": "search_questions",
-                    "arguments": json.dumps({"keywords": ["排序算法"]}),
-                },
-            }],
+            "tool_calls": [
+                {
+                    "id": "call_2",
+                    "function": {
+                        "name": "search_questions",
+                        "arguments": json.dumps({"keywords": ["排序算法"]}),
+                    },
+                }
+            ],
             "finish_reason": "tool_calls",
         }
 
@@ -823,10 +867,22 @@ class TestReactLoopIntegration:
 
         token = _event_queue_var.set(mock_queue)
         try:
-            with patch("app.agents.chat.pipeline.build_react_system_prompt", return_value="Test prompt."):
-                with patch("app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm):
-                    with patch("app.agents.chat.pipeline.stream_llm_messages", side_effect=mock_stream):
-                        with patch("app.agents.chat.pipeline.execute_tool", new_callable=AsyncMock, return_value="mock result"):
+            with patch(
+                "app.agents.chat.pipeline.build_react_system_prompt",
+                return_value="Test prompt.",
+            ):
+                with patch(
+                    "app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm
+                ):
+                    with patch(
+                        "app.agents.chat.pipeline.stream_llm_messages",
+                        side_effect=mock_stream,
+                    ):
+                        with patch(
+                            "app.agents.chat.pipeline.execute_tool",
+                            new_callable=AsyncMock,
+                            return_value="mock result",
+                        ):
                             async for event in _react_loop(base_state):
                                 collected.append(event)
         finally:
@@ -841,3 +897,360 @@ class TestReactLoopIntegration:
 
         # llm_with_tools called 3 times
         assert call_count == 3
+
+
+# ── TestEndInterviewHardRoute ─────────────────────────────
+
+
+class TestEndInterviewHardRoute:
+    """end_interview intent must bypass the ReAct loop entirely — zero tool calls."""
+
+    @pytest.mark.asyncio
+    async def test_end_interview_does_not_call_tools(self):
+        """When intent=end_interview, llm_with_tools and execute_tool must NOT be called."""
+        from app.agents.chat.pipeline import run_chat
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.pipeline._step_load_context",
+                    new_callable=AsyncMock,
+                ) as mock_load,
+                patch(
+                    "app.agents.chat.pipeline._step_classify", new_callable=AsyncMock
+                ) as mock_classify,
+                patch(
+                    "app.agents.chat.pipeline._step_extract_memory",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock
+                ) as mock_llm_tools,
+                patch(
+                    "app.agents.chat.pipeline.execute_tool", new_callable=AsyncMock
+                ) as mock_exec,
+                patch(
+                    "app.agents.chat.pipeline._persist_active_skills",
+                    new_callable=AsyncMock,
+                ),
+                patch("app.agents.chat.pipeline.chat_service"),
+                patch(
+                    "app.agents.chat.pipeline.classify_and_recall",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.agents.chat.pipeline.classify_and_recall_fast",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.agents.chat.pipeline.build_interview_context",
+                    return_value=("", None),
+                ),
+            ):
+                mock_load.return_value = None
+                mock_classify.side_effect = lambda state: state.update(
+                    intent="end_interview",
+                    keywords=[],
+                    search_query="",
+                    answer_complete=False,
+                )
+
+                events = []
+                async for event in run_chat(
+                    conversation_id="test-conv",
+                    user_id=1,
+                    user_message="结束面试",
+                    mode="free_practice",
+                ):
+                    events.append(event)
+
+        finally:
+            _event_queue_var.reset(token)
+
+        # No tool calls should have been made
+        mock_llm_tools.assert_not_called()
+        mock_exec.assert_not_called()
+
+        # Should have chunk + done events
+        all_events = emitted + events
+        types = [e.get("type") for e in all_events]
+        assert "chunk" in types
+        assert "done" in types
+
+        # Closing message should contain summary or farewell
+        chunk_texts = [
+            e.get("content", "") for e in all_events if e.get("type") == "chunk"
+        ]
+        combined = "".join(chunk_texts)
+        assert "面试" in combined or "感谢" in combined
+
+    def test_end_interview_with_summary_request(self):
+        """end_interview + summary keywords should produce a structured summary."""
+        from app.agents.chat.pipeline import _generate_end_interview_response
+
+        state = {
+            "user_message": "结束面试，给我生成一份面试总结",
+            "message_history": [
+                {"role": "assistant", "content": "问题1"},
+                {"role": "user", "content": "回答1"},
+            ]
+            * 12,
+            "question_source": None,
+            "question_source_reason": None,
+        }
+
+        response = _generate_end_interview_response(state)
+
+        assert "整体表现" in response
+        assert state["question_source"] == "conversation"
+        assert state["question_source_reason"] == "end_interview_hard_route"
+
+
+# ── TestRepetitionProtection ──────────────────────────────
+
+
+class TestRepetitionProtection:
+    """Repetitive question protection: same core topic consecutive limit."""
+
+    def test_no_protection_under_limit(self):
+        """Below the limit, no protection note should be injected."""
+        from app.agents.chat.pipeline import _build_repetition_protection_note
+
+        state = {
+            "conversation_id": "test",
+            "message_history": [
+                {"role": "assistant", "content": "请介绍一下 Redis 的持久化机制"},
+                {"role": "user", "content": "RDB 和 AOF"},
+                {"role": "assistant", "content": "TCP 三次握手的流程是什么？"},
+                {"role": "user", "content": "SYN SYN-ACK ACK"},
+            ],
+        }
+
+        note = _build_repetition_protection_note(state)
+        assert note == ""
+
+    def test_protection_triggers_after_limit(self):
+        """After MAX_CONSECUTIVE same-topic questions, protection note appears."""
+        from app.agents.chat.pipeline import (
+            _build_repetition_protection_note,
+            _MAX_CONSECUTIVE_SAME_QUESTION,
+        )
+
+        # Build a history where the last 3 assistant messages all ask about LRU Cache
+        state = {
+            "conversation_id": "test",
+            "message_history": [
+                {
+                    "role": "assistant",
+                    "content": "请实现一个 LRU Cache，用 Python 写出 get 和 put",
+                },
+                {"role": "user", "content": "用 OrderedDict"},
+                {
+                    "role": "assistant",
+                    "content": "LRU Cache 的时间复杂度是多少？请直接回答 O(1) 的原因",
+                },
+                {"role": "user", "content": "哈希表加双向链表"},
+                {
+                    "role": "assistant",
+                    "content": "LRU Cache 如果 capacity 为 0 怎么处理？请写代码",
+                },
+                {"role": "user", "content": "直接返回 -1"},
+            ],
+        }
+
+        note = _build_repetition_protection_note(state)
+        # Should trigger since consecutive count >= _MAX_CONSECUTIVE_SAME_QUESTION
+        assert "节奏保护" in note or "不要" in note or "切换" in note
+
+    def test_protection_count_resets_on_topic_change(self):
+        """When the topic changes, the consecutive count resets."""
+        from app.agents.chat.pipeline import _build_repetition_protection_note
+
+        state = {
+            "conversation_id": "test",
+            "message_history": [
+                # First topic: LRU Cache (2 similar)
+                {"role": "assistant", "content": "请实现一个 LRU Cache"},
+                {"role": "user", "content": "用 OrderedDict"},
+                {"role": "assistant", "content": "LRU Cache 的淘汰策略"},
+                {"role": "user", "content": "LRU 最近最少使用"},
+                # Topic change: Redis
+                {"role": "assistant", "content": "Redis 的持久化机制有哪些？"},
+                {"role": "user", "content": "RDB 和 AOF"},
+                # New topic only asked once
+                {"role": "assistant", "content": "Redis 持久化 RDB 的优缺点"},
+                {"role": "user", "content": "快但可能丢数据"},
+            ],
+        }
+
+        note = _build_repetition_protection_note(state)
+        # The last 2 assistant messages are about Redis, which is under the limit
+        assert note == ""
+
+    @pytest.mark.asyncio
+    async def test_protection_survives_prompt_rebuild_after_skill_load(self, base_state):
+        """If ReAct loads a skill, the rebuilt system prompt keeps protection."""
+        from app.agents.chat.pipeline import _react_loop
+
+        base_state.update(
+            {
+                "user_message": "继续",
+                "message_history": [
+                    {
+                        "role": "assistant",
+                        "content": "请实现一个 LRU Cache，用 Python 写出 get 和 put",
+                    },
+                    {"role": "user", "content": "用 OrderedDict"},
+                    {
+                        "role": "assistant",
+                        "content": "LRU Cache 的时间复杂度是多少？请直接回答 O(1) 的原因",
+                    },
+                    {"role": "user", "content": "哈希表加双向链表"},
+                    {
+                        "role": "assistant",
+                        "content": "LRU Cache 如果 capacity 为 0 怎么处理？请写代码",
+                    },
+                    {"role": "user", "content": "直接返回 -1"},
+                ],
+                "recent_messages": [],
+                "active_skill_instructions": [],
+            }
+        )
+
+        system_prompts: list[str] = []
+
+        async def mock_llm(messages, *args, **kwargs):
+            system_prompts.append(messages[0]["content"])
+            if len(system_prompts) == 1:
+                return {
+                    "content": None,
+                    "tool_calls": [
+                        _tc("load_skill", {"skill_name": "algorithm-coding"})
+                    ],
+                    "finish_reason": "tool_calls",
+                }
+            return {
+                "content": "先给你一个提示：用哈希表加双向链表，再换个边界条件看。",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+
+        async def mock_execute_tool(tool_call, state):
+            state["active_skill_instructions"] = [
+                {
+                    "skill_name": "algorithm-coding",
+                    "instruction": "## Algorithm Coding\nAsk coding questions.",
+                }
+            ]
+            return "loaded"
+
+        with (
+            patch(
+                "app.agents.chat.pipeline.build_react_system_prompt",
+                return_value="BASE PROMPT",
+            ),
+            patch("app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm),
+            patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+        ):
+            events = []
+            async for event in _react_loop(base_state):
+                events.append(event)
+
+        assert len(system_prompts) == 2
+        assert "节奏保护" in system_prompts[0]
+        assert "节奏保护" in system_prompts[1]
+        assert any(e.get("type") == "chunk" for e in events)
+
+
+# ── TestSelectedQuestionBinding ────────────────────────────
+
+
+class TestSelectedQuestionBinding:
+    """selected_question binding: single candidate auto-bind."""
+
+    def test_single_candidate_with_overlap_binds(self):
+        """When draw returns 1 candidate and response uses its tokens, bind it."""
+        from app.agents.chat.pipeline import _infer_selected_question
+
+        candidates = [
+            {"id": 42, "question": "实现一个 LRU Cache，支持 get 和 put 操作"},
+        ]
+        response = (
+            "来写一道代码题：实现一个 LRU Cache，支持 get 和 put，请说明数据结构选择。"
+        )
+
+        selected, reason = _infer_selected_question(response, [], candidates)
+
+        assert selected is not None
+        assert selected["id"] == 42
+        assert reason == "single_candidate_token_overlap"
+
+    def test_single_candidate_no_overlap_not_bound(self):
+        """When response has no overlap with the single candidate, don't bind."""
+        from app.agents.chat.pipeline import _infer_selected_question
+
+        candidates = [
+            {"id": 42, "question": "实现一个 LRU Cache"},
+        ]
+        response = "你刚才提到的项目，能详细说一下架构吗？"
+
+        selected, reason = _infer_selected_question(response, [], candidates)
+
+        assert selected is None
+        assert reason == "candidate_not_explicitly_used"
+
+    def test_basis_id_still_takes_priority(self):
+        """Explicit basis_question_ids should take priority over heuristics."""
+        from app.agents.chat.pipeline import _infer_selected_question
+
+        candidates = [
+            {"id": 1, "question": "Redis 持久化"},
+            {"id": 2, "question": "LRU Cache 实现"},
+        ]
+        response = "介绍一下 Redis 持久化"
+
+        selected, reason = _infer_selected_question(response, [1], candidates)
+
+        assert selected["id"] == 1
+        assert reason == "basis_question_id"
+
+    def test_multiple_candidates_text_match(self):
+        """With multiple candidates, text match still works as before."""
+        from app.agents.chat.pipeline import _infer_selected_question
+
+        candidates = [
+            {"id": 1, "question": "Redis 持久化机制有哪些？"},
+            {"id": 2, "question": "TCP 三次握手流程"},
+        ]
+        response = "Redis 持久化机制有哪些？请详细介绍 RDB 和 AOF 的区别。"
+
+        selected, reason = _infer_selected_question(response, [], candidates)
+
+        assert selected is not None
+        assert selected["id"] == 1
+        assert reason == "question_text_match"
+
+
+# ── TestToolStrategyEndInterview ───────────────────────────
+
+
+class TestToolStrategyEndInterview:
+    """_build_tool_strategy should forbid tools for end_interview."""
+
+    def test_end_interview_forbids_tools(self):
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {
+            "intent": "end_interview",
+            "answer_complete": False,
+            "active_skills": [],
+        }
+        strategy = _build_tool_strategy(state)
+
+        assert "禁止" in strategy
+        assert "不得调用任何工具" in strategy or "load_skill" in strategy

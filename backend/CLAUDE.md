@@ -86,6 +86,31 @@ Routers → Services → Core/DB → (external)
 - DB 自动备份：破坏性操作前自动备份
 - 配置热更新：`/api/profile` → DB + `.env`
 
+## 面试 Agent 质量保护
+
+面试 chat agent (`agents/chat/pipeline.py`) 包含以下质量保护机制：
+
+### 结束意图硬路由
+- 当 `intent == 'end_interview'` 时，**完全跳过 ReAct 循环**，不调用任何工具（load_skill / search_questions / draw_questions）
+- 直接生成总结/收尾回复，保留 done/basis SSE 兼容
+- `_build_tool_strategy()` 也为 end_interview 注入"禁止工具"指令作为双重保护
+- 测试：`TestEndInterviewHardRoute`
+
+### 重复追问节奏保护
+- `_count_consecutive_similar_questions()` 用 overlap coefficient 检测连续相似追问
+- 超过 `_MAX_CONSECUTIVE_SAME_QUESTION`（默认 2）次后，system prompt 注入硬约束
+- 约束要求：给提示/记录短板换题/降级，禁止原样施压
+- 测试：`TestRepetitionProtection`
+
+### 抽题 difficulty 映射与降级
+- `question_draw_service._map_difficulty()` 映射英文难度到中文模式：easy→L1/基础, medium→L2/中等, hard→L3/困难
+- 带 difficulty 抽题返回 0 结果时，自动去掉 difficulty 重试
+- 测试：`test_difficulty_mapping_*` 和 `test_difficulty_fallback_when_no_match`
+
+### selected_question 绑定
+- `_infer_selected_question()` 新增 single-candidate heuristic：draw 单候选 + 响应有 token overlap 时自动绑定
+- 测试：`TestSelectedQuestionBinding`
+
 ## 测试基础设施
 
 `conftest.py` 提供 fixtures（自动生效，无需手动导入）：

@@ -31,7 +31,11 @@ from app.agents.chat.tools import (
     execute_tool,
     tool_progress_message,
 )
-from app.services.llm import llm_with_tools, make_tool_result_message, stream_llm_messages
+from app.services.llm import (
+    llm_with_tools,
+    make_tool_result_message,
+    stream_llm_messages,
+)
 from app.agents.chat.state import ChatState
 from app.agents.shared.events import _event_queue_var
 from app.services import chat_service
@@ -100,18 +104,23 @@ def validate_tool_call(tool_call: dict) -> dict:
 
 # ── ReAct Budget & Control ──────────────────────────────
 
+
 @dataclass(frozen=True)
 class Budget:
     """Three-dimensional runtime budget for the ReAct loop."""
+
     max_steps: int = 5
     max_tool_calls: int = 10
     max_seconds: float = 30.0
 
+
 class StopRun(Exception):
     """Raised when the ReAct loop must stop for a governance reason."""
+
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
 
 REACT_BUDGET = Budget()
 
@@ -175,7 +184,9 @@ def _tokenize_for_overlap(text: str) -> set[str]:
 
 
 def _normalize_question_text(text: str) -> str:
-    return re.sub(r"[\s`'\"“”‘’。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or "").lower()
+    return re.sub(
+        r"[\s`'\"“”‘’。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or ""
+    ).lower()
 
 
 def _infer_selected_question(
@@ -207,6 +218,21 @@ def _infer_selected_question(
             )
         ):
             return q, "question_text_match"
+
+    # Single-candidate heuristic: if there's exactly one candidate and the
+    # response contains meaningful overlap with its question tokens, bind it.
+    # This covers the common case where draw_questions returns 1 question and
+    # the LLM uses it without explicit [BASIS] markup.
+    if len(candidates) == 1:
+        single = candidates[0]
+        single_tokens = _tokenize_for_overlap(str(single.get("question") or ""))
+        response_tokens = _tokenize_for_overlap(response_text)
+        if single_tokens and response_tokens:
+            overlap = single_tokens & response_tokens
+            # Require at least 2 meaningful token overlaps
+            if len(overlap) >= 2:
+                return single, "single_candidate_token_overlap"
+
     return None, "candidate_not_explicitly_used"
 
 
@@ -225,13 +251,17 @@ def _is_bare_coding_prompt(text: str, state: ChatState) -> bool:
 
 
 def _fallback_coding_question(state: ChatState) -> str:
-    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
+    candidates = (
+        state.get("candidate_questions") or state.get("retrieved_questions") or []
+    )
     coding_candidate = None
     for q in candidates:
         haystack = " ".join(
             str(q.get(k) or "") for k in ("question", "cat1", "cat2", "tags")
         )
-        if re.search(r"(算法|代码|手撕|LRU|二分|链表|栈|队列|动态规划)", haystack, re.I):
+        if re.search(
+            r"(算法|代码|手撕|LRU|二分|链表|栈|队列|动态规划)", haystack, re.I
+        ):
             coding_candidate = q
             break
     if coding_candidate:
@@ -261,7 +291,9 @@ def _ensure_final_answer_quality(text: str, state: ChatState) -> str:
 
 def _fallback_react_answer(state: ChatState, reason: str) -> str:
     """Return a safe interviewer turn when ReAct/tool/final generation fails."""
-    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
+    candidates = (
+        state.get("candidate_questions") or state.get("retrieved_questions") or []
+    )
     if candidates:
         selected = candidates[0]
         state["selected_question"] = selected
@@ -287,6 +319,100 @@ def _last_assistant_message(state: ChatState) -> str:
         if msg.get("role") == "assistant":
             return str(msg.get("content") or "")
     return ""
+
+
+# ── Repetitive question protection ────────────────────────
+
+_MAX_CONSECUTIVE_SAME_QUESTION = 2
+
+
+def _count_consecutive_similar_questions(state: ChatState) -> tuple[int, str]:
+    """Count how many consecutive assistant messages are about the same core topic.
+
+    Returns (count, topic_tokens_summary).  A "consecutive run" resets when
+    the latest assistant message has significantly different core tokens from
+    the previous one.
+
+    Uses a lightweight token-overlap heuristic: extract Chinese spans/English
+    words from each assistant message, compute overlap coefficient between
+    consecutive pairs, and count the streak where overlap >= 0.15.
+    """
+    messages = state.get("message_history", []) or []
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    if len(assistant_msgs) < 2:
+        return 0, ""
+
+    def _core_tokens(text: str) -> set[str]:
+        tokens = set()
+        for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{2,}", text.lower()):
+            tokens.add(t)
+        for t in re.findall(r"[\u4e00-\u9fff]{2,4}", text):
+            tokens.add(t)
+        # Remove generic filler tokens that inflate similarity
+        _fillers = {
+            "请",
+            "问题",
+            "回答",
+            "面试",
+            "一下",
+            "具体",
+            "详细",
+            "介绍一下",
+            "说说",
+        }
+        return tokens - _fillers
+
+    recent_assistants = assistant_msgs[-6:]  # look at last 6 assistant messages
+    token_sets = [_core_tokens(m.get("content", "")) for m in recent_assistants]
+
+    # Walk backwards counting consecutive similar pairs
+    # Use overlap coefficient: |A∩B| / min(|A|,|B|) — better than Jaccard
+    # for detecting repetition when one message is much longer than the other.
+    count = 0
+    for i in range(len(token_sets) - 1, 0, -1):
+        curr, prev = token_sets[i], token_sets[i - 1]
+        if not curr or not prev:
+            break
+        intersection = curr & prev
+        overlap = len(intersection) / max(min(len(curr), len(prev)), 1)
+        if overlap >= 0.15:
+            count += 1
+        else:
+            break
+
+    # Return the topic summary of the most recent assistant message
+    last_tokens = token_sets[-1] if token_sets else set()
+    return count, "、".join(sorted(last_tokens)[:5])
+
+
+def _build_repetition_protection_note(state: ChatState) -> str:
+    """If the interviewer has been asking about the same topic too many times
+    consecutively, return a hard constraint note for the system prompt.
+
+    Returns empty string when no protection is needed.
+    """
+    count, topic_summary = _count_consecutive_similar_questions(state)
+    if count < _MAX_CONSECUTIVE_SAME_QUESTION:
+        return ""
+
+    logger.info(
+        "ReAct trace: event=repetition_protection conversation_id=%s "
+        "consecutive_count=%s topic=%s",
+        state.get("conversation_id"),
+        count,
+        topic_summary,
+    )
+
+    return (
+        "## ⚠️ 节奏保护（硬约束）\n"
+        f"你已经连续 {count + 1} 次围绕同一话题「{topic_summary}」追问。\n"
+        "- 不要再用同样的方式施压（如反复要求「写出来」「直接回答」）。\n"
+        "- 必须做以下三选一：\n"
+        "  1) 给一个简短提示/思路引导，让候选人自己想；\n"
+        "  2) 记录为候选人的薄弱点，然后切换到下一个考察方向；\n"
+        "  3) 降低难度，换个更基础的角度考察同一知识点。\n"
+        "- 禁止原样重复上一题的施压话术。\n"
+    )
 
 
 def _looks_like_candidate_question(text: str) -> bool:
@@ -318,6 +444,42 @@ def _forced_closing_response(state: ChatState) -> str:
         )
 
     return "面试时间差不多了，技术问题先到这里。你有什么想问我们的吗？"
+
+
+def _generate_end_interview_response(state: ChatState) -> str:
+    """Generate a closing response when the user explicitly requests end_interview.
+
+    This function is called when intent == 'end_interview'.  It MUST NOT call
+    any tools (load_skill / search_questions / draw_questions).  It produces
+    either a brief farewell or a structured summary depending on message count.
+
+    Side-effects on *state*:
+    - Sets question_source / question_source_reason for metadata.
+    - Sets question_source to 'conversation' so downstream doesn't expect a
+      selected_question binding.
+    """
+    state["question_source"] = "conversation"
+    state["question_source_reason"] = "end_interview_hard_route"
+
+    message_history = state.get("message_history", []) or []
+    user_message = state.get("user_message", "")
+
+    # If the user explicitly asks for a summary, provide a structured one
+    wants_summary = any(
+        kw in user_message
+        for kw in ("总结", "总结报告", "面试总结", "生成总结", "生成一份")
+    )
+
+    if wants_summary or len(message_history) >= 20:
+        return (
+            "今天的模拟面试就到这里，感谢你的时间。\n\n"
+            "**整体表现**：你在项目经验和基础知识方面都有一定积累，"
+            "回答思路基本清晰。建议后续重点复盘面试中暴露的知识盲区，"
+            "尤其是回答不够深入的部分，可以结合实际项目多做总结。\n\n"
+            "建议继续保持对核心技术的深度学习，祝后续面试顺利。"
+        )
+
+    return "好的，面试先到这里。感谢你的时间，后续可以根据面试中暴露的问题继续针对性复盘。祝顺利！"
 
 
 def _sanitize_error_message(e: Exception) -> str:
@@ -392,7 +554,9 @@ def _summarize_tool_output(tool_name: str, output: str, state: ChatState) -> dic
         return summary
 
     if tool_name in {"search_questions", "draw_questions"}:
-        results = [] if not summary["ok"] else state.get("retrieved_questions", []) or []
+        results = (
+            [] if not summary["ok"] else state.get("retrieved_questions", []) or []
+        )
         summary["result_count"] = len(results)
         summary["result_ids"] = [
             q.get("id")
@@ -631,7 +795,9 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     )
     if not selected_question and state.get("selected_question"):
         selected_question = state.get("selected_question")
-        selected_reason = state.get("question_source_reason") or "state_selected_question"
+        selected_reason = (
+            state.get("question_source_reason") or "state_selected_question"
+        )
 
     if selected_question:
         state["selected_question"] = selected_question
@@ -642,7 +808,9 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
         source = state.get("question_source")
         metadata["selected_question"] = None
         metadata["question_source"] = (
-            "conversation" if source in {"search", "draw"} else (source or "conversation")
+            "conversation"
+            if source in {"search", "draw"}
+            else (source or "conversation")
         )
         metadata["question_source_reason"] = (
             state.get("question_source_reason")
@@ -662,7 +830,9 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     ):
         metadata["resume_ref"] = _get_resume_name(state["user_id"])
 
-    if state.get("jd_text") and _response_references_jd(clean_response, state["jd_text"]):
+    if state.get("jd_text") and _response_references_jd(
+        clean_response, state["jd_text"]
+    ):
         metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
 
     return metadata, clean_response
@@ -738,9 +908,7 @@ async def _step_load_context(state: ChatState) -> ChatState:
     )
     state.update(memory_result)
     state.update(history_result)
-    state["session_notes"] = chat_service.get_session_notes(
-        state["conversation_id"]
-    )
+    state["session_notes"] = chat_service.get_session_notes(state["conversation_id"])
 
     # 恢复上一轮持久化的 active skill names
     conversation_metadata = await asyncio.to_thread(
@@ -748,6 +916,7 @@ async def _step_load_context(state: ChatState) -> ChatState:
         state["conversation_id"],
     )
     from app.agents.chat.nodes import _restore_active_skills_from_metadata
+
     _restore_active_skills_from_metadata(state, conversation_metadata)
 
     _step("context", "正在加载个人画像...")
@@ -918,15 +1087,18 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     system_prompt = build_react_system_prompt(state)
     state["active_skill_instructions"] = []  # consumed; skills baked into system prompt
 
+    # 1.5 Inject repetition protection if needed
+    repetition_note = _build_repetition_protection_note(state)
+    if repetition_note:
+        system_prompt += f"\n\n{repetition_note}"
+
     # 2. Build messages
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
     # Compressed context
     compressed = state.get("compressed_context")
     if compressed:
-        messages.append(
-            {"role": "user", "content": f"[历史对话摘要]\n{compressed}"}
-        )
+        messages.append({"role": "user", "content": f"[历史对话摘要]\n{compressed}"})
 
     # Recent messages
     for msg in state.get("recent_messages", [])[-10:]:
@@ -955,6 +1127,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         # Rebuild system prompt if skills were loaded in previous step
         if step > 0 and state.get("active_skill_instructions"):
             system_prompt = build_react_system_prompt(state)
+            if repetition_note:
+                system_prompt += f"\n\n{repetition_note}"
             messages[0] = {"role": "system", "content": system_prompt}
             state["active_skill_instructions"] = []  # consumed
         llm_started = time.monotonic()
@@ -1003,12 +1177,16 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 logger.warning(
                     "ReAct trace: event=validation_failed conversation_id=%s "
                     "react_step=%s reason=%s",
-                    state.get("conversation_id"), react_step, exc.reason,
+                    state.get("conversation_id"),
+                    react_step,
+                    exc.reason,
                 )
-                messages.append(make_tool_result_message(
-                    tc.get("id", "invalid"),
-                    json.dumps({"error": exc.reason}),
-                ))
+                messages.append(
+                    make_tool_result_message(
+                        tc.get("id", "invalid"),
+                        json.dumps({"error": exc.reason}),
+                    )
+                )
                 break  # break inner loop, outer loop will check stop_reason
 
             # Loop detection
@@ -1024,12 +1202,21 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 logger.warning(
                     "ReAct trace: event=loop_detected conversation_id=%s "
                     "react_step=%s tool=%s",
-                    state.get("conversation_id"), react_step, tc["function"]["name"],
+                    state.get("conversation_id"),
+                    react_step,
+                    tc["function"]["name"],
                 )
-                messages.append(make_tool_result_message(
-                    tc.get("id", "loop"),
-                    json.dumps({"error": "loop_detected", "message": "Same tool call repeated — stopping."}),
-                ))
+                messages.append(
+                    make_tool_result_message(
+                        tc.get("id", "loop"),
+                        json.dumps(
+                            {
+                                "error": "loop_detected",
+                                "message": "Same tool call repeated — stopping.",
+                            }
+                        ),
+                    )
+                )
                 break
             seen_tool_calls.add(call_sig)
 
@@ -1083,13 +1270,26 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
             # Emit insight events for user-visible decision points
             if tool_name == "load_skill":
-                skill_label = tool_progress_message(tc).replace("正在加载", "").replace("...", "")
+                skill_label = (
+                    tool_progress_message(tc).replace("正在加载", "").replace("...", "")
+                )
                 _emit({"type": "insight", "text": f"切换到{skill_label}模式"})
-            elif tool_name in ("search_questions", "draw_questions") and state.get("retrieved_questions"):
-                top_q = state["retrieved_questions"][0] if state["retrieved_questions"] else None
+            elif tool_name in ("search_questions", "draw_questions") and state.get(
+                "retrieved_questions"
+            ):
+                top_q = (
+                    state["retrieved_questions"][0]
+                    if state["retrieved_questions"]
+                    else None
+                )
                 if top_q:
                     topic = top_q.get("cat2") or top_q.get("cat1") or "相关技术"
-                    _emit({"type": "insight", "text": f"从题库检索到关于「{topic}」的题目"})
+                    _emit(
+                        {
+                            "type": "insight",
+                            "text": f"从题库检索到关于「{topic}」的题目",
+                        }
+                    )
 
             messages.append(make_tool_result_message(tc["id"], output))
 
@@ -1165,8 +1365,15 @@ async def run_chat(
     token = _event_queue_var.set(queue)
 
     state = _initial_state(
-        conversation_id, user_id, user_message, mode,
-        jd_id, resume_text, jd_text, model, bank_mode,
+        conversation_id,
+        user_id,
+        user_message,
+        mode,
+        jd_id,
+        resume_text,
+        jd_text,
+        model,
+        bank_mode,
     )
 
     async def _run_pipeline() -> None:
@@ -1181,23 +1388,49 @@ async def run_chat(
             # 3-5. ReAct 循环（替代 resolve_skills + route_and_generate）
             response = ""
             metadata = {}
-            async for event in _react_loop(state):
-                event_type = event.get("type")
-                if event_type == "done":
-                    metadata = event.get("metadata", {})
-                    built_metadata, clean_response = _build_react_metadata(
-                        state, response
-                    )
-                    if built_metadata:
-                        metadata = {**built_metadata, **metadata}
-                    response = clean_response
-                    _emit({"type": "basis", **_basis_event_payload(metadata)})
-                    _emit({"type": "done", "metadata": metadata})
-                    continue
-                if event_type in {"chunk", "thinking", "thinking_start", "thinking_done", "error"}:
-                    if event_type == "chunk":
-                        response += event.get("content", "")
-                    _emit(event)
+
+            # Hard route: end_interview bypasses ReAct entirely — no tools
+            if state.get("intent") == "end_interview":
+                _emit(
+                    {
+                        "type": "step",
+                        "step": "closing",
+                        "message": "正在生成面试总结...",
+                    }
+                )
+                closing_text = _generate_end_interview_response(state)
+                response = closing_text
+                _emit({"type": "chunk", "content": closing_text})
+                built_metadata, clean_response = _build_react_metadata(state, response)
+                if built_metadata:
+                    metadata = built_metadata
+                response = clean_response
+                _emit({"type": "basis", **_basis_event_payload(metadata)})
+                _emit({"type": "done", "metadata": metadata})
+            else:
+                async for event in _react_loop(state):
+                    event_type = event.get("type")
+                    if event_type == "done":
+                        metadata = event.get("metadata", {})
+                        built_metadata, clean_response = _build_react_metadata(
+                            state, response
+                        )
+                        if built_metadata:
+                            metadata = {**built_metadata, **metadata}
+                        response = clean_response
+                        _emit({"type": "basis", **_basis_event_payload(metadata)})
+                        _emit({"type": "done", "metadata": metadata})
+                        continue
+                    if event_type in {
+                        "chunk",
+                        "thinking",
+                        "thinking_start",
+                        "thinking_done",
+                        "error",
+                    }:
+                        if event_type == "chunk":
+                            response += event.get("content", "")
+                        _emit(event)
             state["response"] = response
             state["metadata"] = metadata
 
@@ -1215,9 +1448,7 @@ async def run_chat(
             )
         except Exception as e:
             logger.exception("Pipeline 执行失败")
-            queue.put_nowait(
-                {"type": "error", "message": _sanitize_error_message(e)}
-            )
+            queue.put_nowait({"type": "error", "message": _sanitize_error_message(e)})
         finally:
             queue.put_nowait(_SENTINEL)
 

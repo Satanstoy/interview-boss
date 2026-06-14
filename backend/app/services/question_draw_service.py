@@ -13,6 +13,23 @@ from app.db.question_bank_sources import get_sources
 from app.routers.questions import _build_bank_where_clause
 
 
+def _map_difficulty(difficulty: str) -> list[str]:
+    """Map English difficulty levels to database-matching patterns.
+
+    The question_bank stores difficulty as Chinese labels like 'L1-基础',
+    'L2-中等', 'L3-困难', or plain '简单/中等/困难'.  The LLM typically
+    sends 'easy', 'medium', 'hard'.  This function returns a list of LIKE
+    patterns so the caller can use ``qb.difficulty LIKE ? OR qb.difficulty LIKE ?``.
+    """
+    mapping = {
+        "easy": ["L1%", "%基础%", "%简单%"],
+        "medium": ["L2%", "%中等%"],
+        "hard": ["L3%", "%困难%"],
+    }
+    lower = (difficulty or "").strip().lower()
+    return mapping.get(lower, [f"%{difficulty}%"])
+
+
 def draw_questions(
     *,
     user: dict,
@@ -28,11 +45,28 @@ def draw_questions(
 
     This is intentionally synchronous so it can be used from normal FastAPI
     threadpool calls and from LangGraph nodes that already run in-process.
+
+    When *difficulty* is supplied but yields zero candidates, the function
+    automatically retries without the difficulty filter so that callers like
+    ``draw_questions(question_type='algorithm_coding', difficulty='medium')``
+    still get results even if the database stores Chinese difficulty labels.
     """
     count = max(1, min(int(count or 5), 50))
     exclude_ids = exclude_ids or set()
     from_clause, where_clause, base_params = _build_bank_where_clause(user, "qb")
     bank_mode = user.get("bank_mode", "public")
+
+    def _query(extra_conditions: list[str], extra_params: list) -> list:
+        where_with_extra = where_clause
+        if extra_conditions:
+            where_with_extra = f"{where_clause} AND {' AND '.join(extra_conditions)}"
+        dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user["id"])
+        return conn.execute(
+            f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
+            f"({dyn_freq_sql}) as frequency, qb.ai_answer "
+            f"{from_clause} {where_with_extra}",
+            extra_params,
+        ).fetchall()
 
     with get_db_connection() as conn:
         conditions = []
@@ -48,9 +82,13 @@ def draw_questions(
                 "(qb.question LIKE ? OR qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)"
             )
             params.extend([f"%{topic}%"] * 4)
+        difficulty_applied = False
         if difficulty:
-            conditions.append("qb.difficulty LIKE ?")
-            params.append(f"%{difficulty}%")
+            diff_patterns = _map_difficulty(difficulty)
+            diff_ors = " OR ".join("qb.difficulty LIKE ?" for _ in diff_patterns)
+            conditions.append(f"({diff_ors})")
+            params.extend(diff_patterns)
+            difficulty_applied = True
         if question_type:
             type_conditions, type_params = _question_type_filter(question_type)
             if type_conditions:
@@ -61,17 +99,25 @@ def draw_questions(
             conditions.append(f"qb.id NOT IN ({placeholders})")
             params.extend(sorted(exclude_ids))
 
-        where_with_extra = where_clause
-        if conditions:
-            where_with_extra = f"{where_clause} AND {' AND '.join(conditions)}"
+        candidates = _query(conditions, params)
 
-        dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user["id"])
-        candidates = conn.execute(
-            f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
-            f"({dyn_freq_sql}) as frequency, qb.ai_answer "
-            f"{from_clause} {where_with_extra}",
-            params,
-        ).fetchall()
+        # Fallback: if difficulty filter yielded nothing, retry without it
+        if not candidates and difficulty_applied:
+            fallback_conditions = [c for c in conditions if "qb.difficulty" not in c]
+            # Rebuild params without difficulty so placeholder order stays exact.
+            fallback_params = list(base_params)
+            if cat1 and cat1 != "全部":
+                fallback_params.extend([f"%{cat1}%", f"%{cat1}%", f"%{cat1}%"])
+            if cat2 and cat2 != "全部":
+                fallback_params.extend([f"%{cat2}%", f"%{cat2}%"])
+            if topic:
+                fallback_params.extend([f"%{topic}%"] * 4)
+            if question_type:
+                _, type_params = _question_type_filter(question_type)
+                fallback_params.extend(type_params)
+            if exclude_ids:
+                fallback_params.extend(sorted(exclude_ids))
+            candidates = _query(fallback_conditions, fallback_params)
 
         if not candidates:
             return []
