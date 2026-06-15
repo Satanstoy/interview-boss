@@ -267,9 +267,51 @@ class TestDockerDeployScript:
         assert "docker builder prune" in content
         assert "cleanup_after_build" in content
 
+    def test_default_thresholds_match_docs(self):
+        """默认阈值应与文档一致：4096 / 5120 / 2GB"""
+        content = self._read()
+        assert "DEPLOY_MIN_FREE_MB:-4096" in content
+        assert "DEPLOY_TARGET_FREE_MB:-5120" in content
+        assert "BUILDKIT_RESERVED_SPACE:-2GB" in content
+
     def test_build_commands_are_guarded(self):
         """核心构建和 Worker 构建应走磁盘保护包装"""
         content = self._read()
         assert "guarded_compose_build backend nginx" in content
         assert "guarded_compose_build backend" in content
-        assert "docker compose --profile worker up -d --build worker" in content
+        # worker-up / worker-restart 应走 guarded_compose_build，
+        # 而不是用 docker compose --build 绕过磁盘保护
+        assert "--build worker" not in content
+
+    def test_cleanup_after_build_never_stops_services(self):
+        """cleanup_after_build 绝不能在构建成功后停止/删除运行中服务"""
+        content = self._read()
+        in_cleanup = False
+        for line in content.splitlines():
+            if "cleanup_after_build" in line and "()" in line:
+                in_cleanup = True
+            elif in_cleanup and line.startswith("}") and not line.strip().startswith("#"):
+                break
+            if in_cleanup:
+                # 不应出现 --rmi（会删除刚构建的镜像）
+                assert "--rmi" not in line, f"cleanup_after_build 中禁止 --rmi: {line}"
+
+    def test_prune_unused_docker_does_not_force_down(self):
+        """prune_unused_docker 不应默认停止运行中的服务"""
+        content = self._read()
+        # 不应包含无条件的 docker compose down --rmi local
+        assert "docker compose down --rmi local" not in content
+
+    def test_has_diagnose_command(self):
+        """应提供 diagnose 命令输出磁盘诊断"""
+        content = self._read()
+        assert "do_diagnose" in content
+        assert "diagnose)" in content
+        assert "docker system df" in content
+
+    def test_cleanup_supports_dry_run_and_aggressive(self):
+        """cleanup 应支持 --dry-run 和 --aggressive 参数"""
+        content = self._read()
+        assert "--dry-run" in content
+        assert "--aggressive" in content
+        assert "DEPLOY_PRUNE_HOST_ARTIFACTS" in content

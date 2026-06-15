@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup|diagnose]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -13,11 +13,11 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前至少保留 3GB；构建后尽量恢复到 4GB。
+# 磁盘保护阈值（单位：MB）。构建前至少保留 4GB；构建后尽量恢复到 5GB。
 # 多项目安全：只用 docker builder prune 收缩缓存，不用全局 prune。
-DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-3072}"
-DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-4096}"
-BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-256MB}"
+DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-4096}"
+DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-5120}"
+BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-2GB}"
 
 # 颜色
 GREEN='[0;32m'
@@ -56,12 +56,36 @@ prune_build_cache() {
     docker builder prune -f --keep-storage "${BUILDKIT_RESERVED_SPACE}" >/dev/null 2>&1 || true
 }
 
+# 安全清理：BuildKit cache、dangling images、项目 stopped/orphan 资源。
+# 默认不清理宿主机 node_modules/.venv，除非 DEPLOY_PRUNE_HOST_ARTIFACTS=1 或传入 --aggressive。
 prune_unused_docker() {
-  warn "清理本项目的未使用资源（多项目安全，不使用全局 prune）..."
-  # Only remove images built locally by this compose project.
-  # Does NOT use docker system prune / container prune / network prune / image prune.
-  docker compose down --rmi local 2>/dev/null || true
+  local aggressive="${1:-}"
+  warn "安全清理本项目未使用资源（多项目安全，不使用全局 prune）..."
+
+  # 1. BuildKit 构建缓存
   prune_build_cache
+
+  # 2. 本项目 stopped/orphan 容器和关联卷（不影响运行中服务）
+  docker compose down --remove-orphans 2>/dev/null || true
+
+  # 3. dangling images（不指定项目名，安全操作）
+  docker image prune -f 2>/dev/null || true
+
+  # 4. 宿主机大文件目录（只报告，除非显式启用）
+  if [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; then
+    warn "aggressive 模式：清理宿主机 node_modules 和 .venv..."
+    local pdir="$PROJECT_DIR"
+    [ -d "$pdir/frontend/node_modules" ] && rm -rf "$pdir/frontend/node_modules"
+    [ -d "$pdir/backend/.venv" ] && rm -rf "$pdir/backend/.venv"
+  else
+    local pdir="$PROJECT_DIR"
+    local nm_size venv_size
+    nm_size=$(du -sh "$pdir/frontend/node_modules" 2>/dev/null | cut -f1 || echo "N/A")
+    venv_size=$(du -sh "$pdir/backend/.venv" 2>/dev/null | cut -f1 || echo "N/A")
+    log "宿主机目录（只报告，不清理；用 --aggressive 或 DEPLOY_PRUNE_HOST_ARTIFACTS=1 启用）："
+    log "  frontend/node_modules: $nm_size"
+    log "  backend/.venv:         $venv_size"
+  fi
 }
 
 ensure_disk_before_build() {
@@ -89,8 +113,8 @@ cleanup_after_build() {
   prune_build_cache
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，进一步清理本项目资源..."
-    docker compose down --rmi local 2>/dev/null || true
+    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB"
+    warn "建议运行 './docker-deploy.sh cleanup' 或 'cleanup --aggressive' 手动清理"
     prune_build_cache
   fi
   show_disk_usage
@@ -229,10 +253,53 @@ do_test() {
   docker compose --profile test run --rm test uv run pytest backend/tests/ "$@"
 }
 
+# ── 诊断磁盘使用 ──
+do_diagnose() {
+  log "========== 磁盘诊断 =========="
+  echo ""
+  log "根分区："
+  df -h /
+  echo ""
+  log "Docker 系统资源："
+  docker system df 2>/dev/null || true
+  echo ""
+  log "宿主机大文件目录："
+  local pdir="$PROJECT_DIR"
+  du -sh "$pdir/frontend/node_modules" 2>/dev/null && true
+  du -sh "$pdir/backend/.venv"         2>/dev/null && true
+  du -sh "$pdir/frontend/dist"         2>/dev/null && true
+  log "  （以上目录由宿主机管理，非 Docker volume）"
+  echo ""
+  log "Docker BuildKit 缓存："
+  docker builder du 2>/dev/null || true
+  echo ""
+  log "阈值设置（当前值 / 默认值）："
+  log "  DEPLOY_MIN_FREE_MB:     $DEPLOY_MIN_FREE_MB / 4096"
+  log "  DEPLOY_TARGET_FREE_MB:  $DEPLOY_TARGET_FREE_MB / 5120"
+  log "  BUILDKIT_RESERVED_SPACE: $BUILDKIT_RESERVED_SPACE / 2GB"
+  echo ""
+  log "========== 诊断完成 =========="
+}
+
 # ── 清理旧镜像 ──
 do_cleanup() {
+  local dry_run=false
+  local aggressive=""
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) dry_run=true ;;
+      --aggressive) aggressive="--aggressive" ;;
+    esac
+  done
+
+  if [ "$dry_run" = true ]; then
+    log "dry-run 模式：仅输出诊断信息，不执行清理"
+    do_diagnose
+    return
+  fi
+
   log "清理本项目资源（多项目安全）..."
-  prune_unused_docker
+  prune_unused_docker "$aggressive"
   show_disk_usage
   log "清理完成"
 }
@@ -266,7 +333,8 @@ case "$MODE" in
   worker-logs)     check_docker; do_logs worker ;;
   test)            check_docker; do_test "${@:2}" ;;
   backup)          check_docker; do_backup ;;
-  cleanup)         check_docker; do_cleanup ;;
+  cleanup)         check_docker; do_cleanup "${@:2}" ;;
+  diagnose)        do_diagnose ;;
   migrate)         do_migrate ;;
   all)
     check_docker
@@ -293,7 +361,8 @@ case "$MODE" in
     echo "  worker-logs     查看 Worker 日志"
     echo "  test            运行 pytest 测试（可传入 pytest 参数）"
     echo "  backup          备份数据库和 Redis 数据"
-    echo "  cleanup         清理本项目资源（不影响其他项目）和 BuildKit cache"
+    echo "  cleanup [--dry-run] [--aggressive]  清理本项目资源（不影响其他项目）"
+    echo "  diagnose        输出磁盘/资源诊断信息（不修改任何资源）"
     echo "  migrate         停止宿主机服务（首次迁移用）"
     echo "  all             构建 + 启动核心服务（首次部署）"
     echo ""

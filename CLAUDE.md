@@ -24,6 +24,9 @@ cd frontend && npm run build                             # 前端构建
 ./deploy/docker-deploy.sh logs backend                   # 查看后端日志
 ./deploy/docker-deploy.sh worker-up                      # 按需启动 ARQ Worker
 ./deploy/docker-deploy.sh backup                         # 备份数据库
+./deploy/docker-deploy.sh diagnose                       # 磁盘/资源诊断
+./deploy/docker-deploy.sh cleanup --dry-run              # 清理预览（等价 diagnose）
+./deploy/docker-deploy.sh cleanup                        # 安全清理（BuildKit cache + dangling images）
 ```
 
 **部署策略：**
@@ -106,6 +109,7 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
 - Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
 - Docker 磁盘保护：部署必须走 `./deploy/docker-deploy.sh update/all/worker-up`，脚本会在构建前检查根分区至少 4GB 可用，构建后低于 5GB 时自动收缩 BuildKit cache（默认保留 2GB）。不要绕过脚本直接长期执行 `docker compose build`。
+- 磁盘诊断：`./deploy/docker-deploy.sh diagnose`（输出根分区、Docker 资源、宿主机大文件目录）；`./deploy/docker-deploy.sh cleanup --dry-run`（等价 diagnose）；`cleanup --aggressive`（同时清理宿主机 node_modules/.venv）
 
 ## Docs（历史经验库）
 
