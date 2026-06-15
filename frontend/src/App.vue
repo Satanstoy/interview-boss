@@ -9,10 +9,10 @@ const { initAuth } = useAuth()
 
 onMounted(async () => {
   // 初始化认证（检查 refresh token cookie 自动登录）
-  // 必须在 App 层执行，因为路由守卫依赖 currentUser 状态
+  // 成功后设置 currentUser + authCompleted，路由守卫放行
   await initAuth()
   markAuthReady()
-  // 通知白屏检测器：Vue 应用已完成初始化
+  // 通知白屏检测器
   window.__VUE_APP_READY__ = true
 })
 </script>

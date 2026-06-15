@@ -154,9 +154,15 @@ afterFetchCleanup = () => { jdSelection.clearSelection(); interviewSelection.cle
 
 // ── Auth（认证状态） ──
 const {
-  currentUser, showLoginModal, pendingReviewCount,
+  currentUser, authCompleted, showLoginModal, pendingReviewCount,
   initAuth, handleLoginSuccess, handleLogout, handleBankModeChanged,
 } = useAuth()
+
+// 初始化数据回调
+initAuthSingleton({
+  onReady: loadAllData,
+  onDataRefresh: () => { fetchTableData(); fetchPracticeStats() },
+})
 
 // Set singleton callbacks (called once per layout mount)
 initAuthSingleton({
@@ -433,16 +439,19 @@ provide('appData', {
 })
 
 // ── Lifecycle ──
-// 注意：initAuth() 已移至 App.vue 执行，确保路由守卫能正确判断
+// initAuth() 在 App.vue 中执行，authCompleted 变为 true 后触发数据加载
+watch(authCompleted, (done) => {
+  if (done && currentUser.value) {
+    loadAllData()
+  }
+}, { immediate: true })
+
 onMounted(async () => {
   if (isPreviewMode) {
     currentUser.value = previewUser
     applyPreviewData()
   } else {
-    // 恢复未完成的上传任务
-    try {
-      await restoreActiveJobs()
-    } catch {}
+    try { await restoreActiveJobs() } catch {}
   }
 })
 onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })

@@ -12,6 +12,7 @@ import * as api from '@/api/index.js'
 
 // ── 模块级状态（单例） ──
 export const currentUser = ref(null)
+export const authCompleted = ref(false)
 const showLoginModal = ref(false)
 const pendingReviewCount = ref(0)
 
@@ -32,9 +33,10 @@ const initAuth = async () => {
   if (refreshResult?.token && refreshResult?.user) {
     setAuthToken(refreshResult.token)
     currentUser.value = refreshResult.user
-    _onReady?.()
     loadPendingCount()
   }
+  // 标记认证流程完成（无论成功与否）
+  authCompleted.value = true
 }
 
 // ── 登录成功 ──
@@ -74,6 +76,7 @@ export function initAuthSingleton({ onReady, onDataRefresh } = {}) {
 export function useAuth() {
   return {
     currentUser,
+    authCompleted,
     showLoginModal,
     pendingReviewCount,
     initAuth,
