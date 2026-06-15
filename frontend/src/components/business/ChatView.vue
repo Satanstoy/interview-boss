@@ -365,7 +365,10 @@ import * as chatApi from '@/services/chatApi.js'
 const props = defineProps({
   jdList: { type: Array, default: () => [] },
   preview: { type: Boolean, default: false },
+  modelValue: { type: String, default: null },
 })
+
+const emit = defineEmits(['update:modelValue'])
 
 // State
 const conversations = ref([])
@@ -974,10 +977,20 @@ onMounted(async () => {
     autoScrollEnabled.value = true
     if (id) {
       localStorage.setItem(STORAGE_KEY_ACTIVE_ID, id)
+      emit('update:modelValue', id)
     } else {
       localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+      emit('update:modelValue', null)
     }
   })
+})
+
+// Sync external modelValue changes (from URL route param)
+watch(() => props.modelValue, async (newId) => {
+  if (newId && newId !== activeConversationId.value) {
+    activeConversationId.value = newId
+    await selectConversation(newId)
+  }
 })
 
 // Refresh conversations when returning to this tab (KeepAlive)

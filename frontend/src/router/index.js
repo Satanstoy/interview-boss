@@ -34,7 +34,7 @@ const routes = [
         component: () => import('@/views/MasterBankView.vue'),
       },
       {
-        path: 'chat',
+        path: 'chat/:sessionId?',
         name: 'chat',
         component: () => import('@/views/ChatView.vue'),
       },
