@@ -102,6 +102,26 @@ def validate_tool_call(tool_call: dict) -> dict:
     return tool_call  # return original; downstream expects string arguments
 
 
+def _requires_tool_calls(state: ChatState) -> bool:
+    """Check if the current state requires the LLM to call tools before answering.
+
+    When the user has completed an answer in interview mode (not project-deep-dive),
+    the LLM MUST call search_questions to retrieve follow-up candidates from the
+    question bank.  If it skips the call, the resulting follow-up is typically
+    generic and low-quality (e.g. "嗯，就这个问题，你展开说说").
+    """
+    if state.get("intent") != "interview_question":
+        return False
+    if not state.get("answer_complete"):
+        return False
+    if state.get("retrieved_questions"):
+        return False
+    active_skills = state.get("active_skills", [])
+    if "project-deep-dive" in active_skills:
+        return False
+    return True
+
+
 # ── ReAct Budget & Control ──────────────────────────────
 
 
@@ -1115,6 +1135,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     seen_tool_calls: set[str] = set()
     stop_reason = ""
     final_answer_text = ""
+    tool_call_retry_done = False  # guard: only retry tool-skip once
     for step in range(REACT_BUDGET.max_steps):
         react_step = step + 1
         # Budget checks
@@ -1154,6 +1175,32 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         if not tool_calls:
             content = result.get("content")
+            # Hard intercept: if the LLM MUST call tools but skipped them,
+            # inject a reminder and retry once instead of accepting the lazy reply.
+            if (
+                not tool_call_retry_done
+                and _requires_tool_calls(state)
+                and isinstance(content, str)
+                and content.strip()
+            ):
+                tool_call_retry_done = True
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "【系统强制提醒】你没有调用必要的工具。"
+                        "当前用户已回答完毕，你必须先调用 search_questions 工具"
+                        "从题库检索追问题，然后基于检索结果生成追问。"
+                        "不要跳过工具调用直接回复。"
+                    ),
+                })
+                logger.warning(
+                    "ReAct tool-skip intercepted: forcing retry "
+                    "conversation_id=%s react_step=%s",
+                    state.get("conversation_id"),
+                    react_step,
+                )
+                continue
             if isinstance(content, str) and content.strip():
                 final_answer_text = content
             break  # LLM decided to answer directly
