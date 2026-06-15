@@ -1,5 +1,5 @@
 <template>
-  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-3 overflow-hidden" style="position: relative;">
+  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
     <!-- Error banner -->
     <div v-if="dataLoadError" class="bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between shrink-0">
       <span class="flex items-center gap-2 text-sm">
@@ -37,7 +37,9 @@
 
     <!-- MasterBank content -->
     <div v-if="masterBankEverShown" class="flex flex-col flex-1 min-h-0 gap-2">
-      <!-- SearchFilterBar — 固定在顶部，不随滚动 -->
+      <!-- ══ 固定区域（不滚动） ══ -->
+
+      <!-- SearchFilterBar -->
       <SearchFilterBar
         :search-query="searchQuery"
         :filter-difficulty="filterDifficulty"
@@ -45,7 +47,7 @@
         @update:filter-difficulty="filterDifficulty = $event"
       />
 
-      <!-- Category tags — 固定在顶部 -->
+      <!-- Category tags -->
       <div class="flex flex-wrap gap-1.5 shrink-0">
         <button
           @click="onSelectTag('全部')"
@@ -70,29 +72,7 @@
         </button>
       </div>
 
-      <!-- Sub-tag filter chips — 固定在顶部 -->
-      <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 shrink-0">
-        <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
-        <button
-          v-for="st in availableSubTags"
-          :key="st.tag"
-          @click="toggleSubTag(st.tag)"
-          class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
-          :class="selectedSubTags.includes(st.tag)
-            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
-            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
-        >
-          {{ st.tag }}
-          <span class="ml-1 opacity-50">{{ st.count }}</span>
-        </button>
-      </div>
-
-      <!-- Exam Distribution Chart (collapsible) — 固定在顶部 -->
-      <div class="shrink-0">
-        <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
-      </div>
-
-      <!-- MasterBankList — 填满剩余空间，DynamicScroller 是唯一滚动容器 -->
+      <!-- ══ 滚动区域（DynamicScroller 是唯一滚动容器） ══ -->
       <div class="flex flex-col flex-1 min-h-0">
         <MasterBankList
           ref="masterBankRef"
@@ -125,6 +105,31 @@
           @update-answer="onUpdateAnswer"
           @load-more="loadMoreMasterBank"
         >
+          <!-- 随题卡一起滚动的内容：子标签 + 考点分布 + 操作按钮 -->
+          <template #scroll-header>
+            <!-- Sub-tag filter chips -->
+            <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-3">
+              <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
+              <button
+                v-for="st in availableSubTags"
+                :key="st.tag"
+                @click="toggleSubTag(st.tag)"
+                class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
+                :class="selectedSubTags.includes(st.tag)
+                  ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
+                  : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
+              >
+                {{ st.tag }}
+                <span class="ml-1 opacity-50">{{ st.count }}</span>
+              </button>
+            </div>
+
+            <!-- Exam Distribution Chart (collapsible, 默认收起) -->
+            <div class="mb-3">
+              <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
+            </div>
+          </template>
+
           <template #actions>
             <div class="flex flex-wrap items-center gap-2 pt-1">
               <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
@@ -157,7 +162,6 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 const {
-  // Data
   masterBank, filteredMasterBank, isDataLoading, dataLoadError,
   jdData, interviewData,
   masterBankTotal, masterBankOverallTotal,
@@ -173,7 +177,6 @@ const {
   editQuestion, onUpdateAnswer, splitQuestion, startMerge,
   onNavigateToInterview, masterBankEverShown,
   practiceQuestion,
-  // Sub-tag helper
   toggleSubTag,
 } = inject('appData')
 

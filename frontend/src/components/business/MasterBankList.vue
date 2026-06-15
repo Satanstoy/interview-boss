@@ -38,6 +38,9 @@
       class="virtual-scroller custom-scrollbar"
       @visible="emit('scroller-visible')"
     >
+      <template #before>
+        <slot name="scroll-header" />
+      </template>
       <template #default="{ item, index, active }">
         <DynamicScrollerItem
           :item="item"
