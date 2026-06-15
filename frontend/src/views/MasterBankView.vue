@@ -1,7 +1,7 @@
 <template>
-  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
+  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-3 overflow-hidden" style="position: relative;">
     <!-- Error banner -->
-    <div v-if="dataLoadError" class="mb-4 bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between">
+    <div v-if="dataLoadError" class="bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between shrink-0">
       <span class="flex items-center gap-2 text-sm">
         <svg class="size-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         {{ dataLoadError }}
@@ -36,19 +36,17 @@
     </div>
 
     <!-- MasterBank content -->
-    <div v-if="masterBankEverShown">
-      <!-- SearchFilterBar — 吸顶，始终可见 -->
-      <div class="sticky top-0 z-10 bg-background pb-2 pt-1 -mx-4 px-4 md:-mx-6 md:px-6" style="margin-top: -0.5rem;">
-        <SearchFilterBar
-          :search-query="searchQuery"
-          :filter-difficulty="filterDifficulty"
-          @update:search-query="searchQuery = $event"
-          @update:filter-difficulty="filterDifficulty = $event"
-        />
-      </div>
+    <div v-if="masterBankEverShown" class="flex flex-col flex-1 min-h-0 gap-2">
+      <!-- SearchFilterBar — 固定在顶部，不随滚动 -->
+      <SearchFilterBar
+        :search-query="searchQuery"
+        :filter-difficulty="filterDifficulty"
+        @update:search-query="searchQuery = $event"
+        @update:filter-difficulty="filterDifficulty = $event"
+      />
 
-      <!-- Category tags (migrated from sidebar) -->
-      <div class="flex flex-wrap gap-1.5 mb-2">
+      <!-- Category tags — 固定在顶部 -->
+      <div class="flex flex-wrap gap-1.5 shrink-0">
         <button
           @click="onSelectTag('全部')"
           class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium"
@@ -72,8 +70,8 @@
         </button>
       </div>
 
-      <!-- Sub-tag filter chips -->
-      <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-2">
+      <!-- Sub-tag filter chips — 固定在顶部 -->
+      <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 shrink-0">
         <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
         <button
           v-for="st in availableSubTags"
@@ -89,10 +87,12 @@
         </button>
       </div>
 
-      <!-- Exam Distribution Chart (collapsible) -->
-      <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
+      <!-- Exam Distribution Chart (collapsible) — 固定在顶部 -->
+      <div class="shrink-0">
+        <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
+      </div>
 
-      <!-- MasterBankList -->
+      <!-- MasterBankList — 填满剩余空间，DynamicScroller 是唯一滚动容器 -->
       <div class="flex flex-col flex-1 min-h-0">
         <MasterBankList
           ref="masterBankRef"
