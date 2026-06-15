@@ -513,9 +513,9 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           @show-settings="showSettingsPage = true"
         />
 
-        <!-- Chat 路由: overflow-hidden（ChatView 自己管滚动）；其他路由: overflow-y-auto（页面级滚动） -->
+        <!-- 统一 overflow-hidden：每个 View 组件自己管理滚动（消除双层滚动问题） -->
         <!-- h-full 确保 ChatView 的 h-full 能正确解析（CSS 百分比高度需要父链每一层都有明确高度） -->
-        <div class="flex-1 min-h-0 h-full" :class="route.path.startsWith('/chat') ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'">
+        <div class="flex-1 min-h-0 h-full overflow-hidden">
           <router-view v-slot="{ Component }">
             <Transition name="tab-fade" class="h-full">
               <component :is="Component" class="h-full" />

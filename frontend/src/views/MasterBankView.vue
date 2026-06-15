@@ -37,13 +37,15 @@
 
     <!-- MasterBank content -->
     <div v-if="masterBankEverShown">
-      <!-- SearchFilterBar -->
-      <SearchFilterBar
-        :search-query="searchQuery"
-        :filter-difficulty="filterDifficulty"
-        @update:search-query="searchQuery = $event"
-        @update:filter-difficulty="filterDifficulty = $event"
-      />
+      <!-- SearchFilterBar — 吸顶，始终可见 -->
+      <div class="sticky top-0 z-10 bg-background pb-2 pt-1 -mx-4 px-4 md:-mx-6 md:px-6" style="margin-top: -0.5rem;">
+        <SearchFilterBar
+          :search-query="searchQuery"
+          :filter-difficulty="filterDifficulty"
+          @update:search-query="searchQuery = $event"
+          @update:filter-difficulty="filterDifficulty = $event"
+        />
+      </div>
 
       <!-- Category tags (migrated from sidebar) -->
       <div class="flex flex-wrap gap-1.5 mb-2">
