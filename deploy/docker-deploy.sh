@@ -38,6 +38,24 @@ check_docker() {
   fi
 }
 
+# ── 回滚支持 ──
+OLD_BACKEND_IMAGE=""
+
+save_old_image() {
+  OLD_BACKEND_IMAGE=$(docker images --format '{{.ID}}' interview-boss-app:local 2>/dev/null | head -1)
+}
+
+rollback_backend() {
+  if [ -n "$OLD_BACKEND_IMAGE" ]; then
+    warn "Rolling back backend to previous image..."
+    docker tag "$OLD_BACKEND_IMAGE" interview-boss-app:rollback 2>/dev/null || true
+    docker compose up -d --no-deps --wait --wait-timeout 30 backend 2>/dev/null || true
+    err "Rollback attempted. Check status with: $0 status"
+  else
+    err "No previous image available for rollback"
+  fi
+}
+
 # ── 磁盘保护 ──
 root_free_mb() {
   df -Pm / | awk 'NR == 2 {print $4}'
@@ -62,10 +80,7 @@ prune_unused_docker() {
   local aggressive="${1:-}"
   warn "安全清理本项目未使用资源（多项目安全，不使用全局 prune）..."
 
-  # 1. BuildKit 构建缓存
-  prune_build_cache
-
-  # 2. 本项目 stopped/created 容器（不影响运行中服务）
+  # 1. 本项目 stopped/created 容器（不影响运行中服务）
   local stopped_containers
   stopped_containers=$(docker ps -a -q \
     --filter "label=com.docker.compose.project=interview-boss" \
@@ -75,8 +90,17 @@ prune_unused_docker() {
     docker rm -f $stopped_containers >/dev/null 2>&1 || true
   fi
 
-  # 3. dangling images（不指定项目名，安全操作）
+  # 2. dangling images（不指定项目名，安全操作）
   docker image prune -f 2>/dev/null || true
+
+  # 3. BuildKit 缓存（只在磁盘低时清理，避免破坏 uv/apt 下载缓存）
+  local free_mb
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    prune_build_cache
+  else
+    log "磁盘 ${free_mb}MB 充足，跳过 BuildKit 缓存清理（保留下载缓存加速下次构建）"
+  fi
 
   # 4. 宿主机大文件目录（只报告，除非显式启用）
   if [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; then
@@ -117,12 +141,16 @@ ensure_disk_before_build() {
 
 cleanup_after_build() {
   local free_mb
-  prune_build_cache
   free_mb=$(root_free_mb)
+  # 只在磁盘低于目标阈值时才收缩 BuildKit cache，避免删掉 uv/apt 下载缓存
+  if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    warn "构建后可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，收缩 BuildKit 缓存..."
+    prune_build_cache
+    free_mb=$(root_free_mb)
+  fi
   if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
     warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB"
     warn "建议运行 './docker-deploy.sh cleanup' 或 'cleanup --aggressive' 手动清理"
-    prune_build_cache
   fi
   show_disk_usage
 }
@@ -151,8 +179,7 @@ do_build() {
 # ── 启动核心服务 ──
 do_up() {
   log "启动核心服务（redis/backend/nginx，不默认启动 worker）..."
-  docker compose up -d redis backend nginx
-  sleep 3
+  docker compose up -d --wait --wait-timeout 60 redis backend nginx
   do_status
 }
 
@@ -166,8 +193,7 @@ do_down() {
 # ── 重启核心服务 ──
 do_restart() {
   log "重启核心服务..."
-  docker compose restart redis backend nginx
-  sleep 3
+  docker compose restart --wait --wait-timeout 30 redis backend nginx
   do_status
 }
 
@@ -193,18 +219,48 @@ do_logs() {
 # ── 更新部署（代码变更后）──
 do_update() {
   log "更新核心服务（不中断 Redis，不默认启动 worker）..."
+
+  # 1. Pre-flight
+  ensure_disk_before_build
+  save_old_image
+
+  # 2. 数据库备份
+  local backup_dir="$PROJECT_DIR/backups"
+  local timestamp
+  timestamp=$(date +%Y%m%d_%H%M%S)
+  mkdir -p "$backup_dir"
+  log "更新前备份数据库..."
+  cp "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db" 2>/dev/null || warn "数据库文件不存在（首次部署？）"
+
+  # 3. 构建
   do_build
-  docker compose up -d --no-deps redis backend nginx
-  sleep 5
+
+  # 4. 启动服务（等待健康检查）
+  log "启动更新后的服务（等待健康检查）..."
+  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis backend nginx; then
+    err "服务在 60s 内未通过健康检查"
+    do_status
+    rollback_backend
+    exit 1
+  fi
+
+  # 5. 清理旧悬空镜像
+  docker image prune -f 2>/dev/null || true
+
+  # 6. 验证
   do_status
-  log "更新完成"
+  log "更新完成（备份: $backup_dir/interview-boss_${timestamp}.db）"
 }
 
 # ── 前端快速更新（跳过 Docker 构建，直接替换 nginx 内的 dist） ──
 do_frontend() {
   log "快速更新前端（仅构建 + 拷贝到 nginx 容器）..."
   cd "$PROJECT_DIR/frontend"
-  npm run build
+  if ! npm run build; then
+    err "前端构建失败"
+    cd "$PROJECT_DIR"
+    exit 1
+  fi
   cd "$PROJECT_DIR"
   docker cp frontend/dist/. interview-boss-nginx-1:/usr/share/nginx/html/
   log "前端已更新，无需重建镜像或重启容器"
@@ -214,8 +270,7 @@ do_frontend() {
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
   guarded_compose_build backend
-  docker compose --profile worker up -d --no-deps worker
-  sleep 2
+  docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status
 }
 
@@ -229,8 +284,7 @@ do_worker_down() {
 do_worker_restart() {
   log "重建并重启 Worker..."
   guarded_compose_build backend
-  docker compose --profile worker up -d --no-deps worker
-  sleep 2
+  docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status
 }
 
@@ -360,7 +414,7 @@ case "$MODE" in
     echo "  restart         重启核心服务"
     echo "  status          查看服务状态和资源使用"
     echo "  logs            查看日志（可指定服务名: logs backend）"
-    echo "  update          更新核心服务（不中断 Redis，不默认启动 worker）"
+    echo "  update          更新核心服务（自动备份 DB、健康检查等待、失败回滚）"
     echo "  frontend        快速更新前端（npm build + docker cp，跳过镜像构建）"
     echo "  worker-up       按需启动 Worker"
     echo "  worker-down     停止并移除 Worker 容器"
