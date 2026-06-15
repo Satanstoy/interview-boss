@@ -3,16 +3,16 @@
 </template>
 
 <script setup>
-import { inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useAuth } from '@/composables/useAuth.js'
 import LoginPage from '@/components/business/LoginPage.vue'
 
 const router = useRouter()
 const route = useRoute()
-const { handleLoginSuccess: layoutHandleLoginSuccess } = inject('appData')
+const { handleLoginSuccess } = useAuth()
 
 const onLoginSuccess = (user) => {
-  layoutHandleLoginSuccess(user)
+  handleLoginSuccess(user)
   const redirect = route.query.redirect || '/master-bank'
   router.push(redirect)
 }

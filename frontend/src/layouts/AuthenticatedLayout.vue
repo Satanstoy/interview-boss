@@ -433,19 +433,17 @@ provide('appData', {
 })
 
 // ── Lifecycle ──
+// 注意：initAuth() 已移至 App.vue 执行，确保路由守卫能正确判断
 onMounted(async () => {
   if (isPreviewMode) {
     currentUser.value = previewUser
     applyPreviewData()
   } else {
-    await initAuth()
     // 恢复未完成的上传任务
     try {
       await restoreActiveJobs()
     } catch {}
   }
-  // 通知白屏检测器：Vue 应用已完成初始化
-  window.__VUE_APP_READY__ = true
 })
 onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>

@@ -1,6 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { currentUser } from '@/composables/useAuth.js'
 
+// 认证初始化标记 — App.vue onMounted 中 initAuth() 完成后设为 true
+let authInitialized = false
+let _authResolve = null
+const authReady = new Promise(resolve => { _authResolve = resolve })
+export function markAuthReady() { authInitialized = true; _authResolve() }
+
 const routes = [
   {
     path: '/',
@@ -80,8 +86,13 @@ const router = createRouter({
   routes,
 })
 
-// 认证守卫
-router.beforeEach((to) => {
+// 认证守卫 — 等待 initAuth 完成后再判断
+router.beforeEach(async (to) => {
+  // 等待 App.vue 的 initAuth() 完成
+  if (!authInitialized) {
+    await authReady
+  }
+
   if (to.matched.some(record => record.meta.requiresAuth)) {
     if (!currentUser.value) {
       return { name: 'login', query: { redirect: to.fullPath } }
