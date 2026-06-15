@@ -505,15 +505,16 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
       </aside>
 
       <!-- Main content -->
-      <main class="flex-1 min-w-0 flex flex-col">
+      <main class="flex-1 min-w-0 flex flex-col overflow-hidden">
         <SiteHeader
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
-          :no-border="activeTab === 'Chat'"
+          :no-border="route.path.startsWith('/chat')"
           @show-settings="showSettingsPage = true"
         />
 
-        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <!-- Chat 路由: overflow-hidden（ChatView 自己管滚动）；其他路由: overflow-y-auto（页面级滚动） -->
+        <div class="flex-1 min-h-0" :class="route.path.startsWith('/chat') ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'">
           <router-view v-slot="{ Component }">
             <Transition name="tab-fade">
               <component :is="Component" />
