@@ -1,16 +1,95 @@
-/**
- * 路由配置占位
- *
- * 本项目当前使用 TabBar 组件在 App.vue 内切换视图（activeTab ref），
- * 未使用 Vue Router。如需引入路由，可在此文件中配置。
- *
- * 示例（如需启用路由）：
- *   import { createRouter, createWebHistory } from 'vue-router'
- *   const routes = [
- *     { path: '/', component: () => import('@/views/HomeView.vue') },
- *   ]
- *   const router = createRouter({ history: createWebHistory(), routes })
- *   export default router
- */
+import { createRouter, createWebHistory } from 'vue-router'
+import { currentUser } from '@/composables/useAuth.js'
 
-export default null
+const routes = [
+  {
+    path: '/',
+    redirect: '/master-bank',
+  },
+  {
+    path: '/login',
+    component: () => import('@/layouts/BlankLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'login',
+        component: () => import('@/views/LoginView.vue'),
+      },
+    ],
+  },
+  {
+    path: '/',
+    component: () => import('@/layouts/AuthenticatedLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'master-bank',
+        name: 'master-bank',
+        component: () => import('@/views/MasterBankView.vue'),
+      },
+      {
+        path: 'chat',
+        name: 'chat',
+        component: () => import('@/views/ChatView.vue'),
+      },
+      {
+        path: 'jd',
+        name: 'jd',
+        component: () => import('@/views/JdView.vue'),
+      },
+      {
+        path: 'interview',
+        name: 'interview',
+        component: () => import('@/views/InterviewView.vue'),
+      },
+      {
+        path: 'mock-interview',
+        name: 'mock-interview',
+        component: () => import('@/views/MockInterviewView.vue'),
+      },
+      {
+        path: 'knowledge-graph',
+        name: 'knowledge-graph',
+        component: () => import('@/views/KnowledgeGraphView.vue'),
+      },
+      {
+        path: 'import',
+        name: 'import',
+        component: () => import('@/views/ImportView.vue'),
+      },
+      {
+        path: 'coding',
+        name: 'coding',
+        component: () => import('@/views/CodingView.vue'),
+      },
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('@/views/SettingsView.vue'),
+      },
+    ],
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/master-bank',
+  },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+// 认证守卫
+router.beforeEach((to) => {
+  if (to.matched.some(record => record.meta.requiresAuth)) {
+    if (!currentUser.value) {
+      return { name: 'login', query: { redirect: to.fullPath } }
+    }
+  }
+  if (to.name === 'login' && currentUser.value) {
+    return { name: 'master-bank' }
+  }
+})
+
+export default router

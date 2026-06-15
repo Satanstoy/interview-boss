@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import '@/assets/styles/global.css'
 import 'vue-sonner/style.css'
 import App from './App.vue'
+import router from './router'
 import { autoAnimatePlugin } from '@formkit/auto-animate/vue'
 import { MotionPlugin } from '@vueuse/motion'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
@@ -106,6 +107,7 @@ detectBlankScreen()
 
 // 创建并挂载 Vue 应用
 const app = createApp(App)
+app.use(router)
 app.use(autoAnimatePlugin)
 app.use(MotionPlugin)
 app.component('DynamicScroller', DynamicScroller)
