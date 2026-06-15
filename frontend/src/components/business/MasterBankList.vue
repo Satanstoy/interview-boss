@@ -1,23 +1,6 @@
 <template>
-  <div ref="containerRef" class="flex flex-col flex-1 min-h-0 gap-2">
-    <BatchActionPanel
-      :selected-count="selectedCount"
-      :total-count="items.length"
-      :actions="batchActions"
-      @toggle-select-all="$emit('toggle-select-all')"
-      @invert-selection="$emit('invert-selection')"
-    >
-      <template v-if="items.length > 0" #default>
-        <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
-        <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
-        <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
-      </template>
-      <template #right>
-        <slot name="actions" />
-      </template>
-    </BatchActionPanel>
-
-    <AppEmpty 
+  <div ref="containerRef" class="flex flex-col flex-1 min-h-0">
+    <AppEmpty
       v-if="items.length === 0"
       title="题库空空如也"
       description="导入面经或 JD，AI 会自动为你生成高频题目"
@@ -39,7 +22,25 @@
       @visible="emit('scroller-visible')"
     >
       <template #before>
+        <!-- 外部传入的滚动头部（子标签 + 考点分布） -->
         <slot name="scroll-header" />
+        <!-- 操作栏（全选/展开收起/重建/刷题）— 随内容滚动 -->
+        <BatchActionPanel
+          :selected-count="selectedCount"
+          :total-count="items.length"
+          :actions="batchActions"
+          @toggle-select-all="$emit('toggle-select-all')"
+          @invert-selection="$emit('invert-selection')"
+        >
+          <template #default>
+            <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
+            <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
+            <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
+          </template>
+          <template #right>
+            <slot name="actions" />
+          </template>
+        </BatchActionPanel>
       </template>
       <template #default="{ item, index, active }">
         <DynamicScrollerItem
