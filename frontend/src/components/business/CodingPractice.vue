@@ -63,7 +63,7 @@
             <div class="flex-1 h-2 bg-muted dark:bg-muted rounded-full overflow-hidden">
               <div
                 class="h-full rounded-full transition-all"
-                :class="categoryColors[cat] || 'bg-gray-400'"
+                :class="categoryColors[cat] || 'bg-muted-foreground'"
                 :style="{ width: Math.min(100, (count / maxErrorCount) * 100) + '%' }"
               ></div>
             </div>
@@ -122,32 +122,37 @@
 
           <div class="flex-1"></div>
 
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             @click="clearCurrentProblem"
-            class="px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition-colors"
           >
             清空记录
-          </button>
+          </Button>
           <div class="relative group">
-            <button
+            <Button
+              variant="default"
+              size="sm"
+              class="px-4"
               @click="submitCode('full_review')"
               :disabled="isSubmitting || !code.trim()"
-              class="px-4 py-1.5 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {{ isSubmitting && currentMode === 'full_review' ? (currentStep || '评审中...') : '提交评审' }}
-            </button>
+            </Button>
             <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-100 dark:text-foreground rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
               AI 评审代码并给出评分和参考答案
             </div>
           </div>
           <div class="relative group">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
+              class="px-4"
               @click="submitCode('hint')"
               :disabled="isSubmitting || !code.trim() || hintCount >= 3"
-              class="px-4 py-1.5 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted dark:bg-muted dark:text-muted-foreground/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {{ isSubmitting && currentMode === 'hint' ? '提示中...' : hintCount >= 3 ? '提示已用完' : `请求提示 (${hintCount}/3)` }}
-            </button>
+            </Button>
             <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-100 dark:text-foreground rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
               {{ hintCount >= 3 ? '提示机会已用完，请提交评审' : '获取渐进式提示，最多 3 次' }}
             </div>
@@ -184,7 +189,7 @@
               <div class="flex-1 h-2 bg-muted dark:bg-muted rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all"
-                  :class="scoreBarColors[dim] || 'bg-gray-400'"
+                  :class="scoreBarColors[dim] || 'bg-muted-foreground'"
                   :style="{ width: (score / 5 * 100) + '%' }"
                 ></div>
               </div>
@@ -239,6 +244,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { Button } from '@/components/ui/button'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { useToast } from '@/composables/useNotification.js'
 import CodeEditor from './CodeEditor.vue'
