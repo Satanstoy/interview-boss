@@ -947,9 +947,9 @@ function formatRelativeTime(ts) {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-// Restore active conversation from localStorage
+// Restore active conversation from localStorage (only if no modelValue from URL)
 const savedId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
-if (savedId) {
+if (!props.modelValue && savedId) {
   activeConversationId.value = savedId
 }
 
@@ -957,12 +957,14 @@ if (savedId) {
 onMounted(async () => {
   await loadConversations()
 
-  // If we have a saved ID and it exists in the list, load its messages
-  if (activeConversationId.value) {
-    const exists = conversations.value.some(c => c.id === activeConversationId.value)
+  // Determine which conversation to load: modelValue (URL) takes precedence
+  const targetId = props.modelValue || activeConversationId.value
+  if (targetId) {
+    const exists = conversations.value.some(c => c.id === targetId)
     if (exists) {
+      activeConversationId.value = targetId
       try {
-        const res = await chatApi.getMessages(activeConversationId.value)
+        const res = await chatApi.getMessages(targetId)
         messages.value = res.data || []
         await scrollToBottom(true)
       } catch (e) {
@@ -986,9 +988,12 @@ onMounted(async () => {
 })
 
 // Sync external modelValue changes (from URL route param)
+// Skip on mount — onMounted already handles initial load
+let _mounted = false
+onMounted(() => { _mounted = true })
 watch(() => props.modelValue, async (newId) => {
+  if (!_mounted) return
   if (newId && newId !== activeConversationId.value) {
-    activeConversationId.value = newId
     await selectConversation(newId)
   }
 })
