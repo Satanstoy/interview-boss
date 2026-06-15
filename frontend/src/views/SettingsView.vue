@@ -1,1 +1,46 @@
-<template><div>Settings（占位，Task 3 实现）</div></template>
+<template>
+  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+    <SettingsPage
+      :display-user="displayUser"
+      :practice-stats="practiceStats"
+      :master-bank="masterBank"
+      :is-admin="displayUser?.is_admin"
+      :active-season="activeSeason"
+      :available-seasons="availableSeasons"
+      :is-building="isBuilding"
+      @close="onClose"
+      @go-to-question="onGoToQuestion"
+      @logout="handleLogout"
+      @bank-mode-changed="handleBankModeChanged"
+      @profile-updated="fetchTableData"
+      @build-master-bank="triggerBuildMasterBank"
+      @update:active-season="activeSeason = $event"
+      @sidebar-collapsed-changed="sidebarCollapsed = $event"
+    />
+  </div>
+</template>
+
+<script setup>
+import { inject } from 'vue'
+import { useRouter } from 'vue-router'
+import SettingsPage from '@/components/business/SettingsPage.vue'
+
+const router = useRouter()
+
+const {
+  displayUser, practiceStats, masterBank,
+  activeSeason, availableSeasons,
+  isBuilding, sidebarCollapsed,
+  handleLogout, handleBankModeChanged,
+  fetchTableData, triggerBuildMasterBank,
+  onGoToQuestion,
+} = inject('appData')
+
+const onClose = () => {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/master-bank')
+  }
+}
+</script>
