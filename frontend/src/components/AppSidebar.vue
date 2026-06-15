@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { HugeiconsIcon } from '@hugeicons/vue'
 import {
   Book02Icon,
@@ -15,14 +16,12 @@ import { PanelLeft } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 
 const props = defineProps({
-  activeTab: { type: String, default: 'masterBank' },
   sidebarTabs: { type: Array, default: () => [] },
   displayUser: { type: Object, default: null },
   pendingReviewCount: { type: Number, default: 0 },
 })
 
 const emit = defineEmits([
-  'update:active-tab',
   'go-to-question',
   'logout',
   'bank-mode-changed',
@@ -30,6 +29,9 @@ const emit = defineEmits([
   'show-settings',
   'update:collapsed',
 ])
+
+const router = useRouter()
+const route = useRoute()
 
 const collapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
 const logoHovered = ref(false)
@@ -51,7 +53,11 @@ const iconMap = {
   Coding: BracesIcon,
 }
 
-function onTabChange(key) { emit('update:active-tab', key) }
+function isActive(tabRoute) {
+  return route.path === tabRoute || route.path.startsWith(tabRoute + '/')
+}
+
+function onTabChange(tab) { router.push(tab.route) }
 function onGoToQuestion(q) { emit('go-to-question', q) }
 function handleLogout() { emit('logout') }
 function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
@@ -90,9 +96,9 @@ function handleShowSettings() { emit('show-settings') }
     <button
       v-for="tab in sidebarTabs"
       :key="tab.key"
-      @click="onTabChange(tab.key)"
+      @click="onTabChange(tab)"
       class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
-      :class="activeTab === tab.key
+      :class="isActive(tab.route)
         ? 'bg-sidebar-accent text-sidebar-accent-foreground'
         : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
       :title="tab.label"
@@ -101,7 +107,7 @@ function handleShowSettings() { emit('show-settings') }
         v-if="iconMap[tab.key]"
         :icon="iconMap[tab.key]"
         :size="18"
-        :class="activeTab === tab.key ? 'text-primary' : ''"
+        :class="isActive(tab.route) ? 'text-primary' : ''"
       />
     </button>
 
@@ -149,9 +155,9 @@ function handleShowSettings() { emit('show-settings') }
       <button
         v-for="tab in sidebarTabs"
         :key="tab.key"
-        @click="onTabChange(tab.key)"
+        @click="onTabChange(tab)"
         class="group relative flex items-center w-full rounded-lg transition-all duration-200 gap-3 px-3 py-2"
-        :class="activeTab === tab.key
+        :class="isActive(tab.route)
           ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
           : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
       >
@@ -160,7 +166,7 @@ function handleShowSettings() { emit('show-settings') }
           :icon="iconMap[tab.key]"
           :size="18"
           class="transition-colors shrink-0"
-          :class="activeTab === tab.key ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
+          :class="isActive(tab.route) ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
         />
         <span class="text-sm whitespace-nowrap">{{ tab.label }}</span>
         <span

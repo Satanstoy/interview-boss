@@ -1,15 +1,15 @@
 <template>
   <div class="relative">
     <Tabs
-      :model-value="activeTab"
+      :model-value="activeRoute"
       @update:model-value="handleTabClick"
       class="w-fit"
     >
       <TabsList class="bg-transparent border-b border-border/80/50 overflow-x-auto mobile-scroll-x w-full">
         <TabsTrigger
           v-for="tab in tabs"
-          :key="tab.key"
-          :value="tab.key"
+          :key="tab.route"
+          :value="tab.route"
           :disabled="isTransitioning"
           class="flex-shrink-0"
         >
@@ -23,20 +23,22 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-defineProps({ activeTab: { type: String, default: 'MasterBank' } })
-const emit = defineEmits(['update:activeTab'])
+const router = useRouter()
+const route = useRoute()
+const activeRoute = computed(() => route.path)
 
 const isTransitioning = ref(false)
 let transitionTimer = null
 
-function handleTabClick(tabKey) {
+function handleTabClick(tabRoute) {
   if (isTransitioning.value) return
 
   isTransitioning.value = true
-  emit('update:activeTab', tabKey)
+  router.push(tabRoute)
 
   // 300ms 防抖，防止快速点击导致 Transition 竞态
   if (transitionTimer) clearTimeout(transitionTimer)
@@ -47,13 +49,13 @@ function handleTabClick(tabKey) {
 }
 
 const tabs = [
-  { key: 'JD', label: 'JD 筛选' },
-  { key: 'Interview', label: '面经库' },
-  { key: 'MasterBank', label: '高频题库' },
-  { key: 'Chat', label: '模拟面试' },
-  { key: 'MockInterview', label: '题目抽测' },
-  { key: 'KnowledgeGraph', label: '知识图谱' },
-  { key: 'Import', label: '导入' },
-  { key: 'Coding', label: '手撕代码' }
+  { route: '/jd', label: 'JD 筛选' },
+  { route: '/interview', label: '面经库' },
+  { route: '/master-bank', label: '高频题库' },
+  { route: '/chat', label: '模拟面试' },
+  { route: '/mock-interview', label: '题目抽测' },
+  { route: '/knowledge-graph', label: '知识图谱' },
+  { route: '/import', label: '导入' },
+  { route: '/coding', label: '手撕代码' }
 ]
 </script>
