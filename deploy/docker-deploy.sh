@@ -65,8 +65,15 @@ prune_unused_docker() {
   # 1. BuildKit 构建缓存
   prune_build_cache
 
-  # 2. 本项目 stopped/orphan 容器和关联卷（不影响运行中服务）
-  docker compose down --remove-orphans 2>/dev/null || true
+  # 2. 本项目 stopped/created 容器（不影响运行中服务）
+  local stopped_containers
+  stopped_containers=$(docker ps -a -q \
+    --filter "label=com.docker.compose.project=interview-boss" \
+    --filter "status=exited" \
+    --filter "status=created" 2>/dev/null || true)
+  if [ -n "$stopped_containers" ]; then
+    docker rm -f $stopped_containers >/dev/null 2>&1 || true
+  fi
 
   # 3. dangling images（不指定项目名，安全操作）
   docker image prune -f 2>/dev/null || true

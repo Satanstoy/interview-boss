@@ -299,7 +299,8 @@ class TestDockerDeployScript:
     def test_prune_unused_docker_does_not_force_down(self):
         """prune_unused_docker 不应默认停止运行中的服务"""
         content = self._read()
-        # 不应包含无条件的 docker compose down --rmi local
+        # 不应包含无条件的 docker compose down；即使不带 --rmi 也会停止运行服务
+        assert "docker compose down" not in content
         assert "docker compose down --rmi local" not in content
 
     def test_has_diagnose_command(self):
