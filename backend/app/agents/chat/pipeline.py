@@ -160,6 +160,19 @@ def _step(step: str, message: str, reason: str = "", insight: str = "") -> None:
     _emit(event)
 
 
+# ── Step reason templates ─────────────────────────────────────
+STEP_REASONS = {
+    "loading": "加载最近 20 条对话历史和用户记忆，为理解问题提供上下文",
+    "context": "构建面试上下文，包含简历和 JD 信息",
+    "understanding_first": "首次消息快速分类，确定面试开场策略",
+    "understanding_follow": "分析你的回答质量，决定下一步追问方向",
+    "load_skill": "根据对话阶段加载对应的面试技巧",
+    "draw_questions": "从题库随机抽取一道面试题",
+    "generating": "综合上下文和检索结果，生成口述级回答",
+    "closing": "面试已达到足够轮次，生成总结评价",
+}
+
+
 def _extract_company(question: dict) -> str:
     import json
 
@@ -926,7 +939,7 @@ def _initial_state(
 
 async def _step_load_context(state: ChatState) -> ChatState:
     """加载上下文：历史、记忆、简历、session notes"""
-    _step("loading", "正在加载对话历史...")
+    _step("loading", "正在加载对话历史...", reason=STEP_REASONS["loading"])
     memory_result, history_result = await asyncio.gather(
         recall_memories(state),
         load_history(state),
@@ -944,7 +957,7 @@ async def _step_load_context(state: ChatState) -> ChatState:
 
     _restore_active_skills_from_metadata(state, conversation_metadata)
 
-    _step("context", "正在加载个人画像...")
+    _step("context", "正在加载个人画像...", reason=STEP_REASONS["context"])
     interview_context, job_position = build_interview_context(
         state["user_id"], conversation_id=state["conversation_id"]
     )
@@ -976,7 +989,7 @@ async def _step_classify(state: ChatState) -> ChatState:
 
     is_first_message = len(state.get("message_history", [])) <= 1
     if is_first_message:
-        _step("understanding", "正在理解你的问题...")
+        _step("understanding", "正在理解你的问题...", reason=STEP_REASONS["understanding_first"])
         (
             intent,
             memory_ids,
@@ -990,7 +1003,7 @@ async def _step_classify(state: ChatState) -> ChatState:
             recent_context=recent_context,
         )
     else:
-        _step("understanding", "正在分析你的回答...")
+        _step("understanding", "正在分析你的回答...", reason=STEP_REASONS["understanding_follow"])
         (
             intent,
             memory_ids,
@@ -1103,7 +1116,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     """
     forced_closing = _forced_closing_response(state)
     if forced_closing:
-        _emit({"type": "step", "step": "closing", "message": "正在收尾面试..."})
+        _emit({"type": "step", "step": "closing", "message": "正在收尾面试...", "reason": STEP_REASONS["closing"]})
         yield {"type": "chunk", "content": forced_closing}
         yield {"type": "done"}
         return
@@ -1283,6 +1296,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     "type": "step",
                     "step": tool_name,
                     "message": tool_progress_message(tc),
+                    "reason": STEP_REASONS.get(tool_name, ""),
                 }
             )
 
@@ -1365,7 +1379,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         )
 
     # 4. Stream final answer
-    _emit({"type": "step", "step": "generating", "message": "正在生成回答..."})
+    _emit({"type": "step", "step": "generating", "message": "正在生成回答...", "reason": STEP_REASONS["generating"]})
     try:
         if stop_reason == "max_seconds":
             yield {
@@ -1448,6 +1462,7 @@ async def run_chat(
                         "type": "step",
                         "step": "closing",
                         "message": "正在生成面试总结...",
+                        "reason": STEP_REASONS["closing"],
                     }
                 )
                 closing_text = _generate_end_interview_response(state)
