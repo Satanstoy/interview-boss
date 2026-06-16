@@ -230,7 +230,7 @@ _emit(
 
 保持现有 insight emit 代码不变，确保向后兼容。
 
-- [ ] **Step 6: 修改 `_react_loop` 中的 generating emit（line 1363）**
+- [ ] **Step 7: 修改 `_react_loop` 中的 generating emit（line 1363）**
 
 ```python
 # 改前
@@ -239,7 +239,7 @@ _emit({"type": "step", "step": "generating", "message": "正在生成回答..."}
 _emit({"type": "step", "step": "generating", "message": "正在生成回答...", "reason": STEP_REASONS["generating"]})
 ```
 
-- [ ] **Step 7: 修改 `_run_pipeline` 中的 closing emit（line 1441-1446）**
+- [ ] **Step 8: 修改 `_run_pipeline` 中的 closing emit（line 1441-1446）**
 
 ```python
 # 改前
@@ -261,7 +261,7 @@ _emit(
 )
 ```
 
-- [ ] **Step 8: 运行所有 chat 测试确认无回归**
+- [ ] **Step 9: 运行所有 chat 测试确认无回归**
 
 ```bash
 docker compose exec backend pytest backend/tests/chat/ -v
@@ -269,7 +269,7 @@ docker compose exec backend pytest backend/tests/chat/ -v
 
 Expected: 所有现有测试通过（step 事件新增 reason 字段不影响现有断言，因为现有测试只检查 `type`、`step`、`message` 字段）
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add backend/app/agents/chat/pipeline.py
