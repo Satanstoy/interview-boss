@@ -116,7 +116,7 @@ def _step(step: str, message: str, reason: str = "", insight: str = "") -> None:
 
 **3. 洞察合并到步骤：**
 
-当前 insight 是在 step 之后独立 emit 的。改造后，将 insight 作为 step 事件的 `insight` 字段一起发出，不再单独 emit insight 事件。
+当前 insight 是在 step 之后独立 emit 的（通过 `_emit({"type": "insight", ...})`）。改造后，将 insight 作为 step 事件的 `insight` 字段一起发出。原独立的 `_emit({"type": "insight", ...})` 调用被移除。SSE 层（chat.py）保留 insight 事件透传逻辑，确保如果有残留的独立 insight 事件不会丢失。
 
 ### chat.py SSE 透传
 
