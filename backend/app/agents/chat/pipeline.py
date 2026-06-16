@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import time
 from dataclasses import dataclass
 from typing import AsyncGenerator
+
+from pydantic import BaseModel
 
 from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.nodes import (
@@ -32,6 +35,8 @@ from app.agents.chat.tools import (
     tool_progress_message,
 )
 from app.services.llm import (
+    _call_llm_with_retry_messages,
+    _extract_json,
     llm_with_tools,
     make_tool_result_message,
     stream_llm_messages,
@@ -70,6 +75,158 @@ _INTERNAL_REACT_MARKERS = frozenset(
 
 _ALLOWED_TOOL_NAMES = frozenset({"load_skill", "search_questions", "draw_questions"})
 _PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
+
+
+# ── Output Deduplication (hash + Jaccard) ─────────────────
+
+
+class OutputDeduplicator:
+    """Two-level dedup: hash exact match + Jaccard fuzzy match.
+    Borrowed from OpenCode ACP (hash) + Manneri (Jaccard)."""
+
+    def __init__(self, window_size: int = 8, jaccard_threshold: float = 0.7):
+        self.hash_buffer: set[str] = set()
+        self.token_buffer: list[set[str]] = []
+        self.window_size = window_size
+        self.jaccard_threshold = jaccard_threshold
+
+    def check(self, text: str) -> str:
+        """Return 'exact' | 'similar' | 'ok'"""
+        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        # Level 1: Hash exact match
+        h = hashlib.md5(normalized.encode()).hexdigest()
+        if h in self.hash_buffer:
+            return "exact"
+        # Level 2: Jaccard fuzzy match
+        tokens = set(normalized.split())
+        if len(tokens) >= 5:
+            for prev in self.token_buffer:
+                union = tokens | prev
+                if not union:
+                    continue
+                jaccard = len(tokens & prev) / len(union)
+                if jaccard >= self.jaccard_threshold:
+                    return "similar"
+        return "ok"
+
+    def record(self, text: str):
+        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        self.hash_buffer.add(hashlib.md5(normalized.encode()).hexdigest())
+        tokens = set(normalized.split())
+        self.token_buffer.append(tokens)
+        if len(self.token_buffer) > self.window_size:
+            self.token_buffer.pop(0)
+
+
+# ── Structured Interview Summary ────────────────────────────
+
+
+class InterviewSummary(BaseModel):
+    """LLM-generated structured interview feedback."""
+
+    overall_comment: str  # 2-3 sentences, based on actual dialogue
+    strongest_topic: str  # Best performed topic + specific reason
+    weakest_topic: str  # Weakest topic + specific evidence
+    key_suggestions: list[str]  # 3 actionable suggestions
+    score_estimate: int  # 1-10 overall estimate
+
+
+_SUMMARY_SYSTEM_PROMPT = (
+    '你是一个面试复盘教练。基于以下面试记录，给出一份结构化的面试反馈。\n\n'
+    '要求：\n'
+    '- 评价必须基于候选人实际说了什么，不要用泛泛的套话\n'
+    '- 最弱的话题要给出具体的“答不上来”或“答得浅”的证据\n'
+    '- 建议要具体可操作（如“建议复习 LangGraph 的条件路由机制”），'
+    '不要给空泛建议（如“继续深度学习”）\n'
+    '- 整体评价要诚实，好的夸、差的指出\n\n'
+    '请严格以 JSON 格式输出，schema 如下：\n'
+    '{\n'
+    '  "overall_comment": "2-3句整体评价",\n'
+    '  "strongest_topic": "表现最好的话题及原因",\n'
+    '  "weakest_topic": "最薄弱的话题及具体证据",\n'
+    '  "key_suggestions": ["具体建议1", "具体建议2", "具体建议3"],\n'
+    '  "score_estimate": 7\n'
+    '}\n'
+    '不要包含任何其他文字或 markdown 代码块，只输出纯 JSON。'
+)
+
+
+def _build_interview_transcript(state: ChatState) -> str:
+    """Extract the interview transcript from state for the summary prompt."""
+    history = state.get("message_history", []) or []
+    # Take the last 20 messages (or all if shorter)
+    recent = history[-20:] if len(history) > 20 else history
+    lines: list[str] = []
+    for msg in recent:
+        role = "面试官" if msg.get("role") == "assistant" else "候选人"
+        content = str(msg.get("content") or "")
+        if content.strip():
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _render_interview_summary_markdown(summary: InterviewSummary) -> str:
+    """Render an InterviewSummary as user-facing markdown."""
+    suggestions = "\n".join(f"- {s}" for s in summary.key_suggestions)
+    return (
+        "今天的模拟面试就到这里，感谢你的时间。\n\n"
+        f"**整体表现**：{summary.overall_comment}\n\n"
+        f"**最佳话题**：{summary.strongest_topic}\n\n"
+        f"**薄弱环节**：{summary.weakest_topic}\n\n"
+        f"**改进建议**：\n{suggestions}\n\n"
+        f"**综合评分**：{summary.score_estimate}/10"
+    )
+
+
+async def _generate_structured_summary(state: ChatState) -> str:
+    """Call LLM to generate structured interview feedback.
+
+    Falls back to an improved generic summary if LLM call fails.
+    """
+    transcript = _build_interview_transcript(state)
+    if not transcript.strip():
+        return ""
+
+    history = state.get("message_history", []) or []
+    session_notes = state.get("session_notes", "") or ""
+
+    user_content = (
+        "以下是面试记录：\n\n"
+        f"{transcript}\n\n"
+        f"面试官备注：{session_notes}\n"
+        f"总对话轮数：{len(history)}"
+    )
+
+    messages = [
+        {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    try:
+        raw = await _call_llm_with_retry_messages(
+            messages,
+            user_id=state.get("user_id"),
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        data = _extract_json(raw)
+        summary = InterviewSummary(**data)
+        return _render_interview_summary_markdown(summary)
+    except Exception as e:
+        logger.warning(
+            "Interview summary LLM call failed, using fallback: %s", e
+        )
+        # Improved fallback: at least mention topic count from session notes
+        topic_count = len(re.findall(r"\[asked\]", session_notes))
+        topic_info = f"共覆盖了 {topic_count} 个话题" if topic_count else "覆盖了多个话题"
+        return (
+            "今天的模拟面试就到这里，感谢你的时间。\n\n"
+            f"**整体表现**：本次面试{topic_info}，"
+            "你在项目经验和基础知识方面都有一定积累，回答思路基本清晰。"
+            "建议后续重点复盘面试中暴露的知识盲区，"
+            "尤其是回答不够深入的部分，可以结合实际项目多做总结。\n\n"
+            "建议继续保持对核心技术的深度学习，祝后续面试顺利。"
+        )
 
 
 def validate_tool_call(tool_call: dict) -> dict:
@@ -500,8 +657,11 @@ def _looks_like_candidate_question(text: str) -> bool:
     return bool(re.search(r"(想问|请问|了解一下|团队|实习生|培养|业务|落地)", stripped))
 
 
-def _forced_closing_response(state: ChatState) -> str:
-    """Hard-stop overlong interviews so ReAct cannot drift back to tech rounds."""
+async def _forced_closing_response(state: ChatState) -> str:
+    """Hard-stop overlong interviews so ReAct cannot drift back to tech rounds.
+
+    Now generates a structured LLM-based summary instead of hardcoded text.
+    """
     message_count = len(state.get("message_history", []) or [])
     if message_count <= 44:
         return ""
@@ -512,22 +672,25 @@ def _forced_closing_response(state: ChatState) -> str:
     last_assistant = _last_assistant_message(state)
     user_message = state.get("user_message", "")
     if "你有什么想问" in last_assistant or _looks_like_candidate_question(user_message):
+        # Candidate asked a counter-question; give a brief answer then the summary
+        summary = await _generate_structured_summary(state)
         return (
             "这个问题简单回应一下：真实业务里的 Agent 落地，团队通常最看重稳定性和可评估性，"
             "工具调用、权限边界、状态管理和业务系统集成都要能闭环。实习生一般会从一个可控模块切入，"
             "比如评测体系、badcase 分析、某个工具接入或一条业务链路优化。\n\n"
-            "今天的模拟面试就到这里。感谢你的时间，后续可以根据刚才暴露的问题继续针对性复盘。"
+            f"{summary}"
         )
 
-    return "面试时间差不多了，技术问题先到这里。你有什么想问我们的吗？"
+    return await _generate_structured_summary(state)
 
 
-def _generate_end_interview_response(state: ChatState) -> str:
+async def _generate_end_interview_response(state: ChatState) -> str:
     """Generate a closing response when the user explicitly requests end_interview.
 
     This function is called when intent == 'end_interview'.  It MUST NOT call
     any tools (load_skill / search_questions / draw_questions).  It produces
-    either a brief farewell or a structured summary depending on message count.
+    either a brief farewell or a structured LLM-generated summary depending
+    on message count and whether the user explicitly requested a summary.
 
     Side-effects on *state*:
     - Sets question_source / question_source_reason for metadata.
@@ -540,20 +703,15 @@ def _generate_end_interview_response(state: ChatState) -> str:
     message_history = state.get("message_history", []) or []
     user_message = state.get("user_message", "")
 
-    # If the user explicitly asks for a summary, provide a structured one
+    # If the user explicitly asks for a summary or the interview is substantial,
+    # generate a structured LLM-based summary
     wants_summary = any(
         kw in user_message
         for kw in ("总结", "总结报告", "面试总结", "生成总结", "生成一份")
     )
 
     if wants_summary or len(message_history) >= 20:
-        return (
-            "今天的模拟面试就到这里，感谢你的时间。\n\n"
-            "**整体表现**：你在项目经验和基础知识方面都有一定积累，"
-            "回答思路基本清晰。建议后续重点复盘面试中暴露的知识盲区，"
-            "尤其是回答不够深入的部分，可以结合实际项目多做总结。\n\n"
-            "建议继续保持对核心技术的深度学习，祝后续面试顺利。"
-        )
+        return await _generate_structured_summary(state)
 
     return "好的，面试先到这里。感谢你的时间，后续可以根据面试中暴露的问题继续针对性复盘。祝顺利！"
 
@@ -725,12 +883,37 @@ def _fallback_interviewer_response(marker: str, state: ChatState) -> str:
     )
 
 
+async def _regenerate_after_dup(
+    messages: list[dict],
+    state: ChatState,
+) -> AsyncGenerator[dict, None]:
+    """Re-stream after a duplicate output was detected.
+
+    Called once when OutputDeduplicator flags 'exact' or 'similar'.  Streams
+    the regenerated answer directly — no second dedup check (one retry only).
+    """
+    async for event in stream_llm_messages(
+        messages,
+        user_id=state["user_id"],
+        model=state.get("model"),
+        yield_thinking=False,
+    ):
+        if isinstance(event, dict):
+            if event.get("type") == "content":
+                yield {"type": "chunk", "content": event.get("content", "")}
+        else:
+            yield {"type": "chunk", "content": event}
+
+
 async def _stream_final_answer(
     messages: list[dict],
     state: ChatState,
 ) -> AsyncGenerator[dict, None]:
-    """Stream final answer while guarding against internal ReAct marker leakage."""
-    buffered_events: list[dict] = []
+    """Stream final answer while guarding against internal ReAct marker leakage.
+
+    Integrates two-level output dedup (hash + Jaccard) to detect and regenerate
+    repeated responses before they reach the user.
+    """
     chunks: list[str] = []
 
     # Track thinking lifecycle for synthesizing thinking_done
@@ -788,8 +971,40 @@ async def _stream_final_answer(
         final_text = _fallback_interviewer_response(final_text, state)
     final_text = _ensure_final_answer_quality(final_text, state)
 
-    for event in buffered_events:
-        yield event
+    # Two-level output dedup: check before yielding
+    if final_text:
+        deduplicator = state.setdefault("output_deduplicator", OutputDeduplicator())
+        dup_result = deduplicator.check(final_text)
+
+        if dup_result == "exact":
+            logger.info(
+                "ReAct trace: event=output_dedup_exact conversation_id=%s",
+                state.get("conversation_id"),
+            )
+            # Inject note and regenerate once
+            messages.append({
+                "role": "user",
+                "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
+            })
+            async for event in _regenerate_after_dup(messages, state):
+                yield event
+            return
+        elif dup_result == "similar":
+            logger.info(
+                "ReAct trace: event=output_dedup_similar conversation_id=%s",
+                state.get("conversation_id"),
+            )
+            # Inject note and regenerate once
+            messages.append({
+                "role": "user",
+                "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
+            })
+            async for event in _regenerate_after_dup(messages, state):
+                yield event
+            return
+        else:
+            deduplicator.record(final_text)
+
     if final_text:
         yield {"type": "chunk", "content": final_text}
 
@@ -798,6 +1013,11 @@ def _final_answer_events_from_text(
     final_text: str,
     state: ChatState,
 ) -> list[dict]:
+    """Convert pre-captured LLM answer text into yieldable events.
+
+    Note: dedup for the direct-answer path is handled by _react_loop
+    (which has access to messages for regeneration).
+    """
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
     final_text = _ensure_final_answer_quality(final_text, state)
@@ -1191,7 +1411,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     3. ReAct loop: LLM calls tools or answers directly
     4. Stream final answer
     """
-    forced_closing = _forced_closing_response(state)
+    forced_closing = await _forced_closing_response(state)
     if forced_closing:
         _emit({"type": "step", "step": "closing", "message": "正在收尾面试...", "reason": STEP_REASONS["closing"]})
         yield {"type": "chunk", "content": forced_closing}
@@ -1459,8 +1679,43 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "content": _fallback_react_answer(state, stop_reason),
             }
         elif final_answer_text:
-            for event in _final_answer_events_from_text(final_answer_text, state):
-                yield event
+            # Check output dedup for direct-answer path
+            final_text_clean = _ensure_final_answer_quality(
+                _fallback_interviewer_response(final_answer_text, state)
+                if _is_internal_react_marker(final_answer_text)
+                else final_answer_text,
+                state,
+            )
+            deduplicator = state.setdefault("output_deduplicator", OutputDeduplicator())
+            dup_result = deduplicator.check(final_text_clean) if final_text_clean else "ok"
+
+            if dup_result == "exact":
+                logger.info(
+                    "ReAct trace: event=output_dedup_exact conversation_id=%s",
+                    state.get("conversation_id"),
+                )
+                messages.append({
+                    "role": "user",
+                    "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
+                })
+                async for event in _stream_final_answer(messages, state):
+                    yield event
+            elif dup_result == "similar":
+                logger.info(
+                    "ReAct trace: event=output_dedup_similar conversation_id=%s",
+                    state.get("conversation_id"),
+                )
+                messages.append({
+                    "role": "user",
+                    "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
+                })
+                async for event in _stream_final_answer(messages, state):
+                    yield event
+            else:
+                if final_text_clean:
+                    deduplicator.record(final_text_clean)
+                for event in _final_answer_events_from_text(final_answer_text, state):
+                    yield event
         else:
             async for event in _stream_final_answer(messages, state):
                 yield event
@@ -1537,7 +1792,7 @@ async def run_chat(
                         "reason": STEP_REASONS["closing"],
                     }
                 )
-                closing_text = _generate_end_interview_response(state)
+                closing_text = await _generate_end_interview_response(state)
                 response = closing_text
                 _emit({"type": "chunk", "content": closing_text})
                 built_metadata, clean_response = _build_react_metadata(state, response)
