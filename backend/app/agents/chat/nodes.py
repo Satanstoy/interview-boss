@@ -1717,10 +1717,27 @@ def build_react_system_prompt(state: ChatState) -> str:
             basis_guidance="",
         )
     else:
+        # Build memory_context from state
+        resume_summary = state.get("resume_summary")
+        memory_summaries = state.get("memory_summaries", [])
+        memory_parts = []
+        if resume_summary:
+            memory_parts.append(f"候选人背景：{resume_summary[:800]}")
+        if memory_summaries:
+            weak = [m for m in memory_summaries if m.get("memory_type") == "weakness"]
+            strong = [m for m in memory_summaries if m.get("memory_type") == "strength"]
+            if weak:
+                memory_parts.append("薄弱环节：" + "; ".join(m.get("summary", "") for m in weak[:3]))
+            if strong:
+                memory_parts.append("擅长领域：" + "; ".join(m.get("summary", "") for m in strong[:3]))
+        memory_context = _truncate_to_budget(
+            "\n".join(memory_parts) if memory_parts else "", MEMORY_BUDGET
+        )
+
         base = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
             interview_context=interview_context,
             interview_phase=interview_phase,
-            memory_context="",
+            memory_context=memory_context or "暂无用户背景信息",
             basis_guidance="",
         )
 

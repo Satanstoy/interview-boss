@@ -169,7 +169,7 @@ DRAW_QUESTIONS_SCHEMA = {
                 },
                 "topic": {
                     "type": "string",
-                    "description": "希望抽取的主题关键词，如 LRU、RAG、MCP。可选。",
+                    "description": "希望抽取的主题关键词，如 TopK、RAG、MCP、二分查找。可选。",
                 },
                 "question_type": {
                     "type": "string",

@@ -67,7 +67,7 @@ STRUCTURED_REWRITE_PROMPT = """基于面试官的问题，生成结构化检索�
   - find_similar: 查找相似的面试题（用户正在回答问题）
   - expand_knowledge: 扩展相关知识（用户在追问、想深入）
   - review_weakness: 回顾薄弱环节（用户回答不完整或出错）
-- main_topic: 话题核心技术点，2-4 字（如"Redis 缓存穿透"、"LRU 缓存"）
+- main_topic: 话题核心技术点，2-4 字（如"Redis 缓存穿透"、"TopK 问题"）
 - positive_terms: 必须包含的检索词（技术术语，最多 5 个）
 - negative_terms: 必须排除的检索词（容易混淆的概念，最多 3 个）
 
@@ -437,7 +437,7 @@ INTENT_AND_MEMORY_PROMPT = """分析用户的最新消息，完成四个任务�
 
 示例:
 - 面试官问"说说 Redis 缓存穿透"，用户答"布隆过滤器" → keywords: ["Redis", "缓存", "穿透"]
-- 面试官问"手写 LRU 缓存"，用户开始写代码 → keywords: ["LRU", "缓存"]
+- 面试官问"手写 TopK 问题"，用户开始写代码 → keywords: ["TopK", "堆"]
 - 面试官问"整体架构怎么设计的" → keywords: ["架构", "设计"]
 - 面试官问"State Graph 状态怎么定义的" → keywords: ["LangGraph", "状态机", "图"]
 - 面试官问"怎么保证高并发" → keywords: ["高并发", "限流"]
@@ -453,7 +453,7 @@ search_query = keywords 用空格拼接即可。
   - find_similar: 查找相似的面试题（用户正在回答问题）
   - expand_knowledge: 扩展相关知识（用户在追问、想深入）
   - review_weakness: 回顾薄弱环节（用户回答不完整或出错）
-- main_topic: 话题核心技术点，2-4 字（如"Redis 缓存穿透"、"LRU 缓存"）
+- main_topic: 话题核心技术点，2-4 字（如"Redis 缓存穿透"、"TopK 问题"）
 - positive_terms: 必须包含的检索词（技术术语，最多 5 个）
 - negative_terms: 必须排除的检索词（容易混淆的概念，最多 3 个）
 
