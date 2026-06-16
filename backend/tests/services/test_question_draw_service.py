@@ -341,3 +341,163 @@ def test_difficulty_mapping_chinese_input_still_works(test_db, monkeypatch):
     result_ids = {q["id"] for q in result}
     # "中等" matches "L2-中等"
     assert 101 in result_ids or 104 in result_ids
+
+
+# ── Per-category quota tests ──────────────────────────────
+
+
+def test_count_asked_categories():
+    """_count_asked_categories extracts and counts categories from session notes."""
+    from app.services.question_draw_service import _count_asked_categories
+
+    notes = (
+        "[asked] E.算法与数据结构: 实现一个 LRU Cache\n"
+        "[asked] B.Agent与LLM应用: Agentic RAG 的区别\n"
+        "[asked] E.算法与数据结构: 二叉树层序遍历\n"
+        "[topics] RAG, Agent\n"
+    )
+    counts = _count_asked_categories(notes)
+    assert counts == {
+        "E.算法与数据结构": 2,
+        "B.Agent与LLM应用": 1,
+    }
+
+
+def test_count_asked_categories_empty():
+    """_count_asked_categories returns empty dict for empty notes."""
+    from app.services.question_draw_service import _count_asked_categories
+
+    assert _count_asked_categories("") == {}
+    assert _count_asked_categories("[topics] RAG, Agent") == {}
+
+
+def test_apply_category_quota_filters_at_limit():
+    """_apply_category_quota removes questions from categories at quota."""
+    from app.services.question_draw_service import _apply_category_quota
+
+    candidates = [
+        {"id": 1, "cat1": "E.算法与数据结构", "question": "LRU Cache"},
+        {"id": 2, "cat1": "B.Agent与LLM应用", "question": "Agentic RAG"},
+        {"id": 3, "cat1": "A.RAG与检索", "question": "向量检索"},
+    ]
+    asked = {"E.算法与数据结构": 2}
+    result = _apply_category_quota(candidates, asked, max_per_category=2)
+    # Only cat1="E.算法与数据结构" is at quota (2/2), so id=1 is filtered out
+    assert len(result) == 2
+    assert {q["id"] for q in result} == {2, 3}
+
+
+def test_apply_category_quota_keeps_below_limit():
+    """_apply_category_quota keeps questions from categories below quota."""
+    from app.services.question_draw_service import _apply_category_quota
+
+    candidates = [
+        {"id": 1, "cat1": "E.算法与数据结构", "question": "LRU Cache"},
+        {"id": 2, "cat1": "B.Agent与LLM应用", "question": "Agentic RAG"},
+    ]
+    asked = {"E.算法与数据结构": 1}  # 1 < 2, so still below quota
+    result = _apply_category_quota(candidates, asked, max_per_category=2)
+    assert len(result) == 2
+    assert {q["id"] for q in result} == {1, 2}
+
+
+def test_apply_category_quota_fallback_when_all_filtered():
+    """_apply_category_quota returns original list when all candidates filtered."""
+    from app.services.question_draw_service import _apply_category_quota
+
+    candidates = [
+        {"id": 1, "cat1": "E.算法与数据结构", "question": "LRU Cache"},
+        {"id": 2, "cat1": "E.算法与数据结构", "question": "二叉树遍历"},
+    ]
+    asked = {"E.算法与数据结构": 5}
+    result = _apply_category_quota(candidates, asked, max_per_category=2)
+    # All filtered → fallback returns original
+    assert len(result) == 2
+
+
+def test_apply_category_quota_indices_filters():
+    """_apply_category_quota_indices removes indices for categories at quota."""
+    from app.services.question_draw_service import _apply_category_quota_indices
+
+    candidates = [
+        {"id": 1, "cat1": "E.算法与数据结构", "frequency": 10},
+        {"id": 2, "cat1": "B.Agent与LLM应用", "frequency": 8},
+        {"id": 3, "cat1": "A.RAG与检索", "frequency": 5},
+    ]
+    selected_indices = [0, 1, 2]
+    asked = {"E.算法与数据结构": 2}
+    result = _apply_category_quota_indices(
+        candidates, selected_indices, asked, max_per_category=2
+    )
+    assert result == [1, 2]
+
+
+def test_apply_category_quota_indices_fallback():
+    """_apply_category_quota_indices returns original indices when all filtered."""
+    from app.services.question_draw_service import _apply_category_quota_indices
+
+    candidates = [
+        {"id": 1, "cat1": "E.算法与数据结构", "frequency": 10},
+        {"id": 2, "cat1": "E.算法与数据结构", "frequency": 8},
+    ]
+    selected_indices = [0, 1]
+    asked = {"E.算法与数据结构": 5}
+    result = _apply_category_quota_indices(
+        candidates, selected_indices, asked, max_per_category=2
+    )
+    assert result == [0, 1]  # fallback
+
+
+def test_draw_questions_with_session_notes_quota(test_db, monkeypatch):
+    """draw_questions applies category quota when session_notes is provided."""
+    from app.services import question_draw_service
+
+    qds = _patch_draw_helpers(monkeypatch)
+    _seed_algorithm_questions(test_db)
+    monkeypatch.setattr(qds.random, "random", lambda: 0)
+
+    # Session notes indicate E.算法与数据结构 has been asked 2 times already
+    session_notes = (
+        "[asked] E.算法与数据结构: 实现一个 LRU Cache\n"
+        "[asked] E.算法与数据结构: 合并 K 个有序链表\n"
+    )
+
+    result = qds.draw_questions(
+        user={"id": 8, "bank_mode": "public"},
+        count=5,
+        question_type="algorithm_coding",
+        session_notes=session_notes,
+        max_per_category=2,
+    )
+
+    # All seed questions are in cat1="E.算法与数据结构", so quota should filter
+    # them, but fallback returns all since no other categories exist.
+    assert len(result) > 0
+
+    # Now test with a different category in session notes — should NOT filter
+    session_notes_different = "[asked] B.Agent与LLM应用: Agentic RAG 的区别\n"
+    result2 = qds.draw_questions(
+        user={"id": 8, "bank_mode": "public"},
+        count=5,
+        question_type="algorithm_coding",
+        session_notes=session_notes_different,
+        max_per_category=2,
+    )
+    # All algo questions have cat1="E.算法与数据结构", which is not in asked
+    assert len(result2) == 4
+
+
+def test_draw_questions_without_session_notes_unchanged(test_db, monkeypatch):
+    """draw_questions works unchanged when session_notes is not provided."""
+    from app.services import question_draw_service
+
+    qds = _patch_draw_helpers(monkeypatch)
+    _seed_algorithm_questions(test_db)
+    monkeypatch.setattr(qds.random, "random", lambda: 0)
+
+    result = qds.draw_questions(
+        user={"id": 8, "bank_mode": "public"},
+        count=5,
+        question_type="algorithm_coding",
+    )
+    assert len(result) == 4

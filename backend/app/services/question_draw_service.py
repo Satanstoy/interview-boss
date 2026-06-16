@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import random
 import time
 from datetime import datetime
@@ -40,6 +41,8 @@ def draw_questions(
     difficulty: Optional[str] = None,
     question_type: Optional[str] = None,
     exclude_ids: Optional[set[int]] = None,
+    session_notes: Optional[str] = None,
+    max_per_category: int = 2,
 ) -> list[dict]:
     """Draw weighted random questions visible to the current user.
 
@@ -151,6 +154,15 @@ def draw_questions(
         selected_indices = _weighted_sample_without_replacement(
             candidates, practice_map, count
         )
+
+        # Apply per-category quota: remove candidates from categories
+        # that have already been asked max_per_category times.
+        if session_notes:
+            asked_categories = _count_asked_categories(session_notes)
+            selected_indices = _apply_category_quota_indices(
+                candidates, selected_indices, asked_categories, max_per_category
+            )
+
         selected_ids = [candidates[idx]["id"] for idx in selected_indices]
         try:
             sources_map = {qid: get_sources(conn, qid) for qid in selected_ids}
@@ -240,3 +252,65 @@ def _weighted_sample_without_replacement(
         remaining.pop(chosen_idx)
         remaining_weights.pop(chosen_idx)
     return selected_indices
+
+
+def _count_asked_categories(session_notes: str) -> dict[str, int]:
+    """Count how many questions from each category have been asked.
+
+    Parses ``[asked] <category>: <question>`` entries from session notes and
+    returns a dict mapping category name to the number of times it was asked.
+    """
+    counts: dict[str, int] = {}
+    for match in re.finditer(r"\[asked\]\s*(.+?):", session_notes):
+        cat = match.group(1).strip()
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+    return counts
+
+
+def _apply_category_quota(
+    candidates: list[dict],
+    asked_categories: dict[str, int],
+    max_per_category: int = 2,
+) -> list[dict]:
+    """Filter candidates, removing questions from categories already at quota.
+
+    Uses the ``cat1`` field of each candidate to check against the asked
+    categories count.  If *all* candidates would be filtered out, returns the
+    original list as a fallback so the caller always gets something to work
+    with.
+
+    Works with both plain dicts and ``sqlite3.Row`` objects.
+    """
+    filtered = []
+    for q in candidates:
+        try:
+            cat = q["cat1"] or ""
+        except (KeyError, IndexError):
+            cat = ""
+        if asked_categories.get(cat, 0) < max_per_category:
+            filtered.append(q)
+    return filtered or candidates
+
+
+def _apply_category_quota_indices(
+    candidates: list,
+    selected_indices: list[int],
+    asked_categories: dict[str, int],
+    max_per_category: int = 2,
+) -> list[int]:
+    """Like _apply_category_quota but operates on index lists.
+
+    Returns a (possibly shorter) list of indices into *candidates* whose
+    categories have not yet hit the quota.  Falls back to the original
+    *selected_indices* if everything would be removed.
+    """
+    filtered = []
+    for idx in selected_indices:
+        try:
+            cat = candidates[idx]["cat1"] or ""
+        except (KeyError, IndexError):
+            cat = ""
+        if asked_categories.get(cat, 0) < max_per_category:
+            filtered.append(idx)
+    return filtered or selected_indices
