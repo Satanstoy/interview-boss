@@ -696,16 +696,55 @@ async def _stream_final_answer(
     buffered_events: list[dict] = []
     chunks: list[str] = []
 
+    # Track thinking lifecycle for synthesizing thinking_done
+    is_thinking = False
+    thinking_start_time = None
+    thinking_content = ""
+
     async for event in stream_llm_messages(
-        messages, user_id=state["user_id"], model=state.get("model")
+        messages,
+        user_id=state["user_id"],
+        model=state.get("model"),
+        yield_thinking=True,
     ):
         if isinstance(event, dict):
-            if event.get("type") == "chunk":
-                chunks.append(event.get("content", ""))
-            else:
-                buffered_events.append(event)
+            event_type = event.get("type")
+            content = event.get("content", "")
+
+            if event_type == "thinking_start":
+                is_thinking = True
+                thinking_start_time = time.time()
+                _emit({"type": "thinking_start", "content": ""})
+            elif event_type == "thinking":
+                thinking_content += content
+                _emit({"type": "thinking", "content": content})
+            elif event_type == "content":
+                if is_thinking:
+                    is_thinking = False
+                    duration = (
+                        round(time.time() - thinking_start_time, 1)
+                        if thinking_start_time
+                        else 0
+                    )
+                    _emit({
+                        "type": "thinking_done",
+                        "duration": duration,
+                        "content": thinking_content,
+                    })
+                chunks.append(content)
         else:
             chunks.append(event)
+
+    # Handle case where stream ended while still in thinking mode
+    if is_thinking:
+        duration = (
+            round(time.time() - thinking_start_time, 1) if thinking_start_time else 0
+        )
+        _emit({
+            "type": "thinking_done",
+            "duration": duration,
+            "content": thinking_content,
+        })
 
     final_text = "".join(chunks)
     if _is_internal_react_marker(final_text):
