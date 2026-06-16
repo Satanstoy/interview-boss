@@ -45,13 +45,13 @@
                 v-if="step.reason || step.insight"
                 :size="12"
                 class="text-muted-foreground/50 shrink-0 transition-transform duration-200"
-                :class="{ 'rotate-180': expandedSteps.has(i) }"
+                :class="{ 'rotate-180': expandedSteps[i] }"
               />
             </button>
 
             <!-- Step detail (reason + insight) -->
             <Transition name="expand">
-              <div v-if="expandedSteps.has(i) && (step.reason || step.insight)" class="pl-7 pr-2 pb-1">
+              <div v-if="expandedSteps[i] && (step.reason || step.insight)" class="pl-7 pr-2 pb-1">
                 <p v-if="step.reason" class="text-xs text-muted-foreground/60 leading-relaxed">
                   {{ step.reason }}
                 </p>
@@ -83,11 +83,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Loader2, Lightbulb, ChevronDown, CheckCircle2 } from '@lucide/vue'
 
 const props = defineProps({
   isStreaming: { type: Boolean, default: false },
+  isSending: { type: Boolean, default: false },
   content: { type: String, default: '' },
   duration: { type: Number, default: 0 },
   steps: { type: Array, default: () => [] },
@@ -95,12 +96,12 @@ const props = defineProps({
 
 const isOpen = ref(true)
 const contentRef = ref(null)
-const expandedSteps = ref(new Set())
+const expandedSteps = reactive({})
 
 const stepCount = computed(() => props.steps.length)
 
 const displayLabel = computed(() => {
-  if (props.isStreaming) return '思考中'
+  if (props.isSending) return '思考中'
   const parts = []
   if (props.duration > 0) parts.push(`思考了 ${props.duration} 秒`)
   if (stepCount.value > 0) parts.push(`${stepCount.value} 步`)
@@ -108,13 +109,7 @@ const displayLabel = computed(() => {
 })
 
 function toggleStep(index) {
-  const s = new Set(expandedSteps.value)
-  if (s.has(index)) {
-    s.delete(index)
-  } else {
-    s.add(index)
-  }
-  expandedSteps.value = s
+  expandedSteps[index] = !expandedSteps[index]
 }
 
 watch(() => props.content, () => {
@@ -123,8 +118,9 @@ watch(() => props.content, () => {
   }
 })
 
-watch(() => props.isStreaming, (streaming) => {
-  if (!streaming && (props.content || props.steps.length > 0)) {
+// Collapse only when the entire message is done (not just thinking done)
+watch(() => props.isSending, (sending, oldSending) => {
+  if (oldSending && !sending && (props.content || props.steps.length > 0)) {
     setTimeout(() => {
       isOpen.value = false
     }, 1000)
@@ -132,7 +128,7 @@ watch(() => props.isStreaming, (streaming) => {
 })
 
 onMounted(() => {
-  if ((props.content || props.steps.length > 0) && !props.isStreaming) {
+  if ((props.content || props.steps.length > 0) && !props.isSending) {
     isOpen.value = false
   }
 })

@@ -170,6 +170,7 @@
             <ReasoningTimeline
               v-if="isThinking || thinkingContent || processingSteps.length > 0"
               :is-streaming="isThinking"
+              :is-sending="isSending"
               :content="thinkingContent"
               :duration="thinkingDuration"
               :steps="processingSteps"
