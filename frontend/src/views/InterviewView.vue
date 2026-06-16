@@ -1,5 +1,19 @@
 <template>
   <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
+    <!-- 页头 -->
+    <div class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex items-center gap-3">
+          <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
+            <FileText class="size-5 text-white" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-foreground">面经库</h3>
+            <p class="text-caption text-muted-foreground">浏览和管理面试经验数据</p>
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- Season filter bar -->
     <div class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
       <template v-if="interviewSeasons.length > 0">
@@ -108,6 +122,7 @@
 
 <script setup>
 import { inject } from 'vue'
+import { FileText } from '@lucide/vue'
 import DataTable from '@/components/common/DataTable.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'

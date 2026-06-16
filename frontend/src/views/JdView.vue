@@ -1,5 +1,19 @@
 <template>
   <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+    <!-- 页头 -->
+    <div class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex items-center gap-3">
+          <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
+            <Briefcase class="size-5 text-white" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-foreground">JD 库</h3>
+            <p class="text-caption text-muted-foreground">管理岗位描述和招聘信息</p>
+          </div>
+        </div>
+      </div>
+    </div>
     <JdDataTable
       :columns="jdColumns"
       :rows="jdData"
@@ -49,6 +63,7 @@
 
 <script setup>
 import { inject } from 'vue'
+import { Briefcase } from '@lucide/vue'
 import DataTable from '@/components/common/DataTable.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 
