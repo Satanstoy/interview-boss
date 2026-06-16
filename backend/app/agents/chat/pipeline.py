@@ -167,6 +167,7 @@ STEP_REASONS = {
     "understanding_first": "首次消息快速分类，确定面试开场策略",
     "understanding_follow": "分析你的回答质量，决定下一步追问方向",
     "load_skill": "根据对话阶段加载对应的面试技巧",
+    "search_questions": "根据你的问题关键词，从题库检索相关面试题",
     "draw_questions": "从题库随机抽取一道面试题",
     "generating": "综合上下文和检索结果，生成口述级回答",
     "closing": "面试已达到足够轮次，生成总结评价",
