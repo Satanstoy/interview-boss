@@ -167,11 +167,12 @@
           <!-- Streaming message -->
           <div v-if="isSending" class="mb-6">
             <!-- Thinking block -->
-            <ThinkingBlock
-              v-if="isThinking || thinkingContent"
+            <ReasoningTimeline
+              v-if="isThinking || thinkingContent || processingSteps.length > 0"
               :is-streaming="isThinking"
               :content="thinkingContent"
               :duration="thinkingDuration"
+              :steps="processingSteps"
             />
 
             <!-- Processing steps -->
@@ -357,7 +358,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import ChatMessage from './ChatMessage.vue'
-import ThinkingBlock from './ThinkingBlock.vue'
+import ReasoningTimeline from './ReasoningTimeline.vue'
 import NewChatModal from './NewChatModal.vue'
 import ModelSelector from './ModelSelector.vue'
 import * as chatApi from '@/services/chatApi.js'
@@ -657,7 +658,13 @@ async function handleSend() {
       (event) => {
         if (event.type === 'step') {
           processingSteps.value.forEach(s => { s.done = true })
-          processingSteps.value.push({ step: event.step, message: event.message, done: false })
+          processingSteps.value.push({
+            step: event.step,
+            message: event.message,
+            done: false,
+            reason: event.reason || '',
+            insight: event.insight || '',
+          })
           scrollToBottom()
         } else if (event.type === 'thinking_start') {
           isThinking.value = true
@@ -726,6 +733,25 @@ async function handleSend() {
       }
       if (pendingJdRef.value) {
         metadata.jd_ref = pendingJdRef.value
+      }
+      // Persist processing steps, merging insights into their preceding step
+      if (processingSteps.value.length > 0) {
+        const stepsCopy = processingSteps.value.map(s => ({
+          step: s.step,
+          message: s.message,
+          reason: s.reason || '',
+          insight: '',
+        }))
+        // Merge pending insights into the last tool step (by timing order)
+        for (const insight of pendingInsights.value) {
+          for (let j = stepsCopy.length - 1; j >= 0; j--) {
+            if (['load_skill', 'search_questions', 'draw_questions'].includes(stepsCopy[j].step)) {
+              stepsCopy[j].insight = insight.text
+              break
+            }
+          }
+        }
+        metadata.steps = stepsCopy
       }
       if (thinkingContent.value) {
         metadata.thinking = thinkingContent.value
