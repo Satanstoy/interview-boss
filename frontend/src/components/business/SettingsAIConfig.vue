@@ -46,7 +46,6 @@ const loadConfig = async () => {
 }
 
 const startEdit = () => {
-  editKey.value = false
   showKey.value = false
   error.value = ''
   form.llm_api_key = ''
@@ -118,57 +117,13 @@ onMounted(loadConfig)
     </div>
 
     <div class="rounded-xl border bg-card p-6 space-y-4">
-      <!-- Loading skeleton -->
+      <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center py-8">
         <div class="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
 
-      <!-- Unconfigured hint -->
-      <div
-        v-else-if="!configured"
-        class="flex items-center gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800"
-      >
-        <svg class="size-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-        </svg>
-        <span class="text-sm text-amber-700 dark:text-amber-300">请先配置 API Key 才能使用 AI 功能</span>
-        <Button variant="outline" size="sm" @click="startEdit" class="ml-auto">
-          立即配置
-        </Button>
-      </div>
-
-      <!-- Configured summary -->
-      <div v-else-if="!editKey" class="space-y-4">
-        <div class="flex flex-col gap-2 text-sm">
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-muted-foreground w-16 shrink-0">API Key</span>
-            <span class="font-mono text-foreground truncate">{{ settings.llm_api_key || '未设置' }}</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-muted-foreground w-16 shrink-0">Base URL</span>
-            <span class="font-mono text-foreground truncate">{{ settings.llm_base_url || '未设置' }}</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-muted-foreground w-16 shrink-0">模型</span>
-            <span class="font-mono text-foreground truncate">{{ settings.llm_model || '未设置' }}</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-muted-foreground w-16 shrink-0">超时</span>
-            <span class="font-mono text-foreground">{{ settings.llm_timeout || 120 }}s</span>
-          </div>
-        </div>
-        <div class="flex gap-2">
-          <Button variant="outline" size="sm" @click="editKey = true; startEdit()">
-            修改配置
-          </Button>
-          <Button variant="outline" size="sm" @click="handleDelete" class="text-destructive">
-            清除配置
-          </Button>
-        </div>
-      </div>
-
-      <!-- Edit form -->
-      <div v-else class="space-y-4">
+      <!-- Edit form (highest priority after loading) -->
+      <div v-else-if="editKey" class="space-y-4">
         <!-- API Key -->
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">API Key</Label>
@@ -245,6 +200,50 @@ onMounted(loadConfig)
           <Button variant="outline" size="sm" @click="editKey = false">取消</Button>
         </div>
         <p v-if="error" class="text-xs text-destructive">{{ error }}</p>
+      </div>
+
+      <!-- Unconfigured hint -->
+      <div
+        v-else-if="!configured"
+        class="flex items-center gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800"
+      >
+        <svg class="size-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+        </svg>
+        <span class="text-sm text-amber-700 dark:text-amber-300">请先配置 API Key 才能使用 AI 功能</span>
+        <Button variant="outline" size="sm" @click="startEdit(); editKey = true" class="ml-auto">
+          立即配置
+        </Button>
+      </div>
+
+      <!-- Configured summary -->
+      <div v-else class="space-y-4">
+        <div class="flex flex-col gap-2 text-sm">
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">API Key</span>
+            <span class="font-mono text-foreground truncate">{{ settings.llm_api_key || '未设置' }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">Base URL</span>
+            <span class="font-mono text-foreground truncate">{{ settings.llm_base_url || '未设置' }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">模型</span>
+            <span class="font-mono text-foreground truncate">{{ settings.llm_model || '未设置' }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">超时</span>
+            <span class="font-mono text-foreground">{{ settings.llm_timeout || 120 }}s</span>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <Button variant="outline" size="sm" @click="startEdit(); editKey = true">
+            修改配置
+          </Button>
+          <Button variant="outline" size="sm" @click="handleDelete" class="text-destructive">
+            清除配置
+          </Button>
+        </div>
       </div>
     </div>
   </div>
