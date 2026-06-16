@@ -123,42 +123,86 @@ class TestFallbackReactAnswer:
 class TestForcedClosing:
     """_forced_closing_response() — hard stop at 44+ messages."""
 
-    def test_under_44_messages_no_closing(self):
+    async def test_under_44_messages_no_closing(self):
         """消息数 <= 44 → 不触发强制关闭"""
         state = {"message_history": [{}] * 44, "user_message": ""}
-        assert _forced_closing_response(state) == ""
+        assert await _forced_closing_response(state) == ""
 
-    def test_over_44_messages_first_closing(self):
-        """FC1: 消息数 > 44 且未问过反问 → 收尾提问"""
+    @pytest.mark.asyncio
+    async def test_over_44_messages_first_closing(self):
+        """FC1: 消息数 > 44 且未问过反问 → LLM 生成结构化总结"""
         state = {
-            "message_history": [{}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 45,
             "user_message": "我还想继续",
+            "session_notes": "[asked] Redis 持久化",
+            "user_id": 1,
         }
-        result = _forced_closing_response(state)
-        assert "你有什么想问我们的吗" in result
+        mock_summary_json = json.dumps({
+            "overall_comment": "候选人基础知识扎实",
+            "strongest_topic": "Redis，回答全面",
+            "weakest_topic": "算法，答得浅",
+            "key_suggestions": ["建议复习排序算法"],
+            "score_estimate": 7,
+        }, ensure_ascii=False)
+        with patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
+            result = await _forced_closing_response(state)
+        assert "整体表现" in result
+        assert "候选人基础知识扎实" in result
 
-    def test_over_44_messages_after_question(self):
-        """FC2: 已问过"你有什么想问"且用户提了反问 → 通用收尾"""
+    @pytest.mark.asyncio
+    async def test_over_44_messages_after_question(self):
+        """FC2: 已问过"你有什么想问"且用户提了反问 → LLM 总结 + 反问回应"""
         state = {
-            "message_history": [{}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 45,
             "user_message": "请问团队的技术栈是什么？",
-            "_last_assistant_msg": "你有什么想问我们的吗？",
+            "session_notes": "",
+            "user_id": 1,
         }
-        # Need to mock _last_assistant_message
+        mock_summary_json = json.dumps({
+            "overall_comment": "整体一般",
+            "strongest_topic": "项目经验",
+            "weakest_topic": "算法基础薄弱",
+            "key_suggestions": ["多练习"],
+            "score_estimate": 6,
+        }, ensure_ascii=False)
         with patch(
             "app.agents.chat.pipeline._last_assistant_message",
             return_value="你有什么想问我们的吗？",
+        ), patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
         ):
-            result = _forced_closing_response(state)
+            result = await _forced_closing_response(state)
         assert "模拟面试就到这里" in result
+        assert "整体一般" in result
 
-    def test_closing_updates_state(self):
+    @pytest.mark.asyncio
+    async def test_closing_updates_state(self):
         """强制关闭更新 question_source"""
         state = {
-            "message_history": [{}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 45,
             "user_message": "",
+            "session_notes": "",
+            "user_id": 1,
         }
-        _forced_closing_response(state)
+        mock_summary_json = json.dumps({
+            "overall_comment": "test",
+            "strongest_topic": "t",
+            "weakest_topic": "w",
+            "key_suggestions": ["s"],
+            "score_estimate": 5,
+        }, ensure_ascii=False)
+        with patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
+            await _forced_closing_response(state)
         assert state["question_source"] == "conversation"
         assert state["question_source_reason"] == "forced_closing_by_message_count"
 
@@ -385,7 +429,15 @@ class TestForcedClosingE2E:
         async def mock_extract_memory(snapshot):
             pass
 
-        llm_mock = AsyncMock()  # Should NOT be called
+        llm_mock = AsyncMock()  # Should NOT be called (ReAct loop skipped)
+
+        mock_summary_json = json.dumps({
+            "overall_comment": "候选人整体表现出色",
+            "strongest_topic": "项目经验丰富",
+            "weakest_topic": "算法基础薄弱",
+            "key_suggestions": ["多练算法题"],
+            "score_estimate": 7,
+        }, ensure_ascii=False)
 
         with ExitStack() as stack:
             stack.enter_context(
@@ -418,6 +470,13 @@ class TestForcedClosingE2E:
             stack.enter_context(
                 patch("app.agents.chat.pipeline.llm_with_tools", new=llm_mock)
             )
+            stack.enter_context(
+                patch(
+                    "app.agents.chat.pipeline._call_llm_with_retry_messages",
+                    new_callable=AsyncMock,
+                    return_value=mock_summary_json,
+                )
+            )
 
             events = []
             async for event in run_chat(
@@ -429,12 +488,13 @@ class TestForcedClosingE2E:
             ):
                 events.append(event)
 
-        # LLM should NOT have been called (forced closing bypasses ReAct)
+        # ReAct LLM (llm_with_tools) should NOT have been called
         assert llm_mock.call_count == 0
 
-        # Should have chunk + done events
+        # Should have chunk + done events with structured summary
         chunk_text = "".join(
             e.get("content", "") for e in events if e["type"] == "chunk"
         )
-        assert "你有什么想问我们的吗" in chunk_text
+        assert "整体表现" in chunk_text
+        assert "候选人整体表现出色" in chunk_text
         assert any(e["type"] == "done" for e in events)

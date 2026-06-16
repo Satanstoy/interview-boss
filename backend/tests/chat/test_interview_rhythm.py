@@ -413,13 +413,30 @@ class TestForcedClosingPhaseTransitions:
         phase = _determine_interview_phase(45)
         assert "时间已到" in phase
 
-    def test_forced_closing_empty_under_threshold(self):
+    async def test_forced_closing_empty_under_threshold(self):
         """FC1: 44 条消息 → 不触发"""
         state = {"message_history": [{}] * 44, "user_message": ""}
-        assert _forced_closing_response(state) == ""
+        assert await _forced_closing_response(state) == ""
 
-    def test_forced_closing_active_over_threshold(self):
-        """FC1: 45 条消息 → 触发"""
-        state = {"message_history": [{}] * 45, "user_message": ""}
-        result = _forced_closing_response(state)
-        assert "你有什么想问我们的吗" in result
+    async def test_forced_closing_active_over_threshold(self):
+        """FC1: 45 条消息 → 触发（LLM 生成结构化总结）"""
+        mock_summary_json = json.dumps({
+            "overall_comment": "候选人表现中等",
+            "strongest_topic": "Redis，回答较全面",
+            "weakest_topic": "算法薄弱",
+            "key_suggestions": ["多练算法题"],
+            "score_estimate": 6,
+        }, ensure_ascii=False)
+        state = {
+            "message_history": [{"role": "user", "content": "答"}] * 45,
+            "user_message": "",
+            "session_notes": "",
+            "user_id": 1,
+        }
+        with patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
+            result = await _forced_closing_response(state)
+        assert "整体表现" in result

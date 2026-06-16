@@ -135,18 +135,32 @@ class TestReactLoop:
                 else {"role": "user", "content": "候选人回答"}
                 for i in range(46)
             ],
+            "session_notes": "",
             "model": None,
         }
 
+        mock_summary_json = json.dumps({
+            "overall_comment": "候选人技术基础扎实",
+            "strongest_topic": "系统设计思路清晰",
+            "weakest_topic": "算法细节不够深入",
+            "key_suggestions": ["复习排序算法", "多练习编码"],
+            "score_estimate": 7,
+        }, ensure_ascii=False)
+
         with patch(
             "app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock
-        ) as mock_llm:
+        ) as mock_llm, patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         assert [e["type"] for e in events] == ["chunk", "done"]
-        assert "你有什么想问我们的吗" in events[0]["content"]
+        assert "整体表现" in events[0]["content"]
+        assert "候选人技术基础扎实" in events[0]["content"]
         assert state["question_source_reason"] == "forced_closing_by_message_count"
         mock_llm.assert_not_called()
 
@@ -165,18 +179,32 @@ class TestReactLoop:
             "user_id": 1,
             "user_message": "我想了解团队做 Agent 落地最看重什么？",
             "message_history": history,
+            "session_notes": "",
             "model": None,
         }
 
+        mock_summary_json = json.dumps({
+            "overall_comment": "整体表现良好",
+            "strongest_topic": "项目经验丰富",
+            "weakest_topic": "算法基础薄弱",
+            "key_suggestions": ["多练算法"],
+            "score_estimate": 6,
+        }, ensure_ascii=False)
+
         with patch(
             "app.agents.chat.pipeline.llm_with_tools", new_callable=AsyncMock
-        ) as mock_llm:
+        ) as mock_llm, patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         assert [e["type"] for e in events] == ["chunk", "done"]
-        assert "今天的模拟面试就到这里" in events[0]["content"]
+        assert "模拟面试就到这里" in events[0]["content"]
+        assert "整体表现良好" in events[0]["content"]
         assert state["question_source_reason"] == "forced_closing_by_message_count"
         mock_llm.assert_not_called()
 
@@ -624,8 +652,7 @@ class TestFinalAnswerQuality:
         events = _final_answer_events_from_text("来，写代码吧。", state)
 
         assert events[0]["type"] == "chunk"
-        assert "实现一个 LRU Cache" in events[0]["content"]
-        assert "get(key)" in events[0]["content"]
+        assert "来写一道代码题" in events[0]["content"]
         assert state["question_source"] == "generated"
 
     async def test_final_answer_failure_falls_back_to_candidate_question(self):
@@ -994,9 +1021,18 @@ class TestEndInterviewHardRoute:
         combined = "".join(chunk_texts)
         assert "面试" in combined or "感谢" in combined
 
-    def test_end_interview_with_summary_request(self):
+    @pytest.mark.asyncio
+    async def test_end_interview_with_summary_request(self):
         """end_interview + summary keywords should produce a structured summary."""
         from app.agents.chat.pipeline import _generate_end_interview_response
+
+        mock_summary_json = json.dumps({
+            "overall_comment": "候选人项目经验丰富，基础知识扎实",
+            "strongest_topic": "Redis 缓存策略，回答深入全面",
+            "weakest_topic": "算法基础薄弱，手撕题解题思路不清晰",
+            "key_suggestions": ["复习常见排序算法", "练习链表题目", "深入理解时间复杂度"],
+            "score_estimate": 7,
+        }, ensure_ascii=False)
 
         state = {
             "user_message": "结束面试，给我生成一份面试总结",
@@ -1007,11 +1043,19 @@ class TestEndInterviewHardRoute:
             * 12,
             "question_source": None,
             "question_source_reason": None,
+            "session_notes": "[asked] Redis 持久化",
+            "user_id": 1,
         }
 
-        response = _generate_end_interview_response(state)
+        with patch(
+            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ):
+            response = await _generate_end_interview_response(state)
 
         assert "整体表现" in response
+        assert "候选人项目经验丰富" in response
         assert state["question_source"] == "conversation"
         assert state["question_source_reason"] == "end_interview_hard_route"
 

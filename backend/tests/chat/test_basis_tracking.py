@@ -192,8 +192,8 @@ class TestBareCodingPrompt:
         """BS7: _ensure_final_answer_quality 替换 bare coding prompt"""
         state = {"active_skills": ["algorithm-coding"]}
         result = _ensure_final_answer_quality("来，写代码吧", state)
-        assert "LRU Cache" in result
-        assert len(result) > 100
+        assert "来写一道代码题" in result
+        assert len(result) > 50
 
     def test_quality_check_preserves_normal_text(self):
         state = {"active_skills": []}

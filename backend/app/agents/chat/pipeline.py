@@ -184,15 +184,15 @@ async def _generate_structured_summary(state: ChatState) -> str:
     Falls back to an improved generic summary if LLM call fails.
     """
     transcript = _build_interview_transcript(state)
-    if not transcript.strip():
-        return ""
-
     history = state.get("message_history", []) or []
     session_notes = state.get("session_notes", "") or ""
 
+    # Build prompt even if transcript is empty (use message count + session notes)
+    transcript_section = transcript if transcript.strip() else "（对话记录内容较少）"
+
     user_content = (
         "以下是面试记录：\n\n"
-        f"{transcript}\n\n"
+        f"{transcript_section}\n\n"
         f"面试官备注：{session_notes}\n"
         f"总对话轮数：{len(history)}"
     )
