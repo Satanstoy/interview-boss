@@ -1,100 +1,132 @@
 <template>
   <div ref="containerRef" class="flex flex-col flex-1 min-h-0">
-    <AppEmpty
-      v-if="items.length === 0"
-      title="题库空空如也"
-      description="导入面经或 JD，AI 会自动为你生成高频题目"
-    >
-      <Button @click="$emit('navigate-to-import')" variant="default" size="sm" class="text-sm mt-4">
-        <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-        开始导入
-      </Button>
-    </AppEmpty>
+    <!-- Empty state -->
+    <Empty v-if="items.length === 0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Inbox />
+        </EmptyMedia>
+        <EmptyTitle>题库空空如也</EmptyTitle>
+        <EmptyDescription>导入面经或 JD，AI 会自动为你生成高频题目</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button @click="$emit('navigate-to-import')" variant="default" size="sm">
+          <Upload class="size-4 mr-1.5" />
+          开始导入
+        </Button>
+      </EmptyContent>
+    </Empty>
 
-    <!-- Virtual scroller: only renders visible cards in DOM -->
-    <DynamicScroller
-      v-if="items.length > 0"
-      ref="scrollerRef"
-      :items="items"
-      :min-item-size="130"
-      key-field="id"
-      class="virtual-scroller custom-scrollbar"
-      @visible="emit('scroller-visible')"
-    >
-      <template #before>
-        <!-- 外部传入的滚动头部（子标签 + 考点分布） -->
-        <slot name="scroll-header" />
-        <!-- 操作栏（全选/展开收起/重建/刷题）— 随内容滚动 -->
-        <BatchActionPanel
-          :selected-count="selectedCount"
-          :total-count="items.length"
-          :actions="batchActions"
-          @toggle-select-all="$emit('toggle-select-all')"
-          @invert-selection="$emit('invert-selection')"
-        >
-          <template #default>
-            <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
-            <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
-            <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
-          </template>
-          <template #right>
-            <slot name="actions" />
-          </template>
-        </BatchActionPanel>
-      </template>
-      <template #default="{ item, index, active }">
-        <DynamicScrollerItem
-          :item="item"
-          :active="active"
-          :size-dependencies="[item._showAnswer, item._showSources]"
-          :data-index="index"
-          class="mb-4"
-        >
-          <QuestionCard
-            :question="item"
-            :is-selected="isSelected"
-            :practice-info="practicedQuestions[item.id] || null"
-            :bank-mode="bankMode"
-            :is-admin="isAdmin"
-            :current-user-id="currentUserId"
-            @toggle-answer="toggleAnswer"
-            @toggle-star="$emit('toggle-star', $event)"
-            @retag="$emit('retag', $event)"
-            @generate-answer="$emit('generate-answer', $event)"
-            @use-reference-answer="$emit('use-reference-answer', $event)"
-            @save-user-answer="$emit('save-user-answer', $event)"
-            @save-field="$emit('save-field', $event)"
-            @toggle-item="$emit('toggle-item', $event)"
-            @practice="$emit('practice', $event)"
-            @split-question="$emit('split-question', $event)"
-            @start-merge="$emit('start-merge', $event)"
-            @navigate-to-interview="$emit('navigate-to-interview', $event)"
-            @delete="$emit('delete', $event)"
-            @edit-question="$emit('edit-question', $event)"
-            @delete-original-question="$emit('delete-original-question', $event)"
-            @update-answer="$emit('update-answer', $event)"
-          />
-        </DynamicScrollerItem>
-      </template>
-    </DynamicScroller>
+    <template v-else>
+      <!-- scroll-header slot (sub-tags, chart) -->
+      <slot name="scroll-header" />
 
-    <!-- 加载更多指示器 -->
-    <div v-if="isLoadingMore" class="flex items-center justify-center py-4 gap-2 text-muted-foreground">
-      <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-      <span class="text-xs">加载更多题目...</span>
-    </div>
-    <div v-else-if="!hasMore && items.length > 0" class="text-center py-3 text-xs text-muted-foreground/50">
-      — 已加载全部 {{ items.length }} 道题目 —
-    </div>
+      <!-- Batch action panel -->
+      <BatchActionPanel
+        :selected-count="selectedCount"
+        :total-count="items.length"
+        :actions="batchActions"
+        @toggle-select-all="$emit('toggle-select-all')"
+        @invert-selection="$emit('invert-selection')"
+      >
+        <div class="w-px h-5 bg-muted mx-1"></div>
+        <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
+        <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
+        <template #right>
+          <slot name="actions" />
+        </template>
+      </BatchActionPanel>
+
+      <!-- Accordion question list -->
+      <Accordion
+        type="multiple"
+        :model-value="openItems"
+        @update:model-value="onOpenChange"
+        class="flex flex-col gap-2 mt-2"
+      >
+        <AccordionItem
+          v-for="q in items"
+          :key="q.id"
+          :value="String(q.id)"
+          class="border border-border rounded-xl overflow-hidden bg-card shadow-sm data-[state=open]:border-primary/30"
+        >
+          <AccordionTrigger class="px-4 py-3 hover:no-underline">
+            <div class="flex items-center gap-3 flex-1 min-w-0 text-left pr-2">
+              <!-- Checkbox -->
+              <input
+                type="checkbox"
+                :checked="isSelected(q.id)"
+                @click.stop="$emit('toggle-item', q.id)"
+                class="size-4 text-primary-600 rounded-md border-border cursor-pointer shrink-0"
+              />
+              <!-- Content -->
+              <div class="flex-1 min-w-0">
+                <span class="text-sm font-medium text-foreground truncate block">{{ q.question }}</span>
+                <div class="flex gap-1.5 mt-1 flex-wrap items-center">
+                  <span v-if="q.frequency > 1" class="text-xs px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
+                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded font-semibold">{{ q.cat1 || '未分类' }}</span>
+                  <span
+                    v-for="tag in (q.tags || '').split(',').filter(Boolean).slice(0, 3)"
+                    :key="tag"
+                    class="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+                  >{{ tag.trim() }}</span>
+                  <span class="text-xs font-medium px-2 py-0.5 rounded ml-auto"
+                    :class="difficultyClass(q.difficulty)">
+                    {{ q.difficulty || '-' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent class="px-0 pb-0">
+            <QuestionCard
+              :question="q"
+              :is-selected="isSelected"
+              :practice-info="practicedQuestions[q.id] || null"
+              :bank-mode="bankMode"
+              :is-admin="isAdmin"
+              :current-user-id="currentUserId"
+              :content-only="true"
+              @toggle-star="$emit('toggle-star', $event)"
+              @retag="$emit('retag', $event)"
+              @generate-answer="$emit('generate-answer', $event)"
+              @use-reference-answer="$emit('use-reference-answer', $event)"
+              @save-user-answer="$emit('save-user-answer', $event)"
+              @save-field="$emit('save-field', $event)"
+              @toggle-item="$emit('toggle-item', $event)"
+              @practice="$emit('practice', $event)"
+              @split-question="$emit('split-question', $event)"
+              @start-merge="$emit('start-merge', $event)"
+              @navigate-to-interview="$emit('navigate-to-interview', $event)"
+              @delete="$emit('delete', $event)"
+              @edit-question="$emit('edit-question', $event)"
+              @delete-original-question="$emit('delete-original-question', $event)"
+              @update-answer="$emit('update-answer', $event)"
+            />
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+
+      <!-- Load more trigger (IntersectionObserver) -->
+      <div ref="loadMoreRef" v-if="hasMore" class="flex items-center justify-center py-4 gap-2 text-muted-foreground">
+        <Loader2 v-if="isLoadingMore" class="size-4 animate-spin" />
+        <span class="text-xs">{{ isLoadingMore ? '加载更多题目...' : '滚动加载更多' }}</span>
+      </div>
+      <div v-else-if="items.length > 0" class="text-center py-3 text-xs text-muted-foreground/50">
+        — 已加载全部 {{ items.length }} 道题目 —
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import AppEmpty from '@/components/common/AppEmpty.vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { Inbox, Upload, Loader2 } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
 import QuestionCard from '@/components/business/QuestionCard.vue'
-import { Button } from '@/components/ui/button'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -109,128 +141,68 @@ const props = defineProps({
   hasMore: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer', 'scroller-visible', 'load-more'])
+const emit = defineEmits([
+  'toggle-select-all', 'invert-selection', 'toggle-star', 'retag',
+  'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field',
+  'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question',
+  'start-merge', 'navigate-to-interview', 'delete', 'edit-question',
+  'delete-original-question', 'update-answer', 'load-more',
+])
 
 const containerRef = ref(null)
-const scrollerRef = ref(null)
-let resizeObserver = null
-let lastHeight = 0
-let scrollCheckTimer = null
-let outerScrollContainer = null
-let scrollerScrollEl = null
+const loadMoreRef = ref(null)
+const openItems = ref([])
+let observer = null
 
-const checkScrollForLoadMore = () => {
-  if (!props.hasMore || props.isLoadingMore) return
-  const scrollEl = scrollerScrollEl || containerRef.value?.querySelector('.vue-recycle-scroller')
-  if (!scrollEl) return
-  const { scrollTop, scrollHeight, clientHeight } = scrollEl
-  if (scrollHeight - scrollTop - clientHeight < 600) {
-    emit('load-more')
-  }
-}
-
-const onScroll = () => {
-  if (scrollCheckTimer) return
-  scrollCheckTimer = setTimeout(() => {
-    scrollCheckTimer = null
-    checkScrollForLoadMore()
-  }, 150)
-}
-
-const bindScrollerScroll = () => {
-  const nextEl = containerRef.value?.querySelector('.vue-recycle-scroller')
-  if (!nextEl || nextEl === scrollerScrollEl) return
-  if (scrollerScrollEl) scrollerScrollEl.removeEventListener('scroll', onScroll)
-  scrollerScrollEl = nextEl
-  scrollerScrollEl.addEventListener('scroll', onScroll, { passive: true })
-  checkScrollForLoadMore()
-}
-
-const updateScrollerHeight = () => {
-  const container = containerRef.value
-  if (!container) return
-  const scroller = container.querySelector('.vue-recycle-scroller')
-  if (!scroller) return
-
-  // Sum heights of siblings above the scroller (these are stable)
-  let aboveH = 0
-  for (const child of container.children) {
-    if (child === scroller) break
-    aboveH += child.offsetHeight
-  }
-
-  // Container gap (gap-2 = 8px between each pair of children above scroller)
-  const idx = Array.from(container.children).indexOf(scroller)
-  const gapPx = idx > 0 ? idx * 8 : 0
-
-  // Navigate up to find the ACTUAL scroll container (overflow-y-auto)
-  // container → wrapper (App.vue line 200) → v-if div → tab-content → Transition → scroll container
-  const scrollContainer = container.closest('.overflow-y-auto')
-  if (!scrollContainer) return
-
-  const scrollH = scrollContainer.clientHeight
-  const scrollPad = parseFloat(getComputedStyle(scrollContainer).paddingTop) + parseFloat(getComputedStyle(scrollContainer).paddingBottom)
-
-  // Calculate height of elements above the scroll container's content
-  const wrapper = container.parentElement
-  const wrapperPad = parseFloat(getComputedStyle(wrapper).paddingTop) + parseFloat(getComputedStyle(wrapper).paddingBottom)
-
-  const h = scrollH - scrollPad - wrapperPad - aboveH - gapPx - 8
-
-  if (Math.abs(h - lastHeight) > 2) {
-    lastHeight = h
-    scroller.style.height = Math.max(Math.round(h), 200) + 'px'
-  }
-}
-
-onMounted(() => {
-  nextTick(() => {
-    updateScrollerHeight()
-    bindScrollerScroll()
-    setTimeout(updateScrollerHeight, 300)
-    setTimeout(bindScrollerScroll, 300)
+// Sync _showAnswer with accordion state
+const onOpenChange = (newVal) => {
+  openItems.value = newVal
+  props.items.forEach(q => {
+    q._showAnswer = newVal.includes(String(q.id))
   })
-
-  const container = containerRef.value
-  outerScrollContainer = container?.closest('.overflow-y-auto')
-  if (outerScrollContainer) {
-    resizeObserver = new ResizeObserver(updateScrollerHeight)
-    resizeObserver.observe(outerScrollContainer)
-  }
-})
-
-onUnmounted(() => {
-  resizeObserver?.disconnect()
-  if (scrollCheckTimer) clearTimeout(scrollCheckTimer)
-  if (scrollerScrollEl) scrollerScrollEl.removeEventListener('scroll', onScroll)
-})
-
-watch(() => [props.items.length, props.isLoadingMore, props.hasMore], () => {
-  nextTick(() => {
-    updateScrollerHeight()
-    bindScrollerScroll()
-    checkScrollForLoadMore()
-  })
-})
-
-const toggleAnswer = (question) => {
-  question._showAnswer = !question._showAnswer
 }
 
 const expandAll = () => {
+  openItems.value = props.items.map(q => String(q.id))
   props.items.forEach(q => { q._showAnswer = true })
 }
 
 const collapseAll = () => {
+  openItems.value = []
   props.items.forEach(q => { q._showAnswer = false })
 }
 
-defineExpose({ scrollerRef })
-</script>
-
-<style scoped>
-.virtual-scroller {
-  flex: 1 1 auto;
-  min-height: 0;
+// Difficulty badge classes
+const difficultyClass = (d) => {
+  if (!d) return 'bg-muted text-muted-foreground'
+  if (String(d).includes('L3')) return 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+  if (String(d).includes('L2')) return 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
+  return 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
 }
-</style>
+
+// Infinite scroll via IntersectionObserver
+onMounted(() => {
+  if (!loadMoreRef.value) return
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting && props.hasMore && !props.isLoadingMore) {
+        emit('load-more')
+      }
+    },
+    { rootMargin: '200px' }
+  )
+  observer.observe(loadMoreRef.value)
+})
+
+onUnmounted(() => {
+  observer?.disconnect()
+})
+
+// Re-observe when loadMoreRef changes (e.g. after items load)
+watch(() => loadMoreRef.value, (el) => {
+  if (observer && el) {
+    observer.disconnect()
+    observer.observe(el)
+  }
+})
+</script>

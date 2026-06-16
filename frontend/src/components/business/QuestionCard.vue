@@ -1,12 +1,11 @@
 <template>
   <div
-    class="overflow-hidden rounded-md border border-border bg-card shadow-sm transition-all duration-200 hover:border-border dark:hover:border-border"
-    :class="[
-      isSelected(question.id) ? 'border-primary/40 dark:border-primary/30 ring-2 ring-primary/15 dark:ring-primary/20' : '',
-    ]"
+    :class="contentOnly
+      ? 'bg-muted/30 dark:bg-muted/15 relative group answer-section'
+      : 'overflow-hidden rounded-md border border-border bg-card shadow-sm transition-all duration-200 hover:border-border dark:hover:border-border' + (isSelected(question.id) ? ' border-primary/40 dark:border-primary/30 ring-2 ring-primary/15 dark:ring-primary/20' : '')"
   >
-    <!-- Card header -->
-    <div class="p-4 flex gap-3 items-start cursor-pointer hover:bg-muted/40 dark:hover:bg-muted/20 transition-colors duration-200" @click="$emit('toggle-answer', question)">
+    <!-- Card header (normal mode only) -->
+    <div v-if="!contentOnly" class="p-4 flex gap-3 items-start cursor-pointer hover:bg-muted/40 dark:hover:bg-muted/20 transition-colors duration-200" @click="$emit('toggle-answer', question)">
       <div class="flex items-center self-stretch" @click.stop>
         <input type="checkbox" :checked="isSelected(question.id)" @change="$emit('toggle-item', question.id)"
           class="size-4 rounded border-input text-primary shadow-xs focus-visible:ring-3 focus-visible:ring-ring/50 cursor-pointer transition">
@@ -104,8 +103,8 @@
       </div>
     </div>
 
-    <!-- Answer section: v-if instead of v-show for performance -->
-    <div v-if="question._showAnswer" class="border-t border-border bg-muted/30 dark:bg-muted/15 relative group answer-section">
+    <!-- Answer section: always rendered in contentOnly mode; v-if for toggle in normal mode -->
+    <div v-if="contentOnly || question._showAnswer" :class="contentOnly ? '' : 'border-t border-border bg-muted/30 dark:bg-muted/15 relative group answer-section'">
 
       <!-- Answer (primary content — shown first) -->
       <div class="p-5 pb-0">
@@ -223,7 +222,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 
@@ -270,6 +269,7 @@ const props = defineProps({
   bankMode: { type: String, default: 'public' },
   isAdmin: { type: Boolean, default: false },
   currentUserId: { type: [Number, String], default: null },
+  contentOnly: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
@@ -278,6 +278,13 @@ const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-ans
 watch(() => props.question._showAnswer, (show) => {
   if (show) loadFullAnswer()
 }, { immediate: true })
+
+// In content-only mode (Accordion), always mark as showing so lazy load triggers
+onMounted(() => {
+  if (props.contentOnly) {
+    props.question._showAnswer = true
+  }
+})
 
 // Sync fullUserAnswer when parent updates question.user_answer (e.g., useReferenceAnswer)
 watch(() => props.question.user_answer, (val) => {
