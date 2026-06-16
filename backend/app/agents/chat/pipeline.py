@@ -102,25 +102,6 @@ def validate_tool_call(tool_call: dict) -> dict:
     return tool_call  # return original; downstream expects string arguments
 
 
-def _requires_tool_calls(state: ChatState) -> bool:
-    """Check if the current state requires the LLM to call tools before answering.
-
-    When the user has completed an answer in interview mode (not project-deep-dive),
-    the LLM MUST call search_questions to retrieve follow-up candidates from the
-    question bank.  If it skips the call, the resulting follow-up is typically
-    generic and low-quality (e.g. "嗯，就这个问题，你展开说说").
-    """
-    if state.get("intent") != "interview_question":
-        return False
-    if not state.get("answer_complete"):
-        return False
-    if state.get("retrieved_questions"):
-        return False
-    active_skills = state.get("active_skills", [])
-    if "project-deep-dive" in active_skills:
-        return False
-    return True
-
 
 # ── ReAct Budget & Control ──────────────────────────────
 
@@ -289,6 +270,60 @@ def _is_bare_coding_prompt(text: str, state: ChatState) -> bool:
     return bool(re.search(r"(写代码|手撕|代码题|coding)", stripped, re.I))
 
 
+def _build_previously_asked_section(state: ChatState) -> str:
+    """Build a section listing previously asked questions for the current turn.
+
+    Extracts asked questions from session_notes (looked for [asked] entries)
+    and message_history (question-like patterns). Returns a formatted string
+    to be injected as a user message before the LLM call.
+    """
+    questions: list[str] = []
+
+    # Extract from session_notes [asked] entries
+    session_notes = state.get("session_notes", "")
+    for match in re.finditer(r"\[asked\]\s*(.+)", session_notes):
+        q = match.group(1).strip()
+        if q:
+            questions.append(q)
+
+    # Extract from message_history assistant messages that look like question asks
+    history = state.get("message_history", []) or []
+    for msg in history:
+        if msg.get("role") != "assistant":
+            continue
+        content = str(msg.get("content") or "")
+        for pattern in (
+            r"来写一道代码题[：:]\s*(.+?)(?:\n|$)",
+            r"来聊一个八股[题：:]\s*(.+?)(?:\n|$)",
+            r"我们先收束到一道具体题[：:]\s*(.+?)(?:\n|$)",
+            r"说说你对(.+?)的理解",
+        ):
+            for m in re.finditer(pattern, content):
+                q = m.group(1).strip()
+                if q:
+                    questions.append(q)
+
+    # Deduplicate
+    seen: set[str] = set()
+    unique: list[str] = []
+    for q in questions:
+        key = q[:30]
+        if key not in seen:
+            seen.add(key)
+            unique.append(q)
+
+    if not unique:
+        return ""
+
+    lines = [f"{i}. {q}" for i, q in enumerate(unique, 1)]
+    return (
+        "[面试状态 - 由系统自动生成]\n"
+        "## 本轮已问过的题目（禁止重复）\n"
+        + "\n".join(lines)
+        + "\n\n规则：不要再出以上题目或类似题目的变体。每次出题必须是新的知识点方向。"
+    )
+
+
 def _fallback_coding_question(state: ChatState) -> str:
     candidates = (
         state.get("candidate_questions") or state.get("retrieved_questions") or []
@@ -299,12 +334,13 @@ def _fallback_coding_question(state: ChatState) -> str:
             str(q.get(k) or "") for k in ("question", "cat1", "cat2", "tags")
         )
         if re.search(
-            r"(算法|代码|手撕|LRU|二分|链表|栈|队列|动态规划)", haystack, re.I
+            r"(算法|代码|手撕|数据结构|链表|排序|二分)", haystack, re.I
         ):
             coding_candidate = q
             break
     if coding_candidate:
         state["selected_question"] = coding_candidate
+        state["question_source"] = "bank"
         state["question_source_reason"] = "fallback_selected_coding_candidate"
         return (
             f"来写一道代码题：{coding_candidate.get('question', '')}\n\n"
@@ -313,8 +349,9 @@ def _fallback_coding_question(state: ChatState) -> str:
     state["question_source"] = state.get("question_source") or "generated"
     state["question_source_reason"] = "fallback_generated_coding_question"
     return (
-        "来写一道代码题：实现一个 LRU Cache，支持 get(key) 和 put(key, value) 两个操作，要求平均 O(1) 时间复杂度。\n\n"
-        "请直接写代码，并说明你为什么选择哈希表加双向链表，以及 capacity 为 0、更新已有 key、淘汰尾部节点这些边界情况怎么处理。"
+        "好，来写一道代码题。请根据候选人的技术栈和之前的面试内容，"
+        "选择一道合适的手撕题（不要重复之前问过的方向）。"
+        "要求候选人写代码并说明设计思路。"
     )
 
 
@@ -1176,13 +1213,18 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     # Compressed context
     compressed = state.get("compressed_context")
     if compressed:
-        messages.append({"role": "user", "content": f"[历史对话摘要]\n{compressed}"})
+        messages.append({"role": "user", "content": f"[以下是更早对话的压缩摘要，由系统生成，不是候选人的话]\n{compressed}"})
 
     # Recent messages
     for msg in state.get("recent_messages", [])[-10:]:
         role = msg.get("role", "user")
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg.get("content", "")})
+
+    # Inject PREVIOUSLY ASKED as dynamic user message (not in cached system prompt)
+    asked_section = _build_previously_asked_section(state)
+    if asked_section:
+        messages.append({"role": "user", "content": asked_section})
 
     # Current user message
     messages.append({"role": "user", "content": state["user_message"]})
@@ -1193,7 +1235,6 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     seen_tool_calls: set[str] = set()
     stop_reason = ""
     final_answer_text = ""
-    tool_call_retry_done = False  # guard: only retry tool-skip once
     for step in range(REACT_BUDGET.max_steps):
         react_step = step + 1
         # Budget checks
@@ -1233,32 +1274,6 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         if not tool_calls:
             content = result.get("content")
-            # Hard intercept: if the LLM MUST call tools but skipped them,
-            # inject a reminder and retry once instead of accepting the lazy reply.
-            if (
-                not tool_call_retry_done
-                and _requires_tool_calls(state)
-                and isinstance(content, str)
-                and content.strip()
-            ):
-                tool_call_retry_done = True
-                messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "【系统强制提醒】你没有调用必要的工具。"
-                        "当前用户已回答完毕，你必须先调用 search_questions 工具"
-                        "从题库检索追问题，然后基于检索结果生成追问。"
-                        "不要跳过工具调用直接回复。"
-                    ),
-                })
-                logger.warning(
-                    "ReAct tool-skip intercepted: forcing retry "
-                    "conversation_id=%s react_step=%s",
-                    state.get("conversation_id"),
-                    react_step,
-                )
-                continue
             if isinstance(content, str) and content.strip():
                 final_answer_text = content
             break  # LLM decided to answer directly
@@ -1397,11 +1412,28 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                         }
                     )
 
-            messages.append(make_tool_result_message(tc["id"], output))
+            # 3d: Pre-prune search/draw tool output to top 3 before appending to messages.
+            # Full results remain in state["retrieved_questions"] for downstream use.
+            msg_output = output
+            if tool_name in ("search_questions", "draw_questions"):
+                try:
+                    parsed_out = json.loads(output)
+                    if isinstance(parsed_out, list) and len(parsed_out) > 3:
+                        msg_output = json.dumps(parsed_out[:3], ensure_ascii=False)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            messages.append(make_tool_result_message(tc["id"], msg_output))
 
         # If inner loop broke due to validation failure or loop detection, exit outer loop
         if stop_reason:
             break
+
+        # 3d: Prune old tool results (>5 turns ago) to a 1-line summary.
+        # Keeps context lean without losing the fact that a tool was called.
+        _msg_end = len(messages)
+        for _mi, _msg in enumerate(messages):
+            if _msg.get("role") == "tool" and (_msg_end - _mi) > 5:
+                _msg["content"] = "[已裁剪的工具输出]"
 
         if react_step == REACT_BUDGET.max_steps:
             stop_reason = "max_steps"
