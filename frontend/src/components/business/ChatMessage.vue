@@ -14,16 +14,18 @@
 
     <!-- Assistant message -->
     <div v-else>
-      <!-- Thinking block -->
-      <ThinkingBlock
-        v-if="message.metadata?.thinking"
+      <!-- Reasoning timeline (unified: steps + thinking) -->
+      <ReasoningTimeline
+        v-if="message.metadata?.steps?.length || message.metadata?.thinking"
         :is-streaming="false"
-        :content="message.metadata.thinking"
-        :duration="message.metadata.thinking_duration || 0"
+        :content="message.metadata?.thinking || ''"
+        :duration="message.metadata?.thinking_duration || 0"
+        :steps="message.metadata?.steps || []"
       />
 
+      <!-- Fallback: legacy insight-only messages (no steps, has insights) -->
       <InsightBlock
-        v-if="message.metadata?.insights?.length"
+        v-else-if="message.metadata?.insights?.length"
         :items="message.metadata.insights"
         :is-streaming="false"
       />
@@ -186,7 +188,7 @@ import {
   FileText, 
   Briefcase 
 } from '@lucide/vue'
-import ThinkingBlock from './ThinkingBlock.vue'
+import ReasoningTimeline from './ReasoningTimeline.vue'
 import InsightBlock from './InsightBlock.vue'
 
 const props = defineProps({
