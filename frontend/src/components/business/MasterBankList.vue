@@ -18,22 +18,6 @@
     </Empty>
 
     <template v-else>
-      <!-- Batch action panel (fixed) -->
-      <BatchActionPanel
-        :selected-count="selectedCount"
-        :total-count="items.length"
-        :actions="batchActions"
-        @toggle-select-all="$emit('toggle-select-all')"
-        @invert-selection="$emit('invert-selection')"
-      >
-        <div class="w-px h-5 bg-muted mx-1"></div>
-        <Button @click="expandAll" variant="ghost" size="sm" class="text-xs">全部展开</Button>
-        <Button @click="collapseAll" variant="ghost" size="sm" class="text-xs">全部收起</Button>
-        <template #right>
-          <slot name="actions" />
-        </template>
-      </BatchActionPanel>
-
       <!-- Scrollable: sub-tags + accordion -->
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
       <!-- Sub-tag filter (scrolls with content) -->
@@ -127,14 +111,12 @@ import { Inbox, Upload, Loader2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
 import QuestionCard from '@/components/business/QuestionCard.vue'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
   selectedCount: { type: Number, default: 0 },
   isSelected: { type: Function, default: () => false },
-  batchActions: { type: Array, default: () => [] },
   practicedQuestions: { type: Object, default: () => ({}) },
   bankMode: { type: String, default: 'public' },
   isAdmin: { type: Boolean, default: false },
@@ -144,9 +126,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'toggle-select-all', 'invert-selection', 'toggle-star', 'retag',
+  'toggle-star', 'retag',
   'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field',
-  'toggle-item', 'expand-all', 'collapse-all', 'practice', 'split-question',
+  'toggle-item', 'practice', 'split-question',
   'start-merge', 'navigate-to-interview', 'delete', 'edit-question',
   'delete-original-question', 'update-answer', 'load-more',
 ])
@@ -173,6 +155,8 @@ const collapseAll = () => {
   openItems.value = []
   props.items.forEach(q => { q._showAnswer = false })
 }
+
+defineExpose({ expandAll, collapseAll })
 
 // Difficulty badge classes
 const difficultyClass = (d) => {

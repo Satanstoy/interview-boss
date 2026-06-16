@@ -47,11 +47,11 @@
         @update:filter-difficulty="filterDifficulty = $event"
       />
 
-      <!-- Category tags -->
-      <div class="flex flex-wrap gap-1.5 shrink-0">
+      <!-- Category tags (horizontal scroll) -->
+      <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
         <button
           @click="onSelectTag('全部')"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium"
+          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap shrink-0"
           :class="selectedTag === '全部'
             ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
             : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
@@ -62,7 +62,7 @@
         <button
           v-for="(count, topic) in categoryCounts" :key="topic"
           @click="onSelectTag(topic)"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group"
+          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group whitespace-nowrap shrink-0"
           :class="selectedTag === topic
             ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
             : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
@@ -72,22 +72,48 @@
         </button>
       </div>
 
-      <!-- ══ 滚动区域（DynamicScroller 是唯一滚动容器） ══ -->
+      <!-- ══ 滚动区域 ══ -->
+      <!-- BatchActionPanel (全选/反选 + 操作) -->
+      <BatchActionPanel
+        :selected-count="masterSelection.selectedCount.value"
+        :total-count="filteredMasterBank.length"
+        :actions="masterBatchActions"
+        @toggle-select-all="masterSelection.toggleSelectAll()"
+        @invert-selection="masterSelection.invertSelection()"
+      >
+        <div class="w-px h-5 bg-muted mx-1"></div>
+        <Button @click="masterBankRef?.expandAll()" variant="ghost" size="sm" class="text-xs">全部展开</Button>
+        <Button @click="masterBankRef?.collapseAll()" variant="ghost" size="sm" class="text-xs">全部收起</Button>
+        <template #right>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
+              {{ isBuilding ? '重建中...' : '重建题库' }}
+            </Button>
+            <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
+              {{ isBuilding ? '重建中...' : '重建题库' }}
+            </Button>
+            <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
+              刷题模式
+            </Button>
+            <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
+              刷新
+            </Button>
+          </div>
+        </template>
+      </BatchActionPanel>
+
       <div class="flex flex-col flex-1 min-h-0">
         <MasterBankList
           ref="masterBankRef"
           :items="filteredMasterBank"
           :selected-count="masterSelection.selectedCount.value"
           :is-selected="isMasterSelected"
-          :batch-actions="masterBatchActions"
           :practiced-questions="practicedQuestions"
           :bank-mode="displayUser?.bank_mode"
           :is-admin="displayUser?.is_admin"
           :current-user-id="displayUser?.id"
           :is-loading-more="isLoadingMore"
           :has-more="hasMore"
-          @toggle-select-all="masterSelection.toggleSelectAll()"
-          @invert-selection="masterSelection.invertSelection()"
           @toggle-item="masterSelection.toggleItem($event)"
           @toggle-star="toggleStar"
           @retag="retagQuestion"
@@ -105,9 +131,7 @@
           @update-answer="onUpdateAnswer"
           @load-more="loadMoreMasterBank"
         >
-          <!-- 随题卡一起滚动的内容：子标签 + 考点分布 + 操作按钮 -->
           <template #scroll-header>
-            <!-- Sub-tag filter chips -->
             <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-3">
               <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
               <button
@@ -124,23 +148,6 @@
               </button>
             </div>
           </template>
-
-          <template #actions>
-            <div class="flex flex-wrap items-center gap-2 pt-1">
-              <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
-                {{ isBuilding ? '重建中...' : '重建题库' }}
-              </Button>
-              <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
-                {{ isBuilding ? '重建中...' : '重建题库' }}
-              </Button>
-              <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
-                刷题模式
-              </Button>
-              <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
-                刷新
-              </Button>
-            </div>
-          </template>
         </MasterBankList>
       </div>
     </div>
@@ -151,6 +158,7 @@
 import { inject, ref } from 'vue'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
+import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
