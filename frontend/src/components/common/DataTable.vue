@@ -42,26 +42,60 @@
           </TableCell>
         </TableRow>
         <TableRow v-if="rows.length === 0">
-          <TableCell :colspan="columns.length + 2" class="p-16 text-center">
-            <div class="flex flex-col items-center">
-              <div class="size-16 rounded-2xl bg-muted dark:bg-card flex items-center justify-center mb-4">
-                <Inbox class="size-8 text-muted-foreground/50" />
-              </div>
-              <p class="text-muted-foreground font-medium mb-1">暂无数据</p>
-              <p class="text-sm text-muted-foreground">试试切换筛选条件或录入更多内容</p>
-            </div>
+          <TableCell :colspan="columns.length + 2" class="p-0">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Inbox />
+                </EmptyMedia>
+                <EmptyTitle>暂无数据</EmptyTitle>
+                <EmptyDescription>试试切换筛选条件或录入更多内容</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           </TableCell>
         </TableRow>
       </TableBody>
     </Table>
 
-    <PaginationBar
-      :current-page="currentPage"
-      :page-size="pageSize"
+    <Pagination
+      v-if="totalPages > 1"
+      as="div"
+      class="flex items-center justify-between gap-3 mt-4 px-1 w-full"
+      :items-per-page="pageSize"
       :total="rows.length"
-      @update:current-page="$emit('update:currentPage', $event)"
-      @update:page-size="$emit('update:pageSize', $event)"
-    />
+      :page="currentPage"
+      @update:page="(p) => emit('update:currentPage', p)"
+    >
+      <div class="text-xs text-muted-foreground tabular-nums">
+        共 {{ rows.length }} 条，第 {{ currentPage }}/{{ totalPages }} 页
+      </div>
+      <PaginationContent v-slot="{ items }">
+        <PaginationPrevious />
+        <template v-for="(item, idx) in items" :key="idx">
+          <PaginationItem
+            v-if="item.type === 'page'"
+            :value="item.value"
+            :is-active="item.value === currentPage"
+          >
+            {{ item.value }}
+          </PaginationItem>
+          <PaginationEllipsis v-else-if="item.type === 'ellipsis'" />
+        </template>
+        <PaginationNext />
+      </PaginationContent>
+      <div class="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>每页</span>
+        <Select :model-value="String(pageSize)" @update:model-value="(v) => { emit('update:pageSize', Number(v)); emit('update:currentPage', 1) }">
+          <SelectTrigger class="h-8 text-xs min-w-[60px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="s in pageSizeOptions" :key="s" :value="String(s)">{{ s }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <span>条</span>
+      </div>
+    </Pagination>
   </div>
 </template>
 
@@ -69,8 +103,10 @@
 import { computed } from 'vue'
 import { Inbox } from '@lucide/vue'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationNext, PaginationPrevious } from '@/components/ui/pagination'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
-import PaginationBar from '@/components/common/PaginationBar.vue'
 
 const props = defineProps({
   columns: { type: Array, required: true },
@@ -82,7 +118,11 @@ const props = defineProps({
   pageSize: { type: Number, default: 20 },
   highlightId: { type: Number, default: null }
 })
-defineEmits(['toggle-select-all', 'invert-selection', 'toggle-item', 'update:currentPage', 'update:pageSize'])
+const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-item', 'update:currentPage', 'update:pageSize'])
+
+const pageSizeOptions = [10, 20, 50, 100]
+
+const totalPages = computed(() => Math.max(1, Math.ceil(props.rows.length / props.pageSize)))
 
 const paginatedRows = computed(() => {
   const start = (props.currentPage - 1) * props.pageSize
