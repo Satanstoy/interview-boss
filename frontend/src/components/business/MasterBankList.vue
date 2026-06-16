@@ -38,11 +38,12 @@
       </BatchActionPanel>
 
       <!-- Accordion question list -->
+      <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
       <Accordion
         type="multiple"
         :model-value="openItems"
         @update:model-value="onOpenChange"
-        class="flex flex-col gap-2 mt-2"
+        class="flex flex-col gap-2 pb-4"
       >
         <AccordionItem
           v-for="q in items"
@@ -115,6 +116,7 @@
       <div v-else-if="items.length > 0" class="text-center py-3 text-xs text-muted-foreground/50">
         — 已加载全部 {{ items.length }} 道题目 —
       </div>
+      </div> <!-- /scroll container -->
     </template>
   </div>
 </template>
