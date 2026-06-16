@@ -47,32 +47,6 @@
         @update:filter-difficulty="filterDifficulty = $event"
       />
 
-      <!-- Category tags (horizontal scroll) -->
-      <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
-        <button
-          @click="onSelectTag('全部')"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap shrink-0"
-          :class="selectedTag === '全部'
-            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
-            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
-        >
-          全部
-          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBankOverallTotal || masterBank.length }}</span>
-        </button>
-        <button
-          v-for="(count, topic) in categoryCounts" :key="topic"
-          @click="onSelectTag(topic)"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group whitespace-nowrap shrink-0"
-          :class="selectedTag === topic
-            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
-            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
-        >
-          {{ topic }}
-          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ count }}</span>
-        </button>
-      </div>
-
-      <!-- ══ 滚动区域 ══ -->
       <!-- BatchActionPanel (全选/反选 + 操作) -->
       <BatchActionPanel
         :selected-count="masterSelection.selectedCount.value"
@@ -101,6 +75,31 @@
           </div>
         </template>
       </BatchActionPanel>
+
+      <!-- Category tags (horizontal scroll) -->
+      <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
+        <button
+          @click="onSelectTag('全部')"
+          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap shrink-0"
+          :class="selectedTag === '全部'
+            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
+            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+        >
+          全部
+          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBankOverallTotal || masterBank.length }}</span>
+        </button>
+        <button
+          v-for="(count, topic) in categoryCounts" :key="topic"
+          @click="onSelectTag(topic)"
+          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group whitespace-nowrap shrink-0"
+          :class="selectedTag === topic
+            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
+            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
+        >
+          {{ topic }}
+          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ count }}</span>
+        </button>
+      </div>
 
       <div class="flex flex-col flex-1 min-h-0">
         <MasterBankList
