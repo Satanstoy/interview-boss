@@ -18,10 +18,7 @@
     </Empty>
 
     <template v-else>
-      <!-- scroll-header slot (sub-tags, chart) -->
-      <slot name="scroll-header" />
-
-      <!-- Batch action panel -->
+      <!-- Batch action panel (fixed) -->
       <BatchActionPanel
         :selected-count="selectedCount"
         :total-count="items.length"
@@ -37,8 +34,11 @@
         </template>
       </BatchActionPanel>
 
-      <!-- Accordion question list -->
+      <!-- Scrollable: sub-tags + accordion -->
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+      <!-- Sub-tag filter (scrolls with content) -->
+      <slot name="scroll-header" />
+
       <Accordion
         type="multiple"
         :model-value="openItems"

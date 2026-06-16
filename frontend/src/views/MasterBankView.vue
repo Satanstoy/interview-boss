@@ -123,11 +123,6 @@
                 <span class="ml-1 opacity-50">{{ st.count }}</span>
               </button>
             </div>
-
-            <!-- Exam Distribution Chart (collapsible, 默认收起) -->
-            <div class="mb-3">
-              <ExamDistribution :master-bank="masterBank" :default-collapsed="true" />
-            </div>
           </template>
 
           <template #actions>
@@ -155,7 +150,6 @@
 <script setup>
 import { inject, ref } from 'vue'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
-import ExamDistribution from '@/components/business/ExamDistribution.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
