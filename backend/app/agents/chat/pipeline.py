@@ -151,8 +151,13 @@ def _emit(event: dict) -> None:
         queue.put_nowait(event)
 
 
-def _step(step: str, message: str) -> None:
-    _emit({"type": "step", "step": step, "message": message})
+def _step(step: str, message: str, reason: str = "", insight: str = "") -> None:
+    event: dict = {"type": "step", "step": step, "message": message}
+    if reason:
+        event["reason"] = reason
+    if insight:
+        event["insight"] = insight
+    _emit(event)
 
 
 def _extract_company(question: dict) -> str:
