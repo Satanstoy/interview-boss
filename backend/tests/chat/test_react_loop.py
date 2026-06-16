@@ -298,6 +298,11 @@ class TestReactLoop:
         # Event sequence: step(search_questions) + retrieved + chunk + done
         assert events[0]["type"] == "step"
         assert events[0]["step"] == "search_questions"
+
+        # Verify step event contains reason
+        assert "reason" in events[0]
+        assert events[0]["reason"]  # reason is non-empty
+
         assert events[1]["type"] == "retrieved"
         assert events[1]["questions"][0]["id"] == 10
         assert events[-2]["type"] == "chunk"

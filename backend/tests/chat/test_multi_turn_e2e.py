@@ -243,6 +243,11 @@ class TestSSEEventSequence:
         gen_idx = steps.index("generating")
         assert search_idx < gen_idx
 
+        # Insight is now also in step events (merged by frontend during persistence)
+        search_steps = [e for e in events if e["type"] == "step" and e.get("step") == "search_questions"]
+        if search_steps:
+            assert search_steps[0].get("reason")  # reason is present in step
+
         # retrieved should come between search and generating
         retrieved_idx = event_types.index("retrieved")
         assert retrieved_idx > 0
