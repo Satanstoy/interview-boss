@@ -13,10 +13,12 @@ from app.agents.chat.nodes import (
     _count_chars,
     _snip_messages,
     _truncate_to_budget,
-    _format_compressed_brief,
 )
-from app.services.llm import _call_llm_with_retry, _extract_json
-from app.agents.chat.prompts import CONTEXT_COMPRESS_PROMPT
+from app.services.llm import _call_llm_with_retry
+from app.agents.chat.prompts import (
+    CONTEXT_COMPRESS_PROMPT,
+    CONTEXT_COMPRESS_UPDATE_PROMPT,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -201,7 +203,9 @@ class TokenBudgetManager:
         recent_chars = _count_chars(recent)
         available = self._available_for_context(recent_chars)
 
-        llm_compressed = await self._llm_compress(old_messages, state_user_id=user_id)
+        llm_compressed = await self._llm_compress(
+            old_messages, existing_compressed=existing_compressed, state_user_id=user_id
+        )
         combined = self._combine(existing_compressed, llm_compressed)
         if len(combined) > available:
             combined = _truncate_to_budget(combined, available)
@@ -214,23 +218,34 @@ class TokenBudgetManager:
             return f"{existing}\n\n---\n\n{new_part}"
         return new_part
 
-    async def _llm_compress(self, old_messages: list[dict], state_user_id: int = None) -> str:
-        """LLM 结构化压缩（最后手段）"""
+    async def _llm_compress(
+        self,
+        old_messages: list[dict],
+        existing_compressed: Optional[str] = None,
+        state_user_id: int = None,
+    ) -> str:
+        """LLM 结构化压缩（最后手段），支持迭代更新模式"""
         history_text = "\n".join(
             f"{'面试官' if m['role'] == 'assistant' else '候选人'}: {m['content'][:200]}"
             for m in old_messages
         )
         try:
-            prompt = CONTEXT_COMPRESS_PROMPT.format(message_history=history_text)
+            if existing_compressed:
+                prompt = CONTEXT_COMPRESS_UPDATE_PROMPT.format(
+                    existing_summary=existing_compressed,
+                    message_history=history_text,
+                )
+            else:
+                prompt = CONTEXT_COMPRESS_PROMPT.format(message_history=history_text)
+
             result = await _call_llm_with_retry(
                 prompt,
                 user_id=state_user_id,
-                response_format={"type": "json_object"},
             )
-            parsed = _extract_json(result)
-            summary = _format_compressed_brief(parsed)
+            summary = result.strip()
             if not summary:
-                summary = result
+                logger.warning("LLM 结构化压缩返回空结果，回退到模板截断")
+                return _snip_messages(old_messages)
             return summary
         except Exception as e:
             logger.warning(f"LLM 结构化压缩失败，回退到模板截断: {e}")

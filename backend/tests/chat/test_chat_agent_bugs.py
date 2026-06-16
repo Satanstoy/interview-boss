@@ -24,7 +24,7 @@ class TestBug001:
         mgr = TokenBudgetManager(total_budget_chars=5000)
 
         with patch("app.agents.chat.budget._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = '{"topics": [], "weaknesses_exposed": [], "strengths_shown": [], "unanswered": []}'
+            mock_llm.return_value = '## 已完成的考察\n（暂无）\n\n## 剩余工作\n- 继续面试'
 
             await mgr.compress(
                 messages=messages,

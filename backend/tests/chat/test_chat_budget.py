@@ -86,7 +86,7 @@ class TestTokenBudgetManager:
         mgr = TokenBudgetManager(total_budget_chars=8000)
 
         with patch("app.agents.chat.budget._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = '{"topics": ["Redis"], "weaknesses_exposed": [], "strengths_shown": [], "unanswered": []}'
+            mock_llm.return_value = '## 已完成的考察\n- Redis 数据结构: 3分\n\n## 待考察的方向\n- 缓存穿透'
 
             import asyncio
             recent, compressed, tier = asyncio.run(
@@ -105,7 +105,7 @@ class TestTokenBudgetManager:
         mgr = TokenBudgetManager(total_budget_chars=8000)
 
         with patch("app.agents.chat.budget._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
-            mock_llm.return_value = '{"topics": [], "weaknesses_exposed": [], "strengths_shown": [], "unanswered": []}'
+            mock_llm.return_value = '## 面试目标\n- 自由练习\n\n## 已完成的考察\n（暂无）\n\n## 剩余工作\n- 继续考察八股和算法'
 
             import asyncio
             recent, compressed, tier = asyncio.run(
