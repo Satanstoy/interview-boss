@@ -226,7 +226,12 @@ async def send_message(
                 event_type = event.get("type", "chunk")
 
                 if event_type == "step":
-                    yield f"data: {json.dumps({'type': 'step', 'step': event.get('step', ''), 'message': event.get('message', '')}, ensure_ascii=False)}\n\n"
+                    step_data: dict = {"type": "step", "step": event.get("step", ""), "message": event.get("message", "")}
+                    if event.get("reason"):
+                        step_data["reason"] = event["reason"]
+                    if event.get("insight"):
+                        step_data["insight"] = event["insight"]
+                    yield f"data: {json.dumps(step_data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "chunk":
                     content = event.get("content", "")
