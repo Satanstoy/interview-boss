@@ -80,11 +80,13 @@ function handleShowSettings() { emit('show-settings') }
           ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
           : 'bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20'"
       >
-        <!-- IB logo -->
-        <span
-          class="text-sm font-bold transition-all duration-300 ease-out"
+        <!-- App logo -->
+        <img
+          src="/favicon-b.png"
+          alt="InterviewBoss"
+          class="h-7 w-7 object-contain transition-all duration-300 ease-out"
           :class="logoHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'"
-        >IB</span>
+        />
         <!-- PanelLeft icon -->
         <PanelLeft
           :size="18"
@@ -139,8 +141,8 @@ function handleShowSettings() { emit('show-settings') }
     <!-- Header: logo + PanelLeft toggle -->
     <div class="flex items-center justify-between px-4 py-3 shrink-0">
       <a href="#" class="flex items-center gap-3 min-w-0">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-600 text-sm font-bold text-white shadow-lg shadow-primary/20 transition-transform hover:scale-105">
-          IB
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-600 shadow-lg shadow-primary/20 transition-transform hover:scale-105 overflow-hidden">
+          <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
         </div>
         <div class="flex flex-col items-start leading-tight">
           <span class="text-base font-semibold tracking-tight text-sidebar-foreground whitespace-nowrap">InterviewBoss</span>
