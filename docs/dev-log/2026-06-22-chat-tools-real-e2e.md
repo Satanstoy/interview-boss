@@ -9,9 +9,11 @@
 ## 运行方式
 
 ```bash
-RUN_REAL_CHAT_E2E=1 E2E_USERNAME=<user> E2E_PASSWORD=<password> \
+RUN_REAL_CHAT_E2E=1 \
   docker compose exec backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
 ```
+
+脚本默认在 backend 容器内创建/复用临时 E2E 用户并签发短期 access token，不需要账号密码。也支持显式传 `--token` 或 `E2E_ACCESS_TOKEN`。
 
 ## 安全说明
 

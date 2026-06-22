@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -80,6 +81,39 @@ def _login(base_url: str, username: str, password: str) -> str:
     return str(token)
 
 
+def _ensure_internal_e2e_token() -> str:
+    """Create/reuse a local E2E user and issue a short-lived access token.
+
+    This avoids passing account passwords while still exercising real HTTP/SSE
+    chat routes after authentication.
+    """
+    from app.core.auth import create_access_token, hash_password
+    from app.db.connection import get_db_connection
+
+    username = "__chat_tools_e2e__"
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        if row:
+            user_id = int(row["id"] if hasattr(row, "keys") else row[0])
+        else:
+            password_hash = hash_password(uuid4().hex)
+            cursor = conn.execute(
+                "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, ?, ?)",
+                (username, password_hash, 0, "public"),
+            )
+            conn.commit()
+            user_id = int(cursor.lastrowid)
+    return create_access_token({"user_id": user_id}, expires_delta=timedelta(minutes=30))
+
+
+def _resolve_token(args: argparse.Namespace) -> str:
+    if args.token:
+        return args.token
+    if args.username and args.password:
+        return _login(args.base_url, args.username, args.password)
+    return _ensure_internal_e2e_token()
+
+
 def _create_conversation(base_url: str, token: str) -> str:
     title = f"real-e2e-chat-tools-{int(time.time())}-{uuid4().hex[:8]}"
     response = _json_request(
@@ -88,7 +122,8 @@ def _create_conversation(base_url: str, token: str) -> str:
         token=token,
         body={"mode": "free_practice", "title": title},
     )
-    conversation_id = response.get("id") or response.get("conversation_id")
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    conversation_id = response.get("id") or response.get("conversation_id") or data.get("id")
     if not conversation_id:
         raise RuntimeError(f"create conversation response missing id: {response}")
     return str(conversation_id)
@@ -262,6 +297,7 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL", "http://localhost:8000"))
     parser.add_argument("--username", default=os.getenv("E2E_USERNAME"))
     parser.add_argument("--password", default=os.getenv("E2E_PASSWORD"))
+    parser.add_argument("--token", default=os.getenv("E2E_ACCESS_TOKEN"))
     parser.add_argument("--model", default=os.getenv("E2E_MODEL"))
     parser.add_argument("--keep-conversation", action="store_true")
     args = parser.parse_args()
@@ -269,11 +305,8 @@ def main() -> int:
     if os.getenv("RUN_REAL_CHAT_E2E") != "1":
         print("Refusing to run real LLM E2E. Set RUN_REAL_CHAT_E2E=1.", file=sys.stderr)
         return 2
-    if not args.username or not args.password:
-        print("E2E_USERNAME and E2E_PASSWORD are required.", file=sys.stderr)
-        return 2
 
-    token = _login(args.base_url, args.username, args.password)
+    token = _resolve_token(args)
     conversation_id = _create_conversation(args.base_url, token)
     cases = [
         ("practice_request_rag", "我想练 RAG 系统设计，来一道题"),
