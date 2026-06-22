@@ -2,11 +2,8 @@
   <AppDialog :open="visible" size="md" @update:open="emit('close')">
     <div>
           <!-- Header -->
-          <div class="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div class="flex items-center px-6 py-4 border-b border-border">
             <h3 class="text-base font-bold text-foreground">新建面试对话</h3>
-            <button @click="emit('close')" class="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition">
-              <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
           </div>
 
           <!-- Body -->

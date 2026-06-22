@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from 'vue'
-import { User, Target, Bot, Shield, Settings } from '@lucide/vue'
+import { ArrowLeft, PanelLeftClose } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 
 const props = defineProps({
   activeSection: { type: String, required: true },
@@ -8,7 +8,7 @@ const props = defineProps({
   isAdmin: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:activeSection'])
+const emit = defineEmits(['update:activeSection', 'close', 'collapse'])
 
 function selectSection(id) {
   emit('update:activeSection', id)
@@ -16,26 +16,28 @@ function selectSection(id) {
 </script>
 
 <template>
-  <nav class="flex flex-col w-56 shrink-0 bg-sidebar border-r border-sidebar-border overflow-y-auto custom-scrollbar">
+  <nav class="flex h-full w-[288px] shrink-0 flex-col overflow-hidden bg-background">
     <!-- Header -->
-    <div class="px-4 pt-5 pb-3 shrink-0">
-      <h2 class="text-sm font-semibold text-sidebar-foreground tracking-tight">设置</h2>
-      <p class="text-xs text-sidebar-foreground/40 mt-0.5">管理你的账户和偏好</p>
+    <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
+      <div class="min-w-0 flex-1">
+        <h2 class="text-sm font-semibold tracking-tight text-foreground">设置</h2>
+        <p class="mt-0.5 truncate text-xs text-muted-foreground">管理你的账户和偏好</p>
+      </div>
+      <Button variant="ghost" size="icon" class="shrink-0" @click="emit('collapse')">
+        <PanelLeftClose :size="16" />
+      </Button>
     </div>
 
-    <!-- Divider -->
-    <div class="mx-4 mb-2 h-px bg-sidebar-border/50" />
-
     <!-- Navigation items -->
-    <div class="flex-1 min-h-0 flex flex-col gap-0.5 px-2">
+    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2 custom-scrollbar">
       <button
         v-for="item in sections"
         :key="item.id"
         @click="selectSection(item.id)"
-        class="group relative flex items-center w-full rounded-lg transition-all duration-150 gap-3 px-3 py-2 text-sm"
+        class="group relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-all duration-150"
         :class="activeSection === item.id
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-          : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+          ? 'bg-accent text-foreground'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'"
       >
         <component
           :is="item.icon"
@@ -43,17 +45,25 @@ function selectSection(id) {
           class="shrink-0 transition-colors"
           :class="activeSection === item.id
             ? 'text-primary'
-            : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
+            : 'text-muted-foreground group-hover:text-foreground/70'"
         />
-        <span class="whitespace-nowrap">{{ item.label }}</span>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-medium">{{ item.label }}</div>
+          <div v-if="item.description" class="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {{ item.description }}
+          </div>
+        </div>
       </button>
     </div>
 
-    <!-- Footer hint -->
-    <div class="shrink-0 px-4 py-3 border-t border-sidebar-border/50">
-      <p class="text-[11px] text-sidebar-foreground/30 leading-relaxed">
-        修改后点击保存以生效
-      </p>
+    <div class="shrink-0 border-t border-border p-2">
+      <button
+        class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+        @click="emit('close')"
+      >
+        <ArrowLeft :size="14" />
+        返回工作台
+      </button>
     </div>
   </nav>
 </template>

@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-8 max-w-2xl">
+  <div class="w-full space-y-8">
     <div>
       <h3 class="text-lg font-semibold text-foreground">个人信息</h3>
       <p class="text-sm text-muted-foreground mt-1">管理你的账户信息和偏好设置</p>

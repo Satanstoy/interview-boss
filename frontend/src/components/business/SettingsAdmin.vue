@@ -132,7 +132,7 @@ const onRebuild = () => {
 </script>
 
 <template>
-  <div class="space-y-8 max-w-2xl">
+  <div class="w-full space-y-8">
     <!-- Header -->
     <div>
       <h3 class="text-lg font-semibold text-foreground">管理员设置</h3>
