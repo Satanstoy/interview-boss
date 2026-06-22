@@ -93,6 +93,89 @@ class TestToolSchemas:
         assert "algorithm-coding" in skill_desc
 
 
+class TestToolGatewayModels:
+    def test_normalize_search_question_item_prefers_combined_score(self):
+        from app.agents.chat.tool_gateway import normalize_question_item
+
+        item = normalize_question_item(
+            {
+                "id": 42,
+                "question": "介绍一下 RAG 的检索和重排流程",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "B2.RAG系统设计",
+                "tags": "rag,检索,重排",
+                "_combined_rank_score": 0.123456,
+                "_rrf_score": 0.05,
+                "sources": "[{\"company\": \"测试公司\", \"round\": \"一面\"}]",
+            },
+            source="search",
+            reason="rrf_ranked",
+        )
+
+        assert item["id"] == 42
+        assert item["question"] == "介绍一下 RAG 的检索和重排流程"
+        assert item["cat1"] == "B.Agent与LLM应用"
+        assert item["cat2"] == "B2.RAG系统设计"
+        assert item["source"] == "search"
+        assert item["score"] == 0.123456
+        assert item["reason"] == "rrf_ranked"
+        assert item["sources"] == [{"company": "测试公司", "round": "一面"}]
+
+    def test_build_tool_success_envelope_has_stable_shape(self):
+        from app.agents.chat.tool_gateway import build_success_envelope
+
+        envelope = build_success_envelope(
+            tool="search_questions",
+            items=[
+                {
+                    "id": 1,
+                    "question": "What is JVM?",
+                    "cat1": "Java",
+                    "cat2": "Basics",
+                    "source": "search",
+                    "score": 0.1,
+                    "reason": "rrf_ranked",
+                    "tags": "jvm",
+                    "difficulty": "medium",
+                    "sources": [],
+                }
+            ],
+            total_ms=7,
+            debug_reason="hybrid_search_ok",
+        )
+
+        assert envelope["ok"] is True
+        assert envelope["tool"] == "search_questions"
+        assert envelope["items"][0]["id"] == 1
+        assert envelope["metadata"]["result_count"] == 1
+        assert envelope["metadata"]["fallback_used"] is False
+        assert envelope["metadata"]["metrics"]["total_ms"] == 7
+        assert envelope["metadata"]["debug_reason"] == "hybrid_search_ok"
+        assert envelope["error"] is None
+
+    def test_build_tool_error_envelope_has_error_code(self):
+        from app.agents.chat.tool_gateway import build_error_envelope
+
+        envelope = build_error_envelope(
+            tool="draw_questions",
+            error_code="USER_REQUIRED",
+            message="user_id is required for draw_questions",
+            total_ms=2,
+            debug_reason="missing_user_id",
+        )
+
+        assert envelope["ok"] is False
+        assert envelope["tool"] == "draw_questions"
+        assert envelope["items"] == []
+        assert envelope["metadata"]["result_count"] == 0
+        assert envelope["metadata"]["metrics"]["total_ms"] == 2
+        assert envelope["metadata"]["debug_reason"] == "missing_user_id"
+        assert envelope["error"] == {
+            "error_code": "USER_REQUIRED",
+            "message": "user_id is required for draw_questions",
+        }
+
+
 # ── TestExecuteToolLoadSkill ─────────────────────────────
 
 class TestExecuteToolLoadSkill:
