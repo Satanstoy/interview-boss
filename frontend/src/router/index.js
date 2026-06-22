@@ -94,6 +94,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.matched.some(record => record.meta.requiresAuth)) {
+    if (to.query.preview === '1') return true
     if (!currentUser.value) {
       return { name: 'login', query: { redirect: to.fullPath } }
     }

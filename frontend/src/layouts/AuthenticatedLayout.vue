@@ -179,6 +179,11 @@ const previewUser = {
 const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))
 const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
 
+const handleSettingsLogout = () => {
+  showSettingsPage.value = false
+  handleLogout()
+}
+
 const applyPreviewData = () => {
   activeSeason.value = '2026 春招'
   availableSeasons.value = ['2026 春招', '2025 秋招']
@@ -462,26 +467,6 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
     <!-- Login gate -->
     <LoginPage v-if="!isAuthenticatedForUi" @login-success="handleLoginSuccess" />
 
-    <!-- Settings page (full-page overlay) -->
-    <SettingsPage
-      v-else-if="showSettingsPage"
-      :display-user="displayUser"
-      :practice-stats="practiceStats"
-      :master-bank="masterBank"
-      :is-admin="displayUser?.is_admin"
-      :active-season="activeSeason"
-      :available-seasons="availableSeasons"
-      :is-building="isBuilding"
-      @close="showSettingsPage = false"
-      @go-to-question="onGoToQuestion"
-      @logout="handleLogout"
-      @bank-mode-changed="handleBankModeChanged"
-      @profile-updated="fetchTableData"
-      @build-master-bank="triggerBuildMasterBank"
-      @update:active-season="activeSeason = $event"
-      @sidebar-collapsed-changed="sidebarCollapsed = $event"
-    />
-
     <!-- Main layout -->
     <div v-else class="flex h-screen overflow-hidden">
       <!-- Sidebar -->
@@ -517,16 +502,40 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         <!-- h-full 确保 ChatView 的 h-full 能正确解析（CSS 百分比高度需要父链每一层都有明确高度） -->
         <div class="flex-1 min-h-0 h-full overflow-hidden">
           <router-view v-slot="{ Component }">
-            <Transition name="tab-fade" class="h-full">
-              <component :is="Component" class="h-full" />
+            <Transition name="tab-fade" mode="out-in">
+              <component :is="Component" class="h-full min-h-0" />
             </Transition>
           </router-view>
         </div>
       </main>
     </div>
 
+    <!-- Settings overlays the current workspace so closing returns to the same tab/state. -->
+    <Transition name="settings-overlay">
+      <SettingsPage
+        v-if="showSettingsPage && isAuthenticatedForUi"
+        data-testid="settings-overlay"
+        class="fixed inset-0 z-[80]"
+        :display-user="displayUser"
+        :practice-stats="practiceStats"
+        :master-bank="masterBank"
+        :is-admin="displayUser?.is_admin"
+        :active-season="activeSeason"
+        :available-seasons="availableSeasons"
+        :is-building="isBuilding"
+        @close="showSettingsPage = false"
+        @go-to-question="onGoToQuestion"
+        @logout="handleSettingsLogout"
+        @bank-mode-changed="handleBankModeChanged"
+        @profile-updated="fetchTableData"
+        @build-master-bank="triggerBuildMasterBank"
+        @update:active-season="activeSeason = $event"
+        @sidebar-collapsed-changed="sidebarCollapsed = $event"
+      />
+    </Transition>
+
     <ConfirmDialog />
-    <LoginModal :visible="showLoginModal" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
+    <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" />
     <PracticeMode
@@ -584,12 +593,20 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 :deep(h3) { font-size: 1.125rem; }
 
 /* ── Tab transition ── */
-.tab-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
-.tab-fade-leave-active { transition: opacity 0.15s ease-in; position: absolute; width: 100%; }
-.tab-fade-enter-from { opacity: 0; }
+.tab-fade-enter-active,
+.tab-fade-leave-active { transition: opacity 0.16s ease; }
+.tab-fade-enter-from,
 .tab-fade-leave-to { opacity: 0; }
 
+.settings-overlay-enter-active,
+.settings-overlay-leave-active { transition: opacity 0.16s ease; }
+.settings-overlay-enter-from,
+.settings-overlay-leave-to { opacity: 0; }
+
 @media (prefers-reduced-motion: reduce) {
-  .tab-fade-enter-active, .tab-fade-leave-active { transition-duration: 0.01ms !important; }
+  .tab-fade-enter-active,
+  .tab-fade-leave-active,
+  .settings-overlay-enter-active,
+  .settings-overlay-leave-active { transition-duration: 0.01ms !important; }
 }
 </style>
