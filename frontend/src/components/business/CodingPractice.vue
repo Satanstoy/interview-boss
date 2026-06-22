@@ -65,15 +65,14 @@
 
       <!-- 折叠按钮 -->
       <div class="p-2 border-t border-border sidebar-content">
-        <Button variant="ghost" size="sm" class="w-full justify-start gap-2 text-xs text-muted-foreground" @click="sidebarCollapsed = true">
+        <Button variant="ghost" size="icon" @click="sidebarCollapsed = true" class="shrink-0">
           <PanelLeftClose :size="14" />
-          收起侧边栏
         </Button>
       </div>
     </div>
 
     <!-- 侧边栏折叠后的展开按钮 -->
-    <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border">
+    <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons">
       <Button variant="ghost" size="icon" @click="sidebarCollapsed = false" class="shrink-0">
         <PanelLeft :size="16" />
       </Button>
@@ -111,7 +110,7 @@
       <!-- 选中题目后的主区域 -->
       <template v-else>
         <!-- 题目头部 -->
-        <div class="flex items-center justify-between px-6 py-2.5 shrink-0 border-b border-border">
+        <div class="flex items-center justify-between px-6 py-2 shrink-0 border-b border-border">
           <div class="min-w-0 flex-1">
             <span class="truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</span>
           </div>
@@ -496,3 +495,28 @@ onMounted(() => {
   loadErrorStats()
 })
 </script>
+
+<style scoped>
+/* Sidebar animation — aligned with ChatView */
+.sidebar-container {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+</style>

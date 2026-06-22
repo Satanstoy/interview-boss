@@ -17,6 +17,7 @@ import UserMenu from '@/components/business/UserMenu.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
+  collapsed: { type: Boolean, default: false },
   sidebarTabs: { type: Array, default: () => [] },
   displayUser: { type: Object, default: null },
   pendingReviewCount: { type: Number, default: 0 },
@@ -34,13 +35,11 @@ const emit = defineEmits([
 const router = useRouter()
 const route = useRoute()
 
-const collapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
 const logoHovered = ref(false)
 
 function toggleCollapsed() {
-  collapsed.value = !collapsed.value
   logoHovered.value = false
-  emit('update:collapsed', collapsed.value)
+  emit('update:collapsed', !props.collapsed)
 }
 
 const iconMap = {
@@ -58,7 +57,13 @@ function isActive(tabRoute) {
   return route.path === tabRoute || route.path.startsWith(tabRoute + '/')
 }
 
-function onTabChange(tab) { router.push(tab.route) }
+async function onTabChange(tab) {
+  try {
+    await router.push(tab.route)
+  } catch (err) {
+    console.warn('[AppSidebar] 导航失败:', tab.route, err)
+  }
+}
 function onGoToQuestion(q) { emit('go-to-question', q) }
 function handleLogout() { emit('logout') }
 function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
@@ -68,7 +73,7 @@ function handleShowSettings() { emit('show-settings') }
 
 <template>
   <!-- Collapsed: logo + nav icons + avatar -->
-  <div v-if="collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1 animate-sidebar-collapse">
+  <div v-if="props.collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1 animate-sidebar-collapse">
     <!-- Logo → hover shows PanelLeft icon → click expands -->
     <AppTooltip text="展开侧栏" side="right">
       <button

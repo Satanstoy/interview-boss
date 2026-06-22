@@ -4,7 +4,7 @@
     <div v-if="!quizStarted" class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
 
       <!-- Header -->
-      <div class="border-b border-border px-5 py-4">
+      <div class="border-b border-border px-4 py-3">
         <div class="flex items-center gap-3">
           <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
             <svg class="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
@@ -16,7 +16,7 @@
         </div>
       </div>
 
-      <div class="p-5 flex flex-col gap-5">
+      <div class="p-4 flex flex-col gap-4">
         <!-- Category selection -->
         <div>
           <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">

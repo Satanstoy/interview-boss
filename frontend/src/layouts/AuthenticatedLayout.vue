@@ -19,7 +19,6 @@ import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
 
 import { defineAsyncComponent } from 'vue'
-import SettingsPage from '@/components/business/SettingsPage.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LoginModal from '@/components/business/LoginModal.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
@@ -76,6 +75,7 @@ const tabToRouteMap = {
   KnowledgeGraph: '/knowledge-graph',
   Import: '/import',
   Coding: '/coding',
+  Settings: '/settings',
 }
 
 // Computed reactive "activeTab" derived from route for useHighlightNav compatibility.
@@ -123,7 +123,6 @@ const {
 
 // ── UI state ──
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
-const showSettingsPage = ref(false)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
@@ -143,7 +142,11 @@ const sidebarTabs = computed(() => [
   { key: 'Coding', label: '手撕代码', route: '/coding' },
 ])
 
-const activeTabLabel = computed(() => isAuthenticatedForUi.value ? (sidebarTabs.value.find(tab => tab.key === activeTab.value)?.label || '工作台') : 'InterviewBoss')
+const activeTabLabel = computed(() => {
+  if (!isAuthenticatedForUi.value) return 'InterviewBoss'
+  if (activeTab.value === 'Settings') return '设置'
+  return sidebarTabs.value.find(tab => tab.key === activeTab.value)?.label || '工作台'
+})
 
 // ── Selection ──
 const jdSelection = useSelection(() => jdData.value)
@@ -179,9 +182,8 @@ const previewUser = {
 const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))
 const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
 
-const handleSettingsLogout = () => {
-  showSettingsPage.value = false
-  handleLogout()
+const openSettings = () => {
+  router.push('/settings')
 }
 
 const applyPreviewData = () => {
@@ -475,6 +477,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         :style="{ width: sidebarCollapsed ? '60px' : '256px', transition: 'width 380ms cubic-bezier(0.4, 0, 0.2, 1)' }"
       >
         <AppSidebar
+          :collapsed="sidebarCollapsed"
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
           :display-user="displayUser"
@@ -485,7 +488,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           @logout="handleLogout"
           @bank-mode-changed="handleBankModeChanged"
           @show-review="showReviewPanel = true"
-          @show-settings="showSettingsPage = true"
+          @show-settings="openSettings"
         />
       </aside>
 
@@ -495,7 +498,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
           :no-border="route.path.startsWith('/chat')"
-          @show-settings="showSettingsPage = true"
+          @show-settings="openSettings"
         />
 
         <!-- 统一 overflow-hidden：每个 View 组件自己管理滚动（消除双层滚动问题） -->
@@ -509,30 +512,6 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         </div>
       </main>
     </div>
-
-    <!-- Settings overlays the current workspace so closing returns to the same tab/state. -->
-    <Transition name="settings-overlay">
-      <SettingsPage
-        v-if="showSettingsPage && isAuthenticatedForUi"
-        data-testid="settings-overlay"
-        class="fixed inset-0 z-[80]"
-        :display-user="displayUser"
-        :practice-stats="practiceStats"
-        :master-bank="masterBank"
-        :is-admin="displayUser?.is_admin"
-        :active-season="activeSeason"
-        :available-seasons="availableSeasons"
-        :is-building="isBuilding"
-        @close="showSettingsPage = false"
-        @go-to-question="onGoToQuestion"
-        @logout="handleSettingsLogout"
-        @bank-mode-changed="handleBankModeChanged"
-        @profile-updated="fetchTableData"
-        @build-master-bank="triggerBuildMasterBank"
-        @update:active-season="activeSeason = $event"
-        @sidebar-collapsed-changed="sidebarCollapsed = $event"
-      />
-    </Transition>
 
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
@@ -598,15 +577,8 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 .tab-fade-enter-from,
 .tab-fade-leave-to { opacity: 0; }
 
-.settings-overlay-enter-active,
-.settings-overlay-leave-active { transition: opacity 0.16s ease; }
-.settings-overlay-enter-from,
-.settings-overlay-leave-to { opacity: 0; }
-
 @media (prefers-reduced-motion: reduce) {
   .tab-fade-enter-active,
-  .tab-fade-leave-active,
-  .settings-overlay-enter-active,
-  .settings-overlay-leave-active { transition-duration: 0.01ms !important; }
+  .tab-fade-leave-active { transition-duration: 0.01ms !important; }
 }
 </style>
