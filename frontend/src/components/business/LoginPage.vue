@@ -1,6 +1,6 @@
 <template>
-  <div class="min-h-[calc(100vh-56px)] bg-background">
-    <div class="mx-auto grid min-h-[calc(100vh-56px)] max-w-6xl gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center lg:px-8">
+  <div data-testid="login-page" class="h-dvh overflow-hidden bg-background">
+    <div class="mx-auto grid h-full min-h-0 max-w-6xl gap-6 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center lg:px-8">
       <!-- Left side: marketing content -->
       <section class="hidden lg:block">
         <div class="max-w-xl">
@@ -76,8 +76,8 @@
       <!-- Right side: login form -->
       <section class="mx-auto w-full max-w-sm lg:mx-0">
         <div class="mb-6 text-center lg:text-left">
-          <div class="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground lg:mx-0">
-            IB
+          <div class="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-lg lg:mx-0">
+            <img src="/favicon-b.png" alt="InterviewBoss" class="h-9 w-9 object-contain" />
           </div>
           <h1 class="text-xl font-semibold tracking-tight text-foreground">登录 InterviewBoss</h1>
           <p class="mt-1 text-sm text-muted-foreground">访问你的题库、面经和模拟面试记录</p>

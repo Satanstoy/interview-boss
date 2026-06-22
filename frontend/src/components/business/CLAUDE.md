@@ -41,6 +41,7 @@
 - API 调用通过 `services/` 层，禁止在组件中直接 fetch
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
+- `LoginPage.vue` 是无 header 的全屏登录壳，必须使用视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)` 这类为主界面 header 预留高度的写法。
 
 ## 修改后必做
 
