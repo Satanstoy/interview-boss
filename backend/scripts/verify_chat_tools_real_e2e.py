@@ -54,9 +54,10 @@ class CaseResult:
 def _json_request(method: str, url: str, *, token: str | None = None, body: dict[str, Any] | None = None) -> dict[str, Any]:
     data = json.dumps(body or {}).encode("utf-8") if body is not None else None
     headers = {"Accept": "application/json"}
+    if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        headers["X-Requested-With"] = "XMLHttpRequest"
     if body is not None:
         headers["Content-Type"] = "application/json"
-        headers["X-Requested-With"] = "XMLHttpRequest"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)

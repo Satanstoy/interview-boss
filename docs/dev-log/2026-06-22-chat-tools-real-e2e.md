@@ -24,8 +24,18 @@ RUN_REAL_CHAT_E2E=1 \
 
 ## 验证
 
+Guard 验证：
+
 ```bash
 docker compose --profile test run --rm --build test uv run python backend/scripts/verify_chat_tools_real_e2e.py
 ```
 
 预期返回码为 2，并输出：`Refusing to run real LLM E2E. Set RUN_REAL_CHAT_E2E=1.`
+
+真实 E2E 验证（2026-06-22）：
+
+```bash
+docker compose exec -e RUN_REAL_CHAT_E2E=1 backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
+```
+
+结果：脚本成功通过 internal token 调用真实后端 SSE，但 4 个 case 中 3 个失败，`tool_call_rate=0%`。后端日志显示 LLM provider 返回 `401 Invalid API Key`，随后 ReAct LLM step 失败并进入 fallback，因此工具调用没有机会发生。需要先修复生产 LLM API Key 后再复测工具调用稳定性。
