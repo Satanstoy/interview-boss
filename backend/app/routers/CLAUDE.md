@@ -34,6 +34,7 @@
 - **禁止业务逻辑**：路由函数只做 HTTP 感知（解析请求、格式化响应），业务逻辑放 services/
 - **依赖注入**：用 `Depends(get_current_user)` / `Depends(get_admin_user)` 做认证
 - **SSE 端点**：用 `StreamingResponse(media_type="text/event-stream")` 返回流式数据
+- **Chat SSE 元数据**：`chat.py` 用 `_metadata_events_from_done()` 将 agent 的 done metadata 拆成公开事件（如 `selected_question`、`question_plan`、`basis`），避免直接暴露完整内部 metadata
 - **新路由注册**：在 `asgi.py` 中 `app.include_router(router)`
 
 ## 修改后必做
