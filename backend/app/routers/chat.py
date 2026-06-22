@@ -153,6 +153,40 @@ async def delete_conversation(
 # ── 消息 ──
 
 
+def _metadata_events_from_done(meta: dict) -> list[dict]:
+    """Split run_chat done metadata into public SSE events."""
+    events: list[dict] = []
+    if meta.get("candidate_questions"):
+        events.append({"type": "candidates", "questions": meta.get("candidate_questions", [])})
+    if "selected_question" in meta:
+        events.append({
+            "type": "selected_question",
+            "question": meta.get("selected_question"),
+            "source": meta.get("question_source", ""),
+            "reason": meta.get("question_source_reason", ""),
+        })
+    if meta.get("question_plan"):
+        events.append({"type": "question_plan", **meta.get("question_plan")})
+
+    basis_type = meta.get("basis_type")
+    if basis_type:
+        events.append({
+            "type": "basis",
+            "basis_type": basis_type,
+            "basis_question_ids": meta.get("basis_question_ids", []),
+            "basis_confidence": meta.get("basis_confidence", 0.0),
+            "should_show_references": meta.get("should_show_references", False),
+            "selected_basis_questions": meta.get("selected_basis_questions", []),
+            "resume_ref": meta.get("resume_ref", ""),
+            "jd_ref": meta.get("jd_ref", ""),
+        })
+    if meta.get("resume_ref"):
+        events.append({"type": "resume_ref", "name": meta["resume_ref"]})
+    if meta.get("jd_ref"):
+        events.append({"type": "jd_ref", "title": meta["jd_ref"]})
+    return events
+
+
 @router.get("/conversations/{conversation_id}/messages")
 async def get_messages(conversation_id: str, user: dict = Depends(get_current_user)):
     """获取对话的消息历史"""
@@ -256,19 +290,8 @@ async def send_message(
                 elif event_type == "done":
                     meta = event.get("metadata", {})
 
-                    if meta.get("candidate_questions"):
-                        yield f"data: {json.dumps({'type': 'candidates', 'questions': meta.get('candidate_questions', [])}, ensure_ascii=False)}\n\n"
-                    if "selected_question" in meta:
-                        yield f"data: {json.dumps({'type': 'selected_question', 'question': meta.get('selected_question'), 'source': meta.get('question_source', ''), 'reason': meta.get('question_source_reason', '')}, ensure_ascii=False)}\n\n"
-
-                    basis_type = meta.get("basis_type")
-                    if basis_type:
-                        yield f"data: {json.dumps({'type': 'basis', 'basis_type': basis_type, 'basis_question_ids': meta.get('basis_question_ids', []), 'basis_confidence': meta.get('basis_confidence', 0.0), 'should_show_references': meta.get('should_show_references', False), 'selected_basis_questions': meta.get('selected_basis_questions', []), 'resume_ref': meta.get('resume_ref', ''), 'jd_ref': meta.get('jd_ref', '')}, ensure_ascii=False)}\n\n"
-
-                    if meta.get("resume_ref"):
-                        yield f"data: {json.dumps({'type': 'resume_ref', 'name': meta['resume_ref']}, ensure_ascii=False)}\n\n"
-                    if meta.get("jd_ref"):
-                        yield f"data: {json.dumps({'type': 'jd_ref', 'title': meta['jd_ref']}, ensure_ascii=False)}\n\n"
+                    for metadata_event in _metadata_events_from_done(meta):
+                        yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
 
                     if full_response:
                         import re as _re

@@ -75,6 +75,39 @@ def _routerize_events(events: list[dict]) -> list[dict]:
     return sse_events
 
 
+async def test_done_metadata_can_emit_question_plan_event():
+    """Router-style metadata splitting should expose question_plan as its own SSE event."""
+    from app.routers.chat import _metadata_events_from_done
+
+    meta = {
+        "selected_question": {"id": 7, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG"},
+        "question_source": "search",
+        "question_source_reason": "question_plan_bound",
+        "question_plan": {
+            "question_id": 7,
+            "source": "search",
+            "selection_reason": "top_ranked_candidate",
+            "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
+            "repaired": False,
+            "fallback_used": False,
+        },
+    }
+
+    events = _metadata_events_from_done(meta)
+
+    selected = next(event for event in events if event["type"] == "selected_question")
+    assert selected["question"]["id"] == 7
+    assert selected["reason"] == "question_plan_bound"
+
+    plan = next(event for event in events if event["type"] == "question_plan")
+    assert plan["question_id"] == 7
+    assert plan["source"] == "search"
+    assert plan["selection_reason"] == "top_ranked_candidate"
+    assert plan["adherence"]["score"] == 0.5
+    assert plan["repaired"] is False
+    assert plan["fallback_used"] is False
+
+
 def _make_question(
     qid: int,
     question: str,
