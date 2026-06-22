@@ -84,12 +84,17 @@ async def test_done_metadata_can_emit_question_plan_event():
         "question_source": "search",
         "question_source_reason": "question_plan_bound",
         "question_plan": {
+            "type": "internal_plan",
             "question_id": 7,
             "source": "search",
             "selection_reason": "top_ranked_candidate",
             "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
             "repaired": False,
             "fallback_used": False,
+            "question_text": "内部题面不应直接透出",
+            "strategy": "internal_strategy",
+            "allowed_focus": ["RAG"],
+            "forbidden_focus": ["闲聊"],
         },
     }
 
@@ -106,6 +111,11 @@ async def test_done_metadata_can_emit_question_plan_event():
     assert plan["adherence"]["score"] == 0.5
     assert plan["repaired"] is False
     assert plan["fallback_used"] is False
+    assert plan["type"] == "question_plan"
+    assert "question_text" not in plan
+    assert "strategy" not in plan
+    assert "allowed_focus" not in plan
+    assert "forbidden_focus" not in plan
 
 
 def _make_question(

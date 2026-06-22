@@ -44,6 +44,7 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
 - **Tool Gateway 契约**：`search_questions` / `draw_questions` 通过 `tool_gateway.py` 返回统一 `ok/items/metadata/error` envelope，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback
+- **完整回答后强制候选题**：`interview_question + answer_complete=True + 无候选题` 时，即使在 `project-deep-dive` 模式也必须先调用 `search_questions`，避免直接追问跳过 selected_question/question_plan 绑定
 
 ## 修改后必做
 

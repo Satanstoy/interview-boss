@@ -72,3 +72,42 @@ Summary:
 ```
 
 说明：follow-up 负向场景按预期不调用抽题工具，因此整体工具/选题/计划命中率为 75%。部署前自动备份数据库到 `backups/interview-boss_20260622_155041.db`。
+
+## 工具调用稳定性收紧复测（2026-06-22）
+
+收紧内容：
+
+- `question_plan` SSE event 改为显式字段白名单，禁止透传 `question_text`、`strategy`、`allowed_focus`、`forbidden_focus` 等内部 plan 字段。
+- `verify_chat_tools_real_e2e.py` 增加 case 期望矩阵：必须调工具的 case 没有 `search_questions`/`draw_questions` step 会直接 FAIL，避免 selected/question_plan 掩盖工具缺失。
+- 真实 E2E 首次严格校验暴露 `complete_answer_new_question` 未调工具；根因是 `project-deep-dive + answer_complete=True` 工具策略允许直接追问。
+- 修复 `_build_tool_strategy()`：完整回答且无候选题时，即使在 `project-deep-dive` 模式也必须调用 `search_questions`，确保后续 selected_question/question_plan 绑定。
+
+验证命令：
+
+```bash
+DEPLOY_MIN_FREE_MB=512 ./deploy/docker-deploy.sh test -k "test_deep_dive_complete_answer_requires_search or test_done_metadata_can_emit_question_plan_event or extract_case_result_fails_required_tool_case_without_tool_step or extract_case_result_reads_split_sse_question_events or extract_case_result_keeps_legacy_done_metadata_fallback" -q
+DEPLOY_MIN_FREE_MB=512 ./deploy/docker-deploy.sh update
+docker compose exec -T -e RUN_REAL_CHAT_E2E=1 backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
+docker compose --profile test run --rm --build test uv run pytest backend/tests/chat/test_interview_rhythm.py -q
+```
+
+验证结果：
+
+```text
+Chat tools real E2E:
+- cases: 4
+- passed: 4
+- failed: 0
+- tool_call_rate: 75%
+- selected_question_rate: 75%
+- question_plan_rate: 75%
+- repair_count: 0
+- fallback_count: 0
+- leak_count: 0
+
+Mock interview backend E2E:
+- 23 passed
+- 16 warnings（既有 pytest.mark.asyncio 同步测试警告）
+```
+
+说明：follow-up 负向场景按预期不调用工具，因此严格后的工具/选题/计划命中率仍为 75%；其余 3 个必须调工具的 case 均已出现工具 step 和 question_plan。部署备份数据库到 `backups/interview-boss_20260622_174702.db`。

@@ -140,8 +140,8 @@ class TestToolStrategy:
         result = _build_tool_strategy(state)
         assert "不调用工具" in result
 
-    def test_deep_dive_mode_allows_direct_follow(self):
-        """R4: 项目深挖模式 → 可以不检索直接追问"""
+    async def test_deep_dive_complete_answer_requires_search(self):
+        """项目深挖 + 回答完整 + 无候选题 → 必须检索，避免直接追问掩盖工具缺失。"""
         state = {
             "intent": "interview_question",
             "answer_complete": True,
@@ -150,7 +150,9 @@ class TestToolStrategy:
         }
         result = _build_tool_strategy(state)
         assert "项目深挖" in result
-        assert "可以不检索" in result
+        assert "search_questions" in result
+        assert "必须" in result
+        assert "可以不检索" not in result
 
 
 # ── E2E Pipeline Tests ────────────────────────────────

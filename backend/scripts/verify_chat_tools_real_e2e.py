@@ -30,6 +30,23 @@ INTERNAL_MARKERS = (
     "algorithm-coding",
 )
 ALGORITHM_TERMS = ("算法", "代码", "手撕", "数据结构", "链表", "排序", "二分", "LRU", "lru")
+CASE_EXPECTATIONS = {
+    "practice_request_rag": {
+        "required_tools": {"search_questions", "draw_questions"},
+        "must_have_question_plan": True,
+    },
+    "algorithm_coding": {
+        "required_tools": {"draw_questions"},
+        "must_have_question_plan": True,
+    },
+    "complete_answer_new_question": {
+        "required_tools": {"search_questions", "draw_questions"},
+        "must_have_question_plan": True,
+    },
+    "follow_up_negative": {
+        "forbidden_tools": {"draw_questions"},
+    },
+}
 
 
 @dataclass
@@ -255,22 +272,23 @@ def _verdict_for_case(result: CaseResult) -> str:
         result.errors.append("internal marker leaked")
         return "FAIL"
 
-    has_grounding = bool(
-        result.tool_names
-        or result.retrieved_count
-        or result.selected_question_id
-        or result.question_plan_id
-    )
-    if result.name in {"practice_request_rag", "algorithm_coding", "complete_answer_new_question"} and not has_grounding:
-        result.errors.append("expected tool/retrieval/selected question/question plan signal")
+    expectation = CASE_EXPECTATIONS.get(result.name, {})
+    required_tools = expectation.get("required_tools", set())
+    if required_tools and not any(tool in required_tools for tool in result.tool_names):
+        result.errors.append(f"expected tool call: {', '.join(sorted(required_tools))}")
+        return "FAIL"
+    if expectation.get("must_have_question_plan") and not result.question_plan_id:
+        result.errors.append("expected question plan signal")
+        return "FAIL"
+    forbidden_tools = expectation.get("forbidden_tools", set())
+    forbidden_called = sorted(tool for tool in result.tool_names if tool in forbidden_tools)
+    if forbidden_called:
+        result.errors.append(f"forbidden tool called: {', '.join(forbidden_called)}")
         return "FAIL"
     if result.name == "algorithm_coding" and result.selected_question_text:
         if not any(term in result.selected_question_text for term in ALGORITHM_TERMS):
             result.errors.append("selected question is not algorithm related")
             return "FAIL"
-    if result.name == "follow_up_negative" and "draw_questions" in result.tool_names:
-        result.errors.append("follow-up should not call draw_questions")
-        return "FAIL"
     return "PASS"
 
 

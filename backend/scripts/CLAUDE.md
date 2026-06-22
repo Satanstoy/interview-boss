@@ -29,7 +29,7 @@ RUN_REAL_CHAT_E2E=1 \
 
 ## Chat tools E2E 观测
 
-`verify_chat_tools_real_e2e.py` 会解析 Chat SSE 中拆分后的 `selected_question` 和 `question_plan` 事件，同时保留旧版 `done.metadata` fallback，用于区分工具调用、选题绑定、计划生成、repair/fallback 和内部标记泄露。
+`verify_chat_tools_real_e2e.py` 会解析 Chat SSE 中拆分后的 `selected_question` 和 `question_plan` 事件，同时保留旧版 `done.metadata` fallback，用于区分工具调用、选题绑定、计划生成、repair/fallback 和内部标记泄露。对必须调工具的场景，verifier 使用 case 期望矩阵要求出现指定工具 step，避免 selected/question_plan 掩盖缺失工具调用。
 
 ## 安全警告
 

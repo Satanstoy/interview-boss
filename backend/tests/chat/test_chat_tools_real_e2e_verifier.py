@@ -42,6 +42,22 @@ def test_extract_case_result_reads_split_sse_question_events():
     assert result.fallback_used is False
 
 
+def test_extract_case_result_fails_required_tool_case_without_tool_step():
+    """Verifier should not let selected_question/question_plan hide a missing tool call."""
+    events = [
+        {"type": "selected_question", "question": {"id": 7, "question": "RAG 检索怎么设计？"}},
+        {"type": "question_plan", "question_id": 7, "adherence": {"score": 0.75}},
+        {"type": "chunk", "content": "可以从召回、排序、上下文拼装讲。"},
+        {"type": "done"},
+    ]
+
+    result = verifier._extract_case_result("practice_request_rag", "出一道 RAG 题", events)
+
+    assert result.verdict == "FAIL"
+    assert "expected tool call" in "; ".join(result.errors)
+
+
+
 def test_extract_case_result_keeps_legacy_done_metadata_fallback():
     """Verifier should still parse old done.metadata shape for compatibility."""
     events = [

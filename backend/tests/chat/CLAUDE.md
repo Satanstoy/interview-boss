@@ -16,6 +16,7 @@ Chatbot 功能测试：agent 流程、记忆、预算、路由。
 | `test_chat_skills.py` | Skills 系统（Skill 基类、Registry、匹配、prompt 构建） |
 | `test_tools.py` | ReAct tools、Tool Gateway envelope、工具执行副作用 |
 | `test_react_loop.py` | ReAct 主循环、tool governance、question plan 绑定与 repair |
+| `test_chat_tools_real_e2e_verifier.py` | 真实 chat tools E2E verifier 的事件解析和 case 期望矩阵 |
 
 ## 运行
 

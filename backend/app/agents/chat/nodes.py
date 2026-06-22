@@ -1615,7 +1615,7 @@ async def generate_direct_response(state: ChatState) -> AsyncGenerator[dict, Non
 def _build_tool_strategy(state: ChatState) -> str:
     """Build tool usage strategy guidance based on current intent and state.
 
-    核心原则：默认检索，但项目连续深挖时可直接追问（不检索）。
+    核心原则：完整回答后默认检索；未答完或追问时可基于上下文直接追问。
     """
     intent = state.get("intent", "chat")
     answer_complete = state.get("answer_complete", False)
@@ -1627,10 +1627,9 @@ def _build_tool_strategy(state: ChatState) -> str:
         if is_deep_dive:
             return (
                 "<tool_strategy>\n"
-                "当前状态：用户回答完毕，项目深挖模式。\n"
-                "建议：默认调用 search_questions 检索追问题。"
-                "但如果用户回答中包含明确的技术细节，可以不检索、直接基于对话追问；"
-                "这种情况下不要声称问题来自题库，也不要引用候选题作为依据。\n"
+                "当前状态：用户回答完毕，项目深挖模式，且还没有候选题。\n"
+                "必须：从用户回答中提取 2-5 个技术关键词，调用 search_questions 检索追问题；"
+                "不要直接基于对话继续追问，以免跳过题库选题和 question_plan 绑定。\n"
                 "</tool_strategy>"
             )
         return (

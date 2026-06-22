@@ -165,8 +165,17 @@ def _metadata_events_from_done(meta: dict) -> list[dict]:
             "source": meta.get("question_source", ""),
             "reason": meta.get("question_source_reason", ""),
         })
-    if meta.get("question_plan"):
-        events.append({"type": "question_plan", **meta.get("question_plan")})
+    question_plan = meta.get("question_plan")
+    if isinstance(question_plan, dict):
+        events.append({
+            "type": "question_plan",
+            "question_id": question_plan.get("question_id"),
+            "source": question_plan.get("source", ""),
+            "selection_reason": question_plan.get("selection_reason", ""),
+            "adherence": question_plan.get("adherence", {}),
+            "repaired": bool(question_plan.get("repaired", False)),
+            "fallback_used": bool(question_plan.get("fallback_used", False)),
+        })
 
     basis_type = meta.get("basis_type")
     if basis_type:
