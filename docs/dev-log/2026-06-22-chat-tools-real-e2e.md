@@ -39,3 +39,36 @@ docker compose exec -e RUN_REAL_CHAT_E2E=1 backend uv run python backend/scripts
 ```
 
 结果：脚本成功通过 internal token 调用真实后端 SSE，但 4 个 case 中 3 个失败，`tool_call_rate=0%`。后端日志显示 LLM provider 返回 `401 Invalid API Key`，随后 ReAct LLM step 失败并进入 fallback，因此工具调用没有机会发生。需要先修复生产 LLM API Key 后再复测工具调用稳定性。
+
+## 观测面补齐复测（2026-06-22）
+
+补齐内容：
+
+- `chat.py` 通过 `_metadata_events_from_done()` 将 done metadata 拆成公开 SSE 事件。
+- 新增 `question_plan` SSE 事件，保持最终 `done` 事件不带完整 metadata。
+- `verify_chat_tools_real_e2e.py` 解析拆分后的 `selected_question` 和 `question_plan` 事件，并保留旧版 `done.metadata` fallback。
+
+验证命令：
+
+```bash
+DEPLOY_MIN_FREE_MB=512 ./deploy/docker-deploy.sh test -k "test_done_metadata_can_emit_question_plan_event or extract_case_result_reads_split_sse_question_events or extract_case_result_keeps_legacy_done_metadata_fallback" -q
+DEPLOY_MIN_FREE_MB=512 ./deploy/docker-deploy.sh update
+docker compose exec -T -e RUN_REAL_CHAT_E2E=1 backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
+```
+
+验证结果：
+
+```text
+Summary:
+- cases: 4
+- passed: 4
+- failed: 0
+- tool_call_rate: 75%
+- selected_question_rate: 75%
+- question_plan_rate: 75%
+- repair_count: 0
+- fallback_count: 0
+- leak_count: 0
+```
+
+说明：follow-up 负向场景按预期不调用抽题工具，因此整体工具/选题/计划命中率为 75%。部署前自动备份数据库到 `backups/interview-boss_20260622_155041.db`。
