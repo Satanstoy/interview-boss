@@ -1,13 +1,16 @@
 <template>
-  <div data-testid="login-page" class="h-dvh overflow-hidden bg-background">
+  <div data-testid="login-page" class="relative h-dvh overflow-hidden bg-background">
+    <a
+      data-testid="login-brand"
+      href="/login"
+      class="absolute left-4 top-4 inline-flex items-center gap-2 text-foreground sm:left-6 sm:top-6"
+    >
+      <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
+      <span class="text-base font-semibold tracking-tight">InterviewBoss</span>
+    </a>
+
     <main class="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col items-center justify-center px-4 py-4 sm:px-6">
       <section data-testid="login-panel" class="flex w-full max-w-[400px] flex-col items-center">
-        <div class="mb-5 flex flex-col items-center text-center">
-          <img src="/favicon-b.png" alt="InterviewBoss" class="h-12 w-12 object-contain" />
-          <h1 class="mt-3 text-2xl font-semibold tracking-tight text-foreground">InterviewBoss</h1>
-          <p class="mt-1 text-sm text-muted-foreground">JD / 面经 / 模拟面试，一处管理</p>
-        </div>
-
         <div class="w-full rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
           <div class="mb-5 text-center">
             <h2 class="text-lg font-semibold tracking-tight text-foreground">登录你的面试工作台</h2>

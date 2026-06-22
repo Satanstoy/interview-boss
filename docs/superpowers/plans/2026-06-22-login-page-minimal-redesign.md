@@ -295,8 +295,138 @@ Expected: commit succeeds on `master`.
 
 ---
 
+### Task 6: Move Brand to Top Left
+
+**Files:**
+- Modify: `frontend/src/components/business/LoginPage.vue`
+- Modify: `frontend/src/components/business/CLAUDE.md`
+- Modify: `docs/dev-log/2026-06-22-login-page-minimal-redesign.md`
+
+- [ ] **Step 1: Run failing browser assertion**
+
+Run from `frontend/` so Node resolves `@playwright/test`:
+
+```bash
+cd /home/ubuntu/sj/interview-boss/frontend && node --input-type=module - <<'JS'
+import { chromium } from '@playwright/test'
+const browser = await chromium.launch({ headless: true })
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+await page.goto('http://localhost/login', { waitUntil: 'networkidle' })
+const result = await page.evaluate(() => {
+  const brand = document.querySelector('[data-testid="login-brand"]')
+  const rect = brand?.getBoundingClientRect()
+  return {
+    hasSubtitle: document.body.textContent.includes('JD / 面经 / 模拟面试，一处管理'),
+    hasBrand: Boolean(brand),
+    brandLeft: rect?.left ?? null,
+    brandTop: rect?.top ?? null,
+    hasVerticalScroll: document.scrollingElement.scrollHeight > document.scrollingElement.clientHeight,
+  }
+})
+await browser.close()
+console.log(JSON.stringify(result))
+if (result.hasSubtitle) process.exit(1)
+if (!result.hasBrand) process.exit(2)
+if (result.brandLeft === null || result.brandLeft > 40) process.exit(3)
+if (result.brandTop === null || result.brandTop > 40) process.exit(4)
+if (result.hasVerticalScroll) process.exit(5)
+JS
+```
+
+Expected before implementation: FAIL because the current page still contains the subtitle and has no `[data-testid="login-brand"]` top-left brand node.
+
+- [ ] **Step 2: Update LoginPage template**
+
+In `frontend/src/components/business/LoginPage.vue`, replace the centered brand block with an absolutely positioned brand link before `<main>`, remove the subtitle, and keep the login card centered:
+
+```vue
+<template>
+  <div data-testid="login-page" class="relative h-dvh overflow-hidden bg-background">
+    <a
+      data-testid="login-brand"
+      href="/login"
+      class="absolute left-4 top-4 inline-flex items-center gap-2 text-foreground sm:left-6 sm:top-6"
+    >
+      <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
+      <span class="text-base font-semibold tracking-tight">InterviewBoss</span>
+    </a>
+
+    <main class="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col items-center justify-center px-4 py-4 sm:px-6">
+      <section data-testid="login-panel" class="flex w-full max-w-[400px] flex-col items-center">
+        <div class="w-full rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
+          <div class="mb-5 text-center">
+            <h2 class="text-lg font-semibold tracking-tight text-foreground">登录你的面试工作台</h2>
+            <p class="mt-1 text-sm text-muted-foreground">继续查看题库、面经和模拟面试记录</p>
+          </div>
+          <LoginModal embedded hide-header @login-success="$emit('login-success', $event)" />
+        </div>
+
+        <a
+          href="/master-bank?preview=1"
+          class="mt-3 inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background text-sm font-medium text-foreground shadow-sm transition hover:bg-muted"
+        >
+          无需登录，先体验工作台
+        </a>
+
+        <div class="mt-4 grid w-full grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
+          <span class="rounded-md border border-border/60 bg-muted/40 px-2 py-1.5">高频题库</span>
+          <span class="rounded-md border border-border/60 bg-muted/40 px-2 py-1.5">模拟面试</span>
+          <span class="rounded-md border border-border/60 bg-muted/40 px-2 py-1.5">复盘进度</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</template>
+```
+
+- [ ] **Step 3: Verify green, build, deploy, and commit**
+
+Run:
+
+```bash
+cd /home/ubuntu/sj/interview-boss/frontend && npm run build
+/home/ubuntu/sj/interview-boss/deploy/docker-deploy.sh frontend
+cd /home/ubuntu/sj/interview-boss/frontend && node --input-type=module - <<'JS'
+import { chromium } from '@playwright/test'
+const browser = await chromium.launch({ headless: true })
+for (const size of [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+  const page = await browser.newPage({ viewport: size })
+  await page.goto('http://localhost/login', { waitUntil: 'networkidle' })
+  const result = await page.evaluate(() => {
+    const brand = document.querySelector('[data-testid="login-brand"]')
+    const rect = brand?.getBoundingClientRect()
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      hasSubtitle: document.body.textContent.includes('JD / 面经 / 模拟面试，一处管理'),
+      hasBrand: Boolean(brand),
+      brandLeft: rect?.left ?? null,
+      brandTop: rect?.top ?? null,
+      hasVerticalScroll: document.scrollingElement.scrollHeight > document.scrollingElement.clientHeight,
+      formBottom: document.querySelector('section[data-testid="login-panel"]')?.getBoundingClientRect().bottom ?? null,
+      viewportHeight: innerHeight,
+    }
+  })
+  console.log(JSON.stringify(result))
+  if (result.hasSubtitle) process.exit(1)
+  if (!result.hasBrand) process.exit(2)
+  if (result.brandLeft === null || result.brandLeft > 40) process.exit(3)
+  if (result.brandTop === null || result.brandTop > 40) process.exit(4)
+  if (result.hasVerticalScroll) process.exit(5)
+  if (result.formBottom === null || result.formBottom > result.viewportHeight) process.exit(6)
+  await page.close()
+}
+await browser.close()
+JS
+git -C /home/ubuntu/sj/interview-boss add frontend/src/components/business/LoginPage.vue frontend/src/components/business/CLAUDE.md docs/dev-log/2026-06-22-login-page-minimal-redesign.md docs/superpowers/plans/2026-06-22-login-page-minimal-redesign.md
+git -C /home/ubuntu/sj/interview-boss commit -m "fix(frontend): pin login brand to top left" -m "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+Expected: build, deploy, browser verification, and commit all succeed.
+
+---
+
 ## Self-Review
 
-- Spec coverage: Covers simplified visual design, no-login preview CTA, three benefit chips, compact LoginModal header, viewport verification, docs, deploy, and commit.
+- Spec coverage: Covers simplified visual design, no-login preview CTA, three benefit chips, compact LoginModal header, the follow-up request to delete the subtitle, top-left brand positioning, viewport verification, docs, deploy, and commit.
 - Placeholder scan: No placeholders or vague instructions remain.
-- Type consistency: New prop is named `hideHeader` in code and used as `hide-header` in template, matching Vue prop casing conventions.
+- Type consistency: New prop is named `hideHeader` in code and used as `hide-header` in template, matching Vue prop casing conventions; new top-left brand uses `[data-testid="login-brand"]` consistently in assertions and template.

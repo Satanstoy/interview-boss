@@ -6,7 +6,9 @@ Light Exa research on AI interview and SaaS login/entry pages showed that compar
 
 ## Change
 
-- Replaced the dense split login page with a centered InterviewBoss brand area, login card, no-login preview CTA, and three short benefit chips.
+- Replaced the dense split login page with a compact login card, no-login preview CTA, and three short benefit chips.
+- Moved the favicon logo and `InterviewBoss` name to a top-left brand anchor so the logo remains visible at 100% browser zoom.
+- Removed the `JD / 面经 / 模拟面试，一处管理` subtitle to reduce visual clutter.
 - Added `hideHeader` to `LoginModal` embedded mode so the login page controls the visual hierarchy and keeps the form compact.
 - Kept existing password/email login behavior and the `/master-bank?preview=1` preview route.
 
