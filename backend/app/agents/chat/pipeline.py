@@ -413,6 +413,108 @@ def _infer_selected_question(
     return None, "candidate_not_explicitly_used"
 
 
+def _should_create_question_plan(state: ChatState) -> bool:
+    """Return True when this turn is expected to ask a new bank-backed question."""
+    intent = state.get("intent")
+    if intent == "practice_request":
+        return True
+    if intent == "interview_question" and state.get("answer_complete") is True:
+        return True
+    if state.get("question_type") == "algorithm_coding":
+        return True
+    user_message = str(state.get("user_message") or "")
+    return bool(re.search(r"(出题|来一道|换题|随机|手撕|代码题)", user_message))
+
+
+def _candidate_contains_negative_term(candidate: dict, negative_terms: list[str]) -> bool:
+    if not negative_terms:
+        return False
+    text = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("question", "cat1", "cat2", "tags")
+    ).lower()
+    return any(str(term or "").lower() in text for term in negative_terms if term)
+
+
+def _is_algorithm_candidate(candidate: dict) -> bool:
+    text = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("question", "cat1", "cat2", "tags")
+    )
+    return bool(re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru)", text, re.I))
+
+
+def _allowed_focus_from_question(question: dict) -> list[str]:
+    focus: list[str] = []
+    for field in ("cat2", "cat1", "tags"):
+        value = str(question.get(field) or "").strip()
+        if not value:
+            continue
+        for part in re.split(r"[,，、/\s]+", value):
+            part = part.strip()
+            if len(part) >= 2 and part not in focus:
+                focus.append(part)
+            if len(focus) >= 6:
+                return focus
+    for token in sorted(_tokenize_for_overlap(str(question.get("question") or "")))[:6]:
+        if token not in focus:
+            focus.append(token)
+    return focus[:6]
+
+
+def _select_question_for_plan(
+    state: ChatState,
+    candidates: list[dict],
+) -> tuple[dict | None, str]:
+    """Select one candidate for hard question-plan binding."""
+    negative_terms = state.get("search_negative_terms", []) or []
+    viable = [
+        q
+        for q in candidates
+        if isinstance(q, dict)
+        and q.get("id")
+        and q.get("question")
+        and not _candidate_contains_negative_term(q, negative_terms)
+    ]
+    if not viable:
+        return None, "no_viable_candidate"
+
+    if state.get("question_type") == "algorithm_coding":
+        for candidate in viable:
+            if _is_algorithm_candidate(candidate):
+                return candidate, "algorithm_candidate_match"
+
+    return viable[0], "top_ranked_candidate"
+
+
+def _maybe_create_question_plan(state: ChatState) -> dict | None:
+    """Create next_question_plan from current candidates when the turn needs a new question."""
+    if not _should_create_question_plan(state):
+        return None
+
+    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
+    selected, selection_reason = _select_question_for_plan(state, candidates)
+    if not selected:
+        state["question_plan_reason"] = selection_reason
+        return None
+
+    plan = {
+        "must_ask": True,
+        "question_id": selected.get("id"),
+        "question_text": str(selected.get("question") or ""),
+        "basis_type": "drawn_question" if state.get("question_source") == "draw" else "interview_question",
+        "source": state.get("question_source") or "search",
+        "strategy": state.get("intent") or "new_question",
+        "allowed_focus": _allowed_focus_from_question(selected),
+        "forbidden_focus": state.get("search_negative_terms", []) or [],
+        "selection_reason": selection_reason,
+    }
+    state["selected_question"] = selected
+    state["next_question_plan"] = plan
+    state["question_source_reason"] = "question_plan_bound"
+    return plan
+
+
 def _is_bare_coding_prompt(text: str, state: ChatState) -> bool:
     stripped = (text or "").strip()
     if len(stripped) > 40:

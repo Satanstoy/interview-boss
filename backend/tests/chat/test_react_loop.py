@@ -801,6 +801,67 @@ class TestFinalAnswerQuality:
         assert state["question_source_reason"] == "fallback_after_RuntimeError"
 
 
+class TestQuestionPlanHelpers:
+    def test_should_create_question_plan_for_practice_request(self):
+        from app.agents.chat.pipeline import _should_create_question_plan
+
+        state = {"intent": "practice_request", "answer_complete": False}
+        assert _should_create_question_plan(state) is True
+
+    def test_should_create_question_plan_for_complete_interview_answer(self):
+        from app.agents.chat.pipeline import _should_create_question_plan
+
+        state = {"intent": "interview_question", "answer_complete": True}
+        assert _should_create_question_plan(state) is True
+
+    def test_should_not_create_question_plan_for_follow_up_chat_or_end(self):
+        from app.agents.chat.pipeline import _should_create_question_plan
+
+        assert _should_create_question_plan({"intent": "follow_up", "answer_complete": False}) is False
+        assert _should_create_question_plan({"intent": "chat", "answer_complete": False}) is False
+        assert _should_create_question_plan({"intent": "end_interview", "answer_complete": False}) is False
+        assert _should_create_question_plan({"intent": "interview_question", "answer_complete": False}) is False
+
+    def test_select_question_for_plan_prefers_algorithm_candidate(self):
+        from app.agents.chat.pipeline import _select_question_for_plan
+
+        state = {"question_type": "algorithm_coding", "search_negative_terms": []}
+        candidates = [
+            {"id": 1, "question": "说说 Redis 持久化", "cat1": "后端", "cat2": "Redis", "tags": "redis"},
+            {"id": 2, "question": "实现 LRU Cache", "cat1": "E.算法与数据结构", "cat2": "E2.算法手撕", "tags": "代码,lru"},
+        ]
+
+        selected, reason = _select_question_for_plan(state, candidates)
+
+        assert selected["id"] == 2
+        assert reason == "algorithm_candidate_match"
+
+    def test_build_question_plan_sets_state_selected_question(self):
+        from app.agents.chat.pipeline import _maybe_create_question_plan
+
+        state = {
+            "intent": "practice_request",
+            "answer_complete": False,
+            "question_source": "search",
+            "search_negative_terms": ["HR"],
+        }
+        candidates = [
+            {"id": 7, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "tags": "检索,重排"}
+        ]
+        state["candidate_questions"] = candidates
+
+        plan = _maybe_create_question_plan(state)
+
+        assert plan["must_ask"] is True
+        assert plan["question_id"] == 7
+        assert plan["question_text"] == "RAG 检索怎么设计？"
+        assert plan["source"] == "search"
+        assert "RAG" in plan["allowed_focus"]
+        assert state["selected_question"]["id"] == 7
+        assert state["next_question_plan"]["question_id"] == 7
+        assert state["question_source_reason"] == "question_plan_bound"
+
+
 # ── TestBuildReactSystemPrompt ────────────────────────────
 
 
