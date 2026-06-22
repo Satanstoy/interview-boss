@@ -10,9 +10,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+import time
+
+from pydantic import ValidationError
 
 from app.agents.chat.state import ChatState
+from app.agents.chat.tool_gateway import (
+    DrawQuestionsInput,
+    SearchQuestionsInput,
+    build_error_envelope,
+    build_success_envelope,
+    normalize_question_item,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -281,14 +290,46 @@ def _execute_load_skill(args: dict, state: ChatState) -> str:
 
 
 async def _execute_search_questions(args: dict, state: ChatState) -> str:
-    """Search questions via hybrid_search, update state, return top 3."""
-    search_args: dict[str, Any] = {
-        "keywords": args.get("keywords", []),
-    }
+    """Search questions via hybrid_search, update state, return a tool envelope."""
+    started = time.monotonic()
+    try:
+        parsed_args = SearchQuestionsInput(**args)
+    except ValidationError:
+        total_ms = int((time.monotonic() - started) * 1000)
+        return json.dumps(
+            build_error_envelope(
+                tool="search_questions",
+                error_code="VALIDATION_ERROR",
+                message="Invalid search_questions arguments",
+                total_ms=total_ms,
+                debug_reason="validation_failed",
+            ),
+            ensure_ascii=False,
+        )
+
+    if not parsed_args.keywords and not state.get("search_query"):
+        total_ms = int((time.monotonic() - started) * 1000)
+        state["candidate_questions"] = []
+        state["retrieved_questions"] = []
+        state["question_source"] = "search"
+        state["question_source_reason"] = "search_questions_no_query"
+        return json.dumps(
+            build_error_envelope(
+                tool="search_questions",
+                error_code="NO_QUERY",
+                message="search_questions requires keywords or search_query",
+                total_ms=total_ms,
+                debug_reason="no_query",
+                empty_reason="no_query",
+            ),
+            ensure_ascii=False,
+        )
+
+    search_args: dict[str, object] = {"keywords": parsed_args.keywords}
     if state.get("search_query"):
         search_args["query_text"] = state["search_query"]
-    if args.get("question_type"):
-        search_args["question_type"] = args["question_type"]
+    if parsed_args.question_type:
+        search_args["question_type"] = parsed_args.question_type
     if state.get("question_type") and "question_type" not in search_args:
         search_args["question_type"] = state["question_type"]
     if state.get("job_position"):
@@ -306,32 +347,87 @@ async def _execute_search_questions(args: dict, state: ChatState) -> str:
         if exclude_ids:
             search_args["exclude_ids"] = exclude_ids
 
-    results = await asyncio.to_thread(_hybrid_search, **search_args)
+    try:
+        results = await asyncio.to_thread(_hybrid_search, **search_args)
+    except Exception:
+        logger.exception("search_questions service failed")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return json.dumps(
+            build_error_envelope(
+                tool="search_questions",
+                error_code="SERVICE_ERROR",
+                message="search_questions service failed",
+                total_ms=total_ms,
+                debug_reason="service_error",
+                empty_reason="service_unavailable",
+            ),
+            ensure_ascii=False,
+        )
+
     state["candidate_questions"] = results
     state["retrieved_questions"] = results
     state["question_source"] = "search"
     state["question_source_reason"] = "search_questions returned candidate questions"
-    return json.dumps(results[:3])
+
+    items = [
+        normalize_question_item(item, source="search", reason="rrf_ranked")
+        for item in results
+        if isinstance(item, dict) and item.get("id") and item.get("question")
+    ]
+    total_ms = int((time.monotonic() - started) * 1000)
+    envelope = build_success_envelope(
+        tool="search_questions",
+        items=items,
+        total_ms=total_ms,
+        debug_reason="hybrid_search_ok" if items else "no_match",
+        empty_reason=None if items else "no_match",
+    )
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 async def _execute_draw_questions(args: dict, state: ChatState) -> str:
-    """Draw random questions, update state, return results."""
+    """Draw random questions, update state, return a tool envelope."""
+    started = time.monotonic()
+    try:
+        parsed_args = DrawQuestionsInput(**args)
+    except ValidationError:
+        total_ms = int((time.monotonic() - started) * 1000)
+        return json.dumps(
+            build_error_envelope(
+                tool="draw_questions",
+                error_code="VALIDATION_ERROR",
+                message="Invalid draw_questions arguments",
+                total_ms=total_ms,
+                debug_reason="validation_failed",
+            ),
+            ensure_ascii=False,
+        )
+
     user_id = state.get("user_id")
     if not user_id:
-        return json.dumps({"error": "user_id is required for draw_questions"})
+        total_ms = int((time.monotonic() - started) * 1000)
+        return json.dumps(
+            build_error_envelope(
+                tool="draw_questions",
+                error_code="USER_REQUIRED",
+                message="user_id is required for draw_questions",
+                total_ms=total_ms,
+                debug_reason="missing_user_id",
+            ),
+            ensure_ascii=False,
+        )
 
-    draw_args: dict[str, Any] = {
+    draw_args: dict[str, object] = {
         "user": {
             "id": user_id,
             "bank_mode": state.get("bank_mode", "public"),
         },
-        "count": args.get("count", 3),
+        "count": parsed_args.count,
     }
-    if args.get("difficulty"):
-        draw_args["difficulty"] = args["difficulty"]
-    for key in ("cat1", "cat2", "topic", "question_type"):
-        if args.get(key):
-            draw_args[key] = args[key]
+    for key in ("difficulty", "cat1", "cat2", "topic", "question_type"):
+        value = getattr(parsed_args, key)
+        if value:
+            draw_args[key] = value
     if state.get("retrieved_questions"):
         exclude_ids = {
             q.get("id")
@@ -341,9 +437,39 @@ async def _execute_draw_questions(args: dict, state: ChatState) -> str:
         if exclude_ids:
             draw_args["exclude_ids"] = exclude_ids
 
-    results = await asyncio.to_thread(_draw_questions, **draw_args)
+    try:
+        results = await asyncio.to_thread(_draw_questions, **draw_args)
+    except Exception:
+        logger.exception("draw_questions service failed")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return json.dumps(
+            build_error_envelope(
+                tool="draw_questions",
+                error_code="SERVICE_ERROR",
+                message="draw_questions service failed",
+                total_ms=total_ms,
+                debug_reason="service_error",
+                empty_reason="service_unavailable",
+            ),
+            ensure_ascii=False,
+        )
+
     state["candidate_questions"] = results
     state["retrieved_questions"] = results
     state["question_source"] = "draw"
     state["question_source_reason"] = "draw_questions returned candidate questions"
-    return json.dumps(results)
+
+    items = [
+        normalize_question_item(item, source="draw", reason="weighted_draw")
+        for item in results
+        if isinstance(item, dict) and item.get("id") and item.get("question")
+    ]
+    total_ms = int((time.monotonic() - started) * 1000)
+    envelope = build_success_envelope(
+        tool="draw_questions",
+        items=items,
+        total_ms=total_ms,
+        debug_reason="weighted_draw_ok" if items else "no_match",
+        empty_reason=None if items else "no_match",
+    )
+    return json.dumps(envelope, ensure_ascii=False)

@@ -310,8 +310,14 @@ class TestExecuteToolSearchQuestions:
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert isinstance(parsed, list)
-        assert len(parsed) == 3  # top 3 only
+        assert parsed["ok"] is True
+        assert parsed["tool"] == "search_questions"
+        assert len(parsed["items"]) == 4
+        assert parsed["items"][0]["id"] == 1
+        assert parsed["items"][0]["source"] == "search"
+        assert parsed["metadata"]["result_count"] == 4
+        assert parsed["metadata"]["metrics"]["total_ms"] >= 0
+        assert parsed["error"] is None
         assert sample_state["retrieved_questions"] == mock_results
         assert sample_state["candidate_questions"] == mock_results
         assert sample_state["question_source"] == "search"
@@ -338,6 +344,46 @@ class TestExecuteToolSearchQuestions:
             question_type="knowledge_probe",
         )
 
+    async def test_search_empty_keywords_returns_no_query_envelope(self, sample_state):
+        from app.agents.chat.tools import execute_tool
+
+        tool_call = {
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps({"keywords": []}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert parsed["ok"] is False
+        assert parsed["tool"] == "search_questions"
+        assert parsed["items"] == []
+        assert parsed["error"]["error_code"] == "NO_QUERY"
+        assert parsed["metadata"]["empty_reason"] == "no_query"
+        assert sample_state.get("retrieved_questions") == []
+
+    async def test_search_service_error_returns_service_error_envelope(self, sample_state):
+        from app.agents.chat.tools import execute_tool
+
+        tool_call = {
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps({"keywords": ["RAG"]}),
+            }
+        }
+
+        with patch("app.agents.chat.tools._hybrid_search", side_effect=RuntimeError("db down")):
+            result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert parsed["ok"] is False
+        assert parsed["tool"] == "search_questions"
+        assert parsed["error"]["error_code"] == "SERVICE_ERROR"
+        assert parsed["metadata"]["empty_reason"] == "service_unavailable"
+        assert "db down" not in parsed["error"]["message"]
+
 
 # ── TestExecuteToolDrawQuestions ──────────────────────────
 
@@ -363,8 +409,14 @@ class TestExecuteToolDrawQuestions:
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert isinstance(parsed, list)
-        assert len(parsed) == 2
+        assert parsed["ok"] is True
+        assert parsed["tool"] == "draw_questions"
+        assert len(parsed["items"]) == 2
+        assert parsed["items"][0]["id"] == 10
+        assert parsed["items"][0]["source"] == "draw"
+        assert parsed["metadata"]["result_count"] == 2
+        assert parsed["metadata"]["metrics"]["total_ms"] >= 0
+        assert parsed["error"] is None
         assert sample_state["retrieved_questions"] == mock_results
         assert sample_state["candidate_questions"] == mock_results
         assert sample_state["question_source"] == "draw"
@@ -394,6 +446,43 @@ class TestExecuteToolDrawQuestions:
         assert mock_draw.call_args.kwargs["cat2"] == "E2.算法手撕"
         assert mock_draw.call_args.kwargs["topic"] == "LRU"
         assert mock_draw.call_args.kwargs["question_type"] == "algorithm_coding"
+
+    async def test_draw_missing_user_returns_user_required_envelope(self):
+        from app.agents.chat.tools import execute_tool
+
+        state = {"retrieved_questions": []}
+        tool_call = {
+            "function": {
+                "name": "draw_questions",
+                "arguments": json.dumps({"count": 1}),
+            }
+        }
+
+        result = await execute_tool(tool_call, state)
+
+        parsed = json.loads(result)
+        assert parsed["ok"] is False
+        assert parsed["tool"] == "draw_questions"
+        assert parsed["error"]["error_code"] == "USER_REQUIRED"
+        assert parsed["metadata"]["debug_reason"] == "missing_user_id"
+
+    async def test_draw_invalid_count_returns_validation_error_envelope(self, sample_state):
+        from app.agents.chat.tools import execute_tool
+
+        tool_call = {
+            "function": {
+                "name": "draw_questions",
+                "arguments": json.dumps({"count": 99}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert parsed["ok"] is False
+        assert parsed["tool"] == "draw_questions"
+        assert parsed["error"]["error_code"] == "VALIDATION_ERROR"
+        assert parsed["metadata"]["debug_reason"] == "validation_failed"
 
     async def test_unknown_tool_returns_error(self, sample_state):
         """execute_tool should return error for unknown tool names."""
