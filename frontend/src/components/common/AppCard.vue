@@ -2,7 +2,7 @@
   <Card
     :class="cn(
       'transition-colors duration-200',
-      hover && 'hover:border-surface-300 dark:hover:border-ink-700 hover:shadow-md',
+      hover && 'hover:border-border hover:shadow-md',
       noPadding ? 'p-0 gap-0' : '',
       props.class
     )"
@@ -15,10 +15,10 @@
       )"
     >
       <slot name="header">
-        <CardTitle v-if="title" class="text-ink-900 dark:text-ink-50">
+        <CardTitle v-if="title" class="text-foreground">
           <slot name="card-title">{{ title }}</slot>
         </CardTitle>
-        <CardDescription v-if="description" class="text-ink-500 dark:text-ink-400">
+        <CardDescription v-if="description" class="text-muted-foreground">
           {{ description }}
         </CardDescription>
       </slot>

@@ -176,7 +176,7 @@
         </div>
 
         <!-- Evaluation result -->
-        <div v-if="qState._evaluation" class="border-t border-border bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-surface-800 overflow-y-auto custom-scrollbar" style="max-height: 55%;">
+        <div v-if="qState._evaluation" class="border-t border-border bg-gradient-to-b from-primary-50/30 to-background dark:from-primary-900/20 overflow-y-auto custom-scrollbar" style="max-height: 55%;">
           <div class="p-5 flex flex-col gap-4">
             <!-- Overall score -->
             <div class="flex items-center gap-4">

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   taxonomy: { type: Object, default: () => ({ categories: [] }) },
@@ -241,12 +242,13 @@ const onRebuild = () => {
                   <h4 class="text-sm font-semibold text-foreground">{{ tax.position_name }}</h4>
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-muted-foreground">分享者: {{ tax.owner_name || '匿名' }}</span>
-                    <Button v-if="isAdmin" variant="ghost" size="icon-sm"
-                      @click.stop="onDeletePublic(tax)"
-                      class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200"
-                      title="删除此公开分类">
-                      <Trash2 class="size-4" />
-                    </Button>
+                    <AppTooltip v-if="isAdmin" text="删除此公开分类">
+                      <Button variant="ghost" size="icon-sm"
+                        @click.stop="onDeletePublic(tax)"
+                        class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200">
+                        <Trash2 class="size-4" />
+                      </Button>
+                    </AppTooltip>
                   </div>
                 </div>
                 <div class="flex flex-wrap gap-1.5">

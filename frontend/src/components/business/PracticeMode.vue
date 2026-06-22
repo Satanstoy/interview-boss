@@ -3,9 +3,11 @@
     <!-- TOP BAR -->
     <div class="h-12 flex items-center justify-between px-4 border-b border-border bg-muted dark:bg-background shrink-0">
       <div class="flex items-center gap-2 min-w-0 flex-1 mr-3">
-        <button @click="showDirectory = !showDirectory" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition shrink-0" title="题目目录">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
-        </button>
+        <AppTooltip text="题目目录">
+          <button @click="showDirectory = !showDirectory" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition shrink-0">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+        </AppTooltip>
         <span class="text-xs font-bold tabular-nums text-primary-600 dark:text-primary-400 shrink-0">{{ currentIndex + 1 }}/{{ questions.length }}</span>
         <h2 class="text-sm font-bold text-foreground truncate">{{ currentQ.question }}</h2>
         <Badge variant="outline" class="text-[10px] shrink-0"
@@ -16,23 +18,33 @@
         <span v-if="currentQ.cat2" class="text-[10px] text-muted-foreground shrink-0 hidden md:inline">{{ currentQ.cat2 }}</span>
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
-        <button @click="toggleStar" class="p-1.5 rounded-lg transition" :class="currentQ.is_starred ? 'text-amber-500' : 'text-muted-foreground/50 hover:text-amber-400'">
-          <svg class="size-4" :fill="currentQ.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
-        </button>
+        <AppTooltip :text="currentQ.is_starred ? '取消收藏' : '收藏'">
+          <button @click="toggleStar" class="p-1.5 rounded-lg transition" :class="currentQ.is_starred ? 'text-amber-500' : 'text-muted-foreground/50 hover:text-amber-400'">
+            <svg class="size-4" :fill="currentQ.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+          </button>
+        </AppTooltip>
         <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
-        <button @click="goRandom" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition" title="随机跳题">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        </button>
-        <button @click="goPrev" :disabled="currentIndex === 0" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition disabled:opacity-30 disabled:cursor-not-allowed" title="上一题 (Alt+←)">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-        </button>
-        <button @click="goNext" :disabled="currentIndex >= questions.length - 1" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition disabled:opacity-30 disabled:cursor-not-allowed" title="下一题 (Alt+→)">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-        </button>
+        <AppTooltip text="随机跳题">
+          <button @click="goRandom" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+        </AppTooltip>
+        <AppTooltip text="上一题 (Alt+←)">
+          <button @click="goPrev" :disabled="currentIndex === 0" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition disabled:opacity-30 disabled:cursor-not-allowed">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+        </AppTooltip>
+        <AppTooltip text="下一题 (Alt+→)">
+          <button @click="goNext" :disabled="currentIndex >= questions.length - 1" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition disabled:opacity-30 disabled:cursor-not-allowed">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </AppTooltip>
         <div class="w-px h-5 bg-muted dark:bg-muted mx-1"></div>
-        <button @click="emit('close')" class="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition" title="退出刷题 (Esc)">
-          <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
+        <AppTooltip text="退出刷题 (Esc)">
+          <button @click="emit('close')" class="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+            <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </AppTooltip>
       </div>
     </div>
 
@@ -130,9 +142,11 @@
                     <span class="text-primary-300 dark:text-primary-600 mx-0.5">|</span>
                     {{ src.round === '未提供' ? '未知轮次' : src.round }}
                   </span>
-                  <a v-if="src.url" :href="src.url" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors duration-200" title="在新窗口打开">
-                    <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                  </a>
+                  <AppTooltip v-if="src.url" text="在新窗口打开">
+                    <a :href="src.url" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors duration-200">
+                      <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                    </a>
+                  </AppTooltip>
                 </span>
               </div>
             </div>
@@ -265,7 +279,7 @@
           </button>
 
           <!-- Console content -->
-          <div v-if="consoleExpanded" class="flex-1 overflow-y-auto custom-scrollbar bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-surface-800">
+          <div v-if="consoleExpanded" class="flex-1 overflow-y-auto custom-scrollbar bg-gradient-to-b from-primary-50/30 to-white dark:from-primary-900/20 dark:to-background">
             <div class="p-5 flex flex-col gap-4">
               <!-- Overall score -->
               <div class="flex items-center gap-4">
@@ -333,6 +347,7 @@ import { useToast } from '@/composables/useNotification.js'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import Button from '@/components/ui/button/Button.vue'
 import { Badge } from '@/components/ui/badge'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const toast = useToast()
 

@@ -4,6 +4,7 @@ import { onMounted } from 'vue'
 import { Toaster } from 'vue-sonner'
 import { useAuth } from '@/composables/useAuth.js'
 import { markAuthReady } from '@/router/index.js'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 const { initAuth } = useAuth()
 
@@ -18,6 +19,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <router-view />
-  <Toaster position="top-right" richColors closeButton />
+  <TooltipProvider :delay-duration="120" :skip-delay-duration="80">
+    <router-view />
+    <Toaster position="top-right" richColors closeButton />
+  </TooltipProvider>
 </template>

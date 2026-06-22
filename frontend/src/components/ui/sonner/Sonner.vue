@@ -52,7 +52,7 @@ const props = defineProps({
     }"
     :toast-options="{
       classes: {
-        toast: 'rounded-2xl',
+        toast: 'rounded-xl',
       },
     }"
     v-bind="props"

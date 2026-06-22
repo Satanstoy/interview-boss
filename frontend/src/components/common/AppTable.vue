@@ -8,16 +8,16 @@
       >
         <div class="flex items-center gap-2.5">
           <Loader2 class="h-5 w-5 animate-spin text-primary" />
-          <span class="text-sm font-medium text-ink-600 dark:text-ink-300">加载中...</span>
+          <span class="text-sm font-medium text-muted-foreground">加载中...</span>
         </div>
       </div>
 
       <TableHeader>
-        <TableRow class="bg-surface-50/50 dark:bg-ink-800/50 hover:bg-surface-50/50 dark:hover:bg-ink-800/50">
+        <TableRow class="bg-muted/50 hover:bg-muted/50">
           <TableHead
             v-for="col in columns"
             :key="col.key"
-            class="px-4 text-ink-500 dark:text-ink-400"
+            class="px-4 text-muted-foreground"
             :class="col.headerClass || ''"
             :style="col.width ? { width: col.width } : {}"
           >
@@ -37,7 +37,7 @@
             <TableCell
               v-for="col in columns"
               :key="col.key"
-              class="p-4 text-ink-700 dark:text-ink-200"
+              class="p-4 text-foreground"
               :class="col.cellClass || ''"
               :style="col.width ? { width: col.width } : {}"
             >
@@ -50,11 +50,11 @@
 
         <TableEmpty v-else-if="!loading" :colspan="columns.length">
           <div class="flex flex-col items-center justify-center text-center">
-            <div class="size-14 mb-4 rounded-2xl bg-surface-100 dark:bg-ink-800 flex items-center justify-center">
-              <Inbox class="size-7 text-ink-300 dark:text-ink-600" />
+            <div class="size-14 mb-4 rounded-xl bg-muted flex items-center justify-center">
+              <Inbox class="size-7 text-muted-foreground/50" />
             </div>
-            <p class="text-sm font-medium text-ink-600 dark:text-ink-400 mb-1">{{ emptyText }}</p>
-            <p v-if="emptyDescription" class="text-xs text-ink-400 dark:text-ink-500">{{ emptyDescription }}</p>
+            <p class="text-sm font-medium text-muted-foreground mb-1">{{ emptyText }}</p>
+            <p v-if="emptyDescription" class="text-xs text-muted-foreground/80">{{ emptyDescription }}</p>
           </div>
         </TableEmpty>
       </TableBody>

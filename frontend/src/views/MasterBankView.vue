@@ -36,69 +36,72 @@
     </div>
 
     <!-- MasterBank content -->
-    <div v-if="masterBankEverShown" class="flex flex-col flex-1 min-h-0 gap-2">
+    <div v-if="masterBankEverShown" class="flex flex-col flex-1 min-h-0 gap-3">
       <!-- ══ 固定区域（不滚动） ══ -->
+      <div class="rounded-xl border border-border bg-card p-3 shadow-sm flex flex-col gap-3 shrink-0">
+        <!-- SearchFilterBar -->
+        <SearchFilterBar
+          :search-query="searchQuery"
+          :filter-difficulty="filterDifficulty"
+          :framed="false"
+          @update:search-query="searchQuery = $event"
+          @update:filter-difficulty="filterDifficulty = $event"
+        />
 
-      <!-- SearchFilterBar -->
-      <SearchFilterBar
-        :search-query="searchQuery"
-        :filter-difficulty="filterDifficulty"
-        @update:search-query="searchQuery = $event"
-        @update:filter-difficulty="filterDifficulty = $event"
-      />
-
-      <!-- BatchActionPanel (全选/反选 + 操作) -->
-      <BatchActionPanel
-        :selected-count="masterSelection.selectedCount.value"
-        :total-count="filteredMasterBank.length"
-        :actions="masterBatchActions"
-        @toggle-select-all="masterSelection.toggleSelectAll()"
-        @invert-selection="masterSelection.invertSelection()"
-      >
-        <div class="w-px h-5 bg-muted mx-1"></div>
-        <Button @click="masterBankRef?.expandAll()" variant="ghost" size="sm" class="text-xs">全部展开</Button>
-        <Button @click="masterBankRef?.collapseAll()" variant="ghost" size="sm" class="text-xs">全部收起</Button>
-        <template #right>
-          <div class="flex flex-wrap items-center gap-2">
-            <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
-              {{ isBuilding ? '重建中...' : '重建题库' }}
-            </Button>
-            <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
-              {{ isBuilding ? '重建中...' : '重建题库' }}
-            </Button>
-            <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
-              刷题模式
-            </Button>
-            <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
-              刷新
-            </Button>
-          </div>
-        </template>
-      </BatchActionPanel>
-
-      <!-- Category tags (horizontal scroll) -->
-      <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
-        <button
-          @click="onSelectTag('全部')"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap shrink-0"
-          :class="selectedTag === '全部'
-            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
-            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+        <!-- BatchActionPanel (全选/反选 + 操作) -->
+        <BatchActionPanel
+          :selected-count="masterSelection.selectedCount.value"
+          :total-count="filteredMasterBank.length"
+          :actions="masterBatchActions"
+          :framed="false"
+          @toggle-select-all="masterSelection.toggleSelectAll()"
+          @invert-selection="masterSelection.invertSelection()"
         >
-          全部
-          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBankOverallTotal || masterBank.length }}</span>
-        </button>
-        <button
-          v-for="(count, topic) in categoryCounts" :key="topic"
-          @click="onSelectTag(topic)"
-          class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group whitespace-nowrap shrink-0"
-          :class="selectedTag === topic
-            ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
-            : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
-        >
-          {{ topic }}
-          <span class="ml-1 opacity-60 font-mono tabular-nums">{{ count }}</span>
-        </button>
+          <div class="w-px h-5 bg-muted mx-1"></div>
+          <Button @click="masterBankRef?.expandAll()" variant="ghost" size="sm" class="text-xs">全部展开</Button>
+          <Button @click="masterBankRef?.collapseAll()" variant="ghost" size="sm" class="text-xs">全部收起</Button>
+          <template #right>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button v-if="displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildMasterBank" :disabled="isBuilding">
+                {{ isBuilding ? '重建中...' : '重建题库' }}
+              </Button>
+              <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
+                {{ isBuilding ? '重建中...' : '重建题库' }}
+              </Button>
+              <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
+                刷题模式
+              </Button>
+              <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
+                刷新
+              </Button>
+            </div>
+          </template>
+        </BatchActionPanel>
+
+        <!-- Category tags (horizontal scroll) -->
+        <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
+          <button
+            @click="onSelectTag('全部')"
+            class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap shrink-0"
+            :class="selectedTag === '全部'
+              ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
+              : 'bg-background dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+          >
+            全部
+            <span class="ml-1 opacity-60 font-mono tabular-nums">{{ masterBankOverallTotal || masterBank.length }}</span>
+          </button>
+          <button
+            v-for="(count, topic) in categoryCounts" :key="topic"
+            @click="onSelectTag(topic)"
+            class="text-xs px-2.5 py-1.5 rounded-lg border transition-all duration-200 group whitespace-nowrap shrink-0"
+            :class="selectedTag === topic
+              ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
+              : 'bg-background dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:text-primary dark:hover:text-primary'"
+          >
+            {{ topic }}
+            <span class="ml-1 opacity-60 font-mono tabular-nums">{{ count }}</span>
+          </button>
+        </div>
       </div>
 
       <div class="flex flex-col flex-1 min-h-0">
@@ -131,7 +134,7 @@
           @load-more="loadMoreMasterBank"
         >
           <template #scroll-header>
-            <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-3">
+            <div v-if="selectedTag !== '全部' && availableSubTags.length > 0" class="flex flex-wrap gap-2 mb-3 rounded-xl border border-border bg-card p-3 shadow-sm">
               <span class="text-xs text-muted-foreground self-center mr-1 font-medium">子标签：</span>
               <button
                 v-for="st in availableSubTags"
@@ -140,7 +143,7 @@
                 class="text-xs px-2.5 py-1 rounded-lg border transition-all duration-200"
                 :class="selectedSubTags.includes(st.tag)
                   ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 font-semibold shadow-sm'
-                  : 'bg-white dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
+                  : 'bg-background dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted hover:border-border dark:hover:border-border'"
               >
                 {{ st.tag }}
                 <span class="ml-1 opacity-50">{{ st.count }}</span>

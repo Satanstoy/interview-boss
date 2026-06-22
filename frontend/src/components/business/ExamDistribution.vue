@@ -24,7 +24,7 @@
     <Transition name="collapse">
       <div v-if="!isCollapsed" class="border-t border-border">
         <div class="p-4">
-          <div v-if="masterBank.length === 0" class="w-full h-[200px] flex items-center justify-center text-ink-400 dark:text-ink-500 text-xs">暂无数据</div>
+          <div v-if="masterBank.length === 0" class="w-full h-[200px] flex items-center justify-center text-muted-foreground text-xs">暂无数据</div>
           <div v-else ref="chartRef" class="w-full h-[300px]" style="min-width: 0;"></div>
         </div>
       </div>

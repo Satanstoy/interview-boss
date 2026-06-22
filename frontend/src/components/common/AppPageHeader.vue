@@ -2,22 +2,22 @@
   <div class="flex flex-col gap-4">
     <!-- Breadcrumb navigation -->
     <nav v-if="breadcrumbs && breadcrumbs.length" aria-label="breadcrumb">
-      <ol class="flex items-center gap-1.5 text-sm text-ink-500 dark:text-ink-400">
+      <ol class="flex items-center gap-1.5 text-sm text-muted-foreground">
         <li v-for="(crumb, idx) in breadcrumbs" :key="idx" class="flex items-center gap-1.5">
           <template v-if="idx > 0">
-            <svg class="size-3.5 text-ink-300 dark:text-ink-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="size-3.5 text-muted-foreground/50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </template>
           <button
             v-if="crumb.to"
             type="button"
-            class="hover:text-ink-800 dark:hover:text-ink-200 transition-colors bg-transparent border-none p-0 cursor-pointer"
+            class="hover:text-foreground transition-colors bg-transparent border-none p-0 cursor-pointer"
             @click="handleNavigate(crumb)"
           >
             {{ crumb.label }}
           </button>
-          <span v-else class="text-ink-800 dark:text-ink-200 font-medium">{{ crumb.label }}</span>
+          <span v-else class="text-foreground font-medium">{{ crumb.label }}</span>
         </li>
       </ol>
     </nav>
@@ -29,7 +29,7 @@
         <div v-if="showBackButton" class="mb-2">
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 text-sm font-medium text-ink-500 dark:text-ink-400 hover:text-ink-800 dark:hover:text-ink-200 transition-colors"
+            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             @click="handleBack"
           >
             <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -40,12 +40,12 @@
         </div>
 
         <!-- Title -->
-        <h1 class="text-2xl font-bold tracking-tight text-ink-900 dark:text-ink-50">
+        <h1 class="text-2xl font-bold tracking-tight text-foreground">
           <slot name="title">{{ title }}</slot>
         </h1>
 
         <!-- Description -->
-        <p v-if="description || $slots.description" class="mt-1.5 text-sm text-ink-500 dark:text-ink-400 max-w-2xl">
+        <p v-if="description || $slots.description" class="mt-1.5 text-sm text-muted-foreground max-w-2xl">
           <slot name="description">{{ description }}</slot>
         </p>
       </div>

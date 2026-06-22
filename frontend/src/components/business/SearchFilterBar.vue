@@ -1,5 +1,9 @@
 <template>
-  <div class="rounded-xl border border-border bg-background shadow-sm p-3 mb-3">
+  <div
+    :class="[
+      framed && 'rounded-xl border border-border bg-card p-3 shadow-sm'
+    ]"
+  >
     <div class="flex flex-wrap gap-3 items-center">
       <!-- Search input using AppSearchForm pattern -->
       <div class="flex-1 min-w-[200px] relative">
@@ -55,6 +59,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 const props = defineProps({
   searchQuery: { type: String, default: '' },
   filterDifficulty: { type: String, default: '' },
+  framed: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:searchQuery', 'update:filterDifficulty'])

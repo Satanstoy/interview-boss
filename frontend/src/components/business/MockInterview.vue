@@ -130,9 +130,11 @@
                 </span>
                 <span v-if="q.attempt_count > 0" class="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs px-2 py-0.5 rounded font-medium">已刷 {{ q.attempt_count }} 次</span>
                 <span v-else class="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs px-2 py-0.5 rounded font-medium">新题</span>
-                <button @click="handleToggleStar(q)" class="text-lg ml-1 transition-transform hover:scale-125" :title="q.is_starred ? '取消收藏' : '收藏'">
-                  {{ q.is_starred ? '★' : '☆' }}
-                </button>
+                <AppTooltip :text="q.is_starred ? '取消收藏' : '收藏'">
+                  <button @click="handleToggleStar(q)" class="text-lg ml-1 transition-transform hover:scale-125">
+                    {{ q.is_starred ? '★' : '☆' }}
+                  </button>
+                </AppTooltip>
                 <span class="text-xs text-muted-foreground ml-auto">频率 {{ q.frequency }}</span>
               </div>
               <h3 class="text-base lg:text-lg font-bold text-foreground leading-snug">{{ q.question }}</h3>
@@ -339,6 +341,7 @@ import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '@/api/index.js'
 import { sanitizeAgainstInjection, validateNumber } from '@/utils/validate.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()

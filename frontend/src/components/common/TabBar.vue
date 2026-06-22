@@ -18,7 +18,7 @@
       </TabsList>
     </Tabs>
     <!-- Scroll hint gradient (right edge, mobile only) -->
-    <div class="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white/80 dark:from-surface-800/80 to-transparent pointer-events-none sm:hidden"></div>
+    <div class="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background/80 to-transparent pointer-events-none sm:hidden"></div>
   </div>
 </template>
 

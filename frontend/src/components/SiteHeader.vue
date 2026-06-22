@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Settings } from '@lucide/vue'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   activeTabLabel: {
@@ -121,16 +122,17 @@ const onCloseJob = (jobId) => {
       </span>
 
       <!-- Settings button -->
-      <Button
-        variant="ghost"
-        size="icon"
-        class="inline-flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-        @click="emit('show-settings')"
-        title="设置"
-      >
-        <Settings class="h-4 w-4" />
-        <span class="sr-only">设置</span>
-      </Button>
+      <AppTooltip text="设置">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="inline-flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          @click="emit('show-settings')"
+        >
+          <Settings class="h-4 w-4" />
+          <span class="sr-only">设置</span>
+        </Button>
+      </AppTooltip>
     </div>
   </header>
 </template>

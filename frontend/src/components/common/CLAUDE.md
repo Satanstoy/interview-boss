@@ -14,6 +14,7 @@
 | `AppPageHeader.vue` | 页面头（breadcrumbs/title/description/actions 卡槽，back 按钮） |
 | `AppSearchForm.vue` | 搜索表单（modelValue/placeholder props，filters 卡槽） |
 | `AppTable.vue` | 数据表格（columns/rows/loading/emptyText props，cell 卡槽） |
+| `AppTooltip.vue` | 统一悬停提示（底层 shadcn Tooltip，text/content slot） |
 | `BaseModal.vue` | 通用弹窗（动画、遮罩、关闭） |
 | `BatchActionPanel.vue` | 批量操作栏 |
 | `ConfirmDialog.vue` | 确认对话框 |
@@ -29,6 +30,8 @@
 - **Props 驱动**：通过 props 接收数据，通过 emit 向外通信
 - **可复用**：组件应该能在不同页面/场景中复用
 - **视觉基线**：通用表格、按钮、Tab、分页优先保持 shadcn-vue 式细边框、低阴影、紧凑密度和明确 hover/selected 状态。
+- **Tooltip 入口**：hover 气泡统一使用 `AppTooltip.vue`，内容样式由 `components/ui/tooltip/TooltipContent.vue` 和 `App.vue` 的 `TooltipProvider` 控制。
+- **DataTable 外壳**：`DataTable.vue` 负责表格圆角裁切、`min-w-0` 和 `table-fixed` 宽度约束；业务页面不要再包额外的方形表格背景。
 
 ## 修改后必做
 

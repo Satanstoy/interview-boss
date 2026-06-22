@@ -82,7 +82,7 @@
           :enter="{ opacity: 1, y: 0, transition: { duration: 400, easing: [0.25, 0.46, 0.45, 0.94] } }"
           class="flex flex-col items-center max-w-2xl mx-auto px-6"
         >
-          <div class="size-20 mx-auto mb-6 rounded-2xl bg-primary/10 flex items-center justify-center">
+          <div class="size-20 mx-auto mb-6 rounded-xl bg-primary/10 flex items-center justify-center">
             <MessageSquare :size="40" class="text-primary" />
           </div>
           <h2 class="text-3xl font-bold text-foreground mb-3 text-center">开始模拟面试</h2>
@@ -121,23 +121,27 @@
               @keydown.esc.prevent="cancelHeaderRename"
               @blur="saveHeaderRename"
             />
-            <Button type="submit" variant="ghost" size="icon-xs" title="保存标题">
-              <Check :size="14" />
-            </Button>
-            <Button type="button" variant="ghost" size="icon-xs" title="取消" @mousedown.prevent @click="cancelHeaderRename">
-              <X :size="14" />
-            </Button>
+            <AppTooltip text="保存标题">
+              <Button type="submit" variant="ghost" size="icon-xs">
+                <Check :size="14" />
+              </Button>
+            </AppTooltip>
+            <AppTooltip text="取消">
+              <Button type="button" variant="ghost" size="icon-xs" @mousedown.prevent @click="cancelHeaderRename">
+                <X :size="14" />
+              </Button>
+            </AppTooltip>
           </form>
-          <button
-            v-else
-            type="button"
-            @click="startHeaderRename"
-            class="group flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-muted/70 transition-colors"
-            title="重命名对话"
-          >
-            <span class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</span>
-            <Pencil :size="13" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
+          <AppTooltip v-else text="重命名对话">
+            <button
+              type="button"
+              @click="startHeaderRename"
+              class="group flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-muted/70 transition-colors"
+            >
+              <span class="truncate text-sm font-semibold text-foreground">{{ activeConversationTitle }}</span>
+              <Pencil :size="13" class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          </AppTooltip>
         </div>
         <span class="shrink-0 bg-muted/60 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground">{{ activeConversationMode }}</span>
       </div>
@@ -250,7 +254,7 @@
       <div class="shrink-0">
         <div class="max-w-3xl mx-auto px-6 pb-4">
           <form @submit.prevent="handleSend">
-            <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-2xl">
+            <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-xl">
               <!-- Textarea -->
               <textarea
                 ref="inputRef"
@@ -268,13 +272,14 @@
               <div class="flex items-center justify-between gap-2">
                 <div class="flex items-center gap-1">
                   <!-- Attachment button -->
-                  <button
-                    type="button"
-                    class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
-                    title="上传文件"
-                  >
-                    <Paperclip :size="16" />
-                  </button>
+                  <AppTooltip text="上传文件">
+                    <button
+                      type="button"
+                      class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+                    >
+                      <Paperclip :size="16" />
+                    </button>
+                  </AppTooltip>
                   <!-- Model selector -->
                   <ModelSelector
                     :current-model="selectedModel"
@@ -362,6 +367,7 @@ import ChatMessage from './ChatMessage.vue'
 import ReasoningTimeline from './ReasoningTimeline.vue'
 import NewChatModal from './NewChatModal.vue'
 import ModelSelector from './ModelSelector.vue'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 import * as chatApi from '@/services/chatApi.js'
 
 const props = defineProps({

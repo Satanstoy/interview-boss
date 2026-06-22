@@ -1,5 +1,5 @@
 <template>
-  <div class="w-full">
+  <div class="w-full min-w-0">
     <BatchActionPanel
       :selected-count="selectedCount"
       :total-count="rows.length"
@@ -8,54 +8,56 @@
       @invert-selection="$emit('invert-selection')"
     />
 
-    <Table class="rounded-xl border border-border bg-card shadow-sm">
-      <TableHeader>
-        <TableRow class="bg-card text-muted-foreground text-xs border-border">
+    <div class="w-full min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <Table class="min-w-full table-fixed">
+        <TableHeader>
+          <TableRow class="bg-muted/40 text-muted-foreground text-xs border-border hover:bg-muted/40">
           <TableHead class="h-10 px-3 text-center w-10">选择</TableHead>
           <TableHead v-for="col in columns" :key="col.key" class="h-10 px-3" :class="col.class || ''" :style="col.width ? { width: col.width } : {}">
             {{ col.label }}
           </TableHead>
           <TableHead class="h-10 px-3 text-center w-[100px]">操作</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody v-auto-animate>
-        <TableRow v-for="(row, idx) in paginatedRows" :key="row.id"
-          :data-row-id="row.id"
-          class="text-sm animate-fade-in"
-          :class="[
-            highlightId != null && highlightId == row.id ? 'highlight-row' : '',
-            isSelected(row.id) ? 'bg-muted/80 dark:bg-card/70' : 'bg-background'
-          ]"
-          :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
-        >
-          <TableCell class="px-3 py-2.5 text-center">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
-              class="size-4 text-primary-600 rounded-md border-border focus:ring-primary-500 cursor-pointer transition">
-          </TableCell>
-          <TableCell v-for="col in columns" :key="col.key" class="px-3 py-2.5 break-words text-foreground" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
-            <slot :name="'cell-' + col.key" :row="row" :value="row[col.frontendKey || col.key]">
-              {{ row[col.frontendKey || col.key] }}
-            </slot>
-          </TableCell>
-          <TableCell class="px-3 py-2.5 text-center">
-            <slot name="actions" :row="row" />
-          </TableCell>
-        </TableRow>
-        <TableRow v-if="rows.length === 0">
-          <TableCell :colspan="columns.length + 2" class="p-0">
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Inbox />
-                </EmptyMedia>
-                <EmptyTitle>暂无数据</EmptyTitle>
-                <EmptyDescription>试试切换筛选条件或录入更多内容</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </TableCell>
-        </TableRow>
-      </TableBody>
-    </Table>
+          </TableRow>
+        </TableHeader>
+        <TableBody v-auto-animate>
+          <TableRow v-for="(row, idx) in paginatedRows" :key="row.id"
+            :data-row-id="row.id"
+            class="text-sm animate-fade-in"
+            :class="[
+              highlightId != null && highlightId == row.id ? 'highlight-row' : '',
+              isSelected(row.id) ? 'bg-muted/80 dark:bg-card/70' : 'bg-background'
+            ]"
+            :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
+          >
+            <TableCell class="px-3 py-2.5 text-center whitespace-nowrap">
+              <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
+                class="size-4 text-primary-600 rounded-md border-border focus:ring-primary-500 cursor-pointer transition">
+            </TableCell>
+            <TableCell v-for="col in columns" :key="col.key" class="px-3 py-2.5 whitespace-normal break-words text-foreground" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
+              <slot :name="'cell-' + col.key" :row="row" :value="row[col.frontendKey || col.key]">
+                {{ row[col.frontendKey || col.key] }}
+              </slot>
+            </TableCell>
+            <TableCell class="px-3 py-2.5 text-center whitespace-nowrap">
+              <slot name="actions" :row="row" />
+            </TableCell>
+          </TableRow>
+          <TableRow v-if="rows.length === 0">
+            <TableCell :colspan="columns.length + 2" class="p-0">
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Inbox />
+                  </EmptyMedia>
+                  <EmptyTitle>暂无数据</EmptyTitle>
+                  <EmptyDescription>试试切换筛选条件或录入更多内容</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
     <Pagination
       v-if="totalPages > 1"

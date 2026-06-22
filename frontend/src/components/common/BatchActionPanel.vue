@@ -1,5 +1,10 @@
 <template>
-  <div class="mb-2 flex flex-wrap gap-2 items-center bg-card p-2 rounded-xl border border-border shadow-sm">
+  <div
+    :class="[
+      'flex flex-wrap gap-2 items-center',
+      framed && 'rounded-xl border border-border bg-card p-2 shadow-sm'
+    ]"
+  >
     <Button @click="$emit('toggle-select-all')" variant="ghost" size="sm" class="text-xs">
       <CheckSquare class="size-3.5" />
       全选
@@ -44,7 +49,8 @@ import { CheckSquare, ArrowLeftRight } from '@lucide/vue'
 defineProps({
   selectedCount: { type: Number, default: 0 },
   totalCount: { type: Number, default: 0 },
-  actions: { type: Array, default: () => [] }
+  actions: { type: Array, default: () => [] },
+  framed: { type: Boolean, default: true },
 })
 
 defineEmits(['toggle-select-all', 'invert-selection'])

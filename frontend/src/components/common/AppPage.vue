@@ -6,7 +6,7 @@
         <div v-if="showBackButton" class="mb-3">
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 text-sm font-medium text-ink-500 dark:text-ink-400 hover:text-ink-800 dark:hover:text-ink-200 transition-colors"
+            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             @click="handleBack"
           >
             <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -18,10 +18,10 @@
 
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div class="min-w-0">
-            <h1 class="text-2xl font-bold tracking-tight text-ink-900 dark:text-ink-50">
+            <h1 class="text-2xl font-bold tracking-tight text-foreground">
               <slot name="title">{{ title }}</slot>
             </h1>
-            <p v-if="description || $slots.description" class="mt-1.5 text-sm text-ink-500 dark:text-ink-400">
+            <p v-if="description || $slots.description" class="mt-1.5 text-sm text-muted-foreground">
               <slot name="description">{{ description }}</slot>
             </p>
           </div>

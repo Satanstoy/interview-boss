@@ -14,6 +14,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { PanelLeft } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   sidebarTabs: { type: Array, default: () => [] },
@@ -69,47 +70,52 @@ function handleShowSettings() { emit('show-settings') }
   <!-- Collapsed: logo + nav icons + avatar -->
   <div v-if="collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1 animate-sidebar-collapse">
     <!-- Logo → hover shows PanelLeft icon → click expands -->
-    <button
-      @mouseenter="logoHovered = true"
-      @mouseleave="logoHovered = false"
-      @click="toggleCollapsed"
-      class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-1 overflow-hidden"
-      :class="logoHovered
-        ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
-        : 'bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20'"
-      :title="logoHovered ? '展开侧栏' : undefined"
-    >
-      <!-- IB logo -->
-      <span
-        class="text-sm font-bold transition-all duration-300 ease-out"
-        :class="logoHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'"
-      >IB</span>
-      <!-- PanelLeft icon -->
-      <PanelLeft
-        :size="18"
-        class="absolute transition-all duration-300 ease-out"
-        :class="logoHovered ? 'opacity-100 scale-100' : 'opacity-0 scale-75'"
-      />
-    </button>
+    <AppTooltip text="展开侧栏" side="right">
+      <button
+        @mouseenter="logoHovered = true"
+        @mouseleave="logoHovered = false"
+        @click="toggleCollapsed"
+        class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-1 overflow-hidden"
+        :class="logoHovered
+          ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
+          : 'bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20'"
+      >
+        <!-- IB logo -->
+        <span
+          class="text-sm font-bold transition-all duration-300 ease-out"
+          :class="logoHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'"
+        >IB</span>
+        <!-- PanelLeft icon -->
+        <PanelLeft
+          :size="18"
+          class="absolute transition-all duration-300 ease-out"
+          :class="logoHovered ? 'opacity-100 scale-100' : 'opacity-0 scale-75'"
+        />
+      </button>
+    </AppTooltip>
 
     <!-- Navigation icons -->
-    <button
+    <AppTooltip
       v-for="tab in sidebarTabs"
       :key="tab.key"
-      @click="onTabChange(tab)"
-      class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
-      :class="isActive(tab.route)
-        ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-        : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
-      :title="tab.label"
+      :text="tab.label"
+      side="right"
     >
-      <HugeiconsIcon
-        v-if="iconMap[tab.key]"
-        :icon="iconMap[tab.key]"
-        :size="18"
-        :class="isActive(tab.route) ? 'text-primary' : ''"
-      />
-    </button>
+      <button
+        @click="onTabChange(tab)"
+        class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
+        :class="isActive(tab.route)
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+          : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+      >
+        <HugeiconsIcon
+          v-if="iconMap[tab.key]"
+          :icon="iconMap[tab.key]"
+          :size="18"
+          :class="isActive(tab.route) ? 'text-primary' : ''"
+        />
+      </button>
+    </AppTooltip>
 
     <div class="flex-1"></div>
 
@@ -141,13 +147,14 @@ function handleShowSettings() { emit('show-settings') }
           <span class="text-[11px] text-sidebar-foreground/50 whitespace-nowrap">AI 面试准备工作台</span>
         </div>
       </a>
-      <button
-        @click="toggleCollapsed"
-        class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-        title="收起侧栏"
-      >
-        <PanelLeft :size="18" />
-      </button>
+      <AppTooltip text="收起侧栏">
+        <button
+          @click="toggleCollapsed"
+          class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+        >
+          <PanelLeft :size="18" />
+        </button>
+      </AppTooltip>
     </div>
 
     <!-- Navigation -->

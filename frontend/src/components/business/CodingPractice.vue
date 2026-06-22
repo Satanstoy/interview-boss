@@ -12,7 +12,7 @@
           <button
             v-for="opt in difficultyOptions" :key="opt.value"
             @click="filterDifficulty = opt.value; loadProblems()"
-            class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+            class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
             :class="filterDifficulty === opt.value
               ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
               : 'text-muted-foreground border-border hover:bg-accent/50'"
@@ -84,7 +84,7 @@
       <!-- 空状态 -->
       <div v-if="!activeProblem" class="flex-1 flex items-center justify-center">
         <div class="flex flex-col items-center max-w-2xl mx-auto px-6">
-          <div class="size-20 mx-auto mb-6 rounded-2xl bg-primary/10 flex items-center justify-center">
+          <div class="size-20 mx-auto mb-6 rounded-xl bg-primary/10 flex items-center justify-center">
             <Code :size="40" class="text-primary" />
           </div>
           <h2 class="text-3xl font-bold text-foreground mb-3 text-center">开始编码练习</h2>
@@ -117,7 +117,7 @@
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span :class="[
-              'rounded-full px-2 py-0.5 text-[11px]',
+              'rounded-lg px-2 py-0.5 text-[11px]',
               activeProblem.difficulty === 'easy' ? 'bg-green-500/10 text-green-600 dark:text-green-400' :
               activeProblem.difficulty === 'medium' ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400' :
               'bg-red-500/10 text-red-600 dark:text-red-400'
@@ -127,7 +127,7 @@
             <span
               v-for="tag in (activeProblem.tags || []).slice(0, 3)"
               :key="tag"
-              class="bg-muted/60 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground"
+              class="bg-muted/60 rounded-lg px-2 py-0.5 text-[11px] text-muted-foreground"
             >{{ tag }}</span>
           </div>
         </div>
@@ -187,7 +187,7 @@
                   </div>
                 </div>
                 <div v-if="activeProblem._lastSubmission?.error_categories?.length" class="flex gap-1 pt-3 border-t border-border">
-                  <span v-for="cat in activeProblem._lastSubmission.error_categories" :key="cat" class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">{{ categoryLabels[cat] || cat }}</span>
+                  <span v-for="cat in activeProblem._lastSubmission.error_categories" :key="cat" class="text-xs px-2 py-0.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400">{{ categoryLabels[cat] || cat }}</span>
                 </div>
               </div>
             </div>
@@ -232,13 +232,13 @@
         <!-- 底部操作区 -->
         <div class="shrink-0 border-t border-border">
           <div class="max-w-4xl mx-auto px-6 py-3">
-            <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-2xl">
+            <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-xl">
               <!-- 语言选择 + 操作按钮 -->
               <div class="flex items-center gap-2 px-1">
                 <button
                   v-for="lang in languageOptions" :key="lang.value"
                   @click="currentLanguage = lang.value"
-                  class="text-xs px-2.5 py-1 rounded-full border transition-colors"
+                  class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
                   :class="currentLanguage === lang.value
                     ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
                     : 'text-muted-foreground border-border hover:bg-accent/50'"

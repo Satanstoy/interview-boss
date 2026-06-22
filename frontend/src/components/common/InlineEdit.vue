@@ -2,13 +2,15 @@
   <div class="group">
     <!-- Display mode -->
     <div v-if="!editing" class="flex items-center gap-2">
-      <span v-if="type === 'select'" class="px-2 py-1 rounded text-xs" :class="(displayValue || '').includes('难') ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'">
+      <span v-if="type === 'select'" class="px-2 py-1 rounded-md text-xs" :class="(displayValue || '').includes('难') ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'">
         {{ displayValue || '-' }}
       </span>
       <span v-else :class="{ 'whitespace-pre-wrap break-words flex-1': type === 'textarea' }">{{ displayValue }}</span>
-      <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-muted-foreground hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0" title="编辑">
-        <Pencil class="size-3.5" />
-      </Button>
+      <AppTooltip text="编辑">
+        <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-muted-foreground hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0">
+          <Pencil class="size-3.5" />
+        </Button>
+      </AppTooltip>
     </div>
 
     <!-- Edit mode -->
@@ -31,8 +33,12 @@
         </Select>
         <Input v-else v-model="editValue" @keyup.enter="save" />
         <div class="flex gap-1 shrink-0">
-          <Button variant="ghost" size="sm" @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 transition-colors duration-200" title="保存">保存</Button>
-          <Button variant="ghost" size="sm" @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200" title="取消">取消</Button>
+          <AppTooltip text="保存">
+            <Button variant="ghost" size="sm" @click="save" class="text-green-500 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 transition-colors duration-200">保存</Button>
+          </AppTooltip>
+          <AppTooltip text="取消">
+            <Button variant="ghost" size="sm" @click="editing = false" class="text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200">取消</Button>
+          </AppTooltip>
         </div>
       </div>
       <p v-if="validationError" class="text-red-500 dark:text-red-400 text-xs mt-0.5">{{ validationError }}</p>
@@ -48,6 +54,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   row: { type: Object, required: true },

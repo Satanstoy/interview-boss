@@ -3,14 +3,14 @@
   <div v-if="type === 'spinner'" class="flex items-center justify-center" :class="wrapperClass">
     <div class="flex items-center gap-2.5">
       <Loader2 class="animate-spin h-5 w-5 text-primary" />
-      <span v-if="text" class="text-sm font-medium text-ink-600 dark:text-ink-300">{{ text }}</span>
+      <span v-if="text" class="text-sm font-medium text-muted-foreground">{{ text }}</span>
     </div>
   </div>
 
   <!-- Full page loading -->
   <div v-else-if="type === 'page'" class="flex flex-col items-center justify-center py-20">
     <Loader2 class="size-12 text-primary animate-spin" />
-    <p v-if="text" class="mt-4 text-sm font-medium text-ink-500 dark:text-ink-400">{{ text }}</p>
+    <p v-if="text" class="mt-4 text-sm font-medium text-muted-foreground">{{ text }}</p>
   </div>
 
   <!-- Skeleton rows -->
@@ -28,7 +28,7 @@
     <div
       v-for="i in rows"
       :key="i"
-      class="rounded-xl border border-surface-200 dark:border-ink-800 bg-card p-4 flex flex-col gap-3"
+      class="rounded-xl border border-border bg-card p-4 flex flex-col gap-3"
     >
       <!-- Card header skeleton -->
       <div class="flex items-center gap-3">
@@ -49,7 +49,7 @@
   <!-- Skeleton table -->
   <div v-else-if="type === 'table'" class="rounded-xl border border-border bg-card overflow-hidden">
     <!-- Table header -->
-    <div class="flex border-b border-border bg-surface-50/50 dark:bg-ink-800/50">
+    <div class="flex border-b border-border bg-muted/50">
       <div v-for="i in 5" :key="i" class="flex-1 px-4 py-3">
         <Skeleton class="h-3 rounded w-3/4" />
       </div>

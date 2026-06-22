@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   masterBank: { type: Array, default: () => [] },
@@ -159,17 +160,18 @@ const handleGoToQuestion = (question) => {
           >
             {{ pos }}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            @click="handleDeletePosition(pos)"
-            class="text-muted-foreground/50 hover:text-destructive transition-colors"
-            title="删除岗位"
-          >
-            <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </Button>
+          <AppTooltip text="删除岗位">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              @click="handleDeletePosition(pos)"
+              class="text-muted-foreground/50 hover:text-destructive transition-colors"
+            >
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Button>
+          </AppTooltip>
         </div>
       </div>
 

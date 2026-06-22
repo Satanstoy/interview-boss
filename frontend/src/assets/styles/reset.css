@@ -6,13 +6,13 @@
   }
 
   body {
-    @apply bg-surface-50 text-ink-800 dark:bg-surface-900 dark:text-ink-200;
+    @apply bg-background text-foreground;
     font-feature-settings: 'cv11', 'ss01';
   }
 
   /* Global focus ring */
   *:focus-visible {
-    @apply outline-none ring-2 ring-primary-400 ring-offset-2 dark:ring-offset-surface-900;
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
   /* Global selection */

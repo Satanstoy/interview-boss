@@ -18,7 +18,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     :class="cn(
       'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold whitespace-nowrap transition-colors focus-visible:ring-3 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
       // inactive text
-      'text-ink-500 dark:text-ink-400 hover:text-ink-700 dark:hover:text-ink-300',
+      'text-muted-foreground hover:text-foreground',
       // active text
       'data-[state=active]:text-primary-700 dark:data-[state=active]:text-primary-400',
       // underline indicator pseudo-element

@@ -3,7 +3,7 @@
     <!-- User message -->
     <div v-if="isUser" class="flex justify-end">
       <div class="max-w-[80%]">
-        <div class="bg-primary/10 rounded-2xl rounded-tr-md px-4 py-3">
+        <div class="bg-primary/10 rounded-xl rounded-tr-md px-4 py-3">
           <div class="prose-chat text-sm" v-html="renderedContent"></div>
         </div>
         <div class="text-[11px] text-muted-foreground mt-1 text-right">
@@ -37,29 +37,32 @@
 
       <!-- Message actions -->
       <div class="flex items-center gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
-          @click="copyContent" 
-          class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
-          title="复制"
-        >
-          <Copy v-if="!copied" :size="14" />
-          <Check v-else :size="14" class="text-emerald-500" />
-        </button>
-        <button 
-          @click="$emit('regenerate', message.id)" 
-          class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
-          title="重新生成"
-        >
-          <RotateCcw :size="14" />
-        </button>
-        <button 
-          @click="toggleLike" 
-          class="p-1.5 rounded-md transition-colors"
-          :class="liked ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
-          title="点赞"
-        >
-          <ThumbsUp :size="14" />
-        </button>
+        <AppTooltip text="复制">
+          <button 
+            @click="copyContent" 
+            class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+          >
+            <Copy v-if="!copied" :size="14" />
+            <Check v-else :size="14" class="text-emerald-500" />
+          </button>
+        </AppTooltip>
+        <AppTooltip text="重新生成">
+          <button 
+            @click="$emit('regenerate', message.id)" 
+            class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </AppTooltip>
+        <AppTooltip text="点赞">
+          <button 
+            @click="toggleLike" 
+            class="p-1.5 rounded-md transition-colors"
+            :class="liked ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+          >
+            <ThumbsUp :size="14" />
+          </button>
+        </AppTooltip>
         <span class="text-[11px] text-muted-foreground ml-2">{{ formatTime(message.created_at) }}</span>
       </div>
 
@@ -190,6 +193,7 @@ import {
 } from '@lucide/vue'
 import ReasoningTimeline from './ReasoningTimeline.vue'
 import InsightBlock from './InsightBlock.vue'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },

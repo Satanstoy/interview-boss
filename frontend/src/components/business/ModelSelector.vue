@@ -1,14 +1,15 @@
 <template>
   <div class="relative">
-    <button
-      @click="toggleDropdown"
-      type="button"
-      class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-      :class="isOpen ? 'text-foreground bg-muted' : ''"
-      :title="currentModel || '选择模型'"
-    >
-      <Sparkles :size="16" />
-    </button>
+    <AppTooltip :text="currentModel || '选择模型'">
+      <button
+        @click="toggleDropdown"
+        type="button"
+        class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        :class="isOpen ? 'text-foreground bg-muted' : ''"
+      >
+        <Sparkles :size="16" />
+      </button>
+    </AppTooltip>
 
     <Transition name="dropdown">
       <div
@@ -61,6 +62,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Sparkles, ChevronDown, Check, Loader2, AlertCircle } from '@lucide/vue'
 import { fetchAvailableModels } from '@/services/profileApi.js'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   currentModel: { type: String, default: '' },

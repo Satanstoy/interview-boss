@@ -90,7 +90,7 @@
 
         <!-- Preview link -->
         <a
-          href="?preview=1"
+          href="/master-bank?preview=1"
           class="mt-3 inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-card text-sm font-medium text-foreground shadow-sm transition hover:bg-muted"
         >
           预览新版工作台

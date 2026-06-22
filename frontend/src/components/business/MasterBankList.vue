@@ -48,14 +48,14 @@
               <div class="flex-1 min-w-0">
                 <span class="text-sm font-medium text-foreground truncate block">{{ q.question }}</span>
                 <div class="flex gap-1.5 mt-1 flex-wrap items-center">
-                  <span v-if="q.frequency > 1" class="text-xs px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
-                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded font-semibold">{{ q.cat1 || '未分类' }}</span>
+                  <span v-if="q.frequency > 1" class="text-xs px-1.5 py-0.5 rounded-md bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
+                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded-md font-semibold">{{ q.cat1 || '未分类' }}</span>
                   <span
                     v-for="tag in (q.tags || '').split(',').filter(Boolean).slice(0, 3)"
                     :key="tag"
-                    class="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+                    class="text-xs px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground"
                   >{{ tag.trim() }}</span>
-                  <span class="text-xs font-medium px-2 py-0.5 rounded ml-auto"
+                  <span class="text-xs font-medium px-2 py-0.5 rounded-md ml-auto"
                     :class="difficultyClass(q.difficulty)">
                     {{ q.difficulty || '-' }}
                   </span>

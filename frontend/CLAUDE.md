@@ -21,8 +21,19 @@ Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / ECharts / Marked 
 - 全面采用 shadcn-vue 组件（reka-vega 风格），禁止手写自定义 UI 组件类
 - Button/Card/Badge/Dialog/Select/Table/AlertDialog/Skeleton 等一律使用 shadcn 组件
 - 图标统一使用 `@lucide/vue`，禁止内联 SVG
+- 悬停提示统一使用 `components/common/AppTooltip.vue`（底层 shadcn Tooltip），不要新增原生 `title` 或自定义 tooltip 气泡；全局 `TooltipProvider` 放在 `App.vue`
 - global.css 仅保留全局基础样式（reset、scrollbar、prose-chat、elevation、动画），不包含组件样式
 - 通用组件在 `components/common/`，shadcn 原始组件在 `components/ui/`
+
+### UI 一致性基线
+
+- 页面边距统一优先使用 `px-4 py-4 md:px-6 md:py-6`，模块间距由父容器 `gap-*` 管理，子组件避免自带 `mb-*`。
+- 主卡片、列表容器、图表容器统一优先使用 `rounded-xl border border-border bg-card shadow-sm`。
+- toolbar/filter 区统一优先使用 `rounded-xl border border-border bg-card p-3`；内部控件不再各自包一层重边框卡片。
+- 数据表外壳必须自己承担圆角裁切和宽度约束：`rounded-xl border border-border bg-card shadow-sm overflow-hidden w-full min-w-0`，避免背景线条破坏圆角或横向溢出。
+- 普通按钮、输入框、Select、Dialog、Badge 优先使用 shadcn 默认组件圆角，不额外覆盖圆角；确需覆盖时同一组件组内保持一致。
+- 交互行/列表项使用 `rounded-lg`，内容内嵌块使用 `rounded-md`，进度条和开关保留 `rounded-full`。
+- 业务弹窗只做视觉统一时，外壳统一 `rounded-xl border border-border bg-card shadow-lg`，内部边界统一 `border-border` 或 `border-border/50`。
 
 ## 目录结构
 

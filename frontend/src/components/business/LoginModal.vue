@@ -2,7 +2,7 @@
   <!-- Embedded mode: inline form without overlay -->
   <div v-if="embedded">
     <div class="mb-6">
-      <h3 class="text-xl font-semibold text-ink-900 dark:text-ink-50">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
+      <h3 class="text-xl font-semibold text-foreground">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
       <p class="text-sm text-muted-foreground mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
     </div>
 
