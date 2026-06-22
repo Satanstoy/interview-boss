@@ -204,6 +204,19 @@ def _extract_case_result(name: str, user_message: str, events: list[dict[str, An
         elif event_type == "retrieved":
             questions = event.get("questions") if isinstance(event.get("questions"), list) else []
             result.retrieved_count = max(result.retrieved_count, len(questions))
+        elif event_type == "selected_question":
+            question = event.get("question")
+            if isinstance(question, dict):
+                result.selected_question_id = question.get("id")
+                result.selected_question_text = str(question.get("question") or "")
+        elif event_type == "question_plan":
+            result.question_plan_id = event.get("question_id")
+            adherence = event.get("adherence") if isinstance(event.get("adherence"), dict) else {}
+            score = adherence.get("score")
+            if isinstance(score, (int, float)):
+                result.adherence_score = float(score)
+            result.repaired = bool(event.get("repaired", False))
+            result.fallback_used = bool(event.get("fallback_used", False))
         elif event_type == "error":
             result.errors.append(str(event.get("message") or event))
         elif event_type == "done":
@@ -211,11 +224,11 @@ def _extract_case_result(name: str, user_message: str, events: list[dict[str, An
 
     result.assistant_text = "".join(chunks)
     selected = metadata.get("selected_question") if isinstance(metadata.get("selected_question"), dict) else None
-    if selected:
+    if selected and not result.selected_question_id:
         result.selected_question_id = selected.get("id")
         result.selected_question_text = str(selected.get("question") or "")
     plan = metadata.get("question_plan") if isinstance(metadata.get("question_plan"), dict) else None
-    if plan:
+    if plan and not result.question_plan_id:
         result.question_plan_id = plan.get("question_id")
         adherence = plan.get("adherence") if isinstance(plan.get("adherence"), dict) else {}
         score = adherence.get("score")
