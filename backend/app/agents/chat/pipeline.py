@@ -788,6 +788,23 @@ def _summarize_tool_output(tool_name: str, output: str, state: ChatState) -> dic
         return summary
 
     if tool_name in {"search_questions", "draw_questions"}:
+        if isinstance(parsed, dict) and "ok" in parsed and "items" in parsed:
+            summary["ok"] = bool(parsed.get("ok"))
+            if not summary["ok"] and parsed.get("error"):
+                error = parsed.get("error") or {}
+                summary["error"] = str(error.get("error_code") or "tool_error")[:_TRACE_STRING_LIMIT]
+            items = parsed.get("items") if isinstance(parsed.get("items"), list) else []
+            summary["result_count"] = len(items)
+            summary["result_ids"] = [
+                q.get("id")
+                for q in items[:_TRACE_LIST_LIMIT]
+                if isinstance(q, dict) and q.get("id") is not None
+            ]
+            metadata = parsed.get("metadata") or {}
+            summary["fallback_used"] = bool(metadata.get("fallback_used", False))
+            summary["empty_reason"] = metadata.get("empty_reason")
+            return summary
+
         results = (
             [] if not summary["ok"] else state.get("retrieved_questions", []) or []
         )
@@ -1638,7 +1655,10 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             if tool_name in ("search_questions", "draw_questions"):
                 try:
                     parsed_out = json.loads(output)
-                    if isinstance(parsed_out, list) and len(parsed_out) > 3:
+                    if isinstance(parsed_out, dict) and isinstance(parsed_out.get("items"), list):
+                        parsed_out = {**parsed_out, "items": parsed_out["items"][:3]}
+                        msg_output = json.dumps(parsed_out, ensure_ascii=False)
+                    elif isinstance(parsed_out, list) and len(parsed_out) > 3:
                         msg_output = json.dumps(parsed_out[:3], ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass

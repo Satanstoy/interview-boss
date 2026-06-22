@@ -340,6 +340,102 @@ class TestReactLoop:
         # LLM called twice (once for tool, once for answer)
         assert mock_llm_with_tools.call_count == 2
 
+    async def test_tool_envelope_emits_retrieved_and_prunes_message_output(self):
+        """ReAct should understand structured tool envelopes and keep LLM messages compact."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "给我一道 RAG 题",
+            "model": None,
+            "intent": "practice_request",
+            "answer_complete": False,
+        }
+        tc_search = _tc("search_questions", {"keywords": ["RAG"]})
+        captured_messages = []
+
+        async def mock_llm(messages, *args, **kwargs):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                return {
+                    "content": None,
+                    "tool_calls": [tc_search],
+                    "finish_reason": "tool_calls",
+                }
+            return {
+                "content": "请你说说 RAG 的检索和重排怎么设计？",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+
+        envelope = {
+            "ok": True,
+            "tool": "search_questions",
+            "items": [
+                {
+                    "id": i,
+                    "question": f"RAG question {i}",
+                    "cat1": "B",
+                    "cat2": "RAG",
+                    "source": "search",
+                    "score": 0.1,
+                    "reason": "rrf_ranked",
+                    "sources": [],
+                }
+                for i in range(1, 6)
+            ],
+            "metadata": {
+                "result_count": 5,
+                "fallback_used": False,
+                "fallback_steps": [],
+                "empty_reason": None,
+                "debug_reason": "hybrid_search_ok",
+                "metrics": {"total_ms": 5},
+            },
+            "error": None,
+        }
+
+        async def mock_execute_tool(tc, st):
+            st["retrieved_questions"] = [
+                {
+                    "id": i,
+                    "question": f"RAG question {i}",
+                    "cat1": "B",
+                    "cat2": "RAG",
+                    "sources": [],
+                }
+                for i in range(1, 6)
+            ]
+            st["candidate_questions"] = st["retrieved_questions"]
+            st["question_source"] = "search"
+            return json.dumps(envelope, ensure_ascii=False)
+
+        emitted = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch("app.agents.chat.pipeline.build_react_system_prompt", return_value="Prompt."),
+                patch("app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm),
+                patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        retrieved = next(e for e in emitted if e.get("type") == "retrieved")
+        assert [q["id"] for q in retrieved["questions"]] == [1, 2, 3]
+
+        second_messages = captured_messages[1]
+        tool_messages = [m for m in second_messages if m.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        tool_payload = json.loads(tool_messages[0]["content"])
+        assert tool_payload["ok"] is True
+        assert len(tool_payload["items"]) == 3
+
     async def test_max_steps_limit(self):
         """LLM always returns tool_calls (infinite loop scenario) -> capped at MAX_REACT_STEPS."""
         from app.agents.chat.pipeline import _react_loop
