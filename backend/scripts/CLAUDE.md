@@ -27,6 +27,10 @@ RUN_REAL_CHAT_E2E=1 \
   docker compose exec backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
 ```
 
+## Chat tools E2E 观测
+
+`verify_chat_tools_real_e2e.py` 会解析 Chat SSE 中拆分后的 `selected_question` 和 `question_plan` 事件，同时保留旧版 `done.metadata` fallback，用于区分工具调用、选题绑定、计划生成、repair/fallback 和内部标记泄露。
+
 ## 安全警告
 
 脚本直接操作生产数据库，运行前请确认。破坏性操作前必须备份。
