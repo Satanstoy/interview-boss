@@ -10,7 +10,8 @@ docs/
 ├── tdd-reports/       ← 后端 TDD 开发记录
 ├── dev-log/           ← 每次开发/设计活动的简要记录
 ├── superpowers/
-│   └── specs/         ← Superpowers brainstorming 产出的设计规格
+│   ├── specs/         ← Superpowers brainstorming 产出的设计规格
+│   └── plans/         ← Superpowers writing-plans 产出的实施计划
 ├── frontend/
 │   ├── bug-reports/   ← 前端 bug 修复记录
 │   └── tdd-reports/   ← 前端 TDD 开发记录
@@ -27,6 +28,7 @@ docs/
 - **后端相关** → 放 `bug-reports/` 或 `tdd-reports/`
 - **前端相关** → 放 `frontend/bug-reports/` 或 `frontend/tdd-reports/`
 - **设计规格** → 放 `superpowers/specs/`
+- **实施计划** → 放 `superpowers/plans/`
 - **开发活动记录** → 放 `dev-log/`
 
 ## 命名规范
