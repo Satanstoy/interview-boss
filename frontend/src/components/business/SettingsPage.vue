@@ -68,10 +68,10 @@ const activeSectionMeta = computed(() => sections.value.find(item => item.id ===
     </div>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="shrink-0 px-6 py-1.5">
-        <div class="flex min-w-0 items-center gap-2.5">
-          <component :is="activeSectionMeta?.icon" :size="17" class="shrink-0 text-primary" />
-          <h3 class="truncate text-sm font-semibold text-foreground">{{ activeSectionMeta?.label }}</h3>
+      <div class="shrink-0 px-6 py-1">
+        <div class="flex min-w-0 items-center gap-2">
+          <component :is="activeSectionMeta?.icon" :size="15" class="shrink-0 text-primary" />
+          <h3 class="truncate text-xs font-medium text-muted-foreground">{{ activeSectionMeta?.label }}</h3>
         </div>
       </div>
 

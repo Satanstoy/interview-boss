@@ -110,7 +110,7 @@
       <!-- 选中题目后的主区域 -->
       <template v-else>
         <!-- 题目头部 -->
-        <div class="flex items-center justify-between px-6 py-2 shrink-0 border-b border-border">
+        <div class="flex items-center justify-between px-6 py-1.5 shrink-0">
           <div class="min-w-0 flex-1">
             <span class="truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</span>
           </div>
