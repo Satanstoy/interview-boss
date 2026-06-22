@@ -22,6 +22,9 @@ from pydantic import BaseModel
 
 from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.nodes import (
+    _build_next_question_plan_prompt,
+    _question_plan_adherence,
+    _repair_response_to_question_plan,
     build_react_system_prompt,
     extract_memory,
     load_history,
@@ -624,6 +627,57 @@ def _ensure_final_answer_quality(text: str, state: ChatState) -> str:
     return text
 
 
+async def _enforce_question_plan_on_text(
+    text: str,
+    state: ChatState,
+) -> str:
+    """Verify final text follows next_question_plan; repair once if it drifts."""
+    plan = state.get("next_question_plan")
+    if not plan or not plan.get("must_ask"):
+        return text
+
+    adherence = _question_plan_adherence(text, plan)
+    metadata = {
+        "question_id": plan.get("question_id"),
+        "source": plan.get("source"),
+        "selection_reason": plan.get("selection_reason"),
+        "adherence": adherence,
+        "repaired": False,
+    }
+    if adherence.get("adheres"):
+        state["question_plan_metadata"] = metadata
+        return text
+
+    repair = await _repair_response_to_question_plan(
+        user_id=state.get("user_id"),
+        user_message=str(state.get("user_message") or ""),
+        original_response=text,
+        plan=plan,
+    )
+    repaired_text = str(repair.get("response") or "").strip()
+    repaired_adherence = repair.get("adherence") or _question_plan_adherence(repaired_text, plan)
+    metadata.update({
+        "adherence": repaired_adherence,
+        "repaired": True,
+        "repair_reason": repair.get("reason", "plan_drift_repaired"),
+    })
+
+    if repaired_text and repaired_adherence.get("adheres"):
+        state["question_plan_metadata"] = metadata
+        state["question_source_reason"] = "question_plan_repaired"
+        return repaired_text
+
+    fallback = (
+        f"我们收束到这道题：{plan.get('question_text', '')}\n\n"
+        "请你说明核心思路、关键取舍，以及你会怎么验证这个方案。"
+    )
+    metadata["fallback_used"] = True
+    metadata["adherence"] = _question_plan_adherence(fallback, plan)
+    state["question_plan_metadata"] = metadata
+    state["question_source_reason"] = "question_plan_fallback"
+    return fallback
+
+
 def _fallback_react_answer(state: ChatState, reason: str) -> str:
     """Return a safe interviewer turn when ReAct/tool/final generation fails."""
     candidates = (
@@ -1089,6 +1143,7 @@ async def _stream_final_answer(
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
     final_text = _ensure_final_answer_quality(final_text, state)
+    final_text = await _enforce_question_plan_on_text(final_text, state)
 
     # Two-level output dedup: check before yielding
     if final_text:
@@ -1128,7 +1183,7 @@ async def _stream_final_answer(
         yield {"type": "chunk", "content": final_text}
 
 
-def _final_answer_events_from_text(
+async def _final_answer_events_from_text(
     final_text: str,
     state: ChatState,
 ) -> list[dict]:
@@ -1140,6 +1195,7 @@ def _final_answer_events_from_text(
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
     final_text = _ensure_final_answer_quality(final_text, state)
+    final_text = await _enforce_question_plan_on_text(final_text, state)
     if not final_text:
         return []
     return [{"type": "chunk", "content": final_text}]
@@ -1705,6 +1761,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 result=_summarize_tool_output(tool_name, output, state),
                 elapsed_ms=int((time.monotonic() - tool_started) * 1000),
             )
+            if tool_name in ("search_questions", "draw_questions"):
+                _maybe_create_question_plan(state)
 
             # Emit retrieved events for search/draw results
             if tool_name in (
@@ -1765,6 +1823,15 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 except (json.JSONDecodeError, TypeError):
                     pass
             messages.append(make_tool_result_message(tc["id"], msg_output))
+            plan = state.get("next_question_plan")
+            if tool_name in ("search_questions", "draw_questions") and plan and not state.get("question_plan_injected"):
+                plan_prompt = _build_next_question_plan_prompt(plan)
+                if plan_prompt:
+                    messages.append({
+                        "role": "user",
+                        "content": "[系统自动生成的下一题约束]\n" + plan_prompt,
+                    })
+                    state["question_plan_injected"] = True
 
         # If inner loop broke due to validation failure or loop detection, exit outer loop
         if stop_reason:
@@ -1836,7 +1903,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             else:
                 if final_text_clean:
                     deduplicator.record(final_text_clean)
-                for event in _final_answer_events_from_text(final_answer_text, state):
+                for event in await _final_answer_events_from_text(final_answer_text, state):
                     yield event
         else:
             async for event in _stream_final_answer(messages, state):

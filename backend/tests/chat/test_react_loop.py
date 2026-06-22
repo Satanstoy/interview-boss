@@ -736,7 +736,7 @@ class TestBuildToolStrategy:
 
 
 class TestFinalAnswerQuality:
-    def test_bare_coding_prompt_gets_full_fallback_question(self):
+    async def test_bare_coding_prompt_gets_full_fallback_question(self):
         from app.agents.chat.pipeline import _final_answer_events_from_text
 
         state = {
@@ -745,7 +745,7 @@ class TestFinalAnswerQuality:
             "candidate_questions": [],
         }
 
-        events = _final_answer_events_from_text("来，写代码吧。", state)
+        events = await _final_answer_events_from_text("来，写代码吧。", state)
 
         assert events[0]["type"] == "chunk"
         assert "来写一道代码题" in events[0]["content"]
@@ -860,6 +860,91 @@ class TestQuestionPlanHelpers:
         assert state["selected_question"]["id"] == 7
         assert state["next_question_plan"]["question_id"] == 7
         assert state["question_source_reason"] == "question_plan_bound"
+
+
+class TestQuestionPlanEnforcement:
+    async def test_final_generation_injects_next_question_plan(self):
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "来一道 RAG 题",
+            "model": None,
+            "intent": "practice_request",
+            "answer_complete": False,
+        }
+        tc_search = _tc("search_questions", {"keywords": ["RAG"]})
+        captured_messages = []
+
+        async def mock_llm(messages, *args, **kwargs):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                return {"content": None, "tool_calls": [tc_search], "finish_reason": "tool_calls"}
+            return {"content": "请你说说 RAG 检索怎么设计？", "tool_calls": None, "finish_reason": "stop"}
+
+        async def mock_execute_tool(tc, st):
+            question = {"id": 11, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "tags": "检索", "sources": []}
+            st["retrieved_questions"] = [question]
+            st["candidate_questions"] = [question]
+            st["question_source"] = "search"
+            return json.dumps({
+                "ok": True,
+                "tool": "search_questions",
+                "items": [{**question, "source": "search", "score": 0.1, "reason": "rrf_ranked"}],
+                "metadata": {"result_count": 1, "fallback_used": False, "fallback_steps": [], "empty_reason": None, "debug_reason": "hybrid_search_ok", "metrics": {"total_ms": 1}},
+                "error": None,
+            }, ensure_ascii=False)
+
+        with (
+            patch("app.agents.chat.pipeline.build_react_system_prompt", return_value="Prompt."),
+            patch("app.agents.chat.pipeline.llm_with_tools", side_effect=mock_llm),
+            patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+        ):
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        second_messages_text = "\n".join(m.get("content") or "" for m in captured_messages[1])
+        assert "<next_question_plan>" in second_messages_text
+        assert "RAG 检索怎么设计" in second_messages_text
+        assert state["next_question_plan"]["question_id"] == 11
+
+    async def test_plan_drift_is_repaired_once(self):
+        from app.agents.chat.pipeline import _final_answer_events_from_text
+
+        state = {
+            "user_id": 1,
+            "user_message": "来一道 RAG 题",
+            "next_question_plan": {
+                "must_ask": True,
+                "question_id": 11,
+                "question_text": "RAG 检索怎么设计？",
+                "basis_type": "interview_question",
+                "source": "search",
+                "strategy": "practice_request",
+                "allowed_focus": ["RAG", "检索"],
+                "forbidden_focus": ["HR"],
+                "selection_reason": "top_ranked_candidate",
+            },
+            "selected_question": {"id": 11, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG"},
+        }
+
+        with patch(
+            "app.agents.chat.pipeline._repair_response_to_question_plan",
+            new_callable=AsyncMock,
+            return_value={
+                "response": "我们收束到 RAG：请你说说 RAG 检索怎么设计？",
+                "repaired": True,
+                "reason": "plan_drift_repaired",
+                "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
+            },
+        ) as mock_repair:
+            events = await _final_answer_events_from_text("说说你的 HR 优势？", state)
+
+        assert events[0]["type"] == "chunk"
+        assert "RAG 检索怎么设计" in events[0]["content"]
+        assert state["question_plan_metadata"]["repaired"] is True
+        mock_repair.assert_awaited_once()
 
 
 # ── TestBuildReactSystemPrompt ────────────────────────────
