@@ -18,6 +18,8 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 | `prompts.py` | 系统提示词（含面试阶段协议）、记忆提取提示词 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
+| `tools.py` | ReAct tool schemas and tool execution entrypoint |
+| `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `skills/base.py` | Skill 基类 + SkillRegistry（Progressive Disclosure 架构） |
 | `skills/builder.py` | build_skill_prompt() — 合并 active skills 指令为 prompt 片段 |
 | `skills/loader.py` | SKILL.md 文件加载器（解析 YAML frontmatter + Markdown body） |
@@ -40,6 +42,8 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，直接生成总结
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
+- **Tool Gateway 契约**：`search_questions` / `draw_questions` 通过 `tool_gateway.py` 返回统一 `ok/items/metadata/error` envelope，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
+- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback
 
 ## 修改后必做
 
