@@ -263,6 +263,7 @@ do_frontend() {
   fi
   cd "$PROJECT_DIR"
   docker cp frontend/dist/. interview-boss-nginx-1:/usr/share/nginx/html/
+  docker compose exec nginx sh -lc 'chmod -R a+rX /usr/share/nginx/html'
   log "前端已更新，无需重建镜像或重启容器"
 }
 
