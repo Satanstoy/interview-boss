@@ -82,25 +82,27 @@ def _login(base_url: str, username: str, password: str) -> str:
     return str(token)
 
 
-def _ensure_internal_e2e_token() -> str:
+def _ensure_internal_e2e_token(internal_username: str) -> str:
     """Create/reuse a local E2E user and issue a short-lived access token.
 
-    This avoids passing account passwords while still exercising real HTTP/SSE
-    chat routes after authentication.
+    Prefer an existing username such as sj so the request uses that user's
+    saved LLM config. If it does not exist, create a dedicated E2E user.
     """
     from app.core.auth import create_access_token, hash_password
     from app.db.connection import get_db_connection
 
-    username = "__chat_tools_e2e__"
+    fallback_username = "__chat_tools_e2e__"
     with get_db_connection() as conn:
-        row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        row = conn.execute("SELECT id FROM users WHERE username = ?", (internal_username,)).fetchone()
+        if not row:
+            row = conn.execute("SELECT id FROM users WHERE username = ?", (fallback_username,)).fetchone()
         if row:
             user_id = int(row["id"] if hasattr(row, "keys") else row[0])
         else:
             password_hash = hash_password(uuid4().hex)
             cursor = conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, ?, ?)",
-                (username, password_hash, 0, "public"),
+                (fallback_username, password_hash, 0, "public"),
             )
             conn.commit()
             user_id = int(cursor.lastrowid)
@@ -112,7 +114,7 @@ def _resolve_token(args: argparse.Namespace) -> str:
         return args.token
     if args.username and args.password:
         return _login(args.base_url, args.username, args.password)
-    return _ensure_internal_e2e_token()
+    return _ensure_internal_e2e_token(args.internal_username)
 
 
 def _create_conversation(base_url: str, token: str) -> str:
@@ -299,6 +301,7 @@ def main() -> int:
     parser.add_argument("--username", default=os.getenv("E2E_USERNAME"))
     parser.add_argument("--password", default=os.getenv("E2E_PASSWORD"))
     parser.add_argument("--token", default=os.getenv("E2E_ACCESS_TOKEN"))
+    parser.add_argument("--internal-username", default=os.getenv("E2E_INTERNAL_USERNAME", "sj"))
     parser.add_argument("--model", default=os.getenv("E2E_MODEL"))
     parser.add_argument("--keep-conversation", action="store_true")
     args = parser.parse_args()

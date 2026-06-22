@@ -22,7 +22,7 @@ docker compose exec backend uv run python backend/scripts/backfill_embeddings.py
 # 回填 embedding（执行）
 docker compose exec backend uv run python backend/scripts/backfill_embeddings.py --limit 100 --batch-size 32
 
-# 真实 chat tools E2E（会调用真实 LLM；默认在容器内签发临时 E2E token，无需账号密码）
+# 真实 chat tools E2E（会调用真实 LLM；默认给 sj 签发短期 token，使用 sj 的 LLM 配置）
 RUN_REAL_CHAT_E2E=1 \
   docker compose exec backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
 ```
