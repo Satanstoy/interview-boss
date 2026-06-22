@@ -18,6 +18,7 @@
 - Worker 默认不随核心服务启动；需要后台任务时执行 `./deploy/docker-deploy.sh worker-up`，任务完成后可执行 `worker-down` 释放资源
 - Docker 构建使用 BuildKit、inline cache 和 npm/uv cache mounts；部署脚本会自动执行磁盘保护和 BuildKit cache 收缩，不要绕过脚本长期直接运行 `docker compose build`
 - Nginx 镜像内置前端 dist，生产不再挂载宿主机 `frontend/dist`
+- Nginx 静态资源权限必须可被 worker 读取：Dockerfile 的 nginx-runtime 阶段在复制 dist 后执行 `chmod -R a+rX /usr/share/nginx/html`；`frontend` 快速部署也必须在 `docker cp` 后执行同样 chmod，避免宿主机 `0600` 图片进入容器后变成 403
 - `./deploy/docker-deploy.sh frontend` 用于 Docker 已运行时快速发布前端；脚本在 `docker cp frontend/dist/.` 后必须修正 `/usr/share/nginx/html` 权限为 `a+rX`，避免 Nginx 因宿主构建产物权限导致 403
 - 磁盘保护阈值：构建前根分区至少 `DEPLOY_MIN_FREE_MB=4096` MB；构建后低于 `DEPLOY_TARGET_FREE_MB=5120` MB 时自动执行 `docker builder prune`，默认 `BUILDKIT_RESERVED_SPACE=2GB`
 - `cleanup_after_build` 绝不在构建成功后执行 `docker compose down --rmi local`；低于目标时只 prune build cache 并提示手动 cleanup

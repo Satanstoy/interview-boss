@@ -116,4 +116,5 @@ CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 FROM nginx:1.27-alpine AS nginx-runtime
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html
 EXPOSE 80
