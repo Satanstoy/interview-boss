@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { toast } from 'vue-sonner'
 import { switchMyPosition, deletePosition, createPosition, generateTaxonomy, confirmTaxonomy, fetchPositions } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
@@ -14,10 +14,16 @@ const props = defineProps({
 
 const emit = defineEmits(['go-to-question', 'profile-updated'])
 
+const { displayUser } = inject('appData')
+
 onMounted(async () => {
   try {
     const data = await fetchPositions()
-    positions.value = data || []
+    positions.value = data.positions || []
+    // 从用户数据初始化当前岗位
+    if (displayUser.value?.current_position) {
+      currentPosition.value = displayUser.value.current_position
+    }
   } catch (e) {
     console.error('Failed to fetch positions', e)
   }
@@ -136,7 +142,7 @@ const handleGoToQuestion = (question) => {
 </script>
 
 <template>
-  <div class="space-y-8 max-w-2xl">
+  <div class="w-full space-y-8">
     <div>
       <h3 class="text-lg font-semibold text-foreground">面试偏好</h3>
       <p class="text-sm text-muted-foreground mt-1">设置你的目标岗位和面试偏好</p>
