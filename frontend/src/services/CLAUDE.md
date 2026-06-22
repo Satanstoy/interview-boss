@@ -8,7 +8,7 @@
 | 文件 | 职责 | 对应后端 |
 |------|------|---------|
 | `http.js` | HTTP 客户端（拦截器、401 自动刷新、重试） | — |
-| `authApi.js` | 登录/注册/刷新/登出 | `/api/auth/*` |
+| `authApi.js` | 登录/注册/刷新/登出、忘记密码、修改密码 | `/api/auth/*` |
 | `chatApi.js` | 对话 CRUD + SSE 流式消息 | `/api/chat/*` |
 | `dataApi.js` | JD/面经提交、数据管理 | `/api/submit`, `/api/data/*` |
 | `masterBankApi.js` | 题库 CRUD | `/api/master-bank/*` |

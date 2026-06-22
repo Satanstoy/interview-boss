@@ -17,6 +17,8 @@ export {
   authUpdateBankMode,
   authRefresh,
   authLogout,
+  resetPassword,
+  changePassword,
   sendVerifyCode,
   authRegisterWithEmail,
   authLoginWithEmail,

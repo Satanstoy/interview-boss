@@ -24,6 +24,9 @@ export const authLogout = async () => {
   }
 }
 
+export const resetPassword = (email, code, newPassword) => post(`${API}/auth/reset-password`, { email, code, new_password: newPassword })
+export const changePassword = (currentPassword, newPassword) => post(`${API}/auth/change-password`, { current_password: currentPassword, new_password: newPassword })
+
 // ── Email Auth ──
 export const sendVerifyCode = (email, purpose) => post(`${API}/auth/send-code`, { email, purpose })
 export const authRegisterWithEmail = (email, code, username, password) => post(`${API}/auth/register-with-email`, { email, code, username, password })

@@ -52,6 +52,7 @@ const handleLogout = async () => {
   try {
     await authLogout()
   } finally {
+    showLoginModal.value = false
     setAuthToken('')
     currentUser.value = null
     _onDataRefresh?.()
