@@ -1,7 +1,7 @@
 <template>
   <!-- Embedded mode: inline form without overlay -->
   <div v-if="embedded">
-    <div class="mb-6">
+    <div v-if="!hideHeader" class="mb-6">
       <h3 class="text-xl font-semibold text-foreground">{{ isRegister ? '创建账号' : '欢迎回来' }}</h3>
       <p class="text-sm text-muted-foreground mt-1">{{ isRegister ? '注册后即可使用全部功能' : '登录以访问你的面试题库' }}</p>
     </div>
@@ -588,7 +588,8 @@ import { validateUsername, validatePassword } from '@/utils/validate.js'
 
 const props = defineProps({
   visible: Boolean,
-  embedded: { type: Boolean, default: false }
+  embedded: { type: Boolean, default: false },
+  hideHeader: { type: Boolean, default: false }
 })
 const emit = defineEmits(['close', 'login-success'])
 
