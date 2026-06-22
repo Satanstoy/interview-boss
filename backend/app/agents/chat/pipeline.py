@@ -1298,11 +1298,28 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             for q in basis_qs
         ]
 
-    selected_question, selected_reason = _infer_selected_question(
-        clean_response,
-        basis["basis_question_ids"],
-        candidates,
-    )
+    plan = state.get("next_question_plan") or {}
+    plan_metadata = state.get("question_plan_metadata") or {}
+    selected_question = None
+    selected_reason = ""
+
+    if (
+        plan.get("must_ask")
+        and state.get("selected_question")
+        and (
+            plan_metadata.get("adherence", {}).get("adheres")
+            or plan_metadata.get("repaired")
+            or state.get("question_source_reason") in {"question_plan_bound", "question_plan_repaired", "question_plan_fallback"}
+        )
+    ):
+        selected_question = state.get("selected_question")
+        selected_reason = state.get("question_source_reason") or "question_plan_bound"
+    else:
+        selected_question, selected_reason = _infer_selected_question(
+            clean_response,
+            basis["basis_question_ids"],
+            candidates,
+        )
     if not selected_question and state.get("selected_question"):
         selected_question = state.get("selected_question")
         selected_reason = (
@@ -1334,6 +1351,16 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             for q in candidates[:3]
             if _public_question(q) is not None
         ]
+
+    if plan:
+        metadata["question_plan"] = {
+            "question_id": plan.get("question_id"),
+            "source": plan.get("source"),
+            "selection_reason": plan.get("selection_reason"),
+            "adherence": plan_metadata.get("adherence"),
+            "repaired": bool(plan_metadata.get("repaired", False)),
+            "fallback_used": bool(plan_metadata.get("fallback_used", False)),
+        }
 
     if state.get("resume_summary") and _response_references_resume(
         clean_response, state["resume_summary"]

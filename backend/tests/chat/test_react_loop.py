@@ -946,6 +946,42 @@ class TestQuestionPlanEnforcement:
         assert state["question_plan_metadata"]["repaired"] is True
         mock_repair.assert_awaited_once()
 
+    def test_react_metadata_prefers_planned_selected_question(self):
+        from app.agents.chat.pipeline import _build_react_metadata
+
+        state = {
+            "retrieved_questions": [
+                {"id": 1, "question": "Redis 持久化怎么做？", "cat1": "后端", "cat2": "Redis", "sources": []},
+                {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+            ],
+            "candidate_questions": [
+                {"id": 1, "question": "Redis 持久化怎么做？", "cat1": "后端", "cat2": "Redis", "sources": []},
+                {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+            ],
+            "selected_question": {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+            "next_question_plan": {
+                "must_ask": True,
+                "question_id": 2,
+                "question_text": "RAG 检索怎么设计？",
+                "source": "search",
+                "selection_reason": "top_ranked_candidate",
+            },
+            "question_plan_metadata": {
+                "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
+                "repaired": False,
+            },
+            "question_source": "search",
+            "question_source_reason": "question_plan_bound",
+            "active_skills": [],
+        }
+
+        metadata, clean = _build_react_metadata(state, "请你说说 Redis 持久化？")
+
+        assert metadata["selected_question"]["id"] == 2
+        assert metadata["question_source_reason"] == "question_plan_bound"
+        assert metadata["question_plan"]["repaired"] is False
+        assert clean == "请你说说 Redis 持久化？"
+
 
 # ── TestBuildReactSystemPrompt ────────────────────────────
 
