@@ -36,7 +36,7 @@ class TestSendVerificationCode:
         with patch('app.services.email_service._get_smtp_config', return_value=mock_config), \
              patch('app.services.email_service._smtp_send', new_callable=AsyncMock) as mock_smtp:
             mock_smtp.return_value = True
-            result = await send_verification_code("test@example.com", "register")
+            result = await send_verification_code("send-success@example.com", "register")
             assert result["success"] is True
             assert "expires_in" in result
 
@@ -49,9 +49,9 @@ class TestSendVerificationCode:
              patch('app.services.email_service._smtp_send', new_callable=AsyncMock) as mock_smtp:
             mock_smtp.return_value = True
             # 第一次发送
-            await send_verification_code("test@example.com", "register")
+            await send_verification_code("rate-limit@example.com", "register")
             # 第二次发送（60秒内）
-            result = await send_verification_code("test@example.com", "register")
+            result = await send_verification_code("rate-limit@example.com", "register")
             assert result["success"] is False
             assert "频繁" in result["message"] or "rate" in result["message"].lower()
 
@@ -202,30 +202,128 @@ class TestEmailLoginEndpoint:
             assert exc_info.value.status_code == 404
 
 
+class TestPasswordResetEndpoint:
+    """忘记密码 / 修改密码端点测试"""
+
+    @pytest.mark.asyncio
+    async def test_reset_password_success(self):
+        """邮箱验证码正确时应更新密码并清除失败计数"""
+        from app.routers.auth import reset_password, PasswordResetRequest
+
+        mock_user = {"id": 1, "username": "testuser", "password_hash": "old_hash"}
+        req = PasswordResetRequest(email="test@example.com", code="123456", new_password="NewPass123")
+
+        async def _mock_run_db(func):
+            return func()
+
+        with patch('app.routers.auth.verify_code', new_callable=AsyncMock, return_value=True), \
+             patch('app.routers.auth._find_user_by_email', return_value=mock_user), \
+             patch('app.routers.auth.hash_password', return_value="new_hash"), \
+             patch('app.routers.auth.run_db', side_effect=_mock_run_db), \
+             patch('app.routers.auth.get_db_connection') as mock_conn, \
+             patch('app.routers.auth._clear_failures') as mock_clear:
+            conn = MagicMock()
+            mock_conn.return_value.__enter__.return_value = conn
+
+            result = await reset_password(_mock_request(), req)
+
+            assert result["status"] == "success"
+            conn.execute.assert_called_once()
+            args = conn.execute.call_args.args
+            assert "UPDATE users SET password_hash" in args[0]
+            assert args[1] == ("new_hash", 1)
+            mock_clear.assert_called_once_with("testuser")
+
+    @pytest.mark.asyncio
+    async def test_reset_password_wrong_code(self):
+        """验证码错误应返回 400"""
+        from app.routers.auth import reset_password, PasswordResetRequest
+        from fastapi import HTTPException
+
+        req = PasswordResetRequest(email="test@example.com", code="000000", new_password="NewPass123")
+        with patch('app.routers.auth.verify_code', new_callable=AsyncMock, return_value=False):
+            with pytest.raises(HTTPException) as exc_info:
+                await reset_password(_mock_request(), req)
+            assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_change_password_success(self):
+        """已登录用户提供当前密码后可以修改密码"""
+        from app.routers.auth import change_password, ChangePasswordRequest
+
+        current_user = {"id": 1, "username": "testuser"}
+        db_user = {"id": 1, "username": "testuser", "password_hash": "old_hash"}
+        req = ChangePasswordRequest(current_password="OldPass123", new_password="NewPass123")
+
+        async def _mock_run_db(func):
+            return func()
+
+        with patch('app.routers.auth.run_db', side_effect=_mock_run_db), \
+             patch('app.routers.auth.get_db_connection') as mock_conn, \
+             patch('app.routers.auth.verify_password', side_effect=[True, False]), \
+             patch('app.routers.auth.hash_password', return_value="new_hash"):
+            query_conn = MagicMock()
+            update_conn = MagicMock()
+            query_conn.execute.return_value.fetchone.return_value = db_user
+            mock_conn.return_value.__enter__.side_effect = [query_conn, update_conn]
+
+            result = await change_password(_mock_request(), req, current_user=current_user)
+
+            assert result["status"] == "success"
+            update_conn.execute.assert_called_once()
+            args = update_conn.execute.call_args.args
+            assert "UPDATE users SET password_hash" in args[0]
+            assert args[1] == ("new_hash", 1)
+
+    @pytest.mark.asyncio
+    async def test_change_password_wrong_current_password(self):
+        """当前密码错误应返回 400"""
+        from app.routers.auth import change_password, ChangePasswordRequest
+        from fastapi import HTTPException
+
+        current_user = {"id": 1, "username": "testuser"}
+        db_user = {"id": 1, "username": "testuser", "password_hash": "old_hash"}
+        req = ChangePasswordRequest(current_password="WrongPass123", new_password="NewPass123")
+
+        async def _mock_run_db(func):
+            return func()
+
+        with patch('app.routers.auth.run_db', side_effect=_mock_run_db), \
+             patch('app.routers.auth.get_db_connection') as mock_conn, \
+             patch('app.routers.auth.verify_password', return_value=False):
+            query_conn = MagicMock()
+            query_conn.execute.return_value.fetchone.return_value = db_user
+            mock_conn.return_value.__enter__.return_value = query_conn
+
+            with pytest.raises(HTTPException) as exc_info:
+                await change_password(_mock_request(), req, current_user=current_user)
+            assert exc_info.value.status_code == 400
+
+
 class TestBindEmailEndpoint:
     """绑定邮箱端点测试"""
 
     @pytest.mark.asyncio
     async def test_bind_email_success(self):
         """绑定邮箱成功"""
-        from app.routers.profile import bind_email, BindEmailRequest
+        from app.routers.profile_pkg.email import bind_email, BindEmailRequest
         mock_user = {"id": 1, "username": "testuser"}
         req = BindEmailRequest(email="new@example.com", code="123456")
-        with patch('app.routers.profile.verify_code', new_callable=AsyncMock, return_value=True), \
-             patch('app.routers.profile._check_email_taken', return_value=False), \
-             patch('app.routers.profile._update_user_email', return_value=True):
+        with patch('app.routers.profile_pkg.email.verify_code', new_callable=AsyncMock, return_value=True), \
+             patch('app.routers.profile_pkg.email._check_email_taken', return_value=False), \
+             patch('app.routers.profile_pkg.email._update_user_email', return_value=True):
             result = await bind_email(req, user=mock_user)
             assert result["success"] is True
 
     @pytest.mark.asyncio
     async def test_bind_email_already_taken(self):
         """绑定已被其他用户使用的邮箱应返回409"""
-        from app.routers.profile import bind_email, BindEmailRequest
+        from app.routers.profile_pkg.email import bind_email, BindEmailRequest
         from fastapi import HTTPException
         mock_user = {"id": 1, "username": "testuser"}
         req = BindEmailRequest(email="taken@example.com", code="123456")
-        with patch('app.routers.profile.verify_code', new_callable=AsyncMock, return_value=True), \
-             patch('app.routers.profile._check_email_taken', return_value=True):
+        with patch('app.routers.profile_pkg.email.verify_code', new_callable=AsyncMock, return_value=True), \
+             patch('app.routers.profile_pkg.email._check_email_taken', return_value=True):
             with pytest.raises(HTTPException) as exc_info:
                 await bind_email(req, user=mock_user)
             assert exc_info.value.status_code == 409

@@ -7,7 +7,7 @@
 
 | 文件 | 端点 | 职责 |
 |------|------|------|
-| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定（注册强制邮箱，登录检测邮箱绑定）；logout 必须幂等清除 refresh cookie |
+| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie |
 | `submit.py` | `/api/submit` | JD/面经提交（SSE 流式） |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD） |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |

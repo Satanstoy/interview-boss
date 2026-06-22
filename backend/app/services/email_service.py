@@ -7,15 +7,22 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
-
-# 内存存储（开发阶段，后续可替换为DB）
-_code_store: dict[str, dict] = {}
-# 格式: { "email:purpose": {"code": "123456", "expires_at": datetime, "used": False} }
+from app.db.connection import get_db_connection
 
 
 def generate_verification_code() -> str:
     """生成6位数字验证码"""
     return f"{random.randint(0, 999999):06d}"
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _parse_db_datetime(value) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
 
 
 def _get_smtp_config() -> Optional[dict]:
@@ -69,26 +76,66 @@ async def _smtp_send(to_addr: str, subject: str, body: str) -> bool:
 
 
 def _store_code(email: str, code: str, purpose: str, ttl_seconds: int = 300):
-    """存储验证码（内存）"""
-    key = f"{email}:{purpose}"
-    _code_store[key] = {
-        "code": code,
-        "expires_at": datetime.now() + timedelta(seconds=ttl_seconds),
-        "used": False,
-    }
+    """存储验证码到 SQLite，确保多 worker 进程共享。"""
+    normalized_email = _normalize_email(email)
+    expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
+    conn = get_db_connection()
+    conn.execute(
+        "UPDATE email_verification_codes SET used = 1 WHERE email = ? AND purpose = ? AND used = 0",
+        (normalized_email, purpose)
+    )
+    conn.execute(
+        """
+        INSERT INTO email_verification_codes (email, code, purpose, expires_at, used)
+        VALUES (?, ?, ?, ?, 0)
+        """,
+        (normalized_email, code, purpose, expires_at.isoformat())
+    )
+    conn.commit()
 
 
 def _get_stored_code(email: str, purpose: str) -> Optional[dict]:
     """获取存储的验证码"""
-    key = f"{email}:{purpose}"
-    return _code_store.get(key)
+    normalized_email = _normalize_email(email)
+    conn = get_db_connection()
+    row = conn.execute(
+        """
+        SELECT id, code, expires_at, used
+        FROM email_verification_codes
+        WHERE email = ? AND purpose = ? AND used = 0
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (normalized_email, purpose)
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "code": row["code"],
+        "expires_at": _parse_db_datetime(row["expires_at"]),
+        "used": bool(row["used"]),
+    }
 
 
 def _mark_code_used(email: str, purpose: str):
     """标记验证码已使用"""
-    key = f"{email}:{purpose}"
-    if key in _code_store:
-        _code_store[key]["used"] = True
+    normalized_email = _normalize_email(email)
+    conn = get_db_connection()
+    conn.execute(
+        """
+        UPDATE email_verification_codes
+        SET used = 1
+        WHERE id = (
+            SELECT id FROM email_verification_codes
+            WHERE email = ? AND purpose = ? AND used = 0
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+        )
+        """,
+        (normalized_email, purpose)
+    )
+    conn.commit()
 
 
 async def send_verification_code(email: str, purpose: str) -> dict:
@@ -97,7 +144,7 @@ async def send_verification_code(email: str, purpose: str) -> dict:
 
     Args:
         email: 目标邮箱
-        purpose: 用途 ('register' | 'login' | 'bind')
+        purpose: 用途 ('register' | 'login' | 'bind' | 'reset_password')
 
     Returns:
         {"success": bool, "message": str, "expires_in": int}
@@ -119,7 +166,12 @@ async def send_verification_code(email: str, purpose: str) -> dict:
     _store_code(email, code, purpose, ttl_seconds=300)
 
     # 构建邮件内容
-    purpose_text = {"register": "注册", "login": "登录", "bind": "绑定邮箱"}.get(purpose, "验证")
+    purpose_text = {
+        "register": "注册",
+        "login": "登录",
+        "bind": "绑定邮箱",
+        "reset_password": "重置密码",
+    }.get(purpose, "验证")
     subject = f"【InterviewBoss】{purpose_text}验证码"
     body = f"""
     <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">

@@ -424,9 +424,27 @@ async def login_form(
 from app.services.email_service import send_verification_code, verify_code
 
 
+def _validate_password_complexity(v: str) -> str:
+    categories = 0
+    if any(c.isupper() for c in v): categories += 1
+    if any(c.islower() for c in v): categories += 1
+    if any(c.isdigit() for c in v): categories += 1
+    if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
+    if categories < 2:
+        raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
+    return v
+
+
 class SendCodeRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
-    purpose: str = Field(..., pattern=r'^(register|login|bind)$')
+    purpose: str = Field(..., pattern=r'^(register|login|bind|reset_password)$')
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
 
 
 class EmailRegisterRequest(BaseModel):
@@ -445,19 +463,54 @@ class EmailRegisterRequest(BaseModel):
     @field_validator('password')
     @classmethod
     def password_complexity(cls, v):
-        categories = 0
-        if any(c.isupper() for c in v): categories += 1
-        if any(c.islower() for c in v): categories += 1
-        if any(c.isdigit() for c in v): categories += 1
-        if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
-        if categories < 2:
-            raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
-        return v
+        return _validate_password_complexity(v)
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
 
 
 class EmailLoginRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
     code: str = Field(..., min_length=6, max_length=6)
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('email')
+    @classmethod
+    def email_format(cls, v):
+        if not _EMAIL_RE.match(v):
+            raise ValueError('请输入有效的邮箱地址')
+        return v.lower().strip()
+
+    @field_validator('new_password')
+    @classmethod
+    def password_complexity(cls, v):
+        return _validate_password_complexity(v)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('new_password')
+    @classmethod
+    def password_complexity(cls, v):
+        return _validate_password_complexity(v)
 
 
 def _check_username_available(username: str) -> bool:
@@ -476,7 +529,7 @@ def _find_user_by_email(email: str):
     """通过邮箱查找用户"""
     with get_db_connection() as conn:
         return conn.execute(
-            "SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE email = ?",
+            "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id FROM users WHERE email = ?",
             (email,)
         ).fetchone()
 
@@ -552,6 +605,66 @@ async def login_with_email(request: Request, req: EmailLoginRequest, response: R
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", "")
     )
+
+
+@router.post("/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(request: Request, req: PasswordResetRequest):
+    """通过已绑定邮箱验证码重置密码。"""
+    valid = await verify_code(req.email, req.code, "reset_password")
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    user = _find_user_by_email(req.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="该邮箱未注册")
+
+    password_hash = hash_password(req.new_password)
+
+    def _update():
+        with get_db_connection() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (password_hash, user["id"])
+            )
+            conn.commit()
+
+    await run_db(_update)
+    _clear_failures(user["username"])
+    return {"status": "success", "message": "密码已重置，请使用新密码登录"}
+
+
+@router.post("/change-password")
+@limiter.limit("10/minute")
+async def change_password(request: Request, req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    """已登录用户修改密码。"""
+    def _query():
+        with get_db_connection() as conn:
+            return conn.execute(
+                "SELECT id, username, password_hash FROM users WHERE id = ?",
+                (current_user["id"],)
+            ).fetchone()
+
+    user = await run_db(_query)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    if verify_password(req.new_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+
+    password_hash = hash_password(req.new_password)
+
+    def _update():
+        with get_db_connection() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (password_hash, user["id"])
+            )
+            conn.commit()
+
+    await run_db(_update)
+    return {"status": "success", "message": "密码修改成功"}
 
 
 # ── 临时 token 绑定邮箱（老用户首次登录强制绑定）──────────────────────

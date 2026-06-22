@@ -17,7 +17,7 @@
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |
 | `resume_service.py` | 简历 PDF 解析、存储、查询 | `db/connection` |
-| `email_service.py` | 邮箱验证码发送/验证 | `core/config` |
+| `email_service.py` | 邮箱验证码发送/验证（注册、登录、绑定邮箱、重置密码） | `core/config` |
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
 | `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级） | `db/connection`, `routers/questions` |
