@@ -78,7 +78,7 @@ function handleShowSettings() { emit('show-settings') }
         class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-1 overflow-hidden"
         :class="logoHovered
           ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
-          : 'bg-gradient-to-br from-primary to-primary-600 text-white shadow-lg shadow-primary/20'"
+          : 'bg-transparent text-sidebar-foreground'"
       >
         <!-- App logo -->
         <img
@@ -141,7 +141,7 @@ function handleShowSettings() { emit('show-settings') }
     <!-- Header: logo + PanelLeft toggle -->
     <div class="flex items-center justify-between px-4 py-3 shrink-0">
       <a href="#" class="flex items-center gap-3 min-w-0">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary-600 shadow-lg shadow-primary/20 transition-transform hover:scale-105 overflow-hidden">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform hover:scale-105 overflow-hidden">
           <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
         </div>
         <div class="flex flex-col items-start leading-tight">

@@ -13,4 +13,4 @@
 - 通用组件禁止导入 `services/` 或 `composables/` 中的业务模块
 - 业务组件通过 composables 获取数据，不直接调用 API
 - 组件规范见 `.claude/rules/vue-components.md`（编辑 Vue 文件时自动加载）
-- 侧边栏品牌标识统一使用现有方形 favicon 资源 `/favicon-b.png`，不要再用文字 `IB` 作为主 logo。
+- 侧边栏品牌标识统一使用现有方形 favicon 资源 `/favicon-b.png`，不要再用文字 `IB` 或蓝色背景包裹作为主 logo。

@@ -38,6 +38,7 @@ cd frontend && npm run build                             # 前端构建
 
 - **TDD（强制）**：先写测试 → 确认失败 → 最少代码通过 → 重构。详见 `backend/CLAUDE.md` 和 `frontend/CLAUDE.md`。
 - **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文。Git hook 自动检查。
+- **Git 工作流**：本项目由用户单人维护。除非用户明确要求创建分支、PR 或 worktree，日常修改直接在 `master` 上进行并提交；不要为了常规改动自动创建 feature branch。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文。
 - **禁止**：根目录装包、跨包引用源码、`--force`/`--no-verify`。
 - **依赖管理**：Python 用 `cd backend && uv add X`，JS 用 `cd frontend && npm install X`，禁止在根目录操作
