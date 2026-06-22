@@ -154,23 +154,23 @@ const handleGoToQuestion = (question) => {
 
       <!-- Position button group -->
       <div class="flex gap-2 flex-wrap">
-        <div v-for="pos in positions" :key="pos" class="flex items-center gap-1">
+        <div v-for="pos in positions" :key="pos.id || pos.name" class="flex items-center gap-1">
           <Button
-            :variant="currentPosition === pos ? 'default' : 'outline'"
+            :variant="currentPosition === pos.name ? 'default' : 'outline'"
             size="sm"
             :disabled="switching"
-            @click="handleSwitchPosition(pos)"
-            :class="currentPosition === pos
+            @click="handleSwitchPosition(pos.name)"
+            :class="currentPosition === pos.name
               ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/15'
               : ''"
           >
-            {{ pos }}
+            {{ pos.name }}
           </Button>
           <AppTooltip text="删除岗位">
             <Button
               variant="ghost"
               size="icon-sm"
-              @click="handleDeletePosition(pos)"
+              @click="handleDeletePosition(pos.name)"
               class="text-muted-foreground/50 hover:text-destructive transition-colors"
             >
               <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
