@@ -30,6 +30,7 @@ dependencies = [
     "tokenizers>=0.22.0",
     "huggingface-hub>=1.0.0",
     "structlog>=24.1.0",
+    "aiohttp>=3.14.1",
 ]
 
 [dependency-groups]
