@@ -24,7 +24,7 @@
           : 'text-muted-foreground hover:text-foreground'"
         class="flex-1 py-1.5 text-xs font-medium rounded-md transition-all"
       >
-        邮箱验证码
+        验证码登录
       </button>
     </div>
 
@@ -262,12 +262,12 @@
     </form>
 
     <div v-if="!needEmailBind" class="mt-4 text-center">
-      <span class="text-sm text-muted-foreground">{{ isRegister ? '已有账号？' : '没有账号？' }}</span>
+      <span class="text-sm text-muted-foreground">{{ isRegister ? '已有账号？' : '还没有账号？' }}</span>
       <button
         @click="isRegister = !isRegister; error = ''"
         class="text-sm text-primary hover:text-primary/80 font-medium ml-1 transition"
       >
-        {{ isRegister ? '去登录' : '注册一个' }}
+        {{ isRegister ? '去登录' : '立即注册' }}
       </button>
     </div>
   </div>
@@ -314,7 +314,7 @@
                 : 'text-muted-foreground hover:text-foreground'"
               class="flex-1 py-1.5 text-xs font-medium rounded-md transition-all"
             >
-              邮箱验证码
+              验证码登录
             </button>
           </div>
 
@@ -554,12 +554,12 @@
 
           <!-- Toggle -->
           <div v-if="!needEmailBind" class="px-6 py-4 bg-muted/50 text-center border-t border-border/50">
-            <span class="text-sm text-muted-foreground">{{ isRegister ? '已有账号？' : '没有账号？' }}</span>
+            <span class="text-sm text-muted-foreground">{{ isRegister ? '已有账号？' : '还没有账号？' }}</span>
             <button
               @click="isRegister = !isRegister; error = ''"
               class="text-sm text-primary hover:text-primary/80 font-medium ml-1 transition"
             >
-              {{ isRegister ? '去登录' : '注册一个' }}
+              {{ isRegister ? '去登录' : '立即注册' }}
             </button>
           </div>
 

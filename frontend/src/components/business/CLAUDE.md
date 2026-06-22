@@ -41,7 +41,7 @@
 - API 调用通过 `services/` 层，禁止在组件中直接 fetch
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
-- `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间只保留登录卡片、“无需登录，先体验工作台”入口和三个短卖点。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`、副标题标语或复杂 dashboard preview。
+- `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 
 ## 修改后必做
 
