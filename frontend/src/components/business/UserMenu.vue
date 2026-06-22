@@ -92,8 +92,6 @@
 
 <script setup>
 import { ref, watch, nextTick, onUnmounted } from 'vue'
-import { authLogout } from '@/api/index.js'
-import { setAuthToken } from '@/services/http.js'
 
 const props = defineProps({
   user: Object,
@@ -149,8 +147,6 @@ onUnmounted(() => {
 
 async function handleLogout() {
   showMenu.value = false
-  await authLogout()
-  setAuthToken('')
   emit('logout')
 }
 </script>

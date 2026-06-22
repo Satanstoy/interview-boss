@@ -9,9 +9,19 @@ export const authMe = () => get(`${API}/auth/me`)
 export const authUpdateBankMode = (bank_mode) => put(`${API}/auth/bank-mode`, { bank_mode })
 export const authRefresh = () => post(`${API}/auth/refresh`, null)
 export const authLogout = async () => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
   try {
-    await fetchWithCredentials(`${API}/auth/logout`, { method: 'POST' })
-  } catch { /* 忽略网络错误，前端仍会清除本地状态 */ }
+    const response = await fetchWithCredentials(`${API}/auth/logout`, {
+      method: 'POST',
+      signal: controller.signal,
+    })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ── Email Auth ──

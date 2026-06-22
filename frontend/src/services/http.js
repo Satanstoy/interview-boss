@@ -586,7 +586,7 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
  */
 export async function fetchWithCredentials(url, options = {}) {
   const token = getAuthToken()
-  const authHeaders = {}
+  const authHeaders = { 'X-Requested-With': 'XMLHttpRequest' }
   if (token) authHeaders['Authorization'] = `Bearer ${token}`
   return fetch(url, {
     ...options,

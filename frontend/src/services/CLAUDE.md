@@ -22,6 +22,7 @@
 ## 核心规则
 
 - 所有 API 调用必须通过 `http.js` 的 `get/post/put/del/upload` 方法
+- 需要 HttpOnly cookie 的认证请求使用 `fetchWithCredentials()`，必须保留 `X-Requested-With: XMLHttpRequest`，否则后端 CSRF 检查会拒绝 logout/refresh 类请求
 - 新增 API 在此目录创建对应文件，并在 `api/index.js` re-export
 - SSE 流式用 `fetch` + `ReadableStream`，不要用 `EventSource`
 

@@ -16,6 +16,7 @@ Vue 3 Composition API 的可复用逻辑，`use*` 命名前缀。
 | `useSelection.js` | 多选逻辑 |
 | `useSidebar.js` | 侧边栏状态 |
 | `useTabScroll.js` | Tab 滚动 |
+| `useAuth.js` | 认证状态单例；登录成功、自动刷新、统一退出登录（调用后端 logout 清 refresh cookie 后清本地状态） |
 | `useTheme.js` | 主题切换 |
 
 ## 核心规则

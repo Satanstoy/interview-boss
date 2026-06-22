@@ -353,15 +353,21 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
 
 
 @router.post("/logout")
-async def logout(request: Request, response: Response, rt: str = Depends(get_refresh_token), _csrf: None = Depends(_require_custom_header)):
-    """注销：删除 refresh token，清除 cookie"""
-    try:
-        payload = decode_token(rt, expected_type="refresh")
-        jti = payload.get("jti")
-        if jti:
-            delete_refresh_token(jti)
-    except HTTPException:
-        pass  # Token 可能已过期，仍需清除 cookie
+async def logout(request: Request, response: Response, _csrf: None = Depends(_require_custom_header)):
+    """注销：删除 refresh token，清除 cookie。幂等：无 cookie 也返回成功。"""
+    rt = request.cookies.get("refresh_token")
+    if rt:
+        try:
+            payload = decode_token(rt, expected_type="refresh")
+            family_id = payload.get("family_id", "")
+            if family_id:
+                invalidate_family(family_id)
+            else:
+                jti = payload.get("jti")
+                if jti:
+                    delete_refresh_token(jti)
+        except HTTPException:
+            pass  # Token 可能已过期或无效，仍需清除 cookie
     _clear_refresh_cookie(response, request)
     return {"status": "success"}
 

@@ -9,6 +9,7 @@
 import { ref } from 'vue'
 import { setAuthToken, refreshAuthToken, setUnauthorizedHandler, invalidateCache } from '@/services/http.js'
 import * as api from '@/api/index.js'
+import { authLogout } from '@/api/index.js'
 
 // ── 模块级状态（单例） ──
 export const currentUser = ref(null)
@@ -47,11 +48,15 @@ const handleLoginSuccess = (user) => {
 }
 
 // ── 登出 ──
-const handleLogout = () => {
-  setAuthToken('')
-  currentUser.value = null
-  _onDataRefresh?.()
-  pendingReviewCount.value = 0
+const handleLogout = async () => {
+  try {
+    await authLogout()
+  } finally {
+    setAuthToken('')
+    currentUser.value = null
+    _onDataRefresh?.()
+    pendingReviewCount.value = 0
+  }
 }
 
 // ── 切换题库模式（公共/个人） ──
