@@ -516,7 +516,7 @@ async def update_generic_data(req: GenericUpdateRequest, bg_tasks: BackgroundTas
                     url = row['url'] or f"internal://{row['id']}"
                     company = row['company'] or "未提供"
                     round_ = row['round'] or "未提供"
-                    current_pos = get_current_job_position()
+                    current_pos = row['job_position'] or get_current_job_position()
 
                     # LLM 打标（事务外）
                     tagged_rows = await tag_questions_batch(url, company, round_, q_list)

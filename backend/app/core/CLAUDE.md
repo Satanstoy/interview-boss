@@ -15,6 +15,7 @@
 
 - **配置热更新**：`/api/profile` → DB → `_reload_from_db()` → 内存变量更新 → `_sync_env_file()` 写回 `.env`
 - **认证流程**：`get_current_user()` 验证 Access Token → `get_admin_user()` 额外检查 `is_admin`
+- **用户岗位**：`get_current_user()` 返回值需要包含 `current_position`，并通过 `get_user_job_position(user_id)` 解析个人岗位优先级，保证前端刷新后仍停留在用户切换的岗位。
 - **Token 刷新**：401 时前端自动调用 `/api/auth/refresh`，后端轮转 JTI
 
 ## 修改后必做

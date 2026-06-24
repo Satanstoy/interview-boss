@@ -51,16 +51,18 @@ async def get_analytics(user: dict = Depends(get_current_user)):
     def _query():
         tech_counter, tag_counter, level_counter = Counter(), Counter(), Counter()
         with get_db_connection() as conn:
+            _, current_pos = get_user_job_position(uid)
+            position_filter = "(job_position = ? OR job_position = '' OR job_position IS NULL)"
             # 按 bank_mode 过滤 JD 数据
             if mode == 'personal':
-                jd_where = "WHERE deleted_at IS NULL AND owner_id = ?"
-                jd_params = (uid,)
+                jd_where = f"WHERE deleted_at IS NULL AND owner_id = ? AND {position_filter}"
+                jd_params = (uid, current_pos)
             elif mode == 'mixed':
-                jd_where = "WHERE deleted_at IS NULL AND ((owner_id IS NULL AND status = 'approved') OR owner_id = ?)"
-                jd_params = (uid,)
+                jd_where = f"WHERE deleted_at IS NULL AND ((owner_id IS NULL AND status = 'approved') OR owner_id = ?) AND {position_filter}"
+                jd_params = (uid, current_pos)
             else:
-                jd_where = "WHERE deleted_at IS NULL AND owner_id IS NULL AND status = 'approved'"
-                jd_params = ()
+                jd_where = f"WHERE deleted_at IS NULL AND owner_id IS NULL AND status = 'approved' AND {position_filter}"
+                jd_params = (current_pos,)
 
             _skip_tech = {'未提供', '无', '暂无', '没有', '不详', '未知', 'n/a', 'none', 'null'}
             for r in conn.execute(f"SELECT tech_stack FROM jd {jd_where}", jd_params).fetchall():
@@ -68,15 +70,16 @@ async def get_analytics(user: dict = Depends(get_current_user)):
                     tech_counter.update([t.strip().lstrip('0123456789. ') for t in r['tech_stack'].split('\n') if t.strip() and t.strip().lstrip('0123456789. ').lower() not in _skip_tech])
 
             # 按 bank_mode 过滤 questions_detail 数据（通过关联 interview 表）
+            qd_position_filter = "(qd.job_position = ? OR qd.job_position = '' OR qd.job_position IS NULL)"
             if mode == 'personal':
-                qd_where = "WHERE qd.deleted_at IS NULL AND iv.owner_id = ?"
-                qd_params = (uid,)
+                qd_where = f"WHERE qd.deleted_at IS NULL AND iv.owner_id = ? AND {qd_position_filter}"
+                qd_params = (uid, current_pos)
             elif mode == 'mixed':
-                qd_where = "WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?)"
-                qd_params = (uid,)
+                qd_where = f"WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?) AND {qd_position_filter}"
+                qd_params = (uid, current_pos)
             else:
-                qd_where = "WHERE qd.deleted_at IS NULL AND iv.owner_id IS NULL AND iv.status = 'approved'"
-                qd_params = ()
+                qd_where = f"WHERE qd.deleted_at IS NULL AND iv.owner_id IS NULL AND iv.status = 'approved' AND {qd_position_filter}"
+                qd_params = (current_pos,)
 
             for r in conn.execute(
                 f"SELECT qd.tags, qd.diff_tag FROM questions_detail qd JOIN interview iv ON qd.url = iv.url {qd_where}",

@@ -35,6 +35,7 @@
 - **依赖注入**：用 `Depends(get_current_user)` / `Depends(get_admin_user)` 做认证
 - **SSE 端点**：用 `StreamingResponse(media_type="text/event-stream")` 返回流式数据
 - **Chat SSE 元数据**：`chat.py` 用 `_metadata_events_from_done()` 将 agent 的 done metadata 拆成公开事件（如 `selected_question`、`question_plan`、`basis`），避免直接暴露完整内部 metadata；`question_plan` 必须显式白名单输出字段，禁止透传内部 plan
+- **岗位隔离**：列表、统计、练习进度、导入写入等用户可见数据必须通过 `get_user_job_position(user['id'])` 获取当前岗位；不要直接用全局 `get_current_job_position()` 作为用户视图过滤或写入依据。
 - **新路由注册**：在 `asgi.py` 中 `app.include_router(router)`
 
 ## 修改后必做

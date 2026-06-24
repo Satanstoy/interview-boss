@@ -108,3 +108,30 @@ class TestPositionManagement:
 
             # Assert
             assert isinstance(result, list)
+
+    @pytest.mark.asyncio
+    async def test_list_positions_excludes_soft_deleted_rows(self):
+        """GET /api/positions 应排除软删除岗位，避免前端刷新后旧岗位回流"""
+        from app.routers.profile_pkg.position import list_positions
+
+        mock_user = {"id": 1}
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        def mock_execute(sql, *args):
+            result = MagicMock()
+            if "PRAGMA table_info" in sql:
+                result.fetchall.return_value = [(0, "id"), (1, "name"), (2, "description"), (3, "is_deleted")]
+            elif "SELECT id, name, description FROM job_positions" in sql:
+                assert "is_deleted" in sql
+                result.fetchall.return_value = [{"id": 1, "name": "前端开发工程师", "description": ""}]
+            return result
+
+        mock_conn.execute.side_effect = mock_execute
+
+        with patch('app.routers.profile_pkg.position.get_db_connection', return_value=mock_conn):
+            with patch('app.routers.profile_pkg.position.run_db', side_effect=lambda f: f()):
+                result = await list_positions(user=mock_user)
+
+        assert result == {"positions": [{"id": 1, "name": "前端开发工程师", "description": ""}]}

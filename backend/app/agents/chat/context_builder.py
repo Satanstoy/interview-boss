@@ -56,7 +56,11 @@ def build_interview_context(user_id: int, conversation_id: Optional[str] = None)
         # 用岗位名和已有分类作为搜索关键词
         search_keywords = [position_name]
         past_sessions = search_past_sessions(
-            user_id, search_keywords, limit=2, exclude_conv_id=conversation_id
+            user_id,
+            search_keywords,
+            limit=2,
+            exclude_conv_id=conversation_id,
+            job_position=position_name,
         )
         recall_text = format_session_recall(past_sessions)
         if recall_text:

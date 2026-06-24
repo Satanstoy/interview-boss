@@ -183,17 +183,9 @@ def _issue_token_pair(user: dict, response: Response, request: Request, remember
     refresh_token, jti = create_refresh_token(token_data, days=days, family_id=family_id)
     store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent, family_id=family_id)
     _set_refresh_cookie(response, refresh_token, request, remember=remember)
-    # 获取岗位名称
-    pos_name = ""
-    pos_id = user.get('current_position_id')
-    if pos_id:
-        with get_db_connection() as conn:
-            jp = conn.execute("SELECT name FROM job_positions WHERE id = ?", (pos_id,)).fetchone()
-            if jp:
-                pos_name = jp['name']
-    if not pos_name:
-        from app.db.connection import get_current_job_position
-        pos_name = get_current_job_position()
+    # 获取用户真实当前岗位：个人岗位优先，其次 current_position_id，最后全局 fallback
+    from app.db.connection import get_user_job_position
+    pos_id, pos_name = get_user_job_position(user['id'])
     return {
         "token": access_token,
         "user": {

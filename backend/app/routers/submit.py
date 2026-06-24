@@ -15,7 +15,7 @@ from app.core.config import LLM_MODEL, MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'}
 from app.core.prompts import SYSTEM_PROMPT, JD_PROMPT, INTERVIEW_PROMPT, TAGGING_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_user_job_position
 from app.db.operations import (
     _check_duplicate_url_sync, _insert_jd, _insert_interview,
     submit_interview_txn, sync_interview_details,
@@ -29,6 +29,12 @@ from app.agents.submit.graph import stream_submit_graph
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
+
+
+def _get_current_position_for_user(user_id: int) -> str:
+    """Resolve the user's active position for import/write paths."""
+    _, current_pos = get_user_job_position(user_id)
+    return current_pos or get_current_job_position()
 
 
 async def background_generate_answer(question_id: int, question_text: str, user_id: int = None):
@@ -113,7 +119,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     return standardized
 
 
-async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False, interview_id: int = None):
+async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False, interview_id: int = None, job_position: str = None):
     """对一批已打标题目做处理。
 
     个人题库：直接插入 question_bank。
@@ -126,7 +132,7 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     if not valid_rows:
         return
 
-    current_pos = get_current_job_position()
+    current_pos = job_position or _get_current_position_for_user(user_id)
 
     # ── 个人题库：直接插入，不做聚类 ──
     if is_personal:
@@ -257,8 +263,8 @@ async def submit_data(
             if not q_list or all(not q.strip() for q in q_list):
                 raise HTTPException(status_code=422, detail="大模型未能从内容中提取到面试题目，请确认提交的是面经内容而非其他类型。")
 
-        # 获取当前岗位（用于面经题目隔离）
-        current_pos = get_current_job_position()
+        # 获取用户当前岗位（用于 JD/面经/题目隔离）
+        current_pos = _get_current_position_for_user(user['id'])
 
         # 计算 owner_id 和 status
         if submit_target == 'personal':
@@ -549,7 +555,7 @@ async def submit_data_stream(
                     yield f"data: {json.dumps({'type': 'error', 'message': '大模型未能从内容中提取到面试题目'})}\n\n"
                     return
 
-            current_pos = get_current_job_position()
+            current_pos = _get_current_position_for_user(_user['id'])
 
             if submit_target == 'personal':
                 record_owner_id = _user['id']
@@ -777,8 +783,6 @@ async def submit_data_stream_v2(
                     raise HTTPException(status_code=400, detail=f"文件 {file.filename} 不是有效的图片文件（检测到: {real_mime}）")
                 image_data.append({"content": content, "mime": real_mime})
 
-    from app.db.connection import get_current_job_position
-
     input_state = {
         "raw_text": text or "",
         "image_data": image_data,
@@ -788,7 +792,7 @@ async def submit_data_stream_v2(
         "target": submit_target,
         "user_id": user['id'],
         "is_admin": bool(user.get('is_admin', 0)),
-        "job_position": get_current_job_position(),
+        "job_position": _get_current_position_for_user(user['id']),
     }
 
     async def event_stream():
@@ -875,8 +879,6 @@ async def create_submit_job(
                     "mime": real_mime,
                 })
 
-    from app.db.connection import get_current_job_position
-
     # 构建 payload
     payload = {
         "raw_text": text or "",
@@ -887,7 +889,7 @@ async def create_submit_job(
         "target": submit_target,
         "user_id": user['id'],
         "is_admin": bool(user.get('is_admin', 0)),
-        "job_position": get_current_job_position(),
+        "job_position": _get_current_position_for_user(user['id']),
     }
 
     # ── 创建 job + 存 payload（单事务） ──

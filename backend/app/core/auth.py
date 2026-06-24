@@ -161,7 +161,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await run_db(_query)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
-    return dict(user)
+    result = dict(user)
+    from app.db.connection import get_user_job_position
+    pos_id, pos_name = await run_db(lambda: get_user_job_position(user_id))
+    result["current_position_id"] = pos_id
+    result["current_position"] = pos_name
+    return result
 
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)):

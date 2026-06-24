@@ -62,6 +62,20 @@ class TestChatServiceConversation:
         assert len(user2_convs) == 1
         assert user2_convs[0]["title"] == "用户2的对话"
 
+    def test_get_conversations_filters_by_job_position(self, test_db):
+        """T-002pos: 会话列表和详情应按当前岗位隔离"""
+        from app.services.chat_service import create_conversation, get_conversations, get_conversation
+
+        fe = create_conversation(user_id=1, mode="free_practice", title="前端面试", job_position="前端开发")
+        be = create_conversation(user_id=1, mode="free_practice", title="后端面试", job_position="后端开发")
+
+        fe_convs = get_conversations(user_id=1, job_position="前端开发")
+        be_convs = get_conversations(user_id=1, job_position="后端开发")
+
+        assert [c["id"] for c in fe_convs] == [fe["id"]]
+        assert [c["id"] for c in be_convs] == [be["id"]]
+        assert get_conversation(be["id"], user_id=1, job_position="前端开发") is None
+
     def test_get_conversations_excludes_archived(self, test_db):
         """T-002b: 默认不返回已归档的会话"""
         from app.services.chat_service import (

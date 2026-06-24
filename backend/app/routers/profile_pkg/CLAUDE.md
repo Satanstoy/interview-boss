@@ -20,3 +20,7 @@
 
 1. 运行 `docker compose exec backend uv run pytest backend/tests/ -q`
 2. 更新本文件（如新增端点或子模块）
+
+## 岗位列表约定
+
+- `GET /api/positions` 必须排除 `job_positions.is_deleted = 1` 的软删除记录，和删除接口保持同一可见性契约。

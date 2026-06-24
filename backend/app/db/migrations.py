@@ -1662,6 +1662,37 @@ def _migration_037_conversation_metadata(conn):
     logger.info("已添加 chat_conversations.metadata 列")
 
 
+def _migration_038_chat_conversation_position(conn):
+    """Add job_position to chat conversations and backfill existing rows."""
+    cursor = conn.cursor()
+    col_set = {row[1] for row in cursor.execute("PRAGMA table_info('chat_conversations')").fetchall()}
+    if "job_position" not in col_set:
+        conn.execute("ALTER TABLE chat_conversations ADD COLUMN job_position TEXT DEFAULT ''")
+
+    fallback_row = conn.execute("SELECT value FROM user_profile WHERE key = 'current_job_position'").fetchone()
+    fallback_position = fallback_row[0] if fallback_row and fallback_row[0] else DEFAULT_TAXONOMY["job_position"]
+
+    rows = conn.execute(
+        "SELECT c.id, u.personal_position, jp.name "
+        "FROM chat_conversations c "
+        "LEFT JOIN users u ON c.user_id = u.id "
+        "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
+        "WHERE c.job_position IS NULL OR c.job_position = ''"
+    ).fetchall()
+    for row in rows:
+        position = row[1] or row[2] or fallback_position
+        conn.execute("UPDATE chat_conversations SET job_position = ? WHERE id = ?", (position, row[0]))
+
+    cursor.execute("PRAGMA index_list('chat_conversations')")
+    indexes = [row[1] for row in cursor.fetchall()]
+    if "idx_cc_user_status_position" not in indexes:
+        conn.execute(
+            "CREATE INDEX idx_cc_user_status_position "
+            "ON chat_conversations(user_id, status, job_position)"
+        )
+    logger.info("已添加 chat_conversations.job_position 并回填历史会话")
+
+
 _MIGRATIONS = [
     (1,  'base_tables',                  _migration_001_base_tables),
     (2,  'question_bank',                _migration_002_question_bank),
@@ -1700,6 +1731,7 @@ _MIGRATIONS = [
     (35, 'split_e_category',             _migration_035_split_e_category),
     (36, 'job_payloads',                 _migration_036_job_payloads),
     (37, 'conversation_metadata',        _migration_037_conversation_metadata),
+    (38, 'chat_conversation_position',   _migration_038_chat_conversation_position),
 ]
 
 

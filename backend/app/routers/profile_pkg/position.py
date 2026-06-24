@@ -33,7 +33,12 @@ async def switch_my_position(req: dict, user: dict = Depends(get_current_user)):
             conn.commit()
 
     await run_db(_switch)
-    return {"status": "success", "current_job_position": position_name}
+    return {
+        "status": "success",
+        "current_job_position": position_name,
+        "current_position": position_name,
+        "current_position_id": None,
+    }
 
 
 @router.put("/api/profile/position")
@@ -88,7 +93,14 @@ async def list_positions(user: dict = Depends(get_current_user)):
     """列出所有岗位"""
     def _query():
         with get_db_connection() as conn:
-            rows = conn.execute("SELECT id, name, description FROM job_positions ORDER BY name").fetchall()
+            cols = {r[1] for r in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+            if 'is_deleted' in cols:
+                rows = conn.execute(
+                    "SELECT id, name, description FROM job_positions "
+                    "WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name"
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT id, name, description FROM job_positions ORDER BY name").fetchall()
             return [dict(r) for r in rows]
     positions = await run_db(_query)
     return {"positions": positions}

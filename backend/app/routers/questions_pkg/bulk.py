@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.db.question_bank_sources import delete_original_item
-from app.db.connection import get_db_connection, run_db, get_current_job_position
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_user_job_position
 from app.models.schemas import BatchDeleteRequest, DeleteOriginalQuestionRequest, UploadToBankRequest
 from app.services.clustering import generate_unified_question
 
@@ -276,7 +276,8 @@ async def upload_to_bank(req: UploadToBankRequest, user: dict = Depends(get_curr
 
     def _insert():
         with get_db_connection() as conn:
-            current_pos = get_current_job_position()
+            _, current_pos = get_user_job_position(user['id'])
+            current_pos = current_pos or get_current_job_position()
             if req.target == 'personal':
                 conn.execute(
                     "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?)",

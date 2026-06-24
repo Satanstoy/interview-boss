@@ -48,6 +48,7 @@ def create_conversation(
     title: Optional[str] = None,
     jd_id: Optional[int] = None,
     resume_text: Optional[str] = None,
+    job_position: str = "",
 ) -> dict:
     """创建新对话会话"""
     conv_id = str(uuid.uuid4())
@@ -56,25 +57,34 @@ def create_conversation(
 
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO chat_conversations (id, user_id, mode, title, jd_id, resume_text) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (conv_id, user_id, mode, title, jd_id, resume_text)
+            "INSERT INTO chat_conversations (id, user_id, mode, title, jd_id, resume_text, job_position) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (conv_id, user_id, mode, title, jd_id, resume_text, job_position)
         )
         conn.commit()
 
-    return {"id": conv_id, "mode": mode, "title": title}
+    return {"id": conv_id, "mode": mode, "title": title, "job_position": job_position}
 
 
-def get_conversations(user_id: int, status: str = "active") -> list[dict]:
+def get_conversations(user_id: int, status: str = "active", job_position: str = "") -> list[dict]:
     """获取用户的对话列表"""
     with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, mode, title, jd_id, status, created_at, updated_at "
-            "FROM chat_conversations "
-            "WHERE user_id = ? AND status = ? "
-            "ORDER BY updated_at DESC",
-            (user_id, status)
-        ).fetchall()
+        if job_position:
+            rows = conn.execute(
+                "SELECT id, mode, title, jd_id, status, created_at, updated_at, job_position "
+                "FROM chat_conversations "
+                "WHERE user_id = ? AND status = ? AND job_position = ? "
+                "ORDER BY updated_at DESC",
+                (user_id, status, job_position)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, mode, title, jd_id, status, created_at, updated_at, job_position "
+                "FROM chat_conversations "
+                "WHERE user_id = ? AND status = ? "
+                "ORDER BY updated_at DESC",
+                (user_id, status)
+            ).fetchall()
 
     return [
         {
@@ -85,19 +95,27 @@ def get_conversations(user_id: int, status: str = "active") -> list[dict]:
             "status": row[4],
             "created_at": row[5],
             "updated_at": row[6],
+            "job_position": row[7],
         }
         for row in rows
     ]
 
 
-def get_conversation(conversation_id: str, user_id: int) -> Optional[dict]:
+def get_conversation(conversation_id: str, user_id: int, job_position: str = "") -> Optional[dict]:
     """获取单个对话详情"""
     with get_db_connection() as conn:
-        row = conn.execute(
-            "SELECT id, user_id, mode, title, jd_id, resume_text, status, created_at, updated_at "
-            "FROM chat_conversations WHERE id = ? AND user_id = ?",
-            (conversation_id, user_id)
-        ).fetchone()
+        if job_position:
+            row = conn.execute(
+                "SELECT id, user_id, mode, title, jd_id, resume_text, status, created_at, updated_at, job_position "
+                "FROM chat_conversations WHERE id = ? AND user_id = ? AND job_position = ?",
+                (conversation_id, user_id, job_position)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, user_id, mode, title, jd_id, resume_text, status, created_at, updated_at, job_position "
+                "FROM chat_conversations WHERE id = ? AND user_id = ?",
+                (conversation_id, user_id)
+            ).fetchone()
 
     if not row:
         return None
@@ -112,6 +130,7 @@ def get_conversation(conversation_id: str, user_id: int) -> Optional[dict]:
         "status": row[6],
         "created_at": row[7],
         "updated_at": row[8],
+        "job_position": row[9],
     }
 
 
@@ -125,25 +144,38 @@ def update_conversation_title(conversation_id: str, title: str) -> None:
         conn.commit()
 
 
-def archive_conversation(conversation_id: str, user_id: int) -> bool:
+def archive_conversation(conversation_id: str, user_id: int, job_position: str = "") -> bool:
     """归档对话"""
     with get_db_connection() as conn:
-        cursor = conn.execute(
-            "UPDATE chat_conversations SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND user_id = ?",
-            (conversation_id, user_id)
-        )
+        if job_position:
+            cursor = conn.execute(
+                "UPDATE chat_conversations SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ? AND job_position = ?",
+                (conversation_id, user_id, job_position)
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE chat_conversations SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND user_id = ?",
+                (conversation_id, user_id)
+            )
         conn.commit()
         return cursor.rowcount > 0
 
 
-def delete_conversation(conversation_id: str, user_id: int) -> bool:
+def delete_conversation(conversation_id: str, user_id: int, job_position: str = "") -> bool:
     """删除对话（级联删除消息）"""
     with get_db_connection() as conn:
-        cursor = conn.execute(
-            "DELETE FROM chat_conversations WHERE id = ? AND user_id = ?",
-            (conversation_id, user_id)
-        )
+        if job_position:
+            cursor = conn.execute(
+                "DELETE FROM chat_conversations WHERE id = ? AND user_id = ? AND job_position = ?",
+                (conversation_id, user_id, job_position)
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM chat_conversations WHERE id = ? AND user_id = ?",
+                (conversation_id, user_id)
+            )
         conn.commit()
         return cursor.rowcount > 0
 
@@ -593,6 +625,7 @@ def search_past_sessions(
     keywords: list[str],
     limit: int = 3,
     exclude_conv_id: Optional[str] = None,
+    job_position: str = "",
 ) -> list[dict]:
     """搜索用户历史对话中的相关面试经验
 
@@ -619,6 +652,9 @@ def search_past_sessions(
             return []
 
         where_likes = " OR ".join(conditions)
+        position_clause = "AND c.job_position = ?" if job_position else ""
+        if job_position:
+            params.append(job_position)
         exclude_clause = "AND c.id != ?" if exclude_conv_id else ""
         if exclude_conv_id:
             params.append(exclude_conv_id)
@@ -631,7 +667,7 @@ def search_past_sessions(
             f"FROM chat_conversations c "
             f"JOIN chat_messages m ON m.conversation_id = c.id "
             f"WHERE c.user_id = ? AND c.status = 'active' "
-            f"AND ({where_likes}) {exclude_clause} "
+            f"AND ({where_likes}) {position_clause} {exclude_clause} "
             f"ORDER BY c.updated_at DESC "
             f"LIMIT ?",
             params

@@ -8,11 +8,16 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from app.core.auth import get_current_user
-from app.db.connection import run_db
+from app.db.connection import run_db, get_user_job_position
 from app.services import chat_service
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/chat")
+
+
+def _current_position_name(user_id: int) -> str:
+    _, position = get_user_job_position(user_id)
+    return position
 
 
 # ── 请求模型 ──
@@ -54,6 +59,7 @@ async def create_conversation(
                 title=req.title,
                 jd_id=req.jd_id,
                 resume_text=resume_text,
+                job_position=_current_position_name(user["id"]),
             )
         )
 
@@ -84,7 +90,7 @@ async def list_conversations(
     """获取用户的对话列表"""
     try:
         conversations = await run_db(
-            lambda: chat_service.get_conversations(user["id"], status)
+            lambda: chat_service.get_conversations(user["id"], status, _current_position_name(user["id"]))
         )
         return {"status": "success", "data": conversations}
     except Exception as e:
@@ -98,7 +104,7 @@ async def get_conversation(
 ):
     """获取对话详情"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"])
+        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -115,7 +121,7 @@ async def update_title(
         raise HTTPException(status_code=400, detail="标题不能为空")
 
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"])
+        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -130,7 +136,7 @@ async def archive_conversation(
 ):
     """归档对话"""
     success = await run_db(
-        lambda: chat_service.archive_conversation(conversation_id, user["id"])
+        lambda: chat_service.archive_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -143,7 +149,7 @@ async def delete_conversation(
 ):
     """删除对话"""
     success = await run_db(
-        lambda: chat_service.delete_conversation(conversation_id, user["id"])
+        lambda: chat_service.delete_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -200,7 +206,7 @@ def _metadata_events_from_done(meta: dict) -> list[dict]:
 async def get_messages(conversation_id: str, user: dict = Depends(get_current_user)):
     """获取对话的消息历史"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"])
+        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -217,7 +223,7 @@ async def send_message(
 ):
     """发送消息并获取 AI 流式回复（SSE）"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"])
+        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
