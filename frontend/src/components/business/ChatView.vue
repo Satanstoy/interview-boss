@@ -326,14 +326,37 @@
       @close="showNewChat = false; pendingInitialMessage = ''"
       @create="handleCreateConversation"
     />
+
+    <!-- Rename Dialog -->
+    <Dialog :open="showRenameDialog" @update:open="handleRenameCancel">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{{ renameDialogTitle }}</DialogTitle>
+        </DialogHeader>
+        <div class="py-4">
+          <Input
+            v-model="renameDialogValue"
+            placeholder="请输入新标题"
+            @keyup.enter="handleRenameConfirm"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="handleRenameCancel">取消</Button>
+          <Button @click="handleRenameConfirm">确定</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
+import { useConfirm } from '@/composables/useNotification.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { 
   Plus, 
   MessageSquare, 
@@ -377,6 +400,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+const { confirm: showConfirm } = useConfirm()
 
 // State
 const conversations = ref([])
@@ -409,6 +433,12 @@ const sidebarCollapsed = ref(false)
 const isRenamingHeader = ref(false)
 const headerTitleDraft = ref('')
 const headerTitleInput = ref(null)
+
+// Rename dialog state
+const showRenameDialog = ref(false)
+const renameDialogTitle = ref('')
+const renameDialogValue = ref('')
+const renameDialogCallback = ref(null)
 
 // Thinking state
 const isThinking = ref(false)
@@ -855,7 +885,14 @@ async function handlePin(id) {
 }
 
 async function handleRename(id, currentTitle) {
-  const newTitle = prompt('请输入新标题', currentTitle || '新对话')
+  renameDialogTitle.value = '重命名对话'
+  renameDialogValue.value = currentTitle || '新对话'
+  showRenameDialog.value = true
+
+  const newTitle = await new Promise((resolve) => {
+    renameDialogCallback.value = resolve
+  })
+
   if (!newTitle || newTitle === currentTitle) return
   try {
     if (props.preview) {
@@ -868,6 +905,18 @@ async function handleRename(id, currentTitle) {
   } catch (e) {
     console.error('重命名对话失败:', e)
   }
+}
+
+function handleRenameConfirm() {
+  showRenameDialog.value = false
+  renameDialogCallback.value?.(renameDialogValue.value)
+  renameDialogCallback.value = null
+}
+
+function handleRenameCancel() {
+  showRenameDialog.value = false
+  renameDialogCallback.value?.(null)
+  renameDialogCallback.value = null
 }
 
 async function startHeaderRename() {
@@ -907,7 +956,7 @@ async function saveHeaderRename() {
 }
 
 async function handleDelete(id) {
-  if (!confirm('确定要删除这个对话吗？')) return
+  if (!await showConfirm('确定要删除这个对话吗？')) return
   try {
     await chatApi.deleteConversation(id)
     if (activeConversationId.value === id) {

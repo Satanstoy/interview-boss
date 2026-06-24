@@ -1,4 +1,4 @@
-import { get, put, post, del } from './http.js'
+import { get, put, post, del, invalidateCache } from './http.js'
 
 const API = '/api'
 
@@ -9,9 +9,17 @@ export const updateProfile = (settings) => put(`${API}/profile`, { settings })
 export const switchPosition = (position) => put(`${API}/profile/position`, { position })
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })
 export const switchMyPosition = (position) => put(`${API}/profile/my-position`, { position })
-export const fetchPositions = () => get(`${API}/positions`)
-export const deletePosition = (position) => del(`${API}/profile/position/${encodeURIComponent(position)}`)
-export const createPosition = (name, description = '') => post(`${API}/positions`, { name, description })
+export const fetchPositions = () => get(`${API}/positions`, { noCache: true })
+export const deletePosition = async (position) => {
+  const result = await del(`${API}/profile/position/${encodeURIComponent(position)}`)
+  invalidateCache(`${API}/positions`)
+  return result
+}
+export const createPosition = async (name, description = '') => {
+  const result = await post(`${API}/positions`, { name, description })
+  invalidateCache(`${API}/positions`)
+  return result
+}
 
 // ── Taxonomy AI Suggestion ──
 export const generateTaxonomy = () => post(`${API}/profile/taxonomy/generate`, null, { timeout: 180_000 })

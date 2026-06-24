@@ -22,10 +22,10 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
           const result = await api.batchDeleteData('jd', ids)
           onProgress(result.deleted, ids.length)
           toast.success(`已成功删除 ${result.deleted} 条记录！`)
+          jdSelection.clearSelection()
+          fetchTableData()
+          fetchAnalytics()
         } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-        jdSelection.clearSelection()
-        fetchTableData()
-        fetchAnalytics()
       }
     }
     ]
@@ -87,10 +87,10 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
           const result = await api.batchDeleteData('interview', ids)
           onProgress(result.deleted, ids.length)
           toast.success(`已成功删除 ${result.deleted} 条记录！`)
+          interviewSelection.clearSelection()
+          fetchTableData()
+          fetchAnalytics()
         } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-        interviewSelection.clearSelection()
-        fetchTableData()
-        fetchAnalytics()
       }
     }
     ]
@@ -123,8 +123,8 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
             if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
             toast.success(parts.length ? `生成完成：${parts.join('，')}` : '生成完成')
           }
+          fetchTableData()
         } catch (e) { toast.error('批量生成答案失败：' + getFriendlyError(e)) }
-        fetchTableData()
       }
     },
     {
@@ -139,8 +139,9 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
           const result = await api.batchDeleteMasterBank(ids)
           onProgress(result.deleted, ids.length)
           toast.success(`已成功删除 ${result.deleted} 道题目！`)
+          masterSelection.clearSelection()
+          fetchTableData()
         } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
-        fetchTableData()
       }
     }
   ])

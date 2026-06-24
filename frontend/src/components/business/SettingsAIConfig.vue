@@ -1,12 +1,14 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { toast } from 'vue-sonner'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { fetchMyLLMConfig, updateMyLLMConfig, deleteMyLLMConfig } from '@/services/profileApi.js'
 import { validateBaseUrl } from '@/utils/validate.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+const { success: toastSuccess, error: toastError } = useToast()
+const { confirm: showConfirm } = useConfirm()
 const loading = ref(false)
 const saving = ref(false)
 const configured = ref(false)
@@ -82,7 +84,7 @@ const handleSave = async () => {
       payload.llm_api_key = form.llm_api_key.trim()
     }
     await updateMyLLMConfig(payload)
-    toast.success('AI 配置已保存')
+    toastSuccess('AI 配置已保存')
     await loadConfig()
   } catch (e) {
     error.value = `保存失败: ${e.message}`
@@ -92,12 +94,12 @@ const handleSave = async () => {
 }
 
 const handleDelete = async () => {
-  if (!window.confirm('确定要清除 AI 配置吗？清除后需要重新配置才能使用 AI 功能。')) return
+  if (!await showConfirm('确定要清除 AI 配置吗？清除后需要重新配置才能使用 AI 功能。')) return
 
   saving.value = true
   try {
     await deleteMyLLMConfig()
-    toast.success('AI 配置已清除')
+    toastSuccess('AI 配置已清除')
     await loadConfig()
   } catch (e) {
     error.value = `清除失败: ${e.message}`

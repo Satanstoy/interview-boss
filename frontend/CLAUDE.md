@@ -98,6 +98,11 @@ src/
 | 用户配置 | `services/profileApi.js` + `components/business/SettingsPage.vue` |
 | HTTP 客户端 | `services/http.js`（`api/index.js` 是 re-export 兼容层） |
 
+## 岗位设置注意事项
+
+- `services/profileApi.js` 的岗位增删会主动失效 `/api/positions` 缓存，`fetchPositions()` 默认绕过 GET TTL，避免软删除后设置页看到旧岗位。
+- 设置页切换岗位后必须同步 `currentUser.current_position` 并触发 `loadAllData()`，否则跨 tab 数据和设置页高亮会停留在旧岗位。
+
 ## 修改前必读
 
 | 你要做的事 | 先读这些文件 | 再读这些文件 |

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
-import { toast } from 'vue-sonner'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Globe } from '@lucide/vue'
 import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, fetchProfile } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['build-master-bank', 'taxonomy-updated'])
+const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
+const { confirm: showConfirm } = useConfirm()
 
 // Deep-copy taxonomy to avoid prop mutation
 const localTaxonomy = reactive({
@@ -57,31 +59,31 @@ const removeChild = (cat, childIndex) => {
 const onSavePersonal = async () => {
   const valid = getValidCategories()
   if (!valid.length) {
-    toast.warning('没有可保存的分类')
+    toastWarning('没有可保存的分类')
     return
   }
   try {
     await savePersonalTaxonomy(valid)
-    toast.success('已保存为个人分类')
+    toastSuccess('已保存为个人分类')
   } catch (e) {
-    toast.error(`保存失败: ${e.message}`)
+    toastError(`保存失败: ${e.message}`)
   }
 }
 
 const onShare = async () => {
   const valid = getValidCategories()
   if (!valid.length) {
-    toast.warning('没有可分享的分类')
+    toastWarning('没有可分享的分类')
     return
   }
   try {
     const result = await savePersonalTaxonomy(valid)
     if (result.taxonomy?.id) {
       await shareTaxonomy(result.taxonomy.id)
-      toast.success('分类已分享')
+      toastSuccess('分类已分享')
     }
   } catch (e) {
-    toast.error(`分享失败: ${e.message}`)
+    toastError(`分享失败: ${e.message}`)
   }
 }
 
@@ -92,7 +94,7 @@ const onShowPublic = async () => {
     const data = await fetchPublicTaxonomies()
     publicTaxonomies.value = data.taxonomies || []
   } catch (e) {
-    toast.error(`获取公开分类失败: ${e.message}`)
+    toastError(`获取公开分类失败: ${e.message}`)
   } finally {
     publicTaxonomiesLoading.value = false
   }
@@ -102,17 +104,17 @@ const onUsePublic = (tax) => {
   localTaxonomy.categories = tax.categories.map(c => ({ ...c, _open: false }))
   showPublicTaxonomies.value = false
   emit('taxonomy-updated')
-  toast.success(`已加载"${tax.position_name}"的分类`)
+  toastSuccess(`已加载"${tax.position_name}"的分类`)
 }
 
 const onDeletePublic = async (tax) => {
-  if (!confirm(`确定要删除"${tax.position_name}"的公开分类吗？`)) return
+  if (!await showConfirm(`确定要删除"${tax.position_name}"的公开分类吗？`)) return
   try {
     await deletePublicTaxonomy(tax.id)
     publicTaxonomies.value = publicTaxonomies.value.filter(t => t.id !== tax.id)
-    toast.success('已删除公开分类')
+    toastSuccess('已删除公开分类')
   } catch (e) {
-    toast.error(`删除失败: ${e.message}`)
+    toastError(`删除失败: ${e.message}`)
   }
 }
 

@@ -12,7 +12,7 @@
       @go-to-question="onGoToQuestion"
       @logout="handleLogout"
       @bank-mode-changed="handleBankModeChanged"
-      @profile-updated="fetchTableData"
+      @profile-updated="handleProfileUpdated"
       @build-master-bank="triggerBuildMasterBank"
       @update:active-season="activeSeason = $event"
       @sidebar-collapsed-changed="sidebarCollapsed = $event"
@@ -32,9 +32,13 @@ const {
   activeSeason, availableSeasons,
   isBuilding, sidebarCollapsed,
   handleLogout, handleBankModeChanged,
-  fetchTableData, triggerBuildMasterBank,
+  loadAllData, triggerBuildMasterBank,
   onGoToQuestion,
 } = inject('appData')
+
+const handleProfileUpdated = () => {
+  loadAllData()
+}
 
 const onClose = () => {
   if (window.history.length > 1) {

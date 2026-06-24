@@ -10,6 +10,7 @@ export function useToast() {
 }
 
 let confirmResolve = null
+let confirmHandled = false
 const confirmState = ref({ show: false, message: '', title: '', variant: 'warning', confirmLabel: '确定', cancelLabel: '取消' })
 
 export function useConfirm() {
@@ -19,6 +20,7 @@ export function useConfirm() {
       : titleOrOptions
     return new Promise((resolve) => {
       confirmResolve = resolve
+      confirmHandled = false
       confirmState.value = {
         show: true,
         message,
@@ -31,13 +33,14 @@ export function useConfirm() {
   }
 
   const handleConfirm = () => {
+    confirmHandled = true
     confirmState.value.show = false
     if (confirmResolve) { confirmResolve(true); confirmResolve = null }
   }
 
   const handleCancel = () => {
     confirmState.value.show = false
-    if (confirmResolve) { confirmResolve(false); confirmResolve = null }
+    if (!confirmHandled && confirmResolve) { confirmResolve(false); confirmResolve = null }
   }
 
   return { confirmState, confirm, handleConfirm, handleCancel }

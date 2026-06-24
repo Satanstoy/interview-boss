@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
-import { toast } from 'vue-sonner'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { switchMyPosition, deletePosition, createPosition, generateTaxonomy, confirmTaxonomy, fetchPositions } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,8 +13,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['go-to-question', 'profile-updated'])
+const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
+const { confirm: showConfirm } = useConfirm()
 
-const { displayUser } = inject('appData')
+const { displayUser, currentUser } = inject('appData')
 
 onMounted(async () => {
   try {
@@ -43,12 +45,19 @@ const handleSwitchPosition = async (pos) => {
   if (pos === currentPosition.value) return
   switching.value = true
   try {
-    await switchMyPosition(pos)
+    const data = await switchMyPosition(pos)
     currentPosition.value = pos
-    toast.success(`已切换到岗位：${pos}`)
+    if (currentUser?.value) {
+      currentUser.value = {
+        ...currentUser.value,
+        current_position: data.current_position || data.current_job_position || pos,
+        current_position_id: data.current_position_id ?? null,
+      }
+    }
+    toastSuccess(`已切换到岗位：${pos}`)
     emit('profile-updated')
   } catch (e) {
-    toast.error(`切换失败: ${e.message}`)
+    toastError(`切换失败: ${e.message}`)
   } finally {
     switching.value = false
   }
@@ -58,34 +67,38 @@ const handleAddPosition = async () => {
   const name = newPositionInput.value.trim()
   if (!name) return
   if (name.length > 30) {
-    toast.warning('岗位名称不能超过 30 个字符')
+    toastWarning('岗位名称不能超过 30 个字符')
     return
   }
-  if (positions.value.includes(name)) {
-    toast.warning('该岗位已存在')
+  if (positions.value.some(p => p.name === name)) {
+    toastWarning('该岗位已存在')
     return
   }
   try {
     await createPosition(name)
+    // 添加到本地列表
+    positions.value.push({ name })
     newPositionInput.value = ''
-    toast.success(`岗位「${name}」已添加`)
+    toastSuccess(`岗位「${name}」已添加`)
     emit('profile-updated')
   } catch (e) {
-    toast.error(`添加失败: ${e.message}`)
+    toastError(`添加失败: ${e.message}`)
   }
 }
 
 const handleDeletePosition = async (pos) => {
-  if (!confirm(`确定要删除岗位"${pos}"吗？`)) return
+  if (!await showConfirm(`确定要删除岗位"${pos}"吗？`)) return
   try {
     await deletePosition(pos)
+    // 从本地列表中移除（positions 是对象数组，按 name 匹配）
+    positions.value = positions.value.filter(p => p.name !== pos)
     if (currentPosition.value === pos) {
       currentPosition.value = ''
     }
-    toast.success(`岗位"${pos}"已删除`)
+    toastSuccess(`岗位"${pos}"已删除`)
     emit('profile-updated')
   } catch (e) {
-    toast.error(`删除失败: ${e.message}`)
+    toastError(`删除失败: ${e.message}`)
   }
 }
 
@@ -96,7 +109,7 @@ const taxonomyOpen = ref(false)
 
 const handleGenerateTaxonomy = async () => {
   if (!currentPosition.value) {
-    toast.warning('请先选择目标岗位')
+    toastWarning('请先选择目标岗位')
     return
   }
   taxonomyLoading.value = true
@@ -105,7 +118,7 @@ const handleGenerateTaxonomy = async () => {
     taxonomyPreview.value = data
     taxonomyOpen.value = true
   } catch (e) {
-    toast.error(`AI生成失败: ${e.message}`)
+    toastError(`AI生成失败: ${e.message}`)
   } finally {
     taxonomyLoading.value = false
   }
@@ -117,10 +130,10 @@ const handleConfirmTaxonomy = async () => {
     await confirmTaxonomy(taxonomyPreview.value.categories)
     taxonomyOpen.value = false
     taxonomyPreview.value = null
-    toast.success('分类体系已更新')
+    toastSuccess('分类体系已更新')
     emit('profile-updated')
   } catch (e) {
-    toast.error(`保存失败: ${e.message}`)
+    toastError(`保存失败: ${e.message}`)
   }
 }
 
