@@ -10,7 +10,9 @@ The current app is stable and already follows the shadcn-vue/reka-vega direction
 
 - Keep the existing color palette and brand direction.
 - Unify navigation and action icons around `@lucide/vue`.
+- Align the sidebar order with the main user workflow.
 - Add a usable mobile navigation path when the desktop sidebar is hidden.
+- Make mobile pages usable, not just reachable.
 - Improve hierarchy in existing page shells without changing page information architecture.
 - Fix small visual defects: clipped controls, inconsistent icon sources, mixed custom SVGs, cramped card actions, and uneven button prominence.
 - Preserve current routes, data flow, API contracts, and page-level behavior.
@@ -23,12 +25,14 @@ The current app is stable and already follows the shadcn-vue/reka-vega direction
 - Do not replace shadcn-vue with another component system.
 - Do not add new business features such as daily tasks, progress dashboards, or coaching summaries.
 - Do not perform broad refactors unrelated to visible UI consistency.
+- Do not make mobile changes by hiding core functionality.
 
 ## Current Observations
 
 ### Desktop
 
 - The desktop shell is clean and efficient, but the app still reads as a generic admin workspace in several places.
+- The sidebar order mixes daily practice, source material management, and analysis tools, so the navigation does not clearly reflect the user's workflow.
 - The sidebar uses Hugeicons while the project guidance asks for lucide icons.
 - Some components still use hand-written inline SVGs for common actions such as loading, error, close, and status icons.
 - The MasterBank toolbar combines search, filters, batch actions, category pills, and primary actions into one strong block. The function is correct, but the hierarchy is flatter than ideal.
@@ -39,6 +43,8 @@ The current app is stable and already follows the shadcn-vue/reka-vega direction
 
 - The desktop sidebar disappears below `md`, but there is no replacement mobile navigation entry.
 - Users can reach page content, but switching sections is not discoverable from the UI.
+- Chat and Coding still use desktop-style internal sidebars at 390px width, which squeezes the primary content into a narrow strip.
+- JD and Interview use the shared table in a compressed mobile layout, causing table cells to stack into vertical text columns.
 - MasterBank cards fit without horizontal page overflow, but the accordion chevron can sit too close to the viewport edge or appear visually clipped.
 - Toolbar controls wrap correctly, but their hierarchy becomes busy on narrow screens.
 
@@ -69,7 +75,40 @@ Implementation notes:
 - Do not migrate every icon in the repo in one sweep. Prioritize shared layout and high-traffic pages first.
 - Avoid inline SVG unless a shape is genuinely custom and no lucide equivalent exists.
 
-### 2. Mobile Navigation
+### 2. Sidebar Information Architecture
+
+Reorder and group the sidebar around the user's actual work loop.
+
+Recommended grouped order:
+
+| Group | Routes |
+| --- | --- |
+| Primary | 高频题库 |
+| 训练 | 模拟面试, 题目抽测, 手撕代码 |
+| 素材 | 导入, JD 筛选, 面经库 |
+| 洞察 | 知识图谱 |
+
+Desktop expanded sidebar:
+
+- Keep 高频题库 as the first standalone primary workspace.
+- Add lightweight section labels for 训练, 素材, and 洞察.
+- Keep counts on 高频题库, JD 筛选, and 面经库.
+- Keep user menu placement unchanged.
+- Avoid adding new routes or new business concepts.
+
+Desktop collapsed sidebar:
+
+- Keep the same icon order.
+- Do not show section labels in collapsed mode.
+- Use `AppTooltip` so each icon remains understandable.
+
+Mobile navigation:
+
+- Use the same grouped order.
+- Show labels and counts.
+- Close the navigation surface after route selection.
+
+### 3. Mobile Shell
 
 Add mobile navigation to the authenticated layout:
 
@@ -83,7 +122,8 @@ Preferred implementation:
 
 - Reuse the existing `sidebarTabs` data from `AuthenticatedLayout.vue`.
 - Add a mobile-only trigger in `SiteHeader.vue` or a small sibling component owned by the layout.
-- Use existing shadcn primitives if already available; otherwise use a small accessible panel with `Button`, `AppTooltip`, and existing transition patterns.
+- Prefer the existing shadcn `Sheet`/`Sidebar` primitives already present under `components/ui/sidebar` and `components/ui/sheet`.
+- If the existing sidebar primitive is too heavy for this pass, use a small Sheet-backed route menu with the same data model.
 
 Behavior:
 
@@ -91,8 +131,51 @@ Behavior:
 - Mobile nav must work in preview mode and authenticated mode.
 - No horizontal body overflow at 390px width.
 - Mobile nav should not hide the page title or settings action.
+- Mobile nav must be a shell-level navigation surface, not a page-specific workaround.
 
-### 3. Page Hierarchy Polish
+Internal page sidebars:
+
+- Chat's conversation list should not permanently consume horizontal space on mobile.
+- Coding's problem list should not permanently consume horizontal space on mobile.
+- Use a mobile drawer/sheet or a toggleable panel for these internal sidebars.
+- Desktop behavior for Chat and Coding should remain unchanged.
+
+### 4. Mobile Data Presentation
+
+Make data-heavy pages readable on small screens.
+
+JD and Interview:
+
+- Desktop keeps the current table layout.
+- Mobile should render rows as stacked cards instead of compressing table columns.
+- Cards should expose the most important fields first:
+  - JD: company, role, salary, season, core tech, bonus, actions.
+  - Interview: company, season, round, difficulty, created date, focus, question list, actions.
+- Selection checkbox and row actions remain available on each card.
+- Batch actions remain above the list.
+- Pagination remains below the list when present.
+- Inline editing can remain desktop-first if card editing would add too much scope, but mobile cards must still show data and core row actions clearly.
+
+Fallback only if card mode becomes too large:
+
+- Use horizontal table scrolling on mobile.
+- Do not allow table text to collapse into one-character vertical columns.
+- Prefer card mode because the data is mostly textual and cards are more readable at 390px.
+
+MasterBank:
+
+- Keep the accordion list on mobile.
+- Reserve stable space for checkbox and chevron controls.
+- Avoid card widths or child controls extending beyond the visible viewport.
+- Reduce toolbar crowding by letting secondary actions wrap under primary actions in a predictable order.
+
+KnowledgeGraph:
+
+- Keep the chart page simple.
+- Ensure the top controls wrap cleanly on mobile.
+- Do not attempt a full mobile graph redesign in this pass.
+
+### 5. Page Hierarchy Polish
 
 Improve hierarchy without changing the information architecture.
 
@@ -116,13 +199,20 @@ Chat:
 - Keep the current conversation structure.
 - Align icons, status chips, and action controls with the same lucide/shadcn treatment.
 - Avoid changing message flow or chat data behavior.
+- On mobile, make conversation switching available without squeezing the active conversation.
+
+Coding:
+
+- Keep the current coding workflow.
+- On mobile, make problem selection available without squeezing the editor or empty state.
+- Do not redesign the coding editor experience beyond making the layout responsive.
 
 Login:
 
 - Keep the minimal login composition.
 - Only adjust icon/style consistency if needed while touching shared components.
 
-### 4. Interaction And State Details
+### 6. Interaction And State Details
 
 - Standardize icon button dimensions in shared headers and toolbars.
 - Make hover, active, disabled, and focus states consistent with shadcn defaults.
@@ -139,14 +229,23 @@ Login:
 - Page content must not be obscured by the mobile nav.
 - Text inside buttons and cards must not overflow at 390px mobile width.
 - The app must not introduce horizontal body scrolling on core preview pages.
+- Mobile pages must not compress primary content into unreadable narrow columns.
+- Table data must remain readable on mobile, either as cards or as an explicitly scrollable table.
 
 ## Files Likely To Change
 
 - `frontend/src/layouts/AuthenticatedLayout.vue`
 - `frontend/src/components/AppSidebar.vue`
 - `frontend/src/components/SiteHeader.vue`
+- `frontend/src/components/common/DataTable.vue`
 - `frontend/src/views/MasterBankView.vue`
+- `frontend/src/views/JdView.vue`
+- `frontend/src/views/InterviewView.vue`
+- `frontend/src/views/ChatView.vue`
+- `frontend/src/views/CodingView.vue`
 - `frontend/src/components/business/MasterBankList.vue`
+- `frontend/src/components/business/ChatView.vue`
+- `frontend/src/components/business/CodingPractice.vue`
 - `frontend/src/components/business/StagingPanel.vue`
 - Possibly nearby shared UI components under `frontend/src/components/common/`
 - `frontend/CLAUDE.md` only if the work establishes or changes a durable frontend convention
@@ -163,6 +262,11 @@ Manual or Playwright preview checks:
 - `/master-bank?preview=1`
 - `/import?preview=1`
 - `/chat?preview=1`
+- `/jd?preview=1`
+- `/interview?preview=1`
+- `/mock-interview?preview=1`
+- `/knowledge-graph?preview=1`
+- `/coding?preview=1`
 
 Viewport checks:
 
@@ -174,18 +278,25 @@ Acceptance criteria:
 - No horizontal overflow on checked pages.
 - Mobile users can open navigation and switch among core routes.
 - Desktop sidebar remains functional in expanded and collapsed states.
+- Desktop sidebar order follows the grouped workflow: 高频题库, 训练, 素材, 洞察.
 - Sidebar and shared layout icons use lucide consistently.
 - MasterBank mobile accordion chevrons no longer feel clipped.
+- Chat mobile layout keeps the active conversation readable and provides a way to switch conversations.
+- Coding mobile layout keeps the active content/editor readable and provides a way to choose problems.
+- JD and Interview mobile layouts show readable row data instead of compressed vertical table text.
 - Existing import submission contract remains unchanged.
 - Existing color palette remains unchanged.
 
-## Open Decisions
+## Settled Recommendations
 
-- Mobile navigation surface shape: dropdown panel from header vs drawer-style sheet.
-- Whether to install a shadcn sheet/dropdown primitive if not already present, or implement with existing primitives.
-- Whether icon unification should include only shared chrome first or also high-traffic business components in the same pass.
+- Mobile navigation should use a Sheet-backed menu rather than a small dropdown. The route count and grouping need more space than a compact dropdown comfortably provides.
+- JD and Interview should use mobile card rows instead of horizontal scrolling as the primary approach. Text-heavy recruiting and interview data reads better as cards.
+- Chat and Coding should move their internal sidebars into mobile drawers/sheets.
+- Icon unification should cover shared chrome plus touched high-traffic components, not a repo-wide migration.
 
-Recommended decisions:
+## Deferred Follow-Ups
 
-- Use a header dropdown/panel first. It is lighter than a drawer and enough for the current route count.
-- Do shared chrome plus touched high-traffic components, not a repo-wide icon migration.
+- A full mobile graph experience for KnowledgeGraph.
+- A broader redesign of the Chat or Coding workflows.
+- A new dashboard, today view, progress summary, or coaching layer.
+- Theme or palette changes.
