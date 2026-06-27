@@ -44,6 +44,13 @@ test.describe('UI responsive polish', () => {
     ])
   })
 
+  test('desktop sidebar logo returns to the master bank', async ({ page }) => {
+    await gotoPreview(page, '/chat', { width: 1440, height: 900 })
+    await page.getByRole('link', { name: /InterviewBoss/ }).click()
+    await expect(page).toHaveURL(/\/master-bank\?preview=1/)
+    await expect(page.getByRole('heading', { name: '高频题库' })).toBeVisible()
+  })
+
   test('mobile shell navigation opens and switches routes', async ({ page }) => {
     await gotoPreview(page, '/master-bank')
     await page.getByRole('button', { name: '打开导航' }).click()

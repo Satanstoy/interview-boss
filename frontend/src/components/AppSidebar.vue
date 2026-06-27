@@ -66,13 +66,26 @@ function isActive(tabRoute) {
   return route.path === tabRoute || route.path.startsWith(tabRoute + '/')
 }
 
+function routeTarget(path) {
+  return route.query.preview === '1' ? { path, query: { preview: '1' } } : path
+}
+
 async function onTabChange(tab) {
   try {
-    await router.push(tab.route)
+    await router.push(routeTarget(tab.route))
   } catch (err) {
     console.warn('[AppSidebar] 导航失败:', tab.route, err)
   }
 }
+
+async function goHome() {
+  try {
+    await router.push(routeTarget('/master-bank'))
+  } catch (err) {
+    console.warn('[AppSidebar] 回到高频题库失败:', err)
+  }
+}
+
 function onGoToQuestion(q) { emit('go-to-question', q) }
 function handleLogout() { emit('logout') }
 function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
@@ -155,7 +168,11 @@ function handleShowSettings() { emit('show-settings') }
   <div v-else class="flex flex-col h-full overflow-hidden animate-sidebar-expand">
     <!-- Header: logo + PanelLeft toggle -->
     <div class="flex items-center justify-between px-4 py-3 shrink-0">
-      <a href="#" class="flex items-center gap-3 min-w-0">
+      <a
+        :href="route.query.preview === '1' ? '/master-bank?preview=1' : '/master-bank'"
+        class="flex min-w-0 items-center gap-3 rounded-lg text-left transition-colors hover:bg-sidebar-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        @click.prevent="goHome"
+      >
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform hover:scale-105 overflow-hidden">
           <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
         </div>
