@@ -1,8 +1,14 @@
 <template>
-  <div class="flex h-full bg-background">
+  <div class="relative flex h-full overflow-hidden bg-background">
+    <div
+      v-if="!sidebarCollapsed"
+      class="fixed inset-0 z-20 bg-background/70 backdrop-blur-sm md:hidden"
+      @click="sidebarCollapsed = true"
+    />
+
     <!-- ── 左侧边栏：题目列表 ── -->
     <div
-      class="sidebar-container border-r border-border flex flex-col shrink-0 overflow-hidden"
+      class="sidebar-container z-30 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden md:z-auto"
       :class="{ 'sidebar-collapsed': sidebarCollapsed }"
       :style="{ width: sidebarCollapsed ? '0px' : '288px' }"
     >
@@ -65,21 +71,37 @@
 
       <!-- 折叠按钮 -->
       <div class="p-2 border-t border-border sidebar-content">
-        <Button variant="ghost" size="icon" @click="sidebarCollapsed = true" class="shrink-0">
+        <Button variant="ghost" size="icon" aria-label="收起题目列表" @click="sidebarCollapsed = true" class="shrink-0">
           <PanelLeftClose :size="14" />
         </Button>
       </div>
     </div>
 
     <!-- 侧边栏折叠后的展开按钮 -->
-    <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons">
-      <Button variant="ghost" size="icon" @click="sidebarCollapsed = false" class="shrink-0">
+    <div v-if="sidebarCollapsed" class="hidden flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" aria-label="展开题目列表" @click="sidebarCollapsed = false" class="shrink-0">
         <PanelLeft :size="16" />
       </Button>
     </div>
 
     <!-- ── 主内容区 ── -->
     <div class="flex-1 flex flex-col min-w-0">
+      <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+          aria-label="选择题目"
+          @click="sidebarCollapsed = false"
+        >
+          <PanelLeft :size="14" />
+          <span>选择题目</span>
+        </Button>
+        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {{ activeProblem?.title || '手撕代码' }}
+        </span>
+      </div>
+
       <!-- 空状态 -->
       <div v-if="!activeProblem" class="flex-1 flex items-center justify-center">
         <div class="flex flex-col items-center max-w-2xl mx-auto px-6">
@@ -333,7 +355,8 @@ const currentLanguage = ref('python')
 const isLoading = ref(false)
 const filterDifficulty = ref('')
 const errorStats = ref(null)
-const sidebarCollapsed = ref(false)
+const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
+const sidebarCollapsed = ref(isMobileViewport())
 const mainContent = ref(null)
 
 // ── 常量 ──
@@ -404,6 +427,7 @@ async function loadProblems() {
 
 function selectProblem(p) {
   activeProblem.value = p
+  if (isMobileViewport()) sidebarCollapsed.value = true
 }
 
 function clearProblem(p) {
@@ -500,6 +524,23 @@ onMounted(() => {
 /* Sidebar animation — aligned with ChatView */
 .sidebar-container {
   transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 767px) {
+  .sidebar-container {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(82vw, 288px) !important;
+    max-width: calc(100vw - 24px);
+    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }
+
+  .sidebar-container.sidebar-collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
 }
 
 .sidebar-content {

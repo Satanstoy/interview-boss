@@ -1,8 +1,14 @@
 <template>
-  <div class="flex h-full bg-background">
+  <div class="relative flex h-full overflow-hidden bg-background">
+    <div
+      v-if="!sidebarCollapsed"
+      class="fixed inset-0 z-20 bg-background/70 backdrop-blur-sm md:hidden"
+      @click="sidebarCollapsed = true"
+    />
+
     <!-- Conversation list sidebar (always visible) -->
     <div 
-      class="sidebar-container border-r border-border flex flex-col shrink-0 overflow-hidden"
+      class="sidebar-container z-30 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden md:z-auto"
       :class="{ 'sidebar-collapsed': sidebarCollapsed }"
       :style="{ width: sidebarCollapsed ? '0px' : '288px' }"
     >
@@ -63,17 +69,33 @@
     </div>
 
     <!-- Sidebar collapsed: show expand button -->
-    <div v-if="sidebarCollapsed" class="flex flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons">
-      <Button variant="ghost" size="icon" @click="sidebarCollapsed = false" class="shrink-0">
+    <div v-if="sidebarCollapsed" class="hidden flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" aria-label="展开面试会话列表" @click="sidebarCollapsed = false" class="shrink-0">
         <PanelLeft :size="16" />
       </Button>
-      <Button variant="ghost" size="icon" @click="showNewChat = true" class="shrink-0">
+      <Button variant="ghost" size="icon" aria-label="新建面试" @click="showNewChat = true" class="shrink-0">
         <Plus :size="16" />
       </Button>
     </div>
 
     <!-- Main content area -->
     <div class="flex-1 flex flex-col min-w-0">
+      <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+          aria-label="切换面试会话"
+          @click="sidebarCollapsed = false"
+        >
+          <PanelLeft :size="14" />
+          <span>切换面试会话</span>
+        </Button>
+        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {{ activeConversationId ? activeConversationTitle : '模拟面试' }}
+        </span>
+      </div>
+
       <!-- Empty state -->
       <div v-if="!activeConversationId" class="flex-1 flex items-center justify-center">
         <div
@@ -111,7 +133,7 @@
       <!-- Active chat -->
       <template v-else>
       <!-- Chat header -->
-      <div class="flex items-center justify-between px-6 py-1.5 shrink-0">
+      <div class="hidden items-center justify-between px-6 py-1.5 shrink-0 md:flex">
         <div class="min-w-0 flex-1">
           <form v-if="isRenamingHeader" @submit.prevent="saveHeaderRename" class="flex items-center gap-1.5">
             <input
@@ -429,7 +451,8 @@ const pendingSelectedBasisQuestions = ref([])
 const autoScrollEnabled = ref(true)
 const processingSteps = ref([])
 const selectedModel = ref('')
-const sidebarCollapsed = ref(false)
+const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
+const sidebarCollapsed = ref(isMobileViewport())
 const isRenamingHeader = ref(false)
 const headerTitleDraft = ref('')
 const headerTitleInput = ref(null)
@@ -622,6 +645,7 @@ async function loadConversations() {
 async function selectConversation(id) {
   activeConversationId.value = id
   messages.value = []
+  if (isMobileViewport()) sidebarCollapsed.value = true
   try {
     const res = await chatApi.getMessages(id)
     messages.value = res.data || []
@@ -1106,6 +1130,23 @@ onActivated(async () => {
 /* Sidebar animation */
 .sidebar-container {
   transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 767px) {
+  .sidebar-container {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(82vw, 288px) !important;
+    max-width: calc(100vw - 24px);
+    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }
+
+  .sidebar-container.sidebar-collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
 }
 
 .sidebar-content {
