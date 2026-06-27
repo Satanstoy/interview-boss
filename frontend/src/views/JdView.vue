@@ -32,13 +32,13 @@
         <div class="flex items-center justify-center gap-1">
           <AppTooltip v-if="row['来源链接'] && row['来源链接'] !== '未提供链接'" text="打开链接">
             <a :href="safeUrl(row['来源链接'])" target="_blank" rel="noopener noreferrer" class="flex flex-col items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 px-1 transition-colors duration-200">
-              <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+              <ExternalLink class="size-4" />
               <span class="text-[10px] leading-tight">链接</span>
             </a>
           </AppTooltip>
           <AppTooltip v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" text="删除">
             <button @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1 transition-colors duration-200">
-              <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              <Trash2 class="size-4" />
               <span class="text-[10px] leading-tight">删除</span>
             </button>
           </AppTooltip>
@@ -67,7 +67,7 @@
 
 <script setup>
 import { inject } from 'vue'
-import { Briefcase } from '@lucide/vue'
+import { Briefcase, ExternalLink, Trash2 } from '@lucide/vue'
 import DataTable from '@/components/common/DataTable.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
