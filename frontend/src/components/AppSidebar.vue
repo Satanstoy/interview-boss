@@ -1,24 +1,25 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { HugeiconsIcon } from '@hugeicons/vue'
 import {
-  Book02Icon,
-  AiChat01Icon,
-  FilterIcon,
-  BookBookmark01Icon,
-  TestTube01Icon,
-  AiNetworkIcon,
-  BookUploadIcon,
-  BracesIcon,
-} from '@hugeicons/core-free-icons'
-import { PanelLeft } from '@lucide/vue'
+  BookOpen,
+  BotMessageSquare,
+  ClipboardList,
+  Code2,
+  FileUp,
+  Filter,
+  Library,
+  Network,
+  PanelLeft,
+} from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   collapsed: { type: Boolean, default: false },
+  activeTab: { type: String, default: '' },
   sidebarTabs: { type: Array, default: () => [] },
+  sidebarGroups: { type: Array, default: () => [] },
   displayUser: { type: Object, default: null },
   pendingReviewCount: { type: Number, default: 0 },
 })
@@ -37,20 +38,28 @@ const route = useRoute()
 
 const logoHovered = ref(false)
 
+const groupedTabs = computed(() => (
+  props.sidebarGroups?.length
+    ? props.sidebarGroups
+    : [{ label: null, tabs: props.sidebarTabs }]
+))
+
+const flatTabs = computed(() => groupedTabs.value.flatMap(group => group.tabs))
+
 function toggleCollapsed() {
   logoHovered.value = false
   emit('update:collapsed', !props.collapsed)
 }
 
 const iconMap = {
-  MasterBank: Book02Icon,
-  Chat: AiChat01Icon,
-  JD: FilterIcon,
-  Interview: BookBookmark01Icon,
-  MockInterview: TestTube01Icon,
-  KnowledgeGraph: AiNetworkIcon,
-  Import: BookUploadIcon,
-  Coding: BracesIcon,
+  MasterBank: BookOpen,
+  Chat: BotMessageSquare,
+  JD: Filter,
+  Interview: Library,
+  MockInterview: ClipboardList,
+  KnowledgeGraph: Network,
+  Import: FileUp,
+  Coding: Code2,
 }
 
 function isActive(tabRoute) {
@@ -103,21 +112,22 @@ function handleShowSettings() { emit('show-settings') }
 
     <!-- Navigation icons -->
     <AppTooltip
-      v-for="tab in sidebarTabs"
+      v-for="tab in flatTabs"
       :key="tab.key"
       :text="tab.label"
       side="right"
     >
       <button
         @click="onTabChange(tab)"
+        :aria-label="tab.label"
         class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
         :class="isActive(tab.route)
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
           : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
       >
-        <HugeiconsIcon
+        <component
           v-if="iconMap[tab.key]"
-          :icon="iconMap[tab.key]"
+          :is="iconMap[tab.key]"
           :size="18"
           :class="isActive(tab.route) ? 'text-primary' : ''"
         />
@@ -157,6 +167,7 @@ function handleShowSettings() { emit('show-settings') }
       <AppTooltip text="收起侧栏">
         <button
           @click="toggleCollapsed"
+          aria-label="收起侧栏"
           class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
         >
           <PanelLeft :size="18" />
@@ -166,30 +177,44 @@ function handleShowSettings() { emit('show-settings') }
 
     <!-- Navigation -->
     <div class="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar py-1 px-2 gap-0.5">
-      <button
-        v-for="tab in sidebarTabs"
-        :key="tab.key"
-        @click="onTabChange(tab)"
-        class="group relative flex items-center w-full rounded-lg transition-all duration-200 gap-3 px-3 py-2"
-        :class="isActive(tab.route)
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-          : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+      <div
+        v-for="group in groupedTabs"
+        :key="group.label || 'primary'"
+        class="mb-2 last:mb-0"
       >
-        <HugeiconsIcon
-          v-if="iconMap[tab.key]"
-          :icon="iconMap[tab.key]"
-          :size="18"
-          class="transition-colors shrink-0"
-          :class="isActive(tab.route) ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
-        />
-        <span class="text-sm whitespace-nowrap">{{ tab.label }}</span>
-        <span
+        <div
+          v-if="group.label"
+          data-sidebar-section
+          class="px-3 pb-1.5 pt-2 text-[11px] font-medium text-sidebar-foreground/40"
+        >
+          {{ group.label }}
+        </div>
+        <button
+          v-for="tab in group.tabs"
+          :key="tab.key"
+          data-sidebar-route
+          @click="onTabChange(tab)"
+          class="group relative flex items-center w-full rounded-lg transition-all duration-200 gap-3 px-3 py-2"
+          :class="isActive(tab.route)
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+        >
+          <component
+            v-if="iconMap[tab.key]"
+            :is="iconMap[tab.key]"
+            :size="18"
+            class="transition-colors shrink-0"
+            :class="isActive(tab.route) ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
+          />
+          <span class="text-sm whitespace-nowrap">{{ tab.label }}</span>
+          <span
           v-if="tab.count != null && tab.count !== 0"
           class="ml-auto text-[11px] font-medium text-sidebar-foreground/50 whitespace-nowrap"
         >
-          {{ tab.count }}
-        </span>
-      </button>
+            {{ ` ${tab.count}` }}
+          </span>
+        </button>
+      </div>
     </div>
 
     <!-- Footer: user menu -->

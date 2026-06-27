@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Settings } from '@lucide/vue'
+import { AlertCircle, Clock3, Loader2, Menu, Settings, X } from '@lucide/vue'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
@@ -20,7 +20,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['show-settings'])
+const emit = defineEmits(['show-settings', 'toggle-mobile-nav'])
 
 // ── 全局上传任务进度 ──
 const { activeJobs } = useSubmitJobs()
@@ -41,6 +41,18 @@ const onCloseJob = (jobId) => {
   <header
     class="flex h-11 shrink-0 items-center gap-3 bg-background/80 px-3 lg:px-5"
   >
+    <AppTooltip text="打开导航">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground md:hidden"
+        aria-label="打开导航"
+        @click="emit('toggle-mobile-nav')"
+      >
+        <Menu class="h-4 w-4" />
+      </Button>
+    </AppTooltip>
+
     <div class="flex h-8 min-w-0 items-center">
       <h1 class="truncate text-[13px] font-medium leading-5 text-foreground">
         {{ activeTabLabel }}
@@ -54,16 +66,9 @@ const onCloseJob = (jobId) => {
           @click="showJobPanel = !showJobPanel"
           class="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-muted/50 hover:bg-muted transition text-xs"
         >
-          <svg v-if="primaryJob?.status === 'running'" class="animate-spin size-3.5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <svg v-else-if="primaryJob?.status === 'failed'" class="size-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
-          <svg v-else class="size-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-          </svg>
+          <Loader2 v-if="primaryJob?.status === 'running'" class="size-3.5 animate-spin text-blue-500" />
+          <AlertCircle v-else-if="primaryJob?.status === 'failed'" class="size-3.5 text-red-500" />
+          <Clock3 v-else class="size-3.5 text-amber-500" />
           <span class="font-medium text-foreground">{{ activeJobs.length }}</span>
           <span v-if="primaryJob?.percent > 0" class="text-muted-foreground">{{ primaryJob.percent }}%</span>
         </button>
@@ -94,9 +99,10 @@ const onCloseJob = (jobId) => {
                 <button
                   v-if="job.status === 'completed' || job.status === 'failed'"
                   @click="onCloseJob(job.id)"
+                  aria-label="移除任务"
                   class="text-muted-foreground hover:text-foreground transition p-0.5"
                 >
-                  <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                  <X class="size-3.5" />
                 </button>
               </div>
               <!-- 进度条 -->

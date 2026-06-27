@@ -8,6 +8,22 @@ import { useTheme } from '@/composables/useTheme.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
+  BookOpen,
+  BotMessageSquare,
+  ClipboardList,
+  Code2,
+  FileUp,
+  Filter,
+  Library,
+  Network,
+} from '@lucide/vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
@@ -53,6 +69,10 @@ const { isDark, toggleDark } = useTheme()
 const isPreviewMode = new URLSearchParams(window.location.search).get('preview') === '1'
 const showPracticeMode = ref(false)
 
+const routeLocation = (path) => (
+  isPreviewMode ? { path, query: { preview: '1' } } : path
+)
+
 // Route-name to tab-key mapping for useHighlightNav compatibility
 const routeToTabMap = {
   'master-bank': 'MasterBank',
@@ -85,7 +105,7 @@ const activeTab = computed({
   get: () => routeToTabMap[route.name] || 'MasterBank',
   set: (val) => {
     const path = tabToRouteMap[val]
-    if (path) router.push(path)
+    if (path) router.push(routeLocation(path))
   },
 })
 
@@ -123,6 +143,7 @@ const {
 
 // ── UI state ──
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
+const mobileNavOpen = ref(false)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
@@ -131,22 +152,64 @@ const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
 const practiceModeIndex = ref(0)
 
-const sidebarTabs = computed(() => [
-  { key: 'MasterBank', label: '高频题库', route: '/master-bank', count: masterBankTotal.value || filteredMasterBank.value.length },
-  { key: 'Chat', label: '模拟面试', route: '/chat' },
-  { key: 'JD', label: 'JD 筛选', route: '/jd', count: jdData.value.length },
-  { key: 'Interview', label: '面经库', route: '/interview', count: interviewData.value.length },
-  { key: 'MockInterview', label: '题目抽测', route: '/mock-interview' },
-  { key: 'KnowledgeGraph', label: '知识图谱', route: '/knowledge-graph' },
-  { key: 'Import', label: '导入', route: '/import' },
-  { key: 'Coding', label: '手撕代码', route: '/coding' },
+const sidebarGroups = computed(() => [
+  {
+    label: null,
+    tabs: [
+      { key: 'MasterBank', label: '高频题库', route: '/master-bank', count: masterBankTotal.value || filteredMasterBank.value.length },
+    ],
+  },
+  {
+    label: '训练',
+    tabs: [
+      { key: 'Chat', label: '模拟面试', route: '/chat' },
+      { key: 'MockInterview', label: '题目抽测', route: '/mock-interview' },
+      { key: 'Coding', label: '手撕代码', route: '/coding' },
+    ],
+  },
+  {
+    label: '素材',
+    tabs: [
+      { key: 'Import', label: '导入', route: '/import' },
+      { key: 'JD', label: 'JD 筛选', route: '/jd', count: jdData.value.length },
+      { key: 'Interview', label: '面经库', route: '/interview', count: interviewData.value.length },
+    ],
+  },
+  {
+    label: '洞察',
+    tabs: [
+      { key: 'KnowledgeGraph', label: '知识图谱', route: '/knowledge-graph' },
+    ],
+  },
 ])
+
+const sidebarTabs = computed(() => sidebarGroups.value.flatMap(group => group.tabs))
+
+const navIconMap = {
+  MasterBank: BookOpen,
+  Chat: BotMessageSquare,
+  MockInterview: ClipboardList,
+  Coding: Code2,
+  Import: FileUp,
+  JD: Filter,
+  Interview: Library,
+  KnowledgeGraph: Network,
+}
 
 const activeTabLabel = computed(() => {
   if (!isAuthenticatedForUi.value) return 'InterviewBoss'
   if (activeTab.value === 'Settings') return '设置'
   return sidebarTabs.value.find(tab => tab.key === activeTab.value)?.label || '工作台'
 })
+
+function isActiveRoute(tabRoute) {
+  return route.path === tabRoute || route.path.startsWith(tabRoute + '/')
+}
+
+async function navigateMobile(tab) {
+  await router.push(routeLocation(tab.route))
+  mobileNavOpen.value = false
+}
 
 // ── Selection ──
 const jdSelection = useSelection(() => jdData.value)
@@ -183,7 +246,7 @@ const displayUser = computed(() => currentUser.value || (isPreviewMode ? preview
 const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
 
 const openSettings = () => {
-  router.push('/settings')
+  router.push(routeLocation('/settings'))
 }
 
 const applyPreviewData = () => {
@@ -303,7 +366,7 @@ watch(sidebarCollapsed, (val) => {
 
 // ── Cross-view navigation ──
 const onGoToQuestion = (question) => {
-  router.push('/master-bank')
+  router.push(routeLocation('/master-bank'))
   const q = question.question || ''
   searchQuery.value = q.length > 30 ? q.substring(0, 30) : q
   selectedTag.value = '全部'; selectedSubTags.value = []
@@ -337,7 +400,7 @@ const onNavigateToInterview = (event) => {
   if (outerScroll) setSavedScrollTop(outerScroll.scrollTop)
 
   if (showPracticeMode.value) { returnToPracticeMode.value = true; showPracticeMode.value = false }
-  router.push('/interview')
+  router.push(routeLocation('/interview'))
 
   filterSeason.value = ''
   const sortedIdx = filteredInterviewData.value.indexOf(match)
@@ -437,7 +500,7 @@ provide('appData', {
   // Pagination
   jdCurrentPage, jdPageSize, interviewCurrentPage, interviewPageSize,
   // UI
-  sidebarCollapsed, sidebarTabs, isPreviewMode,
+  sidebarCollapsed, sidebarTabs, sidebarGroups, isPreviewMode,
   isDark, toggleDark, showConfirm, toast, safeUrl,
   // Review
   showReviewPanel,
@@ -480,6 +543,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           :collapsed="sidebarCollapsed"
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
+          :sidebar-groups="sidebarGroups"
           :display-user="displayUser"
           :pending-review-count="pendingReviewCount"
           @update:active-tab="activeTab = $event"
@@ -499,7 +563,64 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           :active-season="activeSeason"
           :no-border="route.path.startsWith('/chat')"
           @show-settings="openSettings"
+          @toggle-mobile-nav="mobileNavOpen = true"
         />
+
+        <Sheet v-model:open="mobileNavOpen">
+          <SheetContent side="left" class="w-[86vw] max-w-xs gap-0 p-0 md:hidden">
+            <SheetHeader class="border-b border-border px-4 py-4 text-left">
+              <div class="flex items-center gap-3">
+                <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+                  <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
+                </div>
+                <div class="min-w-0">
+                  <SheetTitle class="truncate text-base">InterviewBoss</SheetTitle>
+                  <p class="truncate text-xs text-muted-foreground">AI 面试准备工作台</p>
+                </div>
+              </div>
+            </SheetHeader>
+
+            <nav class="flex-1 overflow-y-auto px-3 py-3">
+              <div
+                v-for="group in sidebarGroups"
+                :key="group.label || 'primary'"
+                class="mb-3 last:mb-0"
+              >
+                <div
+                  v-if="group.label"
+                  class="px-2 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground"
+                >
+                  {{ group.label }}
+                </div>
+                <div class="space-y-1">
+                  <button
+                    v-for="tab in group.tabs"
+                    :key="tab.key"
+                    type="button"
+                    class="flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors"
+                    :class="isActiveRoute(tab.route)
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+                      : 'text-foreground/75 hover:bg-muted hover:text-foreground'"
+                    @click="navigateMobile(tab)"
+                  >
+                    <component
+                      :is="navIconMap[tab.key]"
+                      class="h-4 w-4 shrink-0"
+                      :class="isActiveRoute(tab.route) ? 'text-primary' : 'text-muted-foreground'"
+                    />
+                    <span class="min-w-0 flex-1 truncate">{{ tab.label }}</span>
+                    <span
+                      v-if="tab.count != null && tab.count !== 0"
+                      class="shrink-0 text-xs font-medium text-muted-foreground"
+                    >
+                      {{ tab.count }}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </nav>
+          </SheetContent>
+        </Sheet>
 
         <!-- 统一 overflow-hidden：每个 View 组件自己管理滚动（消除双层滚动问题） -->
         <!-- h-full 确保 ChatView 的 h-full 能正确解析（CSS 百分比高度需要父链每一层都有明确高度） -->
