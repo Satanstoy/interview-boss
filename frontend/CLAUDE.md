@@ -31,6 +31,9 @@ Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / ECharts / Marked 
 - 主卡片、列表容器、图表容器统一优先使用 `rounded-xl border border-border bg-card shadow-sm`。
 - toolbar/filter 区统一优先使用 `rounded-xl border border-border bg-card p-3`；内部控件不再各自包一层重边框卡片。
 - 数据表外壳必须自己承担圆角裁切和宽度约束：`rounded-xl border border-border bg-card shadow-sm overflow-hidden w-full min-w-0`，避免背景线条破坏圆角或横向溢出。
+- 文本型数据表在 `md` 以下必须提供卡片式行视图，避免把表格列压缩成竖排文本；优先复用 `components/common/DataTable.vue` 的移动卡片行为。
+- 认证壳导航由 `AuthenticatedLayout.vue` 的 `sidebarGroups` 作为单一数据源，桌面侧栏和移动导航必须保持同序、同标签、同计数。
+- Chat/Coding 这类带内部侧栏的工作台在移动端使用 overlay/toggle，不要让侧栏常驻挤压主内容。
 - 普通按钮、输入框、Select、Dialog、Badge 优先使用 shadcn 默认组件圆角，不额外覆盖圆角；确需覆盖时同一组件组内保持一致。
 - 交互行/列表项使用 `rounded-lg`，内容内嵌块使用 `rounded-md`，进度条和开关保留 `rounded-full`。
 - 业务弹窗只做视觉统一时，外壳统一 `rounded-xl border border-border bg-card shadow-lg`，内部边界统一 `border-border` 或 `border-border/50`。

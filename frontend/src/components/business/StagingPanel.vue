@@ -214,25 +214,27 @@ defineExpose({ onSubmit, isSubmitting })
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-3 md:gap-4">
     <!-- Header bar -->
-    <div class="flex flex-wrap items-center gap-2">
-      <Badge v-if="activeJobCount > 0" variant="secondary" class="gap-1.5 text-xs">
-        <span class="relative flex h-2 w-2">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-          <span class="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-        </span>
-        {{ activeJobCount }} 个任务处理中
-      </Badge>
-      <p class="text-xs text-muted-foreground">
-        粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。
-      </p>
+    <div class="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+      <div class="flex flex-wrap items-center gap-2">
+        <Badge v-if="activeJobCount > 0" variant="secondary" class="gap-1.5 text-xs">
+          <span class="relative flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </span>
+          {{ activeJobCount }} 个任务处理中
+        </Badge>
+        <p class="text-xs text-muted-foreground">
+          粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。
+        </p>
+      </div>
     </div>
 
     <!-- Main: two equal columns -->
     <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
       <!-- Left: text -->
-      <section class="flex min-h-0 flex-col gap-2">
+      <section class="flex min-h-[280px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
         <div class="flex items-center gap-2">
           <FileText class="h-4 w-4 text-muted-foreground" />
           <Label class="text-sm font-medium">文本内容</Label>
@@ -245,14 +247,14 @@ defineExpose({ onSubmit, isSubmitting })
           v-model="rawText"
           :maxlength="TEXT_MAX_LENGTH"
           placeholder="粘贴面经或 JD 内容..."
-          class="min-h-0 flex-1 text-sm leading-relaxed"
+          class="min-h-[220px] flex-1 resize-none text-sm leading-relaxed"
           :disabled="isSubmitting"
           @paste="onPaste"
         />
       </section>
 
       <!-- Right: images -->
-      <section class="flex min-h-0 flex-col gap-2">
+      <section class="flex min-h-[280px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2">
             <ImageIcon class="h-4 w-4 text-muted-foreground" />
@@ -275,7 +277,7 @@ defineExpose({ onSubmit, isSubmitting })
 
         <!-- Drop zone: fills remaining space -->
         <div
-          class="group relative flex min-h-0 flex-1 cursor-pointer flex-col rounded-lg border-2 border-dashed transition-all"
+          class="group relative flex min-h-[220px] flex-1 cursor-pointer flex-col rounded-lg border-2 border-dashed transition-all"
           :class="[
             isDragging
               ? 'border-primary bg-primary/5'
@@ -341,7 +343,7 @@ defineExpose({ onSubmit, isSubmitting })
     </div>
 
     <!-- Bottom bar: URL + settings + actions -->
-    <div class="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-end sm:p-4">
+    <div class="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm sm:flex-row sm:items-end sm:p-4">
       <!-- Source URL -->
       <div class="flex-1 space-y-1.5">
         <Label class="text-xs font-medium text-muted-foreground">来源链接（可选）</Label>
@@ -402,11 +404,11 @@ defineExpose({ onSubmit, isSubmitting })
       </div>
 
       <!-- Actions -->
-      <div class="flex items-center gap-2 sm:self-end">
+      <div class="flex w-full items-center gap-2 sm:w-auto sm:self-end">
         <Button
           variant="ghost"
           size="sm"
-          class="text-muted-foreground"
+          class="flex-1 text-muted-foreground sm:flex-none"
           :disabled="isSubmitting"
           @click="resetForm"
         >
@@ -414,7 +416,7 @@ defineExpose({ onSubmit, isSubmitting })
         </Button>
         <Button
           size="sm"
-          class="gap-1.5"
+          class="flex-1 gap-1.5 sm:flex-none"
           :disabled="!inputValid || isSubmitting || rawText.length > TEXT_MAX_LENGTH"
           @click="onSubmit"
         >
