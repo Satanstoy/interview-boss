@@ -16,6 +16,7 @@ from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.nodes import (
+    _repair_response_to_question_plan,
     check_round_limit,
     extract_memory,
     load_history,
