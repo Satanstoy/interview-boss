@@ -209,13 +209,13 @@ def mock_db():
 
     with patch('app.db.connection.get_db_connection', return_value=conn), \
          patch('app.db.operations.get_db_connection', return_value=conn), \
-         patch('app.services.pipeline.get_db_connection', return_value=conn):
+         patch('app.services.pipeline.queue.get_db_connection', return_value=conn), \
+         patch('app.services.pipeline.batch.get_db_connection', return_value=conn):
 
         async def _run_db_sync(func):
             return func()
 
-        with patch('app.db.connection.run_db', side_effect=_run_db_sync), \
-             patch('app.services.pipeline.run_db', side_effect=_run_db_sync):
+        with patch('app.db.connection.run_db', side_effect=_run_db_sync):
             yield conn
 
     conn.close()
@@ -229,8 +229,8 @@ class TestSingleInterview:
     """单条面经：标签 → 入队 → 聚类"""
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_full_pipeline(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """单条面经走完两阶段流水线"""
         from app.services.pipeline import (
@@ -296,8 +296,8 @@ class TestBatchProcessing:
     """3 条面经提交后一起聚类"""
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_batch_merges_same_cat2(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """相同 cat2 的题目被合并到同一聚类"""
         from app.services.pipeline import (
@@ -351,8 +351,8 @@ class TestRebuildFlow:
     """清空 → 入队 → 聚类"""
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_rebuild_clears_old_and_creates_new(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """重建后旧 QB 清除，新 QB 从 pipeline 生成"""
         from app.services.pipeline import (
@@ -421,8 +421,8 @@ class TestRebuildFlow:
 class TestDataConsistency:
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_phase1_does_not_touch_qb(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """阶段1不碰 question_bank"""
         from app.services.pipeline import tag_interview
@@ -443,8 +443,8 @@ class TestDataConsistency:
         asyncio.run(_run())
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_reprocess_no_duplicate_sources(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """对同一 URL 重新聚类，sources 中无重复"""
         from app.services.pipeline import (
@@ -482,8 +482,8 @@ class TestDataConsistency:
         asyncio.run(_run())
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_queue_lifecycle(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """队列状态：pending → processing → done/failed"""
         from app.services.pipeline import (
@@ -623,8 +623,8 @@ class TestEdgeCases:
         mark_batch_done([])
         mark_batch_failed([])
 
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_cluster_empty_batch(self, mock_uq, mock_cluster, mock_db):
         from app.services.pipeline import cluster_batch
 
@@ -634,8 +634,8 @@ class TestEdgeCases:
         asyncio.run(_run())
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_reprocess_preserves_ai_answer(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """重新聚类保留已有 AI 答案"""
         from app.services.pipeline import (
@@ -685,8 +685,8 @@ class TestEdgeCases:
 class TestFullRebuildSimulation:
 
     @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
-    @patch('app.services.pipeline.cluster_all_questions', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
-    @patch('app.services.pipeline.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
+    @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
+    @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_5_interviews_rebuild(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """5条面经重建，验证数据一致性"""
         from app.services.pipeline import tag_interview, force_cluster_all_pending

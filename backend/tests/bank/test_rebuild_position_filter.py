@@ -8,6 +8,10 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, call
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestBug001QuestionsDetailMissingJobPosition:
     """BUG-001: questions_detail 表缺少 job_position 列"""
 
@@ -126,7 +130,7 @@ class TestBug003LoadShouldFilterByPosition:
         import inspect
         import ast
 
-        with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
+        with open(BACKEND_ROOT / "app/routers/bank_build.py", "r") as f:
             source = f.read()
 
         # 检查 _load 函数中的 SQL 是否包含 job_position 过滤
@@ -136,7 +140,7 @@ class TestBug003LoadShouldFilterByPosition:
 
     def test_save_sql_must_include_job_position(self):
         """验证 _save() 写入 question_bank 时包含 job_position"""
-        with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
+        with open(BACKEND_ROOT / "app/routers/bank_build.py", "r") as f:
             source = f.read()
 
         assert "job_position" in source, "_save() 中 INSERT INTO question_bank 应包含 job_position"
@@ -215,7 +219,7 @@ class TestPositionIsolationIntegration:
         with patch("app.routers.bank_build.get_db_connection", return_value=mock_conn):
             with patch("app.routers.bank_build.get_current_job_position", return_value="后端开发"):
                 # 通过检查源码确保 SQL 包含过滤条件
-                with open("/root/sj/interview-boss/backend/app/routers/bank_build.py", "r") as f:
+                with open(BACKEND_ROOT / "app/routers/bank_build.py", "r") as f:
                     source = f.read()
 
                 # 在 _load 函数的 questions_detail 查询中必须有 job_position 过滤

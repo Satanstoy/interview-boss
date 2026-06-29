@@ -219,10 +219,10 @@ class TestCleanupBeforeClustering:
             captured_items.extend(all_items)
             return [{"ids": [item["id"] for item in all_items], "representative": "mock"}]
 
-        with patch("app.services.pipeline.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.cluster_all_questions", side_effect=mock_cluster), \
-             patch("app.services.pipeline.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
+        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
+             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
+             patch("app.services.pipeline.batch.cluster_batch", side_effect=mock_cluster), \
+             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
 
             from app.services.pipeline import cluster_batch
             batch = [{"queue_id": 1, "interview_id": 1, "url": "http://url-x.com",
@@ -280,10 +280,10 @@ class TestCleanupBeforeClustering:
             captured_items.extend(all_items)
             return [{"ids": [item["id"] for item in all_items], "representative": "mock"}]
 
-        with patch("app.services.pipeline.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.cluster_all_questions", side_effect=mock_cluster), \
-             patch("app.services.pipeline.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
+        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
+             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
+             patch("app.services.pipeline.batch.cluster_batch", side_effect=mock_cluster), \
+             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
 
             from app.services.pipeline import cluster_batch
             batch = [{"queue_id": 1, "interview_id": 1, "url": "http://url-x.com",
@@ -335,10 +335,10 @@ class TestCleanupBeforeClustering:
         async def mock_cluster(all_items, user_id=None):
             return [{"ids": [item["id"] for item in all_items], "representative": "什么是RAG"}]
 
-        with patch("app.services.pipeline.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.cluster_all_questions", side_effect=mock_cluster), \
-             patch("app.services.pipeline.generate_unified_question", new_callable=AsyncMock, return_value="什么是RAG"):
+        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
+             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
+             patch("app.services.pipeline.batch.cluster_batch", side_effect=mock_cluster), \
+             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="什么是RAG"):
 
             from app.services.pipeline import cluster_batch
             batch = [{"queue_id": 1, "interview_id": 1, "url": "http://url-x.com",

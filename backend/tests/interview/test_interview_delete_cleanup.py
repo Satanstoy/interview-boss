@@ -7,6 +7,10 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestCleanupSourcesForUrl:
     """_cleanup_sources_for_url: 面经删除时清理 question_bank.sources"""
 
@@ -149,7 +153,7 @@ class TestDeleteEndpointTransactionConsistency:
 
     def test_interview_delete_calls_cleanup(self):
         """删除面经时应调用 _cleanup_sources_for_url"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         # 查找 interview 删除分支
@@ -165,7 +169,7 @@ class TestDeleteEndpointTransactionConsistency:
 
     def test_interview_delete_cascades_questions_detail(self):
         """删除面经时应级联软删除 questions_detail"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         import re
@@ -180,7 +184,7 @@ class TestDeleteEndpointTransactionConsistency:
 
     def test_jd_delete_cascades_interview_and_questions_detail(self):
         """删除 JD 时应级联软删除面经和 questions_detail"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         import re
@@ -195,7 +199,7 @@ class TestDeleteEndpointTransactionConsistency:
 
     def test_jd_delete_cleans_interview_sources(self):
         """删除 JD 时应清理关联面经的 question_bank sources"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         import re
@@ -210,7 +214,7 @@ class TestDeleteEndpointTransactionConsistency:
 
     def test_delete_commits_after_cleanup(self):
         """cleanup 应在 commit 之前执行"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         import re
@@ -236,7 +240,7 @@ class TestBatchDeleteTransactionConsistency:
 
     def test_batch_interview_delete_calls_cleanup(self):
         """批量删除面经时应调用 _cleanup_sources_for_url"""
-        with open('/root/sj/interview-boss/backend/app/routers/data.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
 
         import re
@@ -263,7 +267,7 @@ class TestOqsFilteredByDeletedStatus:
 
     def test_filter_checks_deleted_at(self):
         """filter_original_question_sources_by_mode 应查询 deleted_at IS NULL"""
-        with open('/root/sj/interview-boss/backend/app/db/queries.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/queries.py', 'r') as f:
             content = f.read()
 
         import re
@@ -278,7 +282,7 @@ class TestOqsFilteredByDeletedStatus:
 
     def test_filter_is_called_in_get_endpoint(self):
         """GET /api/master-bank 应通过 build_api_shapes_batch_filtered 过滤 OQS"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         assert 'build_api_shapes_batch_filtered' in content, "GET 端点应调用 build_api_shapes_batch_filtered 过滤 OQS"

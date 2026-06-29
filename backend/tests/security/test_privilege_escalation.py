@@ -7,12 +7,16 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import re
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestBug006GenerateAnswerOwnership:
     """BUG-006: generate-answer 端点应校验题目可见性"""
 
     def test_bug006_should_use_build_bank_where_clause(self):
         """generate_master_answer 应使用 _build_bank_where_clause 过滤可见性"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         # 找到 generate_master_answer 函数
@@ -35,7 +39,7 @@ class TestBug006GenerateAnswerOwnership:
 
     def test_bug006_should_not_just_select_by_id(self):
         """generate_master_answer 不应仅按 id 查询而无过滤"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -62,7 +66,7 @@ class TestBug007BatchGenerateAnswersOwnership:
 
     def test_bug007_should_use_build_bank_where_clause(self):
         """batch_generate_answers 应使用 _build_bank_where_clause 过滤可见性"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -82,7 +86,7 @@ class TestBug007BatchGenerateAnswersOwnership:
 
     def test_bug007_should_filter_by_user_visibility(self):
         """batch_generate_answers 的查询应过滤用户不可见的题目"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -103,7 +107,7 @@ class TestBug008EvaluateAnswerVisibility:
 
     def test_bug008_should_check_question_visibility(self):
         """evaluate_answer 在记录练习前应校验题目可见性"""
-        with open('/root/sj/interview-boss/backend/app/routers/practice.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/practice.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -124,7 +128,7 @@ class TestBug008EvaluateAnswerVisibility:
 
     def test_bug008_should_validate_question_exists_and_visible(self):
         """evaluate_answer 应验证 question_id 对应的题目存在且用户可见"""
-        with open('/root/sj/interview-boss/backend/app/routers/practice.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/practice.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -145,7 +149,7 @@ class TestBug009AnalyticsIsolation:
 
     def test_bug009_jd_query_should_filter_by_bank_mode(self):
         """analytics 的 JD 查询应按 bank_mode 过滤"""
-        with open('/root/sj/interview-boss/backend/app/routers/analytics.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/analytics.py', 'r') as f:
             content = f.read()
 
         # 找到 get_analytics 函数
@@ -168,7 +172,7 @@ class TestBug009AnalyticsIsolation:
 
     def test_bug009_questions_detail_query_should_filter_by_bank_mode(self):
         """analytics 的 questions_detail 查询应按 bank_mode 过滤"""
-        with open('/root/sj/interview-boss/backend/app/routers/analytics.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/analytics.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -188,7 +192,7 @@ class TestBug009AnalyticsIsolation:
 
     def test_bug009_should_use_user_context(self):
         """get_analytics 应使用 user 参数来构建过滤条件"""
-        with open('/root/sj/interview-boss/backend/app/routers/analytics.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/analytics.py', 'r') as f:
             content = f.read()
 
         func_match = re.search(
@@ -209,7 +213,7 @@ class TestIntegration:
 
     def test_generate_answer_endpoint_requires_visibility_check(self):
         """generate-answer 端点应有可见性检查"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         # 找到 generate-answer 路由
@@ -226,7 +230,7 @@ class TestIntegration:
 
     def test_batch_generate_endpoint_requires_visibility_check(self):
         """batch-generate-answers 端点应有可见性检查"""
-        with open('/root/sj/interview-boss/backend/app/routers/answers.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
         route_match = re.search(
@@ -242,7 +246,7 @@ class TestIntegration:
 
     def test_evaluate_answer_endpoint_requires_visibility_check(self):
         """evaluate-answer 端点应有可见性检查"""
-        with open('/root/sj/interview-boss/backend/app/routers/practice.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/practice.py', 'r') as f:
             content = f.read()
 
         route_match = re.search(
@@ -258,7 +262,7 @@ class TestIntegration:
 
     def test_analytics_endpoint_uses_bank_mode_filter(self):
         """analytics 端点应使用 bank_mode 过滤"""
-        with open('/root/sj/interview-boss/backend/app/routers/analytics.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/analytics.py', 'r') as f:
             content = f.read()
 
         has_bank_mode = 'bank_mode' in content

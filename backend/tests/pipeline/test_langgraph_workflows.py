@@ -293,13 +293,13 @@ def mock_db():
 
     with patch('app.db.connection.get_db_connection', return_value=conn), \
          patch('app.db.operations.get_db_connection', return_value=conn), \
-         patch('app.services.pipeline.get_db_connection', return_value=conn):
+         patch('app.services.pipeline.queue.get_db_connection', return_value=conn), \
+         patch('app.services.pipeline.batch.get_db_connection', return_value=conn):
 
         async def _run_db_sync(func):
             return func()
 
-        with patch('app.db.connection.run_db', side_effect=_run_db_sync), \
-             patch('app.services.pipeline.run_db', side_effect=_run_db_sync):
+        with patch('app.db.connection.run_db', side_effect=_run_db_sync):
             yield conn
 
 

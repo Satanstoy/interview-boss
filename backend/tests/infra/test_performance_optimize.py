@@ -13,17 +13,21 @@ import pytest
 from pathlib import Path
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestRemoveNumpy:
     """OPT-1: numpy 应从项目中移除"""
 
     def test_numpy_not_in_pyproject(self):
         """T-001: pyproject.toml 中不应包含 numpy 依赖"""
-        pyproject = Path("/root/sj/interview-boss/pyproject.toml").read_text()
+        pyproject = Path(BACKEND_ROOT.parent / "pyproject.toml").read_text()
         assert "numpy" not in pyproject, "numpy 仍在 pyproject.toml 中"
 
     def test_no_numpy_import_in_backend(self):
         """T-002: 后端代码中不应有 numpy 导入"""
-        backend_dir = Path("/root/sj/interview-boss/backend/app")
+        backend_dir = Path(BACKEND_ROOT / "app")
         violations = []
         for py_file in backend_dir.rglob("*.py"):
             content = py_file.read_text()
@@ -40,7 +44,7 @@ class TestFrontendLazyLoad:
     """OPT-2: 低频组件应使用异步懒加载"""
 
     def _get_app_vue_content(self):
-        return Path("/root/sj/interview-boss/frontend/src/App.vue").read_text()
+        return Path(BACKEND_ROOT.parent / "frontend/src/App.vue").read_text()
 
     def test_mock_interview_is_async(self):
         """T-003a: MockInterview 组件应异步加载"""
@@ -69,7 +73,7 @@ class TestCompactSingletonsPagination:
 
     def test_compact_uses_pagination(self):
         """T-004: _load_singletons 应使用分页而非 fetchall"""
-        pipeline_path = Path("/root/sj/interview-boss/backend/app/services/pipeline.py")
+        pipeline_path = Path(BACKEND_ROOT / "app/services/pipeline.py")
         content = pipeline_path.read_text()
         assert "compact_singletons_in_db" in content
         assert "fetchall" not in content or "LIMIT" in content, \
@@ -80,7 +84,7 @@ class TestLLMRetryLimit:
     """OPT-4: LLM 重试应有总时间上限"""
 
     def _get_llm_content(self):
-        return Path("/root/sj/interview-boss/backend/app/services/llm.py").read_text()
+        return Path(BACKEND_ROOT / "app/services/llm.py").read_text()
 
     def test_retry_has_delay_limit(self):
         """T-005a: 重试装饰器应有 stop_after_delay 限制"""
@@ -104,7 +108,7 @@ class TestUserClientCacheLimit:
 
     def test_cache_has_max_size(self):
         """T-006: _user_client_cache 应有大小限制"""
-        llm_content = Path("/root/sj/interview-boss/backend/app/services/llm.py").read_text()
+        llm_content = Path(BACKEND_ROOT / "app/services/llm.py").read_text()
         # 检查是否有缓存大小限制逻辑
         assert "MAX_CACHE" in llm_content or "max_cache" in llm_content or \
                "cache_size" in llm_content or "len(_user_client_cache)" in llm_content, \
@@ -116,7 +120,7 @@ class TestSecurityHeadersASGI:
 
     def test_not_using_base_http_middleware(self):
         """T-007: 安全头中间件不应继承 BaseHTTPMiddleware"""
-        asgi_content = Path("/root/sj/interview-boss/backend/app/asgi.py").read_text()
+        asgi_content = Path(BACKEND_ROOT / "app/asgi.py").read_text()
         # SecurityHeadersMiddleware 不应继承 BaseHTTPMiddleware
         # 应改为纯 ASGI middleware 或 @app.middleware("http") 装饰器
         lines = asgi_content.split("\n")

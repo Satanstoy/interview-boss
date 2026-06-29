@@ -10,6 +10,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 

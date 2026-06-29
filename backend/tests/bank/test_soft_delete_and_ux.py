@@ -7,13 +7,17 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import re
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestBug001SoftDelete:
     """BUG-001: question_bank 批量删除应使用软删除"""
 
     def test_bug001_question_bank_should_have_deleted_at_column(self):
         """question_bank 表应有 deleted_at 字段"""
         # 读取 connection.py 中的迁移代码
-        with open('/root/sj/interview-boss/backend/app/db/migrations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
             content = f.read()
 
         # 检查是否有为 question_bank 添加 deleted_at 的迁移代码
@@ -28,7 +32,7 @@ class TestBug001SoftDelete:
     def test_bug001_single_delete_should_use_update_not_delete(self):
         """单条删除应使用 UPDATE 而非 DELETE FROM"""
         # 读取 master_bank.py 中的删除代码
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 找到 delete_master_question 函数
@@ -55,7 +59,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_batch_delete_should_use_update_not_delete(self):
         """批量删除应使用 UPDATE 而非 DELETE FROM"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 查找批量删除函数中的关键操作
@@ -72,7 +76,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_build_should_use_update_not_delete(self):
         """题库重建应使用 UPDATE 而非 DELETE FROM"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 查找 _save 函数中的关键操作
@@ -95,7 +99,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_should_have_trash_endpoint(self):
         """应存在回收站查询接口"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 检查是否有 /api/master-bank/trash 路由
@@ -104,7 +108,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_should_have_restore_endpoint(self):
         """应存在恢复接口"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 检查是否有 /api/master-bank/restore/{question_id} 路由
@@ -113,7 +117,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_should_have_batch_restore_endpoint(self):
         """应存在批量恢复接口"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 检查是否有批量恢复路由
@@ -122,7 +126,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_normal_query_should_exclude_deleted(self):
         """普通查询应排除已删除记录"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 查找列表查询函数，检查是否有 deleted_at IS NULL 条件
@@ -136,7 +140,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_type_selector(self):
         """StagingPanel 应包含类型选择控件"""
-        with open('/root/sj/interview-boss/frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有类型选择的 select 元素
@@ -145,7 +149,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_season_selector(self):
         """StagingPanel 应包含季节选择控件"""
-        with open('/root/sj/interview-boss/frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有季节选择的 select 元素
@@ -154,7 +158,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_selector_should_have_options(self):
         """类型选择应包含 JD 和面经选项"""
-        with open('/root/sj/interview-boss/frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有 JD 和面经选项
@@ -168,7 +172,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_should_be_passed_to_api(self):
         """选择的类型应传递给 API"""
-        with open('/root/sj/interview-boss/frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查 FormData 中是否包含 content_type 字段（后端期望的字段名）
@@ -181,7 +185,7 @@ class TestBug003DirtyDataPositions:
 
     def test_bug003_should_have_cleanup_migration(self):
         """应有清理脏数据的迁移代码"""
-        with open('/root/sj/interview-boss/backend/app/db/migrations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
             content = f.read()
 
         # 检查是否有清理 job_positions 脏数据的代码
@@ -196,7 +200,7 @@ class TestBug003DirtyDataPositions:
         """实际数据库中不应有无效岗位数据"""
         import sqlite3
         try:
-            conn = sqlite3.connect('/root/sj/interview-boss/backend/data/interview-boss.db')
+            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
@@ -224,7 +228,7 @@ class TestBug004DirtyDataCategories:
 
     def test_bug004_should_have_cleanup_migration(self):
         """应有清理脏分类的迁移代码"""
-        with open('/root/sj/interview-boss/backend/app/db/migrations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
             content = f.read()
 
         # 检查是否有清理 question_bank.cat1 脏数据的代码
@@ -238,7 +242,7 @@ class TestBug004DirtyDataCategories:
         """实际数据库中不应有 test 分类"""
         import sqlite3
         try:
-            conn = sqlite3.connect('/root/sj/interview-boss/backend/data/interview-boss.db')
+            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
@@ -258,7 +262,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_should_have_delete_endpoint(self):
         """应存在删除 LLM 配置的接口"""
-        with open('/root/sj/interview-boss/backend/app/routers/profile.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/profile.py', 'r') as f:
             content = f.read()
 
         # 检查是否有 DELETE /api/profile/llm 路由
@@ -270,7 +274,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_delete_button(self):
         """前端应有清除配置按钮"""
-        with open('/root/sj/interview-boss/frontend/src/components/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/SettingsPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有清除配置按钮
@@ -279,7 +283,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_prominent_edit_button(self):
         """前端修改配置按钮应明显"""
-        with open('/root/sj/interview-boss/frontend/src/components/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/SettingsPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查修改配置按钮是否有明显的样式
@@ -300,7 +304,7 @@ class TestIntegration:
 
     def test_api_should_have_all_required_endpoints(self):
         """API 应包含所有必要的端点"""
-        with open('/root/sj/interview-boss/backend/app/routers/questions.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
             content = f.read()
 
         # 检查所有必要的端点
@@ -317,7 +321,7 @@ class TestIntegration:
 
     def test_frontend_api_should_have_all_required_functions(self):
         """前端 API 应包含所有必要的函数"""
-        with open('/root/sj/interview-boss/frontend/src/api/index.js', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/api/index.js', 'r') as f:
             content = f.read()
 
         # 检查所有必要的 API 函数

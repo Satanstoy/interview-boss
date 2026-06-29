@@ -7,12 +7,16 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+from pathlib import Path
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
 class TestOqsBackfillOnRebuild:
     """BUG-004a: 重建题库时独立题目应保留 original_question_sources"""
 
     def test_standalone_question_keeps_oqs(self):
         """独立题目（未合并）应保留 original_question_sources"""
-        with open('/root/sj/interview-boss/backend/app/routers/bank_build.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/routers/bank_build.py', 'r') as f:
             content = f.read()
 
         import re
@@ -31,7 +35,7 @@ class TestOqsPopulatedForNewQuestions:
 
     def test_new_question_insert_includes_oqs(self):
         """新建题目的 INSERT 语句应包含 original_question_sources"""
-        with open('/root/sj/interview-boss/backend/app/db/operations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/operations.py', 'r') as f:
             content = f.read()
 
         import re
@@ -47,7 +51,7 @@ class TestOqsPopulatedForNewQuestions:
 
     def test_new_question_oqs_format(self):
         """新建题目的 oqs 应为 [{question, sources: [{url, company, round}]}] 格式"""
-        with open('/root/sj/interview-boss/backend/app/db/operations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/operations.py', 'r') as f:
             content = f.read()
 
         # 检查 oqs_json 变量是否在 INSERT 之前定义
@@ -61,7 +65,7 @@ class TestStartupAutoFixEmptyOqs:
 
     def test_startup_fix_backfills_empty_oqs(self):
         """启动修复应为 oqs 为空但 sources 非空的题目回填数据"""
-        with open('/root/sj/interview-boss/backend/app/db/migrations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
             content = f.read()
 
         assert '回填' in content, "应有 oqs 回填逻辑"
@@ -69,7 +73,7 @@ class TestStartupAutoFixEmptyOqs:
 
     def test_startup_fix_handles_empty_sources_in_oqs(self):
         """启动修复应修复 oqs 中 sources 为空数组的条目"""
-        with open('/root/sj/interview-boss/backend/app/db/migrations.py', 'r') as f:
+        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
             content = f.read()
 
         assert '空 sources' in content or 'empty.*sources' in content.lower() or '\"sources\": []' in content, "应有修复空 sources 条目的逻辑"
@@ -80,7 +84,7 @@ class TestFrontendDedupedSourcesFallback:
 
     def test_deduped_sources_handles_empty_oqs(self):
         """dedupedSources 在 oqs 为空时应返回 sources（无 _origQuestion）"""
-        with open('/root/sj/interview-boss/frontend/src/components/QuestionCard.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/QuestionCard.vue', 'r') as f:
             content = f.read()
 
         # 检查 dedupedSources 存在
@@ -96,7 +100,7 @@ class TestRealDatabaseOqsIntegrity:
         """不应存在 oqs 为空但 sources 非空的题目"""
         import sqlite3
         try:
-            conn = sqlite3.connect('/root/sj/interview-boss/backend/data/interview-boss.db')
+            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
             cursor = conn.cursor()
             count = cursor.execute(
                 "SELECT COUNT(*) FROM question_bank "
@@ -112,7 +116,7 @@ class TestRealDatabaseOqsIntegrity:
         """不应存在 oqs 条目的 sources 为空数组"""
         import sqlite3
         try:
-            conn = sqlite3.connect('/root/sj/interview-boss/backend/data/interview-boss.db')
+            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
             cursor = conn.cursor()
             count = cursor.execute(
                 "SELECT COUNT(*) FROM question_bank "
