@@ -44,7 +44,7 @@ class TestFrontendLazyLoad:
     """OPT-2: 低频组件应使用异步懒加载"""
 
     def _get_app_vue_content(self):
-        return Path(BACKEND_ROOT.parent / "frontend/src/App.vue").read_text()
+        return Path(BACKEND_ROOT / "frontend/src/App.vue").read_text()
 
     def test_mock_interview_is_async(self):
         """T-003a: MockInterview 组件应异步加载"""

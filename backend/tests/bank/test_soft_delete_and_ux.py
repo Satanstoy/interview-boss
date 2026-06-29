@@ -140,7 +140,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_type_selector(self):
         """StagingPanel 应包含类型选择控件"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有类型选择的 select 元素
@@ -149,7 +149,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_season_selector(self):
         """StagingPanel 应包含季节选择控件"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有季节选择的 select 元素
@@ -158,7 +158,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_selector_should_have_options(self):
         """类型选择应包含 JD 和面经选项"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有 JD 和面经选项
@@ -172,7 +172,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_should_be_passed_to_api(self):
         """选择的类型应传递给 API"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/StagingPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查 FormData 中是否包含 content_type 字段（后端期望的字段名）
@@ -274,7 +274,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_delete_button(self):
         """前端应有清除配置按钮"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有清除配置按钮
@@ -283,7 +283,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_prominent_edit_button(self):
         """前端修改配置按钮应明显"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/components/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查修改配置按钮是否有明显的样式
@@ -321,7 +321,7 @@ class TestIntegration:
 
     def test_frontend_api_should_have_all_required_functions(self):
         """前端 API 应包含所有必要的函数"""
-        with open(BACKEND_ROOT.parent / 'frontend/src/api/index.js', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/api/index.js', 'r') as f:
             content = f.read()
 
         # 检查所有必要的 API 函数

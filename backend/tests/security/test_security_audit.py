@@ -211,7 +211,7 @@ class TestBUG003UrlHrefValidation:
 
     def test_question_card_uses_safe_url(self):
         """QuestionCard.vue 应使用 safeUrl 处理 href"""
-        card_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/components/QuestionCard.vue')
+        card_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/components/business/QuestionCard.vue')
         with open(card_path, 'r', encoding='utf-8') as f:
             content = f.read()
 

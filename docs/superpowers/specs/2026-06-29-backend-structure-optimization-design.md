@@ -1,373 +1,205 @@
 # Backend Structure Optimization Design
 
 **Date**: 2026-06-29
-**Status**: Approved for implementation
-**Scope**: Phase 1 (physical split, zero behavior change) of a two-phase refactor
+**Status**: Revised draft, pending implementation plan
+**Scope**: Phase 1 only: thin `backend/app/routers/submit.py` with zero endpoint behavior change.
 
 ## Background
 
 The backend has several oversized files that hurt maintainability:
 
-| File | Lines | Problem |
-|------|-------|---------|
-| `agents/chat/pipeline.py` | 2077 | 50+ functions covering 7 distinct responsibilities |
-| `db/migrations.py` | 1760 | 38 migration functions in a single file |
-| `services/clustering.py` | 1254 | 6 public entry points + 3 prompt constants + 15 helpers |
-| `routers/submit.py` | 952 | Business logic in router layer, 3 versions of same endpoint |
-| `services/pipeline/batch.py` | 933 | Two distinct subsystems (incremental clustering + compaction) |
+| File | Current lines | Problem |
+|------|---------------|---------|
+| `backend/app/agents/chat/pipeline.py` | 2077 | ReAct loop, answer generation, summary, metadata, and repetition protection live in one file. |
+| `backend/app/db/migrations.py` | 1760 | 38 defined migration functions plus one disabled migration in a single file. |
+| `backend/app/services/clustering.py` | 1254 | Public clustering entry points, prompt constants, LLM validation, and helpers are tightly coupled. |
+| `backend/app/routers/submit.py` | 952 | Router layer contains tagging, answer generation, master-bank update, and endpoint orchestration logic. |
+| `backend/app/services/pipeline/batch.py` | 933 | Incremental clustering and singleton compaction share one module. |
 
-Additionally, `submit.py` has v1 and v1_sse endpoints that are no longer used by the frontend (which already uses v2), creating ~500 lines of dead code duplication.
+The broad structural cleanup is valid, but doing all of it in one implementation pass is too risky. Phase 1 narrows the work to `submit.py`, because it has the clearest router-layer violation and can be improved while preserving every API endpoint and import path.
+
+## Phase 1 Goal
+
+Move submit-related business logic out of `backend/app/routers/submit.py` into a service module while keeping all existing HTTP endpoints, function signatures, import paths, and SSE behavior intact.
+
+Phase 1 is not an endpoint cleanup. The legacy `/api/submit` and `/api/submit-stream` endpoints stay available as compatibility wrappers. Removing them is a future phase after explicit caller and access-log verification.
 
 ## Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Refactor approach | Two-phase (physical split first, architecture fix later) | Lower risk, each step independently verifiable |
-| Backward compatibility | `__init__.py` re-exports all public symbols | Zero import path changes for consumers |
-| submit.py versions | Keep only v2 (LangGraph) | Frontend already uses `/api/submit-stream-v2` |
-| batch.py split | Split into batch.py + compact.py | Two conceptually distinct subsystems |
-| clustering.py split | 4 files by responsibility | Each file has a clear single purpose |
-| migrations.py split | 9 files by functional domain | Groups related migrations together |
-| pipeline.py split | 5 files by responsibility | Balances granularity with file count |
+| Phase 1 target | `routers/submit.py` only | Highest architectural value with the smallest blast radius. |
+| Behavior policy | Zero endpoint behavior change | Refactor should be deployable without frontend or external-client changes. |
+| Backward compatibility | Keep old router exports as wrappers | Existing tests and production code patch/import `app.routers.submit.*`. |
+| New business module | `backend/app/services/submit_service.py` | Matches existing router -> service boundary in `backend/CLAUDE.md`. |
+| Legacy submit endpoints | Keep `/api/submit` and `/api/submit-stream` | Deletion conflicts with zero behavior change and must be a separate decision. |
+| Production import migration | Defer to Phase 2 | Moving imports now breaks monkeypatch paths and makes the refactor harder to verify. |
+| Other large-file splits | Defer to separate specs | Migrations, clustering, batch, and chat pipeline have different risks and test strategies. |
 
-## Target Directory Structure
+## Current Submit Surface
 
-```
-app/
-├── agents/chat/
-│   ├── pipeline.py          ← ~300 lines (orchestration entry)
-│   ├── react_loop.py        ← ~500 lines (ReAct core)
-│   ├── answer.py            ← ~400 lines (answer generation + dedup)
-│   ├── question_plan.py     ← ~300 lines (question plan + repetition)
-│   ├── summary.py           ← ~200 lines (end interview + summary)
-│   └── metadata.py          ← ~250 lines (basis tracking + metadata)
-│
-├── services/
-│   ├── clustering/
-│   │   ├── __init__.py      ← re-exports all public symbols
-│   │   ├── matcher.py       ← ~400 lines (incremental matching)
-│   │   ├── clusterer.py     ← ~400 lines (new question clustering)
-│   │   ├── full_recluster.py← ~200 lines (full rebuild)
-│   │   └── prompts.py       ← ~80 lines (prompt constants)
-│   │
-│   ├── submit_service.py    ← ~300 lines (business logic from submit.py)
-│   │
-│   └── pipeline/
-│       ├── batch.py         ← ~400 lines (incremental clustering pipeline)
-│       └── compact.py       ← ~530 lines (singleton compaction)
-│
-├── db/
-│   ├── migrations/
-│   │   ├── __init__.py      ← run_migrations() + _MIGRATIONS list
-│   │   ├── question_bank.py ← migrations 001/002/004/005/006/007/008
-│   │   ├── auth.py          ← migrations 003/010/012/015
-│   │   ├── data_repair.py   ← migrations 011/014/017/018/019/020
-│   │   ├── sources.py       ← migrations 016/023
-│   │   ├── chat.py          ← migrations 024/025/026/027/028/037/038
-│   │   ├── coding.py        ← migrations 029/030/031
-│   │   ├── clustering.py    ← migrations 032/033/034/035
-│   │   ├── jobs.py          ← migrations 009/022/036
-│   │   └── view.py          ← migrations 008/013
-│   │
-│   ├── operations.py        ← unchanged
-│   ├── queries.py           ← unchanged
-│   └── connection.py        ← unchanged
-│
-└── routers/
-    └── submit.py            ← ~150 lines (thin router, v2 only)
+`backend/app/routers/submit.py` currently exposes:
+
+| Surface | Keep in Phase 1 | Notes |
+|---------|-----------------|-------|
+| `POST /api/submit` -> `submit_data()` | Yes | Legacy JSON endpoint; keep as compatibility wrapper. |
+| `POST /api/submit-stream` -> `submit_data_stream()` | Yes | Legacy SSE endpoint; keep as compatibility wrapper. |
+| `POST /api/submit-stream-v2` -> `submit_data_stream_v2()` | Yes | Frontend primary path. |
+| `POST /api/submit-jobs` -> `create_submit_job()` | Yes | Frontend async submit job path. |
+| `GET /api/submit-jobs/active` -> `get_active_submit_jobs()` | Yes | Frontend active-job recovery path. |
+| `tag_questions_batch()` | Yes, wrapper | Existing tests and modules import this from `app.routers.submit`. |
+| `background_generate_answer()` | Yes, wrapper | Existing worker/interview imports use this path. |
+| `incremental_update_master_bank()` | Yes, wrapper | Existing endpoint code depends on this symbol. |
+
+## Target Structure
+
+```text
+backend/app/
+├── routers/
+│   └── submit.py              # HTTP endpoints, auth, request validation, SSE/event wrapping
+└── services/
+    └── submit_service.py      # tagging, answer generation, master-bank update orchestration
 ```
 
----
-
-## 1. pipeline.py Split (2077 → 5 files + entry)
-
-### pipeline.py (entry, ~300 lines)
-
-Functions:
-- `run_chat()` — sole public entry point
-- `_initial_state()` — state factory
-- `_step_load_context()` — context loading step
-- `_step_classify()` — intent classification step
-- `_step_extract_memory()` — background memory extraction
-- `_persist_active_skills()` — skill persistence
-- Constants: `_SENTINEL`, `_FRIENDLY_ERROR`
-
-Imports from: `react_loop`, `answer`, `summary`, `metadata` (internal)
-
-### react_loop.py (ReAct core, ~500 lines)
-
-Functions:
-- `_react_loop()` — main autonomous tool-calling loop
-- `Budget` (dataclass) / `StopRun` (exception) — budget and termination
-- `validate_tool_call()` — tool call validation
-- `_log_react_llm_step()` / `_log_react_tool_call()` — trace logging
-- `_summarize_tool_output()` / `_sanitize_tool_args()` — tool output processing
-- `_emit()` / `_step()` — SSE event emission
-- `_trace_safe_value()` / `_basis_event_payload()` — tracing helpers
-- Constants: `MAX_REACT_STEPS`, `REACT_BUDGET`, `STEP_REASONS`, `_ALLOWED_TOOL_NAMES`, `_INTERNAL_REACT_MARKERS`, `_SAFE_TOOL_ARG_KEYS`, `_TRACE_STRING_LIMIT`, `_TRACE_LIST_LIMIT`
-
-### answer.py (answer generation, ~400 lines)
-
-Functions:
-- `OutputDeduplicator` (class) — two-level dedup (hash + Jaccard)
-- `_stream_final_answer()` — streaming final answer with dedup
-- `_final_answer_events_from_text()` — direct-answer path
-- `_regenerate_after_dup()` — regenerate on duplicate
-- `_enforce_question_plan_on_text()` — plan adherence check
-- `_ensure_final_answer_quality()` — quality guard
-- `_fallback_react_answer()` / `_fallback_interviewer_response()` — degradation
-- `_fallback_coding_question()` — coding question fallback
-- `_is_internal_react_marker()` / `_normalize_react_marker()` — marker detection
-- `_looks_like_candidate_question()` / `_last_assistant_message()` — helpers
-
-### question_plan.py (question plan + repetition, ~300 lines)
-
-Functions:
-- `_should_create_question_plan()` — gate check
-- `_select_question_for_plan()` — candidate selection
-- `_maybe_create_question_plan()` — plan creation orchestrator
-- `_candidate_contains_negative_term()` — negative filter
-- `_is_algorithm_candidate()` — algorithm detection
-- `_allowed_focus_from_question()` — focus extraction
-- `_build_previously_asked_section()` — asked-questions list builder
-- `_count_consecutive_similar_questions()` — streak counter
-- `_build_repetition_protection_note()` — anti-repetition injection
-- `_tokenize_for_overlap()` / `_normalize_question_text()` — text utilities
-
-### summary.py (end interview + summary, ~200 lines)
-
-Functions:
-- `InterviewSummary` (Pydantic model) — structured summary schema
-- `_generate_structured_summary()` — LLM-based summary generation
-- `_build_interview_transcript()` — transcript extraction
-- `_render_interview_summary_markdown()` — markdown rendering
-- `_forced_closing_response()` — hard-stop overlong interviews
-- `_generate_end_interview_response()` — explicit end_interview handler
-- `_sanitize_error_message()` — user-friendly error messages
-
-### metadata.py (basis tracking + metadata, ~250 lines)
-
-Functions:
-- `_build_react_metadata()` — build done-event metadata (172 lines, the largest function)
-- `_infer_selected_question()` — infer which question was asked
-- `_public_question()` — sanitize question for public API
-- `_extract_company()` / `_extract_round()` — metadata extraction
-
-### Backward Compatibility
-
-`pipeline.py` re-exports all symbols imported by tests:
-```python
-from .react_loop import _react_loop, MAX_REACT_STEPS, Budget, StopRun, validate_tool_call, _emit, _step, ...
-from .answer import OutputDeduplicator, _stream_final_answer, _final_answer_events_from_text, ...
-from .question_plan import _should_create_question_plan, _select_question_for_plan, _maybe_create_question_plan, ...
-from .summary import _forced_closing_response, _generate_end_interview_response, ...
-from .metadata import _build_react_metadata, _infer_selected_question, ...
-```
-
----
-
-## 2. clustering.py Split (1254 → 4 files + __init__.py)
-
-### matcher.py (incremental matching, ~400 lines)
-
-Public functions:
-- `process_incremental_batch()` — incremental clustering entry point
-- `match_new_questions()` — lightweight matching for personal bank
-- `scan_personal_duplicates()` — post-approval reverse scan
-- `generate_unified_question()` — unified question text generation
-- `calculate_dynamic_recent_days()` — dynamic days calculation
-
-Private helpers:
-- `_match_and_cluster_cat2()` — per-cat2 processing core
-- `_extract_id()`, `_normalize_question_text()`, `_safe_confidence()`
-- `_build_matched_item()`, `_apply_exact_candidate_matches()`
-- `_extract_raw_matches()`, `_partition_matches_by_risk()`
-- `_validate_merges()`, `_load_recent_singletons()`
-- `_format_existing_clusters()`, `_format_new_questions()`
-
-### clusterer.py (clustering engine, ~400 lines)
-
-Public functions:
-- `_cluster_unmatched()` — new question clustering (imported by batch.py)
-- `cluster_three_stage_v2()` — three-stage clustering (exact + FAISS + LLM)
-
-Private helpers:
-- `_union_find()`, `_union_merge()` — union-find data structure
-
-### full_recluster.py (full rebuild, ~200 lines)
-
-Public functions:
-- `full_recluster_hybrid()` — full database reclustering
-
-### prompts.py (prompt constants, ~80 lines)
-
-Constants:
-- `MATCH_EXISTING_PROMPT`
-- `CLUSTER_NEW_PROMPT`
-- `VALIDATE_MERGES_PROMPT`
-- `VALIDATION_CONFIDENCE_THRESHOLD`
-- `DIRECT_ACCEPT_CONFIDENCE_THRESHOLD`
-
-### Internal Dependencies
-
-`matcher.py` calls `_cluster_unmatched` from `clusterer.py` for unmatched questions after incremental matching. This is the only cross-file dependency within the clustering package.
-
-### Backward Compatibility
-
-`services/clustering/__init__.py` re-exports everything:
-```python
-from .matcher import (
-    process_incremental_batch, match_new_questions,
-    scan_personal_duplicates, generate_unified_question,
-    calculate_dynamic_recent_days,
-    _validate_merges, _extract_id, _format_existing_clusters,
-    _format_new_questions,
-)
-from .clusterer import _cluster_unmatched, cluster_three_stage_v2
-from .full_recluster import full_recluster_hybrid
-from .prompts import (
-    MATCH_EXISTING_PROMPT, CLUSTER_NEW_PROMPT, VALIDATE_MERGES_PROMPT,
-    VALIDATION_CONFIDENCE_THRESHOLD, DIRECT_ACCEPT_CONFIDENCE_THRESHOLD,
-)
-```
-
----
-
-## 3. submit.py Refactor (952 → ~150 lines thin router)
-
-### Functions to move to services/submit_service.py
-
-- `tag_questions_batch()` — LLM tagging logic (imported by pipeline/writer.py, routers/data.py, agents/submit/classify.py)
-- `background_generate_answer()` — background answer generation (imported by worker.py, routers/interview.py)
-- `incremental_update_master_bank()` — incremental update orchestration
-
-### Functions to delete
-
-- `submit_data()` — v1 JSON endpoint (no production callers, only test imports)
-- `submit_data_stream()` — v1 SSE endpoint (frontend uses v2)
-
-### Functions to keep in router
-
-- `submit_data_stream_v2()` — LangGraph SSE endpoint (thin, delegates to agent graph)
-- `create_submit_job()` — async job creation
-- `get_active_submit_jobs()` — query endpoint
-- `_get_current_position_for_user()` — helper
-
-### Import Path Updates
-
-Production code that imports from `submit.py`:
-- `app/worker.py`: `from app.routers.submit import background_generate_answer` → `from app.services.submit_service import background_generate_answer`
-- `app/routers/interview.py`: same change
-- `app/services/pipeline/writer.py`: `from app.routers.submit import tag_questions_batch` → `from app.services.submit_service import tag_questions_batch`
-- `app/routers/data.py`: same change
-- `app/agents/submit/classify.py`: same change
-
----
-
-## 4. batch.py Split (933 → ~400 + ~530)
-
-### batch.py (incremental clustering pipeline, ~400 lines)
-
-Functions:
-- `cluster_batch()` — core pipeline
-- `process_interview_tag_then_maybe_cluster()` — full pipeline
-- `force_cluster_all_pending()` — admin function
-- Helpers: `_run_db`, `_compute_merge_confidence`, `_safe_json_list`, `_append_unique_text`, `_ensure_original_source_entry`, `_canonicalize_originals`, `_load_existing_clusters_by_cat2`
-
-### compact.py (singleton compaction, ~530 lines)
-
-Functions:
-- `compact_singletons_in_db()` — compaction entry point
-- `_match_singletons_to_existing()` — LLM matching
-- `_do_merge_to_existing()` — merge execution
-- Helpers: `_record_merge_history`, `_snapshot_question`, `_load_existing_clusters_for_compact`
-
-### Backward Compatibility
-
-`services/pipeline/__init__.py` re-exports `compact_singletons_in_db` and other public symbols from `compact.py`.
-
----
-
-## 5. migrations.py Split (1760 → 9 domain files + __init__.py)
-
-### Domain Grouping
-
-| File | Migrations | Lines (est) |
-|------|-----------|-------------|
-| question_bank.py | 001/002/004/005/006/007/008 | ~400 |
-| auth.py | 003/010/012/015 | ~200 |
-| data_repair.py | 011/014/017/018/019/020 | ~400 |
-| sources.py | 016/023 | ~150 |
-| chat.py | 024/025/026/027/028/037/038 | ~350 |
-| coding.py | 029/030/031 | ~200 |
-| clustering.py | 032/033/034/035 | ~200 |
-| jobs.py | 009/022/036 | ~100 |
-| view.py | 008/013 | ~100 |
-
-### __init__.py Structure
+`submit.py` remains the compatibility module. It should import the service module and expose thin wrappers:
 
 ```python
-from .question_bank import _migration_001_base_tables, _migration_002_question_bank, ...
-from .auth import _migration_003_auth_tables, ...
-# ... all domain files
+from app.services import submit_service as _submit_service
 
-_MIGRATIONS = [
-    (1, "base_tables", _migration_001_base_tables),
-    (2, "question_bank", _migration_002_question_bank),
-    # ... all 38 migrations
-]
 
-def run_migrations(conn):
-    # unchanged logic
+async def tag_questions_batch(*args, **kwargs):
+    return await _submit_service.tag_questions_batch(*args, **kwargs)
+
+
+async def background_generate_answer(*args, **kwargs):
+    return await _submit_service.background_generate_answer(*args, **kwargs)
+
+
+async def incremental_update_master_bank(*args, **kwargs):
+    return await _submit_service.incremental_update_master_bank(*args, **kwargs)
 ```
 
-### Special Case
+Endpoint functions in `submit.py` should call these wrapper names, not the private service object directly, so existing monkeypatch paths such as `app.routers.submit.tag_questions_batch` still work.
 
-`_classify_e_question` helper (used only by `_migration_035_split_e_category`) moves to `clustering.py` alongside its migration.
+## Service Responsibilities
 
----
+`backend/app/services/submit_service.py` owns:
+
+- `tag_questions_batch(url, company, round_, questions, taxonomy_config=None, user_id=None)`
+- `background_generate_answer(question_id, question_text, user_id=None)`
+- `incremental_update_master_bank(new_tagged_rows, bg_tasks, submitter_is_admin=True, user_id=None, is_personal=False, interview_id=None, job_position=None)`
+
+The service may import lower-level dependencies:
+
+- `app.services.llm`
+- `app.services.pipeline`
+- `app.services.clustering`
+- `app.db.operations`
+- `app.db.queries`
+- `app.core.prompts`
+
+The service must not import FastAPI router objects or request/response classes. `BackgroundTasks` is allowed only as a passed-in scheduling interface because the current public function signature already uses it.
+
+## Router Responsibilities
+
+`backend/app/routers/submit.py` owns:
+
+- FastAPI route decorators and dependency injection.
+- Auth and user context extraction.
+- Form/file parsing and input validation.
+- SSE event formatting for the legacy and v2 streaming endpoints.
+- Compatibility wrappers for old import paths.
+- Job endpoint request handling.
+
+The router should not contain LLM prompt construction, DB update orchestration, clustering trigger logic, or answer-generation implementation details.
+
+## Compatibility Rules
+
+Phase 1 must preserve these contracts:
+
+1. No endpoint is removed.
+2. No endpoint path, method, status-code shape, or SSE event name changes.
+3. Existing imports from `app.routers.submit` remain callable.
+4. Existing tests that patch `app.routers.submit.tag_questions_batch` continue to patch the call path used by submit endpoints and submit agents.
+5. Frontend calls remain unchanged:
+   - `frontend/src/services/dataApi.js` uses `/api/submit-stream-v2`.
+   - `frontend/src/services/dataApi.js` uses `/api/submit-jobs`.
+   - `frontend/src/services/dataApi.js` uses `/api/submit-jobs/active`.
+6. Text plus image/file combined uploads remain supported. Do not make input sources mutually exclusive.
 
 ## Implementation Order
 
 | Step | Task | Risk | Verification |
-|------|------|------|-------------|
-| 1 | Split migrations.py | Very low | `run_migrations()` on empty DB succeeds |
-| 2 | Split clustering.py | Low | Clustering tests pass |
-| 3 | Split batch.py | Low | Pipeline tests pass |
-| 4 | Move submit.py business logic | Low | Submit-related tests pass |
-| 5 | Split pipeline.py | Medium | Chat tests pass |
-| 6 | Delete submit v1/v1_sse | Medium | Frontend submit flow works |
+|------|------|------|--------------|
+| 0 | Ensure unrelated test migration work is committed or intentionally left untouched | Medium | `git status --short` shows only known unrelated files plus this spec before code changes. |
+| 1 | Add/confirm characterization tests for submit exports and endpoints | Low | `backend/tests/services/test_router_refactor.py` and submit-related tests identify current behavior. |
+| 2 | Create `services/submit_service.py` and move pure business functions | Medium | Old `app.routers.submit.*` imports still resolve and delegate. |
+| 3 | Thin `submit.py` endpoint bodies without changing endpoint behavior | Medium | Submit pipeline tests and router-refactor tests pass. |
+| 4 | Run backend gate and document remaining large-file follow-up specs | Low | `./deploy/docker-deploy.sh check backend` passes. |
 
-### Verification per Step
+## Verification
 
-1. Execute the split/migration
-2. `docker compose --profile test run --rm test uv run pytest backend/tests/<related>/ -q`
-3. `docker compose --profile test run --rm test uv run python -m compileall -q backend/app`
-4. Confirm no import errors
+Targeted verification:
 
-### Final Verification
+```bash
+docker compose --profile test run --rm test uv run pytest backend/tests/services/test_router_refactor.py -q
+docker compose --profile test run --rm test uv run pytest backend/tests/pipeline/ -q
+docker compose --profile test run --rm test uv run python -m compileall -q backend/app
+./deploy/docker-deploy.sh check backend
+```
 
-- `./deploy/docker-deploy.sh check backend` — backend daily gate
-- `./deploy/docker-deploy.sh test -q` — full test suite
+Full verification after the separate test-directory migration is clean:
 
-## What We Explicitly Do NOT Change in Phase 1
+```bash
+./deploy/docker-deploy.sh test -q
+```
 
-- **Architecture boundaries** — `db/operations.py → services/utils.py` reverse dependency stays
-- **Agent DB access patterns** — agents still access DB directly in some places
-- **Skills infrastructure** — two parallel implementations (`agents/shared/skills/` and `agents/chat/skills/`) stay
-- **Function signatures** — all public APIs remain identical
-- **Test code** — no test file changes needed (import paths preserved via re-exports)
+## Acceptance Criteria
 
-## Phase 2 Preview (Future)
+- `backend/app/routers/submit.py` is primarily HTTP orchestration and compatibility wrappers.
+- `backend/app/services/submit_service.py` contains submit business logic.
+- `/api/submit`, `/api/submit-stream`, `/api/submit-stream-v2`, `/api/submit-jobs`, and `/api/submit-jobs/active` still exist.
+- `from app.routers.submit import tag_questions_batch` still works.
+- `from app.routers.submit import background_generate_answer` still works.
+- Existing frontend API code does not change.
+- Docker backend daily gate passes after code changes.
 
-Phase 2 will address architecture boundary violations:
-- Move `tag_questions_batch` from router to service layer (already done in Phase 1)
-- Fix `db/operations.py → services/utils.py` reverse dependency
-- Unify skills infrastructure
-- Consider dependency injection for DB access
+## Explicitly Out of Scope for Phase 1
+
+- Deleting `/api/submit` or `/api/submit-stream`.
+- Updating frontend submit APIs.
+- Moving existing production imports away from `app.routers.submit`.
+- Splitting `backend/app/agents/chat/pipeline.py`.
+- Splitting `backend/app/services/clustering.py`.
+- Splitting `backend/app/services/pipeline/batch.py`.
+- Splitting `backend/app/db/migrations.py`.
+- Changing DB schema, migration behavior, or migration order.
+- Changing chat agent behavior, question planning, ReAct tool behavior, or interview summary behavior.
+- Changing test directory layout. That work is currently being handled separately.
+
+## Follow-Up Specs
+
+The earlier broad design is preserved as a roadmap, but each item needs its own spec and implementation plan.
+
+| Future spec | Scope | Important constraints |
+|-------------|-------|-----------------------|
+| Pipeline batch/compact split | Split `services/pipeline/batch.py` into incremental clustering and singleton compaction modules. | Preserve `app.services.pipeline` exports and worker imports. |
+| Clustering package split | Split `services/clustering.py` into matcher, clusterer, full-recluster, and prompt modules. | Decide whether tests keep patching `app.services.clustering.*` or move to new module paths. |
+| Chat pipeline modularization | Split `agents/chat/pipeline.py` into ReAct loop, answer, question plan, summary, and metadata modules. | Existing tests heavily patch `app.agents.chat.pipeline.*`; compatibility shim strategy must be explicit. |
+| Migration package split | Split `db/migrations.py` into migration domain files. | Preserve `_MIGRATIONS` order exactly. Migration 020 is currently disabled; migration 021 is active. Migration 008 must appear once only. Verify empty DB, upgraded DB, and idempotent re-run. |
+
+## Migration Split Notes for Future Spec
+
+The previous version of this document contained a migration grouping draft with two issues:
+
+- Migration `008` was listed in both `question_bank.py` and `view.py`; it should only appear once.
+- Migration `020` is defined but disabled in `_MIGRATIONS`; it must not be accidentally enabled during a physical split.
+
+Any future migration split must start from the current `_MIGRATIONS` list in `backend/app/db/migrations.py`, not from a hand-written grouping table.
 
 ## References
 
-- Test audit report: `docs/dev-log/2026-06-29-test-audit-report.md`
-- Backend CLAUDE.md: `backend/CLAUDE.md`
-- Codex conversation analysis: `.plan` file in codex turn-diffs
+- `backend/CLAUDE.md`
+- `backend/tests/services/test_router_refactor.py`
+- `frontend/src/services/dataApi.js`
+- `backend/app/routers/submit.py`

@@ -4,11 +4,14 @@
 """
 import pytest
 from unittest.mock import patch, MagicMock
+from pathlib import Path
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _get_single_source_section():
     """提取 Single-question sources 部分"""
-    with open('frontend/src/components/QuestionCard.vue', 'r', encoding='utf-8') as f:
+    with open(BACKEND_ROOT / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
         content = f.read()
     idx = content.find('Single-question sources')
     assert idx != -1, "应存在 Single-question sources 注释"
@@ -19,7 +22,7 @@ def _get_single_source_section():
 
 def _get_multi_source_section():
     """提取 Multi-question cluster 部分"""
-    with open('frontend/src/components/QuestionCard.vue', 'r', encoding='utf-8') as f:
+    with open(BACKEND_ROOT / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
         content = f.read()
     idx = content.find('Multi-question cluster')
     end_idx = content.find('Single-question sources')
