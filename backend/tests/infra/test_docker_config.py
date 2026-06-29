@@ -6,7 +6,16 @@ TDD 测试：Docker 部署配置验证
 import pytest
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+def _find_project_root(start: Path) -> Path:
+    """Return the project root containing the Dockerfile."""
+    for candidate in (start, *start.parents):
+        if (candidate / "Dockerfile").is_file():
+            return candidate
+    raise RuntimeError(f"Could not locate project root (containing Dockerfile) from {start}")
+
+
+PROJECT_ROOT = _find_project_root(Path(__file__).resolve())
 
 
 class TestDockerfile:

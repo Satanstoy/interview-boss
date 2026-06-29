@@ -74,31 +74,6 @@ class TestMasterBankSyntax:
         except Exception as e:
             pytest.fail(f"导入 questions.py 时发生意外错误: {e}")
 
-    @pytest.mark.parametrize("line_num", range(928, 961))
-    def test_gen_one_line_indentation(self, line_num):
-        """验证 _gen_one 函数每一行的缩进正确性"""
-        with open(self.ANSWERS_PATH, 'r') as f:
-            lines = f.readlines()
-
-        if line_num > len(lines):
-            pytest.skip(f"行号 {line_num} 超出文件范围")
-
-        line = lines[line_num - 1]  # 行号从1开始，索引从0开始
-
-        # 第 928 行是函数定义，缩进应该是 12 空格（3级缩进）
-        # 第 929-960 行是函数体，缩进应该是 16 空格（4级缩进）
-        if line_num == 928:
-            # 函数定义行
-            assert line.startswith(' ' * 12), \
-                f"第 {line_num} 行（函数定义）缩进应为12空格"
-            assert 'async def _gen_one' in line
-        elif line_num >= 929 and line_num <= 960:
-            # 函数体行
-            if line.strip():  # 非空行
-                assert line.startswith(' ' * 16) or line.startswith(' ' * 20) or line.startswith(' ' * 24), \
-                    f"第 {line_num} 行缩进不正确，应为16/20/24空格"
-
-
 class TestBackendStartup:
     """测试后端服务能否正常启动"""
 

@@ -100,7 +100,6 @@ RUN useradd --create-home --shell /bin/false appuser && \
 COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
 
 COPY --chown=appuser backend/ ./backend/
-COPY --chown=appuser backend/tests/ ./backend/tests/
 COPY --chown=appuser Dockerfile docker-compose.yml .dockerignore ./
 COPY --chown=appuser nginx/ ./nginx/
 COPY --chown=appuser deploy/ ./deploy/
