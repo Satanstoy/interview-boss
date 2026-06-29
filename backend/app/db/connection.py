@@ -1,7 +1,7 @@
 """
 数据库连接管理 — 线程级 SQLite 连接 + async 桥接
 
-迁移函数已拆分至 db/migrations.py
+迁移函数已拆分至 db/migrations/ 包
 业务查询函数已拆分至 db/queries.py
 """
 import sqlite3

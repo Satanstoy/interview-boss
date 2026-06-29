@@ -238,7 +238,7 @@ async def run_single_turn(
 
     patchers = [
         patch(
-            "app.agents.chat.pipeline.build_react_system_prompt",
+            "app.agents.chat.nodes.build_react_system_prompt",
             return_value="Test ReAct prompt.",
         ),
         patch(
@@ -256,7 +256,7 @@ async def run_single_turn(
             new_callable=AsyncMock,
             side_effect=mock_extract_memory,
         ),
-        patch("app.agents.chat.pipeline.llm_with_tools", new=llm_mock),
+        patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch(
             "app.agents.chat.pipeline.stream_llm_messages",
             side_effect=stream_side_effect,

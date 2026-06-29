@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 
 
 # ======================================================================
-# BUG-001: submit.py:48 — 未定义变量 `response` 导致 NameError
+# BUG-001: submit_service.py — 未定义变量 `response` 导致 NameError
 # ======================================================================
 
 @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key', 'OPENAI_BASE_URL': 'http://test'})
@@ -20,7 +20,7 @@ class TestBug001UndefinedResponse:
     @pytest.mark.asyncio
     async def test_tag_questions_batch_returns_correct_categories(self):
         """修复后应正确返回 LLM 标注的分类（BUG-001 已修复）"""
-        from app.routers.submit import tag_questions_batch
+        from app.services.submit_service import tag_questions_batch
 
         with patch('app.services.llm._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = json.dumps({

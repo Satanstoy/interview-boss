@@ -20,7 +20,7 @@ class TestSearchReturnsCategory:
 
     def test_search_sql_includes_cat1_cat2(self):
         """T-001a: 搜索 SQL 应包含 qb.cat1, qb.cat2"""
-        from app.routers.questions_pkg.mutations import search_master_bank
+        from app.routers.questions import search_master_bank
         import inspect
         source = inspect.getsource(search_master_bank)
         assert "qb.cat1" in source, "搜索 SQL 缺少 qb.cat1"

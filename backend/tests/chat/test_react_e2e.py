@@ -179,7 +179,7 @@ async def _run_react_case(
 
     patchers = [
         patch(
-            "app.agents.chat.pipeline.build_react_system_prompt",
+            "app.agents.chat.nodes.build_react_system_prompt",
             return_value="Test ReAct prompt.",
         ),
         patch(
@@ -197,7 +197,7 @@ async def _run_react_case(
             new_callable=AsyncMock,
             side_effect=mock_extract_memory,
         ),
-        patch("app.agents.chat.pipeline.llm_with_tools", new=llm_mock),
+        patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch(
             "app.agents.chat.pipeline.stream_llm_messages",
             side_effect=stream_side_effect,
@@ -670,7 +670,7 @@ class TestRealLinkSkillInjection:
         try:
             with (
                 patch(
-                    "app.agents.chat.pipeline.llm_with_tools",
+                    "app.services.llm.llm_with_tools",
                     side_effect=mock_llm,
                 ),
                 patch(

@@ -1,14 +1,15 @@
 # Pipeline — 批处理流水线
 
-> 位置：`backend/app/services/pipeline/` | 上游调用方：`backend/app/services/clustering.py`, `backend/app/routers/submit.py` | 下游依赖：`backend/app/db/`, `backend/app/services/clustering.py`
+> 位置：`backend/app/services/pipeline/` | 上游调用方：`backend/app/services/clustering/`, `backend/app/services/submit_service.py`, `backend/app/agents/submit/` | 下游依赖：`backend/app/db/`, `backend/app/services/clustering/`
 > 职责：增量聚类、完整流水线、孤岛碎片整理、队列管理、数据清洗。
 
 ## 文件职责
 
 | 文件 | 职责 |
 |------|------|
-| `batch.py` | 增量聚类、完整流水线、孤岛碎片整理（主入口） |
+| `batch.py` | 增量聚类、完整流水线（主入口），共享写库辅助函数 |
 | `batch_v2.py` | v2 版本，新增"孤岛匹配已有聚类"步骤 |
+| `compact.py` | 孤岛碎片整理（frequency=1 题目合并），共享 `batch.py` 辅助函数 |
 | `queue.py` | 队列操作：enqueue / dequeue / mark_done / mark_failed / trigger 判断 |
 | `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE = 40`） |
 | `writer.py` | 数据库写入：将聚类结果写入 question_bank 及关联表 |

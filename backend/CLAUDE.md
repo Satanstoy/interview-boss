@@ -93,7 +93,7 @@ Routers → Services → Core/DB → (external)
 |------|------|---------|--------|
 | 认证 | `routers/auth.py` | `core/auth.py` | `db/operations.py` |
 | 提交 | `routers/submit.py` | `agents/submit/` + `services/pipeline/` | `db/operations.py` |
-| 题库 | `routers/questions.py` + `bank_build.py` + `admin_review.py` | `services/clustering.py` | `db/queries.py` |
+| 题库 | `routers/questions.py` + `bank_build.py` + `admin_review.py` | `services/clustering/` | `db/queries.py` |
 | 答案 | `routers/answers.py` | `services/llm.py` + `core/prompts.py` | `db/operations.py` |
 | 练习 | `routers/practice.py` | — | `db/queries.py` |
 | 面试 | `routers/interview.py` | — | `db/queries.py` |
@@ -107,7 +107,7 @@ Routers → Services → Core/DB → (external)
 |-----------|------------|------------|
 | 修认证 Bug | `core/auth.py` | `routers/auth.py` |
 | 改 LLM 答案生成 | `services/llm.py` + `core/prompts.py` | `routers/answers.py` |
-| 改题目去重逻辑 | `services/clustering.py` | `db/queries.py` |
+| 改题目去重逻辑 | `services/clustering/` | `db/queries.py` |
 | 改提交流程 | `agents/submit/` + `services/pipeline/` | `routers/submit.py` |
 | 改数据库查询 | `db/queries.py` 或 `db/operations.py` | 对应的 `routers/*.py` |
 | 改 Agent 流程 | `agents/<name>/graph.py` | `agents/shared/state.py` |

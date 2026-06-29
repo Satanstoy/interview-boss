@@ -8,7 +8,7 @@
 | 文件 | 端点 | 职责 |
 |------|------|------|
 | `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie |
-| `submit.py` | `/api/submit` | JD/面经提交（SSE 流式） |
+| `submit.py` | `/api/submit-stream-v2`, `/api/submit-jobs*` | JD/面经提交（LangGraph SSE + 后台 Job），并 re-export submit service 兼容旧内部导入 |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD） |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |
 | `answers.py` | `/api/answers/*` | AI 答案生成 |

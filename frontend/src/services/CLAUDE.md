@@ -10,7 +10,7 @@
 | `http.js` | HTTP 客户端（get/post/put/del/upload、SSE helpers、401 自动刷新、重试、GET TTL cache） | — |
 | `authApi.js` | 登录/注册/刷新/登出、忘记密码、修改密码 | `/api/auth/*` |
 | `chatApi.js` | 对话 CRUD + SSE 流式消息 | `/api/chat/*` |
-| `dataApi.js` | JD/面经提交、数据管理 | `/api/submit`, `/api/data/*` |
+| `dataApi.js` | JD/面经提交、数据管理；当前页面主路径使用后台 Job | `/api/submit-jobs*`, `/api/submit-stream-v2`, `/api/data/*` |
 | `masterBankApi.js` | 题库 CRUD | `/api/master-bank/*` |
 | `practiceApi.js` | 练习/答案生成 | `/api/practice/*`, `/api/answers/*` |
 | `interviewApi.js` | 模拟面试 | `/api/interview/*` |

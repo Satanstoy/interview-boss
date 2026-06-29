@@ -145,7 +145,7 @@ class TestForcedClosing:
             "score_estimate": 7,
         }, ensure_ascii=False)
         with patch(
-            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
             return_value=mock_summary_json,
         ):
@@ -173,7 +173,7 @@ class TestForcedClosing:
             "app.agents.chat.pipeline._last_assistant_message",
             return_value="你有什么想问我们的吗？",
         ), patch(
-            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
             return_value=mock_summary_json,
         ):
@@ -198,7 +198,7 @@ class TestForcedClosing:
             "score_estimate": 5,
         }, ensure_ascii=False)
         with patch(
-            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
             return_value=mock_summary_json,
         ):
@@ -442,7 +442,7 @@ class TestForcedClosingE2E:
         with ExitStack() as stack:
             stack.enter_context(
                 patch(
-                    "app.agents.chat.pipeline.build_react_system_prompt",
+                    "app.agents.chat.nodes.build_react_system_prompt",
                     return_value="Test prompt.",
                 )
             )
@@ -468,11 +468,11 @@ class TestForcedClosingE2E:
                 )
             )
             stack.enter_context(
-                patch("app.agents.chat.pipeline.llm_with_tools", new=llm_mock)
+                patch("app.services.llm.llm_with_tools", new=llm_mock)
             )
             stack.enter_context(
                 patch(
-                    "app.agents.chat.pipeline._call_llm_with_retry_messages",
+                    "app.services.llm._call_llm_with_retry_messages",
                     new_callable=AsyncMock,
                     return_value=mock_summary_json,
                 )

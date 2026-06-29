@@ -8,9 +8,10 @@
 | 文件 | 职责 | 依赖 |
 |------|------|------|
 | `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出 | `core/config` |
-| `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库） | `clustering`, `db` |
-| `clustering.py` | LLM 聚类去重（cat2 预分组 + 两遍聚类） | `llm`, `embedding_service` |
+| `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库）与 `compact.py` 孤岛碎片整理 | `clustering`, `db` |
+| `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容 | `llm`, `embedding_service` |
 | `clustering_maintenance.py` | 聚类元数据审计/确定性修复（frequency、cluster_id、normalized tables、精确重复） | `db/question_bank_sources`, `pipeline/batch` |
+| `submit_service.py` | 提交业务逻辑：题目标注、答案生成、增量更新题库 | `llm`, `db`, `pipeline` |
 | `embedding_service.py` | ONNX Runtime 向量编码 + FAISS 预筛选（Xenova/bge-small-zh-v1.5，本地/离线）+ hash fallback | `onnxruntime`, `tokenizers`, `faiss-cpu` |
 | `chat_service.py` | 对话管理、消息存储、记忆提取、面试开场白生成 | `llm`, `memory_recall_service` |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |

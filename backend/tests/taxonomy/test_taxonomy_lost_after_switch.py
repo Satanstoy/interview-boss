@@ -115,7 +115,7 @@ class TestTaxonomyLostAfterSwitch:
     @pytest.mark.asyncio
     async def test_update_profile_saves_taxonomy_as_user_taxonomy(self):
         """update_profile 应将 taxonomy 保存为用户个人分类（非系统分类）"""
-        from app.routers.profile_pkg.taxonomy import update_profile
+        from app.routers.profile import update_profile
         from app.models.schemas import ProfileUpdateRequest
 
         mock_admin = {"id": 1, "is_admin": True}

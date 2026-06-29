@@ -13,7 +13,7 @@ class TestPositionManagement:
     async def test_switch_position_creates_new_position_with_correct_conflict(self):
         """新增岗位应正确处理复合唯一索引的 ON CONFLICT"""
         # Arrange
-        from app.routers.profile import switch_position
+        from app.routers.profile_pkg.position import switch_position
 
         mock_admin = {"id": 1, "is_admin": True}
         req = {"position": "测试新岗位"}
@@ -60,7 +60,7 @@ class TestPositionManagement:
     async def test_delete_position_endpoint_exists(self):
         """删除岗位端点应存在"""
         # Arrange
-        from app.routers.profile import delete_position
+        from app.routers.profile_pkg.position import delete_position
 
         # Assert
         assert delete_position is not None

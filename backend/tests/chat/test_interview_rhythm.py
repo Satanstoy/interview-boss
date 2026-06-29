@@ -436,7 +436,7 @@ class TestForcedClosingPhaseTransitions:
             "user_id": 1,
         }
         with patch(
-            "app.agents.chat.pipeline._call_llm_with_retry_messages",
+            "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
             return_value=mock_summary_json,
         ):
