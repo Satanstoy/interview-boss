@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|backup|cleanup|diagnose]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|cleanup|diagnose]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -315,6 +315,11 @@ do_test() {
   docker compose --profile test run --rm test uv run pytest backend/tests/ "$@"
 }
 
+# ── 运行日常质量门禁 ──
+do_check() {
+  "$PROJECT_DIR/scripts/check.sh" "$@"
+}
+
 # ── 诊断磁盘使用 ──
 do_diagnose() {
   log "========== 磁盘诊断 =========="
@@ -394,6 +399,7 @@ case "$MODE" in
   worker-restart)  check_docker; do_worker_restart ;;
   worker-logs)     check_docker; do_logs worker ;;
   test)            check_docker; do_test "${@:2}" ;;
+  check)           check_docker; do_check "${@:2}" ;;
   backup)          check_docker; do_backup ;;
   cleanup)         check_docker; do_cleanup "${@:2}" ;;
   diagnose)        do_diagnose ;;
@@ -422,6 +428,7 @@ case "$MODE" in
     echo "  worker-restart  重建 app 镜像并重启 Worker"
     echo "  worker-logs     查看 Worker 日志"
     echo "  test            运行 pytest 测试（可传入 pytest 参数）"
+    echo "  check [backend|frontend|audit]  运行日常质量门禁（audit 只报告不拦截）"
     echo "  backup          备份数据库和 Redis 数据"
     echo "  cleanup [--dry-run] [--aggressive]  清理本项目资源（不影响其他项目）"
     echo "  diagnose        输出磁盘/资源诊断信息（不修改任何资源）"
@@ -434,6 +441,8 @@ case "$MODE" in
     echo "  ./docker-deploy.sh worker-up"
     echo "  ./docker-deploy.sh test"
     echo "  ./docker-deploy.sh test -k test_login"
+    echo "  ./docker-deploy.sh check"
+    echo "  ./docker-deploy.sh check backend"
     echo "  ./docker-deploy.sh logs backend"
     ;;
 esac
