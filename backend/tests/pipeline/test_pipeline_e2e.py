@@ -243,7 +243,7 @@ class TestSingleInterview:
             _make_interview(conn, 1, "https://iv1.com", "1. Redis 持久化？\n2. TCP 三次握手？\n3. 快排原理？")
 
             # 阶段1
-            tagged = await tag_interview(1, "https://iv1.com", "腾讯", "一面",
+            tagged = await tag_interview("https://iv1.com", "腾讯", "一面",
                                          "1. Redis 持久化？\n2. TCP 三次握手？\n3. 快排原理？",
                                          job_position="后端开发")
             assert len(tagged) == 3
@@ -314,7 +314,7 @@ class TestBatchProcessing:
             ]
             for iv_id, url, ql in interviews:
                 _make_interview(conn, iv_id, url, ql)
-                await tag_interview(iv_id, url, "公司", "一面", ql, job_position="后端开发")
+                await tag_interview(url, "公司", "一面", ql, job_position="后端开发")
                 enqueue_questions(iv_id)
 
             assert conn.execute("SELECT COUNT(*) as c FROM questions_detail").fetchone()['c'] == 6
@@ -367,7 +367,7 @@ class TestRebuildFlow:
                 (2, "https://iv2.com", "1. 缓存穿透？\n2. 快排原理？"),
             ]:
                 _make_interview(conn, iv_id, url, ql)
-                await tag_interview(iv_id, url, "公司", "一面", ql, job_position="后端开发")
+                await tag_interview(url, "公司", "一面", ql, job_position="后端开发")
 
             # 写入旧 QB
             conn.execute(
@@ -434,7 +434,7 @@ class TestDataConsistency:
             conn.commit()
 
             qb_before = conn.execute("SELECT * FROM question_bank").fetchall()
-            await tag_interview(1, "https://iv1.com", "公司", "一面", "1. Redis 持久化？", job_position="后端开发")
+            await tag_interview("https://iv1.com", "公司", "一面", "1. Redis 持久化？", job_position="后端开发")
             qb_after = conn.execute("SELECT * FROM question_bank").fetchall()
 
             assert len(qb_after) == len(qb_before)
@@ -457,7 +457,7 @@ class TestDataConsistency:
             _make_interview(conn, 1, url, "1. Redis 持久化？")
 
             # 第一次
-            await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
+            await tag_interview(url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
             enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
@@ -466,7 +466,7 @@ class TestDataConsistency:
             # 第二次
             conn.execute("DELETE FROM analysis_queue")
             conn.commit()
-            await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？\n2. 缓存穿透？", job_position="后端开发")
+            await tag_interview(url, "腾讯", "一面", "1. Redis 持久化？\n2. 缓存穿透？", job_position="后端开发")
             enqueue_questions(1)
             batch2 = dequeue_batch(20)
             await cluster_batch(batch2, user_id=1)
@@ -608,7 +608,7 @@ class TestEdgeCases:
 
         async def _run():
             _make_interview(conn, 1, "https://empty.com", "")
-            tagged = await tag_interview(1, "https://empty.com", "公司", "一面", "", job_position="后端开发")
+            tagged = await tag_interview("https://empty.com", "公司", "一面", "", job_position="后端开发")
             assert tagged == []
             assert len(conn.execute("SELECT * FROM questions_detail").fetchall()) == 0
 
@@ -648,7 +648,7 @@ class TestEdgeCases:
             _make_interview(conn, 1, url, "1. Redis 持久化？")
 
             # 第一次
-            await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
+            await tag_interview(url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
             enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
@@ -662,7 +662,7 @@ class TestEdgeCases:
             # 第二次
             conn.execute("DELETE FROM analysis_queue")
             conn.commit()
-            await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
+            await tag_interview(url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
             enqueue_questions(1)
             batch2 = dequeue_batch(20)
             await cluster_batch(batch2, user_id=1)
@@ -703,7 +703,7 @@ class TestFullRebuildSimulation:
 
             for iv_id, url, ql in data:
                 _make_interview(conn, iv_id, url, ql)
-                await tag_interview(iv_id, url, "公司", "一面", ql, job_position="后端开发")
+                await tag_interview(url, "公司", "一面", ql, job_position="后端开发")
 
             # QD 完整
             assert conn.execute("SELECT COUNT(*) as c FROM questions_detail").fetchone()['c'] == 11

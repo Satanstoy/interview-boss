@@ -27,7 +27,7 @@ class TestBug001QuestionsDetailMissingJobPosition:
             tagged_rows = [
                 ["http://test.com", "测试公司", "一面", "什么是闭包？", "JavaScript", "作用域", "闭包", "中等"]
             ]
-            _insert_details_txn(tagged_rows, job_position="后端开发")
+            _insert_details_txn(mock_conn, tagged_rows, job_position="后端开发")
 
         # 验证 INSERT 语句包含 job_position
         insert_call = mock_conn.execute.call_args
@@ -48,7 +48,7 @@ class TestBug001QuestionsDetailMissingJobPosition:
             tagged_rows = [
                 ["http://test.com", "测试公司", "一面", "什么是闭包？", "JavaScript", "作用域", "闭包", "中等"]
             ]
-            _insert_details_txn(tagged_rows)
+            _insert_details_txn(mock_conn, tagged_rows)
 
         insert_call = mock_conn.execute.call_args
         params = insert_call[0][1]

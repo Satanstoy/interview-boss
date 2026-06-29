@@ -100,7 +100,7 @@ class TestBUG002AnalyticsDataLeak:
 
     def test_analytics_uses_bank_filter(self):
         """get_analytics 应使用 _build_analytics_bank_filter 过滤"""
-        analytics_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/analytics.py')
+        analytics_path = os.path.join(os.path.dirname(__file__), '../../app/routers/analytics.py')
         with open(analytics_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -126,7 +126,7 @@ class TestBUG002AnalyticsDataLeak:
 
     def test_analytics_not_raw_select_questions_detail(self):
         """get_analytics 不应对 questions_detail 执行无过滤查询"""
-        analytics_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/analytics.py')
+        analytics_path = os.path.join(os.path.dirname(__file__), '../../app/routers/analytics.py')
         with open(analytics_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -152,7 +152,7 @@ class TestBUG002AnalyticsDataLeak:
 
     def test_analytics_questions_use_question_bank(self):
         """get_analytics 应从 question_bank（而非 questions_detail）查询标签数据"""
-        analytics_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/analytics.py')
+        analytics_path = os.path.join(os.path.dirname(__file__), '../../app/routers/analytics.py')
         with open(analytics_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -235,7 +235,7 @@ class TestBUG005ApiKeyMasking:
 
     def test_mask_key_shows_first_and_last(self):
         """_mask_key 应只显示首尾各 4 字符，中间用 * 替代"""
-        profile_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/profile.py')
+        profile_path = os.path.join(os.path.dirname(__file__), '../../app/routers/profile.py')
         with open(profile_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -261,7 +261,7 @@ class TestBUG005ApiKeyMasking:
 
     def test_mask_key_short_value(self):
         """_mask_key 对短密钥应返回 ****"""
-        profile_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/profile.py')
+        profile_path = os.path.join(os.path.dirname(__file__), '../../app/routers/profile.py')
         with open(profile_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -295,9 +295,9 @@ class TestSecurityVerification:
 
     def test_auth_has_csrf_protection(self):
         """auth.py 应有 CSRF 防护机制"""
-        auth_path = os.path.join(os.path.dirname(__file__), '../../backend/app/core/auth.py')
+        auth_path = os.path.join(os.path.dirname(__file__), '../../app/core/auth.py')
         # 检查 routers/auth.py
-        routers_auth_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/auth.py')
+        routers_auth_path = os.path.join(os.path.dirname(__file__), '../../app/routers/auth.py')
         with open(routers_auth_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert '_require_custom_header' in content or 'csrf' in content.lower(), \
@@ -305,7 +305,7 @@ class TestSecurityVerification:
 
     def test_auth_has_rate_limiting(self):
         """auth.py 应有速率限制"""
-        auth_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/auth.py')
+        auth_path = os.path.join(os.path.dirname(__file__), '../../app/routers/auth.py')
         with open(auth_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'limiter' in content or 'slowapi' in content or 'rate_limit' in content.lower(), \
@@ -313,7 +313,7 @@ class TestSecurityVerification:
 
     def test_refresh_token_httponly(self):
         """refresh token 应设置 HttpOnly cookie"""
-        auth_path = os.path.join(os.path.dirname(__file__), '../../backend/app/routers/auth.py')
+        auth_path = os.path.join(os.path.dirname(__file__), '../../app/routers/auth.py')
         with open(auth_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'httponly=True' in content or 'httponly = True' in content, \
