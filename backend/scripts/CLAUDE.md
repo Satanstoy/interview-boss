@@ -9,6 +9,10 @@
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
 | `verify_chat_tools_real_e2e.py` | 真实后端 + 真实 LLM 的 chat tools 稳定性手动 E2E 验证 |
+| `verify_compaction_*.py` / `evaluate_clustering.py` | 聚类/孤岛碎片整理的真实库验证和质量评估 |
+| `fix_sources_frequency.py` | 来源数量/frequency 修复脚本 |
+
+本目录还包含历史 `.md` 报告和 `.log/.json` 产物；不要把它们当成测试入口。新增手动验证脚本用 `verify_`，数据修复脚本用 `fix_`，健康检查用 `check_`。
 
 ## 用法
 

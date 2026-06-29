@@ -8,10 +8,10 @@
 | 文件 | 职责 | 依赖 |
 |------|------|------|
 | `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出 | `core/config` |
-| `pipeline.py` | JD/面经提交处理流程（解析→去重→入库） | `llm`, `clustering` |
+| `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库） | `clustering`, `db` |
 | `clustering.py` | LLM 聚类去重（cat2 预分组 + 两遍聚类） | `llm`, `embedding_service` |
 | `clustering_maintenance.py` | 聚类元数据审计/确定性修复（frequency、cluster_id、normalized tables、精确重复） | `db/question_bank_sources`, `pipeline/batch` |
-| `embedding_service.py` | Embedding 向量编码 + FAISS 预筛选（bge-small-zh-v1.5） | `sentence-transformers`, `faiss-cpu` |
+| `embedding_service.py` | ONNX Runtime 向量编码 + FAISS 预筛选（Xenova/bge-small-zh-v1.5，本地/离线）+ hash fallback | `onnxruntime`, `tokenizers`, `faiss-cpu` |
 | `chat_service.py` | 对话管理、消息存储、记忆提取、面试开场白生成 | `llm`, `memory_recall_service` |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
@@ -32,5 +32,5 @@
 
 ## 修改后必做
 
-1. 运行 `docker compose exec backend uv run pytest backend/tests/services/ -q`
+1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q`
 2. 更新本文件（如新增文件或改变职责）

@@ -8,6 +8,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **async 桥接**：async 函数必须用 `run_db()` 包装 DB 操作，禁止在 async 中直接调用 `get_db_connection()`
 - **事务**：写操作用 `conn.commit()`，失败时 `conn.rollback()`
 - **迁移**：新增表/列必须在 `migrations.py` 添加 migration，按序递增编号
+- **依赖边界**：DB 层总体应避免业务服务依赖；当前 `operations.py` 复用 `services.utils` 的 URL 签名/分类规范化，改动时先确认调用链，不要扩大交叉依赖。
 
 ## 文件职责
 
@@ -30,5 +31,5 @@ SQLite 数据库层，线程安全，WAL 模式。
 ## 修改后必做
 
 1. 新增 migration → 更新 `migrations.py` 的 `_MIGRATIONS` 列表
-2. 运行 `docker compose exec backend uv run pytest backend/tests/ -q` 确认不回归
+2. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/ -q` 确认不回归
 3. 更新本文件（如新增文件或改变职责）

@@ -1,6 +1,6 @@
 # Pipeline — 批处理流水线
 
-> 位置：`backend/app/services/pipeline/` | 上游调用方：`services/clustering.py`, `routers/submit.py` | 下游依赖：`db/`, `services/clustering.py`
+> 位置：`backend/app/services/pipeline/` | 上游调用方：`backend/app/services/clustering.py`, `backend/app/routers/submit.py` | 下游依赖：`backend/app/db/`, `backend/app/services/clustering.py`
 > 职责：增量聚类、完整流水线、孤岛碎片整理、队列管理、数据清洗。
 
 ## 文件职责
@@ -23,5 +23,5 @@
 
 ## 修改后必做
 
-1. 运行 `docker compose exec backend uv run pytest backend/tests/pipeline/ -q`
+1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/pipeline/ -q`
 2. 更新本文件（如新增文件或改变职责）

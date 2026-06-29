@@ -6,6 +6,8 @@ Bug 修复记录和 TDD 开发记录，供后续开发参考。
 
 ```
 docs/
+├── agents/            ← agent/子代理相关说明
+├── analysis/          ← 分析材料和审计记录
 ├── bug-reports/       ← 后端 bug 修复记录（按日期+描述命名）
 ├── tdd-reports/       ← 后端 TDD 开发记录
 ├── dev-log/           ← 每次开发/设计活动的简要记录
@@ -15,7 +17,6 @@ docs/
 ├── frontend/
 │   ├── bug-reports/   ← 前端 bug 修复记录
 │   └── tdd-reports/   ← 前端 TDD 开发记录
-├── logo.png
 └── test-page.png
 ```
 
@@ -30,6 +31,7 @@ docs/
 - **设计规格** → 放 `superpowers/specs/`
 - **实施计划** → 放 `superpowers/plans/`
 - **开发活动记录** → 放 `dev-log/`
+- **agent 协作/分析材料** → 放 `agents/` 或 `analysis/`
 
 ## 命名规范
 

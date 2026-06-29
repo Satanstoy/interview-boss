@@ -5,5 +5,5 @@
 ## 运行
 
 ```bash
-docker compose exec backend uv run pytest backend/tests/interview/ -q
+docker compose --profile test run --rm test uv run pytest backend/tests/interview/ -q
 ```

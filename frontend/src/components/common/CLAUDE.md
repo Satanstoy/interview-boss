@@ -8,20 +8,17 @@
 |------|------|
 | `AppCard.vue` | 卡片容器（title/description/content/footer 卡槽，noPadding/hover props） |
 | `AppDialog.vue` | 弹窗封装（open/title/description/maxWidth/size props，footer 卡槽） |
-| `AppEmpty.vue` | 空状态展示（title/description/icon props，icon 卡槽可覆盖） |
 | `AppLoading.vue` | 加载状态（type: spinner/page/skeleton/cards/table，rows/gridCols props） |
 | `AppPage.vue` | 页面容器（title/description/actions 卡槽，showBackButton/backTo props） |
 | `AppPageHeader.vue` | 页面头（breadcrumbs/title/description/actions 卡槽，back 按钮） |
 | `AppSearchForm.vue` | 搜索表单（modelValue/placeholder props，filters 卡槽） |
 | `AppTable.vue` | 数据表格（columns/rows/loading/emptyText props，cell 卡槽） |
 | `AppTooltip.vue` | 统一悬停提示（底层 shadcn Tooltip，text/content slot） |
-| `BaseModal.vue` | 通用弹窗（动画、遮罩、关闭） |
+| `AsyncLoading.vue` | 异步组件 loading/error 包装 |
 | `BatchActionPanel.vue` | 批量操作栏 |
 | `ConfirmDialog.vue` | 确认对话框 |
 | `DataTable.vue` | 数据表格（排序、分页） |
 | `InlineEdit.vue` | 行内编辑 |
-| `PaginationBar.vue` | 分页栏 |
-| `RoundedSelect.vue` | 圆角下拉选择 |
 | `TabBar.vue` | Tab 导航栏 |
 
 ## 核心规则
@@ -30,7 +27,7 @@
 - **Props 驱动**：通过 props 接收数据，通过 emit 向外通信
 - **可复用**：组件应该能在不同页面/场景中复用
 - **视觉基线**：通用表格、按钮、Tab、分页优先保持 shadcn-vue 式细边框、低阴影、紧凑密度和明确 hover/selected 状态。
-- **Tooltip 入口**：hover 气泡统一使用 `AppTooltip.vue`，内容样式由 `components/ui/tooltip/TooltipContent.vue` 和 `App.vue` 的 `TooltipProvider` 控制。
+- **Tooltip 入口**：hover 气泡统一使用 `AppTooltip.vue`，内容样式由 `frontend/src/components/ui/tooltip/TooltipContent.vue` 和 `frontend/src/App.vue` 的 `TooltipProvider` 控制。
 - **DataTable 外壳**：`DataTable.vue` 负责表格圆角裁切、`min-w-0` 和 `table-fixed` 宽度约束；业务页面不要再包额外的方形表格背景。
 
 ## 修改后必做

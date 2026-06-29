@@ -1,6 +1,6 @@
 # Core 层 — 配置与认证
 
-项目配置、认证、提示词模板。此层不依赖 routers/services。
+项目配置、认证、提示词模板。此层禁止依赖 routers；`config.py`/`auth.py` 会延迟导入 DB，`config.py` 热更新后会调用 `services.llm.rebuild_clients()` 刷新 LLM client。
 
 ## 文件职责
 

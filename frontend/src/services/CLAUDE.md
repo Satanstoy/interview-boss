@@ -7,7 +7,7 @@
 
 | 文件 | 职责 | 对应后端 |
 |------|------|---------|
-| `http.js` | HTTP 客户端（拦截器、401 自动刷新、重试） | — |
+| `http.js` | HTTP 客户端（get/post/put/del/upload、SSE helpers、401 自动刷新、重试、GET TTL cache） | — |
 | `authApi.js` | 登录/注册/刷新/登出、忘记密码、修改密码 | `/api/auth/*` |
 | `chatApi.js` | 对话 CRUD + SSE 流式消息 | `/api/chat/*` |
 | `dataApi.js` | JD/面经提交、数据管理 | `/api/submit`, `/api/data/*` |
@@ -21,10 +21,10 @@
 
 ## 核心规则
 
-- 所有 API 调用必须通过 `http.js` 的 `get/post/put/del/upload` 方法
+- 普通 API 调用通过 `http.js` 的 `get/post/put/del/upload` 方法；SSE 调用通过 `postSSE/uploadSSE/getSSE`
 - 需要 HttpOnly cookie 的认证请求使用 `fetchWithCredentials()`，必须保留 `X-Requested-With: XMLHttpRequest`，否则后端 CSRF 检查会拒绝 logout/refresh 类请求
 - 新增 API 在此目录创建对应文件，并在 `api/index.js` re-export
-- SSE 流式用 `fetch` + `ReadableStream`，不要用 `EventSource`
+- SSE helper 内部用 `fetch` + `ReadableStream`，不要用 `EventSource`
 
 ## 修改后必做
 

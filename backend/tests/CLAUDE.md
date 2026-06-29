@@ -6,12 +6,14 @@ TDD 测试基础设施。遵循红-绿-重构循环。
 
 ```bash
 # 通过 Docker 容器执行测试
-docker compose exec backend uv run pytest backend/tests/ -q                    # 全部测试
+./deploy/docker-deploy.sh test -q                                             # 全部测试（构建/使用 test-runtime）
 ./deploy/docker-deploy.sh check backend                                       # 后端日常门禁
-docker compose exec backend uv run pytest backend/tests/<dir>/ -q              # 子目录
-docker compose exec backend uv run pytest backend/tests/test_xxx.py -v         # 单文件
-docker compose exec backend uv run pytest backend/tests/test_xxx.py::test_func # 单个测试
+docker compose --profile test run --rm test uv run pytest backend/tests/<dir>/ -q
+docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx.py -v
+docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx.py::test_func -v
 ```
+
+不要在生产 `backend` 容器里跑 pytest：该容器是 `app-runtime`，不安装 dev 依赖。定向测试可直接使用 `test` profile。
 
 ## 路径定位规则
 

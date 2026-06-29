@@ -12,7 +12,7 @@ npx playwright test tests/e2e/login-register.spec.js  # 单文件
 
 ## 规则
 
-- 必须 mock API，禁止调用真实后端
+- 常规 E2E 必须 mock API，禁止调用真实后端
 - 禁止截图断言（CI 环境不稳定）
 - 禁止使用真实密码
 - 测试规则见 `.claude/rules/test-files.md`（编辑测试文件时自动加载）

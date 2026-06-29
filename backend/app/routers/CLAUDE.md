@@ -20,6 +20,7 @@
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
 | `coding.py` | `/api/coding/*` | 手撕代码练习（题目/提交/错误统计） |
+| `error_report.py` | `/api/error-report` | 前端错误上报 |
 | `health.py` | `/api/health` | 健康检查 |
 
 ## 子路由包
@@ -41,5 +42,5 @@
 ## 修改后必做
 
 1. 新增路由后在 `asgi.py` 注册
-2. 运行 `docker compose exec backend uv run pytest backend/tests/ -q`
+2. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/ -q`
 3. 更新本文件

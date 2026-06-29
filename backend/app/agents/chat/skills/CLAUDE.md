@@ -56,5 +56,5 @@ always_active: false
 
 ## 修改后必做
 
-1. 新增/修改 skill 后运行 `docker compose exec backend uv run pytest backend/tests/chat/ -q`
+1. 新增/修改 skill 后运行 `docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q`
 2. 更新本文件

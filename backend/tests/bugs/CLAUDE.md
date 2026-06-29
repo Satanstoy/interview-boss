@@ -13,11 +13,13 @@
 | 文件 | Bug |
 |------|-----|
 | `test_agent_workflow_bugs.py` | BUG-005 ~ BUG-010（agent 工作流 bug） |
+| `test_*position*.py` / `test_*frequency*.py` / `test_*source*.py` | 岗位、frequency、来源展示/统计等回归 |
+| `test_reupload_after_soft_delete.py` / `test_soft_delete_and_ux.py` | 软删除与重复导入回归 |
 
 ## 运行
 
 ```bash
-docker compose exec backend uv run pytest backend/tests/bugs/ -q
+docker compose --profile test run --rm test uv run pytest backend/tests/bugs/ -q
 ```
 
 ## 修改后必做

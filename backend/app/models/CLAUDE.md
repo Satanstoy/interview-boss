@@ -29,7 +29,7 @@
 ## 核心规则
 
 - Pydantic v2：用 `model_dump()` 不是 `.dict()`，`field_validator` 不是 `@validator`
-- 所有字符串字段必须有 `max_length` 约束
+- 新增字符串字段应尽量使用 `Field(..., max_length=...)` 约束；历史 schema 中仍有少量未加约束的字段，改动时可顺手补齐但不要引发兼容性破坏
 - 新 schema 在此文件中添加，不要分散到多个文件
 - routers 层通过 `Depends` 或直接类型注解使用这些 schema
 

@@ -18,7 +18,7 @@
 
 ## 修改后必做
 
-1. 运行 `docker compose exec backend uv run pytest backend/tests/ -q`
+1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/ -q`
 2. 更新本文件（如新增端点或子模块）
 
 ## 岗位列表约定

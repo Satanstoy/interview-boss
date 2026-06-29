@@ -13,8 +13,10 @@ FastAPI 应用初始化、中间件、路由注册。
 ## asgi.py 中间件顺序
 
 ```
-SecurityHeadersMiddleware → CSRFMiddleware → log_requests → CORS
+注册顺序：可选 CORS → SecurityHeadersMiddleware → CSRFMiddleware → log_requests
 ```
+
+`SecurityHeadersMiddleware` 和 `CSRFMiddleware` 是纯 ASGI 中间件，避免 `BaseHTTPMiddleware` 缓冲 SSE。`log_requests` 通过 `app.middleware("http")` 注册；不要把会缓冲响应体的中间件放到 SSE 路径外层。
 
 ## 修改后必做
 

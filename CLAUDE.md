@@ -4,19 +4,20 @@
 
 ## Tech Stack
 
-- **Backend**: Python 3.x (uv) / FastAPI / SQLite (WAL) / LangGraph
-- **Frontend**: Vue 3 (Composition API) / Vite / Tailwind CSS
+- **Backend**: Python 3.10 (uv, root `pyproject.toml`) / FastAPI / SQLite (WAL) / LangGraph
+- **Frontend**: Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue
 - **Deploy**: Docker Compose → nginx 镜像内置前端 (port 80) → backend (8000) + redis (6379)，worker 通过 profile 按需启用
 - **LLM**: OpenAI-compatible API (AsyncOpenAI + tenacity)
-- **Embedding**: BAAI/bge-small-zh-v1.5 (本地 HuggingFace 缓存，离线模式)
+- **Embedding**: Xenova/bge-small-zh-v1.5 ONNX export (本地 HuggingFace 缓存，离线模式) + FAISS CPU
 
 ## Commands
 
 ```bash
-# 开发测试（必须通过 Docker 容器执行，禁止宿主机直接 uv run）
-docker compose exec backend pytest backend/tests/ -q   # 后端测试
-cd frontend && npm run build                             # 前端构建
-./deploy/docker-deploy.sh check                          # 日常质量门禁（后端 Docker + 前端 build/test + audit 报告）
+# 开发测试
+./deploy/docker-deploy.sh test -q                                  # 后端全量测试（test-runtime 镜像）
+docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q  # 后端定向测试
+cd frontend && npm run build                                       # 前端构建
+./deploy/docker-deploy.sh check                                    # 日常质量门禁（后端 Docker + 前端 build/test + audit 报告）
 
 # 部署
 ./deploy/docker-deploy.sh update                         # 完整部署（重建镜像，后端/依赖变更时用）
@@ -42,9 +43,9 @@ cd frontend && npm run build                             # 前端构建
 - **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文。Git hook 自动检查。
 - **Git 工作流**：本项目由用户单人维护。除非用户明确要求创建分支、PR 或 worktree，日常修改直接在 `master` 上进行并提交；不要为了常规改动自动创建 feature branch。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文。
-- **禁止**：根目录装包、跨包引用源码、`--force`/`--no-verify`。
-- **依赖管理**：Python 用 `cd backend && uv add X`，JS 用 `cd frontend && npm install X`，禁止在根目录操作
-- **运行方式**：所有 Python 命令（pytest、脚本等）必须通过 `docker compose exec backend` 执行，禁止宿主机直接 `uv run`（宿主机无 uv 缓存，走 Docker 构建层缓存即可）。
+- **禁止**：跨包引用源码、`--force`/`--no-verify`、在生产 `backend` 容器里跑 pytest。
+- **依赖管理**：Python 依赖在根 `pyproject.toml`/`uv.lock`，用 `uv add X`；JS 依赖在 `frontend/`，用 `cd frontend && npm install X`。
+- **运行方式**：pytest 必须走 Docker `test-runtime`（`./deploy/docker-deploy.sh test ...` 或 `docker compose --profile test run --rm test ...`）。生产 `backend` 容器是 `app-runtime`，不含 dev 依赖。
 
 ## 修改铁律
 
@@ -63,20 +64,23 @@ backend/
 ├── app/db/            ← SQLite 连接、CRUD、查询、迁移
 ├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate/chat）
 ├── app/models/        ← Pydantic schemas
-└── tests/             ← pytest 测试（不提交 git）
+└── tests/             ← pytest 测试
 
 frontend/
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
 ├── src/composables/   ← 领域逻辑复用（use* 前缀）
+├── src/layouts/       ← AuthenticatedLayout / BlankLayout / DefaultLayout
+├── src/views/         ← Vue Router 页面
 ├── src/components/
 │   ├── common/        ← 通用 UI（无业务依赖）
-│   └── business/      ← 业务组件
+│   ├── business/      ← 业务组件
+│   └── ui/            ← shadcn-vue 原始组件
 ├── src/utils/         ← 纯工具函数
-└── tests/             ← Playwright E2E 测试（不提交 git）
+└── tests/             ← Playwright E2E/diagnosis 测试
 
 deploy/                ← 部署脚本（docker-deploy.sh 是生产用）
 nginx/                 ← Docker Nginx 配置
-docs/                  ← 历史经验库（bug-reports、tdd-reports，不提交 git）
+docs/                  ← 历史经验库（bug-reports、tdd-reports、superpowers、analysis）
 ```
 
 子目录各有自己的 CLAUDE.md，Claude 按需自动加载，不需要在此列出。
@@ -86,12 +90,12 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 | 功能 | 后端文件 | 前端文件 |
 |------|---------|---------|
 | 登录/注册/刷新 | `routers/auth.py` + `core/auth.py` | `services/authApi.js` + `components/business/LoginModal.vue` |
-| JD/面经提交 | `routers/submit.py` + `services/pipeline.py` | `services/dataApi.js` |
-| 题库管理 | `routers/master_bank.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
+| JD/面经提交 | `routers/submit.py` + `agents/submit/` + `services/pipeline/` | `views/ImportView.vue` + `components/business/StagingPanel.vue` + `services/dataApi.js` |
+| 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
 | 练习/模拟面试 | `routers/practice.py` + `routers/interview.py` | `components/business/PracticePanel.vue` + `MockInterview.vue` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
-| 用户配置 | `routers/profile.py` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
+| 用户配置 | `routers/profile.py` + `routers/profile_pkg/` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
 | 手撕代码 | `routers/coding.py` | `services/codingApi.js` + `components/business/CodingPractice.vue` |
 | 题目去重 | `services/clustering.py` | — |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |
@@ -100,14 +104,14 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 
 ## 测试基础设施
 
-- **后端**：`conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures
+- **后端**：通过 Docker `test-runtime` 跑 pytest；`backend/tests/conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures
 - **前端**：Playwright 测试必须 mock API，禁止截图断言，禁止使用真实密码
 - **日常门禁**：`./deploy/docker-deploy.sh check` 汇总后端 collect/compile/结构测试、前端 build/smoke test 和 audit WARN。
 - **详细规则**：`.claude/rules/test-files.md`（编辑测试文件时自动加载）
 
 ## Gotchas
 
-- Python 依赖管理用 uv（`uv add`），运行/测试必须通过 Docker 容器执行，禁止宿主机直接 `uv run`
+- Python 依赖管理用根目录 uv（`uv add`），测试必须通过 Docker `test-runtime` 执行，禁止宿主机直接 `uv run pytest`
 - SQLite 迁移后必须重启 backend 容器
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
@@ -130,7 +134,7 @@ worker (--profile worker, 按需启动) → redis/backend data
 
 - Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
 - 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=4096`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
-- Nginx 反代 `/api/` → backend:8000（180s 超时），其余 → 静态文件
+- Nginx 反代 `/api/` → backend:8000（read timeout 600s，SSE 禁用 buffering/cache/gzip），其余 → `/usr/share/nginx/html` 静态文件
 - 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`
 - HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）
 - 环境变量：`HF_HUB_OFFLINE=1`（强制离线模式，避免访问 huggingface.co）

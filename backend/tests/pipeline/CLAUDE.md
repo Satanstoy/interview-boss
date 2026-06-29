@@ -5,5 +5,5 @@ JD/面经提交流程测试。
 ## 运行
 
 ```bash
-docker compose exec backend uv run pytest backend/tests/pipeline/ -q
+docker compose --profile test run --rm test uv run pytest backend/tests/pipeline/ -q
 ```

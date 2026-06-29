@@ -15,12 +15,13 @@ npx playwright test tests/e2e/     # E2E 测试
 | 目录 | 职责 |
 |------|------|
 | `e2e/` | 端到端测试（Playwright） |
-| `diagnosis/` | 诊断测试 |
+| `diagnosis/` | 诊断/调试用 Playwright 测试和报告 |
 | `_helpers/` | 测试辅助函数 |
+| `playwright.config.js` | Playwright 配置 |
 
 ## 核心规则
 
-- **必须 mock API**：禁止使用真实后端
+- **默认 mock API**：常规 E2E 禁止依赖真实后端；诊断脚本需要真实页面时必须在文件名/说明里写清楚意图
 - **禁止截图断言**：用文本/元素断言
 - **禁止真实密码**：测试数据用 fake 值
 - **测试先行**：先写失败测试，再写实现

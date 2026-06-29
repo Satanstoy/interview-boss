@@ -6,34 +6,36 @@
 ## 命令
 
 ```bash
-# 开发/测试必须通过 Docker 容器执行（宿主机无 .venv）
-docker compose exec backend uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000   # 开发
-docker compose exec backend uv run pytest backend/tests/ -q                            # 测试
+# 开发/测试必须通过 Docker 执行
+./deploy/docker-deploy.sh up                                                          # 启动 redis/backend/nginx
+./deploy/docker-deploy.sh test -q                                                     # 全量 pytest（test-runtime）
 ./deploy/docker-deploy.sh check backend                                               # 后端日常门禁（Docker test-runtime）
-docker compose exec backend uv run pytest backend/tests/test_xxx.py -v                 # 单文件
+docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q      # 定向 pytest
 
-# 依赖管理（在容器内执行）
-docker compose exec backend uv sync                                                    # 安装依赖
-docker compose exec backend uv add <package>                                           # 添加依赖
+# 依赖管理（根 pyproject.toml / uv.lock）
+uv add <package>                                                                       # 添加 Python 依赖
+uv sync --frozen                                                                       # 校验锁文件
 ```
 
-禁止宿主机直接 `uv run`，必须通过 Docker 容器执行。
+pytest 禁止宿主机直接 `uv run`，也不要在生产 `backend` 容器里跑；`backend` 镜像是 `app-runtime`，不含 dev 依赖。
 后端日常门禁由 `./deploy/docker-deploy.sh check backend` 执行：构建 test-runtime、pytest collect-only、compileall，以及题库/infra/router 结构测试。
 
-## 架构（4 层，依赖方向向内）
+## 架构（4 层，依赖方向以向内为主）
 
 ```
 Routers → Services → Core/DB → (external)
 ```
 
+现有代码有少量兼容性反向/交叉导入（例如 `core.config` 热更新后刷新 LLM client，`db.operations` 复用 `services.utils`）。改架构边界前先查真实 import 链，不要只按理想分层移动代码。
+
 ### Routers (`app/routers/`) — 路由层
-14 个 APIRouter，在 `asgi.py` 注册。**路由函数必须精简，禁止包含业务逻辑。**
+`asgi.py` 中有 17 次 `include_router` 注册（含 `profile_pkg`、`questions_pkg` 子路由包）。**路由函数必须精简，禁止包含业务逻辑。**
 
 ### Services (`app/services/`) — 业务逻辑层
 - `llm.py` — AsyncOpenAI + tenacity 重试
 - `clustering.py` — LLM 聚类去重（cat2 预分组 + 两遍聚类）
-- `pipeline.py` — 提交处理流程
-- `embedding_service.py` — Embedding 向量编码 + FAISS 预筛选 + 置信度计算
+- `pipeline/` — 批处理流水线、队列、清洗、写库
+- `embedding_service.py` — ONNX Runtime 向量编码 + FAISS 预筛选 + hash fallback
 - `chat_service.py` — 对话管理、记忆提取
 
 ### Core (`app/core/`) — 配置层
@@ -49,7 +51,7 @@ Routers → Services → Core/DB → (external)
 **数据库：** SQLite `backend/data/interview-boss.db`
 
 ### Agents (`app/agents/`) — LangGraph 状态机
-`submit/`, `build/`, `batch_generate/`, `chat/` 四个 agent，共享 `shared/`。
+`submit/`, `build/`, `batch_generate/`, `chat/` 四个 agent；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline。
 
 ### Scripts (`scripts/`) — 运维脚本
 一次性运维脚本、数据修复工具。前缀：`fix_*.py`（修复）、`verify_*.py`（验证）、`check_*.py`（检查）。详见 `scripts/CLAUDE.md`。
@@ -59,14 +61,14 @@ Routers → Services → Core/DB → (external)
 | 功能 | 路由 | 业务逻辑 | 数据库 |
 |------|------|---------|--------|
 | 认证 | `routers/auth.py` | `core/auth.py` | `db/operations.py` |
-| 提交 | `routers/submit.py` | `services/pipeline.py` | `db/operations.py` |
+| 提交 | `routers/submit.py` | `agents/submit/` + `services/pipeline/` | `db/operations.py` |
 | 题库 | `routers/questions.py` + `bank_build.py` + `admin_review.py` | `services/clustering.py` | `db/queries.py` |
 | 答案 | `routers/answers.py` | `services/llm.py` + `core/prompts.py` | `db/operations.py` |
 | 练习 | `routers/practice.py` | — | `db/queries.py` |
 | 面试 | `routers/interview.py` | — | `db/queries.py` |
 | 分析 | `routers/analytics.py` | — | `db/queries.py` |
 | 配置 | `routers/profile.py` | `core/config.py` | `db/operations.py` |
-| Agent | — | `agents/submit/` `agents/build/` `agents/batch_generate/` | — |
+| Agent | `routers/submit.py` / `bank_build.py` / `answers.py` / `chat.py` | `agents/submit/` `agents/build/` `agents/batch_generate/` `agents/chat/` | — |
 
 ## 修改前必读
 
@@ -75,7 +77,7 @@ Routers → Services → Core/DB → (external)
 | 修认证 Bug | `core/auth.py` | `routers/auth.py` |
 | 改 LLM 答案生成 | `services/llm.py` + `core/prompts.py` | `routers/answers.py` |
 | 改题目去重逻辑 | `services/clustering.py` | `db/queries.py` |
-| 改提交流程 | `services/pipeline.py` | `routers/submit.py` + `agents/submit/` |
+| 改提交流程 | `agents/submit/` + `services/pipeline/` | `routers/submit.py` |
 | 改数据库查询 | `db/queries.py` 或 `db/operations.py` | 对应的 `routers/*.py` |
 | 改 Agent 流程 | `agents/<name>/graph.py` | `agents/shared/state.py` |
 | 新增 API 端点 | `asgi.py`（注册路由） | 新建 `routers/<name>.py` |
@@ -124,7 +126,7 @@ Routers → Services → Core/DB → (external)
 | `mock_redis` | Mock Redis | `def test_xxx(mock_redis):` |
 | `client` | FastAPI TestClient | `def test_xxx(client):` |
 
-**pytest 配置**：`asyncio_mode = "auto"`，无需手动加 `@pytest.mark.asyncio`。
+**pytest 配置**：根 `pyproject.toml` 中 `asyncio_mode = "auto"`，无需手动加 `@pytest.mark.asyncio`。
 
 ## 测试代码安全规范（强制）
 

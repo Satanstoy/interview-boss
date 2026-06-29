@@ -10,7 +10,7 @@ FastAPI ASGI 中间件层，负责请求/响应的横切关注点。
 
 ## 中间件注册顺序
 
-在 `asgi.py` 中注册，顺序为：SecurityHeadersMiddleware → CSRFMiddleware → `log_requests` → CORS。`log_requests` 在最内层，确保能记录完整请求耗时。
+在 `asgi.py` 中注册：可选 CORS → `SecurityHeadersMiddleware` → `CSRFMiddleware` → `log_requests`。安全头和 CSRF 是纯 ASGI 中间件，避免缓冲 SSE；新增中间件时要确认不会破坏 `text/event-stream`。
 
 ## 核心规则
 

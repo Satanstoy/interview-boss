@@ -8,7 +8,7 @@
 ```bash
 cd frontend
 npm run dev          # 开发服务器 http://localhost:3000
-npm run build        # 生产构建 → /var/www/interview-boss/dist/
+npm run build        # 生产构建 → frontend/dist（Docker nginx-runtime 会内置该目录）
 npm run test         # 日常 smoke 测试（Playwright 自动启动 Vite）
 npm run test:e2e     # 运行完整 E2E 测试
 npm run audit:prod   # 生产依赖 audit 报告
@@ -18,7 +18,7 @@ npm run audit:prod   # 生产依赖 audit 报告
 
 ## 技术栈
 
-Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / ECharts / Marked + DOMPurify / vue-sonner / vue-virtual-scroller
+Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue (reka-ui) / ECharts / Marked + DOMPurify / vue-sonner / vue-virtual-scroller
 
 ## UI 方向
 
@@ -92,7 +92,7 @@ src/
 | 设置 | `/settings` | `views/SettingsView.vue` | `components/business/SettingsPage.vue` |
 | 登录 | `/login` | `views/LoginView.vue` | `composables/useAuth.js` |
 
-**数据流：** AuthenticatedLayout 调用 composables → `provide('appData')` → View 组件 `inject('appData')` 获取共享数据。
+**数据流：** AuthenticatedLayout 调用 composables → `provide('appData')` → View 组件 `inject('appData')` 获取共享数据。业务组件优先消费共享数据；局部动作可调用 `services/` 或兼容层 `api/index.js`，但不要直接 `fetch`。
 
 | 功能 | 文件 |
 |------|------|

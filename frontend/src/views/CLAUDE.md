@@ -19,9 +19,9 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 
 ## 核心规则
 
-- 页面组件命名：`<Domain>View.vue`（如 `PracticeView.vue`、`AnalyticsView.vue`）
+- 页面组件命名：`<Domain>View.vue`（如 `ChatView.vue`、`SettingsView.vue`）
 - View 组件负责页面编排（组合 business 组件），不直接调用 API
-- API 调用通过 `services/` + `composables/` 封装
+- API 调用通过 `services/` + `composables/` 封装；View 本身保持编排层，业务组件可通过 services/API 兼容层完成局部动作
 - 已登录页面通过 `inject('appData')` 获取 `AuthenticatedLayout.vue` 提供的共享状态和操作
 - 使用 `<script setup>` 语法
 - 路径导入使用 `@/` 绝对路径
