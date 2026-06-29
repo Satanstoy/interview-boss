@@ -63,8 +63,9 @@ Routers → Services → Core/DB → (external)
 
 ### Services (`app/services/`) — 业务逻辑层
 - `llm.py` — AsyncOpenAI + tenacity 重试
-- `clustering.py` — LLM 聚类去重（cat2 预分组 + 两遍聚类）
-- `pipeline/` — 批处理流水线、队列、清洗、写库
+- `clustering/` — LLM 聚类去重（matcher/clusterer/full_recluster/prompts）
+- `pipeline/` — 批处理流水线（batch.py）、单例压缩（compact.py）、队列、清洗、写库
+- `submit_service.py` — 提交业务逻辑（标签、答案生成、增量更新）
 - `embedding_service.py` — ONNX Runtime 向量编码 + FAISS 预筛选 + hash fallback
 - `chat_service.py` — 对话管理、记忆提取
 
@@ -76,12 +77,12 @@ Routers → Services → Core/DB → (external)
 ### DB (`app/db/`) — 数据库层
 - `connection.py` — 线程级 SQLite（WAL），`run_db()` 用 `asyncio.to_thread()` 包装
 - `operations.py` — 可复用 CRUD | `queries.py` — 查询函数
-- `migrations.py` — Schema 迁移（`init_db()` 内联执行）
+- `migrations/` — Schema 迁移（按功能域分组：question_bank/auth/data_repair/sources/view/chat/coding/clustering/jobs），`run_migrations()` 在 `__init__.py`
 
 **数据库：** SQLite `backend/data/interview-boss.db`
 
 ### Agents (`app/agents/`) — LangGraph 状态机
-`submit/`, `build/`, `batch_generate/`, `chat/` 四个 agent；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline。
+`submit/`, `build/`, `batch_generate/`, `chat/` 四个 agent；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline（拆分为 pipeline/react_loop/answer/question_plan/summary/metadata）。
 
 ### Scripts (`scripts/`) — 运维脚本
 一次性运维脚本、数据修复工具。前缀：`fix_*.py`（修复）、`verify_*.py`（验证）、`check_*.py`（检查）。详见 `scripts/CLAUDE.md`。
