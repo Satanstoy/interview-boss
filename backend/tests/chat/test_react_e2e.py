@@ -199,7 +199,7 @@ async def _run_react_case(
         ),
         patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch(
-            "app.agents.chat.pipeline.stream_llm_messages",
+            "app.services.llm.stream_llm_messages",
             side_effect=stream_side_effect,
         ),
     ]
@@ -674,7 +674,7 @@ class TestRealLinkSkillInjection:
                     side_effect=mock_llm,
                 ),
                 patch(
-                    "app.agents.chat.pipeline.stream_llm_messages",
+                    "app.services.llm.stream_llm_messages",
                     side_effect=lambda *a, **kw: _mock_stream(
                         "请解释一下 JVM 内存模型。"
                     ),

@@ -233,7 +233,7 @@ class TestReactLoop:
                 },
             ),
             patch(
-                "app.agents.chat.pipeline.stream_llm_messages",
+                "app.services.llm.stream_llm_messages",
                 side_effect=lambda *a, **kw: _mock_stream_strings("Hello", " World"),
             ),
         ):
@@ -304,11 +304,11 @@ class TestReactLoop:
                     mock_llm_with_tools,
                 ),
                 patch(
-                    "app.agents.chat.pipeline.execute_tool",
+                    "app.agents.chat.tools.execute_tool",
                     side_effect=_mock_execute,
                 ),
                 patch(
-                    "app.agents.chat.pipeline.stream_llm_messages",
+                    "app.services.llm.stream_llm_messages",
                     side_effect=lambda *a, **kw: _mock_stream_strings(
                         "Here is your question"
                     ),
@@ -418,7 +418,7 @@ class TestReactLoop:
             with (
                 patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Prompt."),
                 patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
-                patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+                patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -469,11 +469,11 @@ class TestReactLoop:
             ),
             patch("app.services.llm.llm_with_tools", mock_llm),
             patch(
-                "app.agents.chat.pipeline.execute_tool",
+                "app.agents.chat.tools.execute_tool",
                 side_effect=_mock_execute_tool,
             ),
             patch(
-                "app.agents.chat.pipeline.stream_llm_messages",
+                "app.services.llm.stream_llm_messages",
                 side_effect=lambda *a, **kw: _mock_stream_strings(
                     "Final answer after max steps"
                 ),
@@ -544,11 +544,11 @@ class TestReactLoop:
                 ),
                 patch("app.services.llm.llm_with_tools", mock_llm),
                 patch(
-                    "app.agents.chat.pipeline.execute_tool",
+                    "app.agents.chat.tools.execute_tool",
                     side_effect=mock_execute_tool,
                 ),
                 patch(
-                    "app.agents.chat.pipeline.stream_llm_messages",
+                    "app.services.llm.stream_llm_messages",
                     side_effect=lambda *a, **kw: _mock_stream_strings("Final answer"),
                 ),
             ):
@@ -595,7 +595,7 @@ class TestReactLoop:
                 },
             ),
             patch(
-                "app.agents.chat.pipeline.stream_llm_messages",
+                "app.services.llm.stream_llm_messages",
                 side_effect=lambda *a, **kw: _mock_stream_strings("project-deep-dive"),
             ),
         ):
@@ -787,7 +787,7 @@ class TestFinalAnswerQuality:
                 },
             ),
             patch(
-                "app.agents.chat.pipeline.stream_llm_messages",
+                "app.services.llm.stream_llm_messages",
                 side_effect=broken_stream,
             ),
         ):
@@ -898,7 +898,7 @@ class TestQuestionPlanEnforcement:
         with (
             patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Prompt."),
             patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
-            patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+            patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
         ):
             events = []
             async for event in _react_loop(state):
@@ -1185,11 +1185,11 @@ class TestReactLoopIntegration:
                     "app.services.llm.llm_with_tools", side_effect=mock_llm
                 ):
                     with patch(
-                        "app.agents.chat.pipeline.stream_llm_messages",
+                        "app.services.llm.stream_llm_messages",
                         side_effect=mock_stream,
                     ):
                         with patch(
-                            "app.agents.chat.pipeline.execute_tool",
+                            "app.agents.chat.tools.execute_tool",
                             new_callable=AsyncMock,
                             return_value="mock result",
                         ):
@@ -1242,7 +1242,7 @@ class TestEndInterviewHardRoute:
                     "app.services.llm.llm_with_tools", new_callable=AsyncMock
                 ) as mock_llm_tools,
                 patch(
-                    "app.agents.chat.pipeline.execute_tool", new_callable=AsyncMock
+                    "app.agents.chat.tools.execute_tool", new_callable=AsyncMock
                 ) as mock_exec,
                 patch(
                     "app.agents.chat.pipeline._persist_active_skills",
@@ -1482,7 +1482,7 @@ class TestRepetitionProtection:
                 return_value="BASE PROMPT",
             ),
             patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
-            patch("app.agents.chat.pipeline.execute_tool", side_effect=mock_execute_tool),
+            patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
         ):
             events = []
             async for event in _react_loop(base_state):

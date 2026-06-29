@@ -258,7 +258,7 @@ async def run_single_turn(
         ),
         patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch(
-            "app.agents.chat.pipeline.stream_llm_messages",
+            "app.services.llm.stream_llm_messages",
             side_effect=stream_side_effect,
         ),
     ]
