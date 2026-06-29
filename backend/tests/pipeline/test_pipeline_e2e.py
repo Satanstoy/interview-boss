@@ -228,7 +228,7 @@ def mock_db():
 class TestSingleInterview:
     """单条面经：标签 → 入队 → 聚类"""
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_full_pipeline(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -295,7 +295,7 @@ class TestSingleInterview:
 class TestBatchProcessing:
     """3 条面经提交后一起聚类"""
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_batch_merges_same_cat2(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -350,7 +350,7 @@ class TestBatchProcessing:
 class TestRebuildFlow:
     """清空 → 入队 → 聚类"""
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_rebuild_clears_old_and_creates_new(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -420,7 +420,7 @@ class TestRebuildFlow:
 
 class TestDataConsistency:
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_phase1_does_not_touch_qb(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -442,7 +442,7 @@ class TestDataConsistency:
 
         asyncio.run(_run())
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_reprocess_no_duplicate_sources(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -481,7 +481,7 @@ class TestDataConsistency:
 
         asyncio.run(_run())
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_queue_lifecycle(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -600,7 +600,7 @@ class TestCleanupThoroughness:
 
 class TestEdgeCases:
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     def test_empty_questions_list(self, mock_tag, mock_db):
         """空题目列表不产生数据"""
         from app.services.pipeline import tag_interview
@@ -633,7 +633,7 @@ class TestEdgeCases:
 
         asyncio.run(_run())
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_reprocess_preserves_ai_answer(self, mock_uq, mock_cluster, mock_tag, mock_db):
@@ -684,7 +684,7 @@ class TestEdgeCases:
 
 class TestFullRebuildSimulation:
 
-    @patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch)
+    @patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch)
     @patch('app.services.pipeline.batch.cluster_batch', new_callable=AsyncMock, side_effect=_mock_cluster_all_questions)
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_5_interviews_rebuild(self, mock_uq, mock_cluster, mock_tag, mock_db):

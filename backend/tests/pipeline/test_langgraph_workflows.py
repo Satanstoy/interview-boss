@@ -517,7 +517,7 @@ class TestSubmitNodes:
         """验证 classify_node 调用与原始 tag_questions_batch 相同的接口"""
         from app.agents.submit.classify import classify_node
 
-        with patch('app.routers.submit.tag_questions_batch', side_effect=_mock_tag_batch), \
+        with patch('app.services.submit_service.tag_questions_batch', side_effect=_mock_tag_batch), \
              patch('app.db.connection.get_taxonomy_for_position', return_value=None), \
              patch('app.db.connection.run_db', new_callable=AsyncMock, side_effect=lambda f: f()):
 
@@ -814,7 +814,7 @@ class TestSubmitGraphE2E:
         with patch('app.services.llm._call_llm_with_retry_messages', mock_llm), \
              patch('app.services.llm._should_use_response_format', return_value=False), \
              patch('app.services.llm.get_llm_client_for_user', return_value=(MagicMock(), "model", 30, "", "openai")), \
-             patch('app.routers.submit.tag_questions_batch', mock_tag), \
+             patch('app.services.submit_service.tag_questions_batch', mock_tag), \
              patch('app.services.clustering.match_new_questions', mock_match), \
              patch('app.db.connection.get_current_job_position', return_value="后端开发"), \
              patch('app.db.connection.get_taxonomy_for_position', return_value=None), \
@@ -855,7 +855,7 @@ class TestSubmitGraphE2E:
         with patch('app.services.llm._call_llm_with_retry_messages', mock_llm), \
              patch('app.services.llm._should_use_response_format', return_value=False), \
              patch('app.services.llm.get_llm_client_for_user', return_value=(MagicMock(), "model", 30, "", "openai")), \
-             patch('app.routers.submit.tag_questions_batch', AsyncMock(side_effect=_mock_tag_batch)), \
+             patch('app.services.submit_service.tag_questions_batch', AsyncMock(side_effect=_mock_tag_batch)), \
              patch('app.db.connection.get_current_job_position', return_value="后端开发"), \
              patch('app.db.connection.get_taxonomy_for_position', return_value=None), \
              patch('app.db.connection.run_db', new_callable=AsyncMock, side_effect=lambda f: f()), \
@@ -915,7 +915,7 @@ class TestSubmitGraphE2E:
         """分类质量不足时应触发重试"""
         from app.agents.submit.classify import classify_node
 
-        with patch('app.routers.submit.tag_questions_batch', AsyncMock(side_effect=_mock_tag_batch_low_quality)), \
+        with patch('app.services.submit_service.tag_questions_batch', AsyncMock(side_effect=_mock_tag_batch_low_quality)), \
              patch('app.db.connection.get_taxonomy_for_position', return_value=None), \
              patch('app.db.connection.run_db', new_callable=AsyncMock, side_effect=lambda f: f()):
 
