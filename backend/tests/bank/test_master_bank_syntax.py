@@ -2,17 +2,28 @@
 测试 master_bank.py 模块语法正确性
 针对 Bug INDENT-001: _gen_one 函数缩进错误
 """
-import pytest
 import ast
+import pytest
 import sys
 from pathlib import Path
+
+
+def _find_backend_root(start: Path) -> Path:
+    """Return the backend directory containing app/ and tests/."""
+    for candidate in (start, *start.parents):
+        if (candidate / "app" / "routers").is_dir() and (candidate / "tests").is_dir():
+            return candidate
+    raise RuntimeError(f"Could not locate backend root from {start}")
+
+
+BACKEND_ROOT = _find_backend_root(Path(__file__).resolve())
 
 
 class TestMasterBankSyntax:
     """测试 master_bank.py 的 Python 语法正确性"""
 
-    MODULE_PATH = Path(__file__).parent.parent / "app" / "routers" / "questions.py"
-    ANSWERS_PATH = Path(__file__).parent.parent / "app" / "routers" / "answers.py"
+    MODULE_PATH = BACKEND_ROOT / "app" / "routers" / "questions.py"
+    ANSWERS_PATH = BACKEND_ROOT / "app" / "routers" / "answers.py"
 
     def test_file_syntax_valid(self):
         """验证 master_bank.py 文件语法正确"""
@@ -48,7 +59,7 @@ class TestMasterBankSyntax:
     def test_import_module(self):
         """验证模块可以正常导入"""
         # 添加 backend 目录到 Python 路径
-        backend_dir = Path(__file__).parent.parent
+        backend_dir = BACKEND_ROOT
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
 
@@ -93,7 +104,7 @@ class TestBackendStartup:
 
     def test_asgi_module_importable(self):
         """验证 asgi 模块可以正常导入"""
-        backend_dir = Path(__file__).parent.parent
+        backend_dir = BACKEND_ROOT
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
 
@@ -108,7 +119,7 @@ class TestBackendStartup:
 
     def test_all_routers_importable(self):
         """验证所有路由模块可以正常导入"""
-        backend_dir = Path(__file__).parent.parent
+        backend_dir = BACKEND_ROOT
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
 

@@ -101,6 +101,73 @@ COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
 
 COPY --chown=appuser backend/ ./backend/
 COPY --chown=appuser backend/tests/ ./backend/tests/
+COPY --chown=appuser nginx/ ./nginx/
+COPY --chown=appuser deploy/ ./deploy/
+
+RUN cat <<'EOF' > /app/Dockerfile
+# syntax=docker/dockerfile:1.7
+FROM node:20-alpine AS frontend-builder
+RUN npm run build
+FROM python:3.10-slim-bookworm AS app-runtime
+RUN --mount=type=cache,target=/root/.cache/uv uv sync
+FROM python:3.10-slim-bookworm AS test-runtime
+RUN --mount=type=cache,target=/root/.cache/uv uv sync && \
+    --mount=type=cache,target=/root/.npm npm ci
+FROM nginx:1.27-alpine AS nginx-runtime
+COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+EXPOSE 8000
+ENV REDIS_URL=redis://redis:6379/0
+RUN mkdir -p /app/backend/data
+EOF
+
+RUN cat <<'EOF' > /app/docker-compose.yml
+services:
+  backend:
+    image: interview-boss-app:local
+    build:
+      target: app-runtime
+    env_file:
+      - backend/.env
+    # HF_HOME=/home/appuser/.cache/huggingface
+    environment:
+      HF_HOME: /home/appuser/.cache/huggingface
+      BUILDKIT_INLINE_CACHE: "1"
+    mem_limit: 2g
+    restart: always
+    healthcheck:
+      test: ["CMD", "true"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/data:/app/backend/data
+      - /home/appuser/.cache/huggingface:ro
+  worker:
+    image: interview-boss-app:local
+    build:
+      target: app-runtime
+    profiles: [worker]
+    mem_limit: 2g
+  nginx:
+    image: interview-boss-nginx:local
+    build:
+      target: nginx-runtime
+    restart: always
+    healthcheck:
+      test: ["CMD", "true"]
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "512mb"]
+EOF
+
+RUN cat <<'EOF' > /app/.dockerignore
+.docker-cache
+node_modules
+.venv
+.git
+.env
+backend/data
+EOF
 
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
