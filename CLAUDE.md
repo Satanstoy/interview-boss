@@ -15,9 +15,16 @@
 ```bash
 # 开发测试
 ./deploy/docker-deploy.sh test -q                                  # 后端全量测试（test-runtime 镜像）
-docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q  # 后端定向测试
-cd frontend && npm run build                                       # 前端构建
 ./deploy/docker-deploy.sh check                                    # 日常质量门禁（后端 Docker + 前端 build/test + audit 报告）
+cd frontend && npm run build                                       # 前端构建
+
+# 后端定向测试（按功能域，必须通过 Docker）
+docker compose --profile test run --rm test uv run pytest backend/tests/bank/ -q              # 题库管理
+docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q              # 模拟面试
+docker compose --profile test run --rm test uv run pytest backend/tests/pipeline/ -q          # 提交流水线
+docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q          # 业务逻辑（含 clustering/）
+docker compose --profile test run --rm test uv run pytest backend/tests/security/ -q          # 安全
+docker compose --profile test run --rm test uv run pytest backend/tests/infra/ -q             # 基础设施
 
 # 部署
 ./deploy/docker-deploy.sh update                         # 完整部署（重建镜像，后端/依赖变更时用）
@@ -64,7 +71,17 @@ backend/
 ├── app/db/            ← SQLite 连接、CRUD、查询、迁移
 ├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate/chat）
 ├── app/models/        ← Pydantic schemas
-└── tests/             ← pytest 测试
+└── tests/
+    ├── bank/          ← 题库管理
+    ├── chat/          ← 模拟面试
+    ├── coding/        ← 手撕代码
+    ├── infra/         ← 基础设施
+    ├── interview/     ← 面试管理
+    ├── pipeline/      ← 提交流水线
+    ├── security/      ← 安全测试
+    ├── services/      ← 业务逻辑
+    │   └── clustering/ ← 聚类相关
+    └── taxonomy/      ← 分类体系
 
 frontend/
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端

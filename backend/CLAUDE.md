@@ -10,7 +10,18 @@
 ./deploy/docker-deploy.sh up                                                          # 启动 redis/backend/nginx
 ./deploy/docker-deploy.sh test -q                                                     # 全量 pytest（test-runtime）
 ./deploy/docker-deploy.sh check backend                                               # 后端日常门禁（Docker test-runtime）
-docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q      # 定向 pytest
+
+# 定向 pytest（按功能域）
+docker compose --profile test run --rm test uv run pytest backend/tests/bank/ -q              # 题库管理
+docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q              # 模拟面试
+docker compose --profile test run --rm test uv run pytest backend/tests/pipeline/ -q          # 提交流水线
+docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q          # 业务逻辑（含 clustering/）
+docker compose --profile test run --rm test uv run pytest backend/tests/services/clustering/ -q  # 聚类
+docker compose --profile test run --rm test uv run pytest backend/tests/security/ -q          # 安全
+docker compose --profile test run --rm test uv run pytest backend/tests/infra/ -q             # 基础设施
+docker compose --profile test run --rm test uv run pytest backend/tests/taxonomy/ -q          # 分类体系
+docker compose --profile test run --rm test uv run pytest backend/tests/interview/ -q         # 面试管理
+docker compose --profile test run --rm test uv run pytest backend/tests/coding/ -q            # 手撕代码
 
 # 依赖管理（根 pyproject.toml / uv.lock）
 uv add <package>                                                                       # 添加 Python 依赖
@@ -19,6 +30,25 @@ uv sync --frozen                                                                
 
 pytest 禁止宿主机直接 `uv run`，也不要在生产 `backend` 容器里跑；`backend` 镜像是 `app-runtime`，不含 dev 依赖。
 后端日常门禁由 `./deploy/docker-deploy.sh check backend` 执行：构建 test-runtime、pytest collect-only、compileall，以及题库/infra/router 结构测试。
+
+## 测试目录结构
+
+```
+backend/tests/
+├── conftest.py              # 全局 fixtures（test_db, mock_llm, mock_redis, client）
+├── bank/                    # 题库管理（CRUD、软删除、语法检查）
+├── chat/                    # 模拟面试（路由、工具、记忆、技能、多轮）
+├── coding/                  # 手撕代码
+├── infra/                   # 基础设施（Docker 配置、ARQ、Worker、日志、调度）
+├── interview/               # 面试管理（删除清理、岗位过滤、抽题）
+├── pipeline/                # 提交流水线（导入、LangGraph、Agent 工作流）
+├── security/                # 安全测试（认证、权限、邮箱验证）
+├── services/                # 业务逻辑（LLM、答案生成、简历、搜索、前端 UX）
+│   └── clustering/          # 聚类相关（质量、稳定性、频率、来源、压缩）
+└── taxonomy/                # 分类体系（权限、保存、建议、错误处理）
+```
+
+新增测试文件时，按功能域放入对应目录。不确定归属时优先 `services/`，不要在根目录创建散落文件。
 
 ## 架构（4 层，依赖方向以向内为主）
 
