@@ -1,18 +1,24 @@
 # Chat Agent — 面试 Chatbot
 
-LangGraph 状态机：记忆召回 → 上下文构建 → LLM 流式回复 → 记忆提取。
+纯 async pipeline（替代 LangGraph StateGraph）：记忆召回 → 上下文构建 → 意图分类 → ReAct 循环 → 记忆提取。
 
 ## 流程
 
 ```
-START → recall_memories → build_context → stream_reply → extract_memory → END
+run_chat() → _step_load_context → _step_classify → _react_loop → _persist_active_skills → _step_extract_memory
 ```
 
 ## 文件职责
 
 | 文件 | 职责 |
 |------|------|
-| `graph.py` | StateGraph 定义、条件路由 |
+| `pipeline.py` | 入口点：`run_chat()` + pipeline steps（`_step_load_context`、`_step_classify`、`_step_extract_memory`、`_persist_active_skills`、`_initial_state`）+ 所有子模块的 re-export（向后兼容） |
+| `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射 |
+| `answer.py` | 答案生成与质量：`OutputDeduplicator`、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、fallback 响应、内部 marker 过滤 |
+| `question_plan.py` | 题目计划管理：`_maybe_create_question_plan()`、`_select_question_for_plan()`、重复追问保护、已问题列表构建 |
+| `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
+| `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
+| `graph.py` | 兼容层，委托给 `pipeline.run_chat` |
 | `nodes.py` | 节点实现（recall、build_context、stream、extract）、面试阶段判定 |
 | `state.py` | ChatState TypedDict |
 | `prompts.py` | 系统提示词（含面试阶段协议）、记忆提取提示词 |
@@ -45,6 +51,22 @@ START → recall_memories → build_context → stream_reply → extract_memory 
 - **Tool Gateway 契约**：`search_questions` / `draw_questions` 通过 `tool_gateway.py` 返回统一 `ok/items/metadata/error` envelope，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback
 - **完整回答后强制候选题**：`interview_question + answer_complete=True + 无候选题` 时，即使在 `project-deep-dive` 模式也必须先调用 `search_questions`，避免直接追问跳过 selected_question/question_plan 绑定
+
+## 模块依赖图
+
+```
+pipeline.py ──→ react_loop.py ──→ answer.py ──→ nodes.py
+    │               │                 │
+    │               ├──→ question_plan.py (自包含)
+    │               ├──→ summary.py ──→ llm.py
+    │               ├──→ metadata.py ──→ nodes.py, db.connection
+    │               └──→ tools.py, llm.py
+    ├──→ nodes.py, context_builder.py
+    └──→ chat_service, memory_recall_service
+```
+
+- `question_plan.py` 是自包含模块（仅依赖标准库 + state）
+- `pipeline.py` 通过 re-export 保持所有子模块符号的向后兼容
 
 ## 修改后必做
 
