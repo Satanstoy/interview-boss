@@ -128,13 +128,13 @@ class TestMatchAndClusterCat2Logic:
         mock_extract_json = {"matches": [{"new_id": "101", "cluster_id": "50"}]}
 
         # 执行
-        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+        with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
-            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = mock_llm_response
-                with patch('app.services.clustering._extract_json') as mock_json:
+                with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.return_value = mock_extract_json
-                    with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
+                    with patch('app.services.clustering.matcher._validate_merges', new_callable=AsyncMock) as mock_validate:
                         mock_validate.return_value = (
                             [{"new_id": "101", "cluster_id": "50"}],
                             {("101", "50"): 0.95}
@@ -166,11 +166,11 @@ class TestMatchAndClusterCat2Logic:
         existing_clusters = []
 
         # 执行
-        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+        with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = []  # 没有最近题目
-            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = '{"clusters": []}'
-                with patch('app.services.clustering._extract_json') as mock_json:
+                with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.return_value = {"clusters": []}
                     
                     from app.services.clustering import _match_and_cluster_cat2
@@ -196,11 +196,11 @@ class TestMatchAndClusterCat2Logic:
         existing_clusters = []
 
         # 执行
-        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+        with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = [{"id": 50, "question": "test"}]
-            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = '{"matches": []}'
-                with patch('app.services.clustering._extract_json') as mock_json:
+                with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.return_value = {"matches": []}
                     
                     from app.services.clustering import _match_and_cluster_cat2
@@ -235,7 +235,7 @@ class TestProcessIncrementalBatch:
         }
 
         # 执行
-        with patch('app.services.clustering._match_and_cluster_cat2', new_callable=AsyncMock) as mock_match:
+        with patch('app.services.clustering.matcher._match_and_cluster_cat2', new_callable=AsyncMock) as mock_match:
             mock_match.return_value = mock_result
             from app.services.clustering import process_incremental_batch
             
@@ -265,7 +265,7 @@ class TestProcessIncrementalBatch:
         }
 
         # 执行
-        with patch('app.services.clustering._match_and_cluster_cat2', new_callable=AsyncMock) as mock_match:
+        with patch('app.services.clustering.matcher._match_and_cluster_cat2', new_callable=AsyncMock) as mock_match:
             mock_match.return_value = mock_result
             from app.services.clustering import process_incremental_batch
             
@@ -304,23 +304,23 @@ class TestIntegration:
         phase2_response = {"clusters": []}
 
         # 执行
-        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+        with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
-            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 # Phase 1 matching, Phase 1.5 matching, Phase 2 clustering
                 mock_llm.side_effect = [
                     '{"matches": [{"new_id": "101", "cluster_id": "1"}]}',
                     '{"matches": [{"new_id": "102", "cluster_id": "50"}]}',
                     '{"clusters": []}'
                 ]
-                with patch('app.services.clustering._extract_json') as mock_json:
+                with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.side_effect = [
                         phase1_response,
                         phase15_response,
                         phase2_response
                     ]
                     # Mock _validate_merges: first call for Phase 1, second for Phase 1.5
-                    with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
+                    with patch('app.services.clustering.matcher._validate_merges', new_callable=AsyncMock) as mock_validate:
                         mock_validate.side_effect = [
                             # Phase 1 validation
                             ([{"new_id": "101", "cluster_id": "1"}], {("101", "1"): 0.95}),
@@ -360,20 +360,20 @@ class TestIntegration:
         ]
 
         # 执行
-        with patch('app.services.clustering._load_recent_singletons', new_callable=AsyncMock) as mock_load:
+        with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
-            with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+            with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
                 mock_llm.side_effect = [
                     Exception("LLM 调用失败"),
                     '{"matches": [{"new_id": "101", "cluster_id": "50"}]}',
                     '{"clusters": []}'
                 ]
-                with patch('app.services.clustering._extract_json') as mock_json:
+                with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.side_effect = [
                         {"matches": [{"new_id": "101", "cluster_id": "50"}]},
                         {"clusters": []}
                     ]
-                    with patch('app.services.clustering._validate_merges', new_callable=AsyncMock) as mock_validate:
+                    with patch('app.services.clustering.matcher._validate_merges', new_callable=AsyncMock) as mock_validate:
                         mock_validate.return_value = (
                             [{"new_id": "101", "cluster_id": "50"}],
                             {("101", "50"): 0.95}

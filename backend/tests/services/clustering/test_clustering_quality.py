@@ -13,10 +13,12 @@ import json
 from unittest.mock import AsyncMock, patch, MagicMock
 from typing import List, Dict, Any
 
-from app.services.clustering import (
+from app.services.clustering.prompts import (
     MATCH_EXISTING_PROMPT, CLUSTER_NEW_PROMPT, VALIDATE_MERGES_PROMPT,
-    VALIDATION_CONFIDENCE_THRESHOLD, RECENT_DAYS,
-    _validate_merges, calculate_dynamic_recent_days,
+    VALIDATION_CONFIDENCE_THRESHOLD,
+)
+from app.services.clustering.matcher import (
+    RECENT_DAYS, _validate_merges, calculate_dynamic_recent_days,
 )
 
 
@@ -262,7 +264,7 @@ class TestDynamicTimeWindow:
         assert RECENT_DAYS == 7
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering.get_db_connection')
+    @patch('app.services.clustering.matcher.get_db_connection')
     async def test_high_frequency_category_3_days(self, mock_conn_func):
         """测试：高频分类使用 3 天窗口（30天内 >= 20 题）"""
         mock_conn = MagicMock()
@@ -271,13 +273,13 @@ class TestDynamicTimeWindow:
         mock_row.__getitem__ = lambda self, key: 25 if key == 'cnt' else None
         mock_conn.execute.return_value.fetchone.return_value = mock_row
 
-        with patch('app.services.clustering.asyncio.to_thread', side_effect=lambda fn: fn()):
+        with patch('app.services.clustering.matcher.asyncio.to_thread', side_effect=lambda fn: fn()):
             result = await calculate_dynamic_recent_days("高频分类")
 
         assert result == 3
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering.get_db_connection')
+    @patch('app.services.clustering.matcher.get_db_connection')
     async def test_medium_frequency_category_7_days(self, mock_conn_func):
         """测试：中频分类使用 7 天窗口（30天内 5~19 题）"""
         mock_conn = MagicMock()
@@ -286,13 +288,13 @@ class TestDynamicTimeWindow:
         mock_row.__getitem__ = lambda self, key: 10 if key == 'cnt' else None
         mock_conn.execute.return_value.fetchone.return_value = mock_row
 
-        with patch('app.services.clustering.asyncio.to_thread', side_effect=lambda fn: fn()):
+        with patch('app.services.clustering.matcher.asyncio.to_thread', side_effect=lambda fn: fn()):
             result = await calculate_dynamic_recent_days("中频分类")
 
         assert result == 7
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering.get_db_connection')
+    @patch('app.services.clustering.matcher.get_db_connection')
     async def test_low_frequency_category_14_days(self, mock_conn_func):
         """测试：低频分类使用 14 天窗口（30天内 < 5 题）"""
         mock_conn = MagicMock()
@@ -301,7 +303,7 @@ class TestDynamicTimeWindow:
         mock_row.__getitem__ = lambda self, key: 2 if key == 'cnt' else None
         mock_conn.execute.return_value.fetchone.return_value = mock_row
 
-        with patch('app.services.clustering.asyncio.to_thread', side_effect=lambda fn: fn()):
+        with patch('app.services.clustering.matcher.asyncio.to_thread', side_effect=lambda fn: fn()):
             result = await calculate_dynamic_recent_days("低频分类")
 
         assert result == 14

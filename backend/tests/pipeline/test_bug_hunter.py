@@ -130,7 +130,7 @@ class TestBug003BuildPersonalReturn:
         """build-personal 端点应因解包错误而失败"""
         # 由于 BUG-002 阻止了模块加载，这个测试需要先修复 BUG-002
         # 这里测试的是 match_new_questions 的返回值类型
-        with patch('app.services.clustering._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+        with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = json.dumps({"matches": [], "unmatched": [0]})
 
             from app.services.clustering import match_new_questions

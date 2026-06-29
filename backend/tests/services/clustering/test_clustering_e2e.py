@@ -46,7 +46,7 @@ class TestCat2Grouping:
     """测试按 cat2 分组后聚类"""
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_cross_cat2_questions_not_merged(self, mock_encode, mock_build, mock_llm):
@@ -100,7 +100,7 @@ class TestLLMSemanticGrouping:
     """测试 LLM 语义分组（替代简化的一对一验证）"""
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_llm_groups_similar_questions(self, mock_encode, mock_build, mock_llm):
@@ -138,7 +138,7 @@ class TestTransitiveMerge:
     """测试传递性合并: A≈C 且 B≈C → A,B,C 合并"""
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_transitive_merge_via_llm(self, mock_encode, mock_build, mock_llm):
@@ -178,7 +178,7 @@ class TestE2EClusteringQuality:
     """端到端聚类质量测试"""
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_e2e_known_duplicates_merged(self, mock_encode, mock_build, mock_llm):
@@ -219,7 +219,7 @@ class TestE2EClusteringQuality:
         assert 4 in survivors, "ReAct 对中 id=4 应为 survivor（高频优先，id 相同时取大）"
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_e2e_boundary_not_merged(self, mock_encode, mock_build, mock_llm):
@@ -250,7 +250,7 @@ class TestE2EClusteringQuality:
         assert len(result['merged']) == 0, "边界案例不应被合并"
 
     @pytest.mark.asyncio
-    @patch('app.services.clustering._call_llm_with_retry')
+    @patch('app.services.clustering.clusterer._call_llm_with_retry')
     @patch('app.services.embedding_service.build_index')
     @patch('app.services.embedding_service.encode_texts')
     async def test_e2e_different_cat2_independent(self, mock_encode, mock_build, mock_llm):

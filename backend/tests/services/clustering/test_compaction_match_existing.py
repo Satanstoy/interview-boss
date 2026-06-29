@@ -135,9 +135,9 @@ class TestMatchSingletonsToExisting:
             {"validations": [{"new_id": "10", "cluster_id": "1", "valid": True, "confidence": 0.95}]},
         ])
         with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
-            with patch("app.services.clustering._call_llm_with_retry", mock_llm_obj):
+            with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
                 with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
-                    with patch("app.services.clustering._extract_json", mock_extract_obj):
+                    with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         matched_ids = await _match_singletons_to_existing(
                             singletons, existing, user_id=None
                         )
@@ -201,9 +201,9 @@ class TestMatchSingletonsToExisting:
             {"validations": [{"new_id": "10", "cluster_id": "1", "valid": True, "confidence": 0.95}]},
         ])
         with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
-            with patch("app.services.clustering._call_llm_with_retry", mock_llm_obj):
+            with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
                 with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
-                    with patch("app.services.clustering._extract_json", mock_extract_obj):
+                    with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         await _match_singletons_to_existing(
                             singletons, existing, user_id=None
                         )
@@ -289,9 +289,9 @@ class TestMatchSingletonsToExisting:
         mock_llm_obj = AsyncMock(side_effect=mock_llm)
         mock_extract_obj = Mock(side_effect=mock_extract)
         with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
-            with patch("app.services.clustering._call_llm_with_retry", mock_llm_obj):
+            with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
                 with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
-                    with patch("app.services.clustering._extract_json", mock_extract_obj):
+                    with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         result = await compact_singletons_in_db(user_id=None, match_existing=True)
 
         # id=10 应该被匹配到已有聚类
@@ -334,9 +334,9 @@ class TestMatchSingletonsToExisting:
             {"validations": [{"new_id": "11", "cluster_id": "2", "valid": True, "confidence": 0.95}]},
         ])
         with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
-            with patch("app.services.clustering._call_llm_with_retry", mock_llm_obj):
+            with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
                 with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
-                    with patch("app.services.clustering._extract_json", mock_extract_obj):
+                    with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         await _match_singletons_to_existing(
                             singletons, existing, user_id=None
                         )
@@ -391,9 +391,9 @@ class TestCompactSingletonsEndToEnd:
         mock_llm_obj = AsyncMock(side_effect=mock_llm)
         mock_extract_obj = Mock(side_effect=mock_extract)
         with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
-            with patch("app.services.clustering._call_llm_with_retry", mock_llm_obj):
+            with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
                 with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
-                    with patch("app.services.clustering._extract_json", mock_extract_obj):
+                    with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         result = await compact_singletons_in_db(user_id=None, match_existing=True)
 
         assert result['total_singletons'] == 4
