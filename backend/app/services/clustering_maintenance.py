@@ -213,7 +213,7 @@ def _repair_row_metadata(conn, row: Dict) -> Dict:
 
 
 def _merge_exact_duplicate_pair(conn, survivor_id: int, merged_id: int) -> Dict:
-    from app.services.pipeline.batch import _do_merge_to_existing
+    from app.services.pipeline.compact import _do_merge_to_existing
 
     row = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, "

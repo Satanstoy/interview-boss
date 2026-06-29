@@ -73,7 +73,7 @@ class TestCompactSingletonsPagination:
 
     def test_compact_uses_pagination(self):
         """T-004: _load_singletons 应使用分页而非 fetchall"""
-        pipeline_path = Path(BACKEND_ROOT / "app/services/pipeline.py")
+        pipeline_path = Path(BACKEND_ROOT / "app/services/pipeline/compact.py")
         content = pipeline_path.read_text()
         assert "compact_singletons_in_db" in content
         assert "fetchall" not in content or "LIMIT" in content, \

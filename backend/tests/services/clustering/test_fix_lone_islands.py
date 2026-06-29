@@ -84,7 +84,7 @@ class TestFixLoneIslands:
 
     def test_singleton_merge_never_writes_frequency_zero(self, test_db):
         """BUG: 单例合并时 original_questions=[] 不能导致 survivor frequency=0"""
-        from app.services.pipeline.batch import _do_merge_to_existing
+        from app.services.pipeline.compact import _do_merge_to_existing
 
         test_db.execute(
             "INSERT INTO question_bank "

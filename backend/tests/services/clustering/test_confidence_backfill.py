@@ -170,15 +170,15 @@ class TestCompactConfidenceFallback:
     @pytest.mark.asyncio
     async def test_do_merge_to_existing_uses_fallback_confidence(self):
         """当 confidence=0 时，_do_merge_to_existing 应使用 embedding fallback"""
-        from app.services.pipeline.batch import _do_merge_to_existing
+        from app.services.pipeline.compact import _do_merge_to_existing
 
-        with patch('app.services.pipeline.batch.get_db_connection') as mock_conn, \
-             patch('app.services.pipeline.batch._snapshot_question') as mock_snapshot, \
-             patch('app.services.pipeline.batch._record_merge_history') as mock_record, \
-             patch('app.services.pipeline.batch.delete_all_for_qb'), \
-             patch('app.services.pipeline.batch.insert_source'), \
-             patch('app.services.pipeline.batch.insert_original_item'), \
-             patch('app.services.pipeline.batch._compute_merge_confidence', return_value=0.87):
+        with patch('app.services.pipeline.compact.get_db_connection') as mock_conn, \
+             patch('app.services.pipeline.compact._snapshot_question') as mock_snapshot, \
+             patch('app.services.pipeline.compact._record_merge_history') as mock_record, \
+             patch('app.services.pipeline.compact.delete_all_for_qb'), \
+             patch('app.services.pipeline.compact.insert_source'), \
+             patch('app.services.pipeline.compact.insert_original_item'), \
+             patch('app.services.pipeline.compact._compute_merge_confidence', return_value=0.87):
 
             mock_cursor = MagicMock()
             mock_conn.return_value = MagicMock()

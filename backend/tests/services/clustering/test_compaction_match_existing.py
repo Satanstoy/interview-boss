@@ -102,7 +102,7 @@ class TestMatchSingletonsToExisting:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import (
+        from app.services.pipeline.compact import (
             _match_singletons_to_existing,
             _load_existing_clusters_for_compact,
         )
@@ -134,9 +134,9 @@ class TestMatchSingletonsToExisting:
             {"matches": [{"new_id": "10", "cluster_id": 1}]},
             {"validations": [{"new_id": "10", "cluster_id": "1", "valid": True, "confidence": 0.95}]},
         ])
-        with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
+        with patch("app.services.pipeline.compact._call_llm_with_retry", mock_llm_obj):
             with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
-                with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
+                with patch("app.services.pipeline.compact._extract_json", mock_extract_obj):
                     with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         matched_ids = await _match_singletons_to_existing(
                             singletons, existing, user_id=None
@@ -177,7 +177,7 @@ class TestMatchSingletonsToExisting:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import _match_singletons_to_existing
+        from app.services.pipeline.compact import _match_singletons_to_existing
 
         # id=10 有 ai_answer='因为...'，id=1 没有
         singletons = [
@@ -200,9 +200,9 @@ class TestMatchSingletonsToExisting:
             {"matches": [{"new_id": "10", "cluster_id": 1}]},
             {"validations": [{"new_id": "10", "cluster_id": "1", "valid": True, "confidence": 0.95}]},
         ])
-        with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
+        with patch("app.services.pipeline.compact._call_llm_with_retry", mock_llm_obj):
             with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
-                with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
+                with patch("app.services.pipeline.compact._extract_json", mock_extract_obj):
                     with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         await _match_singletons_to_existing(
                             singletons, existing, user_id=None
@@ -222,7 +222,7 @@ class TestMatchSingletonsToExisting:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import _match_singletons_to_existing
+        from app.services.pipeline.compact import _match_singletons_to_existing
 
         singletons = [
             {'id': 12, 'question': 'volatile关键字的作用',
@@ -255,7 +255,7 @@ class TestMatchSingletonsToExisting:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import compact_singletons_in_db
+        from app.services.pipeline.compact import compact_singletons_in_db
 
         # Mock _call_llm_with_retry：第一次（匹配已有聚类）返回匹配，后续调用返回空结果
         call_count = 0
@@ -288,9 +288,9 @@ class TestMatchSingletonsToExisting:
 
         mock_llm_obj = AsyncMock(side_effect=mock_llm)
         mock_extract_obj = Mock(side_effect=mock_extract)
-        with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
+        with patch("app.services.pipeline.compact._call_llm_with_retry", mock_llm_obj):
             with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
-                with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
+                with patch("app.services.pipeline.compact._extract_json", mock_extract_obj):
                     with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         result = await compact_singletons_in_db(user_id=None, match_existing=True)
 
@@ -309,7 +309,7 @@ class TestMatchSingletonsToExisting:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import _match_singletons_to_existing
+        from app.services.pipeline.compact import _match_singletons_to_existing
 
         # id=2 有 frequency=3，原始问题 1 个
         # 合并 id=11 后，original_questions 应有 2 个，frequency=2
@@ -333,9 +333,9 @@ class TestMatchSingletonsToExisting:
             {"matches": [{"new_id": "11", "cluster_id": 2}]},
             {"validations": [{"new_id": "11", "cluster_id": "2", "valid": True, "confidence": 0.95}]},
         ])
-        with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
+        with patch("app.services.pipeline.compact._call_llm_with_retry", mock_llm_obj):
             with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
-                with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
+                with patch("app.services.pipeline.compact._extract_json", mock_extract_obj):
                     with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         await _match_singletons_to_existing(
                             singletons, existing, user_id=None
@@ -361,7 +361,7 @@ class TestCompactSingletonsEndToEnd:
             return func()
         db_module.run_db = _sync_run_db
 
-        from app.services.pipeline.batch import compact_singletons_in_db
+        from app.services.pipeline.compact import compact_singletons_in_db
 
         call_prompts = []
 
@@ -390,9 +390,9 @@ class TestCompactSingletonsEndToEnd:
 
         mock_llm_obj = AsyncMock(side_effect=mock_llm)
         mock_extract_obj = Mock(side_effect=mock_extract)
-        with patch("app.services.pipeline.batch._call_llm_with_retry", mock_llm_obj):
+        with patch("app.services.pipeline.compact._call_llm_with_retry", mock_llm_obj):
             with patch("app.services.clustering.matcher._call_llm_with_retry", mock_llm_obj):
-                with patch("app.services.pipeline.batch._extract_json", mock_extract_obj):
+                with patch("app.services.pipeline.compact._extract_json", mock_extract_obj):
                     with patch("app.services.clustering.matcher._extract_json", mock_extract_obj):
                         result = await compact_singletons_in_db(user_id=None, match_existing=True)
 

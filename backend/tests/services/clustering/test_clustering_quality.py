@@ -361,7 +361,7 @@ class TestMergeHistory:
 
     def test_record_merge_history_function(self):
         """测试：_record_merge_history 函数正确写入数据库"""
-        from app.services.pipeline.batch import _record_merge_history
+        from app.services.pipeline.compact import _record_merge_history
         import sqlite3
 
         conn = sqlite3.connect(":memory:")

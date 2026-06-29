@@ -8,7 +8,8 @@
   - sanitize.py  — 数据清洗
   - queue.py     — 队列操作
   - writer.py    — 数据库写入
-  - batch.py     — 批处理与流水线协调
+  - batch.py     — 增量聚类流水线
+  - compact.py   — 孤岛碎片整理(compaction)
 """
 from .sanitize import BATCH_SIZE, sanitize_batch, _BLACKLIST_PHRASES
 from .queue import (
@@ -30,8 +31,8 @@ from .batch import (
     cluster_batch,
     process_interview_tag_then_maybe_cluster,
     force_cluster_all_pending,
-    compact_singletons_in_db,
 )
+from .compact import compact_singletons_in_db
 
 # 向后兼容：保留旧函数名
 _sanitize_batch = sanitize_batch

@@ -86,7 +86,7 @@ class TestBug003V2NoValidation:
     def test_v1_compaction_has_validation(self):
         """确认 v1 有验证步骤"""
         import inspect
-        from app.services.pipeline.batch import compact_singletons_in_db
+        from app.services.pipeline.compact import compact_singletons_in_db
         source = inspect.getsource(compact_singletons_in_db)
         assert "_validate_merges" in source, "v1 应该有 _validate_merges 调用"
 
