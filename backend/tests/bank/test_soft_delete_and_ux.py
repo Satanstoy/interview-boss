@@ -17,8 +17,9 @@ class TestBug001SoftDelete:
     def test_bug001_question_bank_should_have_deleted_at_column(self):
         """question_bank 表应有 deleted_at 字段"""
         # 读取 connection.py 中的迁移代码
-        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
-            content = f.read()
+        content = ''
+        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
+            content += _p.read_text() + '\n'
 
         # 检查是否有为 question_bank 添加 deleted_at 的迁移代码
         # 修复前：没有这个迁移代码
@@ -185,8 +186,9 @@ class TestBug003DirtyDataPositions:
 
     def test_bug003_should_have_cleanup_migration(self):
         """应有清理脏数据的迁移代码"""
-        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
-            content = f.read()
+        content = ''
+        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
+            content += _p.read_text() + '\n'
 
         # 检查是否有清理 job_positions 脏数据的代码
         has_cleanup = (
@@ -228,8 +230,9 @@ class TestBug004DirtyDataCategories:
 
     def test_bug004_should_have_cleanup_migration(self):
         """应有清理脏分类的迁移代码"""
-        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
-            content = f.read()
+        content = ''
+        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
+            content += _p.read_text() + '\n'
 
         # 检查是否有清理 question_bank.cat1 脏数据的代码
         has_cleanup = (
@@ -274,7 +277,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_delete_button(self):
         """前端应有清除配置按钮"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPage.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有清除配置按钮
@@ -283,7 +286,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_prominent_edit_button(self):
         """前端修改配置按钮应明显"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPanel.vue', 'r') as f:
+        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPage.vue', 'r') as f:
             content = f.read()
 
         # 检查修改配置按钮是否有明显的样式

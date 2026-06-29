@@ -65,16 +65,18 @@ class TestStartupAutoFixEmptyOqs:
 
     def test_startup_fix_backfills_empty_oqs(self):
         """启动修复应为 oqs 为空但 sources 非空的题目回填数据"""
-        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
-            content = f.read()
+        content = ''
+        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
+            content += _p.read_text() + '\n'
 
         assert '回填' in content, "应有 oqs 回填逻辑"
         assert 'original_question_sources' in content, "应操作 original_question_sources 字段"
 
     def test_startup_fix_handles_empty_sources_in_oqs(self):
         """启动修复应修复 oqs 中 sources 为空数组的条目"""
-        with open(BACKEND_ROOT / 'app/db/migrations.py', 'r') as f:
-            content = f.read()
+        content = ''
+        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
+            content += _p.read_text() + '\n'
 
         assert '空 sources' in content or 'empty.*sources' in content.lower() or '\"sources\": []' in content, "应有修复空 sources 条目的逻辑"
 

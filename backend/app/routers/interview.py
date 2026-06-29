@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
-from app.routers.submit import background_generate_answer
+from app.services.submit_service import background_generate_answer
 from app.services.pipeline import (
     tag_interview, enqueue_questions, should_trigger_clustering,
     dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed,

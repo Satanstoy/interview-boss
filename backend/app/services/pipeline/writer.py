@@ -26,7 +26,7 @@ async def tag_and_write_details(
     if not questions:
         return []
 
-    from app.routers.submit import tag_questions_batch
+    from app.services.submit_service import tag_questions_batch
     tagged_rows = await tag_questions_batch(url, company, round_, questions, user_id=user_id)
 
     def _write_details():

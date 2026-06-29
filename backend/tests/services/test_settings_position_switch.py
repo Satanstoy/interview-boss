@@ -162,7 +162,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPanel.vue'
+            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
@@ -185,7 +185,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPanel.vue'
+            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
@@ -206,7 +206,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPanel.vue'
+            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()

@@ -15,14 +15,13 @@ from app.core.config import LLM_MODEL, MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'}
 from app.core.prompts import SYSTEM_PROMPT, JD_PROMPT, INTERVIEW_PROMPT, TAGGING_PROMPT, build_tagging_prompt
 from app.core.auth import get_current_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position, get_user_job_position
+from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.db.operations import (
     _check_duplicate_url_sync, _insert_jd, _insert_interview,
     submit_interview_txn, sync_interview_details,
-    insert_personal_questions_txn,
 )
 from app.services.llm import client, _should_use_response_format, _extract_json, _call_llm_with_retry_messages, get_llm_client_for_user, raw_llm_call
-from app.services.utils import encode_image, normalize_category
+from app.services.utils import encode_image
 
 from app.agents.submit.graph import stream_submit_graph
 

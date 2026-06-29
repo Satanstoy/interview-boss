@@ -8,6 +8,9 @@ BUG-003: 分析中不显示详细内容
 BUG-004: 软删除记录污染聚类质量
 """
 import json
+from pathlib import Path
+
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 
@@ -126,7 +129,7 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_app_vue_has_active_reprocessing_computed(self):
         """修复后：App.vue 应有 activeReprocessing computed 属性"""
-        with open("frontend/src/App.vue", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "activeReprocessing" in content, (
@@ -136,7 +139,7 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_global_progress_indicator_in_template(self):
         """修复后：模板中应有全局进度指示器（fixed 定位）"""
-        with open("frontend/src/App.vue", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
             content = f.read()
 
         has_fixed_indicator = ("fixed" in content and "activeReprocessing" in content)
@@ -151,7 +154,7 @@ class TestBug002ProgressStateLifecycle:
 
     def test_bug002_reprocessing_state_is_top_level_ref(self):
         """reprocessingIds 应是顶级 ref，不绑定在 v-if 组件内"""
-        with open("frontend/src/App.vue", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
             content = f.read()
 
         # 验证 reprocessingIds 是在 <script setup> 顶级声明的
@@ -181,8 +184,9 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_status_column(self):
         """修复后：interview 表应有 analysis_status 列"""
-        with open("backend/app/db/migrations.py", "r", encoding="utf-8") as f:
-            content = f.read()
+        content = ''
+        for _p in sorted(BACKEND_ROOT.joinpath('app/db/migrations').glob('*.py')):
+            content += _p.read_text(encoding='utf-8') + '\n'
 
         assert "analysis_status" in content, (
             "BUG-001: interview 表缺少 analysis_status 列，"
@@ -191,8 +195,9 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_result_column(self):
         """修复后：interview 表应有 analysis_result 列用于存储中间结果"""
-        with open("backend/app/db/migrations.py", "r", encoding="utf-8") as f:
-            content = f.read()
+        content = ''
+        for _p in sorted(BACKEND_ROOT.joinpath('app/db/migrations').glob('*.py')):
+            content += _p.read_text(encoding='utf-8') + '\n'
 
         assert "analysis_result" in content, (
             "BUG-001: interview 表缺少 analysis_result 列，"

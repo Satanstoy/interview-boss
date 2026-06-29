@@ -81,7 +81,7 @@ async def complete_node(state: SubmitState) -> dict:
 
 async def classify_node(state: SubmitState) -> dict:
     """分类标注节点 -- 调用现有 tag_questions_batch + 质量检查"""
-    from app.routers.submit import tag_questions_batch
+    from app.services.submit_service import tag_questions_batch
     from app.db.connection import run_db, get_taxonomy_for_position
 
     with NodeTimer() as timer:

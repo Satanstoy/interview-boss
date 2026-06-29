@@ -456,7 +456,7 @@ async def submit_import_task(ctx, job_id: int):
         answer_tasks = final_state_values.get("answer_tasks", [])
         uid = result_collector.get("user_id") or payload.get("user_id")
         if answer_tasks and uid:
-            from app.routers.submit import background_generate_answer
+            from app.services.submit_service import background_generate_answer
             for qid, qtext in answer_tasks:
                 try:
                     await background_generate_answer(qid, qtext, uid)

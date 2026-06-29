@@ -495,7 +495,7 @@ async def update_generic_data(req: GenericUpdateRequest, bg_tasks: BackgroundTas
         if req.table_name == "interview" and "questions_list" in req.update_data:
             async def _sync_details():
                 try:
-                    from app.routers.submit import tag_questions_batch
+                    from app.services.submit_service import tag_questions_batch
                     from app.db.operations import _replace_details_txn
 
                     def _load_interview():
