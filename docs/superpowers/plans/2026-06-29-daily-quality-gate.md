@@ -200,7 +200,7 @@ test('quality gate smoke: login route renders without real backend', async ({ pa
   await expect(page.getByTestId('login-page')).toBeVisible()
   await expect(page.getByTestId('login-brand')).toContainText('InterviewBoss')
   await expect(page.getByTestId('login-panel')).toBeVisible()
-  await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^登录$/ })).toBeVisible()
 })
 ```
 
