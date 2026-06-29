@@ -219,7 +219,7 @@ def _fallback_interviewer_response(marker: str, state: ChatState) -> str:
 
     if normalized == "project-deep-dive":
         return (
-            "我们继续围绕你的项目做深挖。你刚才提到"AI 追问编排"和"题库/JD 匹配"，"
+            "我们继续围绕你的项目做深挖。你刚才提到“AI 追问编排”和“题库/JD 匹配”，"
             "请具体讲一下：一次候选人回答进入后端后，从意图判断、关键词提取、题库检索到生成追问，"
             "完整链路是怎么设计的？中间你做过哪些取舍？"
         )
