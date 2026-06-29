@@ -3,7 +3,7 @@ import logging
 import os
 from app.db.connection import get_db_connection
 from app.db.question_bank_sources import insert_source, delete_source, insert_original_item, remove_original_items_by_url
-from app.services.utils import _extract_url_signature, normalize_category
+from app.db.utils import _extract_url_signature, normalize_category
 
 logger = logging.getLogger("interview-boss")
 
