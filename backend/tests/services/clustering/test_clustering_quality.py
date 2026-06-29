@@ -314,11 +314,11 @@ class TestMergeHistory:
 
     def test_merge_history_table_schema(self):
         """测试：merge_history 表 schema 包含必要字段"""
-        from app.db.migrations import _migration_032_merge_history
+        from app.db.migrations import _migration_032_embedding_column
         import sqlite3
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
-        _migration_032_merge_history(conn)
+        _migration_032_embedding_column(conn)
 
         # 检查表存在
         tables = conn.execute(
@@ -342,11 +342,11 @@ class TestMergeHistory:
 
     def test_merge_feedback_table_schema(self):
         """测试：merge_feedback 表 schema 包含必要字段"""
-        from app.db.migrations import _migration_032_merge_history
+        from app.db.migrations import _migration_032_embedding_column
         import sqlite3
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
-        _migration_032_merge_history(conn)
+        _migration_032_embedding_column(conn)
 
         columns = {row[1] for row in conn.execute("PRAGMA table_info(merge_feedback)").fetchall()}
         required_columns = {

@@ -66,7 +66,7 @@ class TestBugTaxonomyConfirm:
     async def test_confirm_taxonomy_endpoint_works(self):
         """confirm_taxonomy 端点应正常工作"""
         # Arrange
-        from app.routers.profile import confirm_taxonomy
+        from app.routers.profile_pkg.taxonomy import confirm_taxonomy
 
         # Mock 依赖
         mock_user = {"id": 1, "is_admin": True}

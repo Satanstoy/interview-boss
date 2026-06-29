@@ -52,7 +52,7 @@ class TestAdminEndpointsStillProtected:
 
     def test_split_requires_admin(self):
         """POST /api/master-bank/split-question 应要求管理员权限"""
-        from app.routers.questions import split_question
+        from app.routers.questions_pkg.mutations import split_question
         import inspect
         source = inspect.getsource(split_question)
         assert "get_admin_user" in source, \
@@ -60,7 +60,7 @@ class TestAdminEndpointsStillProtected:
 
     def test_merge_requires_admin(self):
         """POST /api/master-bank/merge-question 应要求管理员权限"""
-        from app.routers.questions import merge_question
+        from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         assert "get_admin_user" in source, \
@@ -68,7 +68,7 @@ class TestAdminEndpointsStillProtected:
 
     def test_retag_requires_admin(self):
         """POST /api/master-bank/re-tag 应要求管理员权限"""
-        from app.routers.questions import retag_master_question
+        from app.routers.questions_pkg.mutations import retag_master_question
         import inspect
         source = inspect.getsource(retag_master_question)
         assert "get_admin_user" in source, \

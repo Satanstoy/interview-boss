@@ -12,7 +12,7 @@ class TestSavePersonalTaxonomy:
     @pytest.mark.asyncio
     async def test_save_personal_taxonomy_has_correct_imports(self):
         """save_personal_taxonomy 应能正确调用 get_user_job_position（不抛出 NameError）"""
-        from app.routers.profile import save_personal_taxonomy
+        from app.routers.profile_pkg.taxonomy import save_personal_taxonomy
 
         mock_user = {"id": 1, "is_admin": True}
         req = {"categories": [{"cat1": "A.个人分类", "children": ["A1.子类"]}]}
@@ -37,7 +37,7 @@ class TestSavePersonalTaxonomy:
     @pytest.mark.asyncio
     async def test_save_personal_taxonomy_rejects_empty_categories(self):
         """save_personal_taxonomy 应拒绝空的 categories"""
-        from app.routers.profile import save_personal_taxonomy
+        from app.routers.profile_pkg.taxonomy import save_personal_taxonomy
 
         mock_user = {"id": 1, "is_admin": True}
         req = {"categories": []}

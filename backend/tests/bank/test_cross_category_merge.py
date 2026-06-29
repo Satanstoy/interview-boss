@@ -20,7 +20,7 @@ class TestSearchReturnsCategory:
 
     def test_search_sql_includes_cat1_cat2(self):
         """T-001a: 搜索 SQL 应包含 qb.cat1, qb.cat2"""
-        from app.routers.questions import search_master_bank
+        from app.routers.questions_pkg.mutations import search_master_bank
         import inspect
         source = inspect.getsource(search_master_bank)
         assert "qb.cat1" in source, "搜索 SQL 缺少 qb.cat1"
@@ -36,7 +36,7 @@ class TestStandaloneMergePreservesSource:
 
     def test_merge_endpoint_has_standalone_preserve_logic(self):
         """T-002a: 合并端点应有 is_standalone_merge 时 pass 的逻辑（保留源行）"""
-        from app.routers.questions import merge_question
+        from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         assert "is_standalone_merge" in source, "缺少 is_standalone_merge 判断"
@@ -64,7 +64,7 @@ class TestStandaloneMergePreservesSource:
 
     def test_standalone_merge_skips_source_url_copy(self):
         """T-002b: 独立题合并时不应将源 URL 复制到目标 sources"""
-        from app.routers.questions import merge_question
+        from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         assert "not is_standalone_merge" in source, "独立题合并应跳过 sources 复制"
@@ -88,7 +88,7 @@ class TestMergeSupportsCategoryUpdate:
 
     def test_merge_endpoint_uses_cat_params(self):
         """T-003b: 合并端点应根据 target_cat1/cat2 构建动态 SQL"""
-        from app.routers.questions import merge_question
+        from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         assert "target_cat1" in source, "合并端点缺少 target_cat1 处理"
@@ -184,7 +184,7 @@ class TestStandaloneMergeIntegration:
         with patch('app.routers.questions.get_db_connection', return_value=mock_conn), \
              patch('app.routers.questions.run_db', side_effect=lambda fn: fn()):
             from app.models.schemas import MergeOriginalQuestionRequest
-            from app.routers.questions import merge_question
+            from app.routers.questions_pkg.mutations import merge_question
             import asyncio
 
             req = MergeOriginalQuestionRequest(original_question='独立题Q', target_id=200)
@@ -201,7 +201,7 @@ class TestStandaloneMergeIntegration:
 
     def test_non_standalone_merge_has_delete_branch(self):
         """T-005b: 非独立题合并且源清空时有 DELETE 分支"""
-        from app.routers.questions import merge_question
+        from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         # 验证 elif len(new_src_orig) == 0: DELETE 逻辑存在

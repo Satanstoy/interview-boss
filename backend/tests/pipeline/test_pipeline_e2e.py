@@ -234,7 +234,7 @@ class TestSingleInterview:
     def test_full_pipeline(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """单条面经走完两阶段流水线"""
         from app.services.pipeline import (
-            tag_interview, enqueue_interview, should_trigger_clustering,
+            tag_interview, enqueue_questions, should_trigger_clustering,
             dequeue_batch, cluster_batch, mark_batch_done, BATCH_SIZE
         )
         conn = mock_db
@@ -257,7 +257,7 @@ class TestSingleInterview:
             assert len(qb) == 0
 
             # 入队
-            qid = enqueue_interview(1)
+            qid = enqueue_questions(1)
             assert qid > 0
 
             # 触发条件
@@ -301,7 +301,7 @@ class TestBatchProcessing:
     def test_batch_merges_same_cat2(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """相同 cat2 的题目被合并到同一聚类"""
         from app.services.pipeline import (
-            tag_interview, enqueue_interview, should_trigger_clustering,
+            tag_interview, enqueue_questions, should_trigger_clustering,
             dequeue_batch, cluster_batch, mark_batch_done, BATCH_SIZE
         )
         conn = mock_db
@@ -315,7 +315,7 @@ class TestBatchProcessing:
             for iv_id, url, ql in interviews:
                 _make_interview(conn, iv_id, url, ql)
                 await tag_interview(iv_id, url, "公司", "一面", ql, job_position="后端开发")
-                enqueue_interview(iv_id)
+                enqueue_questions(iv_id)
 
             assert conn.execute("SELECT COUNT(*) as c FROM questions_detail").fetchone()['c'] == 6
             assert conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()['c'] == 0
@@ -448,7 +448,7 @@ class TestDataConsistency:
     def test_reprocess_no_duplicate_sources(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """对同一 URL 重新聚类，sources 中无重复"""
         from app.services.pipeline import (
-            tag_interview, enqueue_interview, dequeue_batch, cluster_batch, mark_batch_done
+            tag_interview, enqueue_questions, dequeue_batch, cluster_batch, mark_batch_done
         )
         conn = mock_db
 
@@ -458,7 +458,7 @@ class TestDataConsistency:
 
             # 第一次
             await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
-            enqueue_interview(1)
+            enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch])
@@ -467,7 +467,7 @@ class TestDataConsistency:
             conn.execute("DELETE FROM analysis_queue")
             conn.commit()
             await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？\n2. 缓存穿透？", job_position="后端开发")
-            enqueue_interview(1)
+            enqueue_questions(1)
             batch2 = dequeue_batch(20)
             await cluster_batch(batch2, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch2])
@@ -487,7 +487,7 @@ class TestDataConsistency:
     def test_queue_lifecycle(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """队列状态：pending → processing → done/failed"""
         from app.services.pipeline import (
-            enqueue_interview, dequeue_batch, mark_batch_done, mark_batch_failed,
+            enqueue_questions, dequeue_batch, mark_batch_done, mark_batch_failed,
             get_pending_count, get_processing_count
         )
         conn = mock_db
@@ -495,7 +495,7 @@ class TestDataConsistency:
         async def _run():
             for i in range(1, 4):
                 _make_interview(conn, i, f"https://iv{i}.com", "1. 题目？")
-                enqueue_interview(i)
+                enqueue_questions(i)
 
             assert get_pending_count() == 3
             assert get_processing_count() == 0
@@ -639,7 +639,7 @@ class TestEdgeCases:
     def test_reprocess_preserves_ai_answer(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """重新聚类保留已有 AI 答案"""
         from app.services.pipeline import (
-            tag_interview, enqueue_interview, dequeue_batch, cluster_batch, mark_batch_done
+            tag_interview, enqueue_questions, dequeue_batch, cluster_batch, mark_batch_done
         )
         conn = mock_db
 
@@ -649,7 +649,7 @@ class TestEdgeCases:
 
             # 第一次
             await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
-            enqueue_interview(1)
+            enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch])
@@ -663,7 +663,7 @@ class TestEdgeCases:
             conn.execute("DELETE FROM analysis_queue")
             conn.commit()
             await tag_interview(1, url, "腾讯", "一面", "1. Redis 持久化？", job_position="后端开发")
-            enqueue_interview(1)
+            enqueue_questions(1)
             batch2 = dequeue_batch(20)
             await cluster_batch(batch2, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch2])

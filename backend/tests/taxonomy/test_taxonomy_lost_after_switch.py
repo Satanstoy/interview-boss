@@ -87,7 +87,7 @@ class TestTaxonomyLostAfterSwitch:
     async def test_confirm_taxonomy_saves_as_user_taxonomy(self):
         """confirm_taxonomy 应将分类保存为用户个人分类"""
         # Arrange
-        from app.routers.profile import confirm_taxonomy
+        from app.routers.profile_pkg.taxonomy import confirm_taxonomy
 
         mock_user = {"id": 1, "is_admin": True}
         req = {"categories": [{"cat1": "A.AI生成分类", "children": ["A1.子类"]}]}
@@ -115,7 +115,7 @@ class TestTaxonomyLostAfterSwitch:
     @pytest.mark.asyncio
     async def test_update_profile_saves_taxonomy_as_user_taxonomy(self):
         """update_profile 应将 taxonomy 保存为用户个人分类（非系统分类）"""
-        from app.routers.profile import update_profile
+        from app.routers.profile_pkg.taxonomy import update_profile
         from app.models.schemas import ProfileUpdateRequest
 
         mock_admin = {"id": 1, "is_admin": True}
