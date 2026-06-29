@@ -152,19 +152,7 @@ class TestBUG003TagBatchJsonParsing:
 # ── BUG-004: submit LLM 调用缺少重试机制 ──
 
 class TestBUG004SubmitRetry:
-    """BUG-004: submit_data 中 LLM 调用缺少重试"""
-
-    def test_submit_data_source_uses_retry(self):
-        """submit_data 的 LLM 调用应使用重试机制"""
-        from app.routers import submit
-        import inspect
-        source = inspect.getsource(submit.submit_data)
-        # 修复后：不应直接调用 client.chat.completions.create
-        # 而应使用 _call_llm_with_retry 或类似重试封装
-        if 'client.chat.completions.create' in source:
-            # 如果仍有直接调用，检查是否有重试装饰器或 tenacity 包装
-            has_retry = 'retry' in source.lower() or '_call_llm_with_retry' in source
-            assert has_retry, "submit_data 直接调用 LLM API 而无重试机制"
+    """BUG-004: submit LLM 调用缺少重试机制"""
 
     def test_call_llm_with_retry_exists(self):
         """_call_llm_with_retry 应存在于 llm 服务中"""

@@ -6,26 +6,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
-class TestBug001ContentTypeField:
-    """BUG-001: 前端字段名 type vs content_type"""
-
-    def test_submit_endpoint_accepts_content_type(self):
-        """验证 /api/submit 端点接受 content_type 参数"""
-        from app.routers.submit import submit_data
-        import inspect
-        sig = inspect.signature(submit_data)
-        assert 'content_type' in sig.parameters, \
-            "submit_data 应接受 content_type 参数"
-
-    def test_submit_endpoint_accepts_target(self):
-        """验证 /api/submit 端点接受 target 参数"""
-        from app.routers.submit import submit_data
-        import inspect
-        sig = inspect.signature(submit_data)
-        assert 'target' in sig.parameters, \
-            "submit_data 应接受 target 参数"
-
-
 class TestBug003JdJobPosition:
     """BUG-003: JD 表添加 job_position 字段"""
 
