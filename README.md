@@ -322,6 +322,14 @@ npm install
 npm run dev
 ```
 
+日常开发收尾可运行统一质量门禁：
+
+```bash
+./deploy/docker-deploy.sh check
+```
+
+该命令会执行后端 Docker 测试基础检查、前端 build/smoke 测试，并汇总 npm/pip audit 报告。audit 第一阶段只报告不拦截。
+
 浏览器打开 `http://localhost:3000`。
 
 ### 5. 生产部署（可选）

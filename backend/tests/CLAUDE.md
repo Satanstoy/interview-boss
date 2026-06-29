@@ -7,10 +7,15 @@ TDD 测试基础设施。遵循红-绿-重构循环。
 ```bash
 # 通过 Docker 容器执行测试
 docker compose exec backend uv run pytest backend/tests/ -q                    # 全部测试
+./deploy/docker-deploy.sh check backend                                       # 后端日常门禁
 docker compose exec backend uv run pytest backend/tests/<dir>/ -q              # 子目录
 docker compose exec backend uv run pytest backend/tests/test_xxx.py -v         # 单文件
 docker compose exec backend uv run pytest backend/tests/test_xxx.py::test_func # 单个测试
 ```
+
+## 路径定位规则
+
+结构测试必须从 repo root 或 `backend/app` 根定位文件，禁止使用脆弱的 `backend/tests/...` 相对路径推导源码位置。需要读取部署配置的测试应通过 Docker `test-runtime` 访问 `/app/Dockerfile`、`/app/docker-compose.yml`、`/app/.dockerignore`、`/app/nginx/` 和 `/app/deploy/`。
 
 ## Fixtures（conftest.py 自动注入）
 

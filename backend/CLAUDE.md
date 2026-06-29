@@ -9,6 +9,7 @@
 # 开发/测试必须通过 Docker 容器执行（宿主机无 .venv）
 docker compose exec backend uv run uvicorn app.asgi:app --host 0.0.0.0 --port 8000   # 开发
 docker compose exec backend uv run pytest backend/tests/ -q                            # 测试
+./deploy/docker-deploy.sh check backend                                               # 后端日常门禁（Docker test-runtime）
 docker compose exec backend uv run pytest backend/tests/test_xxx.py -v                 # 单文件
 
 # 依赖管理（在容器内执行）
@@ -17,6 +18,7 @@ docker compose exec backend uv add <package>                                    
 ```
 
 禁止宿主机直接 `uv run`，必须通过 Docker 容器执行。
+后端日常门禁由 `./deploy/docker-deploy.sh check backend` 执行：构建 test-runtime、pytest collect-only、compileall，以及题库/infra/router 结构测试。
 
 ## 架构（4 层，依赖方向向内）
 

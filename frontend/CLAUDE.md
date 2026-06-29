@@ -9,8 +9,12 @@
 cd frontend
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建 → /var/www/interview-boss/dist/
-npx playwright test  # 运行 E2E 测试
+npm run test         # 日常 smoke 测试（Playwright 自动启动 Vite）
+npm run test:e2e     # 运行完整 E2E 测试
+npm run audit:prod   # 生产依赖 audit 报告
 ```
+
+`./deploy/docker-deploy.sh check frontend` 会执行 `npm run build` 和 `npm run test`；`./deploy/docker-deploy.sh check audit` 会汇总 npm/pip audit，但第一阶段只报告不拦截。
 
 ## 技术栈
 

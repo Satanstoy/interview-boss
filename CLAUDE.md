@@ -16,6 +16,7 @@
 # 开发测试（必须通过 Docker 容器执行，禁止宿主机直接 uv run）
 docker compose exec backend pytest backend/tests/ -q   # 后端测试
 cd frontend && npm run build                             # 前端构建
+./deploy/docker-deploy.sh check                          # 日常质量门禁（后端 Docker + 前端 build/test + audit 报告）
 
 # 部署
 ./deploy/docker-deploy.sh update                         # 完整部署（重建镜像，后端/依赖变更时用）
@@ -37,6 +38,7 @@ cd frontend && npm run build                             # 前端构建
 ## 核心规范
 
 - **TDD（强制）**：先写测试 → 确认失败 → 最少代码通过 → 重构。详见 `backend/CLAUDE.md` 和 `frontend/CLAUDE.md`。
+- **日常门禁**：开发收尾优先跑 `./deploy/docker-deploy.sh check`；audit 第一阶段只报告不拦截。
 - **Commit**：Conventional Commits（`feat(frontend):`、`fix(backend):`），英文。Git hook 自动检查。
 - **Git 工作流**：本项目由用户单人维护。除非用户明确要求创建分支、PR 或 worktree，日常修改直接在 `master` 上进行并提交；不要为了常规改动自动创建 feature branch。
 - **语言**：UI/提示词/文档中文简体，代码标识符英文。
@@ -100,6 +102,7 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports，不提�
 
 - **后端**：`conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures
 - **前端**：Playwright 测试必须 mock API，禁止截图断言，禁止使用真实密码
+- **日常门禁**：`./deploy/docker-deploy.sh check` 汇总后端 collect/compile/结构测试、前端 build/smoke test 和 audit WARN。
 - **详细规则**：`.claude/rules/test-files.md`（编辑测试文件时自动加载）
 
 ## Gotchas
