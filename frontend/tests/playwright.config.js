@@ -5,8 +5,14 @@ export default defineConfig({
   testMatch: '**/*.spec.js',
   timeout: 30000,
   retries: 0,
+  webServer: {
+    command: 'npm run dev -- --host 127.0.0.1 --strictPort',
+    url: 'http://127.0.0.1:3000',
+    reuseExistingServer: false,
+    timeout: 120000,
+  },
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://127.0.0.1:3000',
     headless: true,
     channel: 'chrome',
     // 禁止截图 — 部分 AI 模型无法处理图片，用文本断言代替

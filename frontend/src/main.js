@@ -8,6 +8,8 @@ import { MotionPlugin } from '@vueuse/motion'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import { logger } from '@/utils/logger'
+import { useAuth } from '@/composables/useAuth.js'
+import { markAuthReady } from '@/router/index.js'
 
 /**
  * 全局错误捕获 & 白屏检测
@@ -61,7 +63,7 @@ function detectBlankScreen() {
   let retries = 0
 
   function check() {
-    // 等待 Vue 应用初始化完成（App.vue 中 initAuth 完成后设置此标记）
+    // 等待 Vue 应用初始化完成（bootstrap 中 initAuth 完成后设置此标记）
     if (!window.__VUE_APP_READY__) {
       if (retries < MAX_RETRIES) {
         retries++
@@ -124,4 +126,15 @@ app.config.errorHandler = (err, instance, info) => {
   })
 }
 
-app.mount('#app')
+async function bootstrap() {
+  const { initAuth } = useAuth()
+  try {
+    await initAuth()
+  } finally {
+    markAuthReady()
+    app.mount('#app')
+    window.__VUE_APP_READY__ = true
+  }
+}
+
+bootstrap()
