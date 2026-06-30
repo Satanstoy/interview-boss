@@ -36,6 +36,7 @@ docker compose --profile test run --rm test uv run pytest backend/tests/infra/ -
 ./deploy/docker-deploy.sh diagnose                       # 磁盘/资源诊断
 ./deploy/docker-deploy.sh cleanup --dry-run              # 清理预览（等价 diagnose）
 ./deploy/docker-deploy.sh cleanup                        # 安全清理（BuildKit cache + dangling images）
+./deploy/docker-deploy.sh mirrors                        # 手动刷新镜像源缓存和 Docker Hub mirror
 ```
 
 **部署策略：**
@@ -134,6 +135,9 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports、superpo
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
 - Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
 - Docker 磁盘保护：部署必须走 `./deploy/docker-deploy.sh update/all/worker-up`，脚本会在构建前检查根分区至少 4GB 可用，构建后低于 5GB 时自动收缩 BuildKit cache（默认保留 2GB）。不要绕过脚本直接长期执行 `docker compose build`。
+- Docker 镜像源策略：`update/build/test/worker-up` 默认复用版本化缓存/稳定默认源，只做短健康检查；健康检查失败才刷新 npm/PyPI/apt 源，避免每次部署改 build args 导致依赖层缓存失效，也避免旧脚本缓存的坏源污染后续 update。只有镜像源整体失效或首次配置机器时运行 `./deploy/docker-deploy.sh mirrors`，它会清缓存、完整测速并更新 Docker Hub registry mirror。
+- Docker 部署预检：`update/build/test/worker-up` 在真正 build 前会检查生产依赖仍是 `uv export + pip install -i $PYPI_MIRROR`，compose build 仍保留 `network: host`。不要把生产依赖改回 `uv sync --frozen --no-dev --no-install-project`，否则 `uv.lock` 里的 `files.pythonhosted.org` 直链会绕过 PyPI 镜像并造成 update 卡住。
+- Docker 构建 DNS：`docker-compose.yml` 的 build 使用 `network: host`，避免 systemd-resolved 的 `127.0.0.53` stub 让 BuildKit fallback 到不可控外部 DNS。`mirrors` 命令还会持久化 Docker daemon DNS，默认 `223.5.5.5,119.29.29.29`。
 - 磁盘诊断：`./deploy/docker-deploy.sh diagnose`（输出根分区、Docker 资源、宿主机大文件目录）；`./deploy/docker-deploy.sh cleanup --dry-run`（等价 diagnose）；`cleanup --aggressive`（同时清理宿主机 node_modules/.venv）
 
 ## Docs（历史经验库）
@@ -151,6 +155,8 @@ worker (--profile worker, 按需启动) → redis/backend data
 
 - Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
 - 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=4096`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
+- 镜像源构建保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`。不要在普通 `update` 中强制完整测速，除非正在排查镜像源故障。镜像缓存目录由 `MIRROR_CACHE_VERSION` 控制，默认写入 `/tmp/interview-boss-mirrors-v2`。
+- Docker daemon DNS 可通过 `DEPLOY_DOCKER_DNS=223.5.5.5,119.29.29.29` 覆盖，普通 update 不应频繁改 daemon；只在 `mirrors` 维护命令中持久化。
 - Nginx 反代 `/api/` → backend:8000（read timeout 600s，SSE 禁用 buffering/cache/gzip），其余 → `/usr/share/nginx/html` 静态文件
 - 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`
 - HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）

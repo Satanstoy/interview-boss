@@ -406,7 +406,7 @@ npm run dev
 
 ### Docker 部署（推荐）
 
-Docker 一键部署包含 Redis、后端、Nginx 三个核心容器，Worker 通过 profile 按需挂载。镜像已配置国内加速（阿里云 npm/apt/PyPI 镜像）和 BuildKit 本地缓存。
+Docker 一键部署包含 Redis、后端、Nginx 三个核心容器，Worker 通过 profile 按需挂载。镜像已配置国内加速、短健康检查和 BuildKit 本地缓存。
 
 #### 前置条件
 
@@ -426,9 +426,13 @@ cp backend/.env.example backend/.env
 sudo ./deploy/docker-deploy.sh all
 ```
 
-首次构建会生成两个本地镜像：`interview-boss-app:local`（backend/worker 共用）和 `interview-boss-nginx:local`（内置前端 dist）。后续更新复用 BuildKit 缓存层、inline cache 和 npm/uv cache mounts，依赖未变时不重新下载。
+首次构建会生成两个本地镜像：`interview-boss-app:local`（backend/worker 共用）和 `interview-boss-nginx:local`（内置前端 dist）。后续代码更新只需执行 `sudo ./deploy/docker-deploy.sh update`；脚本会自动备份数据库、构建镜像、等待健康检查，依赖未变时复用 BuildKit 缓存层、inline cache 和 npm/pip/uv cache mounts，不重新下载。
 
 部署脚本内置磁盘保护：构建前根分区至少保留 4GB，构建后低于 5GB 会自动收缩 BuildKit cache（默认保留 2GB），避免 Docker 部署过程中把磁盘写满。
+
+部署脚本默认复用缓存/稳定默认镜像源，只做短健康检查；健康检查失败才刷新 npm/PyPI/apt 源，避免每次 `update` 都改变 build args 导致依赖层缓存失效。镜像源缓存使用版本化目录，旧脚本留下的坏源不会污染后续 `update`。镜像源整体失效或首次配置机器时，执行 `sudo ./deploy/docker-deploy.sh mirrors` 强制清缓存、完整测速并更新 Docker Hub registry mirror。
+
+`update/build/test/worker-up` 会先做快速部署预检：生产依赖必须保持 `uv export + pip install -i $PYPI_MIRROR`，compose build 必须保留 `network: host`。如果有人把依赖安装改回会直连 `files.pythonhosted.org` 的慢路径，脚本会在真正 build 前直接失败并给出原因。
 
 #### 常用运维命令
 
@@ -442,6 +446,7 @@ sudo ./deploy/docker-deploy.sh worker-up   # 按需启动 Worker
 sudo ./deploy/docker-deploy.sh worker-down # 停止 Worker
 sudo ./deploy/docker-deploy.sh worker-logs # 查看 Worker 日志
 sudo ./deploy/docker-deploy.sh backup      # 备份数据库和 Redis 数据
+sudo ./deploy/docker-deploy.sh mirrors     # 手动刷新镜像源缓存和 Docker Hub mirror
 sudo ./deploy/docker-deploy.sh down        # 停止所有服务
 ```
 
