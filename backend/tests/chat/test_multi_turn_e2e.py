@@ -446,7 +446,7 @@ class TestContextManagement:
                 "intent": "interview_question",
                 "keywords": [],
                 "search_query": "",
-                "answer_complete": True,
+                "answer_complete": False,
                 "retrieval_intent": None,
                 "search_positive_terms": [],
                 "search_negative_terms": [],

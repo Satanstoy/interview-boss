@@ -8,7 +8,7 @@ Progressive Disclosure 架构的面试官技能系统。每个 skill 是一个�
 skills/
 ├── base.py              ← shared skills 兼容导出
 ├── loader.py            ← shared loader 兼容导出
-├── builder.py           ← shared builder 兼容导出
+├── builder.py           ← chat-specific catalog 包装 + shared prompt builder
 ├── defaults.py          ← get_default_registry() 扫描所有子目录加载 skill
 ├── __init__.py          ← 统一导出
 ├── adaptive-difficulty/ ← 自适应难度调节
@@ -28,7 +28,7 @@ skills/
 |-------|------|---------|
 | Layer 1 | 标准 metadata（name, description）+ InterviewBoss runtime metadata | 始终加载 |
 | Layer 2 | Instruction（`SKILL.md` body） | `load_skill` 按需加载 |
-| Layer 3 | `references/`、`scripts/`、`assets/` 资源 | 明确需要时按路径读取或执行 |
+| Layer 3 | `references/`、`scripts/`、`assets/` 资源 | 默认只索引；当前运行时不自动读取或执行 |
 
 ## SKILL.md 格式
 
@@ -50,6 +50,7 @@ metadata:
 ## 触发规则
 
 - `always_active=true` 的 skill 始终匹配（`interview-rhythm`、`adaptive-difficulty`、`interview-tool-use`）
+- 只有 `always_active=true` 且 `metadata.interview-boss.kind: tool-use` 的 skill 会自动注入每次 ReAct system prompt；普通行为类 skill 即使 always active，也只在被 `load_skill` 或 state `active_skills` 明确激活后注入完整 body
 - 其他 skill：triggers 中任一关键词出现在用户消息或关键词中
 - `hr-soft-skills` 有特殊上下文验证：泛化触发词（如"团队"）需要配合上下文词（合作/协作/文化等）
 - 面试后期（12+ 消息）自动激活 `hr-soft-skills`
@@ -58,9 +59,10 @@ metadata:
 
 - 新增 skill：创建目录 + `SKILL.md`，无需修改 Python 代码（自动扫描加载）
 - skill 名称必须与父目录一致，并使用小写字母、数字和单个连字符
-- 可选资源目录为 `references/`、`scripts/`、`assets/`；默认只索引不注入 prompt，读取必须限制在 skill 目录内
+- 可选资源目录为 `references/`、`scripts/`、`assets/`；默认只索引不注入 prompt。`references/` 可作为开发者/测试文档；`scripts/` 不得由 Agent 自动执行，除非后续新增受限 runner 和对应测试
+- `load_skill` 的 enum 必须等于 registry 中所有非 `kind=tool-use` 的 skill；`interview-tool-use` 这类常驻工具策略不能暴露给模型手动加载
 - `base.py` 中的 `_triggers_match()` 做上下文感知匹配，减少误触发
-- `builder.py` 合并多个 active skill 的 Layer 2 指令为一个 prompt 片段
+- `builder.py` 负责 chat-specific Layer 1 catalog 文案；Layer 2 指令合并复用 shared `build_skill_prompt()`
 
 ## 修改后必做
 

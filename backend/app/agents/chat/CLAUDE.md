@@ -27,7 +27,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 | `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools` |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `skills/base.py` | shared Skill/SkillRegistry/SkillResourceIndex 兼容导出 |
-| `skills/builder.py` | shared build_skill_prompt()/build_skill_catalog() 兼容导出 |
+| `skills/builder.py` | chat-specific skill catalog 包装 + shared build_skill_prompt() |
 | `skills/loader.py` | shared SKILL.md 文件加载器兼容导出 |
 | `skills/defaults.py` | get_default_registry() — 从 SKILL.md 文件加载所有 skill |
 | `skills/{skill-name}/SKILL.md` | 标准 Agent Skill package 定义（标准 frontmatter + Markdown 指令，可选 resources/scripts/assets） |
@@ -41,7 +41,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **面试流程**：开场(自我介绍) → 提问(一次一题) → 收尾(反问)，由 `_determine_interview_phase()` 根据消息数自动切换
 - **开场白**：创建对话时 `chat_service.generate_opening_message()` 自动生成，零 LLM 成本
 - **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
-- **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 只常驻标准 metadata（`name`/`description`）和 InterviewBoss runtime metadata，Layer 2 `SKILL.md` body 通过 `load_skill` 按需注入，Layer 3 `references/`/`scripts/`/`assets/` 仅索引并按需读取。每个 skill 是标准 Agent Skill package；InterviewBoss 私有策略放在 `metadata.interview-boss.*`，不要新增 `skill-pack.yaml`。`always_active=true` 的 tool-use 技能（如 `interview-tool-use`）在每次 ReAct 系统提示构建时自动注入完整 body（Layer 5.5），无需 Agent 显式调用 `load_skill`。
+- **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 只常驻标准 metadata（`name`/`description`）和 InterviewBoss runtime metadata，Layer 2 `SKILL.md` body 通过 `load_skill` 按需注入，Layer 3 `references/`/`scripts/`/`assets/` 默认只索引，不自动注入 prompt，也没有运行时读取工具。每个 skill 是标准 Agent Skill package；InterviewBoss 私有策略放在 `metadata.interview-boss.*`，不要新增 `skill-pack.yaml`。`always_active=true` 表示 registry 匹配始终命中；只有同时 `kind=tool-use` 的 skill（如 `interview-tool-use`）会在每次 ReAct 系统提示构建时自动注入完整 body（Layer 5.5），无需 Agent 显式调用 `load_skill`。
 - **interview-tool-use**：`kind=tool-use` 的始终激活技能，指导 Agent 何时调用题库工具、如何解读信封、空结果降级、禁止泄露内部信号。body 通过 Layer 5.5 自动注入每次 ReAct 系统提示。`references/mcp-tool-envelope.md` 记录信封字段详细规范。
 
 ## 质量保护机制
@@ -52,7 +52,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`
-- **完整回答后强制候选题（代码级硬守卫）**：`interview_question + answer_complete=True + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；若重试仍无 tool_calls 则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
+- **完整回答后强制候选题（代码级硬守卫）**：`interview_question + answer_complete=True + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；触发条件看本轮是否实际执行过 `search_questions` / `draw_questions`，不能只看总 tool call 数，因为 `load_skill` 不会产生候选题。guard 重试分支同样走 `validate_tool_call()` allowlist，且只执行 `search_questions` / `draw_questions`；若重试仍无 tool_calls 或调用不满足契约，则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
 - **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
 
 ## 模块依赖图

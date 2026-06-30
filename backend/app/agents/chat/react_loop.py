@@ -676,7 +676,48 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 }
             )
             for gtc in guard_tool_calls:
+                try:
+                    gtc = validate_tool_call(gtc)
+                except StopRun as exc:
+                    logger.warning(
+                        "ReAct trace: event=force_search_guard_validation_failed "
+                        "conversation_id=%s reason=%s",
+                        state.get("conversation_id"),
+                        exc.reason,
+                    )
+                    messages.append(
+                        make_tool_result_message(
+                            gtc.get("id", "invalid"),
+                            json.dumps({"error": exc.reason}),
+                        )
+                    )
+                    continue
+
                 gtc_name = gtc["function"]["name"]
+                if gtc_name not in ("search_questions", "draw_questions"):
+                    logger.warning(
+                        "ReAct trace: event=force_search_guard_contract_failed "
+                        "conversation_id=%s tool_name=%s",
+                        state.get("conversation_id"),
+                        gtc_name,
+                    )
+                    messages.append(
+                        make_tool_result_message(
+                            gtc["id"],
+                            json.dumps(
+                                {
+                                    "error": "guard_requires_search_or_draw",
+                                    "message": (
+                                        "force_search_guard accepts only "
+                                        "search_questions or draw_questions"
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        )
+                    )
+                    continue
+
                 _emit(
                     {
                         "type": "step",

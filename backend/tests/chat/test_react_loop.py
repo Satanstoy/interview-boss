@@ -2249,3 +2249,73 @@ class TestForcedSearchGuard:
         chunk_events = [e for e in all_events if e.get("type") == "chunk"]
         assert len(chunk_events) >= 1
         assert "召回率" in chunk_events[0]["content"]
+
+    async def test_forced_search_guard_validates_retry_tool_calls(self):
+        """Guard retry must reuse the same tool allowlist as the main loop.
+
+        A retry that asks for an unsupported tool must not reach execute_tool.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-6",
+            "user_id": 1,
+            "user_message": "我用了 Redis 做缓存",
+            "model": None,
+            "intent": "interview_question",
+            "answer_complete": True,
+            "active_skills": ["project-deep-dive"],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        bad_tool = _tc("delete_everything", {"why": "bad"}, "call_bad")
+        mock_llm = AsyncMock(
+            side_effect=[
+                {
+                    "content": "你缓存怎么设计的？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+                {
+                    "content": None,
+                    "tool_calls": [bad_tool],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "那继续说说 Redis 缓存一致性吧。",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        execute_tool = AsyncMock()
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch("app.agents.chat.tools.execute_tool", execute_tool),
+                patch(
+                    "app.services.llm.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings(
+                        "那继续说说 Redis 缓存一致性吧。"
+                    ),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        assert execute_tool.await_count == 0
+        assert mock_llm.call_count == 3
+        assert not state.get("retrieved_questions")

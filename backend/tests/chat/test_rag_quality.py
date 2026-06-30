@@ -309,6 +309,7 @@ class TestNoDuplicateRetrieval:
 
     async def test_has_retrieved_no_search(self):
         """RG6: 已有检索结果 + answer_complete → LLM 直接使用，不调用工具"""
+        existing_question = make_question(201, "Redis 持久化怎么做？")
         events, state, llm_mock = await run_single_turn(
             user_message="我用了 Redis 做缓存",
             classify_updates={
@@ -329,6 +330,10 @@ class TestNoDuplicateRetrieval:
                 },
             ],
             stream_chunks=("很好，那你说说持久化。",),
+            state_overrides={
+                "retrieved_questions": [existing_question],
+                "candidate_questions": [existing_question],
+            },
         )
 
         # LLM should only be called once (no tool calls)

@@ -1057,3 +1057,18 @@ class TestInterviewToolUseSkill:
             assert marker not in desc_lower, (
                 f"Internal marker '{marker}' leaked into skill description"
             )
+
+    def test_load_skill_enum_matches_non_tool_use_registry_skills(self):
+        """load_skill exposes only user-loadable skills and excludes tool-use policy."""
+        from app.agents.chat.skills.defaults import get_default_registry
+        from app.agents.chat.tools import SKILL_NAMES
+
+        registry = get_default_registry()
+        expected = sorted(
+            skill.name
+            for skill in registry._skills.values()
+            if skill.kind != "tool-use"
+        )
+
+        assert sorted(SKILL_NAMES) == expected
+        assert "interview-tool-use" not in SKILL_NAMES

@@ -74,3 +74,30 @@ class TestBuildReactSystemPrompt:
         prompt = build_react_system_prompt(state)
         assert "空结果时沉默不语" in prompt
         assert "Keep pacing" in prompt
+
+    def test_non_tool_use_always_active_skill_body_not_auto_injected(self):
+        """always_active means registry matching; only tool-use bodies are auto-injected."""
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": [],
+        }
+        prompt = build_react_system_prompt(state)
+        assert "空结果时沉默不语" in prompt
+        assert "Candidates who feel overwhelmed stop talking" not in prompt
+
+    def test_non_tool_use_always_active_skill_body_injected_when_explicitly_active(self):
+        """Non-tool-use always_active skills still inject when active_skills names them."""
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": ["adaptive-difficulty"],
+        }
+        prompt = build_react_system_prompt(state)
+        assert "Candidates who feel overwhelmed stop talking" in prompt

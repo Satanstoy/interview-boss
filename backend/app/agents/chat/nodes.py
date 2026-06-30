@@ -1699,7 +1699,7 @@ def build_react_system_prompt(state: ChatState) -> str:
     5.6. Mid-loop pending skill instructions
     6. Basis extraction guidance (so the final answer can still emit metadata)
     """
-    from app.agents.shared.skills.builder import build_skill_catalog
+    from app.agents.chat.skills.builder import build_skill_catalog
     from app.agents.chat.prompts import BASIS_EXTRACT_GUIDANCE
 
     mode = state.get("mode", "free_practice")

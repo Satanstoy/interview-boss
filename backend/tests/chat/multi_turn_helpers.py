@@ -198,6 +198,7 @@ async def run_single_turn(
     llm_responses: list[dict],
     stream_chunks: tuple[str, ...],
     tool_patches: list = None,
+    state_overrides: dict | None = None,
     mode: str = "free_practice",
     bank_mode: str = "public",
 ) -> tuple[list[dict], dict, AsyncMock]:
@@ -220,6 +221,8 @@ async def run_single_turn(
                 "retrieved_questions": [],
             }
         )
+        if state_overrides:
+            state.update(state_overrides)
         return state
 
     async def mock_classify(state):
