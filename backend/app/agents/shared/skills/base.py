@@ -57,6 +57,7 @@ class Skill:
     strategy_rules: dict | None = None
     allowed_agents: list[str] = field(default_factory=list)
     prompt_role: str | None = None
+    kind: str | None = None
     resources: SkillResourceIndex = field(default_factory=SkillResourceIndex)
 
     def get_strategy_rules(self) -> dict:

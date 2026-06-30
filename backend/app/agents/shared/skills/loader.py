@@ -48,8 +48,11 @@ def load_skill_from_file(skill_dir: Path) -> Skill:
             _interview_boss_value(frontmatter, metadata, "always_active", False)
         ),
         strategy_rules=_interview_boss_value(frontmatter, metadata, "strategy_rules"),
-        allowed_agents=_interview_boss_value(frontmatter, metadata, "allowed_agents", []),
+        allowed_agents=_interview_boss_value(
+            frontmatter, metadata, "allowed_agents", []
+        ),
         prompt_role=_interview_boss_value(frontmatter, metadata, "prompt_role"),
+        kind=_interview_boss_value(frontmatter, metadata, "kind"),
         resources=_index_skill_resources(skill_dir),
     )
 

@@ -17,6 +17,7 @@ skills/
 │   └── SKILL.md
 ├── hr-soft-skills/      ← HR 软技能面试
 ├── interview-rhythm/    ← 面试节奏控制
+├── interview-tool-use/  ← MCP 工具调用规范（始终激活，kind=tool-use）
 ├── project-deep-dive/   ← 项目深挖
 └── theory-qa/           ← 理论问答
 ```
@@ -48,7 +49,7 @@ metadata:
 
 ## 触发规则
 
-- `always_active=true` 的 skill 始终匹配
+- `always_active=true` 的 skill 始终匹配（`interview-rhythm`、`adaptive-difficulty`、`interview-tool-use`）
 - 其他 skill：triggers 中任一关键词出现在用户消息或关键词中
 - `hr-soft-skills` 有特殊上下文验证：泛化触发词（如"团队"）需要配合上下文词（合作/协作/文化等）
 - 面试后期（12+ 消息）自动激活 `hr-soft-skills`

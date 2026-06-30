@@ -599,7 +599,9 @@ class TestBuildSkillPrompt:
         prompt = build_skill_prompt(get_default_registry(), ["interview-rhythm"])
 
         assert "Pattern Sequence" in prompt
-        assert "<one project from the candidate's resume or self-introduction>" in prompt
+        assert (
+            "<one project from the candidate's resume or self-introduction>" in prompt
+        )
         assert "HNSW" not in prompt
         assert "efConstruction" not in prompt
         assert "GLEAR" not in prompt
@@ -687,7 +689,9 @@ class TestSkillLoader:
         assert skill.allowed_tools == ["search_questions", "draw_questions"]
         assert skill.metadata == {"author": "interview-boss", "version": "1.0"}
 
-    def test_load_skill_from_file_rejects_name_that_does_not_match_directory(self, tmp_path):
+    def test_load_skill_from_file_rejects_name_that_does_not_match_directory(
+        self, tmp_path
+    ):
         """标准 Agent Skill 要求 name 与父目录名一致。"""
         from app.agents.chat.skills.loader import load_skill_from_file
 
@@ -733,9 +737,7 @@ class TestSkillLoader:
         (skill_dir / "scripts" / "validate_tool_envelope.py").write_text(
             "print('ok')", encoding="utf-8"
         )
-        (skill_dir / "assets" / "template.txt").write_text(
-            "template", encoding="utf-8"
-        )
+        (skill_dir / "assets" / "template.txt").write_text("template", encoding="utf-8")
 
         skill = load_skill_from_file(skill_dir)
 
@@ -993,3 +995,65 @@ class TestSkillLoaderStrategyRules:
 
         skill = load_skill_from_file(skill_dir)
         assert skill.strategy_rules == {}
+
+
+# ═══════════════════════════════════════════════════
+#  T-013: interview-tool-use skill — 注册与元数据
+# ═══════════════════════════════════════════════════
+class TestInterviewToolUseSkill:
+    """interview-tool-use skill 的注册、元数据和 catalog 输出验证"""
+
+    def test_default_registry_has_seven_skills(self):
+        """默认注册表应包含 7 个 skill（6 existing + interview-tool-use）"""
+        from app.agents.chat.skills.defaults import get_default_registry
+
+        registry = get_default_registry()
+        expected_skills = [
+            "interview-rhythm",
+            "adaptive-difficulty",
+            "project-deep-dive",
+            "theory-qa",
+            "algorithm-coding",
+            "hr-soft-skills",
+            "interview-tool-use",
+        ]
+        for name in expected_skills:
+            assert registry.get(name) is not None, (
+                f"Skill '{name}' not found in registry"
+            )
+        assert len(registry._skills) == 7
+
+    def test_interview_tool_use_metadata_from_interview_boss_namespace(self):
+        """interview-tool-use 应从 metadata.interview-boss.* 读取运行时字段"""
+        from app.agents.chat.skills.defaults import get_default_registry
+
+        registry = get_default_registry()
+        skill = registry.get("interview-tool-use")
+        assert skill is not None
+        assert skill.always_active is True
+        assert skill.priority == 100
+        assert skill.kind == "tool-use"
+
+    def test_build_skill_catalog_includes_tool_use_but_not_internal_markers(self):
+        """build_skill_catalog 输出应包含 interview-tool-use 名称和描述，
+        且 skill 自身的 description 不包含内部 marker 字符串"""
+        from app.agents.chat.skills.defaults import get_default_registry
+        from app.agents.chat.skills.builder import build_skill_catalog
+
+        registry = get_default_registry()
+        catalog = build_skill_catalog(registry)
+
+        assert "interview-tool-use" in catalog
+
+        skill = registry.get("interview-tool-use")
+        desc_lower = skill.description.lower()
+        internal_markers = [
+            "search_questions",
+            "draw_questions",
+            "select_question",
+            "project-deep-dive",
+        ]
+        for marker in internal_markers:
+            assert marker not in desc_lower, (
+                f"Internal marker '{marker}' leaked into skill description"
+            )
