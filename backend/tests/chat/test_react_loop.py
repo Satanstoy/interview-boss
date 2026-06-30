@@ -139,20 +139,26 @@ class TestReactLoop:
             "model": None,
         }
 
-        mock_summary_json = json.dumps({
-            "overall_comment": "候选人技术基础扎实",
-            "strongest_topic": "系统设计思路清晰",
-            "weakest_topic": "算法细节不够深入",
-            "key_suggestions": ["复习排序算法", "多练习编码"],
-            "score_estimate": 7,
-        }, ensure_ascii=False)
+        mock_summary_json = json.dumps(
+            {
+                "overall_comment": "候选人技术基础扎实",
+                "strongest_topic": "系统设计思路清晰",
+                "weakest_topic": "算法细节不够深入",
+                "key_suggestions": ["复习排序算法", "多练习编码"],
+                "score_estimate": 7,
+            },
+            ensure_ascii=False,
+        )
 
-        with patch(
-            "app.services.llm.llm_with_tools", new_callable=AsyncMock
-        ) as mock_llm, patch(
-            "app.services.llm._call_llm_with_retry_messages",
-            new_callable=AsyncMock,
-            return_value=mock_summary_json,
+        with (
+            patch(
+                "app.services.llm.llm_with_tools", new_callable=AsyncMock
+            ) as mock_llm,
+            patch(
+                "app.services.llm._call_llm_with_retry_messages",
+                new_callable=AsyncMock,
+                return_value=mock_summary_json,
+            ),
         ):
             events = []
             async for event in _react_loop(state):
@@ -183,20 +189,26 @@ class TestReactLoop:
             "model": None,
         }
 
-        mock_summary_json = json.dumps({
-            "overall_comment": "整体表现良好",
-            "strongest_topic": "项目经验丰富",
-            "weakest_topic": "算法基础薄弱",
-            "key_suggestions": ["多练算法"],
-            "score_estimate": 6,
-        }, ensure_ascii=False)
+        mock_summary_json = json.dumps(
+            {
+                "overall_comment": "整体表现良好",
+                "strongest_topic": "项目经验丰富",
+                "weakest_topic": "算法基础薄弱",
+                "key_suggestions": ["多练算法"],
+                "score_estimate": 6,
+            },
+            ensure_ascii=False,
+        )
 
-        with patch(
-            "app.services.llm.llm_with_tools", new_callable=AsyncMock
-        ) as mock_llm, patch(
-            "app.services.llm._call_llm_with_retry_messages",
-            new_callable=AsyncMock,
-            return_value=mock_summary_json,
+        with (
+            patch(
+                "app.services.llm.llm_with_tools", new_callable=AsyncMock
+            ) as mock_llm,
+            patch(
+                "app.services.llm._call_llm_with_retry_messages",
+                new_callable=AsyncMock,
+                return_value=mock_summary_json,
+            ),
         ):
             events = []
             async for event in _react_loop(state):
@@ -416,9 +428,14 @@ class TestReactLoop:
         token = _event_queue_var.set(mock_queue)
         try:
             with (
-                patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Prompt."),
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
                 patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
-                patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
+                patch(
+                    "app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool
+                ),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -818,18 +835,48 @@ class TestQuestionPlanHelpers:
     def test_should_not_create_question_plan_for_follow_up_chat_or_end(self):
         from app.agents.chat.pipeline import _should_create_question_plan
 
-        assert _should_create_question_plan({"intent": "follow_up", "answer_complete": False}) is False
-        assert _should_create_question_plan({"intent": "chat", "answer_complete": False}) is False
-        assert _should_create_question_plan({"intent": "end_interview", "answer_complete": False}) is False
-        assert _should_create_question_plan({"intent": "interview_question", "answer_complete": False}) is False
+        assert (
+            _should_create_question_plan(
+                {"intent": "follow_up", "answer_complete": False}
+            )
+            is False
+        )
+        assert (
+            _should_create_question_plan({"intent": "chat", "answer_complete": False})
+            is False
+        )
+        assert (
+            _should_create_question_plan(
+                {"intent": "end_interview", "answer_complete": False}
+            )
+            is False
+        )
+        assert (
+            _should_create_question_plan(
+                {"intent": "interview_question", "answer_complete": False}
+            )
+            is False
+        )
 
     def test_select_question_for_plan_prefers_algorithm_candidate(self):
         from app.agents.chat.pipeline import _select_question_for_plan
 
         state = {"question_type": "algorithm_coding", "search_negative_terms": []}
         candidates = [
-            {"id": 1, "question": "说说 Redis 持久化", "cat1": "后端", "cat2": "Redis", "tags": "redis"},
-            {"id": 2, "question": "实现 LRU Cache", "cat1": "E.算法与数据结构", "cat2": "E2.算法手撕", "tags": "代码,lru"},
+            {
+                "id": 1,
+                "question": "说说 Redis 持久化",
+                "cat1": "后端",
+                "cat2": "Redis",
+                "tags": "redis",
+            },
+            {
+                "id": 2,
+                "question": "实现 LRU Cache",
+                "cat1": "E.算法与数据结构",
+                "cat2": "E2.算法手撕",
+                "tags": "代码,lru",
+            },
         ]
 
         selected, reason = _select_question_for_plan(state, candidates)
@@ -847,7 +894,13 @@ class TestQuestionPlanHelpers:
             "search_negative_terms": ["HR"],
         }
         candidates = [
-            {"id": 7, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "tags": "检索,重排"}
+            {
+                "id": 7,
+                "question": "RAG 检索怎么设计？",
+                "cat1": "B",
+                "cat2": "RAG",
+                "tags": "检索,重排",
+            }
         ]
         state["candidate_questions"] = candidates
 
@@ -880,24 +933,59 @@ class TestQuestionPlanEnforcement:
         async def mock_llm(messages, *args, **kwargs):
             captured_messages.append(messages)
             if len(captured_messages) == 1:
-                return {"content": None, "tool_calls": [tc_search], "finish_reason": "tool_calls"}
-            return {"content": "请你说说 RAG 检索怎么设计？", "tool_calls": None, "finish_reason": "stop"}
+                return {
+                    "content": None,
+                    "tool_calls": [tc_search],
+                    "finish_reason": "tool_calls",
+                }
+            return {
+                "content": "请你说说 RAG 检索怎么设计？",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
 
         async def mock_execute_tool(tc, st):
-            question = {"id": 11, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "tags": "检索", "sources": []}
+            question = {
+                "id": 11,
+                "question": "RAG 检索怎么设计？",
+                "cat1": "B",
+                "cat2": "RAG",
+                "tags": "检索",
+                "sources": [],
+            }
             st["retrieved_questions"] = [question]
             st["candidate_questions"] = [question]
             st["question_source"] = "search"
-            return json.dumps({
-                "ok": True,
-                "tool": "search_questions",
-                "items": [{**question, "source": "search", "score": 0.1, "reason": "rrf_ranked"}],
-                "metadata": {"result_count": 1, "fallback_used": False, "fallback_steps": [], "empty_reason": None, "debug_reason": "hybrid_search_ok", "metrics": {"total_ms": 1}},
-                "error": None,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "tool": "search_questions",
+                    "items": [
+                        {
+                            **question,
+                            "source": "search",
+                            "score": 0.1,
+                            "reason": "rrf_ranked",
+                        }
+                    ],
+                    "metadata": {
+                        "result_count": 1,
+                        "fallback_used": False,
+                        "fallback_steps": [],
+                        "empty_reason": None,
+                        "debug_reason": "hybrid_search_ok",
+                        "metrics": {"total_ms": 1},
+                    },
+                    "error": None,
+                },
+                ensure_ascii=False,
+            )
 
         with (
-            patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Prompt."),
+            patch(
+                "app.agents.chat.nodes.build_react_system_prompt",
+                return_value="Prompt.",
+            ),
             patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
             patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
         ):
@@ -905,7 +993,9 @@ class TestQuestionPlanEnforcement:
             async for event in _react_loop(state):
                 events.append(event)
 
-        second_messages_text = "\n".join(m.get("content") or "" for m in captured_messages[1])
+        second_messages_text = "\n".join(
+            m.get("content") or "" for m in captured_messages[1]
+        )
         assert "<next_question_plan>" in second_messages_text
         assert "RAG 检索怎么设计" in second_messages_text
         assert state["next_question_plan"]["question_id"] == 11
@@ -927,7 +1017,12 @@ class TestQuestionPlanEnforcement:
                 "forbidden_focus": ["HR"],
                 "selection_reason": "top_ranked_candidate",
             },
-            "selected_question": {"id": 11, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG"},
+            "selected_question": {
+                "id": 11,
+                "question": "RAG 检索怎么设计？",
+                "cat1": "B",
+                "cat2": "RAG",
+            },
         }
 
         with patch(
@@ -937,7 +1032,11 @@ class TestQuestionPlanEnforcement:
                 "response": "我们收束到 RAG：请你说说 RAG 检索怎么设计？",
                 "repaired": True,
                 "reason": "plan_drift_repaired",
-                "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
+                "adherence": {
+                    "adheres": True,
+                    "score": 0.5,
+                    "reason": "keyword_overlap",
+                },
             },
         ) as mock_repair:
             events = await _final_answer_events_from_text("说说你的 HR 优势？", state)
@@ -952,14 +1051,44 @@ class TestQuestionPlanEnforcement:
 
         state = {
             "retrieved_questions": [
-                {"id": 1, "question": "Redis 持久化怎么做？", "cat1": "后端", "cat2": "Redis", "sources": []},
-                {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+                {
+                    "id": 1,
+                    "question": "Redis 持久化怎么做？",
+                    "cat1": "后端",
+                    "cat2": "Redis",
+                    "sources": [],
+                },
+                {
+                    "id": 2,
+                    "question": "RAG 检索怎么设计？",
+                    "cat1": "B",
+                    "cat2": "RAG",
+                    "sources": [],
+                },
             ],
             "candidate_questions": [
-                {"id": 1, "question": "Redis 持久化怎么做？", "cat1": "后端", "cat2": "Redis", "sources": []},
-                {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+                {
+                    "id": 1,
+                    "question": "Redis 持久化怎么做？",
+                    "cat1": "后端",
+                    "cat2": "Redis",
+                    "sources": [],
+                },
+                {
+                    "id": 2,
+                    "question": "RAG 检索怎么设计？",
+                    "cat1": "B",
+                    "cat2": "RAG",
+                    "sources": [],
+                },
             ],
-            "selected_question": {"id": 2, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG", "sources": []},
+            "selected_question": {
+                "id": 2,
+                "question": "RAG 检索怎么设计？",
+                "cat1": "B",
+                "cat2": "RAG",
+                "sources": [],
+            },
             "next_question_plan": {
                 "must_ask": True,
                 "question_id": 2,
@@ -968,7 +1097,11 @@ class TestQuestionPlanEnforcement:
                 "selection_reason": "top_ranked_candidate",
             },
             "question_plan_metadata": {
-                "adherence": {"adheres": True, "score": 0.5, "reason": "keyword_overlap"},
+                "adherence": {
+                    "adheres": True,
+                    "score": 0.5,
+                    "reason": "keyword_overlap",
+                },
                 "repaired": False,
             },
             "question_source": "search",
@@ -1182,9 +1315,7 @@ class TestReactLoopIntegration:
                 "app.agents.chat.nodes.build_react_system_prompt",
                 return_value="Test prompt.",
             ):
-                with patch(
-                    "app.services.llm.llm_with_tools", side_effect=mock_llm
-                ):
+                with patch("app.services.llm.llm_with_tools", side_effect=mock_llm):
                     with patch(
                         "app.services.llm.stream_llm_messages",
                         side_effect=mock_stream,
@@ -1305,13 +1436,20 @@ class TestEndInterviewHardRoute:
         """end_interview + summary keywords should produce a structured summary."""
         from app.agents.chat.pipeline import _generate_end_interview_response
 
-        mock_summary_json = json.dumps({
-            "overall_comment": "候选人项目经验丰富，基础知识扎实",
-            "strongest_topic": "Redis 缓存策略，回答深入全面",
-            "weakest_topic": "算法基础薄弱，手撕题解题思路不清晰",
-            "key_suggestions": ["复习常见排序算法", "练习链表题目", "深入理解时间复杂度"],
-            "score_estimate": 7,
-        }, ensure_ascii=False)
+        mock_summary_json = json.dumps(
+            {
+                "overall_comment": "候选人项目经验丰富，基础知识扎实",
+                "strongest_topic": "Redis 缓存策略，回答深入全面",
+                "weakest_topic": "算法基础薄弱，手撕题解题思路不清晰",
+                "key_suggestions": [
+                    "复习常见排序算法",
+                    "练习链表题目",
+                    "深入理解时间复杂度",
+                ],
+                "score_estimate": 7,
+            },
+            ensure_ascii=False,
+        )
 
         state = {
             "user_message": "结束面试，给我生成一份面试总结",
@@ -1421,7 +1559,9 @@ class TestRepetitionProtection:
         assert note == ""
 
     @pytest.mark.asyncio
-    async def test_protection_survives_prompt_rebuild_after_skill_load(self, base_state):
+    async def test_protection_survives_prompt_rebuild_after_skill_load(
+        self, base_state
+    ):
         """If ReAct loads a skill, the rebuilt system prompt keeps protection."""
         from app.agents.chat.pipeline import _react_loop
 
@@ -1582,3 +1722,360 @@ class TestToolStrategyEndInterview:
 
         assert "禁止" in strategy
         assert "不得调用任何工具" in strategy or "load_skill" in strategy
+
+
+# ── TestForcedSearchGuard ──────────────────────────────────
+
+
+class TestForcedSearchGuard:
+    """Hard guard: when LLM skips search_questions in interview_question +
+    answer_complete scenario, force one retry with a system message."""
+
+    async def test_forced_search_when_llm_skips_tool_in_deep_dive(self):
+        """LLM returns content without tool_calls in deep-dive mode → guard
+        fires, forces a second LLM call with search_questions tool_call.
+        After the retry, state["retrieved_questions"] is non-empty and the
+        final streamed answer references the searched question.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-1",
+            "user_id": 1,
+            "user_message": "我用了 Redis 做缓存层，通过布隆过滤器解决了穿透问题",
+            "model": None,
+            "intent": "interview_question",
+            "answer_complete": True,
+            "active_skills": ["project-deep-dive"],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        tc_search = _tc("search_questions", {"keywords": ["Redis", "缓存"]})
+
+        # Call 1: LLM skips tools (the forbidden scenario)
+        # Call 2: guard forces retry → LLM calls search_questions
+        # Call 3: LLM answers with tool results
+        mock_llm = AsyncMock(
+            side_effect=[
+                {
+                    "content": "能说说你们项目里 Redis 缓存的过期策略是怎么设计的？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+                {
+                    "content": None,
+                    "tool_calls": [tc_search],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "很好，请说说 Redis 持久化策略有哪些？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        search_result = json.dumps(
+            {
+                "ok": True,
+                "tool": "search_questions",
+                "items": [
+                    {
+                        "id": 201,
+                        "question": "Redis 持久化策略有哪些？",
+                        "cat1": "后端",
+                        "cat2": "Redis",
+                        "source": "search",
+                        "score": 0.1,
+                        "reason": "rrf_ranked",
+                        "sources": [],
+                    }
+                ],
+                "metadata": {
+                    "result_count": 1,
+                    "fallback_used": False,
+                    "fallback_steps": [],
+                    "empty_reason": None,
+                    "debug_reason": "hybrid_search_ok",
+                    "metrics": {"total_ms": 5},
+                },
+                "error": None,
+            },
+            ensure_ascii=False,
+        )
+
+        async def mock_execute_tool(tc, st):
+            st["retrieved_questions"] = [
+                {
+                    "id": 201,
+                    "question": "Redis 持久化策略有哪些？",
+                    "cat1": "后端",
+                    "cat2": "Redis",
+                    "sources": [],
+                }
+            ]
+            st["candidate_questions"] = st["retrieved_questions"]
+            st["question_source"] = "search"
+            return search_result
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Interviewer prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch(
+                    "app.agents.chat.tools.execute_tool",
+                    side_effect=mock_execute_tool,
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+
+        # LLM called 3 times (1 skip + 1 guard-forced tool + 1 answer)
+        assert mock_llm.call_count == 3
+
+        # state["retrieved_questions"] populated after the forced retry
+        assert len(state["retrieved_questions"]) == 1
+        assert state["retrieved_questions"][0]["id"] == 201
+
+        # SSE has a force_search_guard step event
+        guard_steps = [
+            e
+            for e in all_events
+            if e.get("type") == "step" and e.get("step") == "force_search_guard"
+        ]
+        assert len(guard_steps) == 1
+
+        # Final answer references the searched question
+        chunk_events = [e for e in all_events if e.get("type") == "chunk"]
+        assert len(chunk_events) >= 1
+        assert "持久化" in chunk_events[0]["content"]
+
+    async def test_forced_search_guard_not_triggered_when_intent_is_practice_request(
+        self,
+    ):
+        """practice_request intent does NOT trigger the guard — it is a
+        different code path. LLM's direct content is accepted on first try.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-2",
+            "user_id": 1,
+            "user_message": "来一道 RAG 题",
+            "model": None,
+            "intent": "practice_request",
+            "answer_complete": False,
+            "active_skills": [],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        mock_llm = AsyncMock(
+            return_value={
+                "content": "请说说 RAG 的检索流程。",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+        )
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch(
+                    "app.services.llm.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings(
+                        "请说说 RAG 的检索流程。"
+                    ),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+
+        # Guard should NOT have fired — only 1 LLM call
+        assert mock_llm.call_count == 1
+
+        # No force_search_guard step event
+        guard_steps = [
+            e
+            for e in all_events
+            if e.get("type") == "step" and e.get("step") == "force_search_guard"
+        ]
+        assert len(guard_steps) == 0
+
+        # Final answer accepted on first try
+        chunk_events = [e for e in all_events if e.get("type") == "chunk"]
+        assert len(chunk_events) >= 1
+
+    async def test_forced_search_guard_not_triggered_when_retrieved_present(self):
+        """State already has retrieved_questions → guard NOT triggered, no
+        retry, model answer accepted on first try.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-3",
+            "user_id": 1,
+            "user_message": "继续",
+            "model": None,
+            "intent": "interview_question",
+            "answer_complete": True,
+            "active_skills": ["project-deep-dive"],
+            "retrieved_questions": [
+                {"id": 42, "question": "已有候选题", "sources": []}
+            ],
+            "candidate_questions": [
+                {"id": 42, "question": "已有候选题", "sources": []}
+            ],
+        }
+
+        mock_llm = AsyncMock(
+            return_value={
+                "content": "请说说你对 Redis 持久化的理解。",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+        )
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch(
+                    "app.services.llm.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings(
+                        "请说说你对 Redis 持久化的理解。"
+                    ),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+
+        # Guard NOT triggered — only 1 LLM call
+        assert mock_llm.call_count == 1
+
+        # No force_search_guard step event
+        guard_steps = [
+            e
+            for e in all_events
+            if e.get("type") == "step" and e.get("step") == "force_search_guard"
+        ]
+        assert len(guard_steps) == 0
+
+        # Answer accepted on first try
+        chunk_events = [e for e in all_events if e.get("type") == "chunk"]
+        assert len(chunk_events) >= 1
+
+    async def test_forced_search_guard_capped_at_one_retry(self):
+        """LLM returns content without tool_calls TWICE → guard fires once,
+        then cap is hit and the second answer is accepted (call_count==2, not 3).
+        A warning-level log is emitted.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-4",
+            "user_id": 1,
+            "user_message": "我用了 Redis 做缓存",
+            "model": None,
+            "intent": "interview_question",
+            "answer_complete": True,
+            "active_skills": ["project-deep-dive"],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        # Both calls return content without tool_calls
+        mock_llm = AsyncMock(
+            side_effect=[
+                {
+                    "content": "能详细说说缓存的过期策略吗？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+                {
+                    "content": "那你项目中遇到过缓存雪崩吗？怎么解决的？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch(
+                    "app.services.llm.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings(
+                        "那你项目中遇到过缓存雪崩吗？怎么解决的？"
+                    ),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+
+        # Exactly 2 LLM calls (1 original + 1 guard retry), NOT 3
+        assert mock_llm.call_count == 2
+
+        # Guard fired once
+        guard_steps = [
+            e
+            for e in all_events
+            if e.get("type") == "step" and e.get("step") == "force_search_guard"
+        ]
+        assert len(guard_steps) == 1
+
+        # The second answer is accepted (guard exhausted)
+        chunk_events = [e for e in all_events if e.get("type") == "chunk"]
+        assert len(chunk_events) >= 1
+        assert "缓存雪崩" in chunk_events[0]["content"]

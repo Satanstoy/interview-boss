@@ -52,7 +52,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`
-- **完整回答后强制候选题**：`interview_question + answer_complete=True + 无候选题` 时，即使在 `project-deep-dive` 模式也必须先调用 `search_questions`，避免直接追问跳过 selected_question/question_plan 绑定
+- **完整回答后强制候选题（代码级硬守卫）**：`interview_question + answer_complete=True + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；若重试仍无 tool_calls 则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
 - **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
 
 ## 模块依赖图

@@ -606,6 +606,122 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             int((time.monotonic() - react_started) * 1000),
         )
 
+    # 3.5 Forced search guard: when the LLM skipped search_questions in a
+    # scenario where it is contractually required (interview_question +
+    # answer_complete + no candidates), inject a hard instruction and retry
+    # exactly once.  Uses a local counter — Budget is for token/step caps,
+    # not policy retries.
+    guard_retry_count = 0
+    needs_forced_search = (
+        not stop_reason
+        and final_answer_text
+        and state.get("intent") == "interview_question"
+        and state.get("answer_complete") is True
+        and not state.get("retrieved_questions")
+        and not state.get("candidate_questions")
+        and tool_call_count == 0
+        and guard_retry_count < 1
+    )
+    if needs_forced_search:
+        guard_retry_count += 1
+        _emit(
+            {
+                "type": "step",
+                "step": "force_search_guard",
+                "message": "正在强制检索题库...",
+            }
+        )
+        logger.info(
+            "ReAct trace: event=react_force_search_guard_triggered "
+            "conversation_id=%s intent=%s active_skills=%s retry=%s",
+            state.get("conversation_id"),
+            state.get("intent"),
+            state.get("active_skills"),
+            guard_retry_count,
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "【系统硬契约】当前回合必须先调用 search_questions 工具检索题库题目，"
+                    "禁止直接向用户发问。\n"
+                    "从刚才用户回答里提取 2-5 个技术关键词，立即调用 search_questions；"
+                    "返回结果非空后再决定是否继续追问。"
+                ),
+            }
+        )
+        final_answer_text = ""
+
+        guard_result = await llm_service.llm_with_tools(
+            messages,
+            chat_tools.ALL_TOOLS,
+            user_id=state["user_id"],
+            model=state.get("model"),
+        )
+        guard_tool_calls = guard_result.get("tool_calls") or []
+
+        if guard_tool_calls:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": guard_result.get("content"),
+                    "tool_calls": guard_tool_calls,
+                }
+            )
+            for gtc in guard_tool_calls:
+                gtc_name = gtc["function"]["name"]
+                _emit(
+                    {
+                        "type": "step",
+                        "step": gtc_name,
+                        "message": chat_tools.tool_progress_message(gtc),
+                        "reason": STEP_REASONS.get(gtc_name, ""),
+                    }
+                )
+                gtc_output = await chat_tools.execute_tool(gtc, state)
+                if gtc_name in ("search_questions", "draw_questions"):
+                    _maybe_create_question_plan(state)
+                if gtc_name in (
+                    "search_questions",
+                    "draw_questions",
+                ) and state.get("retrieved_questions"):
+                    _emit(
+                        {
+                            "type": "retrieved",
+                            "questions": [
+                                {
+                                    "id": q.get("id"),
+                                    "question": q.get("question", ""),
+                                    "cat1": q.get("cat1", ""),
+                                    "cat2": q.get("cat2", ""),
+                                    "company": _extract_company(q),
+                                    "round": _extract_round(q),
+                                }
+                                for q in state["retrieved_questions"][:3]
+                            ],
+                        }
+                    )
+                messages.append(make_tool_result_message(gtc["id"], gtc_output))
+
+            final_llm = await llm_service.llm_with_tools(
+                messages,
+                chat_tools.ALL_TOOLS,
+                user_id=state["user_id"],
+                model=state.get("model"),
+            )
+            final_content = final_llm.get("content")
+            if isinstance(final_content, str) and final_content.strip():
+                final_answer_text = final_content
+        else:
+            guard_content = guard_result.get("content")
+            if isinstance(guard_content, str) and guard_content.strip():
+                final_answer_text = guard_content
+            logger.warning(
+                "ReAct trace: event=react_force_search_guard_exhausted "
+                "conversation_id=%s",
+                state.get("conversation_id"),
+            )
+
     # 4. Stream final answer
     _emit(
         {
