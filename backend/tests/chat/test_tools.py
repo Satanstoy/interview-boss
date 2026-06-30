@@ -1,10 +1,12 @@
 """TDD tests for chat ReAct agent tool schemas and executor."""
+
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ── Fixtures ──────────────────────────────────────────────
+
 
 @pytest.fixture
 def sample_state():
@@ -22,11 +24,14 @@ def sample_skill():
     skill = MagicMock()
     skill.name = "theory-qa"
     skill.description = "理论问答策略"
-    skill.get_instruction.return_value = "## Theory QA Instruction\n\nAsk theory questions."
+    skill.get_instruction.return_value = (
+        "## Theory QA Instruction\n\nAsk theory questions."
+    )
     return skill
 
 
 # ── TestToolSchemas ────────────────────────────────────────
+
 
 class TestToolSchemas:
     def test_search_questions_schema_has_when_to_use(self):
@@ -41,14 +46,18 @@ class TestToolSchemas:
         """keywords parameter description should guide against generic terms."""
         from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
 
-        kw_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["keywords"]["description"]
+        kw_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"][
+            "keywords"
+        ]["description"]
         assert "2-5" in kw_desc or "具体" in kw_desc
 
     def test_search_questions_question_type_has_enum_descriptions(self):
         """question_type description should explain each enum value."""
         from app.agents.chat.tools import SEARCH_QUESTIONS_SCHEMA
 
-        qt_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["question_type"]["description"]
+        qt_desc = SEARCH_QUESTIONS_SCHEMA["function"]["parameters"]["properties"][
+            "question_type"
+        ]["description"]
         assert "project_followup" in qt_desc
         assert "knowledge_probe" in qt_desc
 
@@ -73,7 +82,9 @@ class TestToolSchemas:
         """count parameter should mention default value in Chinese."""
         from app.agents.chat.tools import DRAW_QUESTIONS_SCHEMA
 
-        count_desc = DRAW_QUESTIONS_SCHEMA["function"]["parameters"]["properties"]["count"]["description"]
+        count_desc = DRAW_QUESTIONS_SCHEMA["function"]["parameters"]["properties"][
+            "count"
+        ]["description"]
         assert "默认" in count_desc
 
     def test_load_skill_schema_has_usage_guidance(self):
@@ -88,7 +99,9 @@ class TestToolSchemas:
         """skill_name description should list all skills with their purposes."""
         from app.agents.chat.tools import LOAD_SKILL_SCHEMA
 
-        skill_desc = LOAD_SKILL_SCHEMA["function"]["parameters"]["properties"]["skill_name"]["description"]
+        skill_desc = LOAD_SKILL_SCHEMA["function"]["parameters"]["properties"][
+            "skill_name"
+        ]["description"]
         assert "project-deep-dive" in skill_desc
         assert "algorithm-coding" in skill_desc
 
@@ -106,7 +119,7 @@ class TestToolGatewayModels:
                 "tags": "rag,检索,重排",
                 "_combined_rank_score": 0.123456,
                 "_rrf_score": 0.05,
-                "sources": "[{\"company\": \"测试公司\", \"round\": \"一面\"}]",
+                "sources": '[{"company": "测试公司", "round": "一面"}]',
             },
             source="search",
             reason="rrf_ranked",
@@ -178,8 +191,8 @@ class TestToolGatewayModels:
 
 # ── TestExecuteToolLoadSkill ─────────────────────────────
 
-class TestExecuteToolLoadSkill:
 
+class TestExecuteToolLoadSkill:
     async def test_load_skill_returns_confirmation(self, sample_state, sample_skill):
         """load_skill should return confirmation with status, not full instruction."""
         from app.agents.chat.tools import execute_tool
@@ -194,13 +207,16 @@ class TestExecuteToolLoadSkill:
         mock_registry = MagicMock()
         mock_registry.get.return_value = sample_skill
 
-        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+        with patch(
+            "app.agents.chat.tools._get_skill_registry", return_value=mock_registry
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert parsed["status"] == "loaded"
-        assert parsed["skill"] == "theory-qa"
-        assert "summary" in parsed
+        assert parsed["ok"] is True
+        assert parsed["metadata"]["status"] == "loaded"
+        assert parsed["metadata"]["skill"] == "theory-qa"
+        assert "summary" in parsed["metadata"]
         assert "instruction" not in parsed
 
     async def test_load_skill_unknown_name(self, sample_state):
@@ -217,12 +233,14 @@ class TestExecuteToolLoadSkill:
         mock_registry = MagicMock()
         mock_registry.get.return_value = None
 
-        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+        with patch(
+            "app.agents.chat.tools._get_skill_registry", return_value=mock_registry
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert "error" in parsed
-        assert "nonexistent" in parsed["error"]
+        assert parsed["ok"] is False
+        assert "nonexistent" in parsed["error"]["message"]
 
 
 class TestLoadSkillStateInjection:
@@ -245,18 +263,24 @@ class TestLoadSkillStateInjection:
         mock_registry = MagicMock()
         mock_registry.get.return_value = sample_skill_obj
 
-        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+        with patch(
+            "app.agents.chat.tools._get_skill_registry", return_value=mock_registry
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert parsed["status"] == "loaded"
-        assert parsed["skill"] == "theory-qa"
+        assert parsed["ok"] is True
+        assert parsed["metadata"]["status"] == "loaded"
+        assert parsed["metadata"]["skill"] == "theory-qa"
         assert "instruction" not in parsed
 
         assert "active_skill_instructions" in sample_state
         assert len(sample_state["active_skill_instructions"]) == 1
         assert sample_state["active_skill_instructions"][0]["skill_name"] == "theory-qa"
-        assert sample_state["active_skill_instructions"][0]["instruction"] == "## Theory QA full instruction"
+        assert (
+            sample_state["active_skill_instructions"][0]["instruction"]
+            == "## Theory QA full instruction"
+        )
 
     async def test_load_skill_already_active_returns_already_active(self, sample_state):
         """load_skill should return already_active if skill is already loaded."""
@@ -276,27 +300,57 @@ class TestLoadSkillStateInjection:
         mock_skill_obj.get_instruction.return_value = "instruction"
         mock_registry.get.return_value = mock_skill_obj
 
-        with patch("app.agents.chat.tools._get_skill_registry", return_value=mock_registry):
+        with patch(
+            "app.agents.chat.tools._get_skill_registry", return_value=mock_registry
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
-        assert parsed["status"] == "already_active"
-        assert "active_skill_instructions" not in sample_state or sample_state.get("active_skill_instructions") == []
+        assert parsed["ok"] is True
+        assert parsed["metadata"]["status"] == "already_active"
+        assert (
+            "active_skill_instructions" not in sample_state
+            or sample_state.get("active_skill_instructions") == []
+        )
 
 
 # ── TestExecuteToolSearchQuestions ────────────────────────
 
-class TestExecuteToolSearchQuestions:
 
+class TestExecuteToolSearchQuestions:
     async def test_search_returns_json_results(self, sample_state):
         """search_questions should return JSON results and update state."""
         from app.agents.chat.tools import execute_tool
 
         mock_results = [
-            {"id": 1, "question": "What is JVM?", "cat1": "Java", "cat2": "Basics", "difficulty": "easy"},
-            {"id": 2, "question": "Explain GC", "cat1": "Java", "cat2": "Basics", "difficulty": "medium"},
-            {"id": 3, "question": "Thread safety", "cat1": "Java", "cat2": "Concurrency", "difficulty": "hard"},
-            {"id": 4, "question": "Too many", "cat1": "Java", "cat2": "Other", "difficulty": "hard"},
+            {
+                "id": 1,
+                "question": "What is JVM?",
+                "cat1": "Java",
+                "cat2": "Basics",
+                "difficulty": "easy",
+            },
+            {
+                "id": 2,
+                "question": "Explain GC",
+                "cat1": "Java",
+                "cat2": "Basics",
+                "difficulty": "medium",
+            },
+            {
+                "id": 3,
+                "question": "Thread safety",
+                "cat1": "Java",
+                "cat2": "Concurrency",
+                "difficulty": "hard",
+            },
+            {
+                "id": 4,
+                "question": "Too many",
+                "cat1": "Java",
+                "cat2": "Other",
+                "difficulty": "hard",
+            },
         ]
 
         tool_call = {
@@ -332,10 +386,12 @@ class TestExecuteToolSearchQuestions:
         tool_call = {
             "function": {
                 "name": "search_questions",
-                "arguments": json.dumps({
-                    "keywords": ["Java"],
-                    "question_type": "knowledge_probe",
-                }),
+                "arguments": json.dumps(
+                    {
+                        "keywords": ["Java"],
+                        "question_type": "knowledge_probe",
+                    }
+                ),
             }
         }
 
@@ -370,7 +426,9 @@ class TestExecuteToolSearchQuestions:
         assert parsed["metadata"]["empty_reason"] == "no_query"
         assert sample_state.get("retrieved_questions") == []
 
-    async def test_search_service_error_returns_service_error_envelope(self, sample_state):
+    async def test_search_service_error_returns_service_error_envelope(
+        self, sample_state
+    ):
         from app.agents.chat.tools import execute_tool
 
         tool_call = {
@@ -396,8 +454,8 @@ class TestExecuteToolSearchQuestions:
 
 # ── TestExecuteToolDrawQuestions ──────────────────────────
 
-class TestExecuteToolDrawQuestions:
 
+class TestExecuteToolDrawQuestions:
     async def test_draw_returns_json_results(self, sample_state):
         """draw_questions should return JSON results and update state."""
         from app.agents.chat.tools import execute_tool
@@ -440,13 +498,15 @@ class TestExecuteToolDrawQuestions:
         tool_call = {
             "function": {
                 "name": "draw_questions",
-                "arguments": json.dumps({
-                    "count": 1,
-                    "cat1": "E.算法与数据结构",
-                    "cat2": "E2.算法手撕",
-                    "topic": "LRU",
-                    "question_type": "algorithm_coding",
-                }),
+                "arguments": json.dumps(
+                    {
+                        "count": 1,
+                        "cat1": "E.算法与数据结构",
+                        "cat2": "E2.算法手撕",
+                        "topic": "LRU",
+                        "question_type": "algorithm_coding",
+                    }
+                ),
             }
         }
 
@@ -481,7 +541,9 @@ class TestExecuteToolDrawQuestions:
         assert parsed["error"]["error_code"] == "USER_REQUIRED"
         assert parsed["metadata"]["debug_reason"] == "missing_user_id"
 
-    async def test_draw_invalid_count_returns_validation_error_envelope(self, sample_state):
+    async def test_draw_invalid_count_returns_validation_error_envelope(
+        self, sample_state
+    ):
         from app.agents.chat.tools import execute_tool
 
         tool_call = {
@@ -521,21 +583,36 @@ class TestToolProgressMessage:
     def test_progress_messages_are_user_friendly_chinese(self):
         from app.agents.chat.tools import tool_progress_message
 
-        assert tool_progress_message({
-            "function": {
-                "name": "load_skill",
-                "arguments": json.dumps({"skill_name": "project-deep-dive"}),
-            }
-        }) == "正在加载项目深挖策略..."
-        assert tool_progress_message({
-            "function": {
-                "name": "search_questions",
-                "arguments": json.dumps({"keywords": ["Redis"]}),
-            }
-        }) == "正在检索相关面试题..."
-        assert tool_progress_message({
-            "function": {
-                "name": "draw_questions",
-                "arguments": json.dumps({"count": 2}),
-            }
-        }) == "正在从题库抽题..."
+        assert (
+            tool_progress_message(
+                {
+                    "function": {
+                        "name": "load_skill",
+                        "arguments": json.dumps({"skill_name": "project-deep-dive"}),
+                    }
+                }
+            )
+            == "正在加载项目深挖策略..."
+        )
+        assert (
+            tool_progress_message(
+                {
+                    "function": {
+                        "name": "search_questions",
+                        "arguments": json.dumps({"keywords": ["Redis"]}),
+                    }
+                }
+            )
+            == "正在检索相关面试题..."
+        )
+        assert (
+            tool_progress_message(
+                {
+                    "function": {
+                        "name": "draw_questions",
+                        "arguments": json.dumps({"count": 2}),
+                    }
+                }
+            )
+            == "正在从题库抽题..."
+        )

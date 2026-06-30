@@ -80,7 +80,12 @@ async def test_done_metadata_can_emit_question_plan_event():
     from app.routers.chat import _metadata_events_from_done
 
     meta = {
-        "selected_question": {"id": 7, "question": "RAG 检索怎么设计？", "cat1": "B", "cat2": "RAG"},
+        "selected_question": {
+            "id": 7,
+            "question": "RAG 检索怎么设计？",
+            "cat1": "B",
+            "cat2": "RAG",
+        },
         "question_source": "search",
         "question_source_reason": "question_plan_bound",
         "question_plan": {
@@ -287,7 +292,10 @@ class TestReactE2E:
                     "tool_calls": [
                         _tool_call(
                             "search_questions",
-                            {"keywords": ["Redis", "缓存"], "question_type": "knowledge_probe"},
+                            {
+                                "keywords": ["Redis", "缓存"],
+                                "question_type": "knowledge_probe",
+                            },
                         )
                     ],
                     "finish_reason": "tool_calls",
@@ -307,7 +315,10 @@ class TestReactE2E:
                 '[BASIS]{"type":"interview_question","question_ids":[101,102],"confidence":0.88,"show_refs":true}[/BASIS]',
             ),
             tool_patches=[
-                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+                patch(
+                    "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                    search_mock,
+                ),
             ],
         )
 
@@ -344,14 +355,30 @@ class TestReactE2E:
 
     async def test_load_skill_then_draw_questions(self):
         mock_skill = MagicMock()
-        mock_skill.get_instruction.return_value = "## Algorithm Coding\n\nAsk algorithm problems."
+        mock_skill.get_instruction.return_value = (
+            "## Algorithm Coding\n\nAsk algorithm problems."
+        )
 
         registry = MagicMock()
         registry.get.return_value = mock_skill
 
         draw_results = [
-            _make_question(201, "写一个二分查找", cat1="算法", cat2="数组", company="字节", round_name="一面"),
-            _make_question(202, "实现一个 LRU Cache", cat1="算法", cat2="缓存", company="阿里", round_name="二面"),
+            _make_question(
+                201,
+                "写一个二分查找",
+                cat1="算法",
+                cat2="数组",
+                company="字节",
+                round_name="一面",
+            ),
+            _make_question(
+                202,
+                "实现一个 LRU Cache",
+                cat1="算法",
+                cat2="缓存",
+                company="阿里",
+                round_name="二面",
+            ),
         ]
         draw_mock = MagicMock(return_value=draw_results)
 
@@ -397,8 +424,12 @@ class TestReactE2E:
                 '[BASIS]{"type":"interview_question","question_ids":[201,202],"confidence":0.91,"show_refs":true}[/BASIS]',
             ),
             tool_patches=[
-                patch("app.agents.chat.tools._get_skill_registry", return_value=registry),
-                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
+                patch(
+                    "app.agents.chat.tools._get_skill_registry", return_value=registry
+                ),
+                patch(
+                    "app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock
+                ),
             ],
         )
 
@@ -475,7 +506,10 @@ class TestReactE2E:
             ],
             stream_chunks=("搜索出错了，我直接给你一道基础题。",),
             tool_patches=[
-                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+                patch(
+                    "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                    search_mock,
+                ),
             ],
         )
 
@@ -497,7 +531,9 @@ class TestReactE2E:
 
     async def test_loop_cap_forces_final_answer(self):
         mock_skill = MagicMock()
-        mock_skill.get_instruction.return_value = "## Theory QA\n\nAsk theory questions."
+        mock_skill.get_instruction.return_value = (
+            "## Theory QA\n\nAsk theory questions."
+        )
 
         registry = MagicMock()
         registry.get.return_value = mock_skill
@@ -517,14 +553,18 @@ class TestReactE2E:
             llm_responses=[
                 {
                     "content": None,
-                    "tool_calls": [_tool_call("load_skill", {"skill_name": "theory-qa", "turn": i})],
+                    "tool_calls": [
+                        _tool_call("load_skill", {"skill_name": "theory-qa", "turn": i})
+                    ],
                     "finish_reason": "tool_calls",
                 }
                 for i in range(MAX_REACT_STEPS)
             ],
             stream_chunks=("工具轮次已满，我直接给出最终结论。",),
             tool_patches=[
-                patch("app.agents.chat.tools._get_skill_registry", return_value=registry),
+                patch(
+                    "app.agents.chat.tools._get_skill_registry", return_value=registry
+                ),
             ],
         )
 
@@ -593,7 +633,8 @@ class TestRealLinkSkillInjection:
             result = await execute_tool(tool_call, state)
 
         parsed = json.loads(result)
-        assert parsed["status"] == "loaded"
+        assert parsed["ok"] is True
+        assert parsed["metadata"]["status"] == "loaded"
 
         assert "theory-qa" in state["active_skills"]
         assert len(state["active_skill_instructions"]) == 1

@@ -24,7 +24,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 | `prompts.py` | 系统提示词（含面试阶段协议）、记忆提取提示词 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
-| `tools.py` | ReAct tool schemas and tool execution entrypoint |
+| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools` |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `skills/base.py` | Skill 基类 + SkillRegistry（Progressive Disclosure 架构） |
 | `skills/builder.py` | build_skill_prompt() — 合并 active skills 指令为 prompt 片段 |
@@ -48,9 +48,11 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，直接生成总结
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
-- **Tool Gateway 契约**：`search_questions` / `draw_questions` 通过 `tool_gateway.py` 返回统一 `ok/items/metadata/error` envelope，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
-- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback
+- **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
+- **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
+- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question` 会覆盖默认选择
 - **完整回答后强制候选题**：`interview_question + answer_complete=True + 无候选题` 时，即使在 `project-deep-dive` 模式也必须先调用 `search_questions`，避免直接追问跳过 selected_question/question_plan 绑定
+- **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
 
 ## 模块依赖图
 

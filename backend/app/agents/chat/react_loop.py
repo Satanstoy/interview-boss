@@ -34,16 +34,10 @@ from app.agents.chat.question_plan import (
 )
 from app.agents.chat.state import ChatState
 from app.agents.chat.summary import _forced_closing_response
-from app.agents.chat.tools import (
-    ALL_TOOLS,
-    execute_tool,
-    tool_progress_message,
-)
+from app.agents.chat import tools as chat_tools
 from app.agents.shared.events import _event_queue_var
-from app.services.llm import (
-    llm_with_tools,
-    make_tool_result_message,
-)
+from app.services import llm as llm_service
+from app.services.llm import make_tool_result_message
 
 logger = logging.getLogger("interview-boss")
 
@@ -59,7 +53,9 @@ _SAFE_TOOL_ARG_KEYS = {
     "skill_name",
     "topic",
 }
-_ALLOWED_TOOL_NAMES = frozenset({"load_skill", "search_questions", "draw_questions"})
+_ALLOWED_TOOL_NAMES = frozenset(
+    {"load_skill", "search_questions", "draw_questions", "select_question"}
+)
 _PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
 
 
@@ -204,21 +200,44 @@ def _summarize_tool_output(tool_name: str, output: str, state: ChatState) -> dic
 
     if tool_name == "load_skill":
         summary["active_skills"] = list(state.get("active_skills", []))
+        if isinstance(parsed, dict) and "ok" in parsed:
+            summary["ok"] = bool(parsed.get("ok"))
+            if not summary["ok"] and parsed.get("error"):
+                summary["error"] = str(
+                    parsed["error"].get("error_code") or "tool_error"
+                )[:_TRACE_STRING_LIMIT]
         return summary
 
-    if tool_name in {"search_questions", "draw_questions"}:
-        if isinstance(parsed, dict) and "ok" in parsed and "items" in parsed:
+    if tool_name in {"search_questions", "draw_questions", "select_question"}:
+        if (
+            isinstance(parsed, dict)
+            and "ok" in parsed
+            and ("items" in parsed or "selected_question" in parsed)
+        ):
             summary["ok"] = bool(parsed.get("ok"))
             if not summary["ok"] and parsed.get("error"):
                 error = parsed.get("error") or {}
-                summary["error"] = str(error.get("error_code") or "tool_error")[:_TRACE_STRING_LIMIT]
-            items = parsed.get("items") if isinstance(parsed.get("items"), list) else []
-            summary["result_count"] = len(items)
-            summary["result_ids"] = [
-                q.get("id")
-                for q in items[:_TRACE_LIST_LIMIT]
-                if isinstance(q, dict) and q.get("id") is not None
-            ]
+                summary["error"] = str(error.get("error_code") or "tool_error")[
+                    :_TRACE_STRING_LIMIT
+                ]
+            if tool_name == "select_question" and parsed.get("selected_question"):
+                selected = parsed["selected_question"]
+                summary["result_count"] = 1
+                summary["result_ids"] = (
+                    [selected.get("id")]
+                    if isinstance(selected, dict) and selected.get("id") is not None
+                    else []
+                )
+            else:
+                items = (
+                    parsed.get("items") if isinstance(parsed.get("items"), list) else []
+                )
+                summary["result_count"] = len(items)
+                summary["result_ids"] = [
+                    q.get("id")
+                    for q in items[:_TRACE_LIST_LIMIT]
+                    if isinstance(q, dict) and q.get("id") is not None
+                ]
             metadata = parsed.get("metadata") or {}
             summary["fallback_used"] = bool(metadata.get("fallback_used", False))
             summary["empty_reason"] = metadata.get("empty_reason")
@@ -294,7 +313,14 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     """
     forced_closing = await _forced_closing_response(state)
     if forced_closing:
-        _emit({"type": "step", "step": "closing", "message": "正在收尾面试...", "reason": STEP_REASONS["closing"]})
+        _emit(
+            {
+                "type": "step",
+                "step": "closing",
+                "message": "正在收尾面试...",
+                "reason": STEP_REASONS["closing"],
+            }
+        )
         yield {"type": "chunk", "content": forced_closing}
         yield {"type": "done"}
         return
@@ -314,7 +340,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     # Compressed context
     compressed = state.get("compressed_context")
     if compressed:
-        messages.append({"role": "user", "content": f"[以下是更早对话的压缩摘要，由系统生成，不是候选人的话]\n{compressed}"})
+        messages.append(
+            {
+                "role": "user",
+                "content": f"[以下是更早对话的压缩摘要，由系统生成，不是候选人的话]\n{compressed}",
+            }
+        )
 
     # Recent messages
     for msg in state.get("recent_messages", [])[-10:]:
@@ -354,9 +385,9 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             state["active_skill_instructions"] = []  # consumed
         llm_started = time.monotonic()
         try:
-            result = await llm_with_tools(
+            result = await llm_service.llm_with_tools(
                 messages,
-                ALL_TOOLS,
+                chat_tools.ALL_TOOLS,
                 user_id=state["user_id"],
                 model=state.get("model"),
             )
@@ -451,14 +482,14 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 {
                     "type": "step",
                     "step": tool_name,
-                    "message": tool_progress_message(tc),
+                    "message": chat_tools.tool_progress_message(tc),
                     "reason": STEP_REASONS.get(tool_name, ""),
                 }
             )
 
             # Execute tool
             tool_started = time.monotonic()
-            output = await execute_tool(tc, state)
+            output = await chat_tools.execute_tool(tc, state)
             _log_react_tool_call(
                 state,
                 react_step=react_step,
@@ -495,7 +526,9 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             # Emit insight events for user-visible decision points
             if tool_name == "load_skill":
                 skill_label = (
-                    tool_progress_message(tc).replace("正在加载", "").replace("...", "")
+                    chat_tools.tool_progress_message(tc)
+                    .replace("正在加载", "")
+                    .replace("...", "")
                 )
                 _emit({"type": "insight", "text": f"切换到{skill_label}模式"})
             elif tool_name in ("search_questions", "draw_questions") and state.get(
@@ -521,7 +554,9 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             if tool_name in ("search_questions", "draw_questions"):
                 try:
                     parsed_out = json.loads(output)
-                    if isinstance(parsed_out, dict) and isinstance(parsed_out.get("items"), list):
+                    if isinstance(parsed_out, dict) and isinstance(
+                        parsed_out.get("items"), list
+                    ):
                         parsed_out = {**parsed_out, "items": parsed_out["items"][:3]}
                         msg_output = json.dumps(parsed_out, ensure_ascii=False)
                     elif isinstance(parsed_out, list) and len(parsed_out) > 3:
@@ -530,13 +565,19 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     pass
             messages.append(make_tool_result_message(tc["id"], msg_output))
             plan = state.get("next_question_plan")
-            if tool_name in ("search_questions", "draw_questions") and plan and not state.get("question_plan_injected"):
+            if (
+                tool_name in ("search_questions", "draw_questions", "select_question")
+                and plan
+                and not state.get("question_plan_injected")
+            ):
                 plan_prompt = _build_next_question_plan_prompt(plan)
                 if plan_prompt:
-                    messages.append({
-                        "role": "user",
-                        "content": "[系统自动生成的下一题约束]\n" + plan_prompt,
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "[系统自动生成的下一题约束]\n" + plan_prompt,
+                        }
+                    )
                     state["question_plan_injected"] = True
 
         # If inner loop broke due to validation failure or loop detection, exit outer loop
@@ -566,7 +607,14 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         )
 
     # 4. Stream final answer
-    _emit({"type": "step", "step": "generating", "message": "正在生成回答...", "reason": STEP_REASONS["generating"]})
+    _emit(
+        {
+            "type": "step",
+            "step": "generating",
+            "message": "正在生成回答...",
+            "reason": STEP_REASONS["generating"],
+        }
+    )
     try:
         if stop_reason == "max_seconds":
             yield {
@@ -582,17 +630,21 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 state,
             )
             deduplicator = state.setdefault("output_deduplicator", OutputDeduplicator())
-            dup_result = deduplicator.check(final_text_clean) if final_text_clean else "ok"
+            dup_result = (
+                deduplicator.check(final_text_clean) if final_text_clean else "ok"
+            )
 
             if dup_result == "exact":
                 logger.info(
                     "ReAct trace: event=output_dedup_exact conversation_id=%s",
                     state.get("conversation_id"),
                 )
-                messages.append({
-                    "role": "user",
-                    "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
+                    }
+                )
                 async for event in _stream_final_answer(messages, state):
                     yield event
             elif dup_result == "similar":
@@ -600,16 +652,20 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     "ReAct trace: event=output_dedup_similar conversation_id=%s",
                     state.get("conversation_id"),
                 )
-                messages.append({
-                    "role": "user",
-                    "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
+                    }
+                )
                 async for event in _stream_final_answer(messages, state):
                     yield event
             else:
                 if final_text_clean:
                     deduplicator.record(final_text_clean)
-                for event in await _final_answer_events_from_text(final_answer_text, state):
+                for event in await _final_answer_events_from_text(
+                    final_answer_text, state
+                ):
                     yield event
         else:
             async for event in _stream_final_answer(messages, state):

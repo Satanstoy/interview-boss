@@ -5,6 +5,7 @@ Defines 3 tools the LLM can call via OpenAI function calling:
 - search_questions: FTS5 hybrid search for interview questions
 - draw_questions: Weighted random question drawing
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Dependency Injection (for easy test mocking) ──────────
+
 
 def _get_skill_registry():
     """Lazy import to avoid circular dependencies."""
@@ -171,10 +173,43 @@ DRAW_QUESTIONS_SCHEMA = {
     },
 }
 
-ALL_TOOLS = [LOAD_SKILL_SCHEMA, SEARCH_QUESTIONS_SCHEMA, DRAW_QUESTIONS_SCHEMA]
+SELECT_QUESTION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "select_question",
+        "description": (
+            "从 search_questions 或 draw_questions 返回的候选题中，绑定一道作为下一题计划。\n\n"
+            "【何时使用】\n"
+            "- 已经调用 search_questions / draw_questions 获得候选题\n"
+            "- 需要显式从候选题中选择一道并生成 question_plan\n"
+            "- 默认选择逻辑（第一题）不符合当前对话 intent\n\n"
+            "【何时不用】\n"
+            "- 还没有候选题（应先调用 search_questions 或 draw_questions）\n"
+            "- 用户只是在闲聊"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "candidate_index": {
+                    "type": "integer",
+                    "description": "候选题索引，0 表示第一题。默认 0。",
+                    "default": 0,
+                },
+            },
+        },
+    },
+}
+
+ALL_TOOLS = [
+    LOAD_SKILL_SCHEMA,
+    SEARCH_QUESTIONS_SCHEMA,
+    DRAW_QUESTIONS_SCHEMA,
+    SELECT_QUESTION_SCHEMA,
+]
 
 
 # ── Progress Messages ────────────────────────────────────
+
 
 def tool_progress_message(tool_call: dict) -> str:
     """Return a user-visible progress string based on tool name."""
@@ -197,11 +232,13 @@ def tool_progress_message(tool_call: dict) -> str:
         "load_skill": f"正在加载{skill_label}...",
         "search_questions": "正在检索相关面试题...",
         "draw_questions": "正在从题库抽题...",
+        "select_question": "正在绑定下一题...",
     }
     return messages.get(name, "正在处理...")
 
 
 # ── Executor ─────────────────────────────────────────────
+
 
 async def execute_tool(tool_call: dict, state: ChatState) -> str:
     """Execute a tool call and return the result as a JSON string.
@@ -223,6 +260,8 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
             return await _execute_search_questions(args, state)
         elif func_name == "draw_questions":
             return await _execute_draw_questions(args, state)
+        elif func_name == "select_question":
+            return _execute_select_question(args, state)
         else:
             return json.dumps({"error": f"Unknown tool: {func_name}"})
     except Exception as e:
@@ -231,6 +270,7 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
 
 
 # ── Tool Implementations ─────────────────────────────────
+
 
 def _execute_load_skill(args: dict, state: ChatState) -> str:
     """Load a skill through the backend MCP tool boundary."""
@@ -253,4 +293,35 @@ async def _execute_draw_questions(args: dict, state: ChatState) -> str:
     from app.mcp_server.interview_tools import draw_questions_tool
 
     envelope = await draw_questions_tool(args, state)
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+def _execute_select_question(args: dict, state: ChatState) -> str:
+    """Select and bind one candidate as the next-question plan."""
+    from app.mcp_server.interview_tools import select_question_tool
+
+    candidates = (
+        state.get("candidate_questions") or state.get("retrieved_questions") or []
+    )
+    index = args.get("candidate_index", 0)
+    if isinstance(index, int) and 0 <= index < len(candidates):
+        selected = candidates[index]
+    elif candidates:
+        selected = candidates[0]
+    else:
+        return json.dumps(
+            {
+                "ok": False,
+                "tool": "select_question",
+                "items": [],
+                "metadata": {},
+                "error": {
+                    "error_code": "NO_CANDIDATES",
+                    "message": "No candidate questions available to select",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    envelope = select_question_tool({"candidates": candidates}, state)
     return json.dumps(envelope, ensure_ascii=False)

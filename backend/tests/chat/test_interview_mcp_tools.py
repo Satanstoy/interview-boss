@@ -32,10 +32,14 @@ def test_load_skill_tool_updates_state_with_registry_getter():
         registry_getter=lambda: registry,
     )
 
-    assert result["status"] == "loaded"
-    assert result["skill"] == "theory-qa"
+    assert result["ok"] is True
+    assert result["metadata"]["status"] == "loaded"
+    assert result["metadata"]["skill"] == "theory-qa"
     assert state["active_skills"] == ["theory-qa"]
-    assert state["active_skill_instructions"][0]["instruction"] == "## Theory QA full instruction"
+    assert (
+        state["active_skill_instructions"][0]["instruction"]
+        == "## Theory QA full instruction"
+    )
 
 
 @pytest.mark.asyncio
@@ -124,7 +128,29 @@ def test_interview_mcp_app_exports_streamable_http_app():
     from app.mcp_server.app import mcp, mcp_app
 
     assert mcp.name == "InterviewBoss"
-    assert hasattr(mcp_app, "routes")
+    inner = getattr(mcp_app, "app", mcp_app)
+    assert hasattr(inner, "routes")
+
+
+def test_mcp_endpoint_exempt_from_csrf(client):
+    response = client.post("/mcp/messages", headers={})
+    assert response.status_code != 403
+
+
+def test_mcp_endpoint_requires_api_key_when_configured(client, monkeypatch):
+    from app.mcp_server import app as mcp_app_module
+
+    monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "test-mcp-key")
+    assert mcp_app_module.MCP_API_KEY == "test-mcp-key"
+
+    response = client.post("/mcp/messages", headers={})
+    assert response.status_code == 401
+
+    response = client.post(
+        "/mcp/messages",
+        headers={"x-mcp-api-key": "test-mcp-key"},
+    )
+    assert response.status_code != 401
 
 
 @pytest.mark.asyncio
@@ -174,3 +200,83 @@ async def test_interview_mcp_app_call_tool_io_contract():
     assert selected["ok"] is True
     assert selected["selected_question"]["id"] == 21
     assert selected["question_plan"]["question_id"] == 21
+
+
+@pytest.mark.asyncio
+async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    async def fake_draw(**kwargs):
+        return [
+            {
+                "id": 101,
+                "question": "算法题：手写 LRU Cache",
+                "cat1": "E.算法与数据结构",
+                "cat2": "E1.数据结构",
+                "tags": "算法手撕,lru",
+                "difficulty": "L2-中等",
+                "sources": [],
+            }
+        ]
+
+    monkeypatch.setattr(interview_tools, "_draw_questions_for_tool", fake_draw)
+
+    loaded = await _call_mcp_json("load_skill", {"skill_name": "algorithm-coding"})
+    assert loaded["ok"] is True
+    session_id = loaded["metadata"]["session_id"]
+    assert session_id
+    assert loaded["metadata"]["state"]["active_skills"] == ["algorithm-coding"]
+
+    drawn = await _call_mcp_json(
+        "draw_questions",
+        {"user_id": 5, "bank_mode": "public", "count": 1, "session_id": session_id},
+    )
+    assert drawn["ok"] is True
+    assert drawn["metadata"]["session_id"] == session_id
+    assert drawn["items"][0]["id"] == 101
+
+
+@pytest.mark.asyncio
+async def test_mcp_session_persists_across_search_and_select(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    async def fake_search(**kwargs):
+        return [
+            {
+                "id": 201,
+                "question": "讲一下 RAG 的重排",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "B2.RAG系统设计",
+                "tags": "rag",
+            },
+            {
+                "id": 202,
+                "question": "算法题：手写 LRU Cache",
+                "cat1": "E.算法与数据结构",
+                "cat2": "E1.数据结构",
+                "tags": "算法手撕,lru",
+            },
+        ]
+
+    monkeypatch.setattr(interview_tools, "_hybrid_search_for_tool", fake_search)
+
+    searched = await _call_mcp_json(
+        "search_questions",
+        {"keywords": ["RAG"], "user_id": 5, "bank_mode": "public"},
+    )
+    assert searched["ok"] is True
+    session_id = searched["metadata"]["session_id"]
+    assert session_id
+
+    selected = await _call_mcp_json(
+        "select_question",
+        {
+            "session_id": session_id,
+            "question_type": "algorithm_coding",
+            "candidates": searched["items"],
+        },
+    )
+    assert selected["ok"] is True
+    assert selected["metadata"]["session_id"] == session_id
+    assert selected["selected_question"]["id"] == 202
+    assert selected["question_plan"]["question_id"] == 202

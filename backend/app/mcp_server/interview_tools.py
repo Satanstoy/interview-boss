@@ -27,6 +27,9 @@ from app.agents.chat.tool_gateway import (
 )
 
 
+_TOOL_SERVICE_TIMEOUT = 30.0
+
+
 def _get_default_skill_registry():
     from app.agents.chat.skills import get_default_registry
 
@@ -40,11 +43,30 @@ def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
     skill = registry.get(skill_name)
 
     if skill is None:
-        return {"error": f"Unknown skill: {skill_name}"}
+        return {
+            "ok": False,
+            "tool": "load_skill",
+            "items": [],
+            "metadata": {},
+            "error": {
+                "error_code": "UNKNOWN_SKILL",
+                "message": f"Unknown skill: {skill_name}",
+            },
+        }
 
     active_skills = state.setdefault("active_skills", [])
     if skill_name in active_skills:
-        return {"status": "already_active", "skill": skill_name}
+        return {
+            "ok": True,
+            "tool": "load_skill",
+            "items": [],
+            "metadata": {
+                "status": "already_active",
+                "skill": skill_name,
+                "summary": f"技能「{skill.description}」已在激活状态。",
+            },
+            "error": None,
+        }
 
     active_skills.append(skill_name)
 
@@ -58,9 +80,15 @@ def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
         )
 
     return {
-        "status": "loaded",
-        "skill": skill_name,
-        "summary": f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。",
+        "ok": True,
+        "tool": "load_skill",
+        "items": [],
+        "metadata": {
+            "status": "loaded",
+            "skill": skill_name,
+            "summary": f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。",
+        },
+        "error": None,
     }
 
 
@@ -142,7 +170,21 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
             search_args["exclude_ids"] = exclude_ids
 
     try:
-        results = await _maybe_await(_hybrid_search_for_tool(**search_args))
+        results = await asyncio.wait_for(
+            _maybe_await(_hybrid_search_for_tool(**search_args)),
+            timeout=_TOOL_SERVICE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.exception("search_questions service timed out")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="search_questions",
+            error_code="TIMEOUT",
+            message="search_questions service timed out",
+            total_ms=total_ms,
+            debug_reason="service_timeout",
+            empty_reason="service_unavailable",
+        )
     except Exception:
         logger.exception("search_questions service failed")
         total_ms = int((time.monotonic() - started) * 1000)
@@ -223,7 +265,21 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
             draw_args["exclude_ids"] = exclude_ids
 
     try:
-        results = await _maybe_await(_draw_questions_for_tool(**draw_args))
+        results = await asyncio.wait_for(
+            _maybe_await(_draw_questions_for_tool(**draw_args)),
+            timeout=_TOOL_SERVICE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.exception("draw_questions service timed out")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="draw_questions",
+            error_code="TIMEOUT",
+            message="draw_questions service timed out",
+            total_ms=total_ms,
+            debug_reason="service_timeout",
+            empty_reason="service_unavailable",
+        )
     except Exception:
         logger.exception("draw_questions service failed")
         total_ms = int((time.monotonic() - started) * 1000)
