@@ -1693,6 +1693,10 @@ def build_react_system_prompt(state: ChatState) -> str:
     3. Session notes
     4. Compressed context
     5. Skill catalog + tool guidance
+    5.25. Intent-based tool strategy (dynamic, state-dependent)
+    5.5. Skill body injection: always_active tool-use skills are auto-injected
+         regardless of state["active_skills"], merged with explicit active skills
+    5.6. Mid-loop pending skill instructions
     6. Basis extraction guidance (so the final answer can still emit metadata)
     """
     from app.agents.shared.skills.builder import build_skill_catalog
@@ -1726,9 +1730,13 @@ def build_react_system_prompt(state: ChatState) -> str:
             weak = [m for m in memory_summaries if m.get("memory_type") == "weakness"]
             strong = [m for m in memory_summaries if m.get("memory_type") == "strength"]
             if weak:
-                memory_parts.append("薄弱环节：" + "; ".join(m.get("summary", "") for m in weak[:3]))
+                memory_parts.append(
+                    "薄弱环节：" + "; ".join(m.get("summary", "") for m in weak[:3])
+                )
             if strong:
-                memory_parts.append("擅长领域：" + "; ".join(m.get("summary", "") for m in strong[:3]))
+                memory_parts.append(
+                    "擅长领域：" + "; ".join(m.get("summary", "") for m in strong[:3])
+                )
         memory_context = _truncate_to_budget(
             "\n".join(memory_parts) if memory_parts else "", MEMORY_BUDGET
         )
@@ -1774,9 +1782,12 @@ def build_react_system_prompt(state: ChatState) -> str:
     always_active_skill_names = [
         skill.name
         for skill in sorted(
-            skill_registry._skills.values(), key=lambda item: item.priority, reverse=True
+            skill_registry._skills.values(),
+            key=lambda item: item.priority,
+            reverse=True,
         )
-        if skill.always_active and skill.metadata.get("interview-boss.kind") == "tool-use"
+        if skill.always_active
+        and skill.metadata.get("interview-boss.kind") == "tool-use"
     ]
     prompt_skill_names = list(
         dict.fromkeys(always_active_skill_names + active_skill_names)
