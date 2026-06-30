@@ -14,7 +14,7 @@ class TestBUG001SanitizeNoop:
 
     def test_sanitize_not_passthrough(self):
         """sanitizeAgainstInjection 不应直接返回原始字符串"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -44,7 +44,7 @@ class TestBUG001SanitizeNoop:
 
     def test_sanitize_removes_html_tags(self):
         """sanitizeAgainstInjection 应移除 HTML 标签"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -69,7 +69,7 @@ class TestBUG001SanitizeNoop:
 
     def test_validate_payload_calls_sanitize(self):
         """validatePayload 应调用 sanitizeAgainstInjection"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -180,14 +180,14 @@ class TestBUG003UrlHrefValidation:
 
     def test_safe_url_function_exists(self):
         """validate.js 应导出 safeUrl 函数"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'safeUrl' in content, "validate.js 应包含 safeUrl 函数"
 
     def test_safe_url_rejects_javascript(self):
         """safeUrl 应拒绝 javascript: 协议"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -211,7 +211,7 @@ class TestBUG003UrlHrefValidation:
 
     def test_question_card_uses_safe_url(self):
         """QuestionCard.vue 应使用 safeUrl 处理 href"""
-        card_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/components/business/QuestionCard.vue')
+        card_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/components/business/QuestionCard.vue')
         with open(card_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -220,7 +220,7 @@ class TestBUG003UrlHrefValidation:
 
     def test_source_views_use_safe_url(self):
         """承载来源链接的视图应使用 safeUrl 处理 href"""
-        frontend_root = os.path.join(os.path.dirname(__file__), '../../frontend/src')
+        frontend_root = os.path.join(os.path.dirname(__file__), '../../../frontend/src')
         source_files = [
             'layouts/AuthenticatedLayout.vue',
             'views/InterviewView.vue',
@@ -295,7 +295,7 @@ class TestSecurityVerification:
 
     def test_validate_js_has_escape_html(self):
         """validate.js 应保留 escapeHtml 函数"""
-        validate_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/utils/validate.js')
+        validate_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/utils/validate.js')
         with open(validate_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'escapeHtml' in content, "validate.js 应包含 escapeHtml 函数"

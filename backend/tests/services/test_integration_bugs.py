@@ -16,7 +16,7 @@ class TestBUG001LoadActiveSeason:
 
     def test_load_active_season_uses_public_endpoint(self):
         """loadActiveSeason 应调用 fetchPublicProfile 而非 fetchProfile"""
-        data_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/composables/useMasterBankData.js')
+        data_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/composables/useMasterBankData.js')
         with open(data_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -60,7 +60,7 @@ class TestBUG002BuildMasterBank:
 
     def test_trigger_build_uses_sse(self):
         """triggerBuildMasterBank 应提交 build 任务并监听 job SSE"""
-        build_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/composables/useBuildTrigger.js')
+        build_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/composables/useBuildTrigger.js')
         with open(build_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -98,7 +98,7 @@ class TestBUG002BuildMasterBank:
 
     def test_api_has_sse_function(self):
         """前端 api/index.js 应有 buildMasterBankSSE 函数"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/api/index.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/api/index.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'buildMasterBankSSE' in content, "api/index.js 应导出 buildMasterBankSSE"
@@ -111,14 +111,14 @@ class TestBUG003FetchPublicProfile:
 
     def test_fetch_public_profile_exists_in_api(self):
         """api/index.js 应导出 fetchPublicProfile 函数"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/services/profileApi.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/services/profileApi.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'fetchPublicProfile' in content, "api/index.js 应导出 fetchPublicProfile"
 
     def test_fetch_public_profile_calls_correct_endpoint(self):
         """fetchPublicProfile 应调用 GET /api/profile/public"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/services/profileApi.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/services/profileApi.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         # 找到 fetchPublicProfile 定义
@@ -145,7 +145,7 @@ class TestIntegrationVerification:
 
     def test_api_index_has_all_required_functions(self):
         """api/index.js 应包含所有必要的 API 函数"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/api/index.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../../frontend/src/api/index.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         required_functions = [

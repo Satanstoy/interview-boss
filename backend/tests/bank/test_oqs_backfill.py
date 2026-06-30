@@ -86,7 +86,7 @@ class TestFrontendDedupedSourcesFallback:
 
     def test_deduped_sources_handles_empty_oqs(self):
         """dedupedSources 在 oqs 为空时应返回 sources（无 _origQuestion）"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/QuestionCard.vue', 'r') as f:
+        with open(BACKEND_ROOT.parent / 'frontend/src/components/business/QuestionCard.vue', 'r') as f:
             content = f.read()
 
         # 检查 dedupedSources 存在

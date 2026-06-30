@@ -146,7 +146,7 @@ class TestFrontendCodeContract:
         """profileApi.js 的 fetchProfile 和 fetchPublicProfile 接受 options 参数"""
         import os
         api_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/services/profileApi.js'
+            os.path.dirname(__file__), '../../../frontend/src/services/profileApi.js'
         )
         with open(api_file, 'r') as f:
             content = f.read()
@@ -162,7 +162,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsInterview.vue'
+            os.path.dirname(__file__), '../../../frontend/src/components/business/SettingsInterview.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
@@ -183,7 +183,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsInterview.vue'
+            os.path.dirname(__file__), '../../../frontend/src/components/business/SettingsInterview.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
@@ -202,7 +202,7 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/composables/useMasterBankData.js'
+            os.path.dirname(__file__), '../../../frontend/src/composables/useMasterBankData.js'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
@@ -221,7 +221,7 @@ class TestFrontendCodeContract:
         """
         import os
         app_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/views/SettingsView.vue'
+            os.path.dirname(__file__), '../../../frontend/src/views/SettingsView.vue'
         )
         with open(app_file, 'r') as f:
             content = f.read()

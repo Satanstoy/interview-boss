@@ -11,7 +11,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 def _get_single_source_section():
     """提取当前来源详情渲染部分"""
-    with open(BACKEND_ROOT / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
+    with open(BACKEND_ROOT.parent / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
         content = f.read()
     idx = content.find('v-for="(src, idx) in dedupedSources"')
     assert idx != -1, "应存在 dedupedSources 来源渲染"
@@ -22,7 +22,7 @@ def _get_single_source_section():
 
 def _get_multi_source_section():
     """提取来源详情容器部分"""
-    with open(BACKEND_ROOT / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
+    with open(BACKEND_ROOT.parent / 'frontend/src/components/business/QuestionCard.vue', 'r', encoding='utf-8') as f:
         content = f.read()
     idx = content.find('来源详情')
     end_idx = content.find('</template>', idx)

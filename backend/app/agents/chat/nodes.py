@@ -1768,13 +1768,23 @@ def build_react_system_prompt(state: ChatState) -> str:
     if tool_strategy:
         parts.append(tool_strategy)
 
-    # Layer 5.5: Active skill instructions (loaded from registry for persistence)
+    # Layer 5.5: Always-active and active skill instructions.
+    skill_registry = get_default_registry()
     active_skill_names = state.get("active_skills", [])
-    if active_skill_names:
-        skill_registry = get_default_registry()
+    always_active_skill_names = [
+        skill.name
+        for skill in sorted(
+            skill_registry._skills.values(), key=lambda item: item.priority, reverse=True
+        )
+        if skill.always_active and skill.metadata.get("interview-boss.kind") == "tool-use"
+    ]
+    prompt_skill_names = list(
+        dict.fromkeys(always_active_skill_names + active_skill_names)
+    )
+    if prompt_skill_names:
         from app.agents.shared.skills.builder import build_skill_prompt as _build_sp
 
-        skill_instr = _build_sp(skill_registry, active_skill_names)
+        skill_instr = _build_sp(skill_registry, prompt_skill_names)
         if skill_instr:
             parts.append(skill_instr)
 

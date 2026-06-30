@@ -129,7 +129,7 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_app_vue_has_active_reprocessing_computed(self):
         """修复后：全局问题操作 composable 应有 activeReprocessing computed 属性"""
-        with open(BACKEND_ROOT / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "activeReprocessing" in content, (
@@ -139,7 +139,7 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_global_progress_indicator_in_template(self):
         """修复后：模板中应有全局进度指示器（fixed 定位）"""
-        with open(BACKEND_ROOT / "frontend/src/layouts/AuthenticatedLayout.vue", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT.parent / "frontend/src/layouts/AuthenticatedLayout.vue", "r", encoding="utf-8") as f:
             content = f.read()
 
         has_fixed_indicator = ("fixed" in content and "activeReprocessing" in content)
@@ -154,7 +154,7 @@ class TestBug002ProgressStateLifecycle:
 
     def test_bug002_reprocessing_state_is_top_level_ref(self):
         """reprocessingIds 应在全局 composable 顶级声明，不绑定在 v-if 组件内"""
-        with open(BACKEND_ROOT / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "const reprocessingIds" in content, (
