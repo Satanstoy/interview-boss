@@ -15,6 +15,7 @@ from app.agents.chat.state import ChatState
 logger = logging.getLogger("interview-boss")
 
 _MAX_CONSECUTIVE_SAME_QUESTION = 2
+_MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION = 4
 
 
 def _tokenize_for_overlap(text: str) -> set[str]:
@@ -35,12 +36,36 @@ def _should_create_question_plan(state: ChatState) -> bool:
     intent = state.get("intent")
     if intent == "practice_request":
         return True
-    if intent == "interview_question" and state.get("answer_complete") is True:
+    if intent == "interview_question" and _should_require_bank_question(state):
         return True
     if state.get("question_type") == "algorithm_coding":
         return True
     user_message = str(state.get("user_message") or "")
     return bool(re.search(r"(出题|来一道|换题|随机|手撕|代码题)", user_message))
+
+
+def _should_require_bank_question(state: ChatState) -> bool:
+    """Return True when the current turn should bind the next ask to the bank.
+
+    The first self-introduction turn is intentionally conversational: the
+    interviewer should ask a natural clarification before forcing a retrieved
+    bank question. Explicit practice/coding requests still require the bank.
+    """
+    if state.get("intent") == "practice_request":
+        return True
+    if state.get("question_type") == "algorithm_coding":
+        return True
+    if state.get("intent") != "interview_question":
+        return False
+    if state.get("answer_complete") is not True:
+        return False
+    history = state.get("message_history")
+    if history is None:
+        return True
+    message_count = len(history or [])
+    if message_count < _MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION:
+        return False
+    return True
 
 
 def _candidate_contains_negative_term(
@@ -100,12 +125,91 @@ def _select_question_for_plan(
     if not viable:
         return None, "no_viable_candidate"
 
+    asked_ids, asked_texts = _previously_asked_question_keys(state)
+    if asked_ids or asked_texts:
+        unasked = [
+            candidate
+            for candidate in viable
+            if not _candidate_was_previously_asked(candidate, asked_ids, asked_texts)
+        ]
+        if unasked:
+            viable = unasked
+            asked_filter_suffix = "_after_asked_filter"
+        else:
+            asked_filter_suffix = "_all_candidates_previously_asked"
+    else:
+        asked_filter_suffix = ""
+
     if state.get("question_type") == "algorithm_coding":
         for candidate in viable:
             if _is_algorithm_candidate(candidate):
-                return candidate, "algorithm_candidate_match"
+                return candidate, f"algorithm_candidate_match{asked_filter_suffix}"
 
-    return viable[0], "top_ranked_candidate"
+    return viable[0], f"top_ranked_candidate{asked_filter_suffix}"
+
+
+def _previously_asked_question_keys(state: ChatState) -> tuple[set[int], set[str]]:
+    ids: set[int] = set()
+    texts: set[str] = set()
+
+    def add_question(raw: object) -> None:
+        if not isinstance(raw, dict):
+            return
+        raw_id = raw.get("id")
+        try:
+            qid = int(raw_id)
+        except (TypeError, ValueError):
+            qid = 0
+        if qid > 0:
+            ids.add(qid)
+        text_key = _normalize_question_text(str(raw.get("question") or ""))
+        if text_key:
+            texts.add(text_key)
+
+    for msg in state.get("message_history", []) or []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        metadata = msg.get("metadata") or {}
+        if isinstance(metadata, dict):
+            add_question(metadata.get("selected_question"))
+            for key in (
+                "selected_basis_questions",
+                "candidate_questions",
+                "retrieved_questions",
+            ):
+                value = metadata.get(key)
+                if isinstance(value, list):
+                    for item in value:
+                        add_question(item)
+        content = str(msg.get("content") or "")
+        for pattern in (
+            r"来写一道代码题[：:]\s*(.+?)(?:\n|$)",
+            r"来聊一个八股[题：:]\s*(.+?)(?:\n|$)",
+            r"我们先收束到一道具体题[：:]\s*(.+?)(?:\n|$)",
+            r"我追问一个.+?问题[：:]\s*(.+?)(?:\n|$)",
+            r"说说你对(.+?)的理解",
+        ):
+            for match in re.finditer(pattern, content):
+                text_key = _normalize_question_text(match.group(1).strip())
+                if text_key:
+                    texts.add(text_key)
+
+    return ids, texts
+
+
+def _candidate_was_previously_asked(
+    candidate: dict,
+    asked_ids: set[int],
+    asked_texts: set[str],
+) -> bool:
+    try:
+        qid = int(candidate.get("id"))
+    except (TypeError, ValueError):
+        qid = 0
+    if qid > 0 and qid in asked_ids:
+        return True
+    text_key = _normalize_question_text(str(candidate.get("question") or ""))
+    return bool(text_key and text_key in asked_texts)
 
 
 def _maybe_create_question_plan(

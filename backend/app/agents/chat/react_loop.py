@@ -31,6 +31,7 @@ from app.agents.chat.question_plan import (
     _build_previously_asked_section,
     _build_repetition_protection_note,
     _maybe_create_question_plan,
+    _should_require_bank_question,
 )
 from app.agents.chat.state import ChatState
 from app.agents.chat.summary import _forced_closing_response
@@ -623,7 +624,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         not stop_reason
         and final_answer_text
         and state.get("intent") == "interview_question"
-        and state.get("answer_complete") is True
+        and _should_require_bank_question(state)
         and not state.get("retrieved_questions")
         and not state.get("candidate_questions")
         and not search_or_draw_called

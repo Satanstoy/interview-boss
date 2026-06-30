@@ -101,12 +101,21 @@ const expandedSteps = reactive({})
 const stepCount = computed(() => props.steps.length)
 
 const displayLabel = computed(() => {
-  if (props.isSending) return '思考中'
+  if (props.isStreaming || (props.isSending && props.duration > 0 && !props.content)) {
+    return `思考中 ${formatDuration(props.duration)}`
+  }
+  if (props.isSending && props.duration <= 0) return '思考中'
   const parts = []
-  if (props.duration > 0) parts.push(`思考了 ${props.duration} 秒`)
+  if (props.duration > 0) parts.push(`思考了 ${formatDuration(props.duration)}`)
   if (stepCount.value > 0) parts.push(`${stepCount.value} 步`)
   return parts.length > 0 ? parts.join(' · ') : '思考过程'
 })
+
+function formatDuration(duration) {
+  const value = Number(duration) || 0
+  if (value <= 0) return '0 秒'
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} 秒`
+}
 
 function toggleStep(index) {
   expandedSteps[index] = !expandedSteps[index]

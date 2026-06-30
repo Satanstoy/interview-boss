@@ -194,11 +194,11 @@
           <div v-if="isSending" class="mb-6">
             <!-- Thinking block -->
             <ReasoningTimeline
-              v-if="isThinking || thinkingContent || processingSteps.length > 0"
+              v-if="isSending || isThinking || thinkingContent || processingSteps.length > 0"
               :is-streaming="isThinking"
               :is-sending="isSending"
               :content="thinkingContent"
-              :duration="thinkingDuration"
+              :duration="displayThinkingDuration"
               :steps="processingSteps"
             />
 
@@ -467,6 +467,8 @@ const renameDialogCallback = ref(null)
 const isThinking = ref(false)
 const thinkingContent = ref('')
 const thinkingDuration = ref(0)
+const liveThinkingSeconds = ref(0)
+let thinkingTimer = null
 
 const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
@@ -543,6 +545,26 @@ const waitingText = computed(() => {
   }
   return stepTextMap[lastStep.step] || lastStep.message || '思考中...'
 })
+
+const displayThinkingDuration = computed(() => {
+  return thinkingDuration.value || liveThinkingSeconds.value
+})
+
+function startThinkingTimer() {
+  stopThinkingTimer()
+  liveThinkingSeconds.value = 0
+  const startedAt = Date.now()
+  thinkingTimer = window.setInterval(() => {
+    liveThinkingSeconds.value = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+  }, 250)
+}
+
+function stopThinkingTimer() {
+  if (thinkingTimer) {
+    window.clearInterval(thinkingTimer)
+    thinkingTimer = null
+  }
+}
 
 // Message grouping by time
 const groupedMessages = computed(() => {
@@ -707,6 +729,8 @@ async function handleSend() {
   isThinking.value = false
   thinkingContent.value = ''
   thinkingDuration.value = 0
+  liveThinkingSeconds.value = 0
+  startThinkingTimer()
 
   const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
   messages.value.push(userMsg)
@@ -731,12 +755,18 @@ async function handleSend() {
           isThinking.value = true
           thinkingContent.value = ''
           thinkingDuration.value = 0
+          liveThinkingSeconds.value = 0
+          startThinkingTimer()
         } else if (event.type === 'thinking') {
           thinkingContent.value += event.content
           scrollToBottom()
         } else if (event.type === 'thinking_done') {
           isThinking.value = false
           thinkingDuration.value = event.duration || 0
+          if (thinkingDuration.value > 0) {
+            liveThinkingSeconds.value = thinkingDuration.value
+          }
+          stopThinkingTimer()
         } else if (event.type === 'chunk') {
           // Strip [BASIS] blocks from streaming content to prevent leakage
           const rawContent = event.content
@@ -863,8 +893,10 @@ async function handleSend() {
     streamingContent.value = ''
     isSending.value = false
     isThinking.value = false
+    stopThinkingTimer()
     thinkingContent.value = ''
     thinkingDuration.value = 0
+    liveThinkingSeconds.value = 0
     await scrollToBottom()
   }
 }
@@ -995,6 +1027,7 @@ async function handleDelete(id) {
 
 function handleStop() {
   cancelAllRequests()
+  stopThinkingTimer()
   if (streamingContent.value) {
     messages.value.push({
       id: Date.now() + 1,
@@ -1006,6 +1039,8 @@ function handleStop() {
   }
   streamingContent.value = ''
   isSending.value = false
+  isThinking.value = false
+  liveThinkingSeconds.value = 0
 }
 
 function autoResize() {

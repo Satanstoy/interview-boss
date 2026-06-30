@@ -18,12 +18,15 @@
     <div class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
       <template v-if="interviewSeasons.length > 0">
         <label class="text-xs text-muted-foreground">招聘季筛选：</label>
-        <Select v-model="filterSeason">
+        <Select
+          :model-value="filterSeason || '__all__'"
+          @update:model-value="filterSeason = $event === '__all__' ? '' : $event"
+        >
           <SelectTrigger class="min-w-[100px] h-8 text-xs">
             <SelectValue placeholder="全部" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">全部</SelectItem>
+            <SelectItem value="__all__">全部</SelectItem>
             <SelectItem v-for="s in interviewSeasons" :key="s" :value="s">{{ s }}</SelectItem>
           </SelectContent>
         </Select>

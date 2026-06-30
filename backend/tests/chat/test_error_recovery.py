@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.agents.chat.answer import _enforce_question_plan_on_text
 from app.agents.chat.pipeline import (
     _fallback_react_answer,
     _is_internal_react_marker,
@@ -84,6 +85,23 @@ class TestFallbackReactAnswer:
         assert "Redis 缓存穿透怎么处理" in result
         assert state["question_source_reason"] == "fallback_after_test_reason"
 
+    def test_fallback_with_candidates_avoids_rigid_question_template(self):
+        """ER2: candidate fallback should not reuse the stiff old template."""
+        state = {
+            "candidate_questions": [
+                make_question(101, "Agent 的整体架构是什么？"),
+            ],
+            "retrieved_questions": [],
+            "keywords": ["Agent"],
+        }
+
+        result = _fallback_react_answer(state, "test_reason")
+
+        assert "Agent 的整体架构是什么" in result
+        assert "收束到" not in result
+        assert "核心思路、关键取舍" not in result
+        assert "验证这个方案" not in result
+
     def test_fallback_with_retrieved(self):
         """ER2: 无 candidate 但有 retrieved → 使用 retrieved"""
         state = {
@@ -115,6 +133,42 @@ class TestFallbackReactAnswer:
         }
         result = _fallback_react_answer(state, "test_reason")
         assert "你刚才提到的项目" in result
+
+    @pytest.mark.asyncio
+    async def test_plan_fallback_avoids_rigid_question_template(self):
+        """Plan repair fallback should ask the bound question without old boilerplate."""
+        state = {
+            "user_id": 1,
+            "user_message": "我讲一下多 Agent 架构",
+            "next_question_plan": {
+                "must_ask": True,
+                "question_id": 201,
+                "question_text": "介绍一下你的项目里的多Agent架构是如何设计的？",
+                "basis_type": "interview_question",
+                "source": "search",
+                "strategy": "interview_question",
+                "allowed_focus": ["Agent", "架构"],
+                "forbidden_focus": [],
+                "selection_reason": "top_ranked_candidate",
+            },
+        }
+
+        with patch(
+            "app.agents.chat.pipeline._repair_response_to_question_plan",
+            new_callable=AsyncMock,
+            return_value={
+                "response": "说说你的项目难点？",
+                "reason": "plan_drift_repair_failed",
+                "adherence": {"adheres": False, "score": 0.0},
+            },
+        ):
+            result = await _enforce_question_plan_on_text("说说你的项目难点？", state)
+
+        assert "多Agent架构" in result
+        assert "收束到" not in result
+        assert "核心思路、关键取舍" not in result
+        assert "验证这个方案" not in result
+        assert state["question_source_reason"] == "question_plan_fallback"
 
 
 class TestForcedClosing:

@@ -31,12 +31,15 @@
       </div>
 
       <!-- Difficulty filter -->
-      <Select :model-value="filterDifficulty" @update:model-value="$emit('update:filterDifficulty', $event)">
+      <Select
+        :model-value="filterDifficulty || '__all__'"
+        @update:model-value="$emit('update:filterDifficulty', $event === '__all__' ? '' : $event)"
+      >
         <SelectTrigger class="min-w-[120px] h-9 text-sm">
           <SelectValue placeholder="全部难度" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">全部难度</SelectItem>
+          <SelectItem value="__all__">全部难度</SelectItem>
           <SelectItem value="L1">L1 - 基础</SelectItem>
           <SelectItem value="L2">L2 - 中等</SelectItem>
           <SelectItem value="L3">L3 - 困难</SelectItem>

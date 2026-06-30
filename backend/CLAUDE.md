@@ -23,6 +23,9 @@ docker compose --profile test run --rm test uv run pytest backend/tests/taxonomy
 docker compose --profile test run --rm test uv run pytest backend/tests/interview/ -q         # 面试管理
 docker compose --profile test run --rm test uv run pytest backend/tests/coding/ -q            # 手撕代码
 
+# 已有 test-runtime 镜像且只改 backend 源码时，可避免重建/uv sync
+docker compose --profile test run --rm -v "$PWD/backend:/app/backend" test /app/.venv/bin/python -m pytest backend/tests/chat/ -q
+
 # 依赖管理（根 pyproject.toml / uv.lock）
 uv add <package>                                                                       # 添加 Python 依赖
 uv sync --frozen                                                                       # 校验锁文件
@@ -143,8 +146,14 @@ Routers → Services → Core/DB → (external)
 - 测试：`test_difficulty_mapping_*` 和 `test_difficulty_fallback_when_no_match`
 
 ### selected_question 绑定
+- `_select_question_for_plan()` 会过滤当前会话已问过的 `selected_question`/候选题 ID 或题面；只有候选全都问过时才回退第一题并记录 all-candidates-asked reason
 - `_infer_selected_question()` 新增 single-candidate heuristic：draw 单候选 + 响应有 token overlap 时自动绑定
 - 测试：`TestSelectedQuestionBinding`
+
+### 长程面试节奏
+- `_should_require_bank_question()` 控制题库绑定时机：显式练习/代码题立即要求题库；普通面试在开场自我介绍/早期背景说明后先自然追问，进入具体项目细节轮次后再默认检索题库
+- `_build_tool_strategy()`、`_should_create_question_plan()` 和 `react_loop` forced search guard 必须共用该判断，避免策略说自然追问但 guard 又强制检索
+- fallback 追问禁止使用“收束到/核心思路、关键取舍/验证这个方案”固定模板
 
 ## 测试基础设施
 

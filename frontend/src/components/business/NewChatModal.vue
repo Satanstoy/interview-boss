@@ -43,12 +43,15 @@
               <!-- JD selection -->
               <div>
                 <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">选择 JD（可选）</label>
-                <Select :model-value="selectedJdId != null ? String(selectedJdId) : ''" @update:model-value="selectedJdId = $event ? Number($event) : null">
+                <Select
+                  :model-value="selectedJdId != null ? String(selectedJdId) : '__none__'"
+                  @update:model-value="selectedJdId = $event === '__none__' ? null : Number($event)"
+                >
                   <SelectTrigger class="w-full h-9 text-sm">
                     <SelectValue placeholder="选择目标 JD" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">不选择 JD</SelectItem>
+                    <SelectItem value="__none__">不选择 JD</SelectItem>
                     <SelectItem v-for="jd in jdList" :key="jd.id" :value="String(jd.id)">{{ (jd.company || '未知公司') + ' · ' + (jd.job_title || '未知岗位') }}</SelectItem>
                   </SelectContent>
                 </Select>

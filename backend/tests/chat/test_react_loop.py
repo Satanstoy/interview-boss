@@ -678,10 +678,38 @@ class TestBuildToolStrategy:
             "answer_complete": True,
             "retrieved_questions": [],
             "active_skills": [],
+            "message_history": [
+                {"role": "assistant", "content": "请做自我介绍"},
+                {"role": "user", "content": "我做后端"},
+                {"role": "assistant", "content": "展开讲缓存优化"},
+                {"role": "user", "content": "我用了 Redis 缓存和预热"},
+            ],
         }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
         assert "必须" in strategy
+
+    def test_first_intro_answer_prefers_natural_followup_without_search(self):
+        """Opening self-introduction should not immediately force bank search."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+            "active_skills": [],
+            "message_history": [
+                {"role": "assistant", "content": "请先简单做一下自我介绍吧。"},
+                {
+                    "role": "user",
+                    "content": "我主要做后端开发，负责订单查询和缓存优化。",
+                },
+            ],
+        }
+        strategy = _build_tool_strategy(state)
+        assert "search_questions" not in strategy
+        assert "自然追问" in strategy
+        assert "题库" in strategy
 
     def test_interview_question_deep_dive_requires_search_for_plan_binding(self):
         """Project deep-dive mode still searches so question_plan can bind the next question."""
@@ -692,6 +720,12 @@ class TestBuildToolStrategy:
             "answer_complete": True,
             "retrieved_questions": [],
             "active_skills": ["project-deep-dive"],
+            "message_history": [
+                {"role": "assistant", "content": "请做自我介绍"},
+                {"role": "user", "content": "我做后端"},
+                {"role": "assistant", "content": "展开讲缓存优化"},
+                {"role": "user", "content": "我用了 Redis 缓存和预热"},
+            ],
         }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
@@ -883,6 +917,79 @@ class TestQuestionPlanHelpers:
 
         assert selected["id"] == 2
         assert reason == "algorithm_candidate_match"
+
+    def test_select_question_for_plan_skips_previously_selected_question(self):
+        from app.agents.chat.pipeline import _select_question_for_plan
+
+        state = {
+            "search_negative_terms": [],
+            "message_history": [
+                {
+                    "role": "assistant",
+                    "content": "我追问一个问题：Agent 的整体架构是什么？",
+                    "metadata": {
+                        "selected_question": {
+                            "id": 10,
+                            "question": "Agent 的整体架构是什么？",
+                        }
+                    },
+                }
+            ],
+        }
+        candidates = [
+            {
+                "id": 10,
+                "question": "Agent 的整体架构是什么？",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "Agent",
+                "tags": "agent",
+            },
+            {
+                "id": 11,
+                "question": "介绍一下你的项目里的多Agent架构是如何设计的？",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "Agent",
+                "tags": "agent,多Agent",
+            },
+        ]
+
+        selected, reason = _select_question_for_plan(state, candidates)
+
+        assert selected["id"] == 11
+        assert reason == "top_ranked_candidate_after_asked_filter"
+
+    def test_select_question_for_plan_falls_back_when_all_candidates_were_asked(self):
+        from app.agents.chat.pipeline import _select_question_for_plan
+
+        state = {
+            "search_negative_terms": [],
+            "message_history": [
+                {
+                    "role": "assistant",
+                    "content": "Redis 持久化怎么做？",
+                    "metadata": {
+                        "selected_question": {
+                            "id": 10,
+                            "question": "Redis 持久化怎么做？",
+                        }
+                    },
+                }
+            ],
+        }
+        candidates = [
+            {
+                "id": 10,
+                "question": "Redis 持久化怎么做？",
+                "cat1": "后端",
+                "cat2": "Redis",
+                "tags": "redis",
+            }
+        ]
+
+        selected, reason = _select_question_for_plan(state, candidates)
+
+        assert selected["id"] == 10
+        assert reason == "top_ranked_candidate_all_candidates_previously_asked"
 
     def test_build_question_plan_sets_state_selected_question(self):
         from app.agents.chat.pipeline import _maybe_create_question_plan

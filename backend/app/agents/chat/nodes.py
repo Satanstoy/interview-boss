@@ -9,6 +9,7 @@ from app.services.llm import stream_llm_messages, _call_llm_with_retry, _extract
 from app.services import chat_service
 from app.services.fts_service import search_questions_fts
 from app.agents.chat.state import ChatState
+from app.agents.chat.question_plan import _should_require_bank_question
 from app.agents.chat.prompts import (
     INTERVIEW_SYSTEM_PROMPT_JD,
     INTERVIEW_SYSTEM_PROMPT_PRACTICE,
@@ -1615,7 +1616,7 @@ async def generate_direct_response(state: ChatState) -> AsyncGenerator[dict, Non
 def _build_tool_strategy(state: ChatState) -> str:
     """Build tool usage strategy guidance based on current intent and state.
 
-    核心原则：完整回答后默认检索；未答完或追问时可基于上下文直接追问。
+    核心原则：开场先自然澄清；进入正式追问轮次后，完整回答默认检索。
     """
     intent = state.get("intent", "chat")
     answer_complete = state.get("answer_complete", False)
@@ -1623,7 +1624,9 @@ def _build_tool_strategy(state: ChatState) -> str:
     active_skills = state.get("active_skills", [])
     is_deep_dive = "project-deep-dive" in active_skills
 
-    if intent == "interview_question" and answer_complete and not has_retrieved:
+    requires_bank_question = _should_require_bank_question(state)
+
+    if intent == "interview_question" and answer_complete and not has_retrieved and requires_bank_question:
         if is_deep_dive:
             return (
                 "<tool_strategy>\n"
@@ -1637,6 +1640,14 @@ def _build_tool_strategy(state: ChatState) -> str:
             "当前状态：用户刚回答完面试问题。\n"
             "必须：从用户回答中提取 2-5 个技术关键词，调用 search_questions 检索追问题。\n"
             "如果需要切换面试类型（如从项目深挖转理论），先调用 load_skill。\n"
+            "</tool_strategy>"
+        )
+    elif intent == "interview_question" and answer_complete and not has_retrieved:
+        return (
+            "<tool_strategy>\n"
+            "当前状态：候选人刚完成开场自我介绍或早期背景说明。\n"
+            "建议：不调用题库工具，先基于候选人的项目、技术栈和职责做自然追问；"
+            "等候选人回答过一轮具体项目细节后，再根据需要检索题库绑定正式问题。\n"
             "</tool_strategy>"
         )
     elif intent == "interview_question" and answer_complete and has_retrieved:

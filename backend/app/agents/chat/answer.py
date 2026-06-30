@@ -190,9 +190,9 @@ async def _enforce_question_plan_on_text(
         state["question_source_reason"] = "question_plan_repaired"
         return repaired_text
 
-    fallback = (
-        f"我们收束到这道题：{plan.get('question_text', '')}\n\n"
-        "请你说明核心思路、关键取舍，以及你会怎么验证这个方案。"
+    fallback = _format_bank_question_fallback(
+        str(plan.get("question_text") or ""),
+        style="plan",
     )
     metadata["fallback_used"] = True
     metadata["adherence"] = _question_plan_adherence(fallback, plan)
@@ -243,6 +243,24 @@ def _fallback_interviewer_response(marker: str, state: ChatState) -> str:
     )
 
 
+def _format_bank_question_fallback(question_text: str, *, style: str = "candidate") -> str:
+    question = (question_text or "").strip()
+    if not question:
+        return (
+            "我先追问你刚才提到的一个点。请选一个最有代表性的模块，"
+            "讲清楚它解决什么问题、具体怎么实现，以及上线后怎么判断效果。"
+        )
+    prefix = (
+        "这个方向我们继续追一下："
+        if style == "plan"
+        else "我追问一个和你刚才回答相关的问题："
+    )
+    return (
+        f"{prefix}{question}\n\n"
+        "请结合实际项目或工程经验展开，重点讲场景背景、实现细节、风险处理和验证方式。"
+    )
+
+
 def _fallback_react_answer(state: ChatState, reason: str) -> str:
     """Return a safe interviewer turn when ReAct/tool/final generation fails."""
     candidates = (
@@ -253,10 +271,7 @@ def _fallback_react_answer(state: ChatState, reason: str) -> str:
         state["selected_question"] = selected
         state["question_source"] = state.get("question_source") or "search"
         state["question_source_reason"] = f"fallback_after_{reason}"
-        return (
-            f"我们先收束到一道具体题：{selected.get('question', '')}\n\n"
-            "你不用展开太泛，直接说核心思路、关键取舍，以及你会怎么验证这个方案。"
-        )
+        return _format_bank_question_fallback(str(selected.get("question") or ""))
 
     state["question_source"] = "conversation"
     state["question_source_reason"] = f"fallback_after_{reason}"

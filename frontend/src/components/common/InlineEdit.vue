@@ -20,14 +20,14 @@
         <Textarea v-else-if="type === 'textarea'" v-model="editValue" :rows="rows || 3" />
         <Select
           v-else-if="type === 'select'"
-          :model-value="editValue"
-          @update:model-value="editValue = $event"
+          :model-value="editValue || '__empty__'"
+          @update:model-value="editValue = $event === '__empty__' ? '' : $event"
         >
           <SelectTrigger class="flex-1 h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">未提供</SelectItem>
+            <SelectItem value="__empty__">未提供</SelectItem>
             <SelectItem v-for="opt in options" :key="opt" :value="opt">{{ opt }}</SelectItem>
           </SelectContent>
         </Select>

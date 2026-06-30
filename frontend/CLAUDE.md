@@ -39,7 +39,9 @@ Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue (reka-
 - 认证壳导航由 `AuthenticatedLayout.vue` 的 `sidebarGroups` 作为单一数据源，桌面侧栏和移动导航必须保持同序、同标签、同计数。
 - 侧栏展开态的品牌 logo/InterviewBoss 文案始终导航回 `/master-bank`；侧栏折叠/展开动作必须使用独立图标按钮，不要把品牌入口改成折叠开关。
 - Chat/Coding 这类带内部侧栏的工作台在移动端使用 overlay/toggle，不要让侧栏常驻挤压主内容。
+- Chat 流式回复的思考区使用 `ReasoningTimeline.vue`：发送开始即用前端本地计时器显示“思考中 N 秒”，收到后端 `thinking_done.duration` 后显示“思考了 N 秒”。不要只等最终 SSE duration 才展示时间。
 - 普通按钮、输入框、Select、Dialog、Badge 优先使用 shadcn 默认组件圆角，不额外覆盖圆角；确需覆盖时同一组件组内保持一致。
+- reka-ui `SelectItem` 不允许空字符串 value；“全部/未提供/不选择”等空业务值必须用 `__all__`/`__empty__`/`__none__` 等内部哨兵，emit 或保存时再转回空字符串/null。
 - 交互行/列表项使用 `rounded-lg`，内容内嵌块使用 `rounded-md`，进度条和开关保留 `rounded-full`。
 - 业务弹窗只做视觉统一时，外壳统一 `rounded-xl border border-border bg-card shadow-lg`，内部边界统一 `border-border` 或 `border-border/50`。
 
@@ -119,6 +121,7 @@ src/
 | 改数据层/composables | `layouts/AuthenticatedLayout.vue` | 对应 composable |
 | 改登录/登出/token | `composables/useAuth.js`（单例） | `services/authApi.js` + `services/http.js` |
 | 改某个页面 | `views/XxxView.vue` | 对应 `components/business/*.vue` |
+| 改 Chat 流式消息/思考计时 | `components/business/ChatView.vue` | `components/business/ReasoningTimeline.vue` + `services/chatApi.js` |
 | 改侧边栏导航 | `components/AppSidebar.vue` | `layouts/AuthenticatedLayout.vue` |
 | 新增页面 | 创建 `views/XxxView.vue` + 在 `router/index.js` 添加路由 | 在 `AuthenticatedLayout.vue` 的 provide 中添加需要的数据 |
 

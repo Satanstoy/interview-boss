@@ -81,6 +81,7 @@ from app.agents.chat.question_plan import (  # noqa: F401
     _normalize_question_text,
     _select_question_for_plan,
     _should_create_question_plan,
+    _should_require_bank_question,
     _tokenize_for_overlap,
 )
 from app.agents.chat.summary import (  # noqa: F401

@@ -49,10 +49,12 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，直接生成总结
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
+- **开场自然追问**：`_should_require_bank_question()` 是题库绑定时机的单一判断；开场自我介绍/早期背景说明后先基于项目和职责自然追问，不立即硬检索题库。`_build_tool_strategy()`、`_should_create_question_plan()`、`react_loop` forced search guard 必须共用该判断
+- **已问题过滤**：`_select_question_for_plan()` 会从历史 assistant metadata 和旧话术正文中提取已问 ID/题面，优先选择未问过的候选；所有候选都已问过时才回退第一题并记录 `*_all_candidates_previously_asked`
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`
-- **完整回答后强制候选题（代码级硬守卫）**：`interview_question + answer_complete=True + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；触发条件看本轮是否实际执行过 `search_questions` / `draw_questions`，不能只看总 tool call 数，因为 `load_skill` 不会产生候选题。guard 重试分支同样走 `validate_tool_call()` allowlist，且只执行 `search_questions` / `draw_questions`；若重试仍无 tool_calls 或调用不满足契约，则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
+- **完整回答后强制候选题（代码级硬守卫）**：`interview_question + _should_require_bank_question(state) + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；触发条件看本轮是否实际执行过 `search_questions` / `draw_questions`，不能只看总 tool call 数，因为 `load_skill` 不会产生候选题。guard 重试分支同样走 `validate_tool_call()` allowlist，且只执行 `search_questions` / `draw_questions`；若重试仍无 tool_calls 或调用不满足契约，则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
 - **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
 
 ## 模块依赖图
