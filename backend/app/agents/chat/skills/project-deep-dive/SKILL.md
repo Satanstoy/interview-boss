@@ -1,12 +1,13 @@
 ---
 name: project-deep-dive
 description: "MUST drill into candidate's project experience 3-5 layers deep, examining architecture decisions, tech choices, and problem-solving. Activate when the candidate mentions any project, internship, system design, framework, Agent, RAG, or technical implementation."
-triggers: ["项目", "实习", "做了", "开发", "设计", "系统", "框架", "Agent", "RAG", "架构", "搭建", "重构"]
-priority: 80
-strategy_rules:
-  deep_dive:
-    preferred_topics: ["RAG", "LangGraph", "状态机", "混合检索", "RRF", "LLM rerank", "selected_basis", "references", "日志", "失败 case"]
-    basis_policy: "selected_basis must strongly support the follow-up question"
+metadata:
+  interview-boss.triggers: ["项目", "实习", "做了", "开发", "设计", "系统", "框架", "Agent", "RAG", "架构", "搭建", "重构"]
+  interview-boss.priority: 80
+  interview-boss.strategy-rules:
+    deep_dive:
+      preferred_topics: ["RAG", "LangGraph", "状态机", "混合检索", "RRF", "LLM rerank", "selected_basis", "references", "日志", "失败 case"]
+      basis_policy: "selected_basis must strongly support the follow-up question"
 ---
 
 ## Why Deep-Drill

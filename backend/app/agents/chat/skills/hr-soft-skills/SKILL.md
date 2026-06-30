@@ -1,8 +1,9 @@
 ---
 name: hr-soft-skills
 description: "面试收尾阶段评估候选人的软素质、职业规划、团队协作和文化匹配度。当面试进入后期（12+消息）或候选人提到职业规划、优缺点、薪资、反问等话题时激活。"
-triggers: ["职业规划", "优缺点", "薪资", "offer", "反问", "想问", "成长空间"]
-priority: 30
+metadata:
+  interview-boss.triggers: ["职业规划", "优缺点", "薪资", "offer", "反问", "想问", "成长空间"]
+  interview-boss.priority: 30
 ---
 
 ## 强制指令：HR 软素质提问

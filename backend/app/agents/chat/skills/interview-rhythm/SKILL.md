@@ -1,19 +1,20 @@
 ---
 name: interview-rhythm
 description: "MUST control the interleaved interview rhythm — ensure project deep-dive, theory Q&A, and algorithm coding alternate naturally. Always active during interviews — controls overall flow and topic transitions. Activate at the start of every interview and never deactivate."
-triggers: []
-priority: 100
-always_active: true
-strategy_rules:
-  deep_dive:
-    trigger: "candidate answer contains project details with unresolved implementation trade-offs"
-    max_consecutive_rounds: 3
-  topic_shift:
-    trigger: "same topic has been sufficiently explored or user asks for a new question"
-    requires_transition: true
-  clarification:
-    trigger: "answer is short, incomplete, or ambiguous"
-    retrieve: false
+metadata:
+  interview-boss.triggers: []
+  interview-boss.priority: 100
+  interview-boss.always-active: true
+  interview-boss.strategy-rules:
+    deep_dive:
+      trigger: "candidate answer contains project details with unresolved implementation trade-offs"
+      max_consecutive_rounds: 3
+    topic_shift:
+      trigger: "same topic has been sufficiently explored or user asks for a new question"
+      requires_transition: true
+    clarification:
+      trigger: "answer is short, incomplete, or ambiguous"
+      retrieve: false
 ---
 
 ## Core Principle

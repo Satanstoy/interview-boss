@@ -1,19 +1,20 @@
 ---
 name: adaptive-difficulty
 description: "MUST dynamically adjust question depth based on candidate response quality using the funnel model. Always active — controls difficulty across all topics. Good answers escalate, bad answers de-escalate. This prevents candidates from freezing up and keeps the interview productive."
-triggers: []
-priority: 90
-always_active: true
-strategy_rules:
-  topic_shift:
-    trigger: "same topic has been sufficiently explored and candidate performance is clear"
-    good_answer_escalation:
-      preferred_topics: ["系统设计", "工程权衡", "高阶原理", "分布式", "架构决策"]
-      reason: "候选人回答扎实，可以提升难度到系统设计或工程权衡层面"
-    bad_answer_de_escalation:
-      preferred_topics: ["基础高频题", "八股", "常见面试题"]
-      reason: "候选人回答薄弱，切回基础高频题巩固"
-    noise_filter: "不要让 LRU、Redis、AI Coding 等噪声示例驱动跳题，必须是节奏自然的转场"
+metadata:
+  interview-boss.triggers: []
+  interview-boss.priority: 90
+  interview-boss.always-active: true
+  interview-boss.strategy-rules:
+    topic_shift:
+      trigger: "same topic has been sufficiently explored and candidate performance is clear"
+      good_answer_escalation:
+        preferred_topics: ["系统设计", "工程权衡", "高阶原理", "分布式", "架构决策"]
+        reason: "候选人回答扎实，可以提升难度到系统设计或工程权衡层面"
+      bad_answer_de_escalation:
+        preferred_topics: ["基础高频题", "八股", "常见面试题"]
+        reason: "候选人回答薄弱，切回基础高频题巩固"
+      noise_filter: "不要让 LRU、Redis、AI Coding 等噪声示例驱动跳题，必须是节奏自然的转场"
 ---
 
 ## Why This Matters

@@ -1,6 +1,7 @@
 """Shared skill primitives used by agent-specific skill directories."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _triggers_match(triggers: list[str], search_text: str, skill_name: str) -> bool:
@@ -17,11 +18,38 @@ def _triggers_match(triggers: list[str], search_text: str, skill_name: str) -> b
 
 
 @dataclass
+class SkillResourceIndex:
+    """Index of optional standard Agent Skill resource directories."""
+
+    root: Path | None = None
+    references: list[str] = field(default_factory=list)
+    scripts: list[str] = field(default_factory=list)
+    assets: list[str] = field(default_factory=list)
+
+    def read_text(self, relative_path: str) -> str:
+        """Read a resource file while preventing path traversal."""
+        if self.root is None:
+            raise ValueError("skill resource root is not configured")
+
+        root = self.root.resolve()
+        target = (root / relative_path).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError("resource path is outside skill directory")
+        if not target.is_file():
+            raise FileNotFoundError(relative_path)
+        return target.read_text(encoding="utf-8")
+
+
+@dataclass
 class Skill:
     """Agent skill loaded from a SKILL.md directory."""
 
     name: str
     description: str
+    license: str | None = None
+    compatibility: str | None = None
+    metadata: dict = field(default_factory=dict)
+    allowed_tools: list[str] = field(default_factory=list)
     triggers: list[str] = field(default_factory=list)
     priority: int = 50
     instruction_template: str | None = None
@@ -29,6 +57,7 @@ class Skill:
     strategy_rules: dict | None = None
     allowed_agents: list[str] = field(default_factory=list)
     prompt_role: str | None = None
+    resources: SkillResourceIndex = field(default_factory=SkillResourceIndex)
 
     def get_strategy_rules(self) -> dict:
         return self.strategy_rules if self.strategy_rules is not None else {}
@@ -46,6 +75,10 @@ class Skill:
             return self.instruction_template.format(**context)
         except (KeyError, IndexError):
             return self.instruction_template
+
+    def read_resource(self, relative_path: str) -> str:
+        """Read a standard skill resource file on demand."""
+        return self.resources.read_text(relative_path)
 
 
 class SkillRegistry:

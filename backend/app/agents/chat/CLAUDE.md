@@ -26,11 +26,11 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 | `budget.py` | Token 预算管理（控制上下文长度） |
 | `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools` |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
-| `skills/base.py` | Skill 基类 + SkillRegistry（Progressive Disclosure 架构） |
-| `skills/builder.py` | build_skill_prompt() — 合并 active skills 指令为 prompt 片段 |
-| `skills/loader.py` | SKILL.md 文件加载器（解析 YAML frontmatter + Markdown body） |
+| `skills/base.py` | shared Skill/SkillRegistry/SkillResourceIndex 兼容导出 |
+| `skills/builder.py` | shared build_skill_prompt()/build_skill_catalog() 兼容导出 |
+| `skills/loader.py` | shared SKILL.md 文件加载器兼容导出 |
 | `skills/defaults.py` | get_default_registry() — 从 SKILL.md 文件加载所有 skill |
-| `skills/{skill-name}/SKILL.md` | 6 个 skill 定义文件（YAML frontmatter + Markdown 指令） |
+| `skills/{skill-name}/SKILL.md` | 标准 Agent Skill package 定义（标准 frontmatter + Markdown 指令，可选 resources/scripts/assets） |
 
 ## 核心模式
 
@@ -41,7 +41,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **面试流程**：开场(自我介绍) → 提问(一次一题) → 收尾(反问)，由 `_determine_interview_phase()` 根据消息数自动切换
 - **开场白**：创建对话时 `chat_service.generate_opening_message()` 自动生成，零 LLM 成本
 - **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
-- **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 metadata 始终加载，Layer 2 instruction 按需注入，Layer 3 resources 条件触发。每个 skill 是一个目录 + `SKILL.md` 文件（YAML frontmatter + Markdown body），遵循 AgentSkills.io 规范。`SkillRegistry` 管理所有 skill，`build_skill_prompt()` 合并 active skills 指令
+- **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 只常驻标准 metadata（`name`/`description`）和 InterviewBoss runtime metadata，Layer 2 `SKILL.md` body 通过 `load_skill` 按需注入，Layer 3 `references/`/`scripts/`/`assets/` 仅索引并按需读取。每个 skill 是标准 Agent Skill package；InterviewBoss 私有策略放在 `metadata.interview-boss.*`，不要新增 `skill-pack.yaml`。
 
 ## 质量保护机制
 

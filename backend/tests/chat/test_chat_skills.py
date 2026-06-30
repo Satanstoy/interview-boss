@@ -636,7 +636,7 @@ class TestSkillLoader:
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text(
-            '---\nname: test\ndescription: "desc"\n---\n\n## Instructions\n\n这是指令内容。\n\n## Rules\n\n规则内容。',
+            '---\nname: test-skill\ndescription: "desc"\n---\n\n## Instructions\n\n这是指令内容。\n\n## Rules\n\n规则内容。',
             encoding="utf-8",
         )
 
@@ -658,6 +658,165 @@ class TestSkillLoader:
         skill = load_skill_from_file(skill_dir)
         assert skill.triggers == []
         assert skill.priority == 50
+        assert skill.always_active is False
+
+    def test_load_skill_from_file_parses_standard_optional_fields(self, tmp_path):
+        """标准 Agent Skill 可选字段应被保留，不要求项目私有顶层字段。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "standard-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: standard-skill\n"
+            'description: "标准 skill"\n'
+            "license: Apache-2.0\n"
+            "compatibility: Requires python3\n"
+            "allowed-tools: search_questions draw_questions\n"
+            "metadata:\n"
+            "  author: interview-boss\n"
+            '  version: "1.0"\n'
+            "---\n\n标准指令。",
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+
+        assert skill.license == "Apache-2.0"
+        assert skill.compatibility == "Requires python3"
+        assert skill.allowed_tools == ["search_questions", "draw_questions"]
+        assert skill.metadata == {"author": "interview-boss", "version": "1.0"}
+
+    def test_load_skill_from_file_rejects_name_that_does_not_match_directory(self, tmp_path):
+        """标准 Agent Skill 要求 name 与父目录名一致。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "actual-name"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: other-name\ndescription: "名称不一致"\n---\n\n指令。',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="must match parent directory"):
+            load_skill_from_file(skill_dir)
+
+    def test_load_skill_from_file_rejects_invalid_standard_name(self, tmp_path):
+        """标准 Agent Skill name 只允许小写字母、数字和单个连字符。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "Bad--Name"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: Bad--Name\ndescription: "非法名称"\n---\n\n指令。',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="invalid skill name"):
+            load_skill_from_file(skill_dir)
+
+    def test_load_skill_from_file_indexes_standard_resource_directories(self, tmp_path):
+        """references/scripts/assets 应被索引，但不自动并入 instruction。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "resourceful-skill"
+        (skill_dir / "references").mkdir(parents=True)
+        (skill_dir / "scripts").mkdir()
+        (skill_dir / "assets").mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: resourceful-skill\ndescription: "资源 skill"\n---\n\n核心指令。',
+            encoding="utf-8",
+        )
+        (skill_dir / "references" / "mcp-tool-envelope.md").write_text(
+            "Envelope details", encoding="utf-8"
+        )
+        (skill_dir / "scripts" / "validate_tool_envelope.py").write_text(
+            "print('ok')", encoding="utf-8"
+        )
+        (skill_dir / "assets" / "template.txt").write_text(
+            "template", encoding="utf-8"
+        )
+
+        skill = load_skill_from_file(skill_dir)
+
+        assert skill.resources.references == ["references/mcp-tool-envelope.md"]
+        assert skill.resources.scripts == ["scripts/validate_tool_envelope.py"]
+        assert skill.resources.assets == ["assets/template.txt"]
+        assert "Envelope details" not in skill.instruction_template
+
+    def test_skill_resource_reader_blocks_path_traversal(self, tmp_path):
+        """资源读取必须限制在 skill 目录内，禁止 ../ 跳出。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "safe-skill"
+        (skill_dir / "references").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            '---\nname: safe-skill\ndescription: "安全 skill"\n---\n\n核心指令。',
+            encoding="utf-8",
+        )
+        (skill_dir / "references" / "guide.md").write_text(
+            "safe guide", encoding="utf-8"
+        )
+        (tmp_path / "secret.md").write_text("secret", encoding="utf-8")
+
+        skill = load_skill_from_file(skill_dir)
+
+        assert skill.read_resource("references/guide.md") == "safe guide"
+        with pytest.raises(ValueError, match="outside skill directory"):
+            skill.read_resource("../secret.md")
+
+    def test_loader_maps_interview_boss_metadata_to_runtime_fields(self, tmp_path):
+        """InterviewBoss 扩展策略放在 metadata 命名空间时仍可驱动现有运行时。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "metadata-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: metadata-skill\n"
+            'description: "metadata 驱动 skill"\n'
+            "metadata:\n"
+            "  interview-boss.triggers: [项目, RAG]\n"
+            "  interview-boss.priority: 88\n"
+            "  interview-boss.always-active: true\n"
+            "  interview-boss.allowed-agents: [chat]\n"
+            "  interview-boss.prompt-role: system-skill\n"
+            "  interview-boss.strategy-rules:\n"
+            "    deep_dive:\n"
+            "      max_depth: 3\n"
+            "---\n\n指令。",
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+
+        assert skill.triggers == ["项目", "RAG"]
+        assert skill.priority == 88
+        assert skill.always_active is True
+        assert skill.allowed_agents == ["chat"]
+        assert skill.prompt_role == "system-skill"
+        assert skill.strategy_rules == {"deep_dive": {"max_depth": 3}}
+
+    def test_loader_parses_interview_boss_metadata_scalar_strings(self, tmp_path):
+        """字符串形式的私有策略标量应被安全解析，避免 bool('false') 误判。"""
+        from app.agents.chat.skills.loader import load_skill_from_file
+
+        skill_dir = tmp_path / "string-policy-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: string-policy-skill\n"
+            'description: "字符串策略 skill"\n'
+            "metadata:\n"
+            '  interview-boss.priority: "77"\n'
+            '  interview-boss.always-active: "false"\n'
+            "---\n\n指令。",
+            encoding="utf-8",
+        )
+
+        skill = load_skill_from_file(skill_dir)
+
+        assert skill.priority == 77
         assert skill.always_active is False
 
     def test_load_skill_from_file_missing_file(self, tmp_path):
