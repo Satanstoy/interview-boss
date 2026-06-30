@@ -414,8 +414,6 @@ class TestChatRouter:
     TODO: 修复 test infrastructure 以支持 async router 测试
     """
 
-    pytestmark = pytest.mark.skip(reason="需要修复 test infrastructure 以支持 async router 测试 (run_db 线程隔离)")
-
     def _create_user(self, conn, user_id=1, username="testuser"):
         """创建测试用户（使用 admin 用户，避免 ID 冲突）"""
         # migration 012 已创建 admin 用户 (id=1)，直接使用
@@ -468,11 +466,12 @@ class TestChatRouter:
 
         try:
             # 先创建一个会话
-            client.post(
+            created = client.post(
                 "/api/chat/conversations",
                 json={"mode": "free_practice"},
                 headers=self._auth_headers(),
             )
+            created_id = created.json()["data"]["id"]
 
             response = client.get(
                 "/api/chat/conversations",
@@ -482,7 +481,11 @@ class TestChatRouter:
             assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
-            assert len(data["data"]) == 1
+            created_conversations = [
+                conv for conv in data["data"] if conv["id"] == created_id
+            ]
+            assert len(created_conversations) == 1
+            assert created_conversations[0]["mode"] == "free_practice"
         finally:
             app.dependency_overrides.clear()
 
@@ -523,7 +526,7 @@ class TestChatRouter:
             )
             conv_id = res.json()["data"]["id"]
 
-            # 获取消息（新会话应为空）
+            # 创建会话时 API 会自动写入面试官开场白
             response = client.get(
                 f"/api/chat/conversations/{conv_id}/messages",
                 headers=self._auth_headers(),
@@ -531,7 +534,9 @@ class TestChatRouter:
 
             assert response.status_code == 200
             data = response.json()
-            assert data["data"] == []
+            assert len(data["data"]) == 1
+            assert data["data"][0]["role"] == "assistant"
+            assert "自我介绍" in data["data"][0]["content"]
         finally:
             app.dependency_overrides.clear()
 

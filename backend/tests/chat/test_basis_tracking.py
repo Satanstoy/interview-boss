@@ -21,9 +21,6 @@ from app.agents.chat.pipeline import (
     _is_internal_react_marker,
 )
 
-pytestmark = pytest.mark.asyncio
-
-
 # ── Pure Function Tests ───────────────────────────────
 
 

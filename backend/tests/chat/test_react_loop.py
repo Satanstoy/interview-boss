@@ -666,8 +666,8 @@ class TestBuildToolStrategy:
         assert "search_questions" in strategy
         assert "必须" in strategy
 
-    def test_interview_question_deep_dive_allows_direct_followup(self):
-        """Project deep-dive mode: can directly follow up without search."""
+    def test_interview_question_deep_dive_requires_search_for_plan_binding(self):
+        """Project deep-dive mode still searches so question_plan can bind the next question."""
         from app.agents.chat.nodes import _build_tool_strategy
 
         state = {
@@ -678,7 +678,8 @@ class TestBuildToolStrategy:
         }
         strategy = _build_tool_strategy(state)
         assert "search_questions" in strategy
-        assert "直接追问" in strategy or "不检索" in strategy
+        assert "必须" in strategy
+        assert "question_plan" in strategy
 
     def test_interview_question_answer_incomplete_suggests_wait(self):
         """Should suggest waiting when user hasn't finished answering."""

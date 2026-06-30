@@ -40,3 +40,37 @@ class TestBuildReactSystemPrompt:
         }
         prompt = build_react_system_prompt(state)
         assert len(prompt) < 8000
+
+    def test_always_active_skill_body_injected_when_active_skills_empty(self):
+        """interview-tool-use (always_active=true) body must appear even with no active_skills."""
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": [],
+        }
+        prompt = build_react_system_prompt(state)
+        assert "空结果时沉默不语" in prompt
+        assert "<skill_instructions>" in prompt
+
+    def test_always_active_body_plus_explicit_active_skills(self):
+        """When active_skills=[interview-rhythm], output ALSO contains interview-tool-use body."""
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": ["interview-rhythm"],
+            "active_skill_instructions": [
+                {
+                    "skill_name": "interview-rhythm",
+                    "instruction": "## Interview Rhythm\nKeep pacing.",
+                }
+            ],
+        }
+        prompt = build_react_system_prompt(state)
+        assert "空结果时沉默不语" in prompt
+        assert "Keep pacing" in prompt

@@ -28,9 +28,6 @@ from tests.chat.multi_turn_helpers import (
     routerize_events,
 )
 
-pytestmark = pytest.mark.asyncio
-
-
 # ── Pure Function Tests ───────────────────────────────
 
 

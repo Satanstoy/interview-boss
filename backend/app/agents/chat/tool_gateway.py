@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-ToolName = Literal["search_questions", "draw_questions"]
+ToolName = Literal["search_questions", "draw_questions", "select_question"]
 QuestionSource = Literal["search", "draw"]
 
 
@@ -150,7 +150,12 @@ def normalize_question_item(
         difficulty=str(raw.get("difficulty") or ""),
         sources=_parse_sources(raw.get("sources")),
     )
-    return item.model_dump()
+    normalized = item.model_dump()
+    if raw.get("_fallback_used") is not None:
+        normalized["_fallback_used"] = bool(raw.get("_fallback_used"))
+    if raw.get("_fallback_reason"):
+        normalized["_fallback_reason"] = str(raw.get("_fallback_reason"))
+    return normalized
 
 
 def build_success_envelope(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import sys
 import time
 from typing import AsyncGenerator
 
@@ -19,7 +20,7 @@ from app.agents.chat.nodes import (
 from app.agents.chat.state import ChatState
 from app.agents.chat.tools import SKILL_NAMES
 from app.agents.shared.events import _event_queue_var
-from app.services.llm import stream_llm_messages
+from app.services import llm as llm_service
 
 logger = logging.getLogger("interview-boss")
 
@@ -164,7 +165,13 @@ async def _enforce_question_plan_on_text(
         state["question_plan_metadata"] = metadata
         return text
 
-    repair = await _repair_response_to_question_plan(
+    pipeline_module = sys.modules.get("app.agents.chat.pipeline")
+    repair_fn = getattr(
+        pipeline_module,
+        "_repair_response_to_question_plan",
+        _repair_response_to_question_plan,
+    )
+    repair = await repair_fn(
         user_id=state.get("user_id"),
         user_message=str(state.get("user_message") or ""),
         original_response=text,
@@ -289,7 +296,7 @@ async def _regenerate_after_dup(
     Called once when OutputDeduplicator flags 'exact' or 'similar'.  Streams
     the regenerated answer directly — no second dedup check (one retry only).
     """
-    async for event in stream_llm_messages(
+    async for event in llm_service.stream_llm_messages(
         messages,
         user_id=state["user_id"],
         model=state.get("model"),
@@ -318,7 +325,7 @@ async def _stream_final_answer(
     thinking_start_time = None
     thinking_content = ""
 
-    async for event in stream_llm_messages(
+    async for event in llm_service.stream_llm_messages(
         messages,
         user_id=state["user_id"],
         model=state.get("model"),

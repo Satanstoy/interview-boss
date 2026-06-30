@@ -19,9 +19,6 @@ from tests.chat.multi_turn_helpers import (
     make_question,
 )
 
-pytestmark = pytest.mark.asyncio
-
-
 # ── Pure Function Tests ───────────────────────────────
 
 

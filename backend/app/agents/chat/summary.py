@@ -12,7 +12,8 @@ import re
 from pydantic import BaseModel
 
 from app.agents.chat.state import ChatState
-from app.services.llm import _call_llm_with_retry_messages, _extract_json
+from app.services import llm as llm_service
+from app.services.llm import _extract_json
 
 logger = logging.getLogger("interview-boss")
 
@@ -101,7 +102,7 @@ async def _generate_structured_summary(state: ChatState) -> str:
     ]
 
     try:
-        raw = await _call_llm_with_retry_messages(
+        raw = await llm_service._call_llm_with_retry_messages(
             messages,
             user_id=state.get("user_id"),
             response_format={"type": "json_object"},
