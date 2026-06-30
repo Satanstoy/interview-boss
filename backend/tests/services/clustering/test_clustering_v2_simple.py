@@ -154,7 +154,7 @@ class TestMatchAndClusterCat2Logic:
         assert len(result["matched"]) == 1
         assert result["matched"][0]["qd_id"] == 101
         assert result["matched"][0]["cluster_id"] == "50"
-        mock_load.assert_called_once_with("C3.数据库基础", days=7)
+        mock_load.assert_called_once_with("C3.数据库基础", days=14)
 
     @pytest.mark.asyncio
     async def test_phase1_5_not_called_when_no_recent_singletons(self):
@@ -289,44 +289,47 @@ class TestIntegration:
         # 准备
         new_questions = [
             {"id": 101, "question": "Redis 持久化方式有哪些？", "cat2": "C3.数据库基础"},
-            {"id": 102, "question": "TCP 三次握手的作用是什么？", "cat2": "C4.操作系统与网络"},
+            {"id": 102, "question": "TCP 三次握手的作用是什么？", "cat2": "C3.数据库基础"},
         ]
         existing_clusters = [
             {"id": 1, "question": "Redis 的 RDB 和 AOF 持久化有什么区别？"}
         ]
         recent_singletons = [
-            {"id": 50, "question": "TCP 为什么是三次握手？", "cat2": "C4.操作系统与网络"}
+            {"id": 50, "question": "TCP 为什么是三次握手？", "cat2": "C3.数据库基础"}
         ]
 
         # 模拟返回
-        phase1_response = {"matches": [{"new_id": "101", "cluster_id": "1"}]}
-        phase15_response = {"matches": [{"new_id": "102", "cluster_id": "50"}]}
+        candidate_pool_response = {
+            "matches": [
+                {"new_id": "101", "cluster_id": "1"},
+                {"new_id": "102", "cluster_id": "50"},
+            ]
+        }
         phase2_response = {"clusters": []}
 
         # 执行
         with patch('app.services.clustering.matcher._load_recent_singletons', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = recent_singletons
             with patch('app.services.clustering.matcher._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
-                # Phase 1 matching, Phase 1.5 matching, Phase 2 clustering
+                # 当前实现把已有聚类和最近孤岛合并为一个候选池，一次完成匹配。
                 mock_llm.side_effect = [
-                    '{"matches": [{"new_id": "101", "cluster_id": "1"}]}',
-                    '{"matches": [{"new_id": "102", "cluster_id": "50"}]}',
+                    '{"matches": [{"new_id": "101", "cluster_id": "1"}, {"new_id": "102", "cluster_id": "50"}]}',
                     '{"clusters": []}'
                 ]
                 with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.side_effect = [
-                        phase1_response,
-                        phase15_response,
+                        candidate_pool_response,
                         phase2_response
                     ]
-                    # Mock _validate_merges: first call for Phase 1, second for Phase 1.5
+                    # Mock _validate_merges: single candidate-pool validation
                     with patch('app.services.clustering.matcher._validate_merges', new_callable=AsyncMock) as mock_validate:
-                        mock_validate.side_effect = [
-                            # Phase 1 validation
-                            ([{"new_id": "101", "cluster_id": "1"}], {("101", "1"): 0.95}),
-                            # Phase 1.5 validation
-                            ([{"new_id": "102", "cluster_id": "50"}], {("102", "50"): 0.95}),
-                        ]
+                        mock_validate.return_value = (
+                            [
+                                {"new_id": "101", "cluster_id": "1"},
+                                {"new_id": "102", "cluster_id": "50"},
+                            ],
+                            {("101", "1"): 0.95, ("102", "50"): 0.95},
+                        )
 
                         from app.services.clustering import _match_and_cluster_cat2
 
@@ -346,8 +349,8 @@ class TestIntegration:
         assert any(m["qd_id"] == 102 and m["cluster_id"] == "50" for m in result["matched"])
 
     @pytest.mark.asyncio
-    async def test_phase1_failure_does_not_block_phase15(self):
-        """测试：Phase 1 失败不影响 Phase 1.5 执行"""
+    async def test_candidate_pool_failure_falls_back_to_phase2(self):
+        """测试：候选池匹配失败后降级到 Phase 2，不抛异常"""
         # 准备
         new_questions = [
             {"id": 101, "question": "Redis 持久化方式有哪些？", "cat2": "C3.数据库基础"}
@@ -389,10 +392,9 @@ class TestIntegration:
                             recent_days=7
                         )
 
-        # 验证：Phase 1.5 仍然被执行并匹配成功
-        assert len(result["matched"]) == 1
-        assert result["matched"][0]["qd_id"] == 101
-        assert result["matched"][0]["cluster_id"] == "50"
+        # 当前实现将已有聚类和最近孤岛合并为一个候选池；候选池失败后进入 Phase 2。
+        assert result["matched"] == []
+        assert "new_clusters" in result
 
 
 if __name__ == "__main__":

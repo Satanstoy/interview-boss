@@ -18,14 +18,8 @@ class TestBug001Phase15Validation:
         from app.services.clustering import _match_and_cluster_cat2
         source = inspect.getsource(_match_and_cluster_cat2)
 
-        phase15_start = source.find("Phase 1.5")
-        phase2_start = source.find("Phase 2")
-        if phase15_start == -1 or phase2_start == -1:
-            pytest.skip("无法定位 Phase 1.5 代码块")
-
-        phase15_code = source[phase15_start:phase2_start]
-        has_validation = "_validate_merges" in phase15_code
-        assert has_validation, "修复后：Phase 1.5 应有 _validate_merges 验证"
+        assert "candidate_pool" in source
+        assert "_validate_merges" in source, "修复后：候选池匹配应有 _validate_merges 验证"
 
 
 # ─────────────── BUG-002: LLM 重复匹配无去重 ───────────────

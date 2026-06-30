@@ -5,6 +5,7 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 
 class TestVerificationCodeGeneration:
@@ -36,7 +37,7 @@ class TestSendVerificationCode:
         with patch('app.services.email_service._get_smtp_config', return_value=mock_config), \
              patch('app.services.email_service._smtp_send', new_callable=AsyncMock) as mock_smtp:
             mock_smtp.return_value = True
-            result = await send_verification_code("send-success@example.com", "register")
+            result = await send_verification_code(f"send-success-{uuid4().hex}@example.com", "register")
             assert result["success"] is True
             assert "expires_in" in result
 

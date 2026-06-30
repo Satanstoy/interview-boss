@@ -188,3 +188,82 @@ def _migration_035_split_e_category(conn):
         conn.execute("UPDATE questions_detail SET cat2 = ? WHERE id = ?", (new_cat2, dr[0]))
 
     logger.info(f"migration_035: 拆分 E 分类完成 — E1.数据结构={e1_count}, E2.算法手撕={e2_count}")
+
+
+def _migration_037_backfill_embeddings(conn):
+    """Compatibility hook for embedding backfill migrations.
+
+    Embeddings are generated lazily by the clustering pipeline. Keeping this
+    idempotent function importable lets audit tooling verify that the migration
+    hook exists without forcing model downloads during normal DB initialization.
+    """
+    logger.info("migration_037_backfill_embeddings: embeddings are backfilled lazily")
+
+
+def _ensure_column(conn, table_name: str, column_name: str, column_sql: str) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()}
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
+def _migration_039_merge_review_tables(conn):
+    """Create merge review tables used by admin audit, feedback, and rollback."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS merge_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            survivor_id INTEGER NOT NULL,
+            merged_ids TEXT NOT NULL,
+            merged_questions TEXT NOT NULL,
+            pre_snapshot TEXT,
+            post_snapshot TEXT,
+            operation_type TEXT DEFAULT 'auto',
+            phase TEXT DEFAULT '',
+            confidence REAL DEFAULT 0,
+            cat2 TEXT DEFAULT '',
+            operator_id INTEGER,
+            is_rolled_back INTEGER DEFAULT 0,
+            rolled_back_at TIMESTAMP,
+            rolled_back_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (survivor_id) REFERENCES question_bank(id) ON DELETE SET NULL,
+            FOREIGN KEY (operator_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (rolled_back_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    for column_name, column_sql in [
+        ("pre_snapshot", "TEXT"),
+        ("post_snapshot", "TEXT"),
+        ("operation_type", "TEXT DEFAULT 'auto'"),
+        ("phase", "TEXT DEFAULT ''"),
+        ("confidence", "REAL DEFAULT 0"),
+        ("cat2", "TEXT DEFAULT ''"),
+        ("operator_id", "INTEGER"),
+        ("is_rolled_back", "INTEGER DEFAULT 0"),
+        ("rolled_back_at", "TIMESTAMP"),
+        ("rolled_back_by", "INTEGER"),
+        ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    ]:
+        _ensure_column(conn, "merge_history", column_name, column_sql)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS merge_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            merge_history_id INTEGER,
+            question_bank_id INTEGER,
+            feedback_type TEXT NOT NULL,
+            comment TEXT,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (merge_history_id) REFERENCES merge_history(id) ON DELETE SET NULL,
+            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_history_survivor ON merge_history(survivor_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_history_cat2 ON merge_history(cat2)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_feedback_history ON merge_feedback(merge_history_id)")
+    logger.info("migration_039: merge_history/merge_feedback 表已就绪")

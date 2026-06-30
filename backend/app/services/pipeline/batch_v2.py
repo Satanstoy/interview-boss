@@ -16,6 +16,7 @@ from app.services.clustering import process_incremental_batch, _cluster_unmatche
 from .sanitize import BATCH_SIZE, sanitize_batch
 from .queue import dequeue_batch, mark_batch_done, mark_batch_failed, should_trigger_clustering
 from .writer import apply_matched, insert_new_clusters, tag_and_write_details
+from .compact import _do_merge_to_existing
 
 logger = logging.getLogger("interview-boss")
 
@@ -144,6 +145,26 @@ async def compact_singletons_in_db_v2(user_id: int = None) -> Dict:
                         conn = get_db_connection()
                         conn.execute("BEGIN")
                         try:
+                            entry = conn.execute(
+                                "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
+                                "sources, original_questions, original_question_sources, ai_answer "
+                                "FROM question_bank WHERE id = ?", (m['qd_id'],)
+                            ).fetchone()
+                            if not entry:
+                                conn.execute("ROLLBACK")
+                                return
+                            _do_merge_to_existing(
+                                int(m['cluster_id']),
+                                dict(entry),
+                                operation_type='compaction',
+                                phase='phase1.5',
+                                cat2=cat2,
+                                operator_id=user_id,
+                                confidence=float(m.get('confidence') or 0),
+                            )
+                            conn.execute("COMMIT")
+                            return
+
                             # 获取被合并的题
                             entry = conn.execute(
                                 "SELECT sources, original_questions, original_question_sources, ai_answer "

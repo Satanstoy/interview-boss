@@ -1,5 +1,4 @@
 """全量聚类：full_recluster_hybrid"""
-import json
 import logging
 from typing import Dict, Any
 
@@ -57,23 +56,27 @@ async def full_recluster_hybrid(
             conn = get_db_connection()
             conn.execute("BEGIN")
             try:
-                conn.execute(
-                    "UPDATE question_bank SET duplicate_of = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (s, m)
-                )
-                conn.execute(
-                    "UPDATE question_bank SET frequency = frequency + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (s,)
-                )
-                conn.execute(
-                    "INSERT INTO merge_history "
-                    "(survivor_id, merged_ids, merged_questions, pre_snapshot, "
-                    "operation_type, phase, confidence) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (s, json.dumps([m]),
-                     json.dumps([question_lookup.get(m, '')]),
-                     json.dumps({"merged_id": m}),
-                     'three_stage', 'full_recluster', c)
+                entry = conn.execute(
+                    "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
+                    "sources, original_questions, original_question_sources, ai_answer "
+                    "FROM question_bank WHERE id = ?",
+                    (m,),
+                ).fetchone()
+                if not entry:
+                    conn.execute("ROLLBACK")
+                    return
+                from app.services.pipeline.compact import _do_merge_to_existing
+
+                entry_dict = dict(entry)
+                entry_dict.setdefault("question", question_lookup.get(m, ""))
+                _do_merge_to_existing(
+                    s,
+                    entry_dict,
+                    operation_type='three_stage',
+                    phase='full_recluster',
+                    cat2=entry_dict.get('cat2') or '',
+                    operator_id=user_id,
+                    confidence=c,
                 )
                 conn.execute("COMMIT")
             except Exception:

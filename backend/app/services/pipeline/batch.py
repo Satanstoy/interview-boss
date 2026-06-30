@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 import numpy as np
+import inspect
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
@@ -24,6 +25,10 @@ async def _run_db(func):
     """Use the current db.connection.run_db so tests can patch thread behavior."""
     import app.db.connection as db_module
     return await db_module.run_db(func)
+
+
+async def _maybe_await(value):
+    return await value if inspect.isawaitable(value) else value
 
 
 def _safe_json_list(value):
@@ -241,15 +246,16 @@ async def process_interview_tag_then_maybe_cluster(
     questions_list: str, job_position: str = "",
     user_id: int = None, batch_size: int = BATCH_SIZE
 ) -> Dict:
-    from .queue import enqueue_questions as _enqueue
-    tagged_rows = await tag_and_write_details(
+    from app.services import pipeline as pipeline_api
+
+    tagged_rows = await _maybe_await(pipeline_api.tag_interview(
         url, company, round_, questions_list,
         job_position=job_position, user_id=user_id
-    )
-    _enqueue(interview_id)
+    ))
+    pipeline_api.enqueue_questions(interview_id)
 
     result = {"tagged_count": len(tagged_rows), "clustered": False, "new_qb_count": 0}
-    if should_trigger_clustering(batch_size):
+    if pipeline_api.should_trigger_clustering(batch_size):
         try:
             from app.worker import enqueue_cluster_task
             job = await enqueue_cluster_task(interview_id, user_id)
@@ -257,18 +263,18 @@ async def process_interview_tag_then_maybe_cluster(
             return result
         except Exception as e:
             logger.warning(f"ARQ 调度失败,回退到内联聚类: {e}")
-            batch = dequeue_batch(batch_size)
+            batch = pipeline_api.dequeue_batch(batch_size)
             if batch:
                 try:
-                    new_count = await cluster_batch(batch, user_id=user_id)
+                    new_count = await _maybe_await(pipeline_api.cluster_batch(batch, user_id=user_id))
                     queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_done(queue_ids)
+                    pipeline_api.mark_batch_done(queue_ids)
                     result["clustered"] = True
                     result["new_qb_count"] = new_count
                 except Exception as e:
                     logger.error(f"聚类失败,回退队列状态: {e}")
                     queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_failed(queue_ids)
+                    pipeline_api.mark_batch_failed(queue_ids)
                     raise
     return result
 
@@ -285,21 +291,24 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
 
     total_new = 0
     total_batches = 0
+    from app.services import pipeline as pipeline_api
 
     while True:
-        batch = dequeue_batch(BATCH_SIZE)
+        batch = pipeline_api.dequeue_batch(BATCH_SIZE)
         if not batch:
             break
         total_batches += 1
         try:
-            new_count = await cluster_batch(batch, user_id=user_id, skip_clean=True)
+            new_count = await _maybe_await(
+                pipeline_api.cluster_batch(batch, user_id=user_id, skip_clean=True)
+            )
             queue_ids = [item['queue_id'] for item in batch]
-            mark_batch_done(queue_ids)
+            pipeline_api.mark_batch_done(queue_ids)
             total_new += new_count
         except Exception as e:
             logger.error(f"聚类批次 {total_batches} 失败: {e}")
             queue_ids = [item['queue_id'] for item in batch]
-            mark_batch_failed(queue_ids)
+            pipeline_api.mark_batch_failed(queue_ids)
             raise
 
         await asyncio.sleep(0.5)

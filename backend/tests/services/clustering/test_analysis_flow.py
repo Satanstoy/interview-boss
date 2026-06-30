@@ -21,26 +21,25 @@ from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 
 
 class TestBug004DeletedBankExcluded:
-    """BUG-004: 聚类时未过滤 deleted_at IS NULL（已迁移到 pipeline.py）"""
+    """BUG-004: 聚类时未过滤 deleted_at IS NULL（当前过滤分布在队列和加载器）"""
 
     def test_bug004_pipeline_filters_deleted_at(self):
-        """修复后：pipeline.py 的 cluster_batch 查询必须包含 deleted_at IS NULL"""
+        """修复后：出队加载 questions_detail 时必须包含 deleted_at IS NULL"""
         import inspect
-        from app.services.pipeline import cluster_batch
-        source = inspect.getsource(cluster_batch)
+        from app.services.pipeline.queue import dequeue_batch
+        source = inspect.getsource(dequeue_batch)
         assert "deleted_at IS NULL" in source, (
-            "BUG-004: pipeline.py cluster_batch 中加载 questions_detail 的查询"
+            "BUG-004: dequeue_batch 中加载 questions_detail 的查询"
             "缺少 'deleted_at IS NULL' 条件，已软删除的记录会参与聚类"
         )
 
     def test_bug004_pipeline_qb_query_filters_deleted(self):
-        """修复后：pipeline.py 加载已有 question_bank 时必须过滤 deleted_at"""
+        """修复后：加载已有 question_bank 聚类时必须过滤 deleted_at"""
         import inspect
-        from app.services.pipeline import cluster_batch
-        source = inspect.getsource(cluster_batch)
-        # 检查加载已有 QB 的查询也包含 deleted_at IS NULL
-        assert source.count("deleted_at IS NULL") >= 2, (
-            "BUG-004: pipeline.py cluster_batch 应同时过滤 questions_detail 和 question_bank 的 deleted_at"
+        from app.services.pipeline.batch import _load_existing_clusters_by_cat2
+        source = inspect.getsource(_load_existing_clusters_by_cat2)
+        assert "deleted_at IS NULL" in source, (
+            "BUG-004: _load_existing_clusters_by_cat2 加载 question_bank 时应过滤 deleted_at"
         )
 
 
@@ -48,18 +47,19 @@ class TestBug004QueryBehavior:
     """BUG-004: 验证查询行为——已删除记录不参与聚类（已迁移到 pipeline.py）"""
 
     def test_bug004_pipeline_cluster_batch_has_proper_filters(self):
-        """修复后：pipeline.py cluster_batch 的查询必须包含所有必要过滤条件"""
+        """修复后：聚类输入和已有 QB 查询必须包含所有必要过滤条件"""
         import inspect
-        from app.services.pipeline import cluster_batch
-        src = inspect.getsource(cluster_batch)
+        from app.services.pipeline.queue import dequeue_batch
+        from app.services.pipeline.batch import _load_existing_clusters_by_cat2
+        src = inspect.getsource(dequeue_batch) + inspect.getsource(_load_existing_clusters_by_cat2)
 
         # 验证 questions_detail 查询
         assert "deleted_at IS NULL" in src
         assert "job_position" in src
 
         # 验证 question_bank 查询
-        assert "owner_id IS NULL" in src
         assert "status = 'approved'" in src
+        assert "duplicate_of IS NULL" in src
 
 
 # ═══════════════════════════════════════════════════════
@@ -128,18 +128,18 @@ class TestBug002GlobalProgressComputed:
     """BUG-002: 需要全局进度 computed 属性以支持跨 Tab 显示"""
 
     def test_bug002_app_vue_has_active_reprocessing_computed(self):
-        """修复后：App.vue 应有 activeReprocessing computed 属性"""
-        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
+        """修复后：全局问题操作 composable 应有 activeReprocessing computed 属性"""
+        with open(BACKEND_ROOT / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
             content = f.read()
 
         assert "activeReprocessing" in content, (
-            "BUG-002: App.vue 缺少 activeReprocessing computed 属性，"
+            "BUG-002: useQuestionOps.js 缺少 activeReprocessing computed 属性，"
             "切换 Tab 后无法在全局位置显示分析进度"
         )
 
     def test_bug002_global_progress_indicator_in_template(self):
         """修复后：模板中应有全局进度指示器（fixed 定位）"""
-        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
+        with open(BACKEND_ROOT / "frontend/src/layouts/AuthenticatedLayout.vue", "r", encoding="utf-8") as f:
             content = f.read()
 
         has_fixed_indicator = ("fixed" in content and "activeReprocessing" in content)
@@ -153,24 +153,12 @@ class TestBug002ProgressStateLifecycle:
     """BUG-002: 进度状态在组件卸载后应保持"""
 
     def test_bug002_reprocessing_state_is_top_level_ref(self):
-        """reprocessingIds 应是顶级 ref，不绑定在 v-if 组件内"""
-        with open(BACKEND_ROOT / "frontend/src/App.vue", "r", encoding="utf-8") as f:
+        """reprocessingIds 应在全局 composable 顶级声明，不绑定在 v-if 组件内"""
+        with open(BACKEND_ROOT / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
             content = f.read()
 
-        # 验证 reprocessingIds 是在 <script setup> 顶级声明的
-        lines = content.split("\n")
-        script_start = None
-        for i, line in enumerate(lines):
-            if "<script setup>" in line:
-                script_start = i
-                break
-
-        assert script_start is not None, "App.vue 缺少 <script setup> 标签"
-
-        # 在 script 块内查找 reprocessingIds 声明
-        script_content = "\n".join(lines[script_start:])
-        assert "const reprocessingIds" in script_content, (
-            "BUG-002: reprocessingIds 未在 <script setup> 顶级声明"
+        assert "const reprocessingIds" in content, (
+            "BUG-002: reprocessingIds 未在 useQuestionOps.js 顶级声明"
         )
 
 

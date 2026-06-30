@@ -54,11 +54,11 @@ class TestRedisPool:
     @pytest.mark.asyncio
     async def test_create_redis_pool(self):
         """应能创建 Redis 连接池（通过 worker 的 _get_redis_pool）"""
-        from app.worker import _get_redis_pool
+        import app.worker
         with patch("app.worker._get_redis_pool") as mock_pool_fn:
             mock_pool = MagicMock()
             mock_pool_fn.return_value = mock_pool
-            pool = await _get_redis_pool()
+            pool = await app.worker._get_redis_pool()
             assert pool is not None
 
 
@@ -74,7 +74,7 @@ class TestWorkerSettings:
         """Worker 应注册任务函数"""
         from app.worker import WorkerSettings
         assert hasattr(WorkerSettings, 'functions')
-        assert len(WorkerSettings.functions) == 2
+        assert len(WorkerSettings.functions) == 5
 
     def test_worker_has_lifecycle_hooks(self):
         """Worker 应有启动和关闭钩子"""
@@ -87,8 +87,8 @@ class TestWorkerSettings:
     def test_worker_resource_limits_for_2c4g(self):
         """T-010: 2c4g 服务器资源限制配置"""
         from app.worker import WorkerSettings
-        assert WorkerSettings.job_timeout == 600  # 10 分钟超时
-        assert WorkerSettings.max_tries == 3  # 最多重试 3 次
+        assert WorkerSettings.job_timeout == 900  # 15 分钟超时
+        assert WorkerSettings.max_tries == 2  # 最多重试 2 次
         assert WorkerSettings.keep_result == 3600  # 结果保留 1 小时
         assert WorkerSettings.queue_read_limit == 10  # 每次最多读 10 个任务
 
@@ -190,10 +190,19 @@ class TestTaskExecution:
         from app.worker import force_cluster_all_task
         mock_ctx = MagicMock()
 
-        with patch("app.services.pipeline.force_cluster_all_pending") as mock_force:
-            mock_force.return_value = {"batches": 3, "new_qb_count": 15}
+        with patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
+             patch("app.services.pipeline.cluster_batch") as mock_cluster, \
+             patch("app.services.pipeline.mark_batch_done") as mock_done:
+            mock_dequeue.side_effect = [
+                [{"queue_id": 1, "qd_id": 10, "question": "test"}],
+                [{"queue_id": 2, "qd_id": 11, "question": "test2"}],
+                [{"queue_id": 3, "qd_id": 12, "question": "test3"}],
+                [],
+            ]
+            mock_cluster.return_value = 5
 
             result = await force_cluster_all_task(mock_ctx, user_id=1)
             assert result["batches"] == 3
             assert result["new_qb_count"] == 15
-            mock_force.assert_called_once_with(user_id=1)
+            assert mock_cluster.call_count == 3
+            assert mock_done.call_count == 3

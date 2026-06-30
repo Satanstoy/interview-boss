@@ -325,9 +325,6 @@ async def cluster_three_stage_v2(
     # ═══════════════════════════════════════════════════════════
     # Stage 3: 按 cat2 分组 LLM 语义聚类
     # ═══════════════════════════════════════════════════════════
-    parent = {}
-    rank = {}
-
     # 并发处理所有 cat2 组
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
@@ -335,18 +332,19 @@ async def cluster_three_stage_v2(
         """处理单个 cat2 组的 LLM 分组"""
         idx_list = sorted(idx_set)
         if len(idx_list) < 2:
-            return
+            return []
 
         # "其他"分类跳过（是兜底分类，容易误合并）
         if cat2 in ('其他', ''):
             logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] 跳过（兜底分类，避免误合并）")
-            return
+            return []
 
         # 初始化 union-find
+        local_parent = {}
+        local_rank = {}
         for idx in idx_list:
-            if idx not in parent:
-                parent[idx] = idx
-                rank[idx] = 0
+            local_parent[idx] = idx
+            local_rank[idx] = 0
 
         # 构建 prompt
         q_list = []
@@ -379,25 +377,27 @@ async def cluster_three_stage_v2(
                         continue
                     # Union-find 合并
                     for gi in group_indices[1:]:
-                        _union_merge(parent, rank, group_indices[0], gi)
+                        _union_merge(local_parent, local_rank, group_indices[0], gi)
 
                 logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组完成")
 
             except Exception as e:
                 logger.warning(f"[V2] Stage 3 [{cat2 or '未分类'}] LLM 分组失败: {e}")
+                return []
+
+        group_clusters = {}
+        for idx in local_parent:
+            root = _union_find(local_parent, idx)
+            group_clusters.setdefault(root, []).append(idx)
+        return [members for members in group_clusters.values() if len(members) >= 2]
 
     # 并发执行所有 cat2 组
-    await asyncio.gather(*[_process_cat2_group(cat2, idx_set) for cat2, idx_set in cat2_candidates.items()])
+    grouped_clusters = await asyncio.gather(
+        *[_process_cat2_group(cat2, idx_set) for cat2, idx_set in cat2_candidates.items()]
+    )
 
-    # 从 union-find 提取合并结果
-    clusters = {}
-    for idx in parent:
-        root = _union_find(parent, idx)
-        clusters.setdefault(root, []).append(idx)
-
-    for root, members in clusters.items():
-        if len(members) < 2:
-            continue
+    # 从每个 cat2 的局部 union-find 结果提取合并结果
+    for members in [members for group in grouped_clusters for members in group]:
         # 选 frequency 最高的作为 survivor
         member_qs = [(remaining[idx].get('frequency', 1), remaining[idx]['id'], idx) for idx in members]
         member_qs.sort(reverse=True)

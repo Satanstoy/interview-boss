@@ -58,6 +58,8 @@ from app.db.migrations.clustering import (
     _migration_033_cluster_id,
     _migration_034_backfill_confidence,
     _migration_035_split_e_category,
+    _migration_037_backfill_embeddings,
+    _migration_039_merge_review_tables,
     _classify_e_question,
 )
 from app.db.migrations.jobs import (
@@ -111,6 +113,7 @@ _MIGRATIONS = [
     (36, 'job_payloads',                 _migration_036_job_payloads),
     (37, 'conversation_metadata',        _migration_037_conversation_metadata),
     (38, 'chat_conversation_position',   _migration_038_chat_conversation_position),
+    (39, 'merge_review_tables',          _migration_039_merge_review_tables),
 ]
 
 

@@ -3,7 +3,7 @@ TDD Review — 跨类别手动聚类功能
 
 覆盖本次改动的三个核心行为：
 1. 搜索端点返回 cat1/cat2
-2. 独立题合并后保留源行不删除
+2. 独立题合并后删除源行，避免题库重复显示
 3. 跨类别合并支持类别更新
 """
 import json
@@ -28,39 +28,20 @@ class TestSearchReturnsCategory:
 
 
 # ─────────────────────────────────────────────────
-# T-002: 独立题合并后保留源行
+# T-002: 独立题合并后删除源行
 # ─────────────────────────────────────────────────
 
-class TestStandaloneMergePreservesSource:
-    """合并独立题到另一个聚类后，源行应保留不被删除"""
+class TestStandaloneMergeRemovesSource:
+    """合并独立题到另一个聚类后，源行应被删除"""
 
-    def test_merge_endpoint_has_standalone_preserve_logic(self):
-        """T-002a: 合并端点应有 is_standalone_merge 时 pass 的逻辑（保留源行）"""
+    def test_merge_endpoint_deletes_standalone_source(self):
+        """T-002a: 独立题并入目标聚类后应删除源行"""
         from app.routers.questions_pkg.mutations import merge_question
         import inspect
         source = inspect.getsource(merge_question)
         assert "is_standalone_merge" in source, "缺少 is_standalone_merge 判断"
-        lines = source.split('\n')
-        # 找到 DELETE 分支，验证前面有 standalone 保护
-        found_delete_guard = False
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # 找到 DELETE FROM question_bank 行
-            if 'DELETE FROM question_bank' in stripped:
-                # 向上找最近的 if is_standalone_merge
-                for j in range(i - 1, max(0, i - 5), -1):
-                    prev = lines[j].strip()
-                    if prev.startswith('if is_standalone_merge'):
-                        # 这个分支的下一行应该是 pass
-                        body_line = lines[j + 1].strip() if j + 1 < len(lines) else ''
-                        # 跳过注释行
-                        if body_line.startswith('#'):
-                            body_line = lines[j + 2].strip() if j + 2 < len(lines) else ''
-                        assert 'pass' in body_line, f"standalone 保留分支应为 pass，实际为: {body_line}"
-                        found_delete_guard = True
-                        break
-                break
-        assert found_delete_guard, "未找到 DELETE 前的 is_standalone_merge 保护"
+        assert "if is_standalone_merge:" in source
+        assert 'DELETE FROM question_bank WHERE id = ?' in source
 
     def test_standalone_merge_skips_source_url_copy(self):
         """T-002b: 独立题合并时不应将源 URL 复制到目标 sources"""

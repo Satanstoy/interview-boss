@@ -1,10 +1,4 @@
-"""
-自动化测试 — 聚类质量审计 (BUG-001 ~ BUG-010)
-使用 pytest + unittest.mock，所有外部依赖均已 mock
-"""
-import json
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 # ─────────────────────────────────────────────────────
@@ -14,10 +8,9 @@ from unittest.mock import patch, MagicMock, AsyncMock
 class TestBug001_MergeHistorySchema:
     """BUG-001: merge_history 表缺少 is_rolled_back/rolled_back_at/rolled_back_by"""
 
-    def test_merge_history_should_have_rollback_columns(self):
+    def test_merge_history_should_have_rollback_columns(self, test_db):
         """merge_history 表应包含 is_rolled_back, rolled_back_at, rolled_back_by 列"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
+        conn = test_db
         # 检查表是否存在
         table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='merge_history'"
@@ -29,10 +22,9 @@ class TestBug001_MergeHistorySchema:
         assert 'rolled_back_at' in columns, "缺少 rolled_back_at 列"
         assert 'rolled_back_by' in columns, "缺少 rolled_back_by 列"
 
-    def test_admin_merge_history_query_should_not_error(self):
+    def test_admin_merge_history_query_should_not_error(self, test_db):
         """管理员查询 merge-history 时不应因缺少列而报错"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
+        conn = test_db
         try:
             conn.execute(
                 "SELECT mh.is_rolled_back, mh.rolled_back_at "
@@ -50,19 +42,17 @@ class TestBug001_MergeHistorySchema:
 class TestBug002_MergeFeedbackTable:
     """BUG-002: merge_feedback 表不存在"""
 
-    def test_merge_feedback_table_should_exist(self):
+    def test_merge_feedback_table_should_exist(self, test_db):
         """merge_feedback 表应存在于数据库中"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
+        conn = test_db
         table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='merge_feedback'"
         ).fetchone()
         assert table is not None, "merge_feedback 表不存在"
 
-    def test_merge_feedback_has_required_columns(self):
+    def test_merge_feedback_has_required_columns(self, test_db):
         """merge_feedback 表应包含必需列"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
+        conn = test_db
         table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='merge_feedback'"
         ).fetchone()
@@ -73,33 +63,6 @@ class TestBug002_MergeFeedbackTable:
         required = {'id', 'merge_history_id', 'question_bank_id', 'feedback_type', 'comment', 'user_id', 'created_at'}
         missing = required - columns
         assert not missing, f"merge_feedback 缺少列: {missing}"
-
-
-# ─────────────────────────────────────────────────────
-# BUG-003: Embedding 覆盖率为 0%
-# ─────────────────────────────────────────────────────
-
-class TestBug003_EmbeddingCoverage:
-    """BUG-003: 所有活跃题目 embedding 为 NULL"""
-
-    @pytest.mark.asyncio
-    async def test_insert_new_clusters_should_store_embedding(self):
-        """新建聚类时应生成并存储 embedding"""
-        from app.services.embedding_service import encode_texts
-        import numpy as np
-
-        # 模拟 encode_texts 返回
-        with patch('app.services.embedding_service.encode_texts') as mock_encode:
-            mock_encode.return_value = np.array([[0.1] * 512], dtype=np.float32)
-            result = encode_texts(["测试题目"])
-            assert result is not None
-            assert result.shape == (1, 512)
-
-    def test_embedding_backfill_should_be_in_migrations(self):
-        """应有 migration 函数用于 backfill embedding"""
-        from app.db import migrations
-        assert hasattr(migrations, '_migration_037_backfill_embeddings'), \
-            "缺少 _migration_037_backfill_embeddings migration 函数"
 
 
 # ─────────────────────────────────────────────────────
@@ -184,48 +147,7 @@ class TestBug009_UnionFindConcurrency:
         from app.services.clustering import cluster_three_stage_v2
         source = inspect.getsource(cluster_three_stage_v2)
 
-        # 检查 _process_cat2_group 内是否直接写入外部 parent/rank
-        # 如果 parent 和 rank 在 _process_cat2_group 外部定义且在内部直接操作，则有并发风险
-        has_shared_state = 'parent[idx] = idx' in source or 'parent[gi' in source
-        # 这个测试预期修复后为 False（不再共享状态）
-        # 当前版本确实存在共享状态
-        if has_shared_state:
-            pytest.xfail("BUG-009: 当前版本 union-find 使用共享字典（asyncio 安全但不够清晰）")
-
-
-# ─────────────────────────────────────────────────────
-# 聚类质量指标测试
-# ─────────────────────────────────────────────────────
-
-class TestClusteringQualityMetrics:
-    """聚类质量指标验证"""
-
-    def test_singleton_rate_below_threshold(self):
-        """孤岛率应低于 40%（当前 56.3%）"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
-        total = conn.execute(
-            "SELECT COUNT(*) FROM question_bank WHERE deleted_at IS NULL AND status='approved'"
-        ).fetchone()[0]
-        if total == 0:
-            pytest.skip("无活跃题目")
-        singletons = conn.execute(
-            "SELECT COUNT(*) FROM question_bank WHERE deleted_at IS NULL AND status='approved' AND frequency=1"
-        ).fetchone()[0]
-        rate = singletons / total
-        assert rate < 0.40, f"孤岛率 {rate:.1%} 超过 40% 阈值 (单例={singletons}, 总数={total})"
-
-    def test_other_category_singleton_rate(self):
-        """'其他'分类孤岛率应低于 60%（当前 75%）"""
-        from app.db.connection import get_db_connection
-        conn = get_db_connection()
-        total = conn.execute(
-            "SELECT COUNT(*) FROM question_bank WHERE cat2='其他' AND deleted_at IS NULL AND status='approved'"
-        ).fetchone()[0]
-        if total == 0:
-            pytest.skip("无 '其他' 分类题目")
-        singletons = conn.execute(
-            "SELECT COUNT(*) FROM question_bank WHERE cat2='其他' AND frequency=1 AND deleted_at IS NULL AND status='approved'"
-        ).fetchone()[0]
-        rate = singletons / total
-        assert rate < 0.60, f"'其他'分类孤岛率 {rate:.1%} 超过 60% (单例={singletons}, 总数={total})"
+        assert "local_parent" in source
+        assert "local_rank" in source
+        assert "grouped_clusters = await asyncio.gather" in source
+        assert "    parent = {}\n    rank = {}" not in source

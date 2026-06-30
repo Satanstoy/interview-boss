@@ -116,15 +116,15 @@ class TestBug010GenerateAnswerFix:
         # Mock visible question
         mock_row = {"id": 100, "owner_id": None, "status": "approved"}
 
-        with patch("app.routers.answers.get_db_connection") as mock_conn:
+        with patch("app.routers.practice.get_db_connection") as mock_conn:
             mock_conn.return_value.__enter__ = MagicMock(return_value=mock_conn.return_value)
             mock_conn.return_value.__exit__ = MagicMock(return_value=False)
             mock_conn.return_value.execute.return_value.fetchone.return_value = mock_row
 
-            with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
+            with patch("app.routers.practice.run_db", new_callable=AsyncMock) as mock_run_db:
                 mock_run_db.return_value = mock_row
 
-                with patch("app.routers.answers._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+                with patch("app.routers.practice._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
                     mock_llm.return_value = '{"overall_score": 8, "dimension_scores": {}, "strengths": [], "weaknesses": [], "suggestions": []}'
 
                     # 应该不抛出403错误

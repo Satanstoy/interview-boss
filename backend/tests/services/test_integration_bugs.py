@@ -16,8 +16,8 @@ class TestBUG001LoadActiveSeason:
 
     def test_load_active_season_uses_public_endpoint(self):
         """loadActiveSeason 应调用 fetchPublicProfile 而非 fetchProfile"""
-        app_vue_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/App.vue')
-        with open(app_vue_path, 'r', encoding='utf-8') as f:
+        data_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/composables/useMasterBankData.js')
+        with open(data_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         # 找到 loadActiveSeason 函数
@@ -59,9 +59,9 @@ class TestBUG002BuildMasterBank:
     """BUG-002: triggerBuildMasterBank 使用 post() 而非 postSSE()"""
 
     def test_trigger_build_uses_sse(self):
-        """triggerBuildMasterBank 应使用 buildMasterBankSSE 而非 buildMasterBank"""
-        app_vue_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/App.vue')
-        with open(app_vue_path, 'r', encoding='utf-8') as f:
+        """triggerBuildMasterBank 应提交 build 任务并监听 job SSE"""
+        build_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/composables/useBuildTrigger.js')
+        with open(build_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         # 找到 triggerBuildMasterBank 函数
@@ -80,20 +80,21 @@ class TestBUG002BuildMasterBank:
             pos += 1
         func_body = content[start:pos]
 
-        # 修复后：应使用 buildMasterBankSSE，不应使用 buildMasterBank（非 SSE 版本）
-        assert 'buildMasterBankSSE' in func_body, \
-            f"triggerBuildMasterBank 应使用 buildMasterBankSSE"
-        # 不应直接使用 buildMasterBank（非 SSE 版本）
-        assert 'api.buildMasterBank()' not in func_body, \
-            "triggerBuildMasterBank 不应使用 api.buildMasterBank()（非 SSE 版本）"
+        assert 'api.buildMasterBank()' in func_body, "triggerBuildMasterBank 应先提交 build 任务"
+        assert 'api.streamJobProgress' in func_body, "triggerBuildMasterBank 应监听 job SSE 进度"
 
     def test_build_endpoint_returns_sse(self):
-        """后端 POST /api/master-bank/build 应返回 StreamingResponse"""
+        """后端 POST /api/master-bank/build 应返回 job_id，并通过 /api/jobs/{id}/stream 监听进度"""
         from app.routers.bank_build import build_master_bank
         import inspect
         source = inspect.getsource(build_master_bank)
-        assert 'StreamingResponse' in source or 'event_stream' in source, \
-            "build_master_bank 应返回 StreamingResponse (SSE)"
+        assert 'job_id' in source and 'status' in source, \
+            "build_master_bank 应提交任务并返回 job_id/status"
+
+        from app.routers.bank_build import stream_job_progress
+        stream_source = inspect.getsource(stream_job_progress)
+        assert 'StreamingResponse' in stream_source or 'event_stream' in stream_source, \
+            "stream_job_progress 应返回 StreamingResponse (SSE)"
 
     def test_api_has_sse_function(self):
         """前端 api/index.js 应有 buildMasterBankSSE 函数"""
@@ -110,18 +111,18 @@ class TestBUG003FetchPublicProfile:
 
     def test_fetch_public_profile_exists_in_api(self):
         """api/index.js 应导出 fetchPublicProfile 函数"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/api/index.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/services/profileApi.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         assert 'fetchPublicProfile' in content, "api/index.js 应导出 fetchPublicProfile"
 
     def test_fetch_public_profile_calls_correct_endpoint(self):
         """fetchPublicProfile 应调用 GET /api/profile/public"""
-        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/api/index.js')
+        api_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/services/profileApi.js')
         with open(api_path, 'r', encoding='utf-8') as f:
             content = f.read()
         # 找到 fetchPublicProfile 定义
-        match = re.search(r'fetchPublicProfile.*?=\s*(.+)', content)
+        match = re.search(r'fetchPublicProfile\s*=\s*(?:\([^)]*\)|\w+)\s*=>\s*(.+)', content)
         assert match is not None, "未找到 fetchPublicProfile 定义"
         definition = match.group(1)
         # 模板字面量 ${API} 展开为 /api，检查 profile/public 路径

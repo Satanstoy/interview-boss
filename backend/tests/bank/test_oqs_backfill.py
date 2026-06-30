@@ -98,33 +98,19 @@ class TestFrontendDedupedSourcesFallback:
 class TestRealDatabaseOqsIntegrity:
     """实际数据库中 original_question_sources 完整性检查"""
 
-    def test_no_questions_with_empty_oqs_but_nonempty_sources(self):
+    def test_no_questions_with_empty_oqs_but_nonempty_sources(self, test_db):
         """不应存在 oqs 为空但 sources 非空的题目"""
-        import sqlite3
-        try:
-            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
-            cursor = conn.cursor()
-            count = cursor.execute(
-                "SELECT COUNT(*) FROM question_bank "
-                "WHERE (original_question_sources IS NULL OR original_question_sources = '' OR original_question_sources = '[]') "
-                "AND sources IS NOT NULL AND sources != '' AND sources != '[]' AND frequency > 0"
-            ).fetchone()[0]
-            conn.close()
-            assert count == 0, f"存在 {count} 条 oqs 为空但 sources 非空的题目（需重启服务执行自动修复）"
-        except Exception as e:
-            pytest.skip(f"无法连接数据库: {e}")
+        count = test_db.execute(
+            "SELECT COUNT(*) FROM question_bank "
+            "WHERE (original_question_sources IS NULL OR original_question_sources = '' OR original_question_sources = '[]') "
+            "AND sources IS NOT NULL AND sources != '' AND sources != '[]' AND frequency > 0"
+        ).fetchone()[0]
+        assert count == 0, f"存在 {count} 条 oqs 为空但 sources 非空的题目"
 
-    def test_no_oqs_entries_with_empty_sources(self):
+    def test_no_oqs_entries_with_empty_sources(self, test_db):
         """不应存在 oqs 条目的 sources 为空数组"""
-        import sqlite3
-        try:
-            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
-            cursor = conn.cursor()
-            count = cursor.execute(
-                "SELECT COUNT(*) FROM question_bank "
-                "WHERE original_question_sources LIKE '%\"sources\": []%' AND frequency > 0"
-            ).fetchone()[0]
-            conn.close()
-            assert count == 0, f"存在 {count} 条 oqs 中有空 sources 条目的题目（需重启服务执行自动修复）"
-        except Exception as e:
-            pytest.skip(f"无法连接数据库: {e}")
+        count = test_db.execute(
+            "SELECT COUNT(*) FROM question_bank "
+            "WHERE original_question_sources LIKE '%\"sources\": []%' AND frequency > 0"
+        ).fetchone()[0]
+        assert count == 0, f"存在 {count} 条 oqs 中有空 sources 条目的题目"

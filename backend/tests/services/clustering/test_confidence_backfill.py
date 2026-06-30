@@ -180,11 +180,9 @@ class TestCompactConfidenceFallback:
              patch('app.services.pipeline.compact.insert_original_item'), \
              patch('app.services.pipeline.compact._compute_merge_confidence', return_value=0.87):
 
-            mock_cursor = MagicMock()
             mock_conn.return_value = MagicMock()
-            mock_conn.return_value.execute = mock_cursor
-            mock_cursor.fetchone.return_value = {
-                'sources': '[]', 'original_questions': '[]',
+            mock_conn.return_value.execute.return_value.fetchone.return_value = {
+                'question': '测试旧题', 'sources': '[]', 'original_questions': '[]',
                 'original_question_sources': '[]', 'ai_answer': None
             }
             mock_snapshot.return_value = {}

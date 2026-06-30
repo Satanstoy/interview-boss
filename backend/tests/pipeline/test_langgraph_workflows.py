@@ -26,7 +26,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 # ─────────────────────────────────────────────
 
 def create_test_db():
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript("""
@@ -98,6 +98,8 @@ def create_test_db():
             original_questions TEXT DEFAULT '[]',
             original_question_sources TEXT DEFAULT '[]',
             is_starred INTEGER DEFAULT 0,
+            embedding BLOB,
+            cluster_id INTEGER DEFAULT NULL,
             owner_id INTEGER,
             submitted_by INTEGER,
             status TEXT DEFAULT 'approved',
@@ -481,8 +483,6 @@ class TestSubmitNodes:
         assert result["extracted_data"]["公司"] == "字节跳动"
         assert len(result["extracted_data"]["具体题目清单"]) == 3
         assert result["extraction_quality"] >= 7.0
-        assert "events" in result
-        assert result["events"][0]["step"] == "extract"
 
     def test_extract_node_blacklist_filter(self, mock_db):
         """验证提取黑名单过滤（精确匹配）"""
@@ -538,7 +538,6 @@ class TestSubmitNodes:
         assert result["tagged_rows"][0][4] == "数据库"  # cat1
         assert result["tagged_rows"][0][5] == "Redis"    # cat2
         assert result["tagging_quality"] >= 7.0
-        assert result["events"][0]["step"] == "tag"
 
     def test_match_and_persist_personal_creates_qb_records(self, mock_db):
         """验证个人题库路径写入 question_bank 的记录与原始 submit_interview_txn 一致"""

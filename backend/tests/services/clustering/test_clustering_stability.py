@@ -122,10 +122,10 @@ class TestBUG004_DynamicFrequency:
         assert 'i.deleted_at IS NULL' in sql
 
     def test_dynamic_frequency_sql_personal_mode(self):
-        """personal 模式频率应统计所有非软删除面试（不限 owner_id）"""
+        """personal 模式频率应统计公共/遗留来源和当前用户来源"""
         from app.db.connection import get_dynamic_frequency_sql
         sql = get_dynamic_frequency_sql('personal', 42)
-        assert 'i.owner_id' not in sql
+        assert 'i.owner_id IS NULL OR i.owner_id = 42' in sql
         assert 'i.deleted_at IS NULL' in sql
 
     def test_dynamic_frequency_sql_mixed_mode(self):

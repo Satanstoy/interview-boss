@@ -218,14 +218,21 @@ class TestBUG003UrlHrefValidation:
         # 应导入或使用 safeUrl
         assert 'safeUrl' in content, "QuestionCard.vue 应使用 safeUrl 函数处理 URL"
 
-    def test_app_vue_uses_safe_url(self):
-        """App.vue 应使用 safeUrl 处理来源链接 href"""
-        app_path = os.path.join(os.path.dirname(__file__), '../../frontend/src/App.vue')
-        with open(app_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+    def test_source_views_use_safe_url(self):
+        """承载来源链接的视图应使用 safeUrl 处理 href"""
+        frontend_root = os.path.join(os.path.dirname(__file__), '../../frontend/src')
+        source_files = [
+            'layouts/AuthenticatedLayout.vue',
+            'views/InterviewView.vue',
+            'views/JdView.vue',
+            'components/business/QuestionCard.vue',
+        ]
+        contents = []
+        for source_file in source_files:
+            with open(os.path.join(frontend_root, source_file), 'r', encoding='utf-8') as f:
+                contents.append(f.read())
 
-        # 应使用 safeUrl
-        assert 'safeUrl' in content, "App.vue 应使用 safeUrl 函数处理 URL"
+        assert any('safeUrl' in content for content in contents), "来源链接视图应使用 safeUrl 函数处理 URL"
 
 
 # ── BUG-005: API Key 掩码泄露前 4 字符 ──

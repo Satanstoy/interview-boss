@@ -22,7 +22,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 # ─────────────────────────────────────────────
 
 def create_test_db():
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript("""
@@ -94,6 +94,8 @@ def create_test_db():
             original_questions TEXT DEFAULT '[]',
             original_question_sources TEXT DEFAULT '[]',
             is_starred INTEGER DEFAULT 0,
+            embedding BLOB,
+            cluster_id INTEGER DEFAULT NULL,
             owner_id INTEGER,
             submitted_by INTEGER,
             status TEXT DEFAULT 'approved',
@@ -101,6 +103,7 @@ def create_test_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             deleted_at TIMESTAMP,
             job_position TEXT DEFAULT '',
+            duplicate_of INTEGER DEFAULT NULL,
             FOREIGN KEY (owner_id) REFERENCES users(id),
             FOREIGN KEY (submitted_by) REFERENCES users(id)
         );
@@ -114,9 +117,11 @@ def create_test_db():
         CREATE TABLE analysis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             interview_id INTEGER NOT NULL,
+            question_detail_id INTEGER,
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
+            UNIQUE(question_detail_id),
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
         CREATE TABLE user_practice_history (
@@ -198,6 +203,22 @@ def _mock_generate_unified(questions, sources_context=None, user_id=None):
     return f"（统一）{questions[0]} 等 {len(questions)} 个问题"
 
 
+async def _mock_process_incremental_batch(new_rows, existing_by_cat2, user_id=None):
+    groups = {}
+    for row in new_rows:
+        groups.setdefault(row.get("cat2") or "未分类", []).append(row)
+
+    new_clusters = []
+    for cat2, rows in groups.items():
+        new_clusters.append({
+            "ids": [str(r["id"]) for r in rows],
+            "representative": rows[0]["question"],
+            "items": rows,
+        })
+
+    return {"matched_to_existing": [], "new_clusters": new_clusters}
+
+
 # ─────────────────────────────────────────────
 #  Fixture: 每个测试注入内存 DB
 # ─────────────────────────────────────────────
@@ -210,13 +231,16 @@ def mock_db():
     with patch('app.db.connection.get_db_connection', return_value=conn), \
          patch('app.db.operations.get_db_connection', return_value=conn), \
          patch('app.services.pipeline.queue.get_db_connection', return_value=conn), \
-         patch('app.services.pipeline.batch.get_db_connection', return_value=conn):
+         patch('app.services.pipeline.writer.get_db_connection', return_value=conn), \
+         patch('app.services.pipeline.batch.get_db_connection', return_value=conn), \
+         patch('app.services.pipeline.batch.process_incremental_batch', side_effect=_mock_process_incremental_batch):
 
         async def _run_db_sync(func):
             return func()
 
         with patch('app.db.connection.run_db', side_effect=_run_db_sync):
-            yield conn
+            with patch('app.services.pipeline.writer.run_db', side_effect=_run_db_sync):
+                yield conn
 
     conn.close()
 
@@ -265,7 +289,7 @@ class TestSingleInterview:
 
             # 阶段2
             batch = dequeue_batch(BATCH_SIZE)
-            assert len(batch) == 1
+            assert len(batch) == 3
             new_count = await cluster_batch(batch, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch])
 
@@ -322,7 +346,7 @@ class TestBatchProcessing:
             assert should_trigger_clustering(BATCH_SIZE) is True
 
             batch = dequeue_batch(BATCH_SIZE)
-            assert len(batch) == 3
+            assert len(batch) == 6
             new_count = await cluster_batch(batch, user_id=1)
             mark_batch_done([b['queue_id'] for b in batch])
 
@@ -356,7 +380,7 @@ class TestRebuildFlow:
     def test_rebuild_clears_old_and_creates_new(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """重建后旧 QB 清除，新 QB 从 pipeline 生成"""
         from app.services.pipeline import (
-            tag_interview, force_cluster_all_pending
+            tag_interview, enqueue_questions, force_cluster_all_pending
         )
         conn = mock_db
 
@@ -394,11 +418,12 @@ class TestRebuildFlow:
             # 入队所有面经
             conn.execute("DELETE FROM analysis_queue")
             for iv_id in [1, 2]:
-                conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (iv_id,))
+                enqueue_questions(iv_id)
             conn.commit()
 
             # 聚类
-            result = await force_cluster_all_pending(user_id=1)
+            with patch('app.worker.enqueue_force_cluster_task', AsyncMock(side_effect=RuntimeError("no worker"))):
+                result = await force_cluster_all_pending(user_id=1)
 
             qb_rows = conn.execute("SELECT * FROM question_bank WHERE owner_id IS NULL").fetchall()
             assert len(qb_rows) >= 2
@@ -495,6 +520,11 @@ class TestDataConsistency:
         async def _run():
             for i in range(1, 4):
                 _make_interview(conn, i, f"https://iv{i}.com", "1. 题目？")
+                conn.execute(
+                    "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
+                    "VALUES (?, '公司', '一面', '题目？', 'A', 'B', '', 'L1', '后端开发')",
+                    (f"https://iv{i}.com",)
+                )
                 enqueue_questions(i)
 
             assert get_pending_count() == 3
@@ -534,7 +564,10 @@ class TestCleanupThoroughness:
             (
                 json.dumps([{"url": url, "company": "腾讯"}, {"url": "https://keep.com", "company": "阿里"}]),
                 json.dumps(["题目A", "题目B"]),
-                json.dumps([{"question": "题目A", "url": url}, {"question": "题目B", "url": "https://keep.com"}]),
+                json.dumps([
+                    {"question": "题目A", "sources": [{"url": url, "company": "腾讯"}]},
+                    {"question": "题目B", "sources": [{"url": "https://keep.com", "company": "阿里"}]},
+                ]),
             )
         )
         conn.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (100, 1)")
@@ -689,7 +722,7 @@ class TestFullRebuildSimulation:
     @patch('app.services.clustering.generate_unified_question', new_callable=AsyncMock, side_effect=_mock_generate_unified)
     def test_5_interviews_rebuild(self, mock_uq, mock_cluster, mock_tag, mock_db):
         """5条面经重建，验证数据一致性"""
-        from app.services.pipeline import tag_interview, force_cluster_all_pending
+        from app.services.pipeline import tag_interview, enqueue_questions, force_cluster_all_pending
         conn = mock_db
 
         async def _run():
@@ -712,11 +745,12 @@ class TestFullRebuildSimulation:
             conn.execute("DELETE FROM question_bank WHERE owner_id IS NULL")
             conn.execute("DELETE FROM analysis_queue")
             for iv_id, _, _ in data:
-                conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (iv_id,))
+                enqueue_questions(iv_id)
             conn.commit()
 
             # 聚类
-            result = await force_cluster_all_pending(user_id=1)
+            with patch('app.worker.enqueue_force_cluster_task', AsyncMock(side_effect=RuntimeError("no worker"))):
+                result = await force_cluster_all_pending(user_id=1)
 
             # 验证
             qb_rows = conn.execute("SELECT * FROM question_bank WHERE owner_id IS NULL").fetchall()

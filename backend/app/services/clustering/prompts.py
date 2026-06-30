@@ -22,13 +22,21 @@ MATCH_EXISTING_PROMPT = """你是一个面试题去重专家。你的任务是�
 - "介绍一下RAG的具体流程" → "RAG是怎么做的" → "RAG各个部分怎么做（端到端设计）"（同一问题不同详略）
 - "MCP 和 Function Calling 有什么区别？" → "function call和工具调用有什么区别" → "mcp和tool的区别"（都围绕 MCP vs FC vs Tool 的对比）
 - "挑一个项目介绍" → "介绍项目"（完全等价）
+- "ReAct 是什么？" → "ReAct 推理行动循环怎么工作？"（同一 Agent 推理模式）
+- "volatile关键字的作用" → "Java volatile 有什么用？"（同一关键字语义）
+- "MCP介绍" → "介绍一下 MCP 协议"（同一协议介绍题）
+- "TCP为什么是三次握手" → "TCP三次握手的作用是什么？"（同一握手机制的不同问法）
+- "Redis 持久化方式有哪些？" → "Redis 的 RDB 和 AOF 持久化有什么区别？"（同一持久化主题的不同详略）
 - "上下文过长怎么办" → "token溢出怎么办" → "短期记忆如何处理上下文爆炸"（都涉及上下文/窗口溢出处理）
 - "SDD和skills的区别" → "mcp和skill" → "skill和prompt区别"（都涉及 Skill 机制的定位与对比）
 - "为什么选择用deepseek" → "模型选择" → "你用的是哪个基模型？"（都问模型选型理由）
 
 ❌ 坚决不合并的真实案例：
 - 「Redis 缓存穿透」≠「Redis 缓存雪崩」（穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同）
+- 「MySQL 索引优化」≠「MySQL 查询优化」（索引设计/失效分析 vs SQL 执行计划/查询改写，答案重点不同）
+- 「Vue 生命周期」≠「Vue 组件通信」（组件生命周期钩子 vs props/emits/provide 等通信机制）
 - 「volatile关键字的作用」≠「Java JUC、JVM相关知识」（volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛，可包含线程池/AQS/CAS 等完全不同话题）
+- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法/回收器 vs 内存区域/线程可见性模型）
 - 「Agent Memory 怎么设计」≠「上下文漂移」（Memory 设计关注存储结构和检索策略，上下文漂移关注对话偏离主题的检测与纠正）
 - 「解释一下token」≠「Token 成本问题」（token 的定义/分词 vs token 计费/成本优化，需要不同答案）
 - 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」（过于宽泛的开场白 ≠ 具体子技术的考察）
@@ -65,7 +73,10 @@ CLUSTER_NEW_PROMPT = """你是一个面试题聚类专家。以下是一个不�
 
 ❌ 坚决不合并的真实案例：
 - 「Redis 缓存穿透」≠「Redis 缓存雪崩」（穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同）
+- 「MySQL 索引优化」≠「MySQL 查询优化」（索引设计/失效分析 vs SQL 执行计划/查询改写，答案重点不同）
+- 「Vue 生命周期」≠「Vue 组件通信」（组件生命周期钩子 vs props/emits/provide 等通信机制）
 - 「volatile关键字的作用」≠「Java JUC、JVM相关知识」（volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛，可包含线程池/AQS/CAS 等完全不同话题）
+- 「JVM 垃圾回收」≠「JVM 内存模型」（GC 算法/回收器 vs 内存区域/线程可见性模型）
 - 「Agent Memory 怎么设计」≠「上下文漂移」（Memory 设计关注存储结构和检索策略，上下文漂移关注对话偏离主题的检测与纠正）
 - 「解释一下token」≠「Token 成本问题」（token 的定义/分词 vs token 计费/成本优化，需要不同答案）
 - 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」（过于宽泛的开场白 ≠ 具体子技术的考察）
@@ -98,10 +109,14 @@ VALIDATE_MERGES_PROMPT = """你是一个面试题去重验证专家。以下是�
 - "SDD和skills的区别" + "mcp和skill" → 都涉及 Skill 机制的定位与对比
 - "为什么选择用deepseek" + "模型选择" → 都问模型选型理由
 - "介绍一下RAG的具体流程" + "RAG是怎么做的" → 同一问题不同详略
+- "TCP为什么是三次握手" + "TCP三次握手的作用是什么？" → 同一握手机制的不同问法
 
 ❌ 应该拒绝合并的真实案例（valid=false）：
 - 「Redis 缓存穿透」≠「Redis 缓存雪崩」→ 穿透是查不存在的 key，雪崩是大面积 key 同时过期，解法完全不同
+- 「MySQL 索引优化」≠「MySQL 查询优化」→ 索引设计/失效分析 vs SQL 执行计划/查询改写
+- 「Vue 生命周期」≠「Vue 组件通信」→ 生命周期钩子 vs 组件通信机制
 - 「volatile关键字的作用」≠「Java JUC、JVM相关知识」→ volatile 只是 JUC 一个知识点，"JUC 相关知识"太宽泛
+- 「JVM 垃圾回收」≠「JVM 内存模型」→ GC 算法/回收器 vs 内存区域/线程可见性模型
 - 「Agent Memory 怎么设计」≠「上下文漂移」→ Memory 设计 vs 偏离检测，完全不同话题
 - 「解释一下token」≠「Token 定价/成本问题」→ token 的定义 vs token 计费，需要不同答案
 - 「Redis熟悉不熟悉」≠「Redis Lua有了解吗」→ 过于宽泛的开场白 ≠ 具体子技术考察

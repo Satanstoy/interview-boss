@@ -87,10 +87,13 @@ def create_test_db():
             original_questions TEXT DEFAULT '[]',
             original_question_sources TEXT DEFAULT '[]',
             is_starred INTEGER DEFAULT 0,
+            embedding BLOB,
+            cluster_id INTEGER DEFAULT NULL,
             owner_id INTEGER,
             submitted_by INTEGER,
             status TEXT DEFAULT 'approved',
             job_position TEXT DEFAULT '',
+            duplicate_of INTEGER DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             deleted_at TIMESTAMP,
@@ -130,6 +133,7 @@ def create_test_db():
         CREATE TABLE analysis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             interview_id INTEGER NOT NULL,
+            question_detail_id INTEGER,
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
@@ -152,7 +156,7 @@ def make_question_bank_row(conn, qb_id, question, cat2="B1.Agent架构与范式"
     if oqs is None:
         oqs = json.dumps([question], ensure_ascii=False)
     if oqs_sources is None:
-        oqs_sources = json.dumps([{"question": question, "url": "http://example.com/1"}], ensure_ascii=False)
+        oqs_sources = json.dumps([{"question": question, "sources": [{"url": "http://example.com/1"}]}], ensure_ascii=False)
     conn.execute(
         "INSERT INTO question_bank (id, question, cat1, cat2, tags, difficulty, frequency, sources, "
         "original_questions, original_question_sources, owner_id, job_position) "
@@ -348,9 +352,9 @@ class TestThoroughCleanup:
         # 预置 question_bank，original_questions 包含来自两个 URL 的题目
         oqs = json.dumps(["题目A来自URL1", "题目B来自URL2", "题目C来自URL1"], ensure_ascii=False)
         oqs_sources = json.dumps([
-            {"question": "题目A来自URL1", "url": "http://url1.com"},
-            {"question": "题目B来自URL2", "url": "http://url2.com"},
-            {"question": "题目C来自URL1", "url": "http://url1.com"},
+            {"question": "题目A来自URL1", "sources": [{"url": "http://url1.com"}]},
+            {"question": "题目B来自URL2", "sources": [{"url": "http://url2.com"}]},
+            {"question": "题目C来自URL1", "sources": [{"url": "http://url1.com"}]},
         ], ensure_ascii=False)
         sources = json.dumps([
             {"url": "http://url1.com", "company": "公司1", "round": "一面"},
@@ -380,7 +384,7 @@ class TestThoroughCleanup:
 
         # original_question_sources 中属于 URL1 的应被移除
         assert len(remaining_oqs_sources) == 1
-        assert remaining_oqs_sources[0]['url'] == "http://url2.com"
+        assert remaining_oqs_sources[0]['sources'][0]['url'] == "http://url2.com"
 
         # frequency 应更新为 1
         assert qb['frequency'] == 1
