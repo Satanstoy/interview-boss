@@ -579,6 +579,139 @@ class TestExecuteToolDrawQuestions:
         assert "unknown_tool" in parsed["error"]
 
 
+class TestExecuteToolSelectQuestion:
+    """Tests for select_question — agent candidate_index contract (Task 3)."""
+
+    @staticmethod
+    def _make_candidates(count: int = 3) -> list[dict]:
+        return [
+            {
+                "id": i + 1,
+                "question": f"Question {i + 1}",
+                "cat1": "A",
+                "cat2": "A1",
+                "tags": "tag",
+            }
+            for i in range(count)
+        ]
+
+    async def test_select_question_index_0_honors_first_candidate(self, sample_state):
+        """Agent explicit index 0 should bind candidates[0] with agent_explicit_selection reason."""
+        from app.agents.chat.tools import execute_tool
+
+        candidates = self._make_candidates(3)
+        sample_state["candidate_questions"] = candidates
+        sample_state["retrieved_questions"] = candidates
+        sample_state["intent"] = "practice_request"
+
+        tool_call = {
+            "function": {
+                "name": "select_question",
+                "arguments": json.dumps({"candidate_index": 0}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+        parsed = json.loads(result)
+
+        assert parsed["ok"] is True
+        assert parsed["selected_question"]["id"] == 1
+        assert parsed["question_plan"]["question_id"] == 1
+        assert sample_state["selected_question"]["id"] == 1
+        assert (
+            sample_state["next_question_plan"]["selection_reason"]
+            == "agent_explicit_selection"
+        )
+
+    async def test_select_question_index_2_binds_candidates_2(self, sample_state):
+        """Agent explicit index 2 with 3 candidates MUST bind candidates[2]."""
+        from app.agents.chat.tools import execute_tool
+
+        candidates = self._make_candidates(3)
+        sample_state["candidate_questions"] = candidates
+        sample_state["retrieved_questions"] = candidates
+        sample_state["intent"] = "practice_request"
+
+        tool_call = {
+            "function": {
+                "name": "select_question",
+                "arguments": json.dumps({"candidate_index": 2}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+        parsed = json.loads(result)
+
+        assert parsed["ok"] is True
+        assert parsed["selected_question"]["id"] == 3
+        assert parsed["question_plan"]["question_id"] == 3
+        assert sample_state["selected_question"]["id"] == 3
+        assert sample_state["next_question_plan"]["question_id"] == 3
+        assert (
+            sample_state["next_question_plan"]["selection_reason"]
+            == "agent_explicit_selection"
+        )
+
+    async def test_select_question_negative_term_filtered(self, sample_state):
+        """Selecting a candidate matching negative terms returns NEGATIVE_TERM_FILTERED."""
+        from app.agents.chat.tools import execute_tool
+
+        candidates = [
+            {
+                "id": 1,
+                "question": "RAG 检索怎么设计？",
+                "cat1": "B",
+                "cat2": "RAG",
+                "tags": "检索,重排",
+            },
+            {
+                "id": 2,
+                "question": "HR 行为面试 STAR 法则",
+                "cat1": "F",
+                "cat2": "HR",
+                "tags": "行为面试,STAR",
+            },
+        ]
+        sample_state["candidate_questions"] = candidates
+        sample_state["retrieved_questions"] = candidates
+        sample_state["intent"] = "practice_request"
+        sample_state["search_negative_terms"] = ["HR"]
+
+        tool_call = {
+            "function": {
+                "name": "select_question",
+                "arguments": json.dumps({"candidate_index": 1}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+        parsed = json.loads(result)
+
+        assert parsed["ok"] is False
+        assert parsed["error"]["error_code"] == "NEGATIVE_TERM_FILTERED"
+
+    async def test_select_question_index_out_of_range(self, sample_state):
+        """Out-of-range index returns INDEX_OUT_OF_RANGE error envelope."""
+        from app.agents.chat.tools import execute_tool
+
+        candidates = self._make_candidates(3)
+        sample_state["candidate_questions"] = candidates
+        sample_state["retrieved_questions"] = candidates
+
+        tool_call = {
+            "function": {
+                "name": "select_question",
+                "arguments": json.dumps({"candidate_index": 5}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+        parsed = json.loads(result)
+
+        assert parsed["ok"] is False
+        assert parsed["error"]["error_code"] == "INDEX_OUT_OF_RANGE"
+
+
 class TestToolProgressMessage:
     def test_progress_messages_are_user_friendly_chinese(self):
         from app.agents.chat.tools import tool_progress_message

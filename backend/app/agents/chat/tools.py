@@ -304,11 +304,8 @@ def _execute_select_question(args: dict, state: ChatState) -> str:
         state.get("candidate_questions") or state.get("retrieved_questions") or []
     )
     index = args.get("candidate_index", 0)
-    if isinstance(index, int) and 0 <= index < len(candidates):
-        selected = candidates[index]
-    elif candidates:
-        selected = candidates[0]
-    else:
+
+    if not candidates:
         return json.dumps(
             {
                 "ok": False,
@@ -323,5 +320,28 @@ def _execute_select_question(args: dict, state: ChatState) -> str:
             ensure_ascii=False,
         )
 
-    envelope = select_question_tool({"candidates": candidates}, state)
+    if not isinstance(index, int) or index < 0 or index >= len(candidates):
+        return json.dumps(
+            {
+                "ok": False,
+                "tool": "select_question",
+                "items": [],
+                "metadata": {},
+                "error": {
+                    "error_code": "INDEX_OUT_OF_RANGE",
+                    "message": (
+                        f"candidate_index {index} is out of range"
+                        f" (0-{len(candidates) - 1})"
+                    ),
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    selected = candidates[index]
+    envelope = select_question_tool(
+        {"candidates": candidates},
+        state,
+        force_candidate=selected,
+    )
     return json.dumps(envelope, ensure_ascii=False)

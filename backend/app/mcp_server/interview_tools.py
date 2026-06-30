@@ -315,14 +315,38 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
     )
 
 
-def select_question_tool(args: dict, state: ChatState) -> dict:
-    """Select and bind one question as the next-question plan."""
+def select_question_tool(
+    args: dict,
+    state: ChatState,
+    *,
+    force_candidate: dict | None = None,
+) -> dict:
+    """Select and bind one question as the next-question plan.
+
+    When *force_candidate* is provided (agent explicit selection via ``tools.py``),
+    it is forwarded to ``_maybe_create_question_plan`` which uses it directly
+    instead of running the local ``viable[0]`` / ``algorithm_candidate_match``
+    heuristic.
+    """
     candidates = args.get("candidates")
     if isinstance(candidates, list):
         state["candidate_questions"] = candidates
         state["retrieved_questions"] = candidates
 
-    plan = _maybe_create_question_plan(state)
+    plan = _maybe_create_question_plan(state, force_candidate=force_candidate)
+
+    # Surface negative-term filtering as an explicit error envelope.
+    reason = state.get("question_plan_reason")
+    if force_candidate is not None and not plan and reason == "negative_term_filtered":
+        return build_error_envelope(
+            tool="select_question",
+            error_code="NEGATIVE_TERM_FILTERED",
+            message="Selected candidate contains negative-term filter match",
+            total_ms=0,
+            debug_reason="negative_term_filtered",
+            empty_reason="negative_term_filtered",
+        )
+
     selected = state.get("selected_question")
     if not plan or not selected:
         return build_error_envelope(
@@ -339,11 +363,16 @@ def select_question_tool(args: dict, state: ChatState) -> dict:
         source="draw" if state.get("question_source") == "draw" else "search",
         reason=state.get("question_source_reason") or "question_plan_bound",
     )
+    debug_reason = (
+        "agent_explicit_selection"
+        if force_candidate is not None
+        else "question_plan_bound"
+    )
     envelope = build_success_envelope(
         tool="select_question",
         items=[item],
         total_ms=0,
-        debug_reason="question_plan_bound",
+        debug_reason=debug_reason,
     )
     envelope["selected_question"] = item
     envelope["question_plan"] = plan

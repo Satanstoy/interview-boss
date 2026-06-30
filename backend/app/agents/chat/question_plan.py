@@ -26,7 +26,7 @@ def _tokenize_for_overlap(text: str) -> set[str]:
 
 def _normalize_question_text(text: str) -> str:
     return re.sub(
-        r"[\s`'\"""''。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or ""
+        r"[\s`'\"" "''。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or ""
     ).lower()
 
 
@@ -43,7 +43,9 @@ def _should_create_question_plan(state: ChatState) -> bool:
     return bool(re.search(r"(出题|来一道|换题|随机|手撕|代码题)", user_message))
 
 
-def _candidate_contains_negative_term(candidate: dict, negative_terms: list[str]) -> bool:
+def _candidate_contains_negative_term(
+    candidate: dict, negative_terms: list[str]
+) -> bool:
     if not negative_terms:
         return False
     text = " ".join(
@@ -58,7 +60,9 @@ def _is_algorithm_candidate(candidate: dict) -> bool:
         str(candidate.get(field) or "")
         for field in ("question", "cat1", "cat2", "tags")
     )
-    return bool(re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru)", text, re.I))
+    return bool(
+        re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru)", text, re.I)
+    )
 
 
 def _allowed_focus_from_question(question: dict) -> list[str]:
@@ -104,13 +108,36 @@ def _select_question_for_plan(
     return viable[0], "top_ranked_candidate"
 
 
-def _maybe_create_question_plan(state: ChatState) -> dict | None:
-    """Create next_question_plan from current candidates when the turn needs a new question."""
+def _maybe_create_question_plan(
+    state: ChatState,
+    *,
+    force_candidate: dict | None = None,
+) -> dict | None:
+    """Create next_question_plan from current candidates when the turn needs a new question.
+
+    When *force_candidate* is provided (agent explicit ``select_question`` call),
+    use it directly instead of running the local heuristic.  Returns ``None`` and
+    sets ``state["question_plan_reason"]`` to ``"negative_term_filtered"`` when the
+    forced candidate matches a ``search_negative_terms`` entry.
+    """
     if not _should_create_question_plan(state):
         return None
 
-    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
-    selected, selection_reason = _select_question_for_plan(state, candidates)
+    negative_terms = state.get("search_negative_terms", []) or []
+
+    if force_candidate is not None:
+        # Agent explicitly selected this candidate — honour it unless filtered.
+        if _candidate_contains_negative_term(force_candidate, negative_terms):
+            state["question_plan_reason"] = "negative_term_filtered"
+            return None
+        selected = force_candidate
+        selection_reason = "agent_explicit_selection"
+    else:
+        candidates = (
+            state.get("candidate_questions") or state.get("retrieved_questions") or []
+        )
+        selected, selection_reason = _select_question_for_plan(state, candidates)
+
     if not selected:
         state["question_plan_reason"] = selection_reason
         return None
@@ -119,11 +146,13 @@ def _maybe_create_question_plan(state: ChatState) -> dict | None:
         "must_ask": True,
         "question_id": selected.get("id"),
         "question_text": str(selected.get("question") or ""),
-        "basis_type": "drawn_question" if state.get("question_source") == "draw" else "interview_question",
+        "basis_type": "drawn_question"
+        if state.get("question_source") == "draw"
+        else "interview_question",
         "source": state.get("question_source") or "search",
         "strategy": state.get("intent") or "new_question",
         "allowed_focus": _allowed_focus_from_question(selected),
-        "forbidden_focus": state.get("search_negative_terms", []) or [],
+        "forbidden_focus": negative_terms,
         "selection_reason": selection_reason,
     }
     state["selected_question"] = selected
