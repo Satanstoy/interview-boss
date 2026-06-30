@@ -117,6 +117,13 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
         if req.question_id:
             def _record():
                 with get_db_connection() as conn:
+                    from_clause, where_clause, params = _build_bank_where_clause(user)
+                    visible = conn.execute(
+                        f"SELECT qb.id {from_clause} {where_clause} AND qb.id = ?",
+                        params + [req.question_id],
+                    ).fetchone()
+                    if not visible:
+                        raise PermissionError("question_not_visible")
                     conn.execute(
                         "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score) VALUES (?, ?, ?, ?, ?)",
                         (user['id'], req.question_id, req.user_answer, json.dumps(result, ensure_ascii=False), result["overall_score"])
@@ -124,6 +131,8 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
                     conn.commit()
             try:
                 await run_db(_record)
+            except PermissionError:
+                raise HTTPException(status_code=404, detail="题目不存在或无权访问")
             except Exception as e:
                 logger.warning(f"记录练习历史失败（不影响评估结果）: {e}")
 
@@ -141,6 +150,8 @@ async def evaluate_answer(req: EvaluateAnswerRequest, user: dict = Depends(get_c
     except openai.APITimeoutError:
         logger.error("评估失败: LLM 调用超时")
         raise HTTPException(status_code=500, detail="LLM 服务响应超时，请在系统配置中增大超时时间或稍后重试。")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("答案评估失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")

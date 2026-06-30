@@ -30,11 +30,11 @@ def _build_analytics_bank_filter(user: dict):
         # fallback: 旧的 job_position 列
         join_clause = ""
         if mode == 'personal':
-            return "", "WHERE qb.owner_id = ? AND qb.job_position = ?", [uid, pos_name]
+            return "", "WHERE qb.owner_id = ? AND qb.deleted_at IS NULL AND qb.job_position = ?", [uid, pos_name]
         elif mode == 'mixed':
-            return "", "WHERE ((qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?) AND qb.job_position = ?", [uid, pos_name]
+            return "", "WHERE ((qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?) AND qb.deleted_at IS NULL AND qb.job_position = ?", [uid, pos_name]
         else:
-            return "", "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.job_position = ?", [pos_name]
+            return "", "WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL AND qb.job_position = ?", [pos_name]
 
     if mode == 'personal':
         return join_clause, "WHERE qb.owner_id = ? AND qb.deleted_at IS NULL", join_params + [uid]

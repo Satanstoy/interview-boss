@@ -38,7 +38,6 @@ class TestBug001MixedModeSQL:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="BUG-001: 修复后此测试应通过")
     async def test_bug001_mixed_mode_sql_should_be_valid(self):
         """修复后：混合模式 SQL 应该括号匹配"""
         with patch('app.db.connection.get_user_job_position') as mock_pos:
@@ -61,7 +60,7 @@ class TestBug001MixedModeSQL:
 
             # 验证 SQL 结构正确
             assert '((qb.owner_id IS NULL AND qb.status' in where_clause
-            assert 'OR qb.owner_id = ?)' in where_clause
+            assert 'OR (qb.owner_id = ? AND qb.duplicate_of IS NULL))' in where_clause
             assert 'AND qb.deleted_at IS NULL' in where_clause
 
     @pytest.mark.asyncio
@@ -133,7 +132,6 @@ class TestBug002AnalyticsFilter:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="BUG-002: 修复后此测试应通过")
     async def test_bug002_personal_mode_should_have_deleted_at(self):
         """修复后：个人模式应有 deleted_at IS NULL 过滤"""
         with patch('app.db.connection.get_user_job_position') as mock_pos:
@@ -175,7 +173,6 @@ class TestBug002AnalyticsFilter:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="BUG-002: 修复后此测试应通过")
     async def test_bug002_mixed_mode_should_have_deleted_at(self):
         """修复后：混合模式应有 deleted_at IS NULL 过滤"""
         with patch('app.db.connection.get_user_job_position') as mock_pos:
@@ -219,7 +216,6 @@ class TestBug002AnalyticsFilter:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="BUG-002: 修复后此测试应通过")
     async def test_bug002_public_mode_should_have_deleted_at(self):
         """修复后：公共模式应有 deleted_at IS NULL 过滤"""
         with patch('app.db.connection.get_user_job_position') as mock_pos:
@@ -264,7 +260,7 @@ class TestFallbackPaths:
 
             # 验证 SQL 结构
             assert '((qb.owner_id IS NULL' in where_clause
-            assert 'OR qb.owner_id = ?)' in where_clause
+            assert 'OR (qb.owner_id = ? AND qb.duplicate_of IS NULL))' in where_clause
             assert 'qb.deleted_at IS NULL' in where_clause
 
 

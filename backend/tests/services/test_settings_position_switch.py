@@ -162,22 +162,20 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
+            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsInterview.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
 
-        # 找到 onSwitchPosition 函数
-        start = content.find('const onSwitchPosition')
+        # 找到当前岗位切换函数
+        start = content.find('const handleSwitchPosition')
         assert start != -1
-        end = content.find('\nconst addPosition', start)
+        end = content.find('\nconst handleAddPosition', start)
         func_body = content[start:end]
 
-        # onSwitchPosition 中不应调用 switchPosition 或 switchMyPosition
-        assert 'await switchPosition(' not in func_body
-        assert 'await switchMyPosition(' not in func_body
-        # 不应有 toast.success（保存时才提示）
-        assert 'toast.success' not in func_body
+        # 当前独立设置页应直接调用个人岗位切换接口并通知父级刷新
+        assert 'await switchMyPosition(' in func_body
+        assert "emit('profile-updated')" in func_body
 
     def test_save_profile_calls_switch_api(self):
         """
@@ -185,19 +183,17 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
+            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsInterview.vue'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
 
-        start = content.find('const saveProfile')
+        start = content.find('const handleSwitchPosition')
         assert start != -1
-        end = content.find('\nconst addSeason', start)
+        end = content.find('\nconst handleAddPosition', start)
         func_body = content[start:end]
 
-        # saveProfile 中应在 positionOnlyChanged 时调用 switchPosition/switchMyPosition
-        assert 'if (positionOnlyChanged.value)' in func_body
-        assert 'await switchPosition(' in func_body
+        # 岗位切换应调用 switchMyPosition
         assert 'await switchMyPosition(' in func_body
 
     def test_save_profile_invalidates_cache(self):
@@ -206,17 +202,17 @@ class TestFrontendCodeContract:
         """
         import os
         panel_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/components/business/SettingsPage.vue'
+            os.path.dirname(__file__), '../../frontend/src/composables/useMasterBankData.js'
         )
         with open(panel_file, 'r') as f:
             content = f.read()
 
-        start = content.find('const saveProfile')
+        start = content.find('const fetchTableData')
         assert start != -1
-        end = content.find('\nconst addSeason', start)
+        end = content.find('\n  const loadMoreMasterBank', start)
         func_body = content[start:end]
 
-        # saveProfile 应在 updateProfile 后调用 invalidateCache
+        # 数据刷新入口应先清除缓存
         assert 'invalidateCache(' in func_body
 
     def test_on_settings_close_no_load_all_data(self):
@@ -225,16 +221,12 @@ class TestFrontendCodeContract:
         """
         import os
         app_file = os.path.join(
-            os.path.dirname(__file__), '../../frontend/src/App.vue'
+            os.path.dirname(__file__), '../../frontend/src/views/SettingsView.vue'
         )
         with open(app_file, 'r') as f:
             content = f.read()
 
-        # 找到 onSettingsClose 定义
-        start = content.find('const onSettingsClose')
-        assert start != -1
-        end = content.find('\n', start)
-        line = content[start:end]
-
-        # onSettingsClose 不应调用 loadAllData
-        assert 'loadAllData' not in line
+        # 设置页通过 profile-updated 触发父级刷新，不在关闭动作里调用 loadAllData
+        assert '@profile-updated="handleProfileUpdated"' in content
+        assert 'const handleProfileUpdated' in content
+        assert 'onSettingsClose' not in content

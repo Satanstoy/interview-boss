@@ -136,7 +136,10 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
     def _delete():
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            row = cursor.execute("SELECT id, question, sources, owner_id FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            row = cursor.execute(
+                "SELECT id, question, sources, owner_id FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+                (question_id,),
+            ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该题目，可能已被删除")
 
@@ -147,46 +150,16 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
             if row['owner_id'] is not None and row['owner_id'] != user['id'] and not is_admin:
                 raise HTTPException(status_code=403, detail="无权删除他人的个人题目")
 
-            # 联动清理 questions_detail 中对应的记录
-            question_text = row['question']
-            if question_text:
-                cursor.execute("DELETE FROM questions_detail WHERE question = ?", (question_text,))
-
-            # BUG-020: 清理其他 QB 记录中对该题目文本的 stale original_questions 引用
-            if question_text:
-                other_qb = cursor.execute(
-                    "SELECT id, original_questions, original_question_sources FROM question_bank WHERE id != ? AND original_questions LIKE ?",
-                    (question_id, f'%{question_text[:80]}%')
-                ).fetchall()
-                for qb in other_qb:
-                    try:
-                        oq = json.loads(qb['original_questions']) if qb['original_questions'] else []
-                        oqs = json.loads(qb['original_question_sources']) if qb['original_question_sources'] else []
-                    except Exception:
-                        continue
-                    if question_text in oq:
-                        oq = [q for q in oq if q != question_text]
-                        oqs = [item for item in oqs if item.get('question') != question_text]
-                        cursor.execute(
-                            "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (json.dumps(oq, ensure_ascii=False), json.dumps(oqs, ensure_ascii=False), qb['id'])
-                        )
-                        # Dual-write: also remove from normalized tables
-                        try:
-                            delete_original_item(cursor, qb['id'], question_text)
-                        except Exception:
-                            pass
-
-            # Bug #14: 级联清理 user_question_view 和 question_position
-            cursor.execute("DELETE FROM user_question_view WHERE question_bank_id = ?", (question_id,))
-            cursor.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
-            cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
-            cursor.execute("DELETE FROM user_practice_history WHERE question_bank_id = ?", (question_id,))
+            cursor.execute(
+                "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND deleted_at IS NULL",
+                (question_id,),
+            )
             conn.commit()
 
     try:
         await run_db(_delete)
-        return {"status": "success", "message": "题目删除成功（已联动清理 questions_detail 和练习历史）"}
+        return {"status": "success", "message": "题目已移入回收站"}
     except HTTPException:
         raise
     except Exception as e:
@@ -204,7 +177,8 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, question, owner_id FROM question_bank WHERE id IN ({placeholders})", req.ids
+                f"SELECT id, question, owner_id FROM question_bank WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                req.ids,
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
@@ -217,44 +191,13 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
                 if r['owner_id'] is not None and r['owner_id'] != user['id'] and not is_admin:
                     raise HTTPException(status_code=403, detail=f"无权删除他人的个人题目 (id={r['id']})")
 
-            question_texts = [r["question"] for r in rows if r["question"]]
-            if question_texts:
-                qph = ",".join("?" * len(question_texts))
-                cursor.execute(f"DELETE FROM questions_detail WHERE question IN ({qph})", question_texts)
-
-            # 清理其他 QB 记录中对被删除题目的 stale oqs/oqs_sources 引用
             found_ids = [r["id"] for r in rows]
-            if question_texts:
-                for q_text in question_texts:
-                    others = cursor.execute(
-                        "SELECT id, original_questions, original_question_sources FROM question_bank "
-                        "WHERE id NOT IN ({}) AND original_questions LIKE ?".format(",".join("?" * len(found_ids))),
-                        [*found_ids, f'%{q_text}%']
-                    ).fetchall()
-                    for qb in others:
-                        try:
-                            oq = json.loads(qb['original_questions']) if qb['original_questions'] else []
-                            oqs_src = json.loads(qb['original_question_sources']) if qb['original_question_sources'] else []
-                        except Exception:
-                            continue
-                        if q_text in oq:
-                            oq = [q for q in oq if q != q_text]
-                            oqs_src = [item for item in oqs_src if item.get('question') != q_text]
-                            cursor.execute(
-                                "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (json.dumps(oq, ensure_ascii=False), json.dumps(oqs_src, ensure_ascii=False), qb['id'])
-                            )
-                            # Dual-write: also remove from normalized tables
-                            try:
-                                delete_original_item(cursor, qb['id'], q_text)
-                            except Exception:
-                                pass
             ph2 = ",".join("?" * len(found_ids))
-            # Bug #14: 级联清理 user_question_view 和 question_position
-            cursor.execute(f"DELETE FROM user_question_view WHERE question_bank_id IN ({ph2})", found_ids)
-            cursor.execute(f"DELETE FROM question_position WHERE question_id IN ({ph2})", found_ids)
-            cursor.execute(f"DELETE FROM question_bank WHERE id IN ({ph2})", found_ids)
-            cursor.execute(f"DELETE FROM user_practice_history WHERE question_bank_id IN ({ph2})", found_ids)
+            cursor.execute(
+                f"UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                f"WHERE id IN ({ph2}) AND deleted_at IS NULL",
+                found_ids,
+            )
             conn.commit()
             return len(found_ids)
 
@@ -266,6 +209,89 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
     except Exception as e:
         logger.exception("批量删除失败")
         raise HTTPException(status_code=500, detail="批量删除失败，请查看服务端日志")
+
+
+@router.get("/api/master-bank/trash")
+async def get_master_bank_trash(user: dict = Depends(get_current_user)):
+    """查询题库回收站。管理员可看公共题，普通用户只看自己的个人题。"""
+
+    def _query():
+        with get_db_connection() as conn:
+            if user.get("is_admin", 0):
+                rows = conn.execute(
+                    "SELECT id, question, cat1, cat2, tags, difficulty, owner_id, job_position, deleted_at "
+                    "FROM question_bank WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, question, cat1, cat2, tags, difficulty, owner_id, job_position, deleted_at "
+                    "FROM question_bank WHERE owner_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+                    (user["id"],),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    return {"items": await run_db(_query)}
+
+
+@router.post("/api/master-bank/restore/{question_id}")
+async def restore_master_question(question_id: int, user: dict = Depends(get_current_user)):
+    """恢复回收站中的题目。"""
+
+    def _restore():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT id, owner_id FROM question_bank WHERE id = ? AND deleted_at IS NOT NULL",
+                (question_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="未找到回收站中的题目")
+            is_admin = user.get("is_admin", 0)
+            if row["owner_id"] is None and not is_admin:
+                raise HTTPException(status_code=403, detail="无权恢复公共题目")
+            if row["owner_id"] is not None and row["owner_id"] != user["id"] and not is_admin:
+                raise HTTPException(status_code=403, detail="无权恢复他人的个人题目")
+            conn.execute(
+                "UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (question_id,),
+            )
+            conn.commit()
+
+    await run_db(_restore)
+    return {"status": "success", "message": "题目已恢复"}
+
+
+@router.post("/api/master-bank/batch-restore")
+async def batch_restore_master_bank(req: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+    """批量恢复题库题目。"""
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+
+    def _restore():
+        with get_db_connection() as conn:
+            placeholders = ",".join("?" * len(req.ids))
+            rows = conn.execute(
+                f"SELECT id, owner_id FROM question_bank WHERE id IN ({placeholders}) AND deleted_at IS NOT NULL",
+                req.ids,
+            ).fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到回收站中的题目")
+            is_admin = user.get("is_admin", 0)
+            for row in rows:
+                if row["owner_id"] is None and not is_admin:
+                    raise HTTPException(status_code=403, detail=f"无权恢复公共题目 (id={row['id']})")
+                if row["owner_id"] is not None and row["owner_id"] != user["id"] and not is_admin:
+                    raise HTTPException(status_code=403, detail=f"无权恢复他人的个人题目 (id={row['id']})")
+            found_ids = [row["id"] for row in rows]
+            ph2 = ",".join("?" * len(found_ids))
+            conn.execute(
+                f"UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN ({ph2})",
+                found_ids,
+            )
+            conn.commit()
+            return len(found_ids)
+
+    restored = await run_db(_restore)
+    return {"status": "success", "restored": restored}
 
 
 @router.post("/api/master-bank/upload")

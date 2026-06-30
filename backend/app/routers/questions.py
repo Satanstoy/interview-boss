@@ -34,6 +34,8 @@ def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
     from_clause = f"FROM question_bank {table_alias} JOIN question_position qp ON {prefix}id = qp.question_id AND qp.position_id = ?"
     from_params = [pos_id] if pos_id else []
 
+    deleted_filter = f"{prefix}deleted_at IS NULL"
+
     if not pos_id:
         # fallback: 如果没有 position_id，用旧的 job_position 列
         from_clause = f"FROM question_bank {table_alias}"
@@ -41,34 +43,34 @@ def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
         if mode == "personal":
             return (
                 from_clause,
-                f"WHERE {prefix}owner_id = ? AND {prefix}job_position = ?",
+                f"WHERE {prefix}owner_id = ? AND {deleted_filter} AND {prefix}job_position = ?",
                 [uid, pos_fallback],
             )
         elif mode == "mixed":
             return (
                 from_clause,
-                f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {prefix}job_position = ?",
+                f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {deleted_filter} AND {prefix}job_position = ?",
                 [uid, pos_fallback],
             )
         else:
             return (
                 from_clause,
-                f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {prefix}job_position = ?",
+                f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {deleted_filter} AND {prefix}job_position = ?",
                 [pos_fallback],
             )
 
     if mode == "personal":
-        return from_clause, f"WHERE {prefix}owner_id = ?", from_params + [uid]
+        return from_clause, f"WHERE {prefix}owner_id = ? AND {deleted_filter}", from_params + [uid]
     elif mode == "mixed":
         return (
             from_clause,
-            f"WHERE ({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)",
+            f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {deleted_filter}",
             from_params + [uid],
         )
     else:  # 'public'
         return (
             from_clause,
-            f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved'",
+            f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {deleted_filter}",
             from_params,
         )
 

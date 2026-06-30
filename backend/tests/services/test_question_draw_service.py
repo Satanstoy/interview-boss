@@ -139,6 +139,72 @@ def test_draw_questions_returns_empty_when_no_candidates(test_db, monkeypatch):
     assert result == []
 
 
+def test_algorithm_draw_falls_back_to_default_position_when_current_position_empty(
+    test_db, monkeypatch
+):
+    """Algorithm coding draw should not go empty just because current position has no algo bank."""
+    from app.services import question_draw_service
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO job_positions (id, name) VALUES (?, ?)",
+        (201, "默认算法岗位"),
+    )
+    test_db.execute(
+        "INSERT OR IGNORE INTO job_positions (id, name) VALUES (?, ?)",
+        (202, "空的新岗位"),
+    )
+    test_db.execute(
+        "INSERT OR IGNORE INTO users "
+        "(id, username, password_hash, bank_mode, current_position_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (77, "algo-fallback-user", "hash", "public", 202),
+    )
+    test_db.execute(
+        "INSERT INTO question_bank "
+        "(id, question, cat1, cat2, tags, difficulty, frequency, status, job_position) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            7701,
+            "算法题：手写 LRU Cache",
+            "E.算法与数据结构",
+            "E1.数据结构",
+            "算法手撕,lru",
+            "L2-中等",
+            9,
+            "approved",
+            "默认算法岗位",
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO question_position (question_id, position_id) VALUES (?, ?)",
+        (7701, 201),
+    )
+    test_db.commit()
+
+    monkeypatch.setattr(
+        question_draw_service,
+        "get_dynamic_frequency_sql",
+        lambda bank_mode, user_id: "qb.frequency",
+    )
+    monkeypatch.setattr(
+        question_draw_service,
+        "get_sources",
+        lambda conn, qid: [],
+    )
+    monkeypatch.setattr(question_draw_service.random, "random", lambda: 0)
+
+    result = question_draw_service.draw_questions(
+        user={"id": 77, "bank_mode": "public"},
+        count=1,
+        question_type="algorithm_coding",
+        difficulty="medium",
+    )
+
+    assert [q["id"] for q in result] == [7701]
+    assert result[0]["_fallback_used"] is True
+    assert result[0]["_fallback_reason"] == "position_filter_empty"
+
+
 def test_weighted_sampling_prefers_high_frequency(monkeypatch):
     from app.services import question_draw_service
 

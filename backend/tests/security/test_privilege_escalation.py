@@ -97,8 +97,10 @@ class TestBug007BatchGenerateAnswersOwnership:
         assert func_match
         func_content = func_match.group(0)
 
-        # 验证使用了 bank_mode 权限检查
-        has_visibility = 'bank_mode' in func_content and 'owner_id' in func_content
+        # 验证使用统一题库可见性过滤（内部覆盖 bank_mode / owner_id）
+        has_visibility = '_build_bank_where_clause' in func_content or (
+            'bank_mode' in func_content and 'owner_id' in func_content
+        )
         assert has_visibility, "batch_generate_answers 应使用 bank_mode 和 owner_id 进行权限检查"
 
 
@@ -218,7 +220,7 @@ class TestIntegration:
 
         # 找到 generate-answer 路由
         route_match = re.search(
-            r'@router\.post\("/api/master-bank/generate-answer/\{question_id\}"\).*?(?=\n@router|\Z)',
+            r'@router\.post\("/generate-answer/\{question_id\}"\).*?(?=\n@router|\Z)',
             content,
             re.DOTALL
         )
@@ -234,7 +236,7 @@ class TestIntegration:
             content = f.read()
 
         route_match = re.search(
-            r'@router\.post\("/api/master-bank/batch-generate-answers"\).*?(?=\n@router|\Z)',
+            r'@router\.post\("/batch-generate-answers"\).*?(?=\n@router|\Z)',
             content,
             re.DOTALL
         )

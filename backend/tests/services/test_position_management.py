@@ -38,8 +38,8 @@ class TestPositionManagement:
 
         mock_conn.execute.side_effect = mock_execute
 
-        with patch('app.routers.profile.get_db_connection', return_value=mock_conn):
-            with patch('app.routers.profile.run_db', side_effect=lambda f: f()):
+        with patch('app.routers.profile_pkg.position.get_db_connection', return_value=mock_conn):
+            with patch('app.routers.profile_pkg.position.run_db', side_effect=lambda f: f()):
                 # Act
                 result = await switch_position(req, admin=mock_admin)
 

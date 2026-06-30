@@ -71,8 +71,8 @@ class TestBugTaxonomyConfirm:
         # Mock 依赖
         mock_user = {"id": 1, "is_admin": True}
 
-        with patch('app.routers.profile.get_current_user', return_value=mock_user):
-            with patch('app.routers.profile.run_db') as mock_run_db:
+        with patch('app.routers.profile_pkg.taxonomy.get_current_user', return_value=mock_user):
+            with patch('app.routers.profile_pkg.taxonomy.run_db') as mock_run_db:
                 # Mock get_user_job_position
                 mock_run_db.side_effect = [
                     (None, "测试岗位"),  # get_user_job_position 返回值

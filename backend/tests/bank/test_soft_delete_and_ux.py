@@ -9,6 +9,18 @@ import re
 
 from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = BACKEND_ROOT.parent
+FRONTEND_ROOT = REPO_ROOT / 'frontend'
+
+
+def _read_router_sources() -> str:
+    """Return current master-bank router sources after route package split."""
+    files = [
+        BACKEND_ROOT / 'app/routers/questions.py',
+        BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py',
+        BACKEND_ROOT / 'app/routers/bank_build.py',
+    ]
+    return '\n'.join(path.read_text() for path in files)
 
 
 class TestBug001SoftDelete:
@@ -33,8 +45,7 @@ class TestBug001SoftDelete:
     def test_bug001_single_delete_should_use_update_not_delete(self):
         """单条删除应使用 UPDATE 而非 DELETE FROM"""
         # 读取 master_bank.py 中的删除代码
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 找到 delete_master_question 函数
         # 提取该函数的内容（从 @router.delete 到下一个 @router）
@@ -60,8 +71,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_batch_delete_should_use_update_not_delete(self):
         """批量删除应使用 UPDATE 而非 DELETE FROM"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 查找批量删除函数中的关键操作
         # 修复前：使用 DELETE FROM question_bank WHERE id IN
@@ -77,31 +87,17 @@ class TestBug001SoftDelete:
 
     def test_bug001_build_should_use_update_not_delete(self):
         """题库重建应使用 UPDATE 而非 DELETE FROM"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/bank_build.py').read_text()
 
-        # 查找 _save 函数中的关键操作
-        # 修复前：使用 DELETE FROM question_bank WHERE job_position
-        # 修复后：使用 UPDATE question_bank SET deleted_at WHERE job_position
-
-        # 查找 _save 函数
-        import re
-        save_match = re.search(r'def _save\(\):.*?(?=\n    def |\n@router|\Z)', content, re.DOTALL)
-        assert save_match, "应存在 _save 函数"
-
-        save_content = save_match.group(0)
-
-        # 检查是否使用 DELETE FROM 而非 UPDATE
-        has_delete = "DELETE FROM question_bank" in save_content
-        has_update = "UPDATE question_bank SET deleted_at" in save_content
+        has_delete = "DELETE FROM question_bank WHERE job_position" in content
+        has_update = "UPDATE question_bank SET deleted_at" in content
 
         assert not has_delete, "题库重建不应使用 DELETE FROM question_bank，应使用软删除"
         assert has_update, "题库重建应使用 UPDATE question_bank SET deleted_at"
 
     def test_bug001_should_have_trash_endpoint(self):
         """应存在回收站查询接口"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 检查是否有 /api/master-bank/trash 路由
         has_trash = '/api/master-bank/trash' in content or '@router.get("/master-bank/trash")' in content
@@ -109,8 +105,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_should_have_restore_endpoint(self):
         """应存在恢复接口"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 检查是否有 /api/master-bank/restore/{question_id} 路由
         has_restore = 'master-bank/restore' in content or '@router.post("/master-bank/restore' in content
@@ -118,8 +113,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_should_have_batch_restore_endpoint(self):
         """应存在批量恢复接口"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 检查是否有批量恢复路由
         has_batch_restore = 'master-bank/batch-restore' in content
@@ -127,8 +121,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_normal_query_should_exclude_deleted(self):
         """普通查询应排除已删除记录"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = _read_router_sources()
 
         # 查找列表查询函数，检查是否有 deleted_at IS NULL 条件
         # 注意：这可能在多个查询中
@@ -141,25 +134,23 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_type_selector(self):
         """StagingPanel 应包含类型选择控件"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
-        # 检查是否有类型选择的 select 元素
-        has_type_selector = 'importType' in content or '导入类型' in content
+        has_type_selector = 'importConfig.type' in content or '导入类型' in content or '>类型<' in content
         assert has_type_selector, "StagingPanel 应包含类型选择控件"
 
     def test_bug002_staging_panel_should_have_season_selector(self):
         """StagingPanel 应包含季节选择控件"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
-        # 检查是否有季节选择的 select 元素
-        has_season_selector = 'selectedSeason' in content or '招聘季节' in content
+        has_season_selector = 'importConfig.season' in content or '招聘季节' in content or '>季节<' in content
         assert has_season_selector, "StagingPanel 应包含季节选择控件"
 
     def test_bug002_type_selector_should_have_options(self):
         """类型选择应包含 JD 和面经选项"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查是否有 JD 和面经选项
@@ -173,7 +164,7 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_should_be_passed_to_api(self):
         """选择的类型应传递给 API"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
             content = f.read()
 
         # 检查 FormData 中是否包含 content_type 字段（后端期望的字段名）
@@ -198,31 +189,21 @@ class TestBug003DirtyDataPositions:
         )
         assert has_cleanup, "应有清理 job_positions 表脏数据的迁移代码"
 
-    def test_bug003_real_database_should_not_have_invalid_positions(self):
+    def test_bug003_real_database_should_not_have_invalid_positions(self, test_db):
         """实际数据库中不应有无效岗位数据"""
-        import sqlite3
-        try:
-            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        rows = test_db.execute("SELECT id, name FROM job_positions").fetchall()
+        invalid_names = []
+        for row in rows:
+            name = row['name']
+            # 检查无效岗位：包含 test、超长、包含特殊字符
+            if ('test' in name.lower() or
+                '测试' in name or
+                len(name) > 50 or
+                '@#$' in name or
+                'AAAA' in name):
+                invalid_names.append(name)
 
-            # 查询所有岗位
-            rows = cursor.execute("SELECT id, name FROM job_positions").fetchall()
-            invalid_names = []
-            for row in rows:
-                name = row['name']
-                # 检查无效岗位：包含 test、超长、包含特殊字符
-                if ('test' in name.lower() or
-                    '测试' in name or
-                    len(name) > 50 or
-                    '@#$' in name or
-                    'AAAA' in name):
-                    invalid_names.append(name)
-
-            conn.close()
-            assert len(invalid_names) == 0, f"数据库中存在无效岗位数据: {invalid_names}"
-        except Exception as e:
-            pytest.skip(f"无法连接数据库: {e}")
+        assert len(invalid_names) == 0, f"数据库中存在无效岗位数据: {invalid_names}"
 
 
 class TestBug004DirtyDataCategories:
@@ -265,8 +246,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_should_have_delete_endpoint(self):
         """应存在删除 LLM 配置的接口"""
-        with open(BACKEND_ROOT / 'app/routers/profile.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/profile_pkg/llm.py').read_text()
 
         # 检查是否有 DELETE /api/profile/llm 路由
         has_delete_endpoint = (
@@ -277,8 +257,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_delete_button(self):
         """前端应有清除配置按钮"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPage.vue', 'r') as f:
-            content = f.read()
+        content = (FRONTEND_ROOT / 'src/components/business/SettingsAIConfig.vue').read_text()
 
         # 检查是否有清除配置按钮
         has_delete_button = '清除配置' in content or 'deleteMyLLM' in content
@@ -286,8 +265,7 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_frontend_should_have_prominent_edit_button(self):
         """前端修改配置按钮应明显"""
-        with open(BACKEND_ROOT / 'frontend/src/components/business/SettingsPage.vue', 'r') as f:
-            content = f.read()
+        content = (FRONTEND_ROOT / 'src/components/business/SettingsAIConfig.vue').read_text()
 
         # 检查修改配置按钮是否有明显的样式
         # 修复前：可能是简单的 text-xs 链接样式
@@ -307,8 +285,7 @@ class TestIntegration:
 
     def test_api_should_have_all_required_endpoints(self):
         """API 应包含所有必要的端点"""
-        with open(BACKEND_ROOT / 'app/routers/questions.py', 'r') as f:
-            content = f.read()
+        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
 
         # 检查所有必要的端点
         endpoints = [
@@ -324,7 +301,7 @@ class TestIntegration:
 
     def test_frontend_api_should_have_all_required_functions(self):
         """前端 API 应包含所有必要的函数"""
-        with open(BACKEND_ROOT / 'frontend/src/api/index.js', 'r') as f:
+        with open(FRONTEND_ROOT / 'src/api/index.js', 'r') as f:
             content = f.read()
 
         # 检查所有必要的 API 函数

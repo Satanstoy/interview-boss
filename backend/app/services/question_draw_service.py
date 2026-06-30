@@ -9,9 +9,17 @@ from datetime import datetime
 from math import log1p, sqrt
 from typing import Optional
 
-from app.db.connection import get_db_connection, get_dynamic_frequency_sql
+from app.db import connection as db_connection
 from app.db.question_bank_sources import get_sources
 from app.routers.questions import _build_bank_where_clause
+
+
+def get_db_connection():
+    return db_connection.get_db_connection()
+
+
+def get_dynamic_frequency_sql(bank_mode: str, user_id: int) -> str:
+    return db_connection.get_dynamic_frequency_sql(bank_mode, user_id)
 
 
 def _map_difficulty(difficulty: str) -> list[str]:
@@ -122,6 +130,20 @@ def draw_questions(
                 fallback_params.extend(sorted(exclude_ids))
             candidates = _query(fallback_conditions, fallback_params)
 
+        if not candidates and question_type == "algorithm_coding":
+            candidates = _query_without_position_filter(
+                conn=conn,
+                user=user,
+                bank_mode=bank_mode,
+                question_type=question_type,
+                cat1=cat1,
+                cat2=cat2,
+                topic=topic,
+                difficulty=difficulty,
+                exclude_ids=exclude_ids,
+                fallback_reason="position_filter_empty",
+            )
+
         if not candidates:
             return []
 
@@ -179,6 +201,94 @@ def draw_questions(
         item["last_practiced_at"] = info.get("last_at") if info else None
         result.append(item)
     return result
+
+
+def _query_without_position_filter(
+    *,
+    conn,
+    user: dict,
+    bank_mode: str,
+    question_type: str,
+    cat1: Optional[str],
+    cat2: Optional[str],
+    topic: Optional[str],
+    difficulty: Optional[str],
+    exclude_ids: set[int],
+    fallback_reason: str,
+) -> list[dict]:
+    """Retry question drawing without the current job-position join.
+
+    Some interview categories, especially algorithm coding, are general across
+    job positions. If a newly-created position has no mapped questions yet, the
+    agent should still be able to draw from approved public algorithm questions.
+    """
+
+    def _build_conditions(include_difficulty: bool) -> tuple[list[str], list]:
+        conditions: list[str] = []
+        params: list = []
+        if bank_mode == "personal":
+            conditions.append("qb.owner_id = ?")
+            params.append(user["id"])
+        elif bank_mode == "mixed":
+            conditions.append(
+                "((qb.owner_id IS NULL AND qb.status = 'approved') "
+                "OR (qb.owner_id = ? AND qb.duplicate_of IS NULL))"
+            )
+            params.append(user["id"])
+        else:
+            conditions.append("qb.owner_id IS NULL")
+            conditions.append("qb.status = 'approved'")
+
+        if cat1 and cat1 != "全部":
+            conditions.append("(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)")
+            params.extend([f"%{cat1}%", f"%{cat1}%", f"%{cat1}%"])
+        if cat2 and cat2 != "全部":
+            conditions.append("(qb.cat2 LIKE ? OR qb.tags LIKE ?)")
+            params.extend([f"%{cat2}%", f"%{cat2}%"])
+        if topic:
+            conditions.append(
+                "(qb.question LIKE ? OR qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)"
+            )
+            params.extend([f"%{topic}%"] * 4)
+        if include_difficulty and difficulty:
+            diff_patterns = _map_difficulty(difficulty)
+            diff_ors = " OR ".join("qb.difficulty LIKE ?" for _ in diff_patterns)
+            conditions.append(f"({diff_ors})")
+            params.extend(diff_patterns)
+        type_conditions, type_params = _question_type_filter(question_type)
+        if type_conditions:
+            conditions.append(type_conditions)
+            params.extend(type_params)
+        if exclude_ids:
+            placeholders = ",".join("?" * len(exclude_ids))
+            conditions.append(f"qb.id NOT IN ({placeholders})")
+            params.extend(sorted(exclude_ids))
+        return conditions, params
+
+    dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user["id"])
+
+    def _run(include_difficulty: bool) -> list[dict]:
+        conditions, params = _build_conditions(include_difficulty)
+        where_clause = " AND ".join(conditions) if conditions else "1 = 1"
+        rows = conn.execute(
+            f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
+            f"({dyn_freq_sql}) as frequency, qb.ai_answer "
+            f"FROM question_bank qb WHERE {where_clause}",
+            params,
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                "_fallback_used": True,
+                "_fallback_reason": fallback_reason,
+            }
+            for row in rows
+        ]
+
+    candidates = _run(include_difficulty=bool(difficulty))
+    if not candidates and difficulty:
+        candidates = _run(include_difficulty=False)
+    return candidates
 
 
 def _question_type_filter(question_type: str) -> tuple[str, list[str]]:

@@ -210,10 +210,19 @@ class TestGetMasterBankUserAnswerFields:
             "user_answer": "用户的个人答案",
         }
 
-        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-            mock_run_db.side_effect = [(1, [mock_row]), {}]
+        with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+            mock_run_db.side_effect = [
+                (1, [mock_row]),
+                {},
+                {
+                    "overall_total": 1,
+                    "category_counts": [],
+                    "popular_tags": [],
+                    "filtered_tag_counts": [],
+                },
+            ]
 
-            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, user=user)
+            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, user=user)
             item = result["items"][0]
             assert item["has_reference_answer"] is True
             assert item["user_answer"] == "用户的个人答案"
@@ -244,10 +253,19 @@ class TestGetMasterBankUserAnswerFields:
             "user_answer": "",
         }
 
-        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-            mock_run_db.side_effect = [(1, [mock_row]), {}]
+        with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+            mock_run_db.side_effect = [
+                (1, [mock_row]),
+                {},
+                {
+                    "overall_total": 1,
+                    "category_counts": [],
+                    "popular_tags": [],
+                    "filtered_tag_counts": [],
+                },
+            ]
 
-            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, user=user)
+            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, user=user)
             item = result["items"][0]
             assert item["has_reference_answer"] is False
             assert item["user_answer"] == ""

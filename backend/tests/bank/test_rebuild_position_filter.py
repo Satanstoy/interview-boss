@@ -76,7 +76,7 @@ class TestBug002InterviewMissingJobPosition:
                 job_position="后端开发"
             )
 
-        insert_call = mock_conn.execute.call_args
+        insert_call = mock_conn.cursor.return_value.execute.call_args
         sql = insert_call[0][0]
         assert "job_position" in sql, "INSERT 语句应包含 job_position 字段"
 

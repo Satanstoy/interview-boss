@@ -8,6 +8,7 @@ from app.core.auth import get_current_user, get_admin_user
 from app.core.prompts import ANSWER_PROMPT
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
+from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry
 
 logger = logging.getLogger("interview-boss")
@@ -69,7 +70,11 @@ async def save_user_answer(question_id: int, body: dict, user: dict = Depends(ge
 async def generate_master_answer(question_id: int, user: dict = Depends(get_current_user)):
     def _get():
         with get_db_connection() as conn:
-            return conn.execute("SELECT question, ai_answer FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            from_clause, where_clause, params = _build_bank_where_clause(user)
+            return conn.execute(
+                f"SELECT qb.question, qb.ai_answer {from_clause} {where_clause} AND qb.id = ?",
+                params + [question_id],
+            ).fetchone()
 
     row = await run_db(_get)
     if not row:
@@ -126,8 +131,11 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest, user: dict = 
     def _load():
         with get_db_connection() as conn:
             placeholders = ",".join("?" * len(req.ids))
+            from_clause, where_clause, params = _build_bank_where_clause(user)
             return conn.execute(
-                f"SELECT id, question, ai_answer FROM question_bank WHERE id IN ({placeholders})", req.ids
+                f"SELECT qb.id, qb.question, qb.ai_answer {from_clause} "
+                f"{where_clause} AND qb.id IN ({placeholders})",
+                params + req.ids,
             ).fetchall()
 
     rows = await run_db(_load)

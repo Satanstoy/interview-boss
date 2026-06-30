@@ -212,21 +212,10 @@ async def _run_build_inline(job_id: int, user_id: int):
                 cursor.execute("BEGIN")
                 try:
                     cursor.execute(
-                        "DELETE FROM user_question_view WHERE question_bank_id IN "
-                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
+                        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE job_position = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                        (current_pos,),
                     )
-                    cursor.execute(
-                        "DELETE FROM user_practice_history WHERE question_bank_id IN "
-                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
-                    )
-                    cursor.execute(
-                        "DELETE FROM question_position WHERE question_id IN "
-                        "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
-                    )
-                    cursor.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
                     conn.commit()
                 except Exception:
                     conn.rollback()

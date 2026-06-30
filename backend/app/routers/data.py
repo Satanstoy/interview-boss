@@ -80,7 +80,7 @@ def _cleanup_sources_for_url(cursor, url: str):
                     "UPDATE question_bank SET frequency = ?, sources = ?, "
                     "original_questions = ?, original_question_sources = ?, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (len(new_oqs),
+                    (len(new_oqs) if new_oqs else len(new_sources),
                      json.dumps(new_sources, ensure_ascii=False),
                      json.dumps(new_oqs, ensure_ascii=False),
                      json.dumps(new_oqs_sources, ensure_ascii=False),
@@ -154,7 +154,7 @@ def _restore_sources_for_url(cursor, url: str):
                 orig_qs = []
             cursor.execute(
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (len(orig_qs), json.dumps(sources, ensure_ascii=False), r['id'])
+                (len(orig_qs) if orig_qs else len(sources), json.dumps(sources, ensure_ascii=False), r['id'])
             )
 
     # Dual-write: restore into normalized source tables
