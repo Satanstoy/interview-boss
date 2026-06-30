@@ -11,6 +11,7 @@ x-default-logging: &default-logging
   options:
     max-size: "10m"
     max-file: "3"
+    compress: "true"
 
 x-app-build: &app-build
   context: .
@@ -52,7 +53,7 @@ services:
   # ── Redis ──
   redis:
     image: redis:7.4-alpine
-    restart: always
+    restart: unless-stopped
     command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru --appendonly yes
     volumes:
       - redis-data:/data
@@ -67,12 +68,14 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+      start_period: 5s
     logging: *default-logging
 
   # ── FastAPI 后端 ──
   backend:
     <<: *app-service
-    restart: always
+    restart: unless-stopped
+    stop_grace_period: 30s
     mem_limit: 512m
     cpus: 0.75
     healthcheck:
@@ -133,7 +136,8 @@ services:
       args:
         BUILDKIT_INLINE_CACHE: "1"
         NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
-    restart: always
+    restart: unless-stopped
+    stop_grace_period: 15s
     ports:
       - "80:80"
     mem_limit: 64m
