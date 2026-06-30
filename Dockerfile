@@ -9,6 +9,7 @@ ARG BUILDKIT_INLINE_CACHE=1
 ARG NPM_MIRROR=https://registry.npmmirror.com
 ARG PYPI_MIRROR=https://mirrors.aliyun.com/pypi/simple/
 ARG APT_MIRROR=mirrors.aliyun.com
+ARG APK_MIRROR=mirrors.aliyun.com
 
 # ── 阶段 1：前端构建 ──
 FROM node:20-alpine AS frontend-builder

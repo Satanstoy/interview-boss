@@ -1,21 +1,28 @@
 #!/bin/bash
-# 智能镜像源选择系统
+# 智能镜像源选择系统 v2
 # 用法: source deploy/mirrors.sh && select_mirrors
 #
 # 功能:
-#   1. 维护 4 类镜像源候选池（Docker Hub / npm / PyPI / Debian apt）
-#   2. 构建前并行测速，选最优源
-#   3. 更新 daemon.json 的 Docker Hub 镜像（去掉被拦截的源）
-#   4. 导出 NPM_MIRROR / PYPI_MIRROR / APT_MIRROR 环境变量供 docker-compose 使用
+#   1. 维护 5 类镜像源候选池（Docker Hub / npm / PyPI / Debian apt / Alpine apk）
+#   2. 构建前并行测速，选最优源（结果缓存 24h）
+#   3. 更新 daemon.json + buildkitd.toml 的 Docker Hub 镜像
+#   4. 实际 pull 验证选出的源可用
+#   5. 导出 NPM_MIRROR / PYPI_MIRROR / APT_MIRROR / APK_MIRROR 环境变量
 
 set -euo pipefail
 
-# log/warn 函数（如果未从 docker-deploy.sh 继承，则定义 fallback）
+# log/warn/err 函数（如果未从 docker-deploy.sh 继承，则定义 fallback）
 if ! declare -f log &>/dev/null; then
   GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
   log()  { echo -e "${GREEN}[INFO]${NC} $1"; }
   warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+  err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 fi
+
+# ── 配置 ──
+
+MIRROR_CACHE_DIR="${MIRROR_CACHE_DIR:-/tmp/interview-boss-mirrors}"
+MIRROR_CACHE_TTL="${MIRROR_CACHE_TTL:-86400}"  # 24h
 
 # ── 镜像源候选池 ──
 
@@ -50,6 +57,43 @@ APT_MIRRORS=(
   "mirrors.huaweicloud.com"
   "mirrors.ustc.edu.cn"
 )
+
+APK_MIRRORS=(
+  "mirrors.aliyun.com"
+  "mirrors.tuna.tsinghua.edu.cn"
+  "mirrors.cloud.tencent.com"
+  "mirrors.huaweicloud.com"
+  "mirrors.ustc.edu.cn"
+)
+
+# ── 缓存函数 ──
+
+# 从缓存读取测速结果
+# 参数: $1=缓存 key
+# 输出: 缓存的值（过期或不存在返回空）
+cache_get() {
+  local key="$1"
+  local cache_file="$MIRROR_CACHE_DIR/$key"
+  if [ -f "$cache_file" ]; then
+    local age
+    age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
+    if [ "$age" -lt "$MIRROR_CACHE_TTL" ]; then
+      cat "$cache_file"
+      return 0
+    fi
+    rm -f "$cache_file"
+  fi
+  return 1
+}
+
+# 写入缓存
+# 参数: $1=缓存 key  $2=值
+cache_set() {
+  local key="$1"
+  local value="$2"
+  mkdir -p "$MIRROR_CACHE_DIR"
+  echo "$value" > "$MIRROR_CACHE_DIR/$key"
+}
 
 # ── 测速函数 ──
 
@@ -91,7 +135,6 @@ test_mirrors_parallel() {
 
   for i in "${!mirrors[@]}"; do
     local url="${mirrors[$i]}"
-    # 拼接测试 URL：去掉末尾 /，加上测试后缀
     local test_url="${url%/}${test_suffix}"
     (
       local t
@@ -121,18 +164,25 @@ test_mirrors_parallel() {
   done
   rm -rf "$tmpdir"
 
-  # 按延迟排序输出
   printf '%s\n' "${results[@]}" | sort -n
 }
 
-# 从候选池中选出最快的镜像源
-# 参数: $1=测试路径后缀  $2=超时秒数  $3...=镜像URL列表
-# 输出: 最快的镜像URL（stdout），失败返回空
+# 从候选池中选出最快的镜像源（带缓存）
+# 参数: $1=缓存 key  $2=测试路径后缀  $3=超时秒数  $4...=镜像URL列表
+# 输出: 最快的镜像URL（stdout）
 pick_fastest() {
-  local test_suffix="$1"
-  local timeout="$2"
-  shift 2
+  local cache_key="$1"
+  local test_suffix="$2"
+  local timeout="$3"
+  shift 3
   local mirrors=("$@")
+
+  # 尝试从缓存读取
+  local cached
+  if cached=$(cache_get "$cache_key"); then
+    echo "$cached"
+    return 0
+  fi
 
   local sorted
   sorted=$(test_mirrors_parallel "$test_suffix" "$timeout" "${mirrors[@]}")
@@ -141,15 +191,55 @@ pick_fastest() {
   local best
   best=$(echo "$sorted" | awk '$1 < 999 {print $2; exit}')
 
-  if [ -n "$best" ]; then
-    echo "$best"
+  if [ -z "$best" ]; then
+    best="${mirrors[0]}"
+  fi
+
+  # 写入缓存
+  cache_set "$cache_key" "$best"
+  echo "$best"
+}
+
+# 验证镜像源是否真的能拉到镜像
+# 参数: $1=镜像源 URL  $2=测试镜像名（可选，默认 library/alpine:latest）
+# 返回: 0=可用  1=不可用
+verify_mirror_pull() {
+  local mirror_url="$1"
+  local test_image="${2:-library/alpine:latest}"
+  local mirror_host
+  mirror_host=$(echo "$mirror_url" | sed 's|https://||;s|/.*||')
+
+  # 用 curl 检查 manifest 是否可获取（不需要真的 docker pull）
+  local manifest_url="${mirror_url%/}/v2/${test_image}/manifests/latest"
+  local http_code
+  http_code=$(curl -sS -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 10 \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+    "$manifest_url" 2>/dev/null) || http_code="000"
+
+  # 200=直接可用, 401/403=需要认证(Docker daemon 自动处理), 3xx=重定向
+  if [[ "$http_code" =~ ^(200|301|302|307|308|401|403)$ ]]; then
+    return 0
   else
-    # 所有源都失败，返回第一个候选作为 fallback
-    echo "${mirrors[0]}"
+    return 1
   fi
 }
 
-# ── daemon.json 更新 ──
+# ── 配置文件更新 ──
+
+# 已知被 Cloudflare 拦截或失效的源
+get_blocked_sources() {
+  echo "docker.xuanyuan.me"
+}
+
+# 备份配置文件（如果还没备份过）
+backup_config() {
+  local file="$1"
+  if [ -f "$file" ] && [ ! -f "${file}.bak" ]; then
+    sudo cp "$file" "${file}.bak"
+    log "已备份 ${file} → ${file}.bak"
+  fi
+}
 
 # 更新 Docker daemon.json 的 registry-mirrors
 # 参数: $1=最佳镜像源URL
@@ -162,37 +252,47 @@ update_daemon_json_mirrors() {
     return 0
   fi
 
-  # 检查是否有 jq
   if ! command -v jq &>/dev/null; then
     warn "jq 未安装，跳过 daemon.json 更新"
     return 0
   fi
 
-  # 构建新的 mirrors 列表：最佳源放第一位，其余保留（去掉重复和已知被拦截的源）
+  # 备份
+  backup_config "$daemon_json"
+
+  # 构建新的 mirrors 列表：最佳源放第一，去掉重复/被拦截源，末尾加官方回源
   local current_mirrors
   current_mirrors=$(jq -r '."registry-mirrors" // [] | .[]' "$daemon_json" 2>/dev/null || echo "")
 
-  # 已知被 Cloudflare 拦截的源
-  local blocked_sources=("docker.xuanyuan.me")
+  local blocked_sources
+  blocked_sources=$(get_blocked_sources)
 
   local new_mirrors=("$best_mirror")
   while IFS= read -r mirror; do
     [ -z "$mirror" ] && continue
-    # 跳过已添加的最佳源
     [ "$mirror" = "$best_mirror" ] && continue
     # 跳过已知被拦截的源
     local blocked=false
-    for blocked_src in "${blocked_sources[@]}"; do
+    while IFS= read -r blocked_src; do
       if [[ "$mirror" == *"$blocked_src"* ]]; then
         blocked=true
         break
       fi
-    done
+    done <<< "$blocked_sources"
     $blocked && continue
     new_mirrors+=("$mirror")
   done <<< "$current_mirrors"
 
-  # 写入 daemon.json
+  # 末尾加官方回源（如果列表里没有）
+  local has_official=false
+  for m in "${new_mirrors[@]}"; do
+    [[ "$m" == *"registry-1.docker.io"* ]] && has_official=true
+  done
+  if ! $has_official; then
+    new_mirrors+=("https://registry-1.docker.io")
+  fi
+
+  # 写入
   local mirrors_json
   mirrors_json=$(printf '%s\n' "${new_mirrors[@]}" | jq -R . | jq -s .)
 
@@ -200,7 +300,6 @@ update_daemon_json_mirrors() {
   tmp_json=$(mktemp)
   jq --argjson mirrors "$mirrors_json" '."registry-mirrors" = $mirrors' "$daemon_json" > "$tmp_json"
 
-  # 比较是否有变化
   if ! diff -q "$daemon_json" "$tmp_json" >/dev/null 2>&1; then
     sudo cp "$tmp_json" "$daemon_json"
     log "daemon.json 已更新，重载 Docker daemon..."
@@ -211,37 +310,133 @@ update_daemon_json_mirrors() {
   rm -f "$tmp_json"
 }
 
+# 更新 BuildKit 配置 (/etc/buildkitd.toml)
+# 参数: $1=最佳镜像源URL列表（逗号分隔）
+update_buildkit_config() {
+  local mirrors_csv="$1"
+  local buildkitd_toml="/etc/buildkitd.toml"
+
+  # 在 DOCKER_BUILDKIT=1 模式下（daemon 内置 BuildKit），daemon.json 的 registry-mirrors
+  # 已经对构建生效。/etc/buildkitd.toml 只在 docker-container driver（独立 BuildKit）才需要。
+  # 检查是否存在 buildx builder 使用 docker-container driver
+  local buildx_output
+  buildx_output=$(docker buildx inspect 2>/dev/null || true)
+  if ! echo "$buildx_output" | grep -q "docker-container"; then
+    log "BuildKit 使用 daemon 内置模式，已通过 daemon.json 配置镜像加速"
+    return 0
+  fi
+
+  # 备份
+  backup_config "$buildkitd_toml"
+
+  # 生成 mirrors 数组
+  local mirrors_toml=""
+  IFS=',' read -ra mirror_arr <<< "$mirrors_csv"
+  for m in "${mirror_arr[@]}"; do
+    mirrors_toml+="  \"${m}\",\n"
+  done
+
+  local tmp_toml
+  tmp_toml=$(mktemp)
+  cat > "$tmp_toml" << EOF
+# BuildKit 镜像加速配置（由 deploy/mirrors.sh 自动生成）
+# 官方文档: https://docs.docker.com/build/buildkit/configure/
+
+debug = false
+
+[registry."docker.io"]
+  mirrors = [
+$(echo -e "$mirrors_toml" | sed '$ s/,$//')
+  ]
+EOF
+
+  # 比较是否有变化
+  if [ -f "$buildkitd_toml" ] && diff -q "$buildkitd_toml" "$tmp_toml" >/dev/null 2>&1; then
+    log "buildkitd.toml 无需变更"
+    rm -f "$tmp_toml"
+  else
+    sudo cp "$tmp_toml" "$buildkitd_toml"
+    log "buildkitd.toml 已更新"
+    rm -f "$tmp_toml"
+  fi
+}
+
 # ── 主入口 ──
 
 # 测速选择所有镜像源并导出环境变量
 # 使用: select_mirrors
-# 副作用: 导出 NPM_MIRROR, PYPI_MIRROR, APT_MIRROR 环境变量
-#         更新 /etc/docker/daemon.json（需要 sudo 权限）
+# 副作用: 导出 NPM_MIRROR, PYPI_MIRROR, APT_MIRROR, APK_MIRROR 环境变量
+#         更新 /etc/docker/daemon.json + /etc/buildkitd.toml
 select_mirrors() {
   log "测速选择最优镜像源..."
 
-  # Docker Hub 镜像源 → 更新 daemon.json
+  # Docker Hub 镜像源
   local best_docker_hub
-  best_docker_hub=$(pick_fastest "/v2/" 5 "${DOCKER_HUB_MIRRORS[@]}")
-  if [ -n "$best_docker_hub" ]; then
-    update_daemon_json_mirrors "$best_docker_hub"
-    log "Docker Hub 镜像源: $best_docker_hub"
+  best_docker_hub=$(pick_fastest "docker-hub" "/v2/" 5 "${DOCKER_HUB_MIRRORS[@]}")
+
+  # 验证选出的源真的能用
+  if ! verify_mirror_pull "$best_docker_hub"; then
+    warn "最快源 $best_docker_hub pull 验证失败，尝试备选..."
+    # 从候选池中找下一个能用的
+    for candidate in "${DOCKER_HUB_MIRRORS[@]}"; do
+      [ "$candidate" = "$best_docker_hub" ] && continue
+      if verify_mirror_pull "$candidate"; then
+        best_docker_hub="$candidate"
+        cache_set "docker-hub" "$best_docker_hub"
+        break
+      fi
+    done
   fi
 
+  # 更新 daemon.json + buildkitd.toml
+  update_daemon_json_mirrors "$best_docker_hub"
+  update_buildkit_config "$best_docker_hub"
+  log "Docker Hub 镜像源: $best_docker_hub"
+
   # npm 镜像源
-  NPM_MIRROR=$(pick_fastest "/" 5 "${NPM_MIRRORS[@]}")
+  NPM_MIRROR=$(pick_fastest "npm" "/" 5 "${NPM_MIRRORS[@]}")
   export NPM_MIRROR
   log "npm 镜像源: $NPM_MIRROR"
 
-  # PyPI 镜像源（测试 /simple/ 路径）
-  PYPI_MIRROR=$(pick_fastest "/simple/" 5 "${PYPI_MIRRORS[@]}")
+  # PyPI 镜像源
+  PYPI_MIRROR=$(pick_fastest "pypi" "/simple/" 5 "${PYPI_MIRRORS[@]}")
   export PYPI_MIRROR
   log "PyPI 镜像源: $PYPI_MIRROR"
 
-  # Debian apt 镜像源（测试 HTTP 根路径）
-  APT_MIRROR=$(pick_fastest "/" 5 "${APT_MIRRORS[@]}")
+  # Debian apt 镜像源
+  APT_MIRROR=$(pick_fastest "apt" "/" 5 "${APT_MIRRORS[@]}")
   export APT_MIRROR
   log "Debian apt 镜像源: $APT_MIRROR"
 
+  # Alpine apk 镜像源
+  APK_MIRROR=$(pick_fastest "apk" "/" 5 "${APK_MIRRORS[@]}")
+  export APK_MIRROR
+  log "Alpine apk 镜像源: $APK_MIRROR"
+
   log "镜像源测速完成"
+}
+
+# 清除测速缓存
+# 使用: clear_mirror_cache
+clear_mirror_cache() {
+  if [ -d "$MIRROR_CACHE_DIR" ]; then
+    rm -rf "$MIRROR_CACHE_DIR"
+    log "镜像源缓存已清除"
+  fi
+}
+
+# 恢复配置文件备份
+# 使用: restore_mirror_configs
+restore_mirror_configs() {
+  local restored=0
+  for f in /etc/docker/daemon.json /etc/buildkitd.toml; do
+    if [ -f "${f}.bak" ]; then
+      sudo cp "${f}.bak" "$f"
+      log "已恢复 ${f}"
+      restored=$((restored + 1))
+    fi
+  done
+  if [ "$restored" -eq 0 ]; then
+    warn "没有找到备份文件"
+  fi
 }
