@@ -2079,3 +2079,173 @@ class TestForcedSearchGuard:
         chunk_events = [e for e in all_events if e.get("type") == "chunk"]
         assert len(chunk_events) >= 1
         assert "缓存雪崩" in chunk_events[0]["content"]
+
+    async def test_forced_search_guard_fires_when_only_load_skill_called(self):
+        """LLM calls load_skill (turns on project-deep-dive) but skips
+        search_questions/draw_questions entirely → guard MUST still fire.
+
+        This is the real-E2E gap from verify_chat_tools_real_e2e.py:
+        the prior guard condition `tool_call_count == 0` was too coarse —
+        load_skill counts as a tool call, so the guard did NOT fire even
+        though search/draw (which writes retrieved_questions) was skipped.
+        The fix: the guard keys off `search_or_draw_called`, not off
+        total tool_call_count.
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "guard-conv-5",
+            "user_id": 1,
+            "user_message": "我做了 RAG 系统，文档切块用 RecursiveCharacterTextSplitter，bge 向量化后 reranker 排序",
+            "model": None,
+            "intent": "interview_question",
+            "answer_complete": True,
+            "active_skills": [],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        tc_load = _tc("load_skill", {"skill_name": "project-deep-dive"}, "call_load")
+        tc_search = _tc(
+            "search_questions",
+            {"keywords": ["RAG", "切块", "reranker"]},
+            "call_search",
+        )
+
+        # LLM mock sequence: load_skill only → guard forces search → final answer
+        mock_llm = AsyncMock(
+            side_effect=[
+                {
+                    "content": None,
+                    "tool_calls": [tc_load],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "你的切块策略具体怎么做的？固定长度还是递归？chunk size 多少？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+                {
+                    "content": None,
+                    "tool_calls": [tc_search],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "很好，请说说你怎么处理 RAG 系统的召回率评估？",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        load_result = json.dumps(
+            {
+                "ok": True,
+                "tool": "load_skill",
+                "items": [],
+                "metadata": {"active_skill": "project-deep-dive"},
+                "error": None,
+            },
+            ensure_ascii=False,
+        )
+        search_result = json.dumps(
+            {
+                "ok": True,
+                "tool": "search_questions",
+                "items": [
+                    {
+                        "id": 701,
+                        "question": "你的 RAG 系统召回率怎么评估的？",
+                        "cat1": "后端",
+                        "cat2": "RAG",
+                        "source": "search",
+                        "score": 0.1,
+                        "reason": "rrf_ranked",
+                        "sources": [],
+                    }
+                ],
+                "metadata": {
+                    "result_count": 1,
+                    "fallback_used": False,
+                    "fallback_steps": [],
+                    "empty_reason": None,
+                    "debug_reason": "hybrid_search_ok",
+                    "metrics": {"total_ms": 5},
+                },
+                "error": None,
+            },
+            ensure_ascii=False,
+        )
+
+        async def mock_execute_tool(tc, st):
+            name = tc["function"]["name"]
+            if name == "load_skill":
+                st.setdefault("active_skills", []).append("project-deep-dive")
+                st.setdefault("active_skill_instructions", []).append(
+                    {
+                        "skill_name": "project-deep-dive",
+                        "instruction": "## Project Deep Dive\nDrill technical details.",
+                    }
+                )
+                return load_result
+            if name == "search_questions":
+                st["retrieved_questions"] = [
+                    {
+                        "id": 701,
+                        "question": "你的 RAG 系统召回率怎么评估的？",
+                        "cat1": "后端",
+                        "cat2": "RAG",
+                        "sources": [],
+                    }
+                ]
+                st["candidate_questions"] = st["retrieved_questions"]
+                st["question_source"] = "search"
+                return search_result
+            return json.dumps(
+                {"ok": False, "error": "unmocked_tool"}, ensure_ascii=False
+            )
+
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                # Stub build_react_system_prompt so loop iterations don't rebuild
+                # full system prompt from the (now mutated) active_skill_instructions
+                # — we want to keep the test focused on guard behavior.
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Interviewer prompt.",
+                ),
+                patch("app.services.llm.llm_with_tools", mock_llm),
+                patch(
+                    "app.agents.chat.tools.execute_tool",
+                    side_effect=mock_execute_tool,
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        all_events = emitted + yielded
+
+        guard_steps = [
+            e
+            for e in all_events
+            if e.get("type") == "step" and e.get("step") == "force_search_guard"
+        ]
+        assert len(guard_steps) == 1, (
+            "force_search_guard must fire when only load_skill was called and "
+            "search_questions/draw_questions were skipped in interview_question "
+            "+ answer_complete scenario"
+        )
+
+        assert len(state["retrieved_questions"]) == 1
+        assert state["retrieved_questions"][0]["id"] == 701
+
+        chunk_events = [e for e in all_events if e.get("type") == "chunk"]
+        assert len(chunk_events) >= 1
+        assert "召回率" in chunk_events[0]["content"]

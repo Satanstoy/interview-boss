@@ -364,6 +364,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     # 3. ReAct loop
     react_started = time.monotonic()
     tool_call_count = 0
+    # Tracks whether any search_questions/draw_questions was actually executed
+    # in this turn — the force_search_guard below keys off this (not off
+    # tool_call_count) because load_skill-only turns still leave the contract
+    # unfulfilled (interview_question + answer_complete must produce a bank
+    # question plan before final answer).
+    search_or_draw_called = False
     seen_tool_calls: set[str] = set()
     stop_reason = ""
     final_answer_text = ""
@@ -499,6 +505,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 elapsed_ms=int((time.monotonic() - tool_started) * 1000),
             )
             if tool_name in ("search_questions", "draw_questions"):
+                search_or_draw_called = True
                 _maybe_create_question_plan(state)
 
             # Emit retrieved events for search/draw results
@@ -619,7 +626,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         and state.get("answer_complete") is True
         and not state.get("retrieved_questions")
         and not state.get("candidate_questions")
-        and tool_call_count == 0
+        and not search_or_draw_called
         and guard_retry_count < 1
     )
     if needs_forced_search:

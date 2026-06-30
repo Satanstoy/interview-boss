@@ -691,7 +691,7 @@ class TestRealLinkSkillInjection:
                 messages = args[0] if args else kwargs.get("messages", [])
                 if messages and messages[0].get("role") == "system":
                     captured_system_prompts.append(messages[0]["content"])
-            return [step1, step2][call_count - 1]
+            return step1 if call_count == 1 else step2
 
         mock_skill = MagicMock()
         mock_skill.name = "theory-qa"
