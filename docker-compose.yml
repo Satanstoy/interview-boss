@@ -18,6 +18,9 @@ x-app-build: &app-build
   target: app-runtime
   args:
     BUILDKIT_INLINE_CACHE: "1"
+    NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
+    PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}
+    APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
 
 x-app-service: &app-service
   image: interview-boss-app:local
@@ -97,6 +100,9 @@ services:
       target: test-runtime
       args:
         BUILDKIT_INLINE_CACHE: "1"
+        NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
+        PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     profiles:
       - test
     env_file: backend/.env
@@ -124,6 +130,7 @@ services:
       target: nginx-runtime
       args:
         BUILDKIT_INLINE_CACHE: "1"
+        NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
     restart: always
     ports:
       - "80:80"

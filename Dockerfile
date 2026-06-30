@@ -6,11 +6,15 @@
 # ============================================================
 
 ARG BUILDKIT_INLINE_CACHE=1
+ARG NPM_MIRROR=https://registry.npmmirror.com
+ARG PYPI_MIRROR=https://mirrors.aliyun.com/pypi/simple/
+ARG APT_MIRROR=mirrors.aliyun.com
 
 # ── 阶段 1：前端构建 ──
 FROM node:20-alpine AS frontend-builder
+ARG NPM_MIRROR
 WORKDIR /app/frontend
-RUN npm config set registry https://registry.npmmirror.com
+RUN npm config set registry ${NPM_MIRROR}
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --production=false
@@ -19,21 +23,24 @@ RUN npm run build
 
 # ── 阶段 2：Python 基础层（系统依赖 + uv）──
 FROM python:3.10-slim-bookworm AS python-base
+ARG APT_MIRROR
+ARG PYPI_MIRROR
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list; \
     apt-get update && \
     apt-get install -y --no-install-recommends curl libmagic1
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com uv
+    pip install -i ${PYPI_MIRROR} --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') uv
 
 # ── 阶段 3：Python 依赖安装（构建阶段，不进入最终镜像）──
 FROM python-base AS deps-builder
+ARG PYPI_MIRROR
 COPY pyproject.toml uv.lock ./
-ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV UV_INDEX_URL=${PYPI_MIRROR}
 ENV UV_HTTP_TIMEOUT=120
 ENV UV_LINK_MODE=copy
 # --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求
@@ -46,8 +53,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ── 阶段 3b：Python 依赖安装（含 dev 依赖，用于测试）──
 FROM python-base AS deps-builder-dev
+ARG PYPI_MIRROR
 COPY pyproject.toml uv.lock ./
-ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV UV_INDEX_URL=${PYPI_MIRROR}
 ENV UV_HTTP_TIMEOUT=120
 ENV UV_LINK_MODE=copy
 # --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求

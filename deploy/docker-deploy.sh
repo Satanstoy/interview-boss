@@ -9,6 +9,9 @@ set -euo pipefail
 PROJECT_DIR="/home/ubuntu/sj/interview-boss"
 cd "$PROJECT_DIR"
 
+# 镜像源测速选源（source，不执行）
+source "$PROJECT_DIR/deploy/mirrors.sh"
+
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
@@ -155,9 +158,19 @@ cleanup_after_build() {
   show_disk_usage
 }
 
+# 镜像源测速选源（只执行一次）
+MIRRORS_SELECTED=false
+ensure_mirrors_selected() {
+  if [ "$MIRRORS_SELECTED" = false ]; then
+    select_mirrors
+    MIRRORS_SELECTED=true
+  fi
+}
+
 guarded_compose_build() {
   local rc
   ensure_disk_before_build
+  ensure_mirrors_selected
   set +e
   docker compose build "$@"
   rc=$?
