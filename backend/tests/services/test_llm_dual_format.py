@@ -21,6 +21,8 @@ from anthropic import AsyncAnthropic
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "mimo-v2.5-pro")
+LIVE_LLM_ENABLED = os.environ.get("RUN_LIVE_LLM_TESTS") == "1" and bool(API_KEY and OPENAI_BASE_URL)
+live_llm_required = pytest.mark.live_llm
 
 ANTHROPIC_BASE_URL = OPENAI_BASE_URL.replace("/v1", "/anthropic") if "/v1" in OPENAI_BASE_URL else OPENAI_BASE_URL + "/anthropic"
 
@@ -125,6 +127,7 @@ class TestProviderDetection:
 # ─────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+@live_llm_required
 class TestOpenAIFormat:
 
     async def test_simple_chat(self):
@@ -193,6 +196,7 @@ class TestOpenAIFormat:
 # ─────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+@live_llm_required
 class TestAnthropicFormat:
 
     async def test_simple_chat(self):
@@ -249,6 +253,7 @@ class TestAnthropicFormat:
 # ─────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+@live_llm_required
 class TestBackendLLMWrapper:
 
     async def test_raw_call_openai(self):

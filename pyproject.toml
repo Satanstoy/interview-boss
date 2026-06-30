@@ -31,6 +31,7 @@ dependencies = [
     "huggingface-hub>=1.0.0",
     "structlog>=24.1.0",
     "aiohttp>=3.14.1",
+    "mcp>=1.12.4",
 ]
 
 [dependency-groups]
@@ -46,5 +47,11 @@ asyncio_mode = "auto"
 markers = [
     "slow: 需要较长时间的测试",
     "integration: 集成测试（需要外部服务）",
+    "live_llm: 需要真实 LLM API 的测试，默认离线套件不收集",
+]
+filterwarnings = [
+    'ignore:Using `httpx` with `starlette.testclient` is deprecated.*:Warning',
+    'ignore:\s*on_event is deprecated, use lifespan event handlers instead\..*:DeprecationWarning',
+    'ignore:The `local_dir_use_symlinks` argument is deprecated and ignored in `snapshot_download`.*:UserWarning',
 ]
 addopts = "-v --tb=short"

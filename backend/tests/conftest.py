@@ -30,6 +30,23 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 
+def pytest_collection_modifyitems(config, items):
+    """Keep live LLM checks out of the default offline suite."""
+    if os.environ.get("RUN_LIVE_LLM_TESTS") == "1":
+        return
+
+    kept = []
+    deselected = []
+    for item in items:
+        if item.get_closest_marker("live_llm"):
+            deselected.append(item)
+        else:
+            kept.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
+
+
 # ── DB 隔离（核心）─────────────────────────────────────────────
 
 @pytest.fixture

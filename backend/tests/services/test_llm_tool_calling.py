@@ -5,8 +5,13 @@
 """
 
 import json
+import os
 import pytest
 from unittest.mock import MagicMock
+
+
+LIVE_LLM_ENABLED = os.environ.get("RUN_LIVE_LLM_TESTS") == "1" and bool(os.environ.get("OPENAI_API_KEY"))
+live_llm_required = pytest.mark.live_llm
 
 
 # ─────────────────────────────────────────────────
@@ -374,6 +379,7 @@ class TestMakeToolResultMessage:
 
 
 @pytest.mark.asyncio
+@live_llm_required
 class TestLLMWithToolsIntegration:
 
     TOOLS = [
