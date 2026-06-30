@@ -232,7 +232,7 @@ class TestSSEEventSequence:
             ],
             stream_chunks=("说说 Redis。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -326,7 +326,7 @@ class TestSSEEventSequence:
             ],
             stream_chunks=("说说 Redis。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -370,7 +370,7 @@ class TestSSEErrorEvents:
             ],
             stream_chunks=("搜索服务暂时不可用，我直接出一道题。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 

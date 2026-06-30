@@ -306,7 +306,10 @@ class TestExecuteToolSearchQuestions:
             }
         }
 
-        with patch("app.agents.chat.tools._hybrid_search", return_value=mock_results):
+        with patch(
+            "app.mcp_server.interview_tools._hybrid_search_for_tool",
+            new=AsyncMock(return_value=mock_results),
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
@@ -324,7 +327,7 @@ class TestExecuteToolSearchQuestions:
 
     async def test_search_with_question_type(self, sample_state):
         """search_questions should pass question_type through to hybrid_search."""
-        from app.agents.chat.tools import execute_tool, _hybrid_search
+        from app.agents.chat.tools import execute_tool
 
         tool_call = {
             "function": {
@@ -336,10 +339,13 @@ class TestExecuteToolSearchQuestions:
             }
         }
 
-        with patch("app.agents.chat.tools._hybrid_search", return_value=[]) as mock_search:
+        with patch(
+            "app.mcp_server.interview_tools._hybrid_search_for_tool",
+            new=AsyncMock(return_value=[]),
+        ) as mock_search:
             await execute_tool(tool_call, sample_state)
 
-        mock_search.assert_called_once_with(
+        mock_search.assert_awaited_once_with(
             keywords=["Java"],
             question_type="knowledge_probe",
         )
@@ -374,7 +380,10 @@ class TestExecuteToolSearchQuestions:
             }
         }
 
-        with patch("app.agents.chat.tools._hybrid_search", side_effect=RuntimeError("db down")):
+        with patch(
+            "app.mcp_server.interview_tools._hybrid_search_for_tool",
+            new=AsyncMock(side_effect=RuntimeError("db down")),
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
@@ -405,7 +414,10 @@ class TestExecuteToolDrawQuestions:
             }
         }
 
-        with patch("app.agents.chat.tools._draw_questions", return_value=mock_results):
+        with patch(
+            "app.mcp_server.interview_tools._draw_questions_for_tool",
+            new=AsyncMock(return_value=mock_results),
+        ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
@@ -438,14 +450,17 @@ class TestExecuteToolDrawQuestions:
             }
         }
 
-        with patch("app.agents.chat.tools._draw_questions", return_value=[]) as mock_draw:
+        with patch(
+            "app.mcp_server.interview_tools._draw_questions_for_tool",
+            new=AsyncMock(return_value=[]),
+        ) as mock_draw:
             await execute_tool(tool_call, sample_state)
 
-        mock_draw.assert_called_once()
-        assert mock_draw.call_args.kwargs["cat1"] == "E.算法与数据结构"
-        assert mock_draw.call_args.kwargs["cat2"] == "E2.算法手撕"
-        assert mock_draw.call_args.kwargs["topic"] == "LRU"
-        assert mock_draw.call_args.kwargs["question_type"] == "algorithm_coding"
+        mock_draw.assert_awaited_once()
+        assert mock_draw.await_args.kwargs["cat1"] == "E.算法与数据结构"
+        assert mock_draw.await_args.kwargs["cat2"] == "E2.算法手撕"
+        assert mock_draw.await_args.kwargs["topic"] == "LRU"
+        assert mock_draw.await_args.kwargs["question_type"] == "algorithm_coding"
 
     async def test_draw_missing_user_returns_user_required_envelope(self):
         from app.agents.chat.tools import execute_tool

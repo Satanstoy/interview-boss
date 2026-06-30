@@ -62,7 +62,7 @@ class TestSearchQuestionsRAG:
             ],
             stream_chunks=("说说 Redis 缓存穿透。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -110,7 +110,7 @@ class TestSearchQuestionsRAG:
             ],
             stream_chunks=("说说 Redis。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -156,7 +156,7 @@ class TestSearchQuestionsRAG:
             ],
             stream_chunks=("说说 Redis。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -200,7 +200,7 @@ class TestDrawQuestionsRAG:
             ],
             stream_chunks=("写一个二分查找。",),
             tool_patches=[
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
         )
 
@@ -236,7 +236,7 @@ class TestDrawQuestionsRAG:
             ],
             stream_chunks=("写一个二分查找。",),
             tool_patches=[
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
             bank_mode="mixed",
         )
@@ -289,8 +289,8 @@ class TestEmptyRetrievalFallback:
             ],
             stream_chunks=("写一个 LRU Cache。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
         )
 

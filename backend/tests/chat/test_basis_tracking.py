@@ -252,7 +252,7 @@ async def _run_basis_turn(
         llm_responses=llm_responses,
         stream_chunks=stream_chunks,
         tool_patches=[
-            patch("app.agents.chat.tools._hybrid_search", search_mock),
+            patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
         ],
     )
     return events, state

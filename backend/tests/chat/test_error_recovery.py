@@ -267,7 +267,7 @@ class TestToolFailureRecovery:
             ],
             stream_chunks=("搜索出错了，我直接给你一道基础题。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -308,7 +308,7 @@ class TestToolFailureRecovery:
             ],
             stream_chunks=("抽题服务暂时不可用，我来手动出一道。",),
             tool_patches=[
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
         )
 

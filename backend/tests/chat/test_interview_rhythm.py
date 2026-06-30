@@ -204,7 +204,7 @@ class TestOpeningPhaseE2E:
                 '"confidence":0.9,"show_refs":true}[/BASIS]',
             ),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -303,7 +303,7 @@ class TestAnswerCompleteness:
                 '"confidence":0.85,"show_refs":true}[/BASIS]',
             ),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -377,7 +377,7 @@ class TestLoadSkillE2E:
             ),
             tool_patches=[
                 patch("app.agents.chat.tools._get_skill_registry", return_value=registry),
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
         )
 

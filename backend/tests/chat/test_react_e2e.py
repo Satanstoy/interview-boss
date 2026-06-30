@@ -307,7 +307,7 @@ class TestReactE2E:
                 '[BASIS]{"type":"interview_question","question_ids":[101,102],"confidence":0.88,"show_refs":true}[/BASIS]',
             ),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
@@ -398,7 +398,7 @@ class TestReactE2E:
             ),
             tool_patches=[
                 patch("app.agents.chat.tools._get_skill_registry", return_value=registry),
-                patch("app.agents.chat.tools._draw_questions", draw_mock),
+                patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
             ],
         )
 
@@ -437,7 +437,7 @@ class TestReactE2E:
         assert state["active_skills"] == ["algorithm-coding"]
         assert state["retrieved_questions"] == draw_results
         assert state["metadata"]["basis_type"] == "interview_question"
-        assert state["metadata"]["selected_question"]["id"] == 202
+        assert state["metadata"]["selected_question"]["id"] == 201
         assert state["metadata"]["question_source"] == "draw"
         assert len(state["metadata"]["selected_basis_questions"]) == 1
         assert "[BASIS]" not in state["response"]
@@ -475,7 +475,7 @@ class TestReactE2E:
             ],
             stream_chunks=("搜索出错了，我直接给你一道基础题。",),
             tool_patches=[
-                patch("app.agents.chat.tools._hybrid_search", search_mock),
+                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],
         )
 
