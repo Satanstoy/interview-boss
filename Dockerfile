@@ -7,7 +7,7 @@
 
 ARG BUILDKIT_INLINE_CACHE=1
 ARG NPM_MIRROR=https://registry.npmmirror.com
-ARG PYPI_MIRROR=https://mirrors.aliyun.com/pypi/simple/
+ARG PYPI_MIRROR=https://mirrors.cloud.tencent.com/pypi/simple/
 ARG APT_MIRROR=mirrors.aliyun.com
 ARG APK_MIRROR=mirrors.aliyun.com
 
@@ -15,7 +15,11 @@ ARG APK_MIRROR=mirrors.aliyun.com
 FROM node:20-alpine AS frontend-builder
 ARG NPM_MIRROR
 WORKDIR /app/frontend
-RUN npm config set registry ${NPM_MIRROR}
+RUN npm config set registry ${NPM_MIRROR} && \
+    npm config set fetch-retries 2 && \
+    npm config set fetch-retry-mintimeout 2000 && \
+    npm config set fetch-retry-maxtimeout 20000 && \
+    npm config set fetch-timeout 30000
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --production=false
@@ -32,24 +36,31 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list; \
-    apt-get update && \
-    apt-get install -y --no-install-recommends curl libmagic1
+    apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update && \
+    apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends curl libmagic1
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -i ${PYPI_MIRROR} --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') uv
+    pip install --timeout 30 --retries 2 -i ${PYPI_MIRROR} --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') uv
 
 # ── 阶段 3：Python 依赖安装（构建阶段，不进入最终镜像）──
 FROM python-base AS deps-builder
 ARG PYPI_MIRROR
 COPY pyproject.toml uv.lock ./
 ENV UV_INDEX_URL=${PYPI_MIRROR}
-ENV UV_HTTP_TIMEOUT=120
+ENV UV_HTTP_TIMEOUT=45
+ENV UV_HTTP_RETRIES=1
+ENV UV_CONCURRENT_DOWNLOADS=4
+ENV UV_CONCURRENT_INSTALLS=2
+ENV UV_CONCURRENT_BUILDS=1
 ENV UV_LINK_MODE=copy
-# --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求
+# --mount=type=cache: 保留 pip 下载缓存，依赖不变时零网络请求
 # --no-install-project: 只装第三方依赖，不装项目本身（项目代码变化不触发重装）
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project && \
+RUN --mount=type=cache,id=interview-boss-pip-cache-v1,sharing=locked,target=/root/.cache/pip \
+    uv export --frozen --no-dev --no-hashes --format requirements-txt > /tmp/requirements.txt && \
+    python -m venv /app/.venv && \
+    /app/.venv/bin/pip install --timeout 20 --retries 1 -i ${PYPI_MIRROR} --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') -r /tmp/requirements.txt && \
     find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; \
     find /app/.venv -name '*.pyc' -delete 2>/dev/null; \
+    rm -f /tmp/requirements.txt; \
     true
 
 # ── 阶段 3b：Python 依赖安装（含 dev 依赖，用于测试）──
@@ -57,12 +68,16 @@ FROM python-base AS deps-builder-dev
 ARG PYPI_MIRROR
 COPY pyproject.toml uv.lock ./
 ENV UV_INDEX_URL=${PYPI_MIRROR}
-ENV UV_HTTP_TIMEOUT=120
+ENV UV_HTTP_TIMEOUT=45
+ENV UV_HTTP_RETRIES=1
+ENV UV_CONCURRENT_DOWNLOADS=4
+ENV UV_CONCURRENT_INSTALLS=2
+ENV UV_CONCURRENT_BUILDS=1
 ENV UV_LINK_MODE=copy
 # --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求
 # --no-install-project: 只装第三方依赖，不装项目本身（项目代码变化不触发重装）
 # 不加 --no-dev：安装 dev 依赖（pytest, pytest-asyncio, httpx 等）
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=interview-boss-uv-cache-v2-dev,sharing=locked,target=/root/.cache/uv \
     uv sync --frozen --no-install-project && \
     find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; \
     find /app/.venv -name '*.pyc' -delete 2>/dev/null; \

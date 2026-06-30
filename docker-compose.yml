@@ -17,10 +17,11 @@ x-app-build: &app-build
   context: .
   dockerfile: Dockerfile
   target: app-runtime
+  network: host
   args:
     BUILDKIT_INLINE_CACHE: "1"
     NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
-    PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}
+    PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.cloud.tencent.com/pypi/simple/}
     APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
     APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
 
@@ -102,10 +103,11 @@ services:
       context: .
       dockerfile: Dockerfile
       target: test-runtime
+      network: host
       args:
         BUILDKIT_INLINE_CACHE: "1"
         NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
-        PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}
+        PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.cloud.tencent.com/pypi/simple/}
         APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
         APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
     profiles:
@@ -133,6 +135,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: nginx-runtime
+      network: host
       args:
         BUILDKIT_INLINE_CACHE: "1"
         NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}

@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|cleanup|diagnose]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|cleanup|diagnose|mirrors]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -22,6 +22,15 @@ DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-4096}"
 DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-5120}"
 BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-2GB}"
 
+# 镜像源策略：
+# - 默认复用缓存/稳定默认源，保持 Docker layer cache key 稳定。
+# - 每次 build 只做短健康检查；失败才刷新 package manager 镜像源。
+# - 全量测速 + Docker daemon registry mirror 更新只在 mirrors 命令或显式开关下执行。
+DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD="${DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD:-1}"
+DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT="${DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT:-2}"
+DEPLOY_SELECT_MIRRORS_ON_BUILD="${DEPLOY_SELECT_MIRRORS_ON_BUILD:-0}"
+DEPLOY_DOCKER_DNS="${DEPLOY_DOCKER_DNS:-223.5.5.5,119.29.29.29}"
+
 # 颜色
 GREEN='[0;32m'
 YELLOW='[1;33m'
@@ -39,6 +48,37 @@ check_docker() {
     echo "  执行: sudo usermod -aG docker $(whoami) && 重新登录"
     exit 1
   fi
+}
+
+ensure_docker_dns_config() {
+  local daemon_json="/etc/docker/daemon.json"
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq 未安装，跳过 Docker DNS 持久化配置"
+    return 0
+  fi
+
+  local current_json tmp_json dns_json
+  current_json=$(mktemp)
+  tmp_json=$(mktemp)
+
+  if [ -f "$daemon_json" ]; then
+    cp "$daemon_json" "$current_json"
+  else
+    echo "{}" > "$current_json"
+  fi
+
+  dns_json=$(printf '%s' "$DEPLOY_DOCKER_DNS" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | jq -R . | jq -s .)
+  jq --argjson dns "$dns_json" '.dns = $dns' "$current_json" > "$tmp_json"
+
+  if diff -q "$current_json" "$tmp_json" >/dev/null 2>&1; then
+    log "Docker DNS 配置无需变更"
+  else
+    sudo cp "$tmp_json" "$daemon_json"
+    log "Docker DNS 已更新为: $DEPLOY_DOCKER_DNS，重载 Docker daemon..."
+    sudo systemctl reload docker 2>/dev/null || sudo systemctl restart docker 2>/dev/null || warn "Docker daemon 重载失败，可能需要手动重启"
+  fi
+
+  rm -f "$current_json" "$tmp_json"
 }
 
 # ── 回滚支持 ──
@@ -158,19 +198,68 @@ cleanup_after_build() {
   show_disk_usage
 }
 
-# 镜像源测速选源（只执行一次）
-MIRRORS_SELECTED=false
-ensure_mirrors_selected() {
-  if [ "$MIRRORS_SELECTED" = false ]; then
+# 镜像源准备：默认轻量健康检查，失败才刷新 package 镜像源。
+maybe_select_mirrors() {
+  if [ "$DEPLOY_SELECT_MIRRORS_ON_BUILD" = "1" ]; then
+    warn "DEPLOY_SELECT_MIRRORS_ON_BUILD=1，构建前执行完整镜像源测速..."
     select_mirrors
-    MIRRORS_SELECTED=true
+    return
   fi
+
+  load_cached_package_mirrors
+
+  if [ "$DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD" != "1" ]; then
+    log "使用缓存镜像源（跳过健康检查）: npm=$NPM_MIRROR, PyPI=$PYPI_MIRROR, apt=$APT_MIRROR"
+    return
+  fi
+
+  if check_package_mirrors_healthy "$DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT"; then
+    log "镜像源健康检查通过: npm=$NPM_MIRROR, PyPI=$PYPI_MIRROR, apt=$APT_MIRROR"
+    return
+  fi
+
+  warn "缓存镜像源不可用，刷新 package manager 镜像源（不修改 Docker daemon）..."
+  refresh_package_mirrors
+}
+
+preflight_update_contract() {
+  local dockerfile="$PROJECT_DIR/Dockerfile"
+  local compose_file="$PROJECT_DIR/docker-compose.yml"
+  local prod_deps_stage
+
+  if ! grep -q -- "uv export --frozen --no-dev --no-hashes --format requirements-txt" "$dockerfile"; then
+    err "部署预检失败：生产依赖必须先 uv export --frozen --no-dev --no-hashes --format requirements-txt，再交给 pip 镜像安装"
+    exit 1
+  fi
+
+  prod_deps_stage=$(awk '
+    /^FROM python-base AS deps-builder$/ {in_stage=1}
+    /^FROM python-base AS deps-builder-dev$/ {in_stage=0}
+    in_stage {print}
+  ' "$dockerfile")
+  if printf '%s\n' "$prod_deps_stage" | grep -q -- "uv sync --frozen --no-dev --no-install-project"; then
+    err "部署预检失败：生产依赖阶段禁止回退到 uv sync --frozen --no-dev --no-install-project；uv.lock 里的 files.pythonhosted.org 直链会绕过 PyPI 镜像并造成 update 卡住"
+    exit 1
+  fi
+
+  if ! grep -q -- "network: host" "$compose_file"; then
+    err "部署预检失败：compose build 必须保留 network: host，避免 BuildKit DNS fallback 到不可控外部 DNS"
+    exit 1
+  fi
+
+  if grep -q -- "files.pythonhosted.org" "$dockerfile"; then
+    err "部署预检失败：Dockerfile 不应直接引用 files.pythonhosted.org，依赖下载必须走当前 PyPI 镜像源"
+    exit 1
+  fi
+
+  log "部署预检通过：生产依赖走 pip 镜像，BuildKit 使用 host network"
 }
 
 guarded_compose_build() {
   local rc
+  preflight_update_contract
   ensure_disk_before_build
-  ensure_mirrors_selected
+  maybe_select_mirrors
   set +e
   docker compose build "$@"
   rc=$?
@@ -384,6 +473,15 @@ do_cleanup() {
   log "清理完成"
 }
 
+# ── 镜像源刷新（显式维护命令）──
+do_mirrors() {
+  log "清除镜像源缓存并重新测速（包含 Docker Hub registry mirror 配置）..."
+  clear_mirror_cache
+  ensure_docker_dns_config
+  DEPLOY_SELECT_MIRRORS_ON_BUILD=1 select_mirrors
+  log "镜像源刷新完成；后续 build/update 将复用缓存源，除非健康检查失败"
+}
+
 # ── 停止宿主机服务（首次迁移用）──
 do_migrate() {
   log "停止宿主机服务..."
@@ -416,6 +514,7 @@ case "$MODE" in
   backup)          check_docker; do_backup ;;
   cleanup)         check_docker; do_cleanup "${@:2}" ;;
   diagnose)        do_diagnose ;;
+  mirrors)         check_docker; do_mirrors ;;
   migrate)         do_migrate ;;
   all)
     check_docker
@@ -445,6 +544,7 @@ case "$MODE" in
     echo "  backup          备份数据库和 Redis 数据"
     echo "  cleanup [--dry-run] [--aggressive]  清理本项目资源（不影响其他项目）"
     echo "  diagnose        输出磁盘/资源诊断信息（不修改任何资源）"
+    echo "  mirrors         强制刷新镜像源缓存和 Docker Hub registry mirror"
     echo "  migrate         停止宿主机服务（首次迁移用）"
     echo "  all             构建 + 启动核心服务（首次部署）"
     echo ""
@@ -457,5 +557,6 @@ case "$MODE" in
     echo "  ./docker-deploy.sh check"
     echo "  ./docker-deploy.sh check backend"
     echo "  ./docker-deploy.sh logs backend"
+    echo "  ./docker-deploy.sh mirrors"
     ;;
 esac

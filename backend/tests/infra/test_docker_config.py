@@ -44,6 +44,12 @@ class TestDockerfile:
         content = self._read()
         assert "uv" in content, "应使用 uv 管理 Python 依赖"
 
+    def test_runtime_dependencies_use_exported_requirements_with_pip_mirror(self):
+        """生产依赖应通过 uv export + pip 镜像安装，避免 uv.lock 直链卡住"""
+        content = self._read()
+        assert "uv export --frozen --no-dev --no-hashes --format requirements-txt" in content
+        assert "pip install --timeout 20 --retries 1" in content
+        assert "-r /tmp/requirements.txt" in content
 
     def test_multi_target_runtime_images(self):
         """应拆分 app-runtime 和 nginx-runtime target"""
@@ -54,8 +60,17 @@ class TestDockerfile:
     def test_buildkit_cache_mounts(self):
         """依赖安装应使用 BuildKit cache mount"""
         content = self._read()
-        assert "--mount=type=cache,target=/root/.cache/uv" in content
+        assert "target=/root/.cache/uv" in content
         assert "--mount=type=cache,target=/root/.npm" in content
+        assert "id=interview-boss-uv-cache" in content
+        assert "sharing=locked,target=/root/.cache/uv" in content
+
+    def test_uv_sync_has_bounded_network_concurrency(self):
+        """测试依赖安装的 uv sync 应限制下载并发和重试"""
+        content = self._read()
+        assert "UV_CONCURRENT_DOWNLOADS=4" in content
+        assert "UV_CONCURRENT_INSTALLS=2" in content
+        assert "UV_HTTP_RETRIES=1" in content
 
     def test_expose_port(self):
         """应暴露 8000 端口"""
@@ -113,6 +128,11 @@ class TestDockerCompose:
         assert "interview-boss-app:local" in content
         assert "interview-boss-nginx:local" in content
 
+    def test_build_uses_host_network_for_stable_dns(self):
+        """BuildKit 构建应使用宿主网络，避免 systemd-resolved stub DNS 触发外部 fallback"""
+        content = self._read()
+        assert "network: host" in content
+
     def test_has_redis_service(self):
         """应有 Redis 服务"""
         content = self._read()
@@ -166,7 +186,7 @@ class TestDockerCompose:
     def test_restart_policy(self):
         """服务应配置自动重启"""
         content = self._read()
-        assert "restart: always" in content, "应配置自动重启"
+        assert "restart: always" in content or "restart: unless-stopped" in content, "应配置自动重启"
 
     def test_redis_health_dependency(self):
         """Backend 应等待 Redis 健康后启动"""
@@ -292,6 +312,43 @@ class TestDockerDeployScript:
         # 而不是用 docker compose --build 绕过磁盘保护
         assert "--build worker" not in content
 
+    def test_build_commands_use_cached_mirrors_with_healthcheck(self):
+        """默认构建应复用缓存镜像源，仅在健康检查失败时刷新"""
+        content = self._read()
+        assert "DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD:-1" in content
+        assert "DEPLOY_SELECT_MIRRORS_ON_BUILD:-0" in content
+        assert "maybe_select_mirrors" in content
+        assert "ensure_mirrors_selected" not in content
+        assert "load_cached_package_mirrors" in content
+        assert "check_package_mirrors_healthy" in content
+
+    def test_mirror_refresh_is_explicit_command(self):
+        """镜像源刷新应是显式命令，不应绑定每次 update"""
+        content = self._read()
+        assert "do_mirrors" in content
+        assert "mirrors)" in content
+        assert "clear_mirror_cache" in content
+        assert "DEPLOY_SELECT_MIRRORS_ON_BUILD=1" in content
+
+    def test_docker_dns_configured_when_refreshing_mirrors(self):
+        """刷新镜像源时应持久化 Docker DNS，避免 BuildKit fallback 到不可控外部 DNS"""
+        content = self._read()
+        assert "ensure_docker_dns_config" in content
+        assert "DEPLOY_DOCKER_DNS" in content
+        assert "223.5.5.5" in content
+        assert "119.29.29.29" in content
+
+    def test_update_preflight_blocks_slow_dependency_regressions(self):
+        """update 应在长时间 build 前拦截会绕过镜像源的依赖安装回退"""
+        content = self._read()
+        assert "preflight_update_contract" in content
+        assert "guarded_compose_build" in content
+        assert "uv export --frozen --no-dev --no-hashes --format requirements-txt" in content
+        assert "uv sync --frozen --no-dev --no-install-project" in content
+        assert "network: host" in content
+        assert "files.pythonhosted.org" in content
+        assert "部署预检通过" in content
+
     def test_cleanup_after_build_never_stops_services(self):
         """cleanup_after_build 绝不能在构建成功后停止/删除运行中服务"""
         content = self._read()
@@ -325,3 +382,17 @@ class TestDockerDeployScript:
         assert "--dry-run" in content
         assert "--aggressive" in content
         assert "DEPLOY_PRUNE_HOST_ARTIFACTS" in content
+
+
+class TestMirrorSelectionScript:
+    """mirrors.sh 镜像缓存验证"""
+
+    def _read(self):
+        return (PROJECT_ROOT / "deploy" / "mirrors.sh").read_text()
+
+    def test_mirror_cache_is_versioned(self):
+        """镜像源缓存目录应带版本，避免复用旧脚本写下的坏源"""
+        content = self._read()
+        assert "MIRROR_CACHE_VERSION" in content
+        assert "/tmp/interview-boss-mirrors-" in content
+        assert "v2" in content

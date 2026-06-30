@@ -21,7 +21,8 @@ fi
 
 # ── 配置 ──
 
-MIRROR_CACHE_DIR="${MIRROR_CACHE_DIR:-/tmp/interview-boss-mirrors}"
+MIRROR_CACHE_VERSION="${MIRROR_CACHE_VERSION:-v2}"
+MIRROR_CACHE_DIR="${MIRROR_CACHE_DIR:-/tmp/interview-boss-mirrors-${MIRROR_CACHE_VERSION}}"
 MIRROR_CACHE_TTL="${MIRROR_CACHE_TTL:-86400}"  # 24h
 
 # ── 镜像源候选池 ──
@@ -43,9 +44,9 @@ NPM_MIRRORS=(
 )
 
 PYPI_MIRRORS=(
+  "https://mirrors.cloud.tencent.com/pypi/simple/"
   "https://mirrors.aliyun.com/pypi/simple/"
   "https://pypi.tuna.tsinghua.edu.cn/simple/"
-  "https://mirrors.cloud.tencent.com/pypi/simple/"
   "https://mirrors.huaweicloud.com/repository/pypi/simple/"
   "https://pypi.mirrors.ustc.edu.cn/simple/"
 )
@@ -93,6 +94,11 @@ cache_set() {
   local value="$2"
   mkdir -p "$MIRROR_CACHE_DIR"
   echo "$value" > "$MIRROR_CACHE_DIR/$key"
+}
+
+cache_delete() {
+  local key="$1"
+  rm -f "$MIRROR_CACHE_DIR/$key" 2>/dev/null || true
 }
 
 # ── 测速函数 ──
@@ -198,6 +204,73 @@ pick_fastest() {
   # 写入缓存
   cache_set "$cache_key" "$best"
   echo "$best"
+}
+
+# 读取缓存中的 package manager 镜像源；缓存缺失时使用稳定默认值。
+# 这个函数不测速、不写 Docker daemon，适合每次 build 前调用以保持 layer cache key 稳定。
+load_cached_package_mirrors() {
+  NPM_MIRROR=$(cache_get "npm" 2>/dev/null || echo "${NPM_MIRRORS[0]}")
+  PYPI_MIRROR=$(cache_get "pypi" 2>/dev/null || echo "${PYPI_MIRRORS[0]}")
+  APT_MIRROR=$(cache_get "apt" 2>/dev/null || echo "${APT_MIRRORS[0]}")
+  APK_MIRROR=$(cache_get "apk" 2>/dev/null || echo "${APK_MIRRORS[0]}")
+  export NPM_MIRROR PYPI_MIRROR APT_MIRROR APK_MIRROR
+}
+
+# 快速健康检查当前 package manager 镜像源。
+# 只检查 Dockerfile 真正会用到的 npm / PyPI / apt，避免每次 build 做完整测速。
+check_package_mirrors_healthy() {
+  local timeout="${1:-2}"
+  local failed=0
+  local npm_url="${NPM_MIRROR%/}/"
+  local pypi_url="${PYPI_MIRROR%/}/pip/"
+  local apt_url="http://${APT_MIRROR}/debian/dists/bookworm/Release"
+  local t
+
+  t=$(test_mirror_speed "$npm_url" "$timeout")
+  if awk "BEGIN {exit !($t >= 999)}"; then
+    warn "npm 镜像源健康检查失败: $NPM_MIRROR"
+    failed=1
+  fi
+
+  t=$(test_mirror_speed "$pypi_url" "$timeout")
+  if awk "BEGIN {exit !($t >= 999)}"; then
+    warn "PyPI 镜像源健康检查失败: $PYPI_MIRROR"
+    failed=1
+  fi
+
+  t=$(test_mirror_speed "$apt_url" "$timeout")
+  if awk "BEGIN {exit !($t >= 999)}"; then
+    warn "Debian apt 镜像源健康检查失败: $APT_MIRROR"
+    failed=1
+  fi
+
+  [ "$failed" -eq 0 ]
+}
+
+select_package_mirrors() {
+  NPM_MIRROR=$(pick_fastest "npm" "/" 5 "${NPM_MIRRORS[@]}")
+  export NPM_MIRROR
+  log "npm 镜像源: $NPM_MIRROR"
+
+  PYPI_MIRROR=$(pick_fastest "pypi" "/simple/" 5 "${PYPI_MIRRORS[@]}")
+  export PYPI_MIRROR
+  log "PyPI 镜像源: $PYPI_MIRROR"
+
+  APT_MIRROR=$(pick_fastest "apt" "/debian/dists/bookworm/Release" 5 "${APT_MIRRORS[@]}")
+  export APT_MIRROR
+  log "Debian apt 镜像源: $APT_MIRROR"
+
+  APK_MIRROR=$(pick_fastest "apk" "/" 5 "${APK_MIRRORS[@]}")
+  export APK_MIRROR
+  log "Alpine apk 镜像源: $APK_MIRROR"
+}
+
+refresh_package_mirrors() {
+  cache_delete "npm"
+  cache_delete "pypi"
+  cache_delete "apt"
+  cache_delete "apk"
+  select_package_mirrors
 }
 
 # 验证镜像源是否真的能拉到镜像
@@ -393,25 +466,8 @@ select_mirrors() {
   update_buildkit_config "$best_docker_hub"
   log "Docker Hub 镜像源: $best_docker_hub"
 
-  # npm 镜像源
-  NPM_MIRROR=$(pick_fastest "npm" "/" 5 "${NPM_MIRRORS[@]}")
-  export NPM_MIRROR
-  log "npm 镜像源: $NPM_MIRROR"
-
-  # PyPI 镜像源
-  PYPI_MIRROR=$(pick_fastest "pypi" "/simple/" 5 "${PYPI_MIRRORS[@]}")
-  export PYPI_MIRROR
-  log "PyPI 镜像源: $PYPI_MIRROR"
-
-  # Debian apt 镜像源
-  APT_MIRROR=$(pick_fastest "apt" "/" 5 "${APT_MIRRORS[@]}")
-  export APT_MIRROR
-  log "Debian apt 镜像源: $APT_MIRROR"
-
-  # Alpine apk 镜像源
-  APK_MIRROR=$(pick_fastest "apk" "/" 5 "${APK_MIRRORS[@]}")
-  export APK_MIRROR
-  log "Alpine apk 镜像源: $APK_MIRROR"
+  # package manager 镜像源
+  select_package_mirrors
 
   log "镜像源测速完成"
 }
