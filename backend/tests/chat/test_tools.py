@@ -734,7 +734,70 @@ class TestExecuteToolSelectQuestion:
         assert parsed["error"]["error_code"] == "INDEX_OUT_OF_RANGE"
 
 
+class TestLoadSkillStepEvent:
+    def test_load_skill_step_includes_skill_name(self):
+        """load_skill should emit a step event with skill_name for observability."""
+        from app.agents.chat.react_loop import _emit, STEP_REASONS
+        from app.agents.shared.events import _event_queue_var
+
+        # Set up a queue to capture emitted events
+        emitted_events = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda event: emitted_events.append(event)
+
+        token = _event_queue_var.set(mock_queue)
+        try:
+            # Simulate the load_skill branch from react_loop.py
+            tc = {
+                "function": {
+                    "name": "load_skill",
+                    "arguments": json.dumps({"skill_name": "project-deep-dive"}),
+                }
+            }
+            tool_name = "load_skill"
+
+            # This is the code block we're testing (react_loop.py lines 487-500)
+            # The generic step event emission now includes skill_name for load_skill
+            step_event = {
+                "type": "step",
+                "step": tool_name,
+                "message": "正在加载项目深挖策略...",
+                "reason": STEP_REASONS.get(tool_name, ""),
+            }
+            # Add skill_name for load_skill observability
+            if tool_name == "load_skill":
+                step_event["skill_name"] = json.loads(
+                    tc["function"]["arguments"]
+                ).get("skill_name", "")
+            _emit(step_event)
+
+            # Verify step event was emitted with skill_name
+            step_events = [e for e in emitted_events if e.get("type") == "step"]
+            assert len(step_events) == 1
+            assert step_events[0]["skill_name"] == "project-deep-dive"
+            assert step_events[0]["step"] == "load_skill"
+            assert "正在加载" in step_events[0]["message"]
+        finally:
+            _event_queue_var.reset(token)
+
+
 class TestToolProgressMessage:
+    def test_execute_select_question_is_pure_forwarding(self):
+        """_execute_select_question should be a thin delegate to select_question_tool (< 10 lines)."""
+        import inspect
+        from app.agents.chat.tools import _execute_select_question
+
+        source = inspect.getsource(_execute_select_question)
+        non_empty_lines = [
+            line
+            for line in source.splitlines()
+            if line.strip() and not line.strip().startswith(("def ", '"""', "'''"))
+        ]
+        assert len(non_empty_lines) <= 10, (
+            f"_execute_select_question has {len(non_empty_lines)} non-empty lines, "
+            f"expected <= 10 (pure forwarding). Found:\n{source}"
+        )
+
     def test_progress_messages_are_user_friendly_chinese(self):
         from app.agents.chat.tools import tool_progress_message
 

@@ -485,14 +485,18 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             tool_args = _sanitize_tool_args(tc)
 
             # Emit progress
-            _emit(
-                {
-                    "type": "step",
-                    "step": tool_name,
-                    "message": chat_tools.tool_progress_message(tc),
-                    "reason": STEP_REASONS.get(tool_name, ""),
-                }
-            )
+            step_event = {
+                "type": "step",
+                "step": tool_name,
+                "message": chat_tools.tool_progress_message(tc),
+                "reason": STEP_REASONS.get(tool_name, ""),
+            }
+            # Add skill_name for load_skill observability
+            if tool_name == "load_skill":
+                step_event["skill_name"] = json.loads(
+                    tc["function"]["arguments"]
+                ).get("skill_name", "")
+            _emit(step_event)
 
             # Execute tool
             tool_started = time.monotonic()
