@@ -18,7 +18,7 @@
       <ReasoningTimeline
         v-if="message.metadata?.steps?.length || message.metadata?.thinking"
         :is-streaming="false"
-        :content="message.metadata?.thinking || ''"
+        :content="thinkingContent"
         :duration="message.metadata?.thinking_duration || 0"
         :steps="message.metadata?.steps || []"
       />
@@ -234,6 +234,24 @@ const retrievedQuestions = computed(() => {
   const basisIds = new Set((m?.selected_basis_questions || []).map(q => q.id))
   if (m?.selected_question?.id) basisIds.add(m.selected_question.id)
   return retrieved.filter(q => !basisIds.has(q.id))
+})
+
+const thinkingContent = computed(() => {
+  const thinking = props.message.metadata?.thinking
+  if (!thinking) return ''
+
+  // Old format: string
+  if (typeof thinking === 'string') return thinking
+
+  // New format: array of chunks
+  if (Array.isArray(thinking)) {
+    return thinking
+      .map(t => t.chunks?.join('') || '')
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  return ''
 })
 
 const renderedContent = computed(() => {
