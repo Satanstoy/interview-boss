@@ -1006,60 +1006,189 @@ class TestDoneEventMetadataPersistence:
 class TestThinkingMetadataContentField:
     """Test thinking metadata collection supports content field."""
 
-    def test_thinking_metadata_collects_content_field(self):
-        """Test that thinking events with 'content' field are collected."""
-        events = [
+    async def test_thinking_metadata_collects_content_field(self):
+        """Thinking events with 'content' field should be collected via pipeline."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
             {"type": "thinking_start", "data": {}},
             {"type": "thinking", "content": "思考内容1"},
             {"type": "thinking", "content": "思考内容2"},
             {"type": "thinking_done", "data": {}},
+            {"type": "chunk", "content": "Answer"},
             {"type": "done", "metadata": {}},
         ]
 
-        # Simulate the collection logic from pipeline.py
-        collected_thinking = []
-        for event in events:
-            if event["type"] == "thinking":
-                chunk = event.get("content") or event.get("data", {}).get("text", "")
-                if chunk:
-                    collected_thinking.append(chunk)
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
 
-        assert len(collected_thinking) == 2
-        assert collected_thinking[0] == "思考内容1"
-        assert collected_thinking[1] == "思考内容2"
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "thinking" in metadata
+        assert len(metadata["thinking"]) == 1
+        chunks = metadata["thinking"][0].get("chunks", [])
+        assert len(chunks) == 2
+        assert chunks[0] == "思考内容1"
+        assert chunks[1] == "思考内容2"
 
-    def test_thinking_metadata_fallback_to_data_text(self):
-        """Test that thinking events fallback to data.text when content is empty."""
-        events = [
+    async def test_thinking_metadata_fallback_to_data_text(self):
+        """Thinking events should fallback to data.text when content is absent."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "thinking_start", "data": {}},
             {"type": "thinking", "data": {"text": "思考内容1"}},
             {"type": "thinking", "data": {"text": "思考内容2"}},
+            {"type": "thinking_done", "data": {}},
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
         ]
 
-        collected_thinking = []
-        for event in events:
-            chunk = event.get("content") or event.get("data", {}).get("text", "")
-            if chunk:
-                collected_thinking.append(chunk)
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
 
-        assert len(collected_thinking) == 2
-        assert collected_thinking[0] == "思考内容1"
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "thinking" in metadata
+        chunks = metadata["thinking"][0].get("chunks", [])
+        assert len(chunks) == 2
+        assert chunks[0] == "思考内容1"
+        assert chunks[1] == "思考内容2"
 
-    def test_thinking_metadata_skips_empty_chunks(self):
-        """Test that empty thinking chunks are not collected."""
-        events = [
+    async def test_thinking_metadata_skips_empty_chunks(self):
+        """Empty thinking chunks should not be collected."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "thinking_start", "data": {}},
             {"type": "thinking", "content": ""},
             {"type": "thinking", "data": {"text": ""}},
             {"type": "thinking", "content": "有效内容"},
+            {"type": "thinking_done", "data": {}},
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
         ]
 
-        collected_thinking = []
-        for event in events:
-            chunk = event.get("content") or event.get("data", {}).get("text", "")
-            if chunk:
-                collected_thinking.append(chunk)
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
 
-        assert len(collected_thinking) == 1
-        assert collected_thinking[0] == "有效内容"
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "thinking" in metadata
+        chunks = metadata["thinking"][0].get("chunks", [])
+        assert len(chunks) == 1
+        assert chunks[0] == "有效内容"
 
 
 # ── Helper ─────────────────────────────────────────────────

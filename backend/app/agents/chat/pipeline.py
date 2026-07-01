@@ -30,8 +30,6 @@ from app.services.memory_recall_service import (
     classify_and_recall,
     classify_and_recall_fast,
 )
-from app.mcp_server.session import save_mcp_session
-
 # Re-exports from submodules (backward compatibility for tests and graph.py)
 from app.agents.chat.react_loop import (  # noqa: F401
     MAX_REACT_STEPS,
@@ -126,7 +124,6 @@ def _initial_state(
 ) -> ChatState:
     return {
         "conversation_id": conversation_id,
-        "session_id": conversation_id,
         "user_id": user_id,
         "user_message": user_message,
         "mode": mode,
@@ -225,11 +222,7 @@ async def _step_classify(state: ChatState) -> ChatState:
 
     is_first_message = len(state.get("message_history", [])) <= 1
     if is_first_message:
-        _step(
-            "understanding",
-            "正在理解你的问题...",
-            reason=STEP_REASONS["understanding_first"],
-        )
+        _step("understanding", "正在理解你的问题...", reason=STEP_REASONS["understanding_first"])
         (
             intent,
             memory_ids,
@@ -243,11 +236,7 @@ async def _step_classify(state: ChatState) -> ChatState:
             recent_context=recent_context,
         )
     else:
-        _step(
-            "understanding",
-            "正在分析你的回答...",
-            reason=STEP_REASONS["understanding_follow"],
-        )
+        _step("understanding", "正在分析你的回答...", reason=STEP_REASONS["understanding_follow"])
         (
             intent,
             memory_ids,
@@ -439,14 +428,6 @@ async def run_chat(
 
             # Persist/clear cross-turn skills so turn-scoped modes do not stick.
             await _persist_active_skills(state)
-
-            # Fix 3: persist MCP session for internal ReAct path
-            session_id = state.get("session_id") or state.get("conversation_id")
-            if session_id:
-                try:
-                    await asyncio.to_thread(save_mcp_session, session_id, dict(state))
-                except Exception:
-                    logger.debug("Failed to persist MCP session (non-fatal)")
 
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
