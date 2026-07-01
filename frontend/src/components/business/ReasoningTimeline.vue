@@ -40,7 +40,10 @@
             >
               <CheckCircle2 v-if="step.done !== false" :size="12" class="text-emerald-500 shrink-0" />
               <Loader2 v-else :size="12" class="animate-spin text-muted-foreground shrink-0" />
-              <span class="text-muted-foreground flex-1">{{ step.message }}</span>
+              <span class="text-muted-foreground flex-1">
+                {{ step.message }}
+                <span v-if="step.skill_name" class="text-primary ml-1">({{ step.skill_name }})</span>
+              </span>
               <ChevronDown
                 v-if="step.reason || step.insight"
                 :size="12"
