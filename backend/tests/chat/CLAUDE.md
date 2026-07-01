@@ -21,6 +21,7 @@ Chatbot 功能测试：agent 流程、记忆、预算、路由。
 | `test_basis_parser.py` / `test_basis_tracking.py` | basis 解析与追踪 |
 | `test_rag_quality.py` / `test_heuristic_rerank.py` / `test_skill_guided_rerank.py` | RAG 质量与重排 |
 | `test_chat_tools_real_e2e_verifier.py` | 真实 chat tools E2E verifier 的事件解析和 case 期望矩阵 |
+| `test_interview_agent_real_e2e_verifier.py` | 真实多轮模拟面试 verifier 的 opt-in guard、候选人 profile、SSE 轮次解析和质量判定 |
 
 ## 运行
 

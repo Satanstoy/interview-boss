@@ -9,6 +9,7 @@
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
 | `verify_chat_tools_real_e2e.py` | 真实后端 + 真实 LLM 的 chat tools 稳定性手动 E2E 验证 |
+| `verify_interview_agent_real_e2e.py` | 真实后端面试官 + 轻量 LLM 候选人的多轮模拟面试质量验证 |
 | `verify_compaction_*.py` / `evaluate_clustering.py` | 聚类/孤岛碎片整理的真实库验证和质量评估 |
 | `fix_sources_frequency.py` | 来源数量/frequency 修复脚本 |
 
@@ -29,11 +30,19 @@ docker compose exec backend uv run python backend/scripts/backfill_embeddings.py
 # 真实 chat tools E2E（会调用真实 LLM；默认给 sj 签发短期 token，使用 sj 的 LLM 配置）
 RUN_REAL_CHAT_E2E=1 \
   docker compose exec backend uv run python backend/scripts/verify_chat_tools_real_e2e.py
+
+# 真实多轮模拟面试 E2E（会调用真实 LLM；候选人 agent 从 CANDIDATE_* 或系统 OPENAI_* env 读取配置）
+RUN_REAL_INTERVIEW_E2E=1 \
+  docker compose exec backend uv run python backend/scripts/verify_interview_agent_real_e2e.py
 ```
 
 ## Chat tools E2E 观测
 
 `verify_chat_tools_real_e2e.py` 会解析 Chat SSE 中拆分后的 `selected_question` 和 `question_plan` 事件，同时保留旧版 `done.metadata` fallback，用于区分工具调用、选题绑定、计划生成、repair/fallback 和内部标记泄露。对必须调工具的场景，verifier 使用 case 期望矩阵要求出现指定工具 step，避免 selected/question_plan 掩盖缺失工具调用。
+
+## Interview agent E2E 观测
+
+`verify_interview_agent_real_e2e.py` 通过真实 `/api/chat` SSE 调用系统面试官，同时用轻量候选人 LLM actor 根据简历和能力画像作答。脚本只从环境变量或参数读取候选人 LLM 配置，默认拒绝运行，必须设置 `RUN_REAL_INTERVIEW_E2E=1`。候选人侧变量优先级为 `CANDIDATE_OPENAI_API_KEY` / `CANDIDATE_OPENAI_BASE_URL` / `CANDIDATE_LLM_MODEL`，缺省回退到系统 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `LLM_MODEL_NAME`。默认清理测试 conversation，传 `--keep-conversation` 才保留。
 
 ## 安全警告
 
