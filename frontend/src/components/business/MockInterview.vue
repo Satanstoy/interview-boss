@@ -70,6 +70,54 @@
           </div>
         </div>
 
+        <!-- Interview difficulty + Experience row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Interview difficulty -->
+          <div>
+            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z"/></svg>
+              面试难度
+            </label>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="opt in interviewDifficultyOptions" :key="opt.value"
+                @click="interviewDifficulty = opt.value"
+                class="text-xs px-3 py-1.5 rounded-full border transition-colors"
+                :class="interviewDifficulty === opt.value ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+
+          <!-- Experience selection -->
+          <div>
+            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              面经来源（可选）
+            </label>
+            <select
+              v-model="experienceId"
+              class="w-full text-xs px-3 py-2 rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option :value="null">不使用面经</option>
+              <option v-for="exp in experiences" :key="exp.id" :value="exp.id">
+                {{ exp.company }} - {{ exp.round }} ({{ exp.question_count }}题)
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Model selection (optional override) -->
+        <div>
+          <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+            <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            模型（留空使用全局默认）
+          </label>
+          <ModelSelectField
+            v-model="selectedModel"
+            placeholder="使用全局默认模型"
+          />
+        </div>
+
         <!-- Start button -->
         <Button variant="default" class="w-full py-3 text-base" @click="startQuiz">
           <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -88,6 +136,10 @@
           <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ selectedDifficultyLabel }}</Badge>
           <span class="text-muted-foreground/50">|</span>
           <span class="text-muted-foreground">共 {{ mockQuestions.length }} 题</span>
+          <template v-if="selectedModel">
+            <span class="text-muted-foreground/50">|</span>
+            <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label font-mono">{{ selectedModel }}</Badge>
+          </template>
           <template v-if="quizSummary">
             <span class="text-muted-foreground">|</span>
             <span class="text-muted-foreground">已答 {{ quizSummary.answered }}/{{ quizSummary.total }}</span>
@@ -334,7 +386,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
@@ -342,6 +394,8 @@ import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnsw
 import { sanitizeAgainstInjection, validateNumber } from '@/utils/validate.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
+import ModelSelectField from '@/components/business/ModelSelectField.vue'
+import { getExperiences } from '@/services/interviewApi.js'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()
@@ -357,15 +411,36 @@ const difficultyOptions = [
   { value: 'L3', label: 'L3-困难' }
 ]
 
+const interviewDifficultyOptions = [
+  { value: 'junior', label: '初级' },
+  { value: 'mid', label: '中级' },
+  { value: 'senior', label: '高级' },
+  { value: 'staff_plus', label: '专家' }
+]
+
 // Config state
 const selectedCat = ref('')
 const selectedDifficulty = ref('')
 const questionCount = ref(10)
+const selectedModel = ref('')
+const interviewDifficulty = ref('mid')
+const experienceId = ref(null)
+const experiences = ref([])
 
 // Quiz state
 const quizStarted = ref(false)
 const isLoading = ref(false)
 const mockQuestions = ref([])
+
+// 加载面经列表
+onMounted(async () => {
+  try {
+    const response = await getExperiences()
+    experiences.value = response.data || []
+  } catch (error) {
+    console.error('Failed to load experiences:', error)
+  }
+})
 
 const selectedDifficultyLabel = computed(() =>
   difficultyOptions.find(o => o.value === selectedDifficulty.value)?.label || '随机'
@@ -465,7 +540,8 @@ const handleEvaluate = async (q) => {
       question_id: q.id,
       question_text: q.question,
       user_answer: q._userAnswer,
-      reference_answer: q.ai_answer
+      reference_answer: q.ai_answer,
+      model: selectedModel.value || undefined
     })
     q._evaluation = data
     q.attempt_count = (q.attempt_count || 0) + 1

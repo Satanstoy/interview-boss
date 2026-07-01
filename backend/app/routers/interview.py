@@ -4,7 +4,7 @@ import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
-from app.core.auth import get_admin_user
+from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.services.submit_service import background_generate_answer
 from app.services.pipeline import (
@@ -16,6 +16,48 @@ from app.services.pipeline import (
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
+
+
+@router.get("/api/interview/experiences")
+async def list_experiences(user: dict = Depends(get_current_user)):
+    """获取可用的面经列表（用于模拟面试选择）"""
+
+    def _query():
+        with get_db_connection() as conn:
+            deleted_at_clause = "AND deleted_at IS NULL" if _has_column(conn, "interview", "deleted_at") else ""
+            rows = conn.execute(
+                f"""
+                SELECT id, company, round, job_position, difficulty, questions_list
+                FROM interview
+                WHERE status = 'approved'
+                  AND questions_list IS NOT NULL
+                  AND questions_list != ''
+                  {deleted_at_clause}
+                  AND (owner_id = ? OR owner_id IS NULL)
+                ORDER BY company, round
+                """,
+                (user["id"],),
+            ).fetchall()
+            return rows
+
+    rows = await run_db(_query)
+    result = []
+    for row in rows:
+        questions = [q.strip() for q in str(row["questions_list"] or "").splitlines() if q.strip()]
+        result.append({
+            "id": row["id"],
+            "company": row["company"] or "未知公司",
+            "round": row["round"] or "未知轮次",
+            "job_position": row["job_position"] or "",
+            "difficulty": row["difficulty"] or "",
+            "question_count": len(questions),
+        })
+    return {"status": "success", "data": result}
+
+
+def _has_column(conn, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
 
 
 @router.post("/api/interview/{interview_id}/re-process")
