@@ -365,7 +365,27 @@ DEFAULT_COVERAGE_THRESHOLDS = {
         InterviewPhase.SYSTEM_DESIGN: 1,
         InterviewPhase.BEHAVIORAL: 1,
     },
-    # ... 其他岗位和难度
+    ("agent_llm", "senior"): {
+        InterviewPhase.PROJECT_FOLLOWUP: 6,
+        InterviewPhase.KNOWLEDGE_PROBE: 3,
+        InterviewPhase.ALGORITHM_CODING: 1,
+        InterviewPhase.SYSTEM_DESIGN: 1,
+        InterviewPhase.BEHAVIORAL: 1,
+    },
+    ("agent_llm", "staff_plus"): {
+        InterviewPhase.PROJECT_FOLLOWUP: 6,
+        InterviewPhase.KNOWLEDGE_PROBE: 2,
+        InterviewPhase.ALGORITHM_CODING: 1,
+        InterviewPhase.SYSTEM_DESIGN: 2,
+        InterviewPhase.BEHAVIORAL: 1,
+    },
+    ("backend", "mid"): {
+        InterviewPhase.PROJECT_FOLLOWUP: 3,
+        InterviewPhase.KNOWLEDGE_PROBE: 5,
+        InterviewPhase.ALGORITHM_CODING: 2,
+        InterviewPhase.SYSTEM_DESIGN: 1,
+        InterviewPhase.BEHAVIORAL: 1,
+    },
 }
 
 
