@@ -19,6 +19,13 @@ logger = logging.getLogger("interview-boss")
 _MAX_CONSECUTIVE_SAME_QUESTION = 2
 _MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION = 4
 _MAX_LEDGER_CAT2_COUNT = 2
+_BIG_TECH_PHASES = (
+    "project_followup",
+    "knowledge_probe",
+    "algorithm_coding",
+    "system_design",
+    "behavioral",
+)
 
 
 @dataclass
@@ -85,6 +92,11 @@ def _infer_question_type(question: dict | None) -> str:
         str(question.get(field) or "")
         for field in ("question", "cat1", "cat2", "tags")
     )
+    normalized = text.lower()
+    if "system_design" in normalized or re.search(r"(系统设计|架构设计|高可用|扩展性|scalability)", text, re.I):
+        return "system_design"
+    if "behavioral" in normalized or re.search(r"(行为面|协作|冲突|失败|复盘|STAR|影响力)", text, re.I):
+        return "behavioral"
     if re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru|滑动窗口)", text, re.I):
         return "algorithm_coding"
     if re.search(r"(项目|架构|系统设计|Agent|RAG|LangGraph)", text, re.I):
@@ -92,6 +104,15 @@ def _infer_question_type(question: dict | None) -> str:
     if re.search(r"(Redis|MySQL|TCP|HTTP|缓存|锁|线程|进程|索引)", text, re.I):
         return "knowledge_probe"
     return "general"
+
+
+def _canonical_interview_phase(question_type: str | None) -> str:
+    qtype = (question_type or "").strip().lower()
+    if qtype in {"project_followup", "knowledge_probe", "algorithm_coding", "system_design"}:
+        return qtype
+    if qtype in {"hr", "behavioral", "soft_skills", "hr_soft_skills"}:
+        return "behavioral"
+    return "other"
 
 
 def _public_question_from_note(
@@ -168,6 +189,92 @@ def _build_interview_ledger(state: ChatState) -> InterviewLedger:
                             ledger.record_question(item)
 
     return ledger
+
+
+def _big_tech_phase_counts(ledger: InterviewLedger) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for question_type, count in ledger.question_type_counts.items():
+        phase = _canonical_interview_phase(question_type)
+        if phase in _BIG_TECH_PHASES:
+            counts[phase] += count
+    return counts
+
+
+def _big_tech_next_focus(state: ChatState) -> dict:
+    """Return runtime full-loop guidance derived from the asked-question ledger."""
+    ledger = _build_interview_ledger(state)
+    phase_counts = _big_tech_phase_counts(ledger)
+    asked_count = sum(phase_counts.values())
+    message_count = len(state.get("message_history", []) or [])
+
+    if phase_counts["project_followup"] < 2:
+        focus = {
+            "phase": "project_followup",
+            "tool": "search_questions",
+            "question_type": "project_followup",
+            "reason": "先确认候选人真实项目贡献和架构取舍",
+        }
+    elif phase_counts["knowledge_probe"] < 1:
+        focus = {
+            "phase": "knowledge_probe",
+            "tool": "search_questions",
+            "question_type": "knowledge_probe",
+            "reason": "从项目切到相关基础知识，验证不是只会背项目",
+        }
+    elif asked_count >= 3 and phase_counts["algorithm_coding"] < 1:
+        focus = {
+            "phase": "algorithm_coding",
+            "tool": "draw_questions",
+            "question_type": "algorithm_coding",
+            "reason": "大厂技术面通常需要至少一次 coding/算法信号",
+        }
+    elif asked_count >= 5 and phase_counts["system_design"] < 1:
+        focus = {
+            "phase": "system_design",
+            "tool": "draw_questions",
+            "question_type": "system_design",
+            "reason": "补充系统设计/架构权衡信号",
+        }
+    elif (asked_count >= 6 or message_count >= 14) and phase_counts["behavioral"] < 1:
+        focus = {
+            "phase": "behavioral",
+            "tool": "draw_questions",
+            "question_type": "hr",
+            "reason": "补充协作、冲突、失败复盘和影响力信号",
+        }
+    else:
+        focus = {
+            "phase": "project_followup",
+            "tool": "search_questions",
+            "question_type": "project_followup",
+            "reason": "继续围绕候选人经历做有依据的深挖",
+        }
+
+    return {
+        "asked_count": asked_count,
+        "message_count": message_count,
+        "phase_counts": {phase: phase_counts.get(phase, 0) for phase in _BIG_TECH_PHASES},
+        "next_focus": focus,
+    }
+
+
+def _build_big_tech_interview_harness_prompt(state: ChatState) -> str:
+    guidance = _big_tech_next_focus(state)
+    counts = guidance["phase_counts"]
+    focus = guidance["next_focus"]
+    coverage = ", ".join(f"{phase}={counts[phase]}" for phase in _BIG_TECH_PHASES)
+    return (
+        "<interview_harness>\n"
+        "风格：大厂 full-loop 技术面。不要把面试做成连续抽题；每一轮都要服务于一个评估信号。\n"
+        f"当前覆盖：{coverage}; asked_count={guidance['asked_count']}.\n"
+        f"下一优先维度：{focus['phase']}，推荐工具：{focus['tool']}，"
+        f"推荐 question_type：{focus['question_type']}，原因：{focus['reason']}。\n"
+        "必须评估的信号：clarification（澄清问题）、problem solving、coding、testing、"
+        "system_design、trade-off、behavioral、communication。\n"
+        "节奏要求：项目深挖、理论、coding、system design、behavioral 穿插推进；"
+        "同一维度不要连续超过 3 轮；候选人回答短时先澄清，回答完整后再进入下一评估维度。\n"
+        "</interview_harness>"
+    )
 
 
 def _should_create_question_plan(state: ChatState) -> bool:

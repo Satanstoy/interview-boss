@@ -105,6 +105,22 @@ class TestToolSchemas:
         assert "project-deep-dive" in skill_desc
         assert "algorithm-coding" in skill_desc
 
+    def test_interview_runtime_skills_encode_big_tech_full_loop(self):
+        """Always-active interview skills should describe full-loop interview signals."""
+        from app.agents.chat.skills import get_default_registry
+
+        registry = get_default_registry()
+        rhythm = registry.get("interview-rhythm").get_instruction()
+        tool_use = registry.get("interview-tool-use").get_instruction()
+        combined = f"{rhythm}\n{tool_use}"
+
+        assert "full-loop" in combined
+        assert "coding" in combined
+        assert "system design" in combined
+        assert "behavioral" in combined
+        assert "STAR" in combined
+        assert "testing" in combined
+
 
 class TestToolGatewayModels:
     def test_normalize_search_question_item_prefers_combined_score(self):

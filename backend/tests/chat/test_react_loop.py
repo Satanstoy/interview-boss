@@ -732,6 +732,37 @@ class TestBuildToolStrategy:
         assert "必须" in strategy
         assert "question_plan" in strategy
 
+    def test_missing_coding_phase_prioritizes_coding_draw_over_more_project_search(self):
+        """Full-loop harness should move to coding when project/RAG has saturated."""
+        from app.agents.chat.nodes import _build_tool_strategy
+
+        state = {
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+            "active_skills": ["interview-rhythm"],
+            "session_notes": "\n".join(
+                [
+                    "[asked] 项目/Agent #11 [project_followup]: 你这个 Agent 项目整体架构是什么？",
+                    "[asked] 项目/Agent #12 [project_followup]: query 改写为什么这么做？",
+                    "[asked] 理论/RAG #13 [knowledge_probe]: RAG 召回率怎么评估？",
+                    "[asked] 理论/RAG #14 [knowledge_probe]: rerank 的延迟怎么控制？",
+                ]
+            ),
+            "message_history": [
+                {"role": "assistant", "content": "技术问题"}
+                if i % 2 == 0
+                else {"role": "user", "content": "候选人回答"}
+                for i in range(10)
+            ],
+        }
+
+        strategy = _build_tool_strategy(state)
+
+        assert "draw_questions" in strategy
+        assert "algorithm_coding" in strategy
+        assert "search_questions" not in strategy
+
     def test_interview_question_answer_incomplete_suggests_wait(self):
         """Should suggest waiting when user hasn't finished answering."""
         from app.agents.chat.nodes import _build_tool_strategy
@@ -1372,6 +1403,43 @@ class TestBuildReactSystemPrompt:
         prompt = build_react_system_prompt(state)
         assert "<tool_strategy>" in prompt
         assert "search_questions" in prompt
+
+    def test_injects_big_tech_interview_harness(self):
+        """System prompt should expose full-loop coverage guidance to the agent."""
+        from app.agents.chat.nodes import build_react_system_prompt
+
+        state = {
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "\n".join(
+                [
+                    "[asked] 项目/Agent #11 [project_followup]: 你这个 Agent 项目整体架构是什么？",
+                    "[asked] 理论/RAG #12 [knowledge_probe]: RAG 召回率怎么评估？",
+                ]
+            ),
+            "memory_summaries": [],
+            "compressed_context": None,
+            "active_skills": ["interview-rhythm"],
+            "intent": "interview_question",
+            "answer_complete": True,
+            "retrieved_questions": [],
+            "message_history": [
+                {"role": "assistant", "content": "技术问题"}
+                if i % 2 == 0
+                else {"role": "user", "content": "候选人回答"}
+                for i in range(8)
+            ],
+        }
+
+        prompt = build_react_system_prompt(state)
+
+        assert "<interview_harness>" in prompt
+        assert "大厂 full-loop" in prompt
+        assert "coding" in prompt
+        assert "system_design" in prompt
+        assert "behavioral" in prompt
+        assert "clarification" in prompt
+        assert "trade-off" in prompt
 
     def test_no_tool_strategy_for_chat(self):
         """build_react_system_prompt should inject no-tools strategy for chat."""

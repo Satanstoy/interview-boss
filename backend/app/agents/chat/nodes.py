@@ -9,7 +9,11 @@ from app.services.llm import stream_llm_messages, _call_llm_with_retry, _extract
 from app.services import chat_service
 from app.services.fts_service import search_questions_fts
 from app.agents.chat.state import ChatState
-from app.agents.chat.question_plan import _should_require_bank_question
+from app.agents.chat.question_plan import (
+    _big_tech_next_focus,
+    _build_big_tech_interview_harness_prompt,
+    _should_require_bank_question,
+)
 from app.agents.chat.prompts import (
     INTERVIEW_SYSTEM_PROMPT_JD,
     INTERVIEW_SYSTEM_PROMPT_PRACTICE,
@@ -1644,10 +1648,23 @@ def _build_tool_strategy(state: ChatState) -> str:
     has_retrieved = bool(state.get("retrieved_questions"))
     active_skills = state.get("active_skills", [])
     is_deep_dive = "project-deep-dive" in active_skills
+    harness_focus = _big_tech_next_focus(state).get("next_focus", {})
 
     requires_bank_question = _should_require_bank_question(state)
 
     if intent == "interview_question" and answer_complete and not has_retrieved and requires_bank_question:
+        if harness_focus.get("tool") == "draw_questions":
+            question_type = harness_focus.get("question_type") or "new_question"
+            phase = harness_focus.get("phase") or question_type
+            reason = harness_focus.get("reason") or "补齐面试覆盖维度"
+            return (
+                "<tool_strategy>\n"
+                "当前状态：用户刚回答完面试问题，且大厂 full-loop 覆盖存在缺口。\n"
+                f"必须：调用 draw_questions(question_type=\"{question_type}\") 进入 {phase} 维度；"
+                "不要继续围绕同一项目或同一 RAG 主题检索追问。\n"
+                f"原因：{reason}。\n"
+                "</tool_strategy>"
+            )
         if is_deep_dive:
             return (
                 "<tool_strategy>\n"
@@ -1807,6 +1824,9 @@ def build_react_system_prompt(state: ChatState) -> str:
     tool_strategy = _build_tool_strategy(state)
     if tool_strategy:
         parts.append(tool_strategy)
+
+    # Layer 5.3: Runtime interview harness.
+    parts.append(_build_big_tech_interview_harness_prompt(state))
 
     # Layer 5.5: Always-active and active skill instructions.
     skill_registry = get_default_registry()
