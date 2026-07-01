@@ -522,16 +522,16 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "select_question",
                 "load_skill",
             ):
-                state.setdefault("tool_steps", []).append(
-                    {
-                        "step": tool_name,
-                        "tool_name": tool_name,
-                        "message": chat_tools.tool_progress_message(tc),
-                        "elapsed_ms": tool_elapsed_ms,
-                        "result_count": tool_summary.get("result_count", 0),
-                        "fallback_used": tool_summary.get("fallback_used", False),
-                    }
-                )
+                step_data = {
+                    "step": tool_name,
+                    "tool_name": tool_name,
+                    "message": chat_tools.tool_progress_message(tc),
+                    "elapsed_ms": tool_elapsed_ms,
+                    "result_count": tool_summary.get("result_count", 0),
+                    "fallback_used": tool_summary.get("fallback_used", False),
+                }
+                state.setdefault("tool_steps", []).append(step_data)
+                _emit({"type": "tool_step", "data": step_data})
 
             if tool_name in ("search_questions", "draw_questions"):
                 search_or_draw_called = True

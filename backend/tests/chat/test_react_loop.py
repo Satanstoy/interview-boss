@@ -352,6 +352,109 @@ class TestReactLoop:
         # LLM called twice (once for tool, once for answer)
         assert mock_llm_with_tools.call_count == 2
 
+    async def test_tool_execution_emits_tool_step_event(self):
+        """_react_loop should emit tool_step events via _emit after tool execution.
+
+        Verifies the production code path where tool_step events are emitted
+        through the event queue (not just stored in state["tool_steps"]).
+        """
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "Give me a JVM question",
+            "model": "gpt-4",
+        }
+
+        tc_search = _tc("search_questions", {"keywords": ["JVM"]})
+
+        mock_llm_with_tools = AsyncMock(
+            side_effect=[
+                {
+                    "content": None,
+                    "tool_calls": [tc_search],
+                    "finish_reason": "tool_calls",
+                },
+                {
+                    "content": "Here is your question",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ]
+        )
+
+        tool_result = json.dumps(
+            {
+                "ok": True,
+                "items": [{"id": 10, "question": "Explain JVM memory model"}],
+                "metadata": {},
+            }
+        )
+
+        async def _mock_execute(tc, st):
+            st["retrieved_questions"] = [
+                {"id": 10, "question": "Explain JVM memory model", "sources": []}
+            ]
+            return tool_result
+
+        # Set up mock event queue to capture _emit side-effect events
+        emitted: list[dict] = []
+        mock_queue = MagicMock()
+        mock_queue.put_nowait = lambda e: emitted.append(e)
+
+        token = _event_queue_var.set(mock_queue)
+        try:
+            with (
+                patch(
+                    "app.agents.chat.nodes.build_react_system_prompt",
+                    return_value="Interviewer prompt.",
+                ),
+                patch(
+                    "app.services.llm.llm_with_tools",
+                    mock_llm_with_tools,
+                ),
+                patch(
+                    "app.agents.chat.tools.execute_tool",
+                    side_effect=_mock_execute,
+                ),
+                patch(
+                    "app.services.llm.stream_llm_messages",
+                    side_effect=lambda *a, **kw: _mock_stream_strings(
+                        "Here is your question"
+                    ),
+                ),
+            ):
+                yielded = []
+                async for event in _react_loop(state):
+                    yielded.append(event)
+        finally:
+            _event_queue_var.reset(token)
+
+        # Verify tool_step event was emitted via _emit
+        tool_step_events = [e for e in emitted if e.get("type") == "tool_step"]
+        assert len(tool_step_events) == 1, (
+            f"Expected 1 tool_step event, got {len(tool_step_events)}. "
+            f"Emitted types: {[e.get('type') for e in emitted]}"
+        )
+
+        tool_step = tool_step_events[0]
+        data = tool_step["data"]
+        assert data["tool_name"] == "search_questions"
+        assert data["step"] == "search_questions"
+        assert "message" in data
+        assert "elapsed_ms" in data
+        assert isinstance(data["elapsed_ms"], int)
+        assert data["elapsed_ms"] >= 0
+        assert "result_count" in data
+        assert isinstance(data["result_count"], int)
+        assert "fallback_used" in data
+        assert isinstance(data["fallback_used"], bool)
+
+        # Verify tool_steps also stored in state
+        assert "tool_steps" in state
+        assert len(state["tool_steps"]) == 1
+        assert state["tool_steps"][0]["tool_name"] == "search_questions"
+
     async def test_tool_envelope_emits_retrieved_and_prunes_message_output(self):
         """ReAct should understand structured tool envelopes and keep LLM messages compact."""
         from app.agents.chat.pipeline import _react_loop
