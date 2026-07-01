@@ -44,7 +44,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `error_code` | `string` | 错误码（如 `NO_CANDIDATE`、`NEGATIVE_TERM_FILTERED`） |
+| `error_code` | `string` | 错误码（如 `NO_CANDIDATES`、`INDEX_OUT_OF_RANGE`、`NEGATIVE_TERM_FILTERED`） |
 | `message` | `string` | 错误描述 |
 
 ## 示例信封
@@ -165,7 +165,7 @@
     "metrics": { "total_ms": 0 }
   },
   "error": {
-    "error_code": "NO_CANDIDATE",
+    "error_code": "NO_CANDIDATES",
     "message": "No viable question candidate could be selected"
   }
 }

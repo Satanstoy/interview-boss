@@ -165,6 +165,7 @@ def select_question(
     session_id: str = None,
     question_type: str = None,
     question_source: str = "draw",
+    candidate_index: int = None,
 ) -> dict:
     """Select one candidate and bind it as the next-question plan."""
     overrides: dict[str, Any] = {"question_source": question_source}
@@ -172,7 +173,11 @@ def select_question(
         overrides["question_type"] = question_type
 
     sid, state = _init_tool_state(session_id, overrides)
-    result = interview_tools.select_question_tool({"candidates": candidates}, state)
+    result = interview_tools.select_question_tool(
+        {"candidates": candidates},
+        state,
+        candidate_index=candidate_index,
+    )
     save_mcp_session(sid, state)
     return _attach_session_metadata(result, sid)
 

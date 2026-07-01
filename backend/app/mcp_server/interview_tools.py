@@ -14,7 +14,10 @@ import time
 
 from pydantic import ValidationError
 
-from app.agents.chat.question_plan import _build_interview_ledger, _maybe_create_question_plan
+from app.agents.chat.question_plan import (
+    _build_interview_ledger,
+    _maybe_create_question_plan,
+)
 
 logger = logging.getLogger(__name__)
 from app.agents.chat.state import ChatState
@@ -38,58 +41,55 @@ def _get_default_skill_registry():
 
 def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
     """Load a skill instruction and store it in chat state."""
+    started = time.monotonic()
     skill_name = args.get("skill_name", "")
     registry = (registry_getter or _get_default_skill_registry)()
     skill = registry.get(skill_name)
 
     if skill is None:
-        return {
-            "ok": False,
-            "tool": "load_skill",
-            "items": [],
-            "metadata": {},
-            "error": {
-                "error_code": "UNKNOWN_SKILL",
-                "message": f"Unknown skill: {skill_name}",
-            },
-        }
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="load_skill",
+            error_code="UNKNOWN_SKILL",
+            message=f"Unknown skill: {skill_name}",
+            total_ms=total_ms,
+            debug_reason="unknown_skill",
+        )
 
     active_skills = state.setdefault("active_skills", [])
     if skill_name in active_skills:
-        return {
-            "ok": True,
-            "tool": "load_skill",
-            "items": [],
-            "metadata": {
-                "status": "already_active",
-                "skill": skill_name,
-                "summary": f"技能「{skill.description}」已在激活状态。",
-            },
-            "error": None,
-        }
+        total_ms = int((time.monotonic() - started) * 1000)
+        envelope = build_success_envelope(
+            tool="load_skill",
+            items=[],
+            total_ms=total_ms,
+            debug_reason="already_active",
+        )
+        envelope["metadata"]["status"] = "already_active"
+        envelope["metadata"]["skill"] = skill_name
+        envelope["metadata"]["summary"] = f"技能「{skill.description}」已在激活状态。"
+        return envelope
 
     active_skills.append(skill_name)
-
     instruction = skill.get_instruction()
     if instruction:
         state.setdefault("active_skill_instructions", []).append(
-            {
-                "skill_name": skill_name,
-                "instruction": instruction,
-            }
+            {"skill_name": skill_name, "instruction": instruction}
         )
 
-    return {
-        "ok": True,
-        "tool": "load_skill",
-        "items": [],
-        "metadata": {
-            "status": "loaded",
-            "skill": skill_name,
-            "summary": f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。",
-        },
-        "error": None,
-    }
+    total_ms = int((time.monotonic() - started) * 1000)
+    envelope = build_success_envelope(
+        tool="load_skill",
+        items=[],
+        total_ms=total_ms,
+        debug_reason="loaded",
+    )
+    envelope["metadata"]["status"] = "loaded"
+    envelope["metadata"]["skill"] = skill_name
+    envelope["metadata"]["summary"] = (
+        f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。"
+    )
+    return envelope
 
 
 async def _hybrid_search_for_tool(**kwargs):
@@ -334,6 +334,7 @@ def select_question_tool(
     state: ChatState,
     *,
     force_candidate: dict | None = None,
+    candidate_index: int | None = None,
 ) -> dict:
     """Select and bind one question as the next-question plan.
 
@@ -342,14 +343,46 @@ def select_question_tool(
     instead of running the local ``viable[0]`` / ``algorithm_candidate_match``
     heuristic.
     """
-    candidates = args.get("candidates")
-    if isinstance(candidates, list):
-        state["candidate_questions"] = candidates
-        state["retrieved_questions"] = candidates
+    candidates = (
+        args.get("candidates")
+        or state.get("candidate_questions")
+        or state.get("retrieved_questions")
+        or []
+    )
+
+    if not candidates:
+        return build_error_envelope(
+            tool="select_question",
+            error_code="NO_CANDIDATES",
+            message="No candidate questions available to select",
+            total_ms=0,
+            debug_reason="no_candidates",
+            empty_reason="no_candidates",
+        )
+
+    if candidate_index is not None:
+        if (
+            not isinstance(candidate_index, int)
+            or candidate_index < 0
+            or candidate_index >= len(candidates)
+        ):
+            return build_error_envelope(
+                tool="select_question",
+                error_code="INDEX_OUT_OF_RANGE",
+                message=f"candidate_index {candidate_index} is out of range (0-{len(candidates) - 1})",
+                total_ms=0,
+                debug_reason="index_out_of_range",
+                empty_reason="index_out_of_range",
+            )
+        force_candidate = candidates[candidate_index]
+
+    args_candidates = args.get("candidates")
+    if isinstance(args_candidates, list):
+        state["candidate_questions"] = args_candidates
+        state["retrieved_questions"] = args_candidates
 
     plan = _maybe_create_question_plan(state, force_candidate=force_candidate)
 
-    # Surface negative-term filtering as an explicit error envelope.
     reason = state.get("question_plan_reason")
     if force_candidate is not None and not plan and reason == "negative_term_filtered":
         return build_error_envelope(
@@ -365,7 +398,7 @@ def select_question_tool(
     if not plan or not selected:
         return build_error_envelope(
             tool="select_question",
-            error_code="NO_CANDIDATE",
+            error_code="NO_CANDIDATES",
             message="No viable question candidate could be selected",
             total_ms=0,
             debug_reason=state.get("question_plan_reason") or "no_viable_candidate",

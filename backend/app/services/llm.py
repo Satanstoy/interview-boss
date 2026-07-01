@@ -174,11 +174,13 @@ def _convert_tools_to_anthropic(openai_tools: list) -> list:
     anthropic_tools = []
     for t in openai_tools:
         func = t.get("function", t)
-        anthropic_tools.append({
-            "name": func["name"],
-            "description": func.get("description", ""),
-            "input_schema": func["parameters"],
-        })
+        anthropic_tools.append(
+            {
+                "name": func["name"],
+                "description": func.get("description", ""),
+                "input_schema": func["parameters"],
+            }
+        )
     return anthropic_tools
 
 
@@ -218,16 +220,22 @@ def _convert_messages_with_tools_to_anthropic(messages: list) -> tuple[str, list
                     arguments = tc["function"]["arguments"]
                     if isinstance(arguments, str):
                         arguments = json.loads(arguments)
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": tc["id"],
-                        "name": tc["function"]["name"],
-                        "input": arguments,
-                    })
-                anthropic_messages.append({"role": "assistant", "content": content_blocks})
+                    content_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc["id"],
+                            "name": tc["function"]["name"],
+                            "input": arguments,
+                        }
+                    )
+                anthropic_messages.append(
+                    {"role": "assistant", "content": content_blocks}
+                )
             elif msg.get("content"):
                 # 无 tool_calls：保持原样（兼容旧逻辑）
-                anthropic_messages.append({"role": "assistant", "content": msg["content"]})
+                anthropic_messages.append(
+                    {"role": "assistant", "content": msg["content"]}
+                )
 
         elif role == "tool":
             # OpenAI tool result → Anthropic user message with tool_result block
@@ -238,10 +246,12 @@ def _convert_messages_with_tools_to_anthropic(messages: list) -> tuple[str, list
             }
             if msg.get("is_error"):
                 tool_result_block["is_error"] = True
-            anthropic_messages.append({
-                "role": "user",
-                "content": [tool_result_block],
-            })
+            anthropic_messages.append(
+                {
+                    "role": "user",
+                    "content": [tool_result_block],
+                }
+            )
 
         elif role == "user":
             content = msg["content"]
@@ -253,16 +263,28 @@ def _convert_messages_with_tools_to_anthropic(messages: list) -> tuple[str, list
                         anthropic_blocks.append({"type": "text", "text": block["text"]})
                     elif block.get("type") == "image_url":
                         url_data = block.get("image_url", {})
-                        url = url_data.get("url", "") if isinstance(url_data, dict) else url_data
+                        url = (
+                            url_data.get("url", "")
+                            if isinstance(url_data, dict)
+                            else url_data
+                        )
                         if url.startswith("data:"):
                             header, b64data = url.split(",", 1)
                             media_type = header.split(";")[0].replace("data:", "")
-                            anthropic_blocks.append({
-                                "type": "image",
-                                "source": {"type": "base64", "media_type": media_type, "data": b64data},
-                            })
+                            anthropic_blocks.append(
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": b64data,
+                                    },
+                                }
+                            )
                         else:
-                            anthropic_blocks.append({"type": "text", "text": f"[图片链接: {url}]"})
+                            anthropic_blocks.append(
+                                {"type": "text", "text": f"[图片链接: {url}]"}
+                            )
                 content = anthropic_blocks
             anthropic_messages.append({"role": "user", "content": content})
 
@@ -294,13 +316,15 @@ def _extract_tool_calls(response, provider: str) -> list[dict] | None:
         tool_calls = []
         for block in response.content:
             if hasattr(block, "type") and block.type == "tool_use":
-                tool_calls.append({
-                    "id": block.id,
-                    "function": {
-                        "name": block.name,
-                        "arguments": json.dumps(block.input, ensure_ascii=False),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": block.id,
+                        "function": {
+                            "name": block.name,
+                            "arguments": json.dumps(block.input, ensure_ascii=False),
+                        },
+                    }
+                )
         return tool_calls or None
 
     # OpenAI
@@ -336,7 +360,14 @@ def make_tool_result_message(tool_call_id: str, result: str) -> dict:
     ),
 )
 async def _llm_with_tools_call(
-    resolved_client, model, messages, tools, provider, max_tokens, temperature, system_text
+    resolved_client,
+    model,
+    messages,
+    tools,
+    provider,
+    max_tokens,
+    temperature,
+    system_text,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     if provider == "anthropic":
@@ -419,15 +450,29 @@ async def llm_with_tools(
 
     # Anthropic 需要预先转换消息格式
     if provider == "anthropic":
-        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(messages)
+        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(
+            messages
+        )
         return await _llm_with_tools_call(
-            resolved_client, model, anthropic_msgs, tools, provider,
-            max_tokens, temperature, system_text,
+            resolved_client,
+            model,
+            anthropic_msgs,
+            tools,
+            provider,
+            max_tokens,
+            temperature,
+            system_text,
         )
 
     return await _llm_with_tools_call(
-        resolved_client, model, messages, tools, provider,
-        max_tokens, temperature, None,
+        resolved_client,
+        model,
+        messages,
+        tools,
+        provider,
+        max_tokens,
+        temperature,
+        None,
     )
 
 
@@ -621,16 +666,23 @@ async def _call_llm_with_retry(
     system_msg: str = "你是一个后端和算法面试指导专家。",
     response_format: dict = None,
     user_id: int = None,
+    model: str = None,
 ) -> str:
-    """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）"""
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
+    """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）
+
+    model 参数非空时覆盖用户/全局默认模型配置，仅切换本次调用的模型名，
+    不会修改 base_url、api_key 等其他配置。
+    """
+    resolved_client, resolved_model, timeout, base_url, provider = (
+        _resolve_client_and_model(user_id)
     )
+    if model:
+        resolved_model = model
 
     if provider == "anthropic":
         return await _call_anthropic(
             resolved_client,
-            model,
+            resolved_model,
             timeout,
             system_msg=system_msg,
             messages=[{"role": "user", "content": prompt}],
@@ -638,7 +690,7 @@ async def _call_llm_with_retry(
         )
 
     kwargs = dict(
-        model=model,
+        model=resolved_model,
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},

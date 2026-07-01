@@ -6,6 +6,7 @@ import { validateBaseUrl } from '@/utils/validate.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import ModelSelectField from '@/components/business/ModelSelectField.vue'
 
 const { success: toastSuccess, error: toastError } = useToast()
 const { confirm: showConfirm } = useConfirm()
@@ -174,11 +175,9 @@ onMounted(loadConfig)
         <!-- Model -->
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">模型名称 <span class="text-destructive">*</span></Label>
-          <Input
+          <ModelSelectField
             v-model="form.llm_model"
-            type="text"
             placeholder="gpt-4o"
-            class="font-mono"
           />
         </div>
 

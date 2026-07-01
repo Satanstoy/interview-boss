@@ -300,48 +300,6 @@ def _execute_select_question(args: dict, state: ChatState) -> str:
     """Select and bind one candidate as the next-question plan."""
     from app.mcp_server.interview_tools import select_question_tool
 
-    candidates = (
-        state.get("candidate_questions") or state.get("retrieved_questions") or []
-    )
-    index = args.get("candidate_index", 0)
-
-    if not candidates:
-        return json.dumps(
-            {
-                "ok": False,
-                "tool": "select_question",
-                "items": [],
-                "metadata": {},
-                "error": {
-                    "error_code": "NO_CANDIDATES",
-                    "message": "No candidate questions available to select",
-                },
-            },
-            ensure_ascii=False,
-        )
-
-    if not isinstance(index, int) or index < 0 or index >= len(candidates):
-        return json.dumps(
-            {
-                "ok": False,
-                "tool": "select_question",
-                "items": [],
-                "metadata": {},
-                "error": {
-                    "error_code": "INDEX_OUT_OF_RANGE",
-                    "message": (
-                        f"candidate_index {index} is out of range"
-                        f" (0-{len(candidates) - 1})"
-                    ),
-                },
-            },
-            ensure_ascii=False,
-        )
-
-    selected = candidates[index]
-    envelope = select_question_tool(
-        {"candidates": candidates},
-        state,
-        force_candidate=selected,
-    )
+    candidate_index = args.get("candidate_index", 0)
+    envelope = select_question_tool(args, state, candidate_index=candidate_index)
     return json.dumps(envelope, ensure_ascii=False)

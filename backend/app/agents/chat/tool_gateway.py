@@ -12,7 +12,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-ToolName = Literal["search_questions", "draw_questions", "select_question"]
+ToolName = Literal[
+    "search_questions", "draw_questions", "select_question", "load_skill"
+]
 QuestionSource = Literal["search", "draw"]
 
 
@@ -66,7 +68,9 @@ class ToolEnvelope(BaseModel):
 
 class SearchQuestionsInput(BaseModel):
     keywords: list[str] = Field(default_factory=list, max_length=5)
-    question_type: Literal["project_followup", "knowledge_probe", "new_question"] | None = None
+    question_type: (
+        Literal["project_followup", "knowledge_probe", "new_question"] | None
+    ) = None
     limit: int = Field(default=5, ge=1, le=10)
 
     @field_validator("keywords", mode="before")
@@ -90,13 +94,16 @@ class DrawQuestionsInput(BaseModel):
     cat1: str | None = Field(default=None, max_length=80)
     cat2: str | None = Field(default=None, max_length=80)
     topic: str | None = Field(default=None, max_length=80)
-    question_type: Literal[
-        "algorithm_coding",
-        "project_followup",
-        "knowledge_probe",
-        "system_design",
-        "hr",
-    ] | None = None
+    question_type: (
+        Literal[
+            "algorithm_coding",
+            "project_followup",
+            "knowledge_probe",
+            "system_design",
+            "hr",
+        ]
+        | None
+    ) = None
 
     @field_validator("cat1", "cat2", "topic", mode="before")
     @classmethod

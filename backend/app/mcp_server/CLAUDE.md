@@ -13,13 +13,23 @@
 
 ## 契约
 
-- 所有工具返回统一 `ok/tool/items|selected_question/metadata/error` envelope，包括 `load_skill`。
-- `interview_tools.py` 可以调用 service 层；`agents/chat/tools.py` 不应直接组装搜索或抽题 envelope。
+- 所有工具返回统一 `ok/tool/items|selected_question/metadata/error` envelope，包括 `load_skill`。所有 envelope 经过 `build_success_envelope` / `build_error_envelope` 构造，包含 `metadata.metrics`（ToolMetrics）和 `debug_reason`。
+- `select_question_tool` 支持 `candidate_index` 参数，内部做空候选（`NO_CANDIDATES`）和越界（`INDEX_OUT_OF_RANGE`）检查；双入口（内部 ReAct via `tools.py` / 外部 MCP via `app.py`）错误码一致。
+- `interview_tools.py` 可以调用 service 层；`agents/chat/tools.py` 不应直接组装搜索或抽题 envelope（纯转发）。
 - MCP 对外函数参数注解保持朴素类型（如 `str`、`int`、`list`、`dict`），避免 FastMCP 对 `str | None`、`list[str]` 等注解解析失败。
 - 每个 MCP 工具都接受 `session_id: str`；不传则自动生成。同一 session 内的 state 会持久化，外部 agent 可以分步调用 `load_skill` → `draw_questions` → `select_question`。
 - `search_questions_tool()` / `draw_questions_tool()` 必须从 chat state 构建 `InterviewLedger`，把历史已问题号合并进 service 层 `exclude_ids`；防重题属于工具执行边界，不能只靠模型 prompt 自觉。
 - `/mcp` 端点已豁免 CSRF；若环境变量 `MCP_API_KEY` 设置，则要求请求头 `X-MCP-API-Key` 或查询参数 `mcp_api_key` 匹配，否则返回 401。
 - 新增可执行工具时，先在本目录落工具函数，再由 agent executor 或 FastMCP app 转发调用；同时更新 `session.py` 的持久化字段白名单。
+
+## 双入口 Session 持久化策略
+
+| 入口 | state 来源 | session 持久化 |
+|---|---|---|
+| 内部 ReAct (`pipeline.py`) | `ChatState` TypedDict，pipeline 内存流转 | ReAct 循环结束后调用 `save_mcp_session(session_id, state)` |
+| 外部 MCP (`app.py`) | `_init_tool_state` 从 `load_mcp_session` 加载 | `save_mcp_session` 持久化到 Redis/SQLite |
+
+两个入口共享同一个 `save_mcp_session` / `load_mcp_session` 基础设施。内部 ReAct 路径的 `session_id` 默认等于 `conversation_id`（存入 `ChatState.session_id`）。持久化白名单见 `session.py:_PERSISTED_STATE_KEYS`。内部路径只在 ReAct 循环结束时持久化，不在每次工具执行后（避免性能开销）。
 
 ## 修改后必做
 

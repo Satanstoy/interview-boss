@@ -29,6 +29,7 @@ docs/
 - **后端相关** → 放 `bug-reports/` 或 `tdd-reports/`
 - **前端相关** → 放 `frontend/bug-reports/` 或 `frontend/tdd-reports/`
 - **设计规格** → 放 `superpowers/specs/`
+- `docs/specs/` 也存放项目内临时/产品 spec；修改这类 spec 时要先对齐当前代码事实，避免把已存在的 pipeline、metadata 或 ledger 能力写成“尚不存在”。
 - **实施计划** → 放 `superpowers/plans/`
 - **开发活动记录** → 放 `dev-log/`
 - **agent 协作/分析材料** → 放 `agents/` 或 `analysis/`

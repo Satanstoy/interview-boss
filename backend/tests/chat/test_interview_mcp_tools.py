@@ -140,6 +140,93 @@ async def test_search_questions_tool_excludes_ledger_question_ids(monkeypatch):
     assert captured["exclude_ids"] == {21, 22}
 
 
+def test_load_skill_tool_returns_unified_envelope():
+    """load_skill_tool should use build_success_envelope with metadata.metrics.total_ms and debug_reason."""
+    from app.mcp_server import interview_tools
+
+    skill = MagicMock()
+    skill.description = "理论问答策略"
+    skill.get_instruction.return_value = "## Theory QA full instruction"
+    registry = MagicMock()
+    registry.get.return_value = skill
+
+    state: dict = {}
+    result = interview_tools.load_skill_tool(
+        {"skill_name": "theory-qa"},
+        state,
+        registry_getter=lambda: registry,
+    )
+
+    assert result["ok"] is True
+    assert result["tool"] == "load_skill"
+    assert "metadata" in result
+    assert "metrics" in result["metadata"]
+    assert "total_ms" in result["metadata"]["metrics"]
+    assert isinstance(result["metadata"]["metrics"]["total_ms"], int)
+    assert "debug_reason" in result["metadata"]
+    assert result["metadata"]["debug_reason"] == "loaded"
+
+
+def test_load_skill_tool_unknown_skill_returns_unified_error_envelope():
+    """load_skill_tool error path should use build_error_envelope with metrics and debug_reason."""
+    from app.mcp_server import interview_tools
+
+    registry = MagicMock()
+    registry.get.return_value = None
+
+    state: dict = {}
+    result = interview_tools.load_skill_tool(
+        {"skill_name": "nonexistent"},
+        state,
+        registry_getter=lambda: registry,
+    )
+
+    assert result["ok"] is False
+    assert result["tool"] == "load_skill"
+    assert result["error"]["error_code"] == "UNKNOWN_SKILL"
+    assert "metadata" in result
+    assert "metrics" in result["metadata"]
+    assert "total_ms" in result["metadata"]["metrics"]
+    assert "debug_reason" in result["metadata"]
+    assert result["metadata"]["debug_reason"] == "unknown_skill"
+
+
+def test_select_question_tool_candidate_index_out_of_range():
+    """select_question_tool with candidate_index out of range should return INDEX_OUT_OF_RANGE."""
+    from app.mcp_server import interview_tools
+
+    candidates = [
+        {"id": 1, "question": "Q1", "cat1": "A", "cat2": "A1", "tags": "t"},
+        {"id": 2, "question": "Q2", "cat1": "A", "cat2": "A1", "tags": "t"},
+    ]
+    state: dict = {"candidate_questions": candidates, "retrieved_questions": candidates}
+
+    result = interview_tools.select_question_tool(
+        {},
+        state,
+        candidate_index=5,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["error_code"] == "INDEX_OUT_OF_RANGE"
+    assert "metadata" in result
+    assert "metrics" in result["metadata"]
+
+
+def test_select_question_tool_no_candidates():
+    """select_question_tool with no candidates should return NO_CANDIDATES."""
+    from app.mcp_server import interview_tools
+
+    state: dict = {}
+
+    result = interview_tools.select_question_tool({}, state)
+
+    assert result["ok"] is False
+    assert result["error"]["error_code"] == "NO_CANDIDATES"
+    assert "metadata" in result
+    assert "metrics" in result["metadata"]
+
+
 def test_select_question_tool_binds_algorithm_candidate():
     from app.mcp_server import interview_tools
 

@@ -332,10 +332,10 @@ class TestReactLoop:
         finally:
             _event_queue_var.reset(token)
 
-        # All events in order: emitted (step, retrieved) + yielded (chunk, done)
+        # All events in order: emitted (step, tool_step, retrieved) + yielded (chunk, done)
         events = emitted + yielded
 
-        # Event sequence: step(search_questions) + retrieved + chunk + done
+        # Event sequence: step(search_questions) + tool_step + retrieved + chunk + done
         assert events[0]["type"] == "step"
         assert events[0]["step"] == "search_questions"
 
@@ -343,8 +343,12 @@ class TestReactLoop:
         assert "reason" in events[0]
         assert events[0]["reason"]  # reason is non-empty
 
-        assert events[1]["type"] == "retrieved"
-        assert events[1]["questions"][0]["id"] == 10
+        # tool_step event emitted after tool execution
+        assert events[1]["type"] == "tool_step"
+        assert events[1]["data"]["tool_name"] == "search_questions"
+
+        assert events[2]["type"] == "retrieved"
+        assert events[2]["questions"][0]["id"] == 10
         assert events[-2]["type"] == "chunk"
         assert events[-2]["content"] == "Here is your question"
         assert events[-1]["type"] == "done"

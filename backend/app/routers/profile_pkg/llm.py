@@ -151,7 +151,12 @@ async def list_available_models(user: dict = Depends(get_current_user)):
             url = "https://api.anthropic.com/v1/models"
         else:
             headers = {"Authorization": f"Bearer {api_key}"}
-            url = f"{base_url.rstrip('/')}/v1/models"
+            base = base_url.rstrip("/")
+            # base_url 可能已含 /v1 后缀（OpenAI 兼容 API 的标准做法），避免拼成 /v1/v1/models
+            if base.endswith("/v1"):
+                url = f"{base}/models"
+            else:
+                url = f"{base}/v1/models"
 
         async with httpx.AsyncClient(timeout=10) as http_client:
             response = await http_client.get(url, headers=headers)
