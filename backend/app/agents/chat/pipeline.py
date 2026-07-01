@@ -30,6 +30,7 @@ from app.services.memory_recall_service import (
     classify_and_recall,
     classify_and_recall_fast,
 )
+from app.mcp_server.session import save_mcp_session
 
 # Re-exports from submodules (backward compatibility for tests and graph.py)
 from app.agents.chat.react_loop import (  # noqa: F401
@@ -109,6 +110,7 @@ from app.agents.chat.metadata import (  # noqa: F401
 logger = logging.getLogger("interview-boss")
 
 _SENTINEL = object()
+_MAX_THINKING_CHUNKS = 50
 
 
 def _initial_state(
@@ -124,6 +126,7 @@ def _initial_state(
 ) -> ChatState:
     return {
         "conversation_id": conversation_id,
+        "session_id": conversation_id,
         "user_id": user_id,
         "user_message": user_message,
         "mode": mode,
@@ -222,7 +225,11 @@ async def _step_classify(state: ChatState) -> ChatState:
 
     is_first_message = len(state.get("message_history", [])) <= 1
     if is_first_message:
-        _step("understanding", "正在理解你的问题...", reason=STEP_REASONS["understanding_first"])
+        _step(
+            "understanding",
+            "正在理解你的问题...",
+            reason=STEP_REASONS["understanding_first"],
+        )
         (
             intent,
             memory_ids,
@@ -236,7 +243,11 @@ async def _step_classify(state: ChatState) -> ChatState:
             recent_context=recent_context,
         )
     else:
-        _step("understanding", "正在分析你的回答...", reason=STEP_REASONS["understanding_follow"])
+        _step(
+            "understanding",
+            "正在分析你的回答...",
+            reason=STEP_REASONS["understanding_follow"],
+        )
         (
             intent,
             memory_ids,
@@ -429,6 +440,14 @@ async def run_chat(
             # Persist/clear cross-turn skills so turn-scoped modes do not stick.
             await _persist_active_skills(state)
 
+            # Fix 3: persist MCP session for internal ReAct path
+            session_id = state.get("session_id") or state.get("conversation_id")
+            if session_id:
+                try:
+                    await asyncio.to_thread(save_mcp_session, session_id, dict(state))
+                except Exception:
+                    logger.debug("Failed to persist MCP session (non-fatal)")
+
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
 
@@ -446,11 +465,53 @@ async def run_chat(
 
     graph_task = asyncio.create_task(_run_pipeline())
 
+    # Fix 4: accumulate step/thinking/insight events for metadata persistence
+    collected_steps: list[dict] = []
+    collected_insights: list[dict] = []
+    collected_thinking: list[dict] = []
+    thinking_start_time: float | None = None
+
     try:
         while True:
             item = await queue.get()
             if item is _SENTINEL:
                 break
+
+            item_type = item.get("type")
+            if item_type == "step":
+                collected_steps.append(item)
+            elif item_type == "insight":
+                collected_insights.append(item)
+            elif item_type == "thinking_start":
+                thinking_start_time = time.monotonic()
+                collected_thinking.append({"start": item.get("data", {})})
+            elif item_type == "thinking":
+                if collected_thinking:
+                    # 优先 content，fallback 到 data.text
+                    chunk = item.get("content") or item.get("data", {}).get("text", "")
+                    if chunk:
+                        collected_thinking[-1].setdefault("chunks", []).append(chunk)
+            elif item_type == "thinking_done":
+                if collected_thinking and thinking_start_time:
+                    collected_thinking[-1]["duration_ms"] = int(
+                        (time.monotonic() - thinking_start_time) * 1000
+                    )
+                    thinking_start_time = None
+            elif item_type == "done":
+                metadata = item.get("metadata", {})
+                # Limit thinking chunks to avoid metadata bloat
+                for t in collected_thinking:
+                    chunks = t.get("chunks", [])
+                    if len(chunks) > _MAX_THINKING_CHUNKS:
+                        t["chunks"] = chunks[:_MAX_THINKING_CHUNKS]
+                metadata["thinking"] = collected_thinking
+                metadata["thinking_duration"] = sum(
+                    t.get("duration_ms", 0) for t in collected_thinking
+                )
+                metadata["steps"] = collected_steps
+                metadata["insights"] = collected_insights
+                item = {**item, "metadata": metadata}
+
             yield item
             await asyncio.sleep(0)
     finally:

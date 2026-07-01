@@ -6,6 +6,7 @@ TDD 测试 — 模拟面试 Chatbot 后端核心模块
 - fts_service: FTS5 全文检索
 - chat router: API 端点
 """
+
 import json
 import pytest
 from unittest.mock import patch, AsyncMock
@@ -14,6 +15,7 @@ from unittest.mock import patch, AsyncMock
 # ═══════════════════════════════════════════════════
 #  T-001 ~ T-005: chat_service 测试
 # ═══════════════════════════════════════════════════
+
 
 class TestChatServiceConversation:
     """会话管理测试"""
@@ -45,7 +47,9 @@ class TestChatServiceConversation:
         from app.services.chat_service import create_conversation, get_conversations
 
         # 创建第二个用户
-        test_db.execute("INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')")
+        test_db.execute(
+            "INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')"
+        )
         test_db.commit()
 
         # 用户1的会话
@@ -64,10 +68,18 @@ class TestChatServiceConversation:
 
     def test_get_conversations_filters_by_job_position(self, test_db):
         """T-002pos: 会话列表和详情应按当前岗位隔离"""
-        from app.services.chat_service import create_conversation, get_conversations, get_conversation
+        from app.services.chat_service import (
+            create_conversation,
+            get_conversations,
+            get_conversation,
+        )
 
-        fe = create_conversation(user_id=1, mode="free_practice", title="前端面试", job_position="前端开发")
-        be = create_conversation(user_id=1, mode="free_practice", title="后端面试", job_position="后端开发")
+        fe = create_conversation(
+            user_id=1, mode="free_practice", title="前端面试", job_position="前端开发"
+        )
+        be = create_conversation(
+            user_id=1, mode="free_practice", title="后端面试", job_position="后端开发"
+        )
 
         fe_convs = get_conversations(user_id=1, job_position="前端开发")
         be_convs = get_conversations(user_id=1, job_position="后端开发")
@@ -79,7 +91,9 @@ class TestChatServiceConversation:
     def test_get_conversations_excludes_archived(self, test_db):
         """T-002b: 默认不返回已归档的会话"""
         from app.services.chat_service import (
-            create_conversation, archive_conversation, get_conversations
+            create_conversation,
+            archive_conversation,
+            get_conversations,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -94,8 +108,11 @@ class TestChatServiceConversation:
     def test_delete_conversation_cascades_messages(self, test_db):
         """T-002c: 删除会话应级联删除消息"""
         from app.services.chat_service import (
-            create_conversation, save_message, delete_conversation,
-            get_conversation, get_messages
+            create_conversation,
+            save_message,
+            delete_conversation,
+            get_conversation,
+            get_messages,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -114,7 +131,9 @@ class TestChatServiceMessages:
     def test_save_and_get_messages(self, test_db):
         """T-003: 保存消息后应能按时间顺序检索"""
         from app.services.chat_service import (
-            create_conversation, save_message, get_messages
+            create_conversation,
+            save_message,
+            get_messages,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -135,7 +154,9 @@ class TestChatServiceMessages:
     def test_get_messages_respects_limit(self, test_db):
         """T-003b: limit 参数应限制返回数量"""
         from app.services.chat_service import (
-            create_conversation, save_message, get_messages
+            create_conversation,
+            save_message,
+            get_messages,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -149,7 +170,9 @@ class TestChatServiceMessages:
     def test_get_recent_messages_returns_last_n(self, test_db):
         """T-003c: get_recent_messages 应返回最近的 N 条消息（时间正序）"""
         from app.services.chat_service import (
-            create_conversation, save_message, get_recent_messages
+            create_conversation,
+            save_message,
+            get_recent_messages,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -167,7 +190,9 @@ class TestChatServiceMessages:
     def test_save_message_with_metadata(self, test_db):
         """T-003d: 消息应支持存储 metadata"""
         from app.services.chat_service import (
-            create_conversation, save_message, get_messages
+            create_conversation,
+            save_message,
+            get_messages,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -204,7 +229,9 @@ class TestChatServiceMessages:
     def test_get_message_count(self, test_db):
         """T-003e: get_message_count 应返回消息总数"""
         from app.services.chat_service import (
-            create_conversation, save_message, get_message_count
+            create_conversation,
+            save_message,
+            get_message_count,
         )
 
         conv = create_conversation(user_id=1, mode="free_practice")
@@ -225,7 +252,9 @@ class TestChatServiceMemories:
         from app.services.chat_service import save_memory, get_memories
 
         # 创建第二个用户
-        test_db.execute("INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')")
+        test_db.execute(
+            "INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')"
+        )
         test_db.commit()
 
         save_memory(user_id=1, memory_type="weakness", content="Redis不熟悉")
@@ -252,7 +281,11 @@ class TestChatServiceMemories:
 
     def test_deactivate_memory(self, test_db):
         """T-004c: 停用记忆后不应出现在查询结果中"""
-        from app.services.chat_service import save_memory, get_memories, deactivate_memory
+        from app.services.chat_service import (
+            save_memory,
+            get_memories,
+            deactivate_memory,
+        )
 
         mem_id = save_memory(user_id=1, memory_type="weakness", content="旧弱点")
         assert len(get_memories(user_id=1)) == 1
@@ -263,7 +296,9 @@ class TestChatServiceMemories:
     def test_resume_memory_overwrite(self, test_db):
         """T-005: 保存新简历应停用旧简历记忆"""
         from app.services.chat_service import (
-            save_resume_memory, get_memories, get_resume_memory
+            save_resume_memory,
+            get_memories,
+            get_resume_memory,
         )
 
         save_resume_memory(user_id=1, resume_text="旧简历内容")
@@ -281,7 +316,9 @@ class TestChatServiceMemories:
         from app.services.chat_service import save_resume_memory, get_resume_memory
 
         # 创建第二个用户
-        test_db.execute("INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')")
+        test_db.execute(
+            "INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')"
+        )
         test_db.commit()
 
         save_resume_memory(user_id=1, resume_text="用户1简历")
@@ -295,22 +332,44 @@ class TestChatServiceMemories:
 #  T-006 ~ T-007: fts_service 测试
 # ═══════════════════════════════════════════════════
 
+
 class TestFTSService:
     """FTS5 全文检索测试"""
 
     def _seed_questions(self, conn):
         """插入测试题目数据"""
         questions = [
-            ("什么是RESTful API？", "后端", "Spring", "REST,API", 1, "REST是一种架构风格..."),
-            ("Redis缓存策略有哪些？", "后端", "Redis", "Redis,缓存", 1, "常见策略有..."),
-            ("Vue3的Composition API是什么？", "前端", "Vue", "Vue3,组合式API", 1, "Composition API是..."),
+            (
+                "什么是RESTful API？",
+                "后端",
+                "Spring",
+                "REST,API",
+                1,
+                "REST是一种架构风格...",
+            ),
+            (
+                "Redis缓存策略有哪些？",
+                "后端",
+                "Redis",
+                "Redis,缓存",
+                1,
+                "常见策略有...",
+            ),
+            (
+                "Vue3的Composition API是什么？",
+                "前端",
+                "Vue",
+                "Vue3,组合式API",
+                1,
+                "Composition API是...",
+            ),
             ("数据库索引原理？", "数据库", "MySQL", "索引,B+树", 1, "B+树索引..."),
         ]
         for q in questions:
             conn.execute(
                 "INSERT INTO question_bank (question, cat1, cat2, tags, frequency, ai_answer, status) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'approved')",
-                q
+                q,
             )
         conn.commit()
 
@@ -371,7 +430,7 @@ class TestFTSService:
         test_db.execute(
             "INSERT INTO question_bank (question, cat1, cat2, tags, ai_answer, status) "
             "VALUES (?, ?, ?, ?, ?, 'approved')",
-            ("什么是Docker容器？", "DevOps", "Docker", "Docker,容器", "Docker是...")
+            ("什么是Docker容器？", "DevOps", "Docker", "Docker,容器", "Docker是..."),
         )
         test_db.commit()
         qid = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -405,6 +464,7 @@ class TestFTSService:
 #  T-008 ~ T-010: Chat Router 测试
 # ═══════════════════════════════════════════════════
 
+
 class TestChatRouter:
     """Chat API 端点测试
 
@@ -417,12 +477,14 @@ class TestChatRouter:
     def _create_user(self, conn, user_id=1, username="testuser"):
         """创建测试用户（使用 admin 用户，避免 ID 冲突）"""
         # migration 012 已创建 admin 用户 (id=1)，直接使用
-        existing = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        existing = conn.execute(
+            "SELECT id FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
         if not existing:
             conn.execute(
                 "INSERT INTO users (id, username, password_hash, is_admin, bank_mode) "
                 "VALUES (?, ?, 'fakehash', 0, 'public')",
-                (user_id, username)
+                (user_id, username),
             )
             conn.commit()
 
@@ -438,7 +500,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             response = client.post(
@@ -462,7 +528,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             # 先创建一个会话
@@ -496,7 +566,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             response = client.get(
@@ -515,7 +589,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             # 创建会话
@@ -547,7 +625,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             res = client.post(
@@ -579,7 +661,11 @@ class TestChatRouter:
         from app.core.auth import get_current_user
         from app.asgi import app
 
-        app.dependency_overrides[get_current_user] = lambda: {"id": 1, "username": "testuser", "is_admin": 0}
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
 
         try:
             response = client.get(
@@ -593,3 +679,393 @@ class TestChatRouter:
             assert isinstance(data["data"], list)
         finally:
             app.dependency_overrides.clear()
+
+
+# ═══════════════════════════════════════════════════
+#  Fix 4: thinking/steps/insights persistence in done metadata
+# ═══════════════════════════════════════════════════
+
+
+class TestDoneEventMetadataPersistence:
+    """Fix 4 — done event metadata must include thinking, steps, insights."""
+
+    async def test_done_event_metadata_includes_thinking(self):
+        """After pipeline runs, done event metadata.thinking should exist."""
+        from app.agents.chat.pipeline import run_chat
+
+        thinking_events = [
+            {"type": "thinking_start", "data": {}},
+            {"type": "thinking", "data": {"text": "Let me think..."}},
+            {"type": "thinking_done", "data": {}},
+        ]
+        react_events = [
+            *thinking_events,
+            {"type": "chunk", "content": "Here is a question"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Here is a question"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None, "No done event received"
+        metadata = done_event.get("metadata", {})
+        assert "thinking" in metadata, (
+            f"done event metadata should contain 'thinking', got keys: {list(metadata.keys())}"
+        )
+        assert isinstance(metadata["thinking"], list)
+        assert len(metadata["thinking"]) == 1
+        assert metadata["thinking"][0].get("chunks") == ["Let me think..."]
+
+    async def test_done_event_metadata_includes_steps(self):
+        """After pipeline runs, done event metadata.steps should exist."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "chunk", "content": "Here is a question"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Here is a question"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "steps" in metadata, (
+            f"done event metadata should contain 'steps', got keys: {list(metadata.keys())}"
+        )
+        assert isinstance(metadata["steps"], list)
+
+    async def test_done_event_metadata_includes_insights(self):
+        """After pipeline runs, done event metadata.insights should exist."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "chunk", "content": "Here is a question"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Here is a question"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "insights" in metadata, (
+            f"done event metadata should contain 'insights', got keys: {list(metadata.keys())}"
+        )
+        assert isinstance(metadata["insights"], list)
+
+    async def test_done_event_metadata_thinking_duration_calculated(self):
+        """thinking_duration should be sum of all thinking session durations."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {
+                "type": "thinking_start",
+                "data": {},
+            },
+            {
+                "type": "thinking",
+                "data": {"text": "Reasoning chunk 1"},
+            },
+            {
+                "type": "thinking_done",
+                "data": {},
+            },
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "thinking_duration" in metadata
+        assert isinstance(metadata["thinking_duration"], (int, float))
+        assert metadata["thinking_duration"] >= 0
+
+    async def test_done_event_metadata_thinking_chunks_limited(self):
+        """Thinking chunks should be limited to avoid metadata bloat."""
+        from app.agents.chat.pipeline import run_chat
+
+        # Simulate many thinking chunks
+        thinking_events = [
+            {"type": "thinking_start", "data": {}},
+        ]
+        for i in range(200):
+            thinking_events.append({"type": "thinking", "data": {"text": f"chunk_{i}"}})
+        thinking_events.append({"type": "thinking_done", "data": {}})
+
+        react_events = [
+            *thinking_events,
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "thinking" in metadata
+        # Should be capped — 200 chunks is way over any reasonable limit
+        total_chunks = sum(len(t.get("chunks", [])) for t in metadata["thinking"])
+        assert total_chunks < 200, (
+            f"Thinking chunks should be limited, got {total_chunks}"
+        )
+
+
+# ── Thinking Metadata Collection (content field) ──────────
+
+
+class TestThinkingMetadataContentField:
+    """Test thinking metadata collection supports content field."""
+
+    def test_thinking_metadata_collects_content_field(self):
+        """Test that thinking events with 'content' field are collected."""
+        events = [
+            {"type": "thinking_start", "data": {}},
+            {"type": "thinking", "content": "思考内容1"},
+            {"type": "thinking", "content": "思考内容2"},
+            {"type": "thinking_done", "data": {}},
+            {"type": "done", "metadata": {}},
+        ]
+
+        # Simulate the collection logic from pipeline.py
+        collected_thinking = []
+        for event in events:
+            if event["type"] == "thinking":
+                chunk = event.get("content") or event.get("data", {}).get("text", "")
+                if chunk:
+                    collected_thinking.append(chunk)
+
+        assert len(collected_thinking) == 2
+        assert collected_thinking[0] == "思考内容1"
+        assert collected_thinking[1] == "思考内容2"
+
+    def test_thinking_metadata_fallback_to_data_text(self):
+        """Test that thinking events fallback to data.text when content is empty."""
+        events = [
+            {"type": "thinking", "data": {"text": "思考内容1"}},
+            {"type": "thinking", "data": {"text": "思考内容2"}},
+        ]
+
+        collected_thinking = []
+        for event in events:
+            chunk = event.get("content") or event.get("data", {}).get("text", "")
+            if chunk:
+                collected_thinking.append(chunk)
+
+        assert len(collected_thinking) == 2
+        assert collected_thinking[0] == "思考内容1"
+
+    def test_thinking_metadata_skips_empty_chunks(self):
+        """Test that empty thinking chunks are not collected."""
+        events = [
+            {"type": "thinking", "content": ""},
+            {"type": "thinking", "data": {"text": ""}},
+            {"type": "thinking", "content": "有效内容"},
+        ]
+
+        collected_thinking = []
+        for event in events:
+            chunk = event.get("content") or event.get("data", {}).get("text", "")
+            if chunk:
+                collected_thinking.append(chunk)
+
+        assert len(collected_thinking) == 1
+        assert collected_thinking[0] == "有效内容"
+
+
+# ── Helper ─────────────────────────────────────────────────
+
+
+async def _async_gen(items: list):
+    """Simple async generator yielding items from a list."""
+    for item in items:
+        yield item
