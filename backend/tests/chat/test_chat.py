@@ -1505,6 +1505,36 @@ class TestInterviewStateMetadata:
         assert metadata["observability"]["tool_trace_persisted"] is False
 
 
+# ── chat_tool_traces audit table ─────────────────────────────
+
+
+def test_chat_tool_traces_table_exists(test_db):
+    """Test that chat_tool_traces table exists after migration."""
+    result = test_db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='chat_tool_traces'"
+    ).fetchone()
+    assert result is not None
+
+
+def test_chat_tool_traces_table_columns(test_db):
+    """Test that chat_tool_traces has the expected columns."""
+    columns = {
+        row[1] for row in test_db.execute("PRAGMA table_info('chat_tool_traces')").fetchall()
+    }
+    expected = {
+        "id",
+        "conversation_id",
+        "message_id",
+        "react_step",
+        "tool_name",
+        "sanitized_args_json",
+        "result_summary_json",
+        "elapsed_ms",
+        "created_at",
+    }
+    assert expected.issubset(columns), f"Missing columns: {expected - columns}"
+
+
 # ── Helper ─────────────────────────────────────────────────
 
 

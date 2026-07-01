@@ -1,4 +1,4 @@
-"""Chat domain migrations: 024, 025, 026, 027, 028, 037, 038."""
+"""Chat domain migrations: 024, 025, 026, 027, 028, 037, 038, 040."""
 
 import logging
 
@@ -189,3 +189,28 @@ def _migration_038_chat_conversation_position(conn):
             "ON chat_conversations(user_id, status, job_position)"
         )
     logger.info("已添加 chat_conversations.job_position 并回填历史会话")
+
+
+def _migration_040_chat_tool_traces(conn):
+    """Create chat_tool_traces table for tool call audit."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS chat_tool_traces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL,
+            message_id INTEGER,
+            react_step INTEGER NOT NULL,
+            tool_name TEXT NOT NULL,
+            sanitized_args_json TEXT NOT NULL,
+            result_summary_json TEXT NOT NULL,
+            elapsed_ms INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA index_list('chat_tool_traces')")
+    indexes = [row[1] for row in cursor.fetchall()]
+    if "idx_ctt_conversation" not in indexes:
+        conn.execute(
+            "CREATE INDEX idx_ctt_conversation ON chat_tool_traces(conversation_id, created_at)"
+        )
+    logger.info("已创建 chat_tool_traces 表")
