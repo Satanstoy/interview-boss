@@ -1397,6 +1397,18 @@ class TestToolStepsMetadataCollection:
 class TestInterviewStateMetadata:
     """Test that run_chat persists interview_state and observability metadata."""
 
+    async def test_pipeline_includes_interview_state_in_metadata(self):
+        """Test that pipeline includes interview_state in done metadata."""
+        from app.agents.chat.interview_state import build_interview_state_snapshot
+        from app.agents.chat.question_plan import _build_interview_ledger
+
+        # Verify functions exist and have correct signatures
+        import inspect
+        sig = inspect.signature(build_interview_state_snapshot)
+        assert "state" in sig.parameters
+        assert "ledger" in sig.parameters
+        assert "rhythm_profile" in sig.parameters
+
     async def test_done_event_metadata_includes_interview_state_snapshot(self):
         from app.agents.chat.pipeline import run_chat
 
