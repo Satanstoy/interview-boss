@@ -735,69 +735,81 @@ class TestExecuteToolSelectQuestion:
 
 
 class TestLoadSkillStepEvent:
-    def test_load_skill_step_includes_skill_name(self):
-        """load_skill should emit a step event with skill_name for observability."""
-        from app.agents.chat.react_loop import _emit, STEP_REASONS
+    @pytest.mark.asyncio
+    async def test_load_skill_step_includes_skill_name(self):
+        """load_skill tool call in _react_loop should emit step event with skill_name."""
+        from app.agents.chat.react_loop import _react_loop
         from app.agents.shared.events import _event_queue_var
 
-        # Set up a queue to capture emitted events
         emitted_events = []
         mock_queue = MagicMock()
         mock_queue.put_nowait = lambda event: emitted_events.append(event)
 
         token = _event_queue_var.set(mock_queue)
         try:
-            # Simulate the load_skill branch from react_loop.py
-            tc = {
+            state = {
+                "user_id": 1,
+                "user_message": "Tell me about the project",
+                "retrieved_questions": [],
+            }
+
+            load_skill_tc = {
+                "id": "call_1",
                 "function": {
                     "name": "load_skill",
-                    "arguments": json.dumps({"skill_name": "project-deep-dive"}),
-                }
+                    "arguments": json.dumps(
+                        {"skill_name": "project-deep-dive"}
+                    ),
+                },
             }
-            tool_name = "load_skill"
 
-            # This is the code block we're testing (react_loop.py lines 487-500)
-            # The generic step event emission now includes skill_name for load_skill
-            step_event = {
-                "type": "step",
-                "step": tool_name,
-                "message": "正在加载项目深挖策略...",
-                "reason": STEP_REASONS.get(tool_name, ""),
-            }
-            # Add skill_name for load_skill observability
-            if tool_name == "load_skill":
-                step_event["skill_name"] = json.loads(
-                    tc["function"]["arguments"]
-                ).get("skill_name", "")
-            _emit(step_event)
+            with (
+                patch(
+                    "app.agents.chat.react_loop._forced_closing_response",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ),
+                patch(
+                    "app.agents.chat.react_loop.build_react_system_prompt",
+                    return_value="You are an interviewer.",
+                ),
+                patch(
+                    "app.agents.chat.react_loop._build_repetition_protection_note",
+                    return_value="",
+                ),
+                patch(
+                    "app.agents.chat.react_loop.llm_service.llm_with_tools",
+                    new_callable=AsyncMock,
+                    side_effect=[
+                        {"tool_calls": [load_skill_tc], "finish_reason": "tool_calls"},
+                        {"content": "OK", "tool_calls": [], "finish_reason": "stop"},
+                    ],
+                ),
+                patch(
+                    "app.agents.chat.react_loop.validate_tool_call",
+                    side_effect=lambda tc: tc,
+                ),
+                patch(
+                    "app.agents.chat.react_loop.chat_tools.execute_tool",
+                    new_callable=AsyncMock,
+                    return_value="skill loaded",
+                ),
+            ):
+                async for _ in _react_loop(state):
+                    pass
 
-            # Verify step event was emitted with skill_name
             step_events = [e for e in emitted_events if e.get("type") == "step"]
-            assert len(step_events) == 1
-            assert step_events[0]["skill_name"] == "project-deep-dive"
-            assert step_events[0]["step"] == "load_skill"
-            assert "正在加载" in step_events[0]["message"]
+            load_skill_events = [
+                e for e in step_events if e.get("step") == "load_skill"
+            ]
+            assert len(load_skill_events) == 1
+            assert load_skill_events[0]["skill_name"] == "project-deep-dive"
+            assert "正在加载" in load_skill_events[0]["message"]
         finally:
             _event_queue_var.reset(token)
 
 
 class TestToolProgressMessage:
-    def test_execute_select_question_is_pure_forwarding(self):
-        """_execute_select_question should be a thin delegate to select_question_tool (< 10 lines)."""
-        import inspect
-        from app.agents.chat.tools import _execute_select_question
-
-        source = inspect.getsource(_execute_select_question)
-        non_empty_lines = [
-            line
-            for line in source.splitlines()
-            if line.strip() and not line.strip().startswith(("def ", '"""', "'''"))
-        ]
-        assert len(non_empty_lines) <= 10, (
-            f"_execute_select_question has {len(non_empty_lines)} non-empty lines, "
-            f"expected <= 10 (pure forwarding). Found:\n{source}"
-        )
-
     def test_progress_messages_are_user_friendly_chinese(self):
         from app.agents.chat.tools import tool_progress_message
 

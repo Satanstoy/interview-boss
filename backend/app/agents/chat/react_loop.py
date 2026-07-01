@@ -493,9 +493,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             }
             # Add skill_name for load_skill observability
             if tool_name == "load_skill":
-                step_event["skill_name"] = json.loads(
-                    tc["function"]["arguments"]
-                ).get("skill_name", "")
+                raw_args = tc["function"]["arguments"]
+                if isinstance(raw_args, dict):
+                    skill_args = raw_args
+                else:
+                    skill_args = json.loads(raw_args)
+                step_event["skill_name"] = skill_args.get("skill_name", "")
             _emit(step_event)
 
             # Execute tool
