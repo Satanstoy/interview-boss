@@ -20,6 +20,15 @@ from unittest.mock import patch, AsyncMock
 class TestChatServiceConversation:
     """会话管理测试"""
 
+    def test_create_conversation_with_difficulty(self):
+        """Test creating conversation with difficulty parameter."""
+        from app.services.chat_service import create_conversation
+        import inspect
+
+        sig = inspect.signature(create_conversation)
+        assert "difficulty" in sig.parameters
+        assert "experience_id" in sig.parameters
+
     def test_create_conversation_returns_correct_structure(self, test_db):
         """T-001: 创建会话应返回包含 id, mode, title 的字典"""
         from app.services.chat_service import create_conversation

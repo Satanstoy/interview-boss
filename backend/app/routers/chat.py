@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from app.core.auth import get_current_user
 from app.db.connection import run_db, get_user_job_position
+from app.models.schemas import CreateConversationRequest
 from app.services import chat_service
 
 logger = logging.getLogger("interview-boss")
@@ -21,15 +22,6 @@ def _current_position_name(user_id: int) -> str:
 
 
 # ── 请求模型 ──
-
-
-class CreateConversationRequest(BaseModel):
-    mode: str = Field(..., pattern="^(jd_resume|free_practice)$")
-    title: Optional[str] = None
-    jd_id: Optional[int] = None
-    resume_text: Optional[str] = None
-    difficulty: Optional[str] = Field(None, pattern="^(junior|mid|senior|staff_plus)$")
-    experience_id: Optional[int] = None
 
 
 class SendMessageRequest(BaseModel):

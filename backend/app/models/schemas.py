@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +26,7 @@ class EvaluateAnswerRequest(BaseModel):
     question_text: str = Field(..., max_length=10000)
     user_answer: str = Field(..., max_length=10000)
     reference_answer: str = Field(..., max_length=10000)
+    model: Optional[str] = Field(None, max_length=100)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -80,3 +81,12 @@ class CodingProblemCreateRequest(BaseModel):
     expected_complexity: str = Field("", max_length=100)
     source: str = Field("", max_length=200)
     supported_languages: str = Field('["python","c","java"]', max_length=500)
+
+
+class CreateConversationRequest(BaseModel):
+    mode: str = Field(..., pattern="^(jd_resume|free_practice)$")
+    title: Optional[str] = None
+    jd_id: Optional[int] = None
+    resume_text: Optional[str] = None
+    difficulty: Optional[str] = Field(None, pattern="^(junior|mid|senior|staff_plus)$")
+    experience_id: Optional[int] = None
