@@ -16,11 +16,12 @@
     <div v-else>
       <!-- Reasoning timeline (unified: steps + thinking) -->
       <ReasoningTimeline
-        v-if="timelineSteps.length || message.metadata?.thinking"
+        v-if="timelineSteps.length || timelineToolSteps.length || message.metadata?.thinking"
         :is-streaming="false"
         :content="thinkingContent"
         :duration="message.metadata?.thinking_duration || 0"
         :steps="timelineSteps"
+        :tool-steps="timelineToolSteps"
       />
 
       <!-- Fallback: legacy insight-only messages (no steps, has insights) -->
@@ -256,8 +257,7 @@ const toolLabels = {
 const timelineSteps = computed(() => {
   const metadata = props.message.metadata || {}
   const steps = Array.isArray(metadata.steps) ? metadata.steps : []
-  const toolSteps = Array.isArray(metadata.tool_steps) ? metadata.tool_steps : []
-  const normalizedSteps = steps.map(step => {
+  return steps.map(step => {
     const skillName = step.skill_name
     const skillLabel = skillLabels[skillName] || skillName
     return {
@@ -267,20 +267,20 @@ const timelineSteps = computed(() => {
         : step.message,
     }
   })
-  const normalizedToolSteps = toolSteps.map(toolStep => {
+})
+
+const timelineToolSteps = computed(() => {
+  const metadata = props.message.metadata || {}
+  const toolSteps = Array.isArray(metadata.tool_steps) ? metadata.tool_steps : []
+  return toolSteps.map(toolStep => {
     const label = toolLabels[toolStep.tool_name] || toolStep.tool_name || toolStep.step
-    const details = []
-    if (Number.isFinite(Number(toolStep.elapsed_ms))) details.push(`${toolStep.elapsed_ms}ms`)
-    if (Number.isFinite(Number(toolStep.result_count))) details.push(`${toolStep.result_count} 个结果`)
-    if (toolStep.fallback_used) details.push('已降级')
     return {
-      step: toolStep.step || toolStep.tool_name,
-      message: details.length ? `${label} · ${details.join(' · ')}` : label,
-      reason: toolStep.message || '',
+      message: label,
+      elapsed_ms: toolStep.elapsed_ms,
+      result_count: toolStep.result_count,
       done: true,
     }
   })
-  return [...normalizedSteps, ...normalizedToolSteps]
 })
 
 const thinkingContent = computed(() => {

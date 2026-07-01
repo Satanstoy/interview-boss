@@ -67,6 +67,22 @@
           </div>
         </div>
 
+        <!-- Tool steps -->
+        <div v-if="toolSteps.length > 0" class="space-y-1 mb-3">
+          <div v-for="(step, i) in toolSteps" :key="i" class="group/step">
+            <button
+              @click="toggleToolStep(i)"
+              class="flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-muted/50 transition-colors"
+            >
+              <CheckCircle2 v-if="step.done !== false" :size="12" class="text-emerald-500 shrink-0" />
+              <Loader2 v-else :size="12" class="animate-spin text-muted-foreground shrink-0" />
+              <span class="text-muted-foreground flex-1">{{ step.message }}</span>
+              <span v-if="step.elapsed_ms" class="text-xs text-muted-foreground/50">{{ step.elapsed_ms }}ms</span>
+              <span v-if="step.result_count !== undefined" class="text-xs text-muted-foreground/50">{{ step.result_count }} 结果</span>
+            </button>
+          </div>
+        </div>
+
         <!-- LLM Thinking section -->
         <div v-if="content" ref="contentRef"
           class="text-xs leading-relaxed text-muted-foreground/70 max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words p-3 rounded-lg bg-muted/30 border border-border/50"
@@ -95,11 +111,13 @@ const props = defineProps({
   content: { type: String, default: '' },
   duration: { type: Number, default: 0 },
   steps: { type: Array, default: () => [] },
+  toolSteps: { type: Array, default: () => [] },
 })
 
 const isOpen = ref(true)
 const contentRef = ref(null)
 const expandedSteps = reactive({})
+const expandedToolSteps = reactive({})
 
 const stepCount = computed(() => props.steps.length)
 
@@ -124,6 +142,10 @@ function toggleStep(index) {
   expandedSteps[index] = !expandedSteps[index]
 }
 
+function toggleToolStep(index) {
+  expandedToolSteps[index] = !expandedToolSteps[index]
+}
+
 watch(() => props.content, () => {
   if (contentRef.value && isOpen.value) {
     contentRef.value.scrollTop = contentRef.value.scrollHeight
@@ -132,7 +154,7 @@ watch(() => props.content, () => {
 
 // Collapse only when the entire message is done (not just thinking done)
 watch(() => props.isSending, (sending, oldSending) => {
-  if (oldSending && !sending && (props.content || props.steps.length > 0)) {
+  if (oldSending && !sending && (props.content || props.steps.length > 0 || props.toolSteps.length > 0)) {
     setTimeout(() => {
       isOpen.value = false
     }, 1000)
@@ -140,7 +162,7 @@ watch(() => props.isSending, (sending, oldSending) => {
 })
 
 onMounted(() => {
-  if ((props.content || props.steps.length > 0) && !props.isSending) {
+  if ((props.content || props.steps.length > 0 || props.toolSteps.length > 0) && !props.isSending) {
     isOpen.value = false
   }
 })
