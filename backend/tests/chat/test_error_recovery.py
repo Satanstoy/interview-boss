@@ -101,6 +101,11 @@ class TestFallbackReactAnswer:
         assert "收束到" not in result
         assert "核心思路、关键取舍" not in result
         assert "验证这个方案" not in result
+        assert "请结合实际项目或工程经验展开" not in result
+        assert "场景背景" not in result
+        assert "实现细节" not in result
+        assert "风险处理" not in result
+        assert "验证方式" not in result
 
     def test_fallback_with_retrieved(self):
         """ER2: 无 candidate 但有 retrieved → 使用 retrieved"""
@@ -168,6 +173,11 @@ class TestFallbackReactAnswer:
         assert "收束到" not in result
         assert "核心思路、关键取舍" not in result
         assert "验证这个方案" not in result
+        assert "请结合实际项目或工程经验展开" not in result
+        assert "场景背景" not in result
+        assert "实现细节" not in result
+        assert "风险处理" not in result
+        assert "验证方式" not in result
         assert state["question_source_reason"] == "question_plan_fallback"
 
 

@@ -247,18 +247,15 @@ def _format_bank_question_fallback(question_text: str, *, style: str = "candidat
     question = (question_text or "").strip()
     if not question:
         return (
-            "我先追问你刚才提到的一个点。请选一个最有代表性的模块，"
-            "讲清楚它解决什么问题、具体怎么实现，以及上线后怎么判断效果。"
+            "我先追问你刚才提到的一个点。选一个你最熟的模块，"
+            "把关键设计和你当时做的取舍讲清楚。"
         )
     prefix = (
-        "这个方向我们继续追一下："
+        "换个具体点的问题："
         if style == "plan"
-        else "我追问一个和你刚才回答相关的问题："
+        else "顺着你刚才的回答，我问一个具体问题："
     )
-    return (
-        f"{prefix}{question}\n\n"
-        "请结合实际项目或工程经验展开，重点讲场景背景、实现细节、风险处理和验证方式。"
-    )
+    return f"{prefix}{question}"
 
 
 def _fallback_react_answer(state: ChatState, reason: str) -> str:
@@ -278,8 +275,8 @@ def _fallback_react_answer(state: ChatState, reason: str) -> str:
     keywords = state.get("keywords") or []
     topic = "、".join(keywords[:3]) if keywords else "你刚才提到的项目"
     return (
-        f"我们先围绕「{topic}」继续追问。请你挑一个最核心的模块，"
-        "说明它的输入输出、关键流程、主要取舍，以及你是怎么验证效果的。"
+        f"我们先围绕「{topic}」问细一点。挑一个你实际做过的模块，"
+        "说清楚它的关键流程和主要取舍。"
     )
 
 

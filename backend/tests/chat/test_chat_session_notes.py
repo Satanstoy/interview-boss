@@ -108,6 +108,49 @@ class TestExtractMemoryRichCapture:
             notes_arg = mock_svc.update_session_notes.call_args[0][1]
             assert "[asked]" in notes_arg
 
+    @pytest.mark.asyncio
+    async def test_captures_selected_question_instead_of_first_retrieved(self):
+        """S-003b: asked ledger should record the actually selected question."""
+        from app.agents.chat.nodes import extract_memory
+
+        state = {
+            "user_id": 1,
+            "user_message": "我继续回答 RAG 评估指标的设计思路和实际验证过程",
+            "response": "好的，换一个方向。",
+            "keywords": ["RAG"],
+            "intent": "interview_question",
+            "selected_question": {
+                "id": 2,
+                "question": "RAG 评估指标怎么设计？",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "RAG",
+                "tags": "评估",
+            },
+            "next_question_plan": {
+                "question_id": 2,
+                "question_text": "RAG 评估指标怎么设计？",
+                "source": "search",
+                "strategy": "interview_question",
+            },
+            "retrieved_questions": [
+                {"id": 1, "question": "RAG 流程是什么？", "cat1": "B.Agent与LLM应用", "cat2": "RAG"},
+                {"id": 2, "question": "RAG 评估指标怎么设计？", "cat1": "B.Agent与LLM应用", "cat2": "RAG"},
+            ],
+            "session_notes": "",
+            "conversation_id": "test-conv-id",
+        }
+
+        with patch("app.agents.chat.nodes.chat_service") as mock_svc, \
+             patch("app.agents.chat.nodes._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = "[]"
+
+            await extract_memory(state)
+
+        notes_arg = mock_svc.update_session_notes.call_args[0][1]
+        assert "#2" in notes_arg
+        assert "RAG 评估指标怎么设计" in notes_arg
+        assert "RAG 流程是什么" not in notes_arg
+
 
 class TestTier1SessionNotesIntegration:
     """Tier 1 压缩集成 session notes"""

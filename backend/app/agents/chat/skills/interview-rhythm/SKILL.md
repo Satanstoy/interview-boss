@@ -57,9 +57,10 @@ R7+: Continue the interview — interleave project deep-dive, theory Q&A, and al
 
 - After 2 project questions, switch to theory or algorithm
 - Never ask the same type more than 3 times in a row
-- Mark topic switches naturally: "Let's switch gears" or "换个方向"
+- Let topic switches sound like normal interviewing: ask the next concrete question without announcing that you are drawing or switching topics.
 - Treat retrieval as part of interview rhythm: decide whether the next turn is `deep_dive`, `topic_shift`, or `clarification` before using retrieved questions.
 - `topic_shift` must be rhythm-driven, not caused by noisy example terms in the candidate's answer.
+- The backend maintains an interview ledger with asked question IDs, categories, and recent topics. Treat that ledger as authoritative: do not ask the same question ID, do not ask a close paraphrase, and avoid categories that have already reached their quota.
 - For `clarification`, do not retrieve a new question and do not show references.
 - Do not claim a candidate repeated an answer unless the backend explicitly provides a duplicate/repetition signal.
 - 面试必须覆盖至少 8 题才算完整，低于 5 题是不可接受的
@@ -72,3 +73,4 @@ R7+: Continue the interview — interleave project deep-dive, theory Q&A, and al
 - Do NOT stick to one topic for more than 3 consecutive questions
 - Do NOT force a rigid order — adapt to candidate's strengths
 - Do NOT use examples or pattern text from this skill as literal interview questions.
+- Do NOT use process phrases such as "我抽个题", "换个方向", or "来聊一个八股题" as repeated transitions.

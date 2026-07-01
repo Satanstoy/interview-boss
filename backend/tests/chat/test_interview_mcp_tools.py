@@ -94,6 +94,52 @@ async def test_search_questions_tool_returns_error_envelope_for_empty_query():
     assert state["retrieved_questions"] == []
 
 
+@pytest.mark.asyncio
+async def test_search_questions_tool_excludes_ledger_question_ids(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    captured = {}
+
+    async def fake_search(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "id": 30,
+                "question": "Redis 分布式锁如何避免误删？",
+                "cat1": "C.后端基础",
+                "cat2": "Redis",
+                "tags": "redis",
+            }
+        ]
+
+    monkeypatch.setattr(interview_tools, "_hybrid_search_for_tool", fake_search)
+
+    state = {
+        "user_id": 5,
+        "session_notes": "[asked] B.Agent与LLM应用/Agent 检索 #21 [project_followup]: Agent 检索怎么做？",
+        "retrieved_questions": [{"id": "legacy-id", "question": "旧格式题目"}],
+        "message_history": [
+            {
+                "role": "assistant",
+                "metadata": {
+                    "selected_question": {
+                        "id": 22,
+                        "question": "LRU Cache",
+                        "cat1": "E.算法与数据结构",
+                        "cat2": "E2.算法手撕",
+                        "tags": "代码,lru",
+                    }
+                },
+            }
+        ],
+    }
+
+    result = await interview_tools.search_questions_tool({"keywords": ["Redis"]}, state)
+
+    assert result["ok"] is True
+    assert captured["exclude_ids"] == {21, 22}
+
+
 def test_select_question_tool_binds_algorithm_candidate():
     from app.mcp_server import interview_tools
 
@@ -234,6 +280,44 @@ async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
     assert drawn["ok"] is True
     assert drawn["metadata"]["session_id"] == session_id
     assert drawn["items"][0]["id"] == 101
+
+
+@pytest.mark.asyncio
+async def test_draw_questions_tool_excludes_ledger_question_ids(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    captured = {}
+
+    async def fake_draw(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "id": 31,
+                "question": "滑动窗口最大值",
+                "cat1": "E.算法与数据结构",
+                "cat2": "E2.算法手撕",
+                "tags": "算法",
+                "difficulty": "L2-中等",
+                "sources": [],
+            }
+        ]
+
+    monkeypatch.setattr(interview_tools, "_draw_questions_for_tool", fake_draw)
+
+    state = {
+        "user_id": 5,
+        "bank_mode": "public",
+        "session_notes": "[asked] E.算法与数据结构/E2.算法手撕 #21 [algorithm_coding]: LRU Cache",
+        "retrieved_questions": [{"id": "legacy-id", "question": "旧格式题目"}],
+    }
+
+    result = await interview_tools.draw_questions_tool(
+        {"question_type": "algorithm_coding", "count": 1},
+        state,
+    )
+
+    assert result["ok"] is True
+    assert captured["exclude_ids"] == {21}
 
 
 @pytest.mark.asyncio

@@ -63,6 +63,7 @@ metadata:
 - `load_skill` 的 enum 必须等于 registry 中所有非 `kind=tool-use` 的 skill；`interview-tool-use` 这类常驻工具策略不能暴露给模型手动加载
 - `base.py` 中的 `_triggers_match()` 做上下文感知匹配，减少误触发
 - `builder.py` 负责 chat-specific Layer 1 catalog 文案；Layer 2 指令合并复用 shared `build_skill_prompt()`
+- `interview-rhythm` 负责节奏和表达边界：它可以提醒 Agent 尊重后端 `InterviewLedger`，但不能替代 `question_plan.py` / MCP 工具层的题号和题型去重；同时避免“我抽个题”“来聊一个八股题”“换个方向”这类流程播报式话术
 
 ## 修改后必做
 

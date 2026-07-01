@@ -15,7 +15,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 | `pipeline.py` | 入口点：`run_chat()` + pipeline steps（`_step_load_context`、`_step_classify`、`_step_extract_memory`、`_persist_active_skills`、`_initial_state`）+ 所有子模块的 re-export（向后兼容） |
 | `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射 |
 | `answer.py` | 答案生成与质量：`OutputDeduplicator`、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、fallback 响应、内部 marker 过滤 |
-| `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、重复追问保护、已问题列表构建 |
+| `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护、已问题列表构建 |
 | `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
 | `graph.py` | 兼容层，委托给 `pipeline.run_chat` |
@@ -50,7 +50,9 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
 - **开场自然追问**：`_should_require_bank_question()` 是题库绑定时机的单一判断；开场自我介绍/早期背景说明后先基于项目和职责自然追问，不立即硬检索题库。`_build_tool_strategy()`、`_should_create_question_plan()`、`react_loop` forced search guard 必须共用该判断
-- **已问题过滤**：`_select_question_for_plan()` 会从历史 assistant metadata 和旧话术正文中提取已问 ID/题面，优先选择未问过的候选；所有候选都已问过时才回退第一题并记录 `*_all_candidates_previously_asked`
+- **InterviewLedger 问题台账**：`_build_interview_ledger()` 从 session notes、assistant metadata、selected question 和 retrieved questions 中汇总 `asked_question_ids`、题面、一级/二级分类计数、题型计数和近期主题 token；这是防止同题号/同题型/同主题重复追问的硬状态，不要只依赖 prompt 提醒
+- **已问题过滤**：`_select_question_for_plan()` 会结合 `InterviewLedger` 与历史 assistant metadata / 旧话术正文提取的已问 ID/题面，优先选择未问过且未达到类别配额的候选；所有候选都已问过时才回退第一题并记录 `*_all_candidates_previously_asked`
+- **自然话术兜底**：`answer.py` 的 deterministic fallback 只负责把已选题自然问出来，不要重新引入“我抽个题”“来聊一个八股题”或固定四段式要求（如“场景背景、实现细节、风险处理和验证方式”）
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容
 - **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`

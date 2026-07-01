@@ -14,7 +14,7 @@ import time
 
 from pydantic import ValidationError
 
-from app.agents.chat.question_plan import _maybe_create_question_plan
+from app.agents.chat.question_plan import _build_interview_ledger, _maybe_create_question_plan
 
 logger = logging.getLogger(__name__)
 from app.agents.chat.state import ChatState
@@ -108,6 +108,18 @@ async def _maybe_await(value):
     return await value if inspect.isawaitable(value) else value
 
 
+def _positive_int_ids(values) -> set[int]:
+    ids: set[int] = set()
+    for value in values or []:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            ids.add(parsed)
+    return ids
+
+
 def _fallback_metadata(items: list[dict]) -> tuple[bool, list[str]]:
     reasons = []
     for item in items:
@@ -160,14 +172,15 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         search_args["retrieval_intent"] = state["retrieval_intent"]
     if state.get("search_negative_terms"):
         search_args["negative_terms"] = state["search_negative_terms"]
+    exclude_ids = set(_build_interview_ledger(state).asked_question_ids)
     if state.get("retrieved_questions"):
-        exclude_ids = {
+        exclude_ids.update(
             q.get("id")
             for q in state["retrieved_questions"]
             if isinstance(q, dict) and q.get("id")
-        }
-        if exclude_ids:
-            search_args["exclude_ids"] = exclude_ids
+        )
+    if exclude_ids:
+        search_args["exclude_ids"] = _positive_int_ids(exclude_ids)
 
     try:
         results = await asyncio.wait_for(
@@ -255,14 +268,15 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         value = getattr(parsed_args, key)
         if value:
             draw_args[key] = value
+    exclude_ids = set(_build_interview_ledger(state).asked_question_ids)
     if state.get("retrieved_questions"):
-        exclude_ids = {
+        exclude_ids.update(
             q.get("id")
             for q in state["retrieved_questions"]
             if isinstance(q, dict) and q.get("id")
-        }
-        if exclude_ids:
-            draw_args["exclude_ids"] = exclude_ids
+        )
+    if exclude_ids:
+        draw_args["exclude_ids"] = _positive_int_ids(exclude_ids)
 
     try:
         results = await asyncio.wait_for(

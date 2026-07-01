@@ -1511,11 +1511,32 @@ async def extract_memory(state: ChatState) -> dict:
         if keywords:
             note_parts.append(f"[topics] {', '.join(keywords[:3])}")
 
-        # 记录被问到的题目（从 retrieved_questions）
+        # 记录被问到的题目（优先使用最终 selected_question / question_plan）
         intent = state.get("intent", "")
-        if intent == "interview_question" and state.get("retrieved_questions"):
-            q = state["retrieved_questions"][0]
-            note_parts.append(f"[asked] {q.get('cat1', '')}: {q['question'][:60]}")
+        selected_question = state.get("selected_question")
+        if not selected_question and state.get("next_question_plan"):
+            plan = state.get("next_question_plan") or {}
+            selected_question = {
+                "id": plan.get("question_id"),
+                "question": plan.get("question_text"),
+                "cat1": "",
+                "cat2": "",
+                "tags": plan.get("strategy", ""),
+            }
+        if (
+            intent == "interview_question"
+            and not selected_question
+            and state.get("retrieved_questions")
+        ):
+            selected_question = state["retrieved_questions"][0]
+        if intent == "interview_question" and isinstance(selected_question, dict):
+            qid = selected_question.get("id") or ""
+            cat1 = str(selected_question.get("cat1") or "").strip()
+            cat2 = str(selected_question.get("cat2") or "").strip()
+            qtype = str(state.get("question_type") or selected_question.get("tags") or "general").strip()
+            question = str(selected_question.get("question") or "")[:80]
+            category = f"{cat1}/{cat2}".strip("/")
+            note_parts.append(f"[asked] {category} #{qid} [{qtype}]: {question}".strip())
 
         if note_parts:
             current_notes = state.get("session_notes", "")

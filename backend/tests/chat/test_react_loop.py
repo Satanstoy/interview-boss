@@ -958,6 +958,62 @@ class TestQuestionPlanHelpers:
         assert selected["id"] == 11
         assert reason == "top_ranked_candidate_after_asked_filter"
 
+    def test_select_question_for_plan_uses_ledger_to_shift_saturated_topic(self):
+        from app.agents.chat.pipeline import _select_question_for_plan
+
+        state = {
+            "search_negative_terms": [],
+            "message_history": [
+                {
+                    "role": "assistant",
+                    "content": "Agent 的检索机制是怎样的？",
+                    "metadata": {
+                        "selected_question": {
+                            "id": 10,
+                            "question": "Agent 的检索机制是怎样的？",
+                            "cat1": "B.Agent与LLM应用",
+                            "cat2": "Agent 检索",
+                            "tags": "agent,检索",
+                        }
+                    },
+                },
+                {
+                    "role": "assistant",
+                    "content": "Agent 的检索机制如何设计？",
+                    "metadata": {
+                        "selected_question": {
+                            "id": 11,
+                            "question": "Agent 的检索机制如何设计？",
+                            "cat1": "B.Agent与LLM应用",
+                            "cat2": "Agent 检索",
+                            "tags": "agent,检索",
+                        }
+                    },
+                },
+            ],
+        }
+        candidates = [
+            {
+                "id": 12,
+                "question": "Agent 检索链路里的 query 改写怎么做？",
+                "cat1": "B.Agent与LLM应用",
+                "cat2": "Agent 检索",
+                "tags": "agent,检索",
+            },
+            {
+                "id": 13,
+                "question": "Redis 分布式锁如何避免误删？",
+                "cat1": "C.后端基础",
+                "cat2": "Redis",
+                "tags": "redis,锁",
+            },
+        ]
+
+        selected, reason = _select_question_for_plan(state, candidates)
+
+        assert selected["id"] == 13
+        assert reason == "top_ranked_candidate_after_ledger_filter"
+
     def test_select_question_for_plan_falls_back_when_all_candidates_were_asked(self):
         from app.agents.chat.pipeline import _select_question_for_plan
 
@@ -990,6 +1046,36 @@ class TestQuestionPlanHelpers:
 
         assert selected["id"] == 10
         assert reason == "top_ranked_candidate_all_candidates_previously_asked"
+
+    def test_build_interview_ledger_collects_question_ids_and_type_counts(self):
+        from app.agents.chat.pipeline import _build_interview_ledger
+
+        state = {
+            "session_notes": "[asked] B.Agent与LLM应用/Agent 检索 #21 [project_followup]: Agent 检索怎么做？",
+            "message_history": [
+                {
+                    "role": "assistant",
+                    "content": "来写一道代码题：LRU Cache",
+                    "metadata": {
+                        "selected_question": {
+                            "id": 22,
+                            "question": "LRU Cache",
+                            "cat1": "E.算法与数据结构",
+                            "cat2": "E2.算法手撕",
+                            "tags": "代码,lru",
+                        },
+                        "question_plan": {"question_id": 22},
+                    },
+                }
+            ],
+        }
+
+        ledger = _build_interview_ledger(state)
+
+        assert ledger.asked_question_ids == {21, 22}
+        assert ledger.cat2_counts["Agent 检索"] == 1
+        assert ledger.cat2_counts["E2.算法手撕"] == 1
+        assert ledger.question_type_counts["algorithm_coding"] == 1
 
     def test_build_question_plan_sets_state_selected_question(self):
         from app.agents.chat.pipeline import _maybe_create_question_plan

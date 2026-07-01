@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
+from dataclasses import dataclass, field
 
 from app.agents.chat.state import ChatState
 
@@ -16,6 +18,51 @@ logger = logging.getLogger("interview-boss")
 
 _MAX_CONSECUTIVE_SAME_QUESTION = 2
 _MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION = 4
+_MAX_LEDGER_CAT2_COUNT = 2
+
+
+@dataclass
+class InterviewLedger:
+    """Conversation-local ledger of asked question IDs and topic distribution."""
+
+    asked_question_ids: set[int] = field(default_factory=set)
+    asked_question_texts: set[str] = field(default_factory=set)
+    cat1_counts: Counter[str] = field(default_factory=Counter)
+    cat2_counts: Counter[str] = field(default_factory=Counter)
+    question_type_counts: Counter[str] = field(default_factory=Counter)
+    recent_topic_tokens: list[set[str]] = field(default_factory=list)
+
+    def record_question(self, question: dict | None, question_type: str | None = None) -> None:
+        if not isinstance(question, dict):
+            return
+        raw_id = question.get("id")
+        try:
+            qid = int(raw_id)
+        except (TypeError, ValueError):
+            qid = 0
+        if qid > 0:
+            self.asked_question_ids.add(qid)
+
+        question_text = str(question.get("question") or "")
+        text_key = _normalize_question_text(question_text)
+        if text_key:
+            self.asked_question_texts.add(text_key)
+
+        cat1 = str(question.get("cat1") or "").strip()
+        cat2 = str(question.get("cat2") or "").strip()
+        if cat1:
+            self.cat1_counts[cat1] += 1
+        if cat2:
+            self.cat2_counts[cat2] += 1
+
+        qtype = question_type or _infer_question_type(question)
+        if qtype:
+            self.question_type_counts[qtype] += 1
+
+        tokens = _tokenize_for_overlap(" ".join([question_text, cat1, cat2, str(question.get("tags") or "")]))
+        if tokens:
+            self.recent_topic_tokens.append(tokens)
+            self.recent_topic_tokens = self.recent_topic_tokens[-8:]
 
 
 def _tokenize_for_overlap(text: str) -> set[str]:
@@ -29,6 +76,98 @@ def _normalize_question_text(text: str) -> str:
     return re.sub(
         r"[\s`'\"" "''。？?！!，,、：:；;（）()【】\\[\\]{}<>《》]", "", text or ""
     ).lower()
+
+
+def _infer_question_type(question: dict | None) -> str:
+    if not isinstance(question, dict):
+        return ""
+    text = " ".join(
+        str(question.get(field) or "")
+        for field in ("question", "cat1", "cat2", "tags")
+    )
+    if re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru|滑动窗口)", text, re.I):
+        return "algorithm_coding"
+    if re.search(r"(项目|架构|系统设计|Agent|RAG|LangGraph)", text, re.I):
+        return "project_followup"
+    if re.search(r"(Redis|MySQL|TCP|HTTP|缓存|锁|线程|进程|索引)", text, re.I):
+        return "knowledge_probe"
+    return "general"
+
+
+def _public_question_from_note(
+    *,
+    qid: int = 0,
+    cat1: str = "",
+    cat2: str = "",
+    qtype: str = "",
+    question: str = "",
+) -> dict:
+    return {
+        "id": qid,
+        "question": question,
+        "cat1": cat1,
+        "cat2": cat2,
+        "tags": qtype,
+    }
+
+
+def _build_interview_ledger(state: ChatState) -> InterviewLedger:
+    ledger = InterviewLedger()
+
+    session_notes = state.get("session_notes", "") or ""
+    for line in session_notes.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("[asked]"):
+            continue
+        body = stripped.replace("[asked]", "", 1).strip()
+        match = re.match(
+            r"(?P<cat1>[^/#:\[]+)?(?:/(?P<cat2>[^#:\[]+))?\s*"
+            r"(?:#(?P<id>\d+))?\s*(?:\[(?P<type>[^\]]+)\])?\s*[:：]\s*(?P<question>.+)",
+            body,
+        )
+        if match:
+            data = match.groupdict()
+            ledger.record_question(
+                _public_question_from_note(
+                    qid=int(data.get("id") or 0),
+                    cat1=(data.get("cat1") or "").strip(),
+                    cat2=(data.get("cat2") or "").strip(),
+                    qtype=(data.get("type") or "").strip(),
+                    question=(data.get("question") or "").strip(),
+                ),
+                question_type=(data.get("type") or "").strip() or None,
+            )
+        elif ":" in body or "：" in body:
+            sep = ":" if ":" in body else "："
+            cat, question = body.split(sep, 1)
+            ledger.record_question(
+                _public_question_from_note(cat1=cat.strip(), question=question.strip())
+            )
+
+    for msg in state.get("message_history", []) or []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        metadata = msg.get("metadata") or {}
+        if isinstance(metadata, dict):
+            selected = metadata.get("selected_question")
+            if isinstance(selected, dict):
+                ledger.record_question(selected)
+            plan = metadata.get("question_plan")
+            if isinstance(plan, dict):
+                qid = plan.get("question_id")
+                if qid:
+                    try:
+                        ledger.asked_question_ids.add(int(qid))
+                    except (TypeError, ValueError):
+                        pass
+            for key in ("selected_basis_questions",):
+                value = metadata.get(key)
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            ledger.record_question(item)
+
+    return ledger
 
 
 def _should_create_question_plan(state: ChatState) -> bool:
@@ -114,6 +253,7 @@ def _select_question_for_plan(
 ) -> tuple[dict | None, str]:
     """Select one candidate for hard question-plan binding."""
     negative_terms = state.get("search_negative_terms", []) or []
+    ledger = _build_interview_ledger(state)
     viable = [
         q
         for q in candidates
@@ -126,6 +266,8 @@ def _select_question_for_plan(
         return None, "no_viable_candidate"
 
     asked_ids, asked_texts = _previously_asked_question_keys(state)
+    asked_ids = asked_ids | ledger.asked_question_ids
+    asked_texts = asked_texts | ledger.asked_question_texts
     if asked_ids or asked_texts:
         unasked = [
             candidate
@@ -140,12 +282,50 @@ def _select_question_for_plan(
     else:
         asked_filter_suffix = ""
 
+    ledger_filtered = _filter_candidates_by_ledger(viable, ledger)
+    if ledger_filtered and len(ledger_filtered) < len(viable):
+        viable = ledger_filtered
+        asked_filter_suffix = "_after_ledger_filter"
+
     if state.get("question_type") == "algorithm_coding":
         for candidate in viable:
             if _is_algorithm_candidate(candidate):
                 return candidate, f"algorithm_candidate_match{asked_filter_suffix}"
 
     return viable[0], f"top_ranked_candidate{asked_filter_suffix}"
+
+
+def _candidate_repeats_recent_topic(candidate: dict, ledger: InterviewLedger) -> bool:
+    if not ledger.recent_topic_tokens:
+        return False
+    text = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("question", "cat1", "cat2", "tags")
+    )
+    candidate_tokens = _tokenize_for_overlap(text)
+    if not candidate_tokens:
+        return False
+    for previous in ledger.recent_topic_tokens[-3:]:
+        if not previous:
+            continue
+        overlap = len(candidate_tokens & previous) / max(min(len(candidate_tokens), len(previous)), 1)
+        if overlap >= 0.45:
+            return True
+    return False
+
+
+def _filter_candidates_by_ledger(candidates: list[dict], ledger: InterviewLedger) -> list[dict]:
+    if not candidates:
+        return candidates
+    filtered = []
+    for candidate in candidates:
+        cat2 = str(candidate.get("cat2") or "").strip()
+        if cat2 and ledger.cat2_counts.get(cat2, 0) >= _MAX_LEDGER_CAT2_COUNT:
+            continue
+        if _candidate_repeats_recent_topic(candidate, ledger):
+            continue
+        filtered.append(candidate)
+    return filtered or candidates
 
 
 def _previously_asked_question_keys(state: ChatState) -> tuple[set[int], set[str]]:
