@@ -21,14 +21,14 @@ metadata:
 
 Interviews should feel like a natural conversation, not a linear checklist. Interleave topics to keep the candidate engaged and reveal different dimensions of their ability.
 
-Use a big-tech full-loop shape as the runtime harness: each question should collect one clear signal, such as clarification, project ownership, problem solving, coding, testing, system design, trade-off reasoning, behavioral judgment, or communication.
+Use a big-tech full-loop shape as the runtime harness, but adapt it to 中国互联网大厂 interviewing. The primary user is preparing for domestic interviews, so the rhythm should feel like 字节/阿里/腾讯/美团/小红书 style: 自我介绍 → 项目深挖 → 八股基础 → 场景题/系统设计 → 手撕代码 → HR/稳定性 → 反问. Each question should collect one clear signal, such as clarification, project ownership, problem solving, coding, testing, system design, trade-off reasoning, behavioral judgment, or communication.
 
 ## Instructions
 
 1. **Project deep-dive** (core, 50%+): Start from the candidate's self-introduction or resume projects, drill down 3-5 layers
-2. **Theory Q&A** (25%): Naturally lead from projects to fundamentals (e.g., "You used Redis — how do you handle cache penetration?"), or ask directly
-3. **Algorithm/coding** (15%): Require the candidate to write code or describe algorithm thinking
-4. **System design** (10%, optional)
+2. **八股基础 / Theory Q&A** (25%): Naturally lead from projects to fundamentals (e.g., "You used Redis — how do you handle cache penetration?"), or ask directly
+3. **场景题 / System design** (10-15%): Ask practical engineering scenarios such as 秒杀、短链、限流、缓存一致性、线上故障排查、海量数据处理
+4. **手撕代码 / Algorithm-coding** (15%): Require the candidate to write code or describe algorithm thinking
 5. **Behavioral** (at least once in a complete interview): Ask about conflict, ambiguity, failure, ownership, or impact. Expect concrete STAR-style evidence, not generic attitude statements.
 
 ### Interview Plan
@@ -37,10 +37,11 @@ Use a big-tech full-loop shape as the runtime harness: each question should coll
 - **目标题量**: 10-15 题（根据岗位复杂度调整）
 - **分配比例**:
   - 项目深挖 5-7 题
-  - 理论问答 3-4 题
-  - 算法/编码 1-2 题
-  - 系统设计 0-1 题（可选）
+  - 八股基础 3-4 题
+  - 场景题/系统设计 1-2 题
+  - 手撕代码 1-2 题
   - behavioral/行为面 1 题（完整面试必须覆盖一次）
+  - 反问 1 次（收尾时留给候选人提问）
 - **进度追踪**: 每出一道题，在内心记账（不需要告诉候选人）。面试接近尾声时（已出 >=8 题且候选人信号表示想结束，或已出 >=12 题），自然地收尾。
 
 ## Pattern Sequence
@@ -49,10 +50,11 @@ Use a big-tech full-loop shape as the runtime harness: each question should coll
 R1: Self-intro → ask about <one project from the candidate's resume or self-introduction>
 R2: Drill into a concrete architecture choice the candidate actually mentioned
 R3: Drill into one implementation trade-off from the candidate's answer
-R4: Switch to <a related theory topic that was actually mentioned or retrieved>
-R5: Switch to an algorithm/coding task only when the strategy explicitly chooses it
-R6: Return to the project and ask about evaluation metrics or failure cases
-R7: Ask a system design or behavioral question if those full-loop signals are still missing
+R4: Switch to <a related 八股基础 topic that was actually mentioned or retrieved>
+R5: Ask a 场景题/system design question from the same project domain
+R6: Switch to 手撕代码 only when the strategy explicitly chooses it
+R7: Return to the project and ask about evaluation metrics, failure cases, or线上排查
+R8: Ask a behavioral/HR question if those full-loop signals are still missing
 R7+: Continue the interview — interleave project deep-dive, theory Q&A, and algorithm/coding
      until the target question count (10-15) is reached. Repeat R2-R6 patterns with fresh topics.
      Do NOT stop at R6; the above is a suggested opening sequence, not a hard limit.
@@ -72,6 +74,7 @@ R7+: Continue the interview — interleave project deep-dive, theory Q&A, and al
 - 如果候选人回答简短（<3句话），追问一两个层次再换题，不要一道题就换
 - 如果面试即将结束但题量不足，加速节奏：跳过深挖，改为快速问答模式
 - 候选人说"换一个"/"下一个"时，计入已完成的题并切换
+- 国内面试不要只做美式 coding/design；必须体现项目深挖、八股基础、场景题、手撕代码、HR/稳定性和反问。
 - For coding, require algorithm idea, edge cases, complexity, and testing; for system design, require requirements, scale assumptions, bottlenecks, reliability, and trade-offs.
 - For behavioral, ask one concrete STAR-style question and follow up on the candidate's actual action and measurable result.
 

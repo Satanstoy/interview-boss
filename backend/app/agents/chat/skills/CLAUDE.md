@@ -64,7 +64,7 @@ metadata:
 - `base.py` 中的 `_triggers_match()` 做上下文感知匹配，减少误触发
 - `builder.py` 负责 chat-specific Layer 1 catalog 文案；Layer 2 指令合并复用 shared `build_skill_prompt()`
 - `interview-rhythm` 负责节奏和表达边界：它可以提醒 Agent 尊重后端 `InterviewLedger`，但不能替代 `question_plan.py` / MCP 工具层的题号和题型去重；同时避免“我抽个题”“来聊一个八股题”“换个方向”这类流程播报式话术
-- `interview-rhythm` / `interview-tool-use` 必须与 chat runtime 的大厂 full-loop harness 对齐：覆盖 project_followup、knowledge_probe、coding/testing、system design、behavioral/STAR 和 communication 信号；不要把 skill 写成单纯抽题流程
+- `interview-rhythm` / `interview-tool-use` 必须与 chat runtime 的中国互联网大厂 + full-loop harness 对齐：覆盖项目深挖、八股基础、场景题/system design、手撕代码/coding/testing、HR/behavioral/STAR、communication 和反问信号；不要把 skill 写成单纯抽题流程
 
 ## 修改后必做
 

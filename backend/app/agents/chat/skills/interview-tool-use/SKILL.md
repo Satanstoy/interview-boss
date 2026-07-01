@@ -11,7 +11,7 @@ metadata:
 
 ## 何时调用哪个工具
 
-工具调用服务于大厂 full-loop 面试 harness，而不是为了“抽题”本身。每次调用前先判断当前缺少哪类评估信号：project_followup、knowledge_probe、coding、testing、system design、behavioral、communication 或 trade-off。
+工具调用服务于中国互联网大厂 + 大厂 full-loop 面试 harness，而不是为了“抽题”本身。每次调用前先判断当前缺少哪类评估信号：项目深挖、八股基础、场景题/system design、手撕代码/coding、testing、HR/behavioral、communication、trade-off 或反问。
 
 ### 题库搜索（搜索工具）
 
@@ -25,7 +25,7 @@ metadata:
 
 支持按难度、分类、主题筛选。
 
-当 runtime harness 指出缺少 coding、system design 或 behavioral 信号时，优先使用 draw_questions 并带上对应 question_type。coding 题必须继续追问 edge cases、复杂度和 testing；behavioral 题要追 STAR 里的行动和结果。
+当 runtime harness 指出缺少手撕代码/coding、场景题/system design 或 HR/behavioral 信号时，优先使用 draw_questions 并带上对应 question_type。coding 题必须继续追问 edge cases、复杂度和 testing；场景题要追业务约束、容量、瓶颈、降级和一致性；behavioral 题要追 STAR 里的行动和结果。
 
 ### 显式选题（选题工具）
 
@@ -81,7 +81,7 @@ metadata:
 
 **你的下一个回复必须直接问那道题**。不要跳过、不要先评论、不要问其他问题。用自然的面试官口吻把题目问出来。
 
-如果题目属于 system design 或 behavioral，可以用候选人简历中的项目做一句自然承接，但不要改变该题的评估目标。
+如果题目属于场景题/system design 或 HR/behavioral，可以用候选人简历中的项目做一句自然承接，但不要改变该题的评估目标。收尾时要自然进入反问，不要继续强行抽题。
 
 ## 普通对话时不调用工具
 

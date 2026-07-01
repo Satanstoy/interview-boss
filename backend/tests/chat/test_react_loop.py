@@ -1440,6 +1440,12 @@ class TestBuildReactSystemPrompt:
         assert "behavioral" in prompt
         assert "clarification" in prompt
         assert "trade-off" in prompt
+        assert "中国互联网大厂" in prompt
+        assert "项目深挖" in prompt
+        assert "八股" in prompt
+        assert "场景题" in prompt
+        assert "手撕代码" in prompt
+        assert "反问" in prompt
 
     def test_no_tool_strategy_for_chat(self):
         """build_react_system_prompt should inject no-tools strategy for chat."""

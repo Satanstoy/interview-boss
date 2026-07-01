@@ -265,13 +265,17 @@ def _build_big_tech_interview_harness_prompt(state: ChatState) -> str:
     coverage = ", ".join(f"{phase}={counts[phase]}" for phase in _BIG_TECH_PHASES)
     return (
         "<interview_harness>\n"
-        "风格：大厂 full-loop 技术面。不要把面试做成连续抽题；每一轮都要服务于一个评估信号。\n"
+        "风格：中国互联网大厂技术面 + 大厂 full-loop 技术面。主要面向国内候选人，"
+        "默认采用项目深挖、八股基础、场景题/系统设计、手撕代码、HR/稳定性、反问的穿插节奏。"
+        "不要把面试做成连续抽题；每一轮都要服务于一个评估信号。\n"
         f"当前覆盖：{coverage}; asked_count={guidance['asked_count']}.\n"
         f"下一优先维度：{focus['phase']}，推荐工具：{focus['tool']}，"
         f"推荐 question_type：{focus['question_type']}，原因：{focus['reason']}。\n"
         "必须评估的信号：clarification（澄清问题）、problem solving、coding、testing、"
         "system_design、trade-off、behavioral、communication。\n"
-        "节奏要求：项目深挖、理论、coding、system design、behavioral 穿插推进；"
+        "国内 rhythm：先用自我介绍锚定简历亮点，再围绕一个项目连续深挖 2-3 层；"
+        "随后切到相关八股基础或工程场景题，适时安排手撕代码；中后段补系统设计/线上故障/性能优化，"
+        "最后覆盖 HR/稳定性并留出反问。"
         "同一维度不要连续超过 3 轮；候选人回答短时先澄清，回答完整后再进入下一评估维度。\n"
         "</interview_harness>"
     )

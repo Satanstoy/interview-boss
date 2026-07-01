@@ -120,6 +120,12 @@ class TestToolSchemas:
         assert "behavioral" in combined
         assert "STAR" in combined
         assert "testing" in combined
+        assert "中国互联网大厂" in combined
+        assert "项目深挖" in combined
+        assert "八股" in combined
+        assert "场景题" in combined
+        assert "手撕代码" in combined
+        assert "反问" in combined
 
 
 class TestToolGatewayModels:
