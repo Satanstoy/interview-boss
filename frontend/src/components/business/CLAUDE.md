@@ -10,8 +10,8 @@
 | `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
 | `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审）；内部侧栏折叠/展开动画对齐 ChatView |
-| `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染） |
-| `ChatView.vue` | Chat 主视图（SSE 流式） |
+| `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 thinking、step、tool_steps、skill_name 和本轮采用题 |
+| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking 到临时 metadata |
 | `ThinkingBlock.vue` | AI 思维链展示组件（可展开/折叠） |
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
@@ -19,8 +19,10 @@
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |
-| `MockInterview.vue` | 模拟面试（配置面板 + 抽测模式）；布局紧凑化（header padding `px-4 py-3`，内容 padding `p-4`） |
-| `NewChatModal.vue` | 新建对话弹窗 |
+| `MockInterview.vue` | 模拟面试（配置面板 + 抽测模式）；布局紧凑化（header padding `px-4 py-3`，内容 padding `p-4`）；支持临时选择模型留空则走全局默认 |
+| `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
+| `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
+| `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |
 | `PracticeMode.vue` | 练习模式选择 |
 | `PracticePanel.vue` | 练习面板 |
 | `QuestionCard.vue` | 题目卡片 |

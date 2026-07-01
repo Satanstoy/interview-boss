@@ -103,6 +103,45 @@
                 </div><!-- /v-if="!useSavedResume" -->
               </div>
             </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">面试难度</label>
+                <Select v-model="difficulty">
+                  <SelectTrigger class="w-full h-9 text-sm">
+                    <SelectValue placeholder="选择难度" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="junior">初级</SelectItem>
+                    <SelectItem value="mid">中级</SelectItem>
+                    <SelectItem value="senior">高级</SelectItem>
+                    <SelectItem value="staff_plus">专家</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label class="text-xs font-semibold text-muted-foreground mb-1.5 block">参考面经节奏</label>
+                <Select
+                  :model-value="selectedExperienceId != null ? String(selectedExperienceId) : '__none__'"
+                  @update:model-value="selectedExperienceId = $event === '__none__' ? null : Number($event)"
+                >
+                  <SelectTrigger class="w-full h-9 text-sm">
+                    <SelectValue placeholder="选择面经" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">不使用面经节奏</SelectItem>
+                    <SelectItem
+                      v-for="item in interviewList"
+                      :key="item.id"
+                      :value="String(item.id)"
+                    >
+                      {{ formatExperienceLabel(item) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
           <!-- Footer -->
@@ -127,12 +166,15 @@ import AppDialog from '@/components/common/AppDialog.vue'
 const props = defineProps({
   visible: { type: Boolean, default: false },
   jdList: { type: Array, default: () => [] },
+  interviewList: { type: Array, default: () => [] },
   initialMessage: { type: String, default: '' },
 })
 const emit = defineEmits(['close', 'create'])
 
 const mode = ref('free_practice')
 const selectedJdId = ref(null)
+const selectedExperienceId = ref(null)
+const difficulty = ref('mid')
 const resumeText = ref('')
 const resumeFileName = ref('')
 const creating = ref(false)
@@ -196,11 +238,20 @@ async function handleCreate() {
       mode: mode.value,
       jd_id: selectedJdId.value,
       resume_text: finalResumeText,
+      difficulty: difficulty.value,
+      experience_id: selectedExperienceId.value,
       initial_message: props.initialMessage || null,
     })
   } finally {
     creating.value = false
   }
+}
+
+function formatExperienceLabel(item) {
+  const company = item.company || '未知公司'
+  const round = item.round || '未知轮次'
+  const difficultyLabel = item.difficulty || item['难易程度'] || ''
+  return [company, round, difficultyLabel].filter(Boolean).join(' · ')
 }
 
 async function loadSavedResume() {
@@ -215,6 +266,8 @@ async function loadSavedResume() {
 
 watch(() => mode.value, () => {
   selectedJdId.value = null
+  selectedExperienceId.value = null
+  difficulty.value = 'mid'
   resumeText.value = ''
   resumeFileName.value = ''
   useSavedResume.value = !!savedResume.value

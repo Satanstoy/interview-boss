@@ -4,6 +4,7 @@
     <KeepAlive>
       <AsyncChatView
         :jd-list="jdData"
+        :interview-list="interviewData"
         :preview="isPreviewMode"
         :model-value="activeSessionId"
         @update:model-value="onSessionChange"
@@ -18,7 +19,7 @@ import { inject, KeepAlive, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 
-const { jdData, isPreviewMode } = inject('appData')
+const { jdData, interviewData, isPreviewMode } = inject('appData')
 const route = useRoute()
 const router = useRouter()
 

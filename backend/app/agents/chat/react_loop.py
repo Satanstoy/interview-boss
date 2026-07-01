@@ -504,14 +504,35 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             # Execute tool
             tool_started = time.monotonic()
             output = await chat_tools.execute_tool(tc, state)
+            tool_elapsed_ms = int((time.monotonic() - tool_started) * 1000)
+            tool_summary = _summarize_tool_output(tool_name, output, state)
             _log_react_tool_call(
                 state,
                 react_step=react_step,
                 tool_name=tool_name,
                 args=tool_args,
-                result=_summarize_tool_output(tool_name, output, state),
-                elapsed_ms=int((time.monotonic() - tool_started) * 1000),
+                result=tool_summary,
+                elapsed_ms=tool_elapsed_ms,
             )
+
+            # Record a metadata-only tool summary for frontend observability.
+            if tool_name in (
+                "search_questions",
+                "draw_questions",
+                "select_question",
+                "load_skill",
+            ):
+                state.setdefault("tool_steps", []).append(
+                    {
+                        "step": tool_name,
+                        "tool_name": tool_name,
+                        "message": chat_tools.tool_progress_message(tc),
+                        "elapsed_ms": tool_elapsed_ms,
+                        "result_count": tool_summary.get("result_count", 0),
+                        "fallback_used": tool_summary.get("fallback_used", False),
+                    }
+                )
+
             if tool_name in ("search_questions", "draw_questions"):
                 search_or_draw_called = True
                 _maybe_create_question_plan(state)

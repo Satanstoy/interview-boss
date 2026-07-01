@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Optional
 from app.db.connection import get_db_connection
+from app.agents.chat.coverage_config import get_coverage_thresholds
+from app.agents.chat.rhythm_profile import build_rhythm_profile
 
 logger = logging.getLogger("interview-boss")
 
@@ -49,21 +51,57 @@ def create_conversation(
     jd_id: Optional[int] = None,
     resume_text: Optional[str] = None,
     job_position: str = "",
+    difficulty: str = "mid",
+    experience_id: Optional[int] = None,
 ) -> dict:
     """创建新对话会话"""
     conv_id = str(uuid.uuid4())
     if not title:
         title = "新对话" if mode == "free_practice" else "JD定制面试"
+    difficulty = difficulty or "mid"
+    rhythm_profile = (
+        build_rhythm_profile(experience_id, user_id, job_position)
+        if experience_id
+        else None
+    )
+    if experience_id and rhythm_profile is None:
+        raise ValueError("面经不存在或无权访问")
+    thresholds = get_coverage_thresholds(job_position, difficulty, rhythm_profile)
+    interview_config = {
+        "difficulty": difficulty,
+        "experience_id": experience_id,
+        "rhythm_profile_id": f"experience:{experience_id}" if rhythm_profile else None,
+        "coverage_thresholds": {
+            phase.value: count for phase, count in thresholds.items()
+        },
+        "rhythm_profile": rhythm_profile or {},
+    }
+    metadata = {"interview_config": interview_config}
 
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO chat_conversations (id, user_id, mode, title, jd_id, resume_text, job_position) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (conv_id, user_id, mode, title, jd_id, resume_text, job_position)
+            "INSERT INTO chat_conversations (id, user_id, mode, title, jd_id, resume_text, job_position, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                conv_id,
+                user_id,
+                mode,
+                title,
+                jd_id,
+                resume_text,
+                job_position,
+                json.dumps(metadata, ensure_ascii=False),
+            )
         )
         conn.commit()
 
-    return {"id": conv_id, "mode": mode, "title": title, "job_position": job_position}
+    return {
+        "id": conv_id,
+        "mode": mode,
+        "title": title,
+        "job_position": job_position,
+        "metadata": metadata,
+    }
 
 
 def get_conversations(user_id: int, status: str = "active", job_position: str = "") -> list[dict]:

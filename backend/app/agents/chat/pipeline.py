@@ -24,8 +24,10 @@ from app.agents.chat.nodes import (
     summarize_context,
 )
 from app.agents.chat.state import ChatState
+from app.agents.chat.interview_state import build_interview_state_snapshot
 from app.agents.shared.events import _event_queue_var
 from app.services import chat_service
+from app.mcp_server.session import save_mcp_session
 from app.services.memory_recall_service import (
     classify_and_recall,
     classify_and_recall_fast,
@@ -121,9 +123,11 @@ def _initial_state(
     jd_text: str | None,
     model: str | None,
     bank_mode: str | None,
+    difficulty: str | None = None,
 ) -> ChatState:
     return {
         "conversation_id": conversation_id,
+        "session_id": conversation_id,
         "user_id": user_id,
         "user_message": user_message,
         "mode": mode,
@@ -132,6 +136,9 @@ def _initial_state(
         "resume_text": resume_text,
         "model": model,
         "bank_mode": bank_mode or "public",
+        "difficulty": difficulty or "mid",
+        "interview_config": {},
+        "rhythm_profile": {},
         "memories": [],
         "memory_summaries": [],
         "resume_summary": None,
@@ -164,6 +171,7 @@ def _initial_state(
         "basis_confidence": 0.0,
         "should_show_references": False,
         "active_skills": [],
+        "tool_steps": [],
     }
 
 
@@ -331,6 +339,66 @@ async def _persist_active_skills(state: ChatState) -> None:
         logger.exception("Failed to persist active_skills")
 
 
+async def _load_interview_config(state: ChatState) -> None:
+    """Load cross-turn interview config into ChatState."""
+
+    metadata = await asyncio.to_thread(
+        chat_service.get_conversation_metadata,
+        state["conversation_id"],
+    )
+    config = metadata.get("interview_config") if isinstance(metadata, dict) else {}
+    if not isinstance(config, dict):
+        config = {}
+    state["interview_config"] = config
+    state["difficulty"] = config.get("difficulty") or state.get("difficulty") or "mid"
+    rhythm_profile = config.get("rhythm_profile")
+    state["rhythm_profile"] = rhythm_profile if isinstance(rhythm_profile, dict) else {}
+
+
+def _add_interview_observability_metadata(
+    metadata: dict,
+    state: ChatState,
+    *,
+    collected_steps: list[dict],
+    collected_tool_steps: list[dict],
+) -> dict:
+    """Attach interview_state and observability summary to done metadata."""
+
+    ledger = _build_interview_ledger(state)
+    selected_question = state.get("selected_question")
+    if selected_question:
+        ledger.record_question(selected_question, state.get("question_type"))
+    metadata["interview_state"] = build_interview_state_snapshot(
+        state,
+        ledger,
+        state.get("rhythm_profile") or {},
+    )
+    metadata["observability"] = {
+        "thinking_duration": metadata.get("thinking_duration", 0),
+        "step_count": len(collected_steps),
+        "active_skills": state.get("active_skills", []),
+        "tool_step_count": len(
+            collected_tool_steps or state.get("tool_steps", [])
+        ),
+        "tool_trace_persisted": False,
+    }
+    return metadata
+
+
+def _refresh_interview_state_snapshot(state: ChatState) -> None:
+    """Refresh state['interview_state'] from the current ledger."""
+
+    ledger = _build_interview_ledger(state)
+    selected_question = state.get("selected_question")
+    if selected_question:
+        ledger.record_question(selected_question, state.get("question_type"))
+    state["interview_state"] = build_interview_state_snapshot(
+        state,
+        ledger,
+        state.get("rhythm_profile") or {},
+    )
+
+
 # ═══════════════════════════════════════════════════
 #  Main Entry Point
 # ═══════════════════════════════════════════════════
@@ -346,6 +414,7 @@ async def run_chat(
     jd_text: str = None,
     model: str = None,
     bank_mode: str = None,
+    difficulty: str = None,
 ) -> AsyncGenerator[dict, None]:
     """面试对话 pipeline — SSE 兼容的 async generator。
 
@@ -365,6 +434,7 @@ async def run_chat(
         jd_text,
         model,
         bank_mode,
+        difficulty,
     )
 
     async def _run_pipeline() -> None:
@@ -372,6 +442,8 @@ async def run_chat(
         try:
             # 1. 加载上下文
             await _step_load_context(state)
+            await _load_interview_config(state)
+            _refresh_interview_state_snapshot(state)
 
             # 2. 意图分类 + 关键词
             await _step_classify(state)
@@ -418,6 +490,7 @@ async def run_chat(
                         "thinking",
                         "thinking_start",
                         "thinking_done",
+                        "tool_step",
                         "error",
                     }:
                         if event_type == "chunk":
@@ -428,6 +501,7 @@ async def run_chat(
 
             # Persist/clear cross-turn skills so turn-scoped modes do not stick.
             await _persist_active_skills(state)
+            save_mcp_session(state.get("session_id") or state["conversation_id"], state)
 
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
@@ -450,6 +524,7 @@ async def run_chat(
     collected_steps: list[dict] = []
     collected_insights: list[dict] = []
     collected_thinking: list[dict] = []
+    collected_tool_steps: list[dict] = []
     thinking_start_time: float | None = None
 
     try:
@@ -461,6 +536,9 @@ async def run_chat(
             item_type = item.get("type")
             if item_type == "step":
                 collected_steps.append(item)
+            elif item_type == "tool_step":
+                collected_tool_steps.append(item.get("data", {}))
+                continue
             elif item_type == "insight":
                 collected_insights.append(item)
             elif item_type == "thinking_start":
@@ -491,6 +569,13 @@ async def run_chat(
                 )
                 metadata["steps"] = collected_steps
                 metadata["insights"] = collected_insights
+                metadata["tool_steps"] = collected_tool_steps or state.get("tool_steps", [])
+                metadata = _add_interview_observability_metadata(
+                    metadata,
+                    state,
+                    collected_steps=collected_steps,
+                    collected_tool_steps=collected_tool_steps,
+                )
                 item = {**item, "metadata": metadata}
 
             yield item

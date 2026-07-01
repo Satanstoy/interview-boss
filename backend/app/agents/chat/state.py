@@ -24,6 +24,7 @@ class ChatState(TypedDict, total=False):
 
     # === 输入 ===
     conversation_id: str  # 对话会话 ID
+    session_id: Optional[str]  # MCP session ID（通常与 conversation_id 相同）
     user_id: int  # 用户 ID
     user_message: str  # 当前用户消息
     mode: str  # 'jd_resume' | 'free_practice'
@@ -32,6 +33,7 @@ class ChatState(TypedDict, total=False):
     resume_text: Optional[str]  # 简历文本
     model: Optional[str]  # 用户选择的模型（覆盖默认配置）
     bank_mode: Optional[str]  # 题库模式 public/personal/mixed
+    difficulty: Optional[str]  # 面试难度 junior/mid/senior/staff_plus
 
     # === 记忆 ===
     memories: list[dict]  # 用户长期记忆列表（按需加载完整内容）
@@ -40,6 +42,9 @@ class ChatState(TypedDict, total=False):
     session_notes: str  # 会话级累积笔记（增量记忆）
     interview_context: str  # 面试上下文（岗位、分类、练习统计）
     job_position: Optional[str]  # 用户目标岗位名
+    interview_config: dict  # 会话级面试配置（难度、覆盖阈值、节奏来源）
+    rhythm_profile: dict  # 面经节奏学习结果
+    interview_state: dict  # InterviewLedger 派生的产品化快照
 
     # === 上下文压缩 ===
     message_history: list[dict]  # 完整消息历史
@@ -71,6 +76,7 @@ class ChatState(TypedDict, total=False):
     # === 输出 ===
     response: str  # AI 面试官回复
     metadata: dict  # 回复元数据（检索到的题目等）
+    tool_steps: list[dict]  # 本轮工具调用摘要，只进 metadata，不作为 raw payload 暴露
 
     # === 生成依据（basis） ===
     basis_type: str  # 'question' | 'resume' | 'conversation' | 'mixed' | 'none'
@@ -80,7 +86,9 @@ class ChatState(TypedDict, total=False):
 
     # === Skills ===
     active_skills: list[str]  # 当前激活的 skill 名称列表（用于 prompt 注入）
-    active_skill_instructions: list[dict]  # [{"skill_name": str, "instruction": str}] 当前 ReAct loop 待注入 system prompt；跨轮只持久化 skill_name
+    active_skill_instructions: list[
+        dict
+    ]  # [{"skill_name": str, "instruction": str}] 当前 ReAct loop 待注入 system prompt；跨轮只持久化 skill_name
 
     # === 检索元数据 ===
     retrieved_questions: list[dict]  # RAG 检索到的相关题目

@@ -344,6 +344,7 @@
     <NewChatModal
       :visible="showNewChat"
       :jd-list="jdList"
+      :interview-list="interviewList"
       :initial-message="pendingInitialMessage"
       @close="showNewChat = false; pendingInitialMessage = ''"
       @create="handleCreateConversation"
@@ -417,6 +418,7 @@ import * as chatApi from '@/services/chatApi.js'
 
 const props = defineProps({
   jdList: { type: Array, default: () => [] },
+  interviewList: { type: Array, default: () => [] },
   preview: { type: Boolean, default: false },
   modelValue: { type: String, default: null },
 })
@@ -446,6 +448,7 @@ const pendingBasisType = ref(null)
 const pendingBasisQuestionIds = ref([])
 const pendingBasisConfidence = ref(0)
 const pendingInsights = ref([])
+const pendingToolSteps = ref([])
 const pendingShouldShowReferences = ref(false)
 const pendingSelectedBasisQuestions = ref([])
 const autoScrollEnabled = ref(true)
@@ -723,6 +726,7 @@ async function handleSend() {
   pendingShouldShowReferences.value = false
   pendingSelectedBasisQuestions.value = []
   pendingInsights.value = []
+  pendingToolSteps.value = []
   processingSteps.value = []
   autoScrollEnabled.value = true
 
@@ -749,8 +753,13 @@ async function handleSend() {
             done: false,
             reason: event.reason || '',
             insight: event.insight || '',
+            skill_name: event.skill_name || '',
           })
           scrollToBottom()
+        } else if (event.type === 'tool_step') {
+          if (event.data) {
+            pendingToolSteps.value.push(event.data)
+          }
         } else if (event.type === 'thinking_start') {
           isThinking.value = true
           thinkingContent.value = ''
@@ -832,6 +841,7 @@ async function handleSend() {
           message: s.message,
           reason: s.reason || '',
           insight: '',
+          skill_name: s.skill_name || '',
         }))
         // Merge pending insights into the last tool step (by timing order)
         for (const insight of pendingInsights.value) {
@@ -843,6 +853,9 @@ async function handleSend() {
           }
         }
         metadata.steps = stepsCopy
+      }
+      if (pendingToolSteps.value.length > 0) {
+        metadata.tool_steps = [...pendingToolSteps.value]
       }
       if (thinkingContent.value) {
         metadata.thinking = thinkingContent.value
@@ -875,6 +888,7 @@ async function handleSend() {
       pendingResumeRef.value = null
       pendingJdRef.value = null
       pendingInsights.value = []
+      pendingToolSteps.value = []
       pendingBasisType.value = null
       pendingBasisQuestionIds.value = []
       pendingBasisConfidence.value = 0
@@ -897,6 +911,7 @@ async function handleSend() {
     thinkingContent.value = ''
     thinkingDuration.value = 0
     liveThinkingSeconds.value = 0
+    pendingToolSteps.value = []
     await scrollToBottom()
   }
 }

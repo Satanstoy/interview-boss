@@ -28,6 +28,8 @@ class CreateConversationRequest(BaseModel):
     title: Optional[str] = None
     jd_id: Optional[int] = None
     resume_text: Optional[str] = None
+    difficulty: Optional[str] = Field(None, pattern="^(junior|mid|senior|staff_plus)$")
+    experience_id: Optional[int] = None
 
 
 class SendMessageRequest(BaseModel):
@@ -60,6 +62,8 @@ async def create_conversation(
                 jd_id=req.jd_id,
                 resume_text=resume_text,
                 job_position=_current_position_name(user["id"]),
+                difficulty=req.difficulty or "mid",
+                experience_id=req.experience_id,
             )
         )
 
@@ -77,6 +81,9 @@ async def create_conversation(
         result["opening_message"] = opening
 
         return {"status": "success", "data": result}
+    except ValueError as e:
+        logger.warning(f"创建对话参数无效: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"创建对话失败: {e}")
         raise HTTPException(status_code=500, detail="创建对话失败")
@@ -280,7 +287,12 @@ async def send_message(
                         step_data["reason"] = event["reason"]
                     if event.get("insight"):
                         step_data["insight"] = event["insight"]
+                    if event.get("skill_name"):
+                        step_data["skill_name"] = event["skill_name"]
                     yield f"data: {json.dumps(step_data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "tool_step":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 elif event_type == "chunk":
                     content = event.get("content", "")

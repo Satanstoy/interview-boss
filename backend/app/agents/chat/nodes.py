@@ -1733,6 +1733,32 @@ def _build_tool_strategy(state: ChatState) -> str:
         )
 
 
+def _format_interview_state_prompt(state: ChatState) -> str:
+    """Render a compact interview-state snapshot for the ReAct prompt."""
+
+    snapshot = state.get("interview_state") or {}
+    if not isinstance(snapshot, dict):
+        return ""
+    coverage = snapshot.get("coverage") or {}
+    coverage_parts = []
+    if isinstance(coverage, dict):
+        for phase, data in coverage.items():
+            if not isinstance(data, dict):
+                continue
+            coverage_parts.append(
+                f"{phase}={data.get('current_count', 0)}/{data.get('threshold', 0)}"
+            )
+    return (
+        "<interview_state>\n"
+        f"current_phase: {snapshot.get('current_phase', '')}\n"
+        f"next_focus: {snapshot.get('next_focus') or 'none'}\n"
+        f"coverage: {', '.join(coverage_parts)}\n"
+        "Instruction: Treat this as a read-only snapshot derived from the ledger. "
+        "Use it as a tie-breaker for pacing; do not override a must_ask question plan.\n"
+        "</interview_state>"
+    )
+
+
 def build_react_system_prompt(state: ChatState) -> str:
     """Build system prompt for the ReAct loop.
 
@@ -1814,6 +1840,10 @@ def build_react_system_prompt(state: ChatState) -> str:
     # Layer 4: Compressed context
     if compressed:
         parts.append(f"## 历史对话摘要\n{compressed}")
+
+    interview_state_prompt = _format_interview_state_prompt(state)
+    if interview_state_prompt:
+        parts.append(interview_state_prompt)
 
     # Layer 5: Skill catalog + tool guidance
     catalog = build_skill_catalog()

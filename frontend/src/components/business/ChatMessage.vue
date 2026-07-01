@@ -16,11 +16,11 @@
     <div v-else>
       <!-- Reasoning timeline (unified: steps + thinking) -->
       <ReasoningTimeline
-        v-if="message.metadata?.steps?.length || message.metadata?.thinking"
+        v-if="timelineSteps.length || message.metadata?.thinking"
         :is-streaming="false"
         :content="thinkingContent"
         :duration="message.metadata?.thinking_duration || 0"
-        :steps="message.metadata?.steps || []"
+        :steps="timelineSteps"
       />
 
       <!-- Fallback: legacy insight-only messages (no steps, has insights) -->
@@ -234,6 +234,53 @@ const retrievedQuestions = computed(() => {
   const basisIds = new Set((m?.selected_basis_questions || []).map(q => q.id))
   if (m?.selected_question?.id) basisIds.add(m.selected_question.id)
   return retrieved.filter(q => !basisIds.has(q.id))
+})
+
+const skillLabels = {
+  'project-deep-dive': '项目深挖',
+  'theory-qa': '八股基础',
+  'algorithm-coding': '算法手撕',
+  'system-design': '系统设计',
+  'hr-soft-skills': '行为面',
+  'interview-rhythm': '面试节奏',
+  'adaptive-difficulty': '难度调整',
+}
+
+const toolLabels = {
+  load_skill: '加载策略',
+  search_questions: '检索题库',
+  draw_questions: '抽取题目',
+  select_question: '采用题目',
+}
+
+const timelineSteps = computed(() => {
+  const metadata = props.message.metadata || {}
+  const steps = Array.isArray(metadata.steps) ? metadata.steps : []
+  const toolSteps = Array.isArray(metadata.tool_steps) ? metadata.tool_steps : []
+  const normalizedSteps = steps.map(step => {
+    const skillName = step.skill_name
+    const skillLabel = skillLabels[skillName] || skillName
+    return {
+      ...step,
+      message: step.step === 'load_skill' && skillLabel
+        ? `${step.message}（${skillLabel}）`
+        : step.message,
+    }
+  })
+  const normalizedToolSteps = toolSteps.map(toolStep => {
+    const label = toolLabels[toolStep.tool_name] || toolStep.tool_name || toolStep.step
+    const details = []
+    if (Number.isFinite(Number(toolStep.elapsed_ms))) details.push(`${toolStep.elapsed_ms}ms`)
+    if (Number.isFinite(Number(toolStep.result_count))) details.push(`${toolStep.result_count} 个结果`)
+    if (toolStep.fallback_used) details.push('已降级')
+    return {
+      step: toolStep.step || toolStep.tool_name,
+      message: details.length ? `${label} · ${details.join(' · ')}` : label,
+      reason: toolStep.message || '',
+      done: true,
+    }
+  })
+  return [...normalizedSteps, ...normalizedToolSteps]
 })
 
 const thinkingContent = computed(() => {

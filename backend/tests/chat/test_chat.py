@@ -42,6 +42,53 @@ class TestChatServiceConversation:
         assert result["mode"] == "jd_resume"
         assert result["title"] == "JD定制面试"
 
+    def test_create_conversation_saves_interview_config_metadata(self, test_db):
+        """创建会话时应保存难度、面经来源和覆盖度配置。"""
+        from app.services.chat_service import (
+            create_conversation,
+            get_conversation_metadata,
+        )
+
+        result = create_conversation(
+            user_id=1,
+            mode="free_practice",
+            job_position="agent_llm",
+            difficulty="senior",
+        )
+
+        metadata = get_conversation_metadata(result["id"])
+        config = metadata.get("interview_config", {})
+
+        assert config["difficulty"] == "senior"
+        assert config["experience_id"] is None
+        assert config["rhythm_profile_id"] is None
+        assert config["coverage_thresholds"]["project_followup"] == 6
+
+    def test_create_conversation_rejects_inaccessible_experience_id(self, test_db):
+        """越权或不可用面经不能作为节奏来源。"""
+        from app.services.chat_service import create_conversation
+
+        test_db.execute(
+            "INSERT INTO users (id, username, password_hash) VALUES (2, 'user2', 'hash')"
+        )
+        test_db.execute(
+            """
+            INSERT INTO interview
+                (id, url, company, round, questions_list, difficulty, owner_id, status, job_position)
+            VALUES
+                (201, 'https://example.com/x', 'X', '一面', 'Redis 持久化机制', '中等', 2, 'approved', 'agent_llm')
+            """
+        )
+        test_db.commit()
+
+        with pytest.raises(ValueError, match="面经不存在或无权访问"):
+            create_conversation(
+                user_id=1,
+                mode="free_practice",
+                job_position="agent_llm",
+                experience_id=201,
+            )
+
     def test_get_conversations_returns_user_own(self, test_db):
         """T-002: 获取会话列表只返回当前用户的会话"""
         from app.services.chat_service import create_conversation, get_conversations
@@ -1189,6 +1236,252 @@ class TestThinkingMetadataContentField:
         chunks = metadata["thinking"][0].get("chunks", [])
         assert len(chunks) == 1
         assert chunks[0] == "有效内容"
+
+
+# ── Tool Steps Metadata Collection ────────────────────────
+
+
+class TestToolStepsMetadataCollection:
+    """Test that tool_steps are collected and included in done metadata."""
+
+    async def test_done_event_metadata_includes_tool_steps(self):
+        """tool_step events should be collected and added to done metadata."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {
+                "type": "tool_step",
+                "data": {
+                    "step": "search_questions",
+                    "tool_name": "search_questions",
+                    "message": "检索了相关面试题",
+                    "elapsed_ms": 320,
+                    "result_count": 3,
+                    "fallback_used": False,
+                },
+            },
+            {
+                "type": "tool_step",
+                "data": {
+                    "step": "select_question",
+                    "tool_name": "select_question",
+                    "message": "选择了一道面试题",
+                    "elapsed_ms": 50,
+                    "result_count": 1,
+                    "fallback_used": False,
+                },
+            },
+            {"type": "chunk", "content": "Here is a question"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Here is a question"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None, "No done event received"
+        metadata = done_event.get("metadata", {})
+        assert "tool_steps" in metadata, (
+            f"done event metadata should contain 'tool_steps', got keys: {list(metadata.keys())}"
+        )
+        assert isinstance(metadata["tool_steps"], list)
+        assert len(metadata["tool_steps"]) == 2
+        assert metadata["tool_steps"][0]["tool_name"] == "search_questions"
+        assert metadata["tool_steps"][0]["elapsed_ms"] == 320
+        assert metadata["tool_steps"][0]["result_count"] == 3
+        assert metadata["tool_steps"][1]["tool_name"] == "select_question"
+
+    async def test_done_event_tool_steps_empty_when_none_emitted(self):
+        """tool_steps should be an empty list when no tool_step events occur."""
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert "tool_steps" in metadata
+        assert metadata["tool_steps"] == []
+
+
+# ── Interview State Metadata ───────────────────────────────
+
+
+class TestInterviewStateMetadata:
+    """Test that run_chat persists interview_state and observability metadata."""
+
+    async def test_done_event_metadata_includes_interview_state_snapshot(self):
+        from app.agents.chat.pipeline import run_chat
+
+        async def load_context(state):
+            state.update(
+                {
+                    "message_history": [
+                        {
+                            "role": "assistant",
+                            "content": "请介绍你的项目经历",
+                            "metadata": {
+                                "selected_question": {
+                                    "id": 1,
+                                    "question": "请介绍你的项目经历",
+                                    "tags": "project_followup",
+                                }
+                            },
+                        },
+                        {"role": "user", "content": "我做过 RAG 项目"},
+                    ],
+                    "recent_messages": [],
+                    "session_notes": "",
+                    "job_position": "agent_llm",
+                    "interview_context": "",
+                }
+            )
+            return state
+
+        react_events = [
+            {"type": "chunk", "content": "继续问 Redis"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch(
+                "app.agents.chat.pipeline._step_load_context",
+                side_effect=load_context,
+            ),
+            patch(
+                "app.agents.chat.pipeline.chat_service.get_conversation_metadata",
+                return_value={
+                    "interview_config": {
+                        "difficulty": "mid",
+                        "coverage_thresholds": {
+                            "project_followup": 5,
+                            "knowledge_probe": 3,
+                        },
+                    }
+                },
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_classify",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "继续问 Redis"),
+            ),
+            patch(
+                "app.agents.chat.pipeline._basis_event_payload",
+                return_value={},
+            ),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory",
+                new_callable=AsyncMock,
+            ),
+        ):
+            done_event = None
+            async for event in run_chat(
+                conversation_id="conv-1",
+                user_id=1,
+                user_message="Hello",
+                mode="free_practice",
+            ):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event is not None
+        metadata = done_event.get("metadata", {})
+        assert metadata["interview_state"]["job_position"] == "agent_llm"
+        assert metadata["interview_state"]["difficulty"] == "mid"
+        assert metadata["interview_state"]["coverage"]["project_followup"][
+            "current_count"
+        ] == 1
+        assert metadata["observability"]["step_count"] == 0
+        assert metadata["observability"]["tool_trace_persisted"] is False
 
 
 # ── Helper ─────────────────────────────────────────────────
