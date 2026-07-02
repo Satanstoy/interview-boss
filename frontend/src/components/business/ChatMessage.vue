@@ -321,7 +321,9 @@ const timelineDuration = computed(() => {
 
 const thinkingContent = computed(() => {
   const metadata = props.message.metadata || {}
-  if (metadata.reasoning_trace?.summary) return metadata.reasoning_trace.summary
+  const traceSummary = metadata.reasoning_trace?.summary
+  if (Array.isArray(traceSummary)) return traceSummary.filter(Boolean).join('\n')
+  if (traceSummary) return String(traceSummary)
 
   const thinking = metadata.thinking
   if (!thinking) return ''

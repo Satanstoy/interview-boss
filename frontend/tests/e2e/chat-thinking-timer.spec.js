@@ -78,7 +78,7 @@ async function mockChatThinkingStream(page) {
     const finalMetadata = {
       thinking_duration: 2.4,
       reasoning_trace: {
-        summary: '分析候选人的项目经历',
+        summary: ['分析候选人的项目经历', '检索题库，获取本轮追问依据'],
         duration_ms: 2400,
         steps: [
           { step: 'load_skill', label: '加载策略', message: '加载项目深挖策略', reason: '候选人正在介绍项目经历', status: 'done' },
