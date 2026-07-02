@@ -106,6 +106,7 @@ from app.agents.chat.metadata import (  # noqa: F401
     _infer_selected_question,
     _public_question,
 )
+from app.agents.chat.trace import build_reasoning_trace, merge_trace_metadata
 
 logger = logging.getLogger("interview-boss")
 
@@ -521,6 +522,7 @@ async def run_chat(
     graph_task = asyncio.create_task(_run_pipeline())
 
     # Fix 4: accumulate step/thinking/insight events for metadata persistence
+    run_started_at = time.monotonic()
     collected_steps: list[dict] = []
     collected_insights: list[dict] = []
     collected_thinking: list[dict] = []
@@ -543,7 +545,7 @@ async def run_chat(
                 collected_insights.append(item)
             elif item_type == "thinking_start":
                 thinking_start_time = time.monotonic()
-                collected_thinking.append({"start": item.get("data", {})})
+                collected_thinking.append({"chunks": []})
             elif item_type == "thinking":
                 if collected_thinking:
                     # 优先 content，fallback 到 data.text
@@ -551,11 +553,17 @@ async def run_chat(
                     if chunk:
                         collected_thinking[-1].setdefault("chunks", []).append(chunk)
             elif item_type == "thinking_done":
-                if collected_thinking and thinking_start_time:
-                    collected_thinking[-1]["duration_ms"] = int(
-                        (time.monotonic() - thinking_start_time) * 1000
-                    )
-                    thinking_start_time = None
+                if collected_thinking:
+                    duration = item.get("duration")
+                    if duration is not None:
+                        collected_thinking[-1]["duration_ms"] = int(
+                            float(duration) * 1000
+                        )
+                    elif thinking_start_time:
+                        collected_thinking[-1]["duration_ms"] = int(
+                            (time.monotonic() - thinking_start_time) * 1000
+                        )
+                thinking_start_time = None
             elif item_type == "done":
                 metadata = item.get("metadata", {})
                 # Limit thinking chunks to avoid metadata bloat
@@ -563,9 +571,28 @@ async def run_chat(
                     chunks = t.get("chunks", [])
                     if len(chunks) > _MAX_THINKING_CHUNKS:
                         t["chunks"] = chunks[:_MAX_THINKING_CHUNKS]
+                total_duration_ms = max(
+                    int((time.monotonic() - run_started_at) * 1000),
+                    sum(t.get("duration_ms", 0) for t in collected_thinking),
+                )
+                tool_trace = state.get("tool_calls_trace", [])
+                skill_trace = state.get("skill_trace", [])
+                reasoning_trace = build_reasoning_trace(
+                    collected_thinking,
+                    collected_steps,
+                    tool_trace,
+                    skill_trace,
+                    total_duration_ms,
+                )
+                metadata = merge_trace_metadata(
+                    metadata,
+                    reasoning_trace=reasoning_trace,
+                    tool_calls_trace=tool_trace,
+                    skill_trace=skill_trace,
+                )
                 metadata["thinking"] = collected_thinking
-                metadata["thinking_duration"] = sum(
-                    t.get("duration_ms", 0) for t in collected_thinking
+                metadata["thinking_duration"] = round(
+                    reasoning_trace["duration_ms"] / 1000, 1
                 )
                 metadata["steps"] = collected_steps
                 metadata["insights"] = collected_insights

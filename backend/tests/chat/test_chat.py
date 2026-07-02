@@ -1697,6 +1697,83 @@ class TestReasoningTraceHelpers:
         assert reasoning["model_reasoning"] == []
 
 
+class TestRunChatReasoningTraceMetadata:
+    async def test_done_metadata_includes_summary_fallback_reasoning_trace(self):
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
+            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+        ):
+            done_event = None
+            async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
+                if event.get("type") == "done":
+                    done_event = event
+
+        metadata = done_event["metadata"]
+        assert metadata["reasoning_trace"]["version"] == 1
+        assert metadata["reasoning_trace"]["source"] in {
+            "summary_fallback",
+            "timing_only",
+        }
+        assert metadata["reasoning_trace"]["duration_ms"] >= 0
+        assert metadata["tool_calls_trace"] == []
+        assert metadata["skill_trace"] == []
+
+    async def test_done_metadata_includes_model_reasoning_trace(self):
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {"type": "thinking_start", "content": ""},
+            {"type": "thinking", "content": "思考内容"},
+            {"type": "thinking_done", "duration": 1.2, "content": "思考内容"},
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        with (
+            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._react_loop",
+                side_effect=lambda state: _async_gen(react_events),
+            ),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
+            patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
+            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+        ):
+            done_event = None
+            async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
+                if event.get("type") == "done":
+                    done_event = event
+
+        trace = done_event["metadata"]["reasoning_trace"]
+        assert trace["source"] == "model_reasoning"
+        assert trace["model_reasoning"][0]["chunks"] == ["思考内容"]
+        assert trace["duration_ms"] >= trace["model_reasoning"][0]["duration_ms"]
+        assert done_event["metadata"]["thinking_duration"] >= 0
+
+
 # ── Helper ─────────────────────────────────────────────────
 
 
