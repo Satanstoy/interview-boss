@@ -200,6 +200,7 @@
               :content="thinkingContent"
               :duration="displayThinkingDuration"
               :steps="processingSteps"
+              :tool-steps="pendingToolSteps"
             />
 
             <!-- Processing steps -->
@@ -741,7 +742,7 @@ async function handleSend() {
   await scrollToBottom()
 
   try {
-    await chatApi.sendMessage(
+    const finalEvent = await chatApi.sendMessage(
       activeConversationId.value,
       text,
       (event) => {
@@ -813,29 +814,32 @@ async function handleSend() {
     )
 
     if (streamingContent.value) {
-      const metadata = {}
+      const serverMetadata = finalEvent?.metadata && typeof finalEvent.metadata === 'object'
+        ? finalEvent.metadata
+        : {}
+      const metadata = { ...serverMetadata }
       if (pendingRetrievedQuestions.value?.length > 0) {
-        metadata.retrieved_questions = pendingRetrievedQuestions.value
+        metadata.retrieved_questions ||= pendingRetrievedQuestions.value
       }
       if (pendingCandidateQuestions.value?.length > 0) {
-        metadata.candidate_questions = pendingCandidateQuestions.value
+        metadata.candidate_questions ||= pendingCandidateQuestions.value
         if (!metadata.retrieved_questions) {
           metadata.retrieved_questions = pendingCandidateQuestions.value
         }
       }
       if (pendingSelectedQuestion.value) {
-        metadata.selected_question = pendingSelectedQuestion.value
-        metadata.question_source = pendingQuestionSource.value
-        metadata.question_source_reason = pendingQuestionSourceReason.value
+        metadata.selected_question ||= pendingSelectedQuestion.value
+        metadata.question_source ||= pendingQuestionSource.value
+        metadata.question_source_reason ||= pendingQuestionSourceReason.value
       }
       if (pendingResumeRef.value) {
-        metadata.resume_ref = pendingResumeRef.value
+        metadata.resume_ref ||= pendingResumeRef.value
       }
       if (pendingJdRef.value) {
-        metadata.jd_ref = pendingJdRef.value
+        metadata.jd_ref ||= pendingJdRef.value
       }
       // Persist processing steps, merging insights into their preceding step
-      if (processingSteps.value.length > 0) {
+      if (processingSteps.value.length > 0 && !metadata.steps) {
         const stepsCopy = processingSteps.value.map(s => ({
           step: s.step,
           message: s.message,
@@ -854,23 +858,23 @@ async function handleSend() {
         }
         metadata.steps = stepsCopy
       }
-      if (pendingToolSteps.value.length > 0) {
+      if (pendingToolSteps.value.length > 0 && !metadata.tool_steps && !metadata.tool_calls_trace) {
         metadata.tool_steps = [...pendingToolSteps.value]
       }
-      if (thinkingContent.value) {
+      if (thinkingContent.value && !metadata.thinking) {
         metadata.thinking = thinkingContent.value
-        metadata.thinking_duration = thinkingDuration.value
+        metadata.thinking_duration ||= thinkingDuration.value
       }
       if (pendingInsights.value.length > 0) {
-        metadata.insights = [...pendingInsights.value]
+        metadata.insights ||= [...pendingInsights.value]
       }
       if (pendingBasisType.value && pendingBasisType.value !== 'none') {
-        metadata.basis_type = pendingBasisType.value
-        metadata.basis_question_ids = pendingBasisQuestionIds.value
-        metadata.basis_confidence = pendingBasisConfidence.value
-        metadata.should_show_references = pendingShouldShowReferences.value
+        metadata.basis_type ||= pendingBasisType.value
+        metadata.basis_question_ids ||= pendingBasisQuestionIds.value
+        metadata.basis_confidence ||= pendingBasisConfidence.value
+        metadata.should_show_references ||= pendingShouldShowReferences.value
         if (pendingSelectedBasisQuestions.value?.length > 0) {
-          metadata.selected_basis_questions = pendingSelectedBasisQuestions.value
+          metadata.selected_basis_questions ||= pendingSelectedBasisQuestions.value
         }
       }
       messages.value.push({

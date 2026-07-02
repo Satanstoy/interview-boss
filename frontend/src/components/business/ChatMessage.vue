@@ -16,12 +16,13 @@
     <div v-else>
       <!-- Reasoning timeline (unified: steps + thinking) -->
       <ReasoningTimeline
-        v-if="timelineSteps.length || timelineToolSteps.length || message.metadata?.thinking"
+        v-if="timelineSteps.length || timelineToolSteps.length || timelineSkillSteps.length || thinkingContent"
         :is-streaming="false"
         :content="thinkingContent"
-        :duration="message.metadata?.thinking_duration || 0"
+        :duration="timelineDuration"
         :steps="timelineSteps"
         :tool-steps="timelineToolSteps"
+        :skill-steps="timelineSkillSteps"
       />
 
       <!-- Fallback: legacy insight-only messages (no steps, has insights) -->
@@ -256,25 +257,44 @@ const toolLabels = {
 
 const timelineSteps = computed(() => {
   const metadata = props.message.metadata || {}
-  const steps = Array.isArray(metadata.steps) ? metadata.steps : []
+  const traceSteps = Array.isArray(metadata.reasoning_trace?.steps) ? metadata.reasoning_trace.steps : null
+  const steps = traceSteps || (Array.isArray(metadata.steps) ? metadata.steps : [])
   return steps.map(step => {
     const skillName = step.skill_name
     const skillLabel = skillLabels[skillName] || skillName
     return {
       ...step,
+      label: step.label || toolLabels[step.step] || step.step,
       message: step.step === 'load_skill' && skillLabel
         ? `${step.message}（${skillLabel}）`
         : step.message,
+      done: step.done !== false && step.status !== 'running',
     }
   })
 })
 
 const timelineToolSteps = computed(() => {
   const metadata = props.message.metadata || {}
+  if (Array.isArray(metadata.tool_calls_trace) && metadata.tool_calls_trace.length) {
+    return metadata.tool_calls_trace.map(toolStep => {
+      const label = toolStep.label || toolLabels[toolStep.tool_name] || toolStep.tool_name || toolStep.step
+      return {
+        ...toolStep,
+        label,
+        message: toolStep.message || label,
+        done: toolStep.status !== 'running',
+        result_preview: Array.isArray(toolStep.result_preview) ? toolStep.result_preview : [],
+        args: toolStep.args || {},
+      }
+    })
+  }
+
   const toolSteps = Array.isArray(metadata.tool_steps) ? metadata.tool_steps : []
   return toolSteps.map(toolStep => {
     const label = toolLabels[toolStep.tool_name] || toolStep.tool_name || toolStep.step
     return {
+      ...toolStep,
+      label,
       message: label,
       elapsed_ms: toolStep.elapsed_ms,
       result_count: toolStep.result_count,
@@ -283,8 +303,27 @@ const timelineToolSteps = computed(() => {
   })
 })
 
+const timelineSkillSteps = computed(() => {
+  const metadata = props.message.metadata || {}
+  const skillTrace = Array.isArray(metadata.skill_trace) ? metadata.skill_trace : []
+  return skillTrace.map(skill => ({
+    ...skill,
+    label: skill.label || skillLabels[skill.skill_name] || skill.skill_name,
+  }))
+})
+
+const timelineDuration = computed(() => {
+  const metadata = props.message.metadata || {}
+  const durationMs = Number(metadata.reasoning_trace?.duration_ms) || 0
+  if (durationMs > 0) return durationMs / 1000
+  return Number(metadata.thinking_duration) || 0
+})
+
 const thinkingContent = computed(() => {
-  const thinking = props.message.metadata?.thinking
+  const metadata = props.message.metadata || {}
+  if (metadata.reasoning_trace?.summary) return metadata.reasoning_trace.summary
+
+  const thinking = metadata.thinking
   if (!thinking) return ''
 
   // Old format: string
