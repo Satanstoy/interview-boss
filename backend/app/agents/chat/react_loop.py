@@ -35,6 +35,7 @@ from app.agents.chat.question_plan import (
 )
 from app.agents.chat.state import ChatState
 from app.agents.chat.summary import _forced_closing_response
+from app.agents.chat.trace import build_skill_trace_from_tool, build_tool_trace
 from app.agents.chat import tools as chat_tools
 from app.agents.shared.events import _event_queue_var
 from app.services import llm as llm_service
@@ -300,6 +301,35 @@ def _log_react_tool_call(
     )
 
 
+def _record_tool_observability(
+    state: ChatState,
+    *,
+    tool_name: str,
+    tool_call: dict,
+    summary: dict,
+    elapsed_ms: int,
+    message: str,
+    output: str = "",
+) -> dict:
+    step_data = {
+        "step": tool_name,
+        "tool_name": tool_name,
+        "message": message,
+        "elapsed_ms": elapsed_ms,
+        "result_count": summary.get("result_count", 0),
+        "fallback_used": summary.get("fallback_used", False),
+    }
+    state.setdefault("tool_steps", []).append(step_data)
+    trace = build_tool_trace(tool_name, tool_call, summary, elapsed_ms, state, output)
+    trace["message"] = message
+    state.setdefault("tool_calls_trace", []).append(trace)
+    skill_trace = build_skill_trace_from_tool(tool_name, tool_call, summary)
+    if skill_trace:
+        state.setdefault("skill_trace", []).append(skill_trace)
+    _emit({"type": "tool_step", "data": step_data})
+    return step_data
+
+
 # ── ReAct Loop ────────────────────────────────────────────
 
 
@@ -522,16 +552,15 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "select_question",
                 "load_skill",
             ):
-                step_data = {
-                    "step": tool_name,
-                    "tool_name": tool_name,
-                    "message": chat_tools.tool_progress_message(tc),
-                    "elapsed_ms": tool_elapsed_ms,
-                    "result_count": tool_summary.get("result_count", 0),
-                    "fallback_used": tool_summary.get("fallback_used", False),
-                }
-                state.setdefault("tool_steps", []).append(step_data)
-                _emit({"type": "tool_step", "data": step_data})
+                _record_tool_observability(
+                    state,
+                    tool_name=tool_name,
+                    tool_call=tc,
+                    summary=tool_summary,
+                    elapsed_ms=tool_elapsed_ms,
+                    message=chat_tools.tool_progress_message(tc),
+                    output=output,
+                )
 
             if tool_name in ("search_questions", "draw_questions"):
                 search_or_draw_called = True
@@ -755,7 +784,19 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                         "reason": STEP_REASONS.get(gtc_name, ""),
                     }
                 )
+                gtc_started = time.monotonic()
                 gtc_output = await chat_tools.execute_tool(gtc, state)
+                gtc_elapsed_ms = int((time.monotonic() - gtc_started) * 1000)
+                gtc_summary = _summarize_tool_output(gtc_name, gtc_output, state)
+                _record_tool_observability(
+                    state,
+                    tool_name=gtc_name,
+                    tool_call=gtc,
+                    summary=gtc_summary,
+                    elapsed_ms=gtc_elapsed_ms,
+                    message=chat_tools.tool_progress_message(gtc),
+                    output=gtc_output,
+                )
                 if gtc_name in ("search_questions", "draw_questions"):
                     _maybe_create_question_plan(state)
                 if gtc_name in (

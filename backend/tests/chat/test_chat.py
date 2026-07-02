@@ -1774,6 +1774,57 @@ class TestRunChatReasoningTraceMetadata:
         assert done_event["metadata"]["thinking_duration"] >= 0
 
 
+class TestRunChatSkillTraceMetadata:
+    async def test_load_skill_records_skill_trace_in_done_metadata(self):
+        from app.agents.chat.pipeline import run_chat
+
+        react_events = [
+            {
+                "type": "tool_step",
+                "data": {
+                    "step": "load_skill",
+                    "tool_name": "load_skill",
+                    "message": "正在加载项目深挖策略...",
+                    "elapsed_ms": 1,
+                    "result_count": 0,
+                    "fallback_used": False,
+                },
+            },
+            {"type": "chunk", "content": "Answer"},
+            {"type": "done", "metadata": {}},
+        ]
+
+        async def fake_react_loop(state):
+            state["skill_trace"] = [
+                {
+                    "skill_name": "project-deep-dive",
+                    "label": "项目深挖策略",
+                    "reason": "候选人正在介绍项目，需要追问职责、架构和取舍",
+                    "persistent": False,
+                    "status": "loaded",
+                }
+            ]
+            for event in react_events:
+                yield event
+
+        with (
+            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._react_loop", side_effect=fake_react_loop),
+            patch("app.agents.chat.pipeline._build_react_metadata", return_value=({}, "Answer")),
+            patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
+            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
+            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+        ):
+            done_event = None
+            async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
+                if event.get("type") == "done":
+                    done_event = event
+
+        assert done_event["metadata"]["skill_trace"][0]["skill_name"] == "project-deep-dive"
+        assert done_event["metadata"]["skill_trace"][0]["label"] == "项目深挖策略"
+
+
 # ── Helper ─────────────────────────────────────────────────
 
 

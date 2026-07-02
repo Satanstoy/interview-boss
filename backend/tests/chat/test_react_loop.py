@@ -116,6 +116,90 @@ class TestActiveSkillsPersistence:
         assert "active_skill_instructions" not in state
 
 
+class TestForceSearchGuardTrace:
+    async def test_force_search_guard_records_tool_trace(self):
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "conv-guard-trace",
+            "user_id": 1,
+            "user_message": "我负责 Redis 缓存优化。",
+            "intent": "interview_question",
+            "answer_complete": True,
+            "mode": "free_practice",
+            "message_history": [
+                {"role": "assistant", "content": "请介绍项目。"},
+                {"role": "user", "content": "我负责 Redis 缓存优化。"},
+            ],
+            "recent_messages": [],
+            "retrieved_questions": [],
+            "candidate_questions": [],
+            "active_skills": [],
+            "tool_steps": [],
+        }
+
+        search_results = [
+            {
+                "id": 101,
+                "question": "Redis 缓存穿透怎么处理？",
+                "cat1": "中间件",
+                "cat2": "缓存",
+                "sources": [{"company": "腾讯", "round": "一面"}],
+            }
+        ]
+
+        llm_responses = [
+            {"content": "直接追问一句。", "tool_calls": None, "finish_reason": "stop"},
+            {
+                "content": None,
+                "tool_calls": [_tc("search_questions", {"keywords": ["Redis"]})],
+                "finish_reason": "tool_calls",
+            },
+            {"content": "说说 Redis 缓存穿透。", "tool_calls": None, "finish_reason": "stop"},
+        ]
+
+        from contextlib import ExitStack
+        import app.agents.chat.react_loop as react_loop_module
+
+        with ExitStack() as stack:
+            if hasattr(react_loop_module, "evaluate_interview_stop"):
+                stack.enter_context(
+                    patch(
+                        "app.agents.chat.react_loop.evaluate_interview_stop",
+                        return_value={"action": "continue"},
+                    )
+                )
+            stack.enter_context(
+                patch("app.agents.chat.react_loop.build_react_system_prompt", return_value="prompt")
+            )
+            mock_llm = stack.enter_context(
+                patch(
+                    "app.services.llm.llm_with_tools",
+                    new_callable=AsyncMock,
+                    side_effect=llm_responses,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                    return_value=search_results,
+                )
+            )
+            stack.enter_context(
+                patch("app.agents.chat.react_loop._should_require_bank_question", return_value=True)
+            )
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        assert mock_llm.call_count == 3
+        assert state["tool_steps"][0]["tool_name"] == "search_questions"
+        assert state["tool_calls_trace"][0]["tool_name"] == "search_questions"
+        assert state["tool_calls_trace"][0]["label"] == "检索题库"
+        assert state["tool_calls_trace"][0]["result_count"] == 1
+        assert state["tool_calls_trace"][0]["result_preview"][0]["id"] == 101
+
+
 # ── TestReactLoop ─────────────────────────────────────────
 
 
