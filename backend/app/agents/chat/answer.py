@@ -326,7 +326,7 @@ def _format_bank_question_fallback(
         )
     if style == "plan":
         return f"好，{question}"
-    return f"顺着你刚才的回答，我问一个具体问题：{question}"
+    return f"好，{question}"
 
 
 def _fallback_react_answer(state: ChatState, reason: str) -> str:

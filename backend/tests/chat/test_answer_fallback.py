@@ -30,11 +30,13 @@ class TestFormatBankQuestionFallback:
         result = _format_bank_question_fallback("Redis 跳表结构", style="plan")
         assert result.startswith("好，")
 
-    def test_candidate_style_unchanged(self):
+    def test_candidate_style_no_mechanical_prefix(self):
         from app.agents.chat.answer import _format_bank_question_fallback
 
         result = _format_bank_question_fallback("说说 Redis 跳表", style="candidate")
-        assert "顺着你刚才的回答" in result
+        assert "换个具体点的问题" not in result
+        assert "顺着你刚才的回答" not in result
+        assert "Redis" in result
 
     def test_empty_question_returns_generic(self):
         from app.agents.chat.answer import _format_bank_question_fallback

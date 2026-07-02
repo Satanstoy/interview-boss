@@ -629,8 +629,9 @@ forbidden_focus: {plan.get("forbidden_focus", [])}
         repaired = ""
 
     repaired = _strip_basis_markup(repaired)
-    if not repaired:
-        repaired = f"换个方向，{question_text}"
+    # When repair fails, return empty so the caller (_enforce_question_plan_on_text)
+    # can use LLM rewrite for a natural transition instead of a mechanical prefix.
+    # Do NOT inject hardcoded text here — it would bypass the LLM rewrite path.
 
     adherence = _question_plan_adherence(repaired, plan)
     return {
