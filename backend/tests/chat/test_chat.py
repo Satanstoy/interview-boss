@@ -1433,6 +1433,25 @@ class TestInterviewStateMetadata:
                     "session_notes": "",
                     "job_position": "agent_llm",
                     "interview_context": "",
+                    "interview_stop_decision": {
+                        "action": "continue",
+                        "mode": "strong_close",
+                        "reason": "coverage_incomplete",
+                        "message_count": 45,
+                        "missing_phases": ["system_design"],
+                        "coverage": {
+                            "project_followup": {
+                                "current_count": 1,
+                                "threshold": 5,
+                                "is_covered": False,
+                            },
+                            "system_design": {
+                                "current_count": 0,
+                                "threshold": 1,
+                                "is_covered": False,
+                            },
+                        },
+                    },
                 }
             )
             return state
@@ -1503,6 +1522,25 @@ class TestInterviewStateMetadata:
         ] == 1
         assert metadata["observability"]["step_count"] == 0
         assert metadata["observability"]["tool_trace_persisted"] is False
+        assert metadata["observability"]["stop_policy"] == {
+            "action": "continue",
+            "mode": "strong_close",
+            "reason": "coverage_incomplete",
+            "message_count": 45,
+            "missing_phases": ["system_design"],
+            "coverage": {
+                "project_followup": {
+                    "current_count": 1,
+                    "threshold": 5,
+                    "is_covered": False,
+                },
+                "system_design": {
+                    "current_count": 0,
+                    "threshold": 1,
+                    "is_covered": False,
+                },
+            },
+        }
 
 
 # ── chat_tool_traces audit table ─────────────────────────────
@@ -1533,6 +1571,130 @@ def test_chat_tool_traces_table_columns(test_db):
         "created_at",
     }
     assert expected.issubset(columns), f"Missing columns: {expected - columns}"
+
+
+# ── Reasoning trace helpers ─────────────────────────────────
+
+
+class TestReasoningTraceHelpers:
+    def test_safe_tool_args_keeps_only_public_fields(self):
+        from app.agents.chat.trace import safe_tool_args
+
+        tool_call = {
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps(
+                    {
+                        "keywords": ["Redis", "缓存"],
+                        "question_type": "knowledge_probe",
+                        "secret": "must-not-leak",
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        }
+
+        assert safe_tool_args(tool_call) == {
+            "keywords": ["Redis", "缓存"],
+            "question_type": "knowledge_probe",
+        }
+
+    def test_build_tool_trace_keeps_result_preview_and_labels(self):
+        from app.agents.chat.trace import build_tool_trace
+
+        tool_call = {
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps({"keywords": ["Redis"]}, ensure_ascii=False),
+            }
+        }
+        state = {
+            "retrieved_questions": [
+                {
+                    "id": 101,
+                    "question": "Redis 缓存穿透怎么处理？",
+                    "cat1": "中间件",
+                    "cat2": "缓存",
+                    "sources": [{"company": "腾讯", "round": "一面"}],
+                }
+            ],
+            "selected_question": {"id": 101},
+        }
+        summary = {
+            "ok": True,
+            "result_count": 1,
+            "result_ids": [101],
+            "fallback_used": False,
+            "debug_reason": "hybrid_search_ok",
+        }
+
+        trace = build_tool_trace(
+            "search_questions",
+            tool_call,
+            summary,
+            elapsed_ms=318,
+            state=state,
+        )
+
+        assert trace["tool_name"] == "search_questions"
+        assert trace["label"] == "检索题库"
+        assert trace["args_summary"] == {"keywords": ["Redis"]}
+        assert trace["elapsed_ms"] == 318
+        assert trace["result_count"] == 1
+        assert trace["result_ids"] == [101]
+        assert trace["result_preview"][0]["question"] == "Redis 缓存穿透怎么处理？"
+        assert trace["result_preview"][0]["company"] == "腾讯"
+        assert trace["selected_question_id"] == 101
+        assert trace["debug_reason"] == "hybrid_search_ok"
+
+    def test_build_skill_trace_from_load_skill_tool(self):
+        from app.agents.chat.trace import build_skill_trace_from_tool
+
+        tool_call = {
+            "function": {
+                "name": "load_skill",
+                "arguments": json.dumps({"skill_name": "project-deep-dive"}),
+            }
+        }
+
+        trace = build_skill_trace_from_tool(
+            "load_skill",
+            tool_call,
+            {"ok": True},
+        )
+
+        assert trace == {
+            "skill_name": "project-deep-dive",
+            "label": "项目深挖策略",
+            "reason": "候选人正在介绍项目，需要追问职责、架构和取舍",
+            "persistent": False,
+            "status": "loaded",
+        }
+
+    def test_build_reasoning_trace_uses_summary_fallback_without_model_reasoning(self):
+        from app.agents.chat.trace import build_reasoning_trace
+
+        reasoning = build_reasoning_trace(
+            collected_thinking=[],
+            steps=[
+                {"step": "understanding", "message": "正在分析你的回答..."},
+                {"step": "search_questions", "message": "正在检索相关面试题..."},
+                {"step": "generating", "message": "正在生成回答..."},
+            ],
+            tool_traces=[],
+            skill_traces=[],
+            duration_ms=2400,
+        )
+
+        assert reasoning["version"] == 1
+        assert reasoning["duration_ms"] == 2400
+        assert reasoning["source"] == "summary_fallback"
+        assert reasoning["summary"] == [
+            "分析候选人回答，判断下一步追问方向",
+            "根据关键词检索题库中的相关面试题",
+            "综合上下文、题库结果和面试阶段组织追问",
+        ]
+        assert reasoning["model_reasoning"] == []
 
 
 # ── Helper ─────────────────────────────────────────────────
