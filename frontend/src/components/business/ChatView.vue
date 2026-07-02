@@ -818,6 +818,19 @@ async function handleSend() {
         ? finalEvent.metadata
         : {}
       const metadata = { ...serverMetadata }
+
+      // 从 done 事件中提取 reasoning_trace（后端新增下发）
+      if (finalEvent?.reasoning_trace && !metadata.reasoning_trace) {
+        metadata.reasoning_trace = finalEvent.reasoning_trace
+      }
+      // 从 done 事件中提取 thinking 数据（兼容旧格式）
+      if (finalEvent?.thinking && !metadata.thinking && !metadata.reasoning_trace) {
+        metadata.thinking = finalEvent.thinking
+      }
+      if (finalEvent?.thinking_duration && !metadata.thinking_duration) {
+        metadata.thinking_duration = finalEvent.thinking_duration
+      }
+
       if (pendingRetrievedQuestions.value?.length > 0) {
         metadata.retrieved_questions ||= pendingRetrievedQuestions.value
       }
@@ -861,7 +874,7 @@ async function handleSend() {
       if (pendingToolSteps.value.length > 0 && !metadata.tool_steps && !metadata.tool_calls_trace) {
         metadata.tool_steps = [...pendingToolSteps.value]
       }
-      if (thinkingContent.value && !metadata.thinking) {
+      if (thinkingContent.value && !metadata.thinking && !metadata.reasoning_trace) {
         metadata.thinking = thinkingContent.value
         metadata.thinking_duration ||= thinkingDuration.value
       }
