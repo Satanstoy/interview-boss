@@ -339,16 +339,21 @@ async def send_message(
                             )
                         )
 
-                    # 附带 reasoning_trace 给前端，用于展开思维链显示
+                    # 附带 reasoning metadata 给前端，用于思维链/步骤/工具/skill 显示
                     done_payload: dict = {"type": "done"}
-                    reasoning_trace = meta.get("reasoning_trace")
-                    if reasoning_trace:
-                        done_payload["reasoning_trace"] = reasoning_trace
-                    # 也附带 thinking 数据（兼容旧格式）
-                    if meta.get("thinking") and not reasoning_trace:
-                        done_payload["thinking"] = meta["thinking"]
-                    if meta.get("thinking_duration"):
-                        done_payload["thinking_duration"] = meta["thinking_duration"]
+                    for key in (
+                        "reasoning_trace",
+                        "tool_calls_trace",
+                        "skill_trace",
+                        "steps",
+                        "tool_steps",
+                        "thinking",
+                        "thinking_duration",
+                        "insights",
+                    ):
+                        val = meta.get(key)
+                        if val:
+                            done_payload[key] = val
                     yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "error":

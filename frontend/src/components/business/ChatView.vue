@@ -819,16 +819,11 @@ async function handleSend() {
         : {}
       const metadata = { ...serverMetadata }
 
-      // 从 done 事件中提取 reasoning_trace（后端新增下发）
-      if (finalEvent?.reasoning_trace && !metadata.reasoning_trace) {
-        metadata.reasoning_trace = finalEvent.reasoning_trace
-      }
-      // 从 done 事件中提取 thinking 数据（兼容旧格式）
-      if (finalEvent?.thinking && !metadata.thinking && !metadata.reasoning_trace) {
-        metadata.thinking = finalEvent.thinking
-      }
-      if (finalEvent?.thinking_duration && !metadata.thinking_duration) {
-        metadata.thinking_duration = finalEvent.thinking_duration
+      // 从 done 事件中提取 reasoning 相关字段（后端下发）
+      for (const key of ['reasoning_trace', 'tool_calls_trace', 'skill_trace', 'steps', 'tool_steps', 'thinking', 'thinking_duration', 'insights']) {
+        if (finalEvent?.[key] && !metadata[key]) {
+          metadata[key] = finalEvent[key]
+        }
       }
 
       if (pendingRetrievedQuestions.value?.length > 0) {
