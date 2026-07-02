@@ -18,6 +18,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 | `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护、已问题列表构建 |
 | `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
+| `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
 | `coverage_config.py` | 面试阶段枚举和岗位/难度覆盖阈值；可根据高置信 rhythm profile 调整阈值 |
 | `rhythm_profile.py` | 从有权限的 approved 面经中学习题型分布和阶段转换；必须按 owner/status/job_position/deleted_at 过滤 |
 | `interview_state.py` | 基于 `InterviewLedger` 构建可序列化 `interview_state` 快照，不替代 ledger |
@@ -63,7 +64,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`
 - **完整回答后强制候选题（代码级硬守卫）**：`interview_question + _should_require_bank_question(state) + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；触发条件看本轮是否实际执行过 `search_questions` / `draw_questions`，不能只看总 tool call 数，因为 `load_skill` 不会产生候选题。guard 重试分支同样走 `validate_tool_call()` allowlist，且只执行 `search_questions` / `draw_questions`；若重试仍无 tool_calls 或调用不满足契约，则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
 - **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
-- **Thinking/Steps/Tool Steps/Insights 持久化**：`run_chat()` 在事件循环中累积 `step`、`tool_step`、`thinking`、`insight` 事件，在 `done` 事件时合并进 metadata（`thinking`、`thinking_duration`、`steps`、`tool_steps`、`insights` 字段）。thinking chunks 上限 `_MAX_THINKING_CHUNKS=50`，避免 metadata 膨胀。页面刷新后前端通过 `getMessages()` 可取回这些字段；`tool_steps` 只保存工具名、耗时、结果数、fallback 等摘要，不保存 raw args/payload
+- **Thinking/Steps/Tool Steps/Insights 持久化**：`run_chat()` 在事件循环中累积 `step`、`tool_step`、`thinking`、`insight` 事件，在 `done` 事件时合并进 metadata（兼容字段：`thinking`、`thinking_duration`、`steps`、`tool_steps`、`insights`；新结构化字段：`reasoning_trace`、`tool_calls_trace`、`skill_trace`）。`reasoning_trace.summary` 是可公开展示的思考摘要，不保存 hidden raw CoT；`tool_calls_trace` 只保存白名单参数、耗时、结果数和短结果预览。thinking chunks 上限 `_MAX_THINKING_CHUNKS=50`，避免 metadata 膨胀。页面刷新后前端通过 `getMessages()` 可取回这些字段
 - **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `save_mcp_session(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session` 有白名单过滤（`active_skills`、`retrieved_questions` 等），性能开销可控
 
 ## 模块依赖图
