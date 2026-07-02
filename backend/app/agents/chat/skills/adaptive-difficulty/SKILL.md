@@ -36,7 +36,7 @@ Each topic starts broad and narrows based on response quality:
 
 - **Good answer** (detailed, data-backed, shows trade-off thinking) → escalate: add constraints, ask trade-offs, pressure test
 - **Medium answer** (correct but shallow) → stay level: change angle, ask for specifics
-- **Bad answer** (vague, textbook-style, "I don't know") → de-escalate: give hints, narrow scope, switch topic
+- **Bad answer** (vague, textbook-style, "I don't know", OR completely off-topic) → de-escalate: if off-topic, point it out directly first; if still off-topic after 1 attempt, switch topic immediately. Don't keep pressing the same question.
 
 ## Examples
 

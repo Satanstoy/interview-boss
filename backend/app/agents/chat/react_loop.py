@@ -34,7 +34,11 @@ from app.agents.chat.question_plan import (
     _should_require_bank_question,
 )
 from app.agents.chat.state import ChatState
-from app.agents.chat.summary import _forced_closing_response
+from app.agents.chat.stop_policy import evaluate_interview_stop
+from app.agents.chat.summary import (
+    _forced_closing_response,
+    _generate_structured_summary,
+)
 from app.agents.chat.trace import build_skill_trace_from_tool, build_tool_trace
 from app.agents.chat import tools as chat_tools
 from app.agents.shared.events import _event_queue_var
@@ -342,8 +346,36 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     3. ReAct loop: LLM calls tools or answers directly
     4. Stream final answer
     """
-    forced_closing = await _forced_closing_response(state)
-    if forced_closing:
+    stop_decision = evaluate_interview_stop(state)
+    state["interview_stop_decision"] = stop_decision
+    if stop_decision["action"] == "ask_candidate_question":
+        state["question_source"] = "conversation"
+        state["question_source_reason"] = stop_decision["reason"]
+        message = stop_decision.get("message")
+        if message:
+            # Pre-set message from stop_policy (e.g. coverage-complete prompt)
+            _emit(
+                {
+                    "type": "step",
+                    "step": "closing",
+                    "message": "正在进入反问收尾...",
+                    "reason": STEP_REASONS["closing"],
+                }
+            )
+            yield {"type": "chunk", "content": message}
+            yield {"type": "done"}
+            return
+        # No pre-set message (e.g. candidate_repeated_answers) —
+        # inject a system note and let the ReAct loop generate a natural response.
+        state["repetition_detected"] = True
+
+    if stop_decision["action"] == "close":
+        state["question_source"] = "conversation"
+        state["question_source_reason"] = stop_decision["reason"]
+        if stop_decision["reason"] == "hard_stop_by_message_count":
+            closing_text = await _forced_closing_response(state)
+        else:
+            closing_text = await _generate_structured_summary(state)
         _emit(
             {
                 "type": "step",
@@ -352,7 +384,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "reason": STEP_REASONS["closing"],
             }
         )
-        yield {"type": "chunk", "content": forced_closing}
+        yield {"type": "chunk", "content": closing_text}
         yield {"type": "done"}
         return
 

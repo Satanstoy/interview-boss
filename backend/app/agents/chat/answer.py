@@ -190,12 +190,23 @@ async def _enforce_question_plan_on_text(
         state["question_source_reason"] = "question_plan_repaired"
         return repaired_text
 
-    fallback = _format_bank_question_fallback(
-        str(plan.get("question_text") or ""),
-        style="plan",
-    )
+    # Try LLM rewrite for natural transition
+    question_text = str(plan.get("question_text") or "")
+    last_answer = str(state.get("user_message") or "")
+    rewritten = await _rewrite_transition_with_llm(question_text, last_answer)
+    if rewritten:
+        metadata["fallback_used"] = True
+        metadata["adherence"] = _question_plan_adherence(rewritten, plan)
+        metadata["transition_source"] = "llm_rewrite"
+        state["question_plan_metadata"] = metadata
+        state["question_source_reason"] = "question_plan_llm_rewrite"
+        return rewritten
+
+    # Last resort: deterministic fallback (no LLM available)
+    fallback = _format_bank_question_fallback(question_text, style="plan")
     metadata["fallback_used"] = True
     metadata["adherence"] = _question_plan_adherence(fallback, plan)
+    metadata["transition_source"] = "deterministic_fallback"
     state["question_plan_metadata"] = metadata
     state["question_source_reason"] = "question_plan_fallback"
     return fallback
@@ -243,19 +254,79 @@ def _fallback_interviewer_response(marker: str, state: ChatState) -> str:
     )
 
 
-def _format_bank_question_fallback(question_text: str, *, style: str = "candidate") -> str:
+# ── Natural transition via LLM rewrite ──────────────────────────
+
+_TRANSITION_REWRITE_SYSTEM = (
+    "你是技术面试官。候选人刚回答了一段话，你需要自然地过渡到下一道题。\n"
+    "规则：\n"
+    "1. 用 1-2 句话从候选人的回答自然过渡到新题目\n"
+    "2. 可以引用候选人提到的具体技术点做承接\n"
+    "3. 禁止使用 '换个方向'、'换个问题'、'换个具体点的问题'、'换个角度' 这类机械前缀\n"
+    "4. 直接输出面试官的话，不要加任何前缀、解释或 markdown 格式\n"
+    "5. 保持面试官冷峻、务实的语气"
+)
+
+
+async def _rewrite_transition_with_llm(
+    question_text: str,
+    last_user_answer: str,
+) -> str | None:
+    """Use LLM to generate a natural transition from candidate's answer to the next question.
+
+    Returns the rewritten text, or None if LLM fails.
+    """
+    if not question_text.strip():
+        return None
+    messages = [
+        {"role": "system", "content": _TRANSITION_REWRITE_SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                f"候选人刚才的回答：{last_user_answer[:300]}\n\n"
+                f"下一道题：{question_text}\n\n"
+                "请生成自然的过渡。"
+            ),
+        },
+    ]
+    try:
+        chunks: list[str] = []
+        async for event in llm_service.stream_llm_messages(
+            messages, temperature=0.3, max_tokens=200
+        ):
+            if event.get("type") == "chunk":
+                chunks.append(str(event.get("content") or ""))
+        text = "".join(chunks).strip()
+        # Validate: must be non-empty, not leaked markers, not mechanical prefixes
+        if (
+            text
+            and len(text) > 5
+            and "换个具体点的问题" not in text
+            and "换个方向" not in text
+        ):
+            return text
+    except Exception:
+        logger.warning("transition rewrite LLM call failed", exc_info=True)
+    return None
+
+
+def _format_bank_question_fallback(
+    question_text: str,
+    *,
+    style: str = "candidate",
+) -> str:
+    """Deterministic fallback when LLM rewrite is not available.
+
+    Only used as last resort (LLM rewrite failed or not attempted).
+    """
     question = (question_text or "").strip()
     if not question:
         return (
             "我先追问你刚才提到的一个点。选一个你最熟的模块，"
             "把关键设计和你当时做的取舍讲清楚。"
         )
-    prefix = (
-        "换个具体点的问题："
-        if style == "plan"
-        else "顺着你刚才的回答，我问一个具体问题："
-    )
-    return f"{prefix}{question}"
+    if style == "plan":
+        return f"好，{question}"
+    return f"顺着你刚才的回答，我问一个具体问题：{question}"
 
 
 def _fallback_react_answer(state: ChatState, reason: str) -> str:

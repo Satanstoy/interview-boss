@@ -411,6 +411,8 @@ def _determine_interview_phase(recent_count: int) -> str:
         return "面试进行中。根据候选人回答和你的判断，自由穿插项目深挖、八股、算法。"
     if recent_count <= 44:
         return "面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。"
+    if recent_count <= 56:
+        return "面试进入强收口阶段。只补最后一个未覆盖维度，或进入 HR/反问/收尾，不要开启新的长链路话题。"
     return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
 
@@ -1649,8 +1651,56 @@ def _build_tool_strategy(state: ChatState) -> str:
     active_skills = state.get("active_skills", [])
     is_deep_dive = "project-deep-dive" in active_skills
     harness_focus = _big_tech_next_focus(state).get("next_focus", {})
+    interview_state = state.get("interview_state") or {}
+    message_count = len(state.get("message_history", []) or [])
 
     requires_bank_question = _should_require_bank_question(state)
+
+    # Hard limit: if interviewer has been asking about the same topic 3+ times
+    # consecutively, force a topic switch instead of continuing.
+    from app.agents.chat.question_plan import _count_consecutive_similar_questions
+
+    consecutive_same_topic, topic_summary = _count_consecutive_similar_questions(state)
+    if consecutive_same_topic >= 2 and intent == "interview_question":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：你已连续多次追问同一话题，候选人未能有效回答。\n"
+            "必须：切换到完全不同的面试方向（如从项目转算法，或从八股转系统设计），"
+            "调用 draw_questions 换一个类型。\n"
+            f"之前的话题：{topic_summary}。不要再围绕这个话题追问。\n"
+            "禁止：继续围绕同一话题追问或检索。\n"
+            "</tool_strategy>"
+        )
+
+    if intent == "end_interview":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：用户明确要求结束面试。\n"
+            "严格禁止：不得调用任何工具（load_skill / search_questions / draw_questions）。\n"
+            "必须：直接生成面试总结或简单收尾，然后结束。\n"
+            "</tool_strategy>"
+        )
+
+    if harness_focus.get("phase") == "wrap_up":
+        return (
+            "<tool_strategy>\n"
+            "当前状态：核心评估维度已覆盖，进入收尾。\n"
+            "严格禁止：不要再调用 search_questions / draw_questions 出新题。\n"
+            "必须：如果还没问过候选人反问，问“你有什么想问我们的吗？”；"
+            "如果已经问过反问，则简短回应后结束面试。\n"
+            "</tool_strategy>"
+        )
+
+    if message_count >= 44:
+        next_focus = interview_state.get("next_focus") or harness_focus.get("phase")
+        return (
+            "<tool_strategy>\n"
+            "当前状态：面试已进入强收口阶段。\n"
+            "必须：只补最后一个未覆盖维度，或进入 HR/反问/收尾；"
+            "不要继续自由项目深挖，不要开启新的长链路话题。\n"
+            f"最后缺口：{next_focus or '未知'}。\n"
+            "</tool_strategy>"
+        )
 
     if intent == "interview_question" and answer_complete and not has_retrieved and requires_bank_question:
         if harness_focus.get("tool") == "draw_questions":
@@ -1700,14 +1750,6 @@ def _build_tool_strategy(state: ChatState) -> str:
             "<tool_strategy>\n"
             "当前状态：用户尚未回答完毕。\n"
             "建议：不调用工具，等待用户完成回答或给出追问引导。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "end_interview":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户明确要求结束面试。\n"
-            "严格禁止：不得调用任何工具（load_skill / search_questions / draw_questions）。\n"
-            "必须：直接生成面试总结或简单收尾，然后结束。\n"
             "</tool_strategy>"
         )
     elif intent == "practice_request":

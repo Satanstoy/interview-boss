@@ -12,6 +12,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
+from app.agents.chat.coverage_events import question_from_coverage_event
+from app.agents.chat.coverage_config import get_coverage_thresholds
 from app.agents.chat.state import ChatState
 
 logger = logging.getLogger("interview-boss")
@@ -93,6 +95,9 @@ def _infer_question_type(question: dict | None) -> str:
         for field in ("question", "cat1", "cat2", "tags")
     )
     normalized = text.lower()
+    for phase in _BIG_TECH_PHASES:
+        if phase in normalized:
+            return phase
     if "system_design" in normalized or re.search(r"(系统设计|架构设计|高可用|扩展性|scalability)", text, re.I):
         return "system_design"
     if "behavioral" in normalized or re.search(r"(行为面|协作|冲突|失败|复盘|STAR|影响力)", text, re.I):
@@ -170,6 +175,18 @@ def _build_interview_ledger(state: ChatState) -> InterviewLedger:
             continue
         metadata = msg.get("metadata") or {}
         if isinstance(metadata, dict):
+            coverage_events = metadata.get("coverage_events")
+            recorded_coverage_event = False
+            if isinstance(coverage_events, list):
+                for event in coverage_events:
+                    converted = question_from_coverage_event(event)
+                    if converted:
+                        question, phase = converted
+                        ledger.record_question(question, question_type=phase)
+                        recorded_coverage_event = True
+            if recorded_coverage_event:
+                continue
+
             selected = metadata.get("selected_question")
             if isinstance(selected, dict):
                 ledger.record_question(selected)
@@ -206,8 +223,25 @@ def _big_tech_next_focus(state: ChatState) -> dict:
     phase_counts = _big_tech_phase_counts(ledger)
     asked_count = sum(phase_counts.values())
     message_count = len(state.get("message_history", []) or [])
+    thresholds = get_coverage_thresholds(
+        str(state.get("job_position") or "agent_llm"),
+        str(state.get("difficulty") or "mid"),
+        state.get("rhythm_profile") or {},
+    )
+    coverage_complete = all(
+        phase_counts.get(phase.value, 0) >= thresholds.get(phase, 0)
+        for phase in thresholds
+        if thresholds.get(phase, 0) > 0
+    )
 
-    if phase_counts["project_followup"] < 2:
+    if coverage_complete:
+        focus = {
+            "phase": "wrap_up",
+            "tool": "none",
+            "question_type": "wrap_up",
+            "reason": "核心覆盖维度已达标，进入 HR/反问和收尾",
+        }
+    elif phase_counts["project_followup"] < 2:
         focus = {
             "phase": "project_followup",
             "tool": "search_questions",
@@ -669,12 +703,66 @@ def _count_consecutive_similar_questions(state: ChatState) -> tuple[int, str]:
     return count, "、".join(sorted(last_tokens)[:5])
 
 
+def _count_consecutive_similar_user_answers(state: ChatState) -> int:
+    """Count how many consecutive user messages are essentially the same answer.
+
+    Uses the same token-overlap heuristic as _count_consecutive_similar_questions
+    but on user messages, with a higher threshold (0.5) because candidate
+    repetition is more clear-cut than interviewer topic similarity.
+
+    Returns the number of consecutive similar pairs (0 = no repetition,
+    1 = 2 similar in a row, 2 = 3 similar in a row, etc.).
+    """
+    messages = state.get("message_history", []) or []
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if len(user_msgs) < 2:
+        return 0
+
+    def _core_tokens(text: str) -> set[str]:
+        tokens = set()
+        for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{2,}", text.lower()):
+            tokens.add(t)
+        for t in re.findall(r"[一-鿿]{2,4}", text):
+            tokens.add(t)
+        _fillers = {"请", "问题", "回答", "面试", "一下", "具体", "详细", "介绍一下", "说说"}
+        return tokens - _fillers
+
+    recent = user_msgs[-6:]
+    token_sets = [_core_tokens(m.get("content", "")) for m in recent]
+
+    count = 0
+    for i in range(len(token_sets) - 1, 0, -1):
+        curr, prev = token_sets[i], token_sets[i - 1]
+        if not curr or not prev:
+            break
+        intersection = curr & prev
+        overlap = len(intersection) / max(min(len(curr), len(prev)), 1)
+        if overlap >= 0.5:
+            count += 1
+        else:
+            break
+    return count
+
+
 def _build_repetition_protection_note(state: ChatState) -> str:
     """If the interviewer has been asking about the same topic too many times
-    consecutively, return a hard constraint note for the system prompt.
+    consecutively, or if the candidate is repeating the same answer,
+    return a hard constraint note for the system prompt.
 
     Returns empty string when no protection is needed.
     """
+    # Candidate repetition detection (from stop_policy)
+    if state.get("repetition_detected"):
+        user_repeat = _count_consecutive_similar_user_answers(state)
+        if user_repeat >= 2:
+            return (
+                "## ⚠️ 候选人重复回答（硬约束）\n"
+                f"候选人已连续 {user_repeat + 1} 次给出实质相同的回答。\n"
+                "- 不要继续追问同一话题，这没有意义。\n"
+                "- 直接指出候选人回答重复，然后切换到完全不同的面试方向。\n"
+                "- 或者问候选人：'你有什么想问我们的吗？' 进入反问环节。\n"
+            )
+
     count, topic_summary = _count_consecutive_similar_questions(state)
     if count < _MAX_CONSECUTIVE_SAME_QUESTION:
         return ""

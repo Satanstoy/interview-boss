@@ -6,6 +6,7 @@ import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.agents.chat.coverage_config import InterviewPhase
 from app.agents.chat.pipeline import MAX_REACT_STEPS
 from app.agents.shared.events import _event_queue_var
 
@@ -28,6 +29,50 @@ async def _mock_stream_strings(*chunks: str):
     """Async generator that yields plain strings (like stream_llm_messages)."""
     for c in chunks:
         yield c
+
+
+def _selected_question_message(qid: int, phase: str) -> dict:
+    return {
+        "role": "assistant",
+        "content": f"Question {qid} for {phase}",
+        "metadata": {
+            "selected_question": {
+                "id": qid,
+                "question": f"Question {qid} for {phase}",
+                "tags": phase,
+            }
+        },
+    }
+
+
+def _covered_interview_history(message_count: int = 33) -> list[dict]:
+    phases = (
+        [InterviewPhase.PROJECT_FOLLOWUP.value] * 6
+        + [InterviewPhase.KNOWLEDGE_PROBE.value] * 3
+        + [InterviewPhase.ALGORITHM_CODING.value]
+        + [InterviewPhase.SYSTEM_DESIGN.value]
+        + [InterviewPhase.BEHAVIORAL.value]
+    )
+    messages: list[dict] = []
+    for idx, phase in enumerate(phases, start=1):
+        messages.append(_selected_question_message(idx, phase))
+        messages.append({"role": "user", "content": f"answer {idx}"})
+    extra_idx = 0
+    _extra_answers = [
+        "Redis 我用在缓存层，设了合理 TTL 避免雪崩。",
+        "MySQL 索引用 B+ 树，查询走覆盖索引优化。",
+        "TCP 三次握手是 SYN、SYN-ACK、ACK 三步。",
+        "进程是资源分配单位，线程是调度单位，共享地址空间。",
+        "B+ 树叶子节点串链表，范围查询效率高。",
+        "哈希表 O(1) 查找，冲突用链地址法解决。",
+        "跳表是有序链表加多层索引，平均 O(logN)。",
+        "堆排序建大顶堆，逐个取堆顶，时间 O(NlogN)。",
+    ]
+    while len(messages) < message_count:
+        answer = _extra_answers[extra_idx % len(_extra_answers)]
+        extra_idx += 1
+        messages.append({"role": "user", "content": answer})
+    return messages[:message_count]
 
 
 # ── TestActiveSkillsPersistence ──────────────────────────
@@ -207,67 +252,45 @@ class TestReactLoop:
     """Tests for the _react_loop async generator."""
 
     async def test_overlong_interview_asks_final_candidate_question(self):
-        """Overlong interviews should hard-stop tech questioning before tools run."""
+        """Coverage-complete interviews should ask the candidate's question before closing."""
         from app.agents.chat.pipeline import _react_loop
 
         state = {
             "user_id": 1,
             "user_message": "我会检查 prompt、上下文截断和模型是否混用法条。",
-            "message_history": [
-                {"role": "assistant", "content": "技术问题"}
-                if i % 2 == 0
-                else {"role": "user", "content": "候选人回答"}
-                for i in range(46)
-            ],
+            "job_position": "agent_llm",
+            "difficulty": "senior",
+            "message_history": _covered_interview_history(33),
             "session_notes": "",
             "model": None,
         }
 
-        mock_summary_json = json.dumps(
-            {
-                "overall_comment": "候选人技术基础扎实",
-                "strongest_topic": "系统设计思路清晰",
-                "weakest_topic": "算法细节不够深入",
-                "key_suggestions": ["复习排序算法", "多练习编码"],
-                "score_estimate": 7,
-            },
-            ensure_ascii=False,
-        )
-
-        with (
-            patch(
-                "app.services.llm.llm_with_tools", new_callable=AsyncMock
-            ) as mock_llm,
-            patch(
-                "app.services.llm._call_llm_with_retry_messages",
-                new_callable=AsyncMock,
-                return_value=mock_summary_json,
-            ),
-        ):
+        with patch(
+            "app.services.llm.llm_with_tools", new_callable=AsyncMock
+        ) as mock_llm:
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         assert [e["type"] for e in events] == ["chunk", "done"]
-        assert "整体表现" in events[0]["content"]
-        assert "候选人技术基础扎实" in events[0]["content"]
-        assert state["question_source_reason"] == "forced_closing_by_message_count"
+        assert "你有什么想问" in events[0]["content"]
+        assert (
+            state["question_source_reason"]
+            == "coverage_complete_ready_for_candidate_question"
+        )
         mock_llm.assert_not_called()
 
     async def test_overlong_interview_closes_after_candidate_question(self):
         """If the final candidate question was already asked, answer and end."""
         from app.agents.chat.pipeline import _react_loop
 
-        history = [
-            {"role": "assistant", "content": "技术问题"}
-            if i % 2 == 0
-            else {"role": "user", "content": "候选人回答"}
-            for i in range(45)
-        ]
+        history = _covered_interview_history(34)
         history.append({"role": "assistant", "content": "你有什么想问我们的吗？"})
         state = {
             "user_id": 1,
             "user_message": "我想了解团队做 Agent 落地最看重什么？",
+            "job_position": "agent_llm",
+            "difficulty": "senior",
             "message_history": history,
             "session_notes": "",
             "model": None,
@@ -301,7 +324,7 @@ class TestReactLoop:
         assert [e["type"] for e in events] == ["chunk", "done"]
         assert "模拟面试就到这里" in events[0]["content"]
         assert "整体表现良好" in events[0]["content"]
-        assert state["question_source_reason"] == "forced_closing_by_message_count"
+        assert state["question_source_reason"] == "coverage_complete_after_candidate_question"
         mock_llm.assert_not_called()
 
     async def test_direct_answer_no_tools(self):
@@ -941,9 +964,13 @@ class TestBuildToolStrategy:
                 ]
             ),
             "message_history": [
-                {"role": "assistant", "content": "技术问题"}
+                {"role": "assistant", "content": [
+                    "说说你的项目架构设计？", "Redis 缓存穿透怎么解决？",
+                    "MySQL 索引原理是什么？", "TCP 三次握手过程？",
+                    "Python 装饰器怎么实现？",
+                ][i // 2]}
                 if i % 2 == 0
-                else {"role": "user", "content": "候选人回答"}
+                else {"role": "user", "content": f"候选人回答 {i // 2}"}
                 for i in range(10)
             ],
         }
@@ -1933,6 +1960,166 @@ class TestEndInterviewHardRoute:
         assert "候选人项目经验丰富" in response
         assert state["question_source"] == "conversation"
         assert state["question_source_reason"] == "end_interview_hard_route"
+
+    @pytest.mark.asyncio
+    async def test_end_interview_with_evaluation_request_generates_summary(self):
+        """Evaluation-style closing requests should not fall through to brief farewell."""
+        from app.agents.chat.pipeline import _generate_end_interview_response
+
+        mock_summary_json = json.dumps(
+            {
+                "overall_comment": "候选人的项目讲解有亮点，但系统设计深度还不稳定。",
+                "strongest_topic": "Agent 工具调用链路，能结合项目细节说明取舍。",
+                "weakest_topic": "容量评估和异常兜底，缺少可量化的压测依据。",
+                "key_suggestions": [
+                    "补充关键链路的容量估算",
+                    "整理工具调用失败时的降级策略",
+                    "用一次真实复盘串起指标和结论",
+                ],
+                "score_estimate": 6,
+                "hiring_signal": "有进入下一轮的基础，但需要继续压系统设计细节。",
+                "risk_points": ["压测依据不足", "异常恢复方案不够具体"],
+                "next_round_questions": ["如果 Redis 不可用，面试链路如何降级？"],
+            },
+            ensure_ascii=False,
+        )
+
+        state = {
+            "user_message": "结束面试，请给我完整评价：hiring signal、风险点、强项和下一轮追问。",
+            "message_history": [
+                {"role": "assistant", "content": "讲一下你的 Agent 项目。"},
+                {"role": "user", "content": "我做了工具调用和状态管理。"},
+            ],
+            "question_source": None,
+            "question_source_reason": None,
+            "session_notes": "[asked] Agent 工具调用",
+            "user_id": 1,
+        }
+
+        with patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ) as mock_call:
+            response = await _generate_end_interview_response(state)
+
+        mock_call.assert_awaited_once()
+        assert "整体表现" in response
+        assert "Hiring Signal" in response
+        assert "主要风险" in response
+        assert "下一轮追问" in response
+        assert "戛然而止" not in response
+        assert state["question_source"] == "conversation"
+        assert state["question_source_reason"] == "end_interview_hard_route"
+
+
+class TestAssessmentFocusMetadata:
+    def test_conversation_followup_without_selected_question_has_assessment_focus(self):
+        """Conversation-only follow-ups should still expose what is being assessed."""
+        from app.agents.chat.metadata import _build_react_metadata
+
+        state = {
+            "active_skills": ["project-deep-dive"],
+            "question_source": "conversation",
+            "question_source_reason": "deep_dive_followup",
+            "question_type": "system_design",
+            "interview_state": {
+                "current_phase": "project_deep_dive",
+                "next_focus": "failure_recovery",
+            },
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        metadata, _ = _build_react_metadata(
+            state,
+            "继续说说如果 Redis 不可用，你的面试状态链路怎么降级？",
+        )
+
+        assert metadata["selected_question"] is None
+        assert metadata["question_source"] == "conversation"
+        assert metadata["assessment_focus"] == {
+            "source": "conversation",
+            "reason": "deep_dive_followup",
+            "question_type": "system_design",
+            "phase": "project_deep_dive",
+            "next_focus": "failure_recovery",
+            "active_skills": ["project-deep-dive"],
+        }
+
+    def test_conversation_followup_metadata_writes_coverage_event(self):
+        """Conversation-only questions should still become next-turn coverage facts."""
+        from app.agents.chat.metadata import _build_react_metadata
+
+        state = {
+            "active_skills": ["project-deep-dive"],
+            "question_source": "conversation",
+            "question_source_reason": "deep_dive_followup",
+            "question_type": "knowledge_probe",
+            "interview_state": {
+                "current_phase": "knowledge_probe",
+                "next_focus": "behavioral",
+            },
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        metadata, _ = _build_react_metadata(
+            state,
+            "Redis 分布式锁如果客户端超时，怎么保证不会误删别人的锁？",
+        )
+
+        assert metadata["coverage_events"] == [
+            {
+                "phase": "knowledge_probe",
+                "source": "conversation",
+                "confidence": "medium",
+                "question_text": "Redis 分布式锁如果客户端超时，怎么保证不会误删别人的锁？",
+                "reason": "deep_dive_followup",
+            }
+        ]
+
+    def test_selected_question_metadata_writes_high_confidence_coverage_event(self):
+        from app.agents.chat.metadata import _build_react_metadata
+
+        state = {
+            "active_skills": [],
+            "question_source": "draw",
+            "question_source_reason": "question_plan_bound",
+            "question_type": "behavioral",
+            "selected_question": {
+                "id": 99,
+                "question": "讲讲你处理团队冲突的一次经历。",
+                "tags": "behavioral",
+            },
+            "next_question_plan": {
+                "must_ask": True,
+                "question_id": 99,
+                "question_text": "讲讲你处理团队冲突的一次经历。",
+                "source": "draw",
+            },
+            "question_plan_metadata": {
+                "adherence": {"adheres": True, "score": 1.0, "reason": "exact"},
+            },
+            "retrieved_questions": [],
+            "candidate_questions": [],
+        }
+
+        metadata, _ = _build_react_metadata(
+            state,
+            "讲讲你处理团队冲突的一次经历。",
+        )
+
+        assert metadata["coverage_events"] == [
+            {
+                "phase": "behavioral",
+                "source": "draw",
+                "confidence": "high",
+                "question_text": "讲讲你处理团队冲突的一次经历。",
+                "evidence": {"question_id": 99, "question_type": "behavioral"},
+                "reason": "question_plan_bound",
+            }
+        ]
 
 
 # ── TestRepetitionProtection ──────────────────────────────
