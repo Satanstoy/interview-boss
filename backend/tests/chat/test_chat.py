@@ -1694,7 +1694,11 @@ class TestReasoningTraceHelpers:
             "根据关键词检索题库中的相关面试题",
             "综合上下文、题库结果和面试阶段组织追问",
         ]
-        assert reasoning["model_reasoning"] == []
+        assert reasoning["model_reasoning"] == {
+            "available": False,
+            "duration_ms": 0,
+            "truncated": False,
+        }
 
 
 class TestRunChatReasoningTraceMetadata:
@@ -1736,7 +1740,7 @@ class TestRunChatReasoningTraceMetadata:
         assert metadata["tool_calls_trace"] == []
         assert metadata["skill_trace"] == []
 
-    async def test_done_metadata_includes_model_reasoning_trace(self):
+    async def test_done_metadata_tracks_model_reasoning_without_raw_chunks(self):
         from app.agents.chat.pipeline import run_chat
 
         react_events = [
@@ -1769,8 +1773,14 @@ class TestRunChatReasoningTraceMetadata:
 
         trace = done_event["metadata"]["reasoning_trace"]
         assert trace["source"] == "model_reasoning"
-        assert trace["model_reasoning"][0]["chunks"] == ["思考内容"]
-        assert trace["duration_ms"] >= trace["model_reasoning"][0]["duration_ms"]
+        assert trace["summary"] == ["模型分析上下文并组织回答"]
+        assert trace["model_reasoning"] == {
+            "available": True,
+            "duration_ms": 1200,
+            "truncated": False,
+        }
+        assert "思考内容" not in json.dumps(trace, ensure_ascii=False)
+        assert trace["duration_ms"] >= trace["model_reasoning"]["duration_ms"]
         assert done_event["metadata"]["thinking_duration"] >= 0
 
 

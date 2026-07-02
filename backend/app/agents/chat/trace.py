@@ -185,7 +185,9 @@ def build_reasoning_trace(
     skill_traces: list[dict],
     duration_ms: int,
 ) -> dict:
-    model_reasoning = []
+    model_reasoning_available = False
+    model_reasoning_duration_ms = 0
+    model_reasoning_truncated = False
     for item in collected_thinking:
         chunks = [
             str(chunk)
@@ -193,12 +195,10 @@ def build_reasoning_trace(
             if str(chunk).strip()
         ][:50]
         if chunks:
-            model_reasoning.append(
-                {
-                    "chunks": chunks,
-                    "duration_ms": max(int(item.get("duration_ms") or 0), 0),
-                    "truncated": len(item.get("chunks", [])) > 50,
-                }
+            model_reasoning_available = True
+            model_reasoning_duration_ms += max(int(item.get("duration_ms") or 0), 0)
+            model_reasoning_truncated = (
+                model_reasoning_truncated or len(item.get("chunks", [])) > 50
             )
 
     summary = []
@@ -223,7 +223,10 @@ def build_reasoning_trace(
                 summary.append(text)
                 seen.add(text)
 
-    if model_reasoning:
+    if model_reasoning_available and not summary:
+        summary.append("模型分析上下文并组织回答")
+
+    if model_reasoning_available:
         source = "model_reasoning"
     elif summary:
         source = "summary_fallback"
@@ -235,7 +238,11 @@ def build_reasoning_trace(
         "duration_ms": max(int(duration_ms or 0), 0),
         "source": source,
         "summary": summary[:8],
-        "model_reasoning": model_reasoning,
+        "model_reasoning": {
+            "available": model_reasoning_available,
+            "duration_ms": model_reasoning_duration_ms,
+            "truncated": model_reasoning_truncated,
+        },
     }
 
 
