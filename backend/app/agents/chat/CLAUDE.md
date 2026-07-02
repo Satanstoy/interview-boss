@@ -5,7 +5,7 @@
 ## 流程
 
 ```
-run_chat() → _step_load_context → _step_classify → _react_loop → _persist_active_skills → save_mcp_session → _step_extract_memory
+run_chat() → _step_load_context → _step_classify → _react_loop → _persist_active_skills → save_mcp_session_async → _step_extract_memory
 ```
 
 ## 文件职责
@@ -14,12 +14,14 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 |------|------|
 | `pipeline.py` | 入口点：`run_chat()` + pipeline steps（`_step_load_context`、`_step_classify`、`_step_extract_memory`、`_persist_active_skills`、`_initial_state`）+ 事件累积（thinking/steps/insights → done metadata）+ MCP session 持久化 + 所有子模块的 re-export（向后兼容） |
 | `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射 |
-| `answer.py` | 答案生成与质量：`OutputDeduplicator`、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、fallback 响应、内部 marker 过滤 |
-| `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护、已问题列表构建 |
+| `answer.py` | 答案生成与质量：`OutputDeduplicator`、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、`_rewrite_transition_with_llm()`（LLM 自然过渡重写）、fallback 响应、内部 marker 过滤 |
+| `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护（含 `_count_consecutive_similar_user_answers()` 候选人重复检测）、已问题列表构建 |
+| `stop_policy.py` | 产品级停止策略：32 条后覆盖完整进入反问，44 条后强收口，56 条后硬停止；候选人重复回答检测（3 次切方向，5 次结束）；避免只靠 prompt 判断何时结束 |
 | `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
 | `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
 | `coverage_config.py` | 面试阶段枚举和岗位/难度覆盖阈值；可根据高置信 rhythm profile 调整阈值 |
+| `coverage_events.py` | 覆盖率事件归一化：把 selected question、MCP/题库来源和 conversation-only 自然追问转成 `metadata.coverage_events`，供下一轮 API 入口的 ledger/stop policy 使用 |
 | `rhythm_profile.py` | 从有权限的 approved 面经中学习题型分布和阶段转换；必须按 owner/status/job_position/deleted_at 过滤 |
 | `interview_state.py` | 基于 `InterviewLedger` 构建可序列化 `interview_state` 快照，不替代 ledger |
 | `graph.py` | 兼容层，委托给 `pipeline.run_chat` |
@@ -50,11 +52,14 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 
 ## 质量保护机制
 
-- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，直接生成总结
+- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具。若用户要求总结、评价、复盘、hiring signal、风险点或下一轮追问，走 `_generate_structured_summary()`；只有单纯结束且对话很短时才返回简短告别
+- **自然停止策略**：`stop_policy.py` 是何时结束面试的代码级裁判：`>=32` 条消息且核心覆盖完整时先问候选人“你有什么想问我们的吗？”，候选人回应后生成结构化总结；`>=44` 条消息进入 strong-close，只允许补最后缺口或 HR/反问/收尾；`>56` 条消息才硬停止并直接总结。不要把 45 条消息重新改成硬停
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
+- **coverage 事件先于快照**：每轮 API 入口的 `interview_state` / `stop_policy` 必须基于历史 assistant metadata 中的 `coverage_events` 作为优先事实源；本轮回复生成后再把新的 selected-question 或 conversation-only 自然追问归一化写入 `metadata.coverage_events`，下一轮生效，避免只在 done metadata 展示 coverage 而不参与运行时决策
+- **conversation-only 评估锚点**：无 `selected_question` 的自然追问必须在 done metadata 写入 `assessment_focus` 和 `coverage_events`，记录 `question_source`、`question_source_reason`、`question_type`、`interview_state.current_phase`、`interview_state.next_focus` 和活跃技能，避免 E2E 只有文本、没有结构化评估依据；解释性回复和候选人反问回答不要记为 coverage
 - **开场自然追问**：`_should_require_bank_question()` 是题库绑定时机的单一判断；开场自我介绍/早期背景说明后先基于项目和职责自然追问，不立即硬检索题库。`_build_tool_strategy()`、`_should_create_question_plan()`、`react_loop` forced search guard 必须共用该判断
-- **InterviewLedger 问题台账**：`_build_interview_ledger()` 从 session notes、assistant metadata、selected question 和 retrieved questions 中汇总 `asked_question_ids`、题面、一级/二级分类计数、题型计数和近期主题 token；这是防止同题号/同题型/同主题重复追问的硬状态，不要只依赖 prompt 提醒
+- **InterviewLedger 问题台账**：`_build_interview_ledger()` 优先读取 assistant metadata 的 `coverage_events`，再兼容 session notes、selected question 和 retrieved questions，汇总 `asked_question_ids`、题面、一级/二级分类计数、题型计数和近期主题 token；这是防止同题号/同题型/同主题重复追问和驱动 coverage/stop policy 的硬状态，不要只依赖 prompt 提醒
 - **Interview State 快照**：`run_chat()` 每轮从 conversation metadata 读取 `interview_config`（difficulty / coverage_thresholds / rhythm_profile），用 `InterviewLedger` 派生 `state["interview_state"]` 并注入短 `<interview_state>` prompt；done metadata 也会保存 `interview_state` 和 `observability`，供刷新后恢复。不要在快照里独立推进状态，ledger 仍是事实来源
 - **中国互联网大厂 + full-loop harness**：`_build_big_tech_interview_harness_prompt()` / `_big_tech_next_focus()` 基于 `InterviewLedger` 派生当前覆盖度和下一优先评估维度（project_followup / knowledge_probe / algorithm_coding / system_design / behavioral），并注入 `build_react_system_prompt()`；默认面向国内候选人，节奏要覆盖项目深挖、八股基础、场景题/系统设计、手撕代码、HR/稳定性和反问；`_build_tool_strategy()` 必须尊重该推荐，缺 coding / system design / behavioral 信号时优先 `draw_questions(question_type=...)`，不要继续围绕同一项目检索
 - **已问题过滤**：`_select_question_for_plan()` 会结合 `InterviewLedger` 与历史 assistant metadata / 旧话术正文提取的已问 ID/题面，优先选择未问过且未达到类别配额的候选；所有候选都已问过时才回退第一题并记录 `*_all_candidates_previously_asked`
@@ -65,7 +70,7 @@ run_chat() → _step_load_context → _step_classify → _react_loop → _persis
 - **完整回答后强制候选题（代码级硬守卫）**：`interview_question + _should_require_bank_question(state) + 无候选题` 时，`react_loop.py` 的 forced search guard 会在循环退出后检测此场景，注入硬契约系统消息并重试一次 LLM 调用；触发条件看本轮是否实际执行过 `search_questions` / `draw_questions`，不能只看总 tool call 数，因为 `load_skill` 不会产生候选题。guard 重试分支同样走 `validate_tool_call()` allowlist，且只执行 `search_questions` / `draw_questions`；若重试仍无 tool_calls 或调用不满足契约，则接受答案并记录 warning。SSE 事件 `step=force_search_guard` 标识守卫触发。兜底保留 `_build_tool_strategy` 提示词双重保护
 - **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
 - **Thinking/Steps/Tool Steps/Insights 持久化**：`run_chat()` 在事件循环中累积 `step`、`tool_step`、`thinking`、`insight` 事件，在 `done` 事件时合并进 metadata（兼容字段：`thinking`、`thinking_duration`、`steps`、`tool_steps`、`insights`；新结构化字段：`reasoning_trace`、`tool_calls_trace`、`skill_trace`）。`reasoning_trace.summary` 是可公开展示的思考摘要，不保存 hidden raw CoT；`tool_calls_trace` 只保存白名单参数、耗时、结果数和短结果预览。thinking chunks 上限 `_MAX_THINKING_CHUNKS=50`，避免 metadata 膨胀。页面刷新后前端通过 `getMessages()` 可取回这些字段
-- **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `save_mcp_session(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session` 有白名单过滤（`active_skills`、`retrieved_questions` 等），性能开销可控
+- **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `await save_mcp_session_async(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session_async` 有白名单过滤（`active_skills`、`retrieved_questions` 等），性能开销可控
 
 ## 模块依赖图
 
