@@ -805,7 +805,41 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             int((time.monotonic() - react_started) * 1000),
         )
 
-    # 3.5 Retrieval gap observability. Retrieval recommendations are part of
+    # 3.5 If max_steps hit without a final answer, force synthesis from
+    # accumulated tool results instead of surfacing an error.
+    if stop_reason == "max_steps" and not final_answer_text:
+        logger.info(
+            "ReAct trace: event=max_steps_synthesize conversation_id=%s "
+            "tool_calls=%s",
+            state.get("conversation_id"),
+            tool_call_count,
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "【系统提示】你已经搜索了足够多的题目。"
+                    "请基于已有的搜索结果，直接输出面试官对候选人的下一个问题。"
+                    "不要再调用任何工具，直接用文字回复。"
+                ),
+            }
+        )
+        try:
+            from app.services.llm import raw_llm_call
+
+            result_text = await raw_llm_call(
+                user_id=state["user_id"],
+                model=state.get("model"),
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024,
+            )
+            if result_text and result_text.strip():
+                final_answer_text = result_text.strip()
+        except Exception as e:
+            logger.error("max_steps synthesis failed: %s", e)
+
+    # 3.6 Retrieval gap observability. Retrieval recommendations are part of
     # the strategy prompt, not a post-hoc control-flow takeover.
     if (
         not stop_reason
