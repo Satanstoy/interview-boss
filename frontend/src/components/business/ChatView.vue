@@ -435,6 +435,7 @@ const inputText = ref('')
 const isSending = ref(false)
 const streamingContent = ref('')
 const showNewChat = ref(false)
+const creatingConversation = ref(false)
 const messagesContainer = ref(null)
 const inputRef = ref(null)
 const pendingRetrievedQuestions = ref(null)
@@ -683,6 +684,8 @@ async function selectConversation(id) {
 
 // Create conversation
 async function handleCreateConversation(data) {
+  if (creatingConversation.value) return
+  creatingConversation.value = true
   try {
     const res = await chatApi.createConversation(data)
     showNewChat.value = false
@@ -698,6 +701,8 @@ async function handleCreateConversation(data) {
     }
   } catch (e) {
     console.error('创建对话失败:', e)
+  } finally {
+    creatingConversation.value = false
   }
 }
 
@@ -784,7 +789,11 @@ async function handleSend() {
             .replace(/\[BASIS\][\s\S]*?\[\/BASIS\]/g, '')
             .replace(/\[BASIS\]\{[^}]*$/g, '')  // Partial [BASIS]{ at end of chunk
             .replace(/^\{[^}]*\}?\[\/BASIS\]/g, '')  // Partial }[/BASIS] at start
-          streamingContent.value += cleanedContent
+          if (event.replace) {
+            streamingContent.value = cleanedContent
+          } else {
+            streamingContent.value += cleanedContent
+          }
           scrollToBottom()
         } else if (event.type === 'retrieved') {
           pendingRetrievedQuestions.value = event.questions || []

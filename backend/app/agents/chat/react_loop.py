@@ -14,18 +14,17 @@ from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from app.agents.chat.answer import (
-    OutputDeduplicator,
-    _ensure_final_answer_quality,
-    _fallback_interviewer_response,
-    _fallback_react_answer,
     _final_answer_events_from_text,
-    _is_internal_react_marker,
-    _stream_final_answer,
+    OutputDeduplicator,
+    _stream_final_answer,  # kept for backward compat, no longer called in main path
 )
+from app.agents.chat.chat_constants import PUBLIC_QUESTION_PREVIEW_LIMIT
+from app.agents.chat.routing import should_record_retrieval_gap
 from app.agents.chat.metadata import _extract_company, _extract_round
 from app.agents.chat.nodes import (
     _build_next_question_plan_prompt,
     build_react_system_prompt,
+    build_runtime_tool_contract_message,
 )
 from app.agents.chat.question_plan import (
     _build_previously_asked_section,
@@ -48,6 +47,8 @@ from app.services.llm import make_tool_result_message
 logger = logging.getLogger("interview-boss")
 
 MAX_REACT_STEPS = 5
+FINAL_ANSWER_STREAM_MAX_ATTEMPTS = 3
+FINAL_ANSWER_ERROR_MESSAGE = "模型生成失败，已重试 3 次，请稍后再试。"
 _TRACE_STRING_LIMIT = 120
 _TRACE_LIST_LIMIT = 5
 _SAFE_TOOL_ARG_KEYS = {
@@ -334,7 +335,98 @@ def _record_tool_observability(
     return step_data
 
 
+def _emit_reasoning_content(reasoning_content: str | None, elapsed_ms: int) -> None:
+    """Bridge OpenAI-compatible reasoning_content into public thinking events."""
+    if not isinstance(reasoning_content, str) or not reasoning_content.strip():
+        return
+    duration = round(max(elapsed_ms, 0) / 1000, 1)
+    _emit({"type": "thinking_start", "content": ""})
+    _emit({"type": "thinking", "content": reasoning_content})
+    _emit(
+        {
+            "type": "thinking_done",
+            "duration": duration,
+            "content": reasoning_content,
+        }
+    )
+
+
 # ── ReAct Loop ────────────────────────────────────────────
+
+
+def _record_retrieval_gap(state: ChatState, tool_names: list[str]) -> None:
+    """Record that retrieval was recommended but the model answered directly."""
+    state["retrieval_gap"] = {
+        "reason": "model_answered_without_retrieval",
+        "intent": state.get("intent"),
+        "answer_quality": state.get("answer_quality"),
+        "should_retrieve": bool(state.get("should_retrieve")),
+        "requires_bank_question": bool(state.get("requires_bank_question")),
+        "tool_names": tool_names,
+    }
+    state.setdefault("question_source", "conversation")
+    state.setdefault(
+        "question_source_reason",
+        "retrieval_recommended_but_skipped",
+    )
+    logger.info(
+        "ReAct trace: event=retrieval_gap_recorded conversation_id=%s "
+        "intent=%s answer_quality=%s tool_names=%s",
+        state.get("conversation_id"),
+        state.get("intent"),
+        state.get("answer_quality"),
+        tool_names,
+    )
+
+
+async def _stream_final_answer_with_retry(
+    messages: list[dict],
+    state: ChatState,
+) -> AsyncGenerator[dict, None]:
+    """Stream the final answer with bounded retries, never synthetic fallback.
+
+    DEPRECATED: No longer called in the main _react_loop path. The final answer
+    is now taken directly from the ReAct decision phase and processed through
+    the quality pipeline without a second LLM streaming call. Kept for backward
+    compatibility and potential future use.
+    """
+    retry_should_replace = False
+    streamed_any = False
+
+    for attempt in range(1, FINAL_ANSWER_STREAM_MAX_ATTEMPTS + 1):
+        try:
+            first_replacement_chunk = retry_should_replace
+            async for event in _stream_final_answer(messages, state):
+                if (
+                    first_replacement_chunk
+                    and event.get("type") == "chunk"
+                    and event.get("content")
+                ):
+                    event = {**event, "replace": True}
+                    first_replacement_chunk = False
+                    retry_should_replace = False
+                if event.get("type") == "chunk" and event.get("content"):
+                    streamed_any = True
+                yield event
+            return
+        except Exception as e:
+            if streamed_any:
+                retry_should_replace = True
+            logger.warning(
+                "ReAct trace: event=final_answer_retry conversation_id=%s "
+                "attempt=%s max_attempts=%s reason=%s",
+                state.get("conversation_id"),
+                attempt,
+                FINAL_ANSWER_STREAM_MAX_ATTEMPTS,
+                type(e).__name__,
+                exc_info=True,
+            )
+
+    state["final_answer_error"] = {
+        "reason": "stream_generation_failed",
+        "attempts": FINAL_ANSWER_STREAM_MAX_ATTEMPTS,
+    }
+    yield {"type": "error", "message": FINAL_ANSWER_ERROR_MESSAGE}
 
 
 async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
@@ -421,6 +513,10 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     if asked_section:
         messages.append({"role": "user", "content": asked_section})
 
+    tool_contract = build_runtime_tool_contract_message(state)
+    if tool_contract:
+        messages.append({"role": "user", "content": tool_contract})
+
     # Current user message
     messages.append({"role": "user", "content": state["user_message"]})
 
@@ -428,11 +524,10 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     react_started = time.monotonic()
     tool_call_count = 0
     # Tracks whether any search_questions/draw_questions was actually executed
-    # in this turn — the force_search_guard below keys off this (not off
-    # tool_call_count) because load_skill-only turns still leave the contract
-    # unfulfilled (interview_question + answer_complete must produce a bank
-    # question plan before final answer).
+    # in this turn. If retrieval was recommended but skipped, we record that
+    # as metadata instead of forcing a second tool-calling pass.
     search_or_draw_called = False
+    tool_names_seen: list[str] = []
     seen_tool_calls: set[str] = set()
     stop_reason = ""
     final_answer_text = ""
@@ -462,7 +557,11 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             )
         except Exception as e:
             logger.error(f"ReAct step {step} LLM call failed: {e}")
+            stop_reason = "react_llm_failed"
             break
+
+        llm_elapsed_ms = int((time.monotonic() - llm_started) * 1000)
+        _emit_reasoning_content(result.get("reasoning_content"), llm_elapsed_ms)
 
         tool_calls = result.get("tool_calls") or []
         _log_react_llm_step(
@@ -470,7 +569,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             react_step=react_step,
             finish_reason=result.get("finish_reason"),
             tool_count=len(tool_calls),
-            elapsed_ms=int((time.monotonic() - llm_started) * 1000),
+            elapsed_ms=llm_elapsed_ms,
         )
 
         if not tool_calls:
@@ -544,6 +643,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             tool_call_count += 1
 
             tool_name = tc["function"]["name"]
+            tool_names_seen.append(tool_name)
             tool_args = _sanitize_tool_args(tc)
 
             # Emit progress
@@ -615,7 +715,9 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                                 "company": _extract_company(q),
                                 "round": _extract_round(q),
                             }
-                            for q in state["retrieved_questions"][:3]
+                            for q in state["retrieved_questions"][
+                                :PUBLIC_QUESTION_PREVIEW_LIMIT
+                            ]
                         ],
                     }
                 )
@@ -703,174 +805,15 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             int((time.monotonic() - react_started) * 1000),
         )
 
-    # 3.5 Forced search guard: when the LLM skipped search_questions in a
-    # scenario where it is contractually required (interview_question +
-    # answer_complete + no candidates), inject a hard instruction and retry
-    # exactly once.  Uses a local counter — Budget is for token/step caps,
-    # not policy retries.
-    guard_retry_count = 0
-    needs_forced_search = (
+    # 3.5 Retrieval gap observability. Retrieval recommendations are part of
+    # the strategy prompt, not a post-hoc control-flow takeover.
+    if (
         not stop_reason
         and final_answer_text
-        and state.get("intent") == "interview_question"
-        and _should_require_bank_question(state)
-        and not state.get("retrieved_questions")
-        and not state.get("candidate_questions")
+        and should_record_retrieval_gap(state)
         and not search_or_draw_called
-        and guard_retry_count < 1
-    )
-    if needs_forced_search:
-        guard_retry_count += 1
-        _emit(
-            {
-                "type": "step",
-                "step": "force_search_guard",
-                "message": "正在强制检索题库...",
-            }
-        )
-        logger.info(
-            "ReAct trace: event=react_force_search_guard_triggered "
-            "conversation_id=%s intent=%s active_skills=%s retry=%s",
-            state.get("conversation_id"),
-            state.get("intent"),
-            state.get("active_skills"),
-            guard_retry_count,
-        )
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "【系统硬契约】当前回合必须先调用 search_questions 工具检索题库题目，"
-                    "禁止直接向用户发问。\n"
-                    "从刚才用户回答里提取 2-5 个技术关键词，立即调用 search_questions；"
-                    "返回结果非空后再决定是否继续追问。"
-                ),
-            }
-        )
-        final_answer_text = ""
-
-        guard_result = await llm_service.llm_with_tools(
-            messages,
-            chat_tools.ALL_TOOLS,
-            user_id=state["user_id"],
-            model=state.get("model"),
-        )
-        guard_tool_calls = guard_result.get("tool_calls") or []
-
-        if guard_tool_calls:
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": guard_result.get("content"),
-                    "tool_calls": guard_tool_calls,
-                }
-            )
-            for gtc in guard_tool_calls:
-                try:
-                    gtc = validate_tool_call(gtc)
-                except StopRun as exc:
-                    logger.warning(
-                        "ReAct trace: event=force_search_guard_validation_failed "
-                        "conversation_id=%s reason=%s",
-                        state.get("conversation_id"),
-                        exc.reason,
-                    )
-                    messages.append(
-                        make_tool_result_message(
-                            gtc.get("id", "invalid"),
-                            json.dumps({"error": exc.reason}),
-                        )
-                    )
-                    continue
-
-                gtc_name = gtc["function"]["name"]
-                if gtc_name not in ("search_questions", "draw_questions"):
-                    logger.warning(
-                        "ReAct trace: event=force_search_guard_contract_failed "
-                        "conversation_id=%s tool_name=%s",
-                        state.get("conversation_id"),
-                        gtc_name,
-                    )
-                    messages.append(
-                        make_tool_result_message(
-                            gtc["id"],
-                            json.dumps(
-                                {
-                                    "error": "guard_requires_search_or_draw",
-                                    "message": (
-                                        "force_search_guard accepts only "
-                                        "search_questions or draw_questions"
-                                    ),
-                                },
-                                ensure_ascii=False,
-                            ),
-                        )
-                    )
-                    continue
-
-                _emit(
-                    {
-                        "type": "step",
-                        "step": gtc_name,
-                        "message": chat_tools.tool_progress_message(gtc),
-                        "reason": STEP_REASONS.get(gtc_name, ""),
-                    }
-                )
-                gtc_started = time.monotonic()
-                gtc_output = await chat_tools.execute_tool(gtc, state)
-                gtc_elapsed_ms = int((time.monotonic() - gtc_started) * 1000)
-                gtc_summary = _summarize_tool_output(gtc_name, gtc_output, state)
-                _record_tool_observability(
-                    state,
-                    tool_name=gtc_name,
-                    tool_call=gtc,
-                    summary=gtc_summary,
-                    elapsed_ms=gtc_elapsed_ms,
-                    message=chat_tools.tool_progress_message(gtc),
-                    output=gtc_output,
-                )
-                if gtc_name in ("search_questions", "draw_questions"):
-                    _maybe_create_question_plan(state)
-                if gtc_name in (
-                    "search_questions",
-                    "draw_questions",
-                ) and state.get("retrieved_questions"):
-                    _emit(
-                        {
-                            "type": "retrieved",
-                            "questions": [
-                                {
-                                    "id": q.get("id"),
-                                    "question": q.get("question", ""),
-                                    "cat1": q.get("cat1", ""),
-                                    "cat2": q.get("cat2", ""),
-                                    "company": _extract_company(q),
-                                    "round": _extract_round(q),
-                                }
-                                for q in state["retrieved_questions"][:3]
-                            ],
-                        }
-                    )
-                messages.append(make_tool_result_message(gtc["id"], gtc_output))
-
-            final_llm = await llm_service.llm_with_tools(
-                messages,
-                chat_tools.ALL_TOOLS,
-                user_id=state["user_id"],
-                model=state.get("model"),
-            )
-            final_content = final_llm.get("content")
-            if isinstance(final_content, str) and final_content.strip():
-                final_answer_text = final_content
-        else:
-            guard_content = guard_result.get("content")
-            if isinstance(guard_content, str) and guard_content.strip():
-                final_answer_text = guard_content
-            logger.warning(
-                "ReAct trace: event=react_force_search_guard_exhausted "
-                "conversation_id=%s",
-                state.get("conversation_id"),
-            )
+    ):
+        _record_retrieval_gap(state, tool_names_seen)
 
     # 4. Stream final answer
     _emit(
@@ -881,70 +824,40 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             "reason": STEP_REASONS["generating"],
         }
     )
-    try:
-        if stop_reason == "max_seconds":
-            yield {
-                "type": "chunk",
-                "content": _fallback_react_answer(state, stop_reason),
-            }
-        elif final_answer_text:
-            # Check output dedup for direct-answer path
-            final_text_clean = _ensure_final_answer_quality(
-                _fallback_interviewer_response(final_answer_text, state)
-                if _is_internal_react_marker(final_answer_text)
-                else final_answer_text,
-                state,
-            )
-            deduplicator = state.setdefault("output_deduplicator", OutputDeduplicator())
-            dup_result = (
-                deduplicator.check(final_text_clean) if final_text_clean else "ok"
-            )
-
-            if dup_result == "exact":
-                logger.info(
-                    "ReAct trace: event=output_dedup_exact conversation_id=%s",
-                    state.get("conversation_id"),
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
-                    }
-                )
-                async for event in _stream_final_answer(messages, state):
-                    yield event
-            elif dup_result == "similar":
-                logger.info(
-                    "ReAct trace: event=output_dedup_similar conversation_id=%s",
-                    state.get("conversation_id"),
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
-                    }
-                )
-                async for event in _stream_final_answer(messages, state):
-                    yield event
-            else:
-                if final_text_clean:
-                    deduplicator.record(final_text_clean)
-                for event in await _final_answer_events_from_text(
-                    final_answer_text, state
-                ):
-                    yield event
-        else:
-            async for event in _stream_final_answer(messages, state):
-                yield event
-    except Exception as e:
-        logger.exception(
-            "ReAct trace: event=final_answer_failed conversation_id=%s reason=%s",
-            state.get("conversation_id"),
-            type(e).__name__,
-        )
-        yield {
-            "type": "chunk",
-            "content": _fallback_react_answer(state, type(e).__name__),
+    if stop_reason == "react_llm_failed":
+        state["final_answer_error"] = {
+            "reason": "react_llm_failed",
+            "attempts": 0,
         }
+        yield {"type": "error", "message": "模型决策失败，请稍后再试。"}
+    elif stop_reason == "max_seconds":
+        state["final_answer_error"] = {
+            "reason": "react_loop_timeout",
+            "attempts": 0,
+        }
+        yield {"type": "error", "message": "模型生成超时，请稍后再试。"}
+    elif final_answer_text:
+        state["react_direct_answer_draft"] = final_answer_text
+        # Use ReAct answer directly — apply quality pipeline without
+        # a second LLM streaming call (which causes intermittent 500s).
+        events = await _final_answer_events_from_text(final_answer_text, state)
+        final_text = events[0]["content"] if events else final_answer_text
+        # Dedup check
+        deduplicator = state.setdefault(
+            "output_deduplicator", OutputDeduplicator()
+        )
+        dedup_result = deduplicator.check(final_text)
+        if dedup_result != "ok":
+            logger.info(
+                "ReAct trace: event=output_dedup conversation_id=%s result=%s",
+                state.get("conversation_id"),
+                dedup_result,
+            )
+        deduplicator.record(final_text)
+        for event in events:
+            yield event
+    else:
+        # No text from ReAct — shouldn't happen, surface error.
+        yield {"type": "error", "message": "模型未能生成回复，请稍后再试。"}
 
     yield {"type": "done"}
