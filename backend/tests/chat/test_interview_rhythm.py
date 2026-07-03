@@ -56,10 +56,11 @@ class TestInterviewPhase:
         result = _determine_interview_phase(44)
         assert "较长时间" in result
 
-    def test_time_up_45_messages(self):
-        """FC1: 45 条消息 → 时间已到"""
+    def test_strong_close_45_messages(self):
+        """FC1: 45 条消息 → 强收口但不硬停"""
         result = _determine_interview_phase(45)
-        assert "时间已到" in result
+        assert "强收口" in result
+        assert "不要开启新的长链路话题" in result
 
     def test_time_up_100_messages(self):
         """FC1: 100 条消息 → 时间已到"""
@@ -75,12 +76,14 @@ class TestToolStrategy:
         state = {
             "intent": "interview_question",
             "answer_complete": True,
+            "answer_quality": "complete",
+            "should_retrieve": True,
             "retrieved_questions": [],
             "active_skills": [],
         }
         result = _build_tool_strategy(state)
         assert "search_questions" in result
-        assert "必须" in result
+        assert "需要先调用题库工具" in result
 
     def test_interview_question_complete_has_retrieved(self):
         """已有检索结果 → 直接使用，无需再次检索"""
@@ -98,11 +101,12 @@ class TestToolStrategy:
         state = {
             "intent": "interview_question",
             "answer_complete": False,
+            "answer_quality": "incomplete",
             "retrieved_questions": [],
             "active_skills": [],
         }
         result = _build_tool_strategy(state)
-        assert "不调用工具" in result
+        assert "不要检索新题" in result
 
     def test_practice_request(self):
         """练习请求 → 必须调用 search_questions"""
@@ -124,7 +128,7 @@ class TestToolStrategy:
             "active_skills": [],
         }
         result = _build_tool_strategy(state)
-        assert "上下文" in result
+        assert "直接回应" in result
 
     def test_chat_intent(self):
         """闲聊 → 不调用工具，引导回面试"""
@@ -135,20 +139,22 @@ class TestToolStrategy:
             "active_skills": [],
         }
         result = _build_tool_strategy(state)
-        assert "不调用工具" in result
+        assert "直接回应" in result
 
     async def test_deep_dive_complete_answer_requires_search(self):
         """项目深挖 + 回答完整 + 无候选题 → 必须检索，避免直接追问掩盖工具缺失。"""
         state = {
             "intent": "interview_question",
             "answer_complete": True,
+            "answer_quality": "complete",
+            "should_retrieve": True,
             "retrieved_questions": [],
             "active_skills": ["project-deep-dive"],
         }
         result = _build_tool_strategy(state)
         assert "项目深挖" in result
         assert "search_questions" in result
-        assert "必须" in result
+        assert "需要先调用题库工具" in result
         assert "可以不检索" not in result
 
 
@@ -407,18 +413,19 @@ class TestForcedClosingPhaseTransitions:
         assert "较长时间" in phase
         assert "收尾" in phase
 
-    def test_phase_45_messages_must_close(self):
-        """FC1: 45 条消息 → 时间已到"""
+    def test_phase_45_messages_strong_close(self):
+        """FC1: 45 条消息 → 强收口但不硬停"""
         phase = _determine_interview_phase(45)
-        assert "时间已到" in phase
+        assert "强收口" in phase
+        assert "不要开启新的长链路话题" in phase
 
     async def test_forced_closing_empty_under_threshold(self):
         """FC1: 44 条消息 → 不触发"""
         state = {"message_history": [{}] * 44, "user_message": ""}
         assert await _forced_closing_response(state) == ""
 
-    async def test_forced_closing_active_over_threshold(self):
-        """FC1: 45 条消息 → 触发（LLM 生成结构化总结）"""
+    async def test_forced_closing_active_over_hard_threshold(self):
+        """FC1: hard-stop 消息数后 → 触发（LLM 生成结构化总结）"""
         mock_summary_json = json.dumps({
             "overall_comment": "候选人表现中等",
             "strongest_topic": "Redis，回答较全面",
@@ -427,7 +434,7 @@ class TestForcedClosingPhaseTransitions:
             "score_estimate": 6,
         }, ensure_ascii=False)
         state = {
-            "message_history": [{"role": "user", "content": "答"}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 57,
             "user_message": "",
             "session_notes": "",
             "user_id": 1,

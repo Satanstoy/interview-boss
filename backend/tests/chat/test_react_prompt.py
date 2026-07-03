@@ -29,6 +29,20 @@ class TestBuildReactSystemPrompt:
         assert "load_skill" in prompt
         assert "search_questions" in prompt
 
+    def test_prompt_requires_chinese_reasoning_content(self):
+        state = {
+            "user_id": 1,
+            "mode": "free_practice",
+            "interview_context": "",
+            "session_notes": "",
+            "compressed_context": None,
+            "memory_summaries": [],
+        }
+        prompt = build_react_system_prompt(state)
+        assert "reasoning_content" in prompt
+        assert "推理过程" in prompt
+        assert "简体中文" in prompt
+
     def test_prompt_not_excessively_long(self):
         state = {
             "user_id": 1,
@@ -39,7 +53,7 @@ class TestBuildReactSystemPrompt:
             "memory_summaries": [],
         }
         prompt = build_react_system_prompt(state)
-        assert len(prompt) < 8000
+        assert len(prompt) < 9000
 
     def test_always_active_skill_body_injected_when_active_skills_empty(self):
         """interview-tool-use (always_active=true) body must appear even with no active_skills."""

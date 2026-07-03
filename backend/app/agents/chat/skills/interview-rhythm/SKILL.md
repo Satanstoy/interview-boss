@@ -15,7 +15,7 @@ metadata:
     clarification:
       trigger: "answer is short, incomplete, ambiguous, or off-topic (doesn't address the question asked)"
       retrieve: false
-      escalation: "第1次指出不相关；第2次给提示；第3次换题"
+      state_driven: "Read answer_quality and escalation_level from runtime state. If escalation_level>=3 or off_topic_streak>=3, pivot to a different topic instead of pressing further."
 ---
 
 ## Core Principle
@@ -78,9 +78,10 @@ R7+: Continue the interview — interleave project deep-dive, theory Q&A, and al
 - 国内面试不要只做美式 coding/design；必须体现项目深挖、八股基础、场景题、手撕代码、HR/稳定性和反问。
 - For coding, require algorithm idea, edge cases, complexity, and testing; for system design, require requirements, scale assumptions, bottlenecks, reliability, and trade-offs.
 - For behavioral, ask one concrete STAR-style question and follow up on the candidate's actual action and measurable result.
-- **答非所问升级**：候选人回答和问题明显不相关时，第 1 次直接指出不相关并要求重答；第 2 次给提示或缩小范围；第 3 次放弃该问题换方向。不要在同一题上追问超过 3 次。
-- **候选人重复回答**：如果候选人连续 2 次回答内容基本相同，直接指出 "我注意到你的回答和刚才基本一样"，然后换一个完全不同的方向。
-- **出题过渡**：出新题时，先从候选人上一个回答中找一个关键词或技术点做 1 句话承接，再自然引入新题目。禁止使用 "换个方向"、"换个问题"、"换个具体点的问题" 这类机械前缀。
+- **状态驱动决策**：每轮系统会注入 `answer_quality`、`escalation_level`、`off_topic_streak`、`repetition_streak`、`transition_style`。根据这些字段决定下一步，不要背诵固定次数规则。
+- **答非所问**：当 `answer_quality=off_topic` 或 `escalation_level>0` 时，指出不相关并要求重答；当 `escalation_level>=3` 或 `off_topic_streak>=3` 时，必须放弃当前问题换方向。
+- **候选人重复回答**：当 `repetition_streak>=2` 时，直接指出 "我注意到你的回答和刚才基本一样"，然后换一个完全不同的方向。
+- **出题过渡**：当 `transition_style=from_candidate_keyword` 时，从候选人上一个回答中找一个关键词或技术点做 1 句话承接，再自然引入新题目。当 `transition_style=pivot` 时，简洁切换到新方向。禁止使用 "换个方向"、"换个问题"、"换个具体点的问题" 这类机械前缀。
 
 ## Boundaries
 

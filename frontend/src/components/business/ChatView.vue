@@ -878,7 +878,7 @@ async function handleSend() {
       if (pendingToolSteps.value.length > 0 && !metadata.tool_steps && !metadata.tool_calls_trace) {
         metadata.tool_steps = [...pendingToolSteps.value]
       }
-      if (thinkingContent.value && !metadata.thinking && !metadata.reasoning_trace) {
+      if (thinkingContent.value && !metadata.thinking) {
         metadata.thinking = thinkingContent.value
         metadata.thinking_duration ||= thinkingDuration.value
       }

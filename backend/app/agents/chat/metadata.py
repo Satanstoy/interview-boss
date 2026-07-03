@@ -10,6 +10,11 @@ import json
 import logging
 import re
 
+from app.agents.chat.chat_constants import PUBLIC_QUESTION_PREVIEW_LIMIT
+from app.agents.chat.coverage_events import (
+    coverage_event_from_conversation,
+    coverage_event_from_question,
+)
 from app.agents.chat.question_plan import _normalize_question_text, _tokenize_for_overlap
 from app.agents.chat.state import ChatState
 
@@ -112,6 +117,21 @@ def _basis_event_payload(meta: dict) -> dict:
     }
 
 
+def _build_assessment_focus(state: ChatState, question_source: str) -> dict:
+    """Build an assessment anchor for conversation-only interview turns."""
+    interview_state = state.get("interview_state") or {}
+    active_skills = state.get("active_skills") or []
+    focus = {
+        "source": question_source or "conversation",
+        "reason": state.get("question_source_reason") or "conversation_followup",
+        "question_type": state.get("question_type") or "",
+        "phase": interview_state.get("current_phase") or "",
+        "next_focus": interview_state.get("next_focus") or "",
+        "active_skills": active_skills[:3],
+    }
+    return {key: value for key, value in focus.items() if value not in ("", None, [])}
+
+
 def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, str]:
     """Build done-event metadata from the final streamed response.
 
@@ -169,7 +189,7 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
                 "company": _extract_company_from_sources(q),
                 "round": _extract_round_from_sources(q),
             }
-            for q in retrieved[:3]
+            for q in retrieved[:PUBLIC_QUESTION_PREVIEW_LIMIT]
         ]
 
     if basis["basis_question_ids"]:
@@ -242,24 +262,44 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
         metadata["selected_question"] = _public_question(selected_question)
         metadata["question_source"] = state.get("question_source") or "search"
         metadata["question_source_reason"] = selected_reason
+        coverage_event = coverage_event_from_question(
+            selected_question,
+            question_type=state.get("question_type"),
+            source=str(metadata["question_source"]),
+            reason=selected_reason,
+            fallback_text=clean_response,
+        )
     else:
         source = state.get("question_source")
-        metadata["selected_question"] = None
-        metadata["question_source"] = (
+        question_source = (
             "conversation"
             if source in {"search", "draw"}
             else (source or "conversation")
         )
+        metadata["selected_question"] = None
+        metadata["question_source"] = question_source
         metadata["question_source_reason"] = (
             state.get("question_source_reason")
             if source not in {"search", "draw"}
             else "candidate_questions_not_explicitly_used"
         )
+        metadata["assessment_focus"] = _build_assessment_focus(
+            state, question_source
+        )
+        coverage_event = coverage_event_from_conversation(
+            state,
+            clean_response,
+            source=question_source,
+            reason=str(metadata.get("question_source_reason") or ""),
+        )
+
+    if coverage_event:
+        metadata["coverage_events"] = [coverage_event]
 
     if candidates:
         metadata["candidate_questions"] = [
             _public_question(q)
-            for q in candidates[:3]
+            for q in candidates[:PUBLIC_QUESTION_PREVIEW_LIMIT]
             if _public_question(q) is not None
         ]
 

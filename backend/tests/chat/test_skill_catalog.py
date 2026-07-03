@@ -83,6 +83,8 @@ class TestBuildSkillCatalog:
             {
                 "intent": "interview_question",
                 "answer_complete": True,
+                "answer_quality": "complete",
+                "should_retrieve": True,
                 "retrieved_questions": [],
                 "active_skills": ["project-deep-dive"],
             }

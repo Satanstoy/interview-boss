@@ -289,7 +289,11 @@ async def send_message(
                 elif event_type == "chunk":
                     content = event.get("content", "")
                     full_response += content
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}\n\n"
+                    payload = {"type": "chunk", "content": content}
+                    if event.get("replace"):
+                        full_response = content
+                        payload["replace"] = True
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "thinking_start":
                     yield f"data: {json.dumps({'type': 'thinking_start', 'content': ''}, ensure_ascii=False)}\n\n"

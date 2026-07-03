@@ -34,9 +34,10 @@ Each topic starts broad and narrows based on response quality:
 
 ## Adjustment Rules
 
-- **Good answer** (detailed, data-backed, shows trade-off thinking) → escalate: add constraints, ask trade-offs, pressure test
-- **Medium answer** (correct but shallow) → stay level: change angle, ask for specifics
-- **Bad answer** (vague, textbook-style, "I don't know", OR completely off-topic) → de-escalate: if off-topic, point it out directly first; if still off-topic after 1 attempt, switch topic immediately. Don't keep pressing the same question.
+- Read `answer_quality` and `escalation_level` from runtime state each turn.
+- **Good answer** (`answer_quality=complete`, detailed, data-backed, shows trade-off thinking) → escalate: add constraints, ask trade-offs, pressure test
+- **Medium answer** (`answer_quality=vague`, correct but shallow) → stay level: change angle, ask for specifics
+- **Bad answer** (`answer_quality=incomplete/off_topic/repeated`) → de-escalate: point out the issue directly, give a hint, and if `escalation_level>=3` or `off_topic_streak>=3`, switch topic immediately. Don't keep pressing the same question.
 
 ## Examples
 

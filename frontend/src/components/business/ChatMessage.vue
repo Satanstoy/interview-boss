@@ -255,11 +255,13 @@ const toolLabels = {
   select_question: '采用题目',
 }
 
+const hiddenTimelineSteps = new Set(['loading', 'context'])
+
 const timelineSteps = computed(() => {
   const metadata = props.message.metadata || {}
   const traceSteps = Array.isArray(metadata.reasoning_trace?.steps) ? metadata.reasoning_trace.steps : null
   const steps = traceSteps || (Array.isArray(metadata.steps) ? metadata.steps : [])
-  return steps.map(step => {
+  return steps.filter(step => !hiddenTimelineSteps.has(step?.step)).map(step => {
     const skillName = step.skill_name
     const skillLabel = skillLabels[skillName] || skillName
     return {
@@ -321,13 +323,18 @@ const timelineDuration = computed(() => {
 
 const thinkingContent = computed(() => {
   const metadata = props.message.metadata || {}
+  const modelThinking = extractThinkingContent(metadata.thinking)
+  if (modelThinking) return modelThinking
+
   const traceSummary = metadata.reasoning_trace?.summary
   if (Array.isArray(traceSummary)) return traceSummary.filter(Boolean).join('\n')
   if (traceSummary) return String(traceSummary)
 
-  const thinking = metadata.thinking
-  if (!thinking) return ''
+  return ''
+})
 
+function extractThinkingContent(thinking) {
+  if (!thinking) return ''
   // Old format: string
   if (typeof thinking === 'string') return thinking
 
@@ -340,7 +347,7 @@ const thinkingContent = computed(() => {
   }
 
   return ''
-})
+}
 
 const renderedContent = computed(() => {
   return renderSafeMarkdown(props.message.content)

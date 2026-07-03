@@ -48,6 +48,7 @@ from app.db.migrations.chat import (
     _migration_037_conversation_metadata,
     _migration_038_chat_conversation_position,
     _migration_040_chat_tool_traces,
+    _migration_041_asked_questions,
 )
 from app.db.migrations.coding import (
     _migration_029_user_resumes,
@@ -116,6 +117,7 @@ _MIGRATIONS = [
     (38, 'chat_conversation_position',   _migration_038_chat_conversation_position),
     (39, 'merge_review_tables',          _migration_039_merge_review_tables),
     (40, 'chat_tool_traces',             _migration_040_chat_tool_traces),
+    (41, 'asked_questions',              _migration_041_asked_questions),
 ]
 
 

@@ -120,6 +120,30 @@ class TestParseBasisFromResponse:
         assert "Response text." in result["clean_response"]
 
 
+class TestResumeReferenceDetection:
+    def test_generic_overlap_does_not_count_as_resume_reference(self):
+        from app.agents.chat.nodes import _response_references_resume
+
+        resume_summary = (
+            "施杰主要做 LLM 应用和 RAG，负责 CareDOC 智能文档项目，"
+            "包含混合召回、rerank、引用追踪和人工复核。"
+        )
+        response = "既然你提到主要做 RAG 方向，我们先聊 Agentic RAG 和传统 RAG 的区别。"
+
+        assert _response_references_resume(response, resume_summary) is False
+
+    def test_explicit_resume_cue_with_specific_overlap_counts_as_resume_reference(self):
+        from app.agents.chat.nodes import _response_references_resume
+
+        resume_summary = (
+            "施杰主要做 LLM 应用和 RAG，负责 CareDOC 智能文档项目，"
+            "包含混合召回、rerank、引用追踪和人工复核。"
+        )
+        response = "我会结合你简历里的 CareDOC 智能文档项目和 RAG 经验，继续追问引用追踪。"
+
+        assert _response_references_resume(response, resume_summary) is True
+
+
 class TestBasisValidation:
     """Test suite for validate_basis() pure function"""
 

@@ -416,6 +416,7 @@ async def _llm_with_tools_call(
     tool_calls = _extract_tool_calls(response, "openai")
     return {
         "content": msg.content,
+        "reasoning_content": getattr(msg, "reasoning_content", None),
         "tool_calls": tool_calls,
         "finish_reason": response.choices[0].finish_reason,
     }

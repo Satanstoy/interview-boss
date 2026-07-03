@@ -182,18 +182,23 @@ class TestFallbackReactAnswer:
 
 
 class TestForcedClosing:
-    """_forced_closing_response() — hard stop at 44+ messages."""
+    """_forced_closing_response() — hard stop after product stop-policy ceiling."""
 
     async def test_under_44_messages_no_closing(self):
         """消息数 <= 44 → 不触发强制关闭"""
         state = {"message_history": [{}] * 44, "user_message": ""}
         assert await _forced_closing_response(state) == ""
 
+    async def test_45_messages_no_hard_closing(self):
+        """45 条消息进入 strong-close 策略区，但不再直接硬总结。"""
+        state = {"message_history": [{}] * 45, "user_message": ""}
+        assert await _forced_closing_response(state) == ""
+
     @pytest.mark.asyncio
-    async def test_over_44_messages_first_closing(self):
-        """FC1: 消息数 > 44 且未问过反问 → LLM 生成结构化总结"""
+    async def test_over_hard_stop_messages_first_closing(self):
+        """FC1: hard-stop 消息数后且未问过反问 → LLM 生成结构化总结"""
         state = {
-            "message_history": [{"role": "user", "content": "答"}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 57,
             "user_message": "我还想继续",
             "session_notes": "[asked] Redis 持久化",
             "user_id": 1,
@@ -215,10 +220,10 @@ class TestForcedClosing:
         assert "候选人基础知识扎实" in result
 
     @pytest.mark.asyncio
-    async def test_over_44_messages_after_question(self):
+    async def test_over_hard_stop_messages_after_question(self):
         """FC2: 已问过"你有什么想问"且用户提了反问 → LLM 总结 + 反问回应"""
         state = {
-            "message_history": [{"role": "user", "content": "答"}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 57,
             "user_message": "请问团队的技术栈是什么？",
             "session_notes": "",
             "user_id": 1,
@@ -246,7 +251,7 @@ class TestForcedClosing:
     async def test_closing_updates_state(self):
         """强制关闭更新 question_source"""
         state = {
-            "message_history": [{"role": "user", "content": "答"}] * 45,
+            "message_history": [{"role": "user", "content": "答"}] * 57,
             "user_message": "",
             "session_notes": "",
             "user_id": 1,
@@ -454,13 +459,13 @@ class TestForcedClosingE2E:
     """FC1-FC3: Forced closing through the pipeline."""
 
     async def test_forced_closing_skips_react_loop(self):
-        """FC1: 44+ 消息 → 强制关闭，不进入 ReAct 循环"""
+        """FC1: hard-stop 消息数后 → 强制关闭，不进入 ReAct 循环"""
         from app.agents.chat.pipeline import run_chat
 
         async def mock_load_context(state):
             state.update(
                 {
-                    "message_history": [{}] * 45,
+                    "message_history": [{}] * 57,
                     "recent_messages": [],
                     "compressed_context": None,
                     "session_notes": "",

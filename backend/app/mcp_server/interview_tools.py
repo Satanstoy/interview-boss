@@ -159,7 +159,7 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
             empty_reason="no_query",
         )
 
-    search_args: dict[str, object] = {"keywords": parsed_args.keywords}
+    search_args: dict[str, object] = {"keywords": parsed_args.keywords, "limit": 15}
     if state.get("search_query"):
         search_args["query_text"] = state["search_query"]
     if parsed_args.question_type:
@@ -173,6 +173,15 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
     if state.get("search_negative_terms"):
         search_args["negative_terms"] = state["search_negative_terms"]
     exclude_ids = set(_build_interview_ledger(state).asked_question_ids)
+    # Cross-conversation dedup: exclude questions asked in previous interviews
+    try:
+        from app.db.operations import get_db_connection, get_asked_question_ids
+
+        with get_db_connection() as conn:
+            cross_conversation_ids = get_asked_question_ids(conn, state.get("user_id"))
+        exclude_ids.update(cross_conversation_ids)
+    except Exception as e:
+        logger.debug("Cross-conversation dedup query failed: %s", e)
     if state.get("retrieved_questions"):
         exclude_ids.update(
             q.get("id")

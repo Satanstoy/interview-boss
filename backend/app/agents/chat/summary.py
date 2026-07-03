@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 import re
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agents.chat.state import ChatState
+from app.agents.chat.decision_config import DecisionConfig
 from app.services import llm as llm_service
 from app.services.llm import _extract_json
 
@@ -28,25 +29,61 @@ class InterviewSummary(BaseModel):
     weakest_topic: str  # Weakest topic + specific evidence
     key_suggestions: list[str]  # 3 actionable suggestions
     score_estimate: int  # 1-10 overall estimate
+    hiring_signal: str = ""  # Optional pass/fail signal when requested
+    risk_points: list[str] = Field(default_factory=list)  # Optional concrete risks
+    next_round_questions: list[str] = Field(
+        default_factory=list
+    )  # Optional follow-up questions
 
 
 _SUMMARY_SYSTEM_PROMPT = (
-    '你是一个面试复盘教练。基于以下面试记录，给出一份结构化的面试反馈。\n\n'
-    '要求：\n'
-    '- 评价必须基于候选人实际说了什么，不要用泛泛的套话\n'
+    "你是一个面试复盘教练。基于以下面试记录，给出一份结构化的面试反馈。\n\n"
+    "要求：\n"
+    "- 评价必须基于候选人实际说了什么，不要用泛泛的套话\n"
     '- 最弱的话题要给出具体的"答不上来"或"答得浅"的证据\n'
     '- 建议要具体可操作（如"建议复习 LangGraph 的条件路由机制"），'
     '不要给空泛建议（如"继续深度学习"）\n'
-    '- 整体评价要诚实，好的夸、差的指出\n\n'
-    '请严格以 JSON 格式输出，schema 如下：\n'
-    '{\n'
+    "- 整体评价要诚实，好的夸、差的指出\n\n"
+    "- 如果候选人要求 hiring signal、风险点、下一轮追问或完整评价，"
+    "必须在 JSON 的可选字段中回应\n\n"
+    "请严格以 JSON 格式输出，schema 如下：\n"
+    "{\n"
     '  "overall_comment": "2-3句整体评价",\n'
     '  "strongest_topic": "表现最好的话题及原因",\n'
     '  "weakest_topic": "最薄弱的话题及具体证据",\n'
     '  "key_suggestions": ["具体建议1", "具体建议2", "具体建议3"],\n'
-    '  "score_estimate": 7\n'
-    '}\n'
-    '不要包含任何其他文字或 markdown 代码块，只输出纯 JSON。'
+    '  "score_estimate": 7,\n'
+    '  "hiring_signal": "可选：是否建议进入下一轮及原因",\n'
+    '  "risk_points": ["可选：主要风险1", "主要风险2"],\n'
+    '  "next_round_questions": ["可选：下一轮建议追问1"]\n'
+    "}\n"
+    "不要包含任何其他文字或 markdown 代码块，只输出纯 JSON。"
+)
+
+
+_SUMMARY_REQUEST_KEYWORDS = (
+    "总结",
+    "总结报告",
+    "面试总结",
+    "生成总结",
+    "生成一份",
+    "评价",
+    "评估",
+    "反馈",
+    "复盘",
+    "结论",
+    "完整评价",
+    "hiring signal",
+    "hire signal",
+    "强项",
+    "风险",
+    "薄弱",
+    "改进",
+    "下一轮",
+    "追问",
+    "压测",
+    "是否值得",
+    "进入下一轮",
 )
 
 
@@ -67,14 +104,29 @@ def _build_interview_transcript(state: ChatState) -> str:
 def _render_interview_summary_markdown(summary: InterviewSummary) -> str:
     """Render an InterviewSummary as user-facing markdown."""
     suggestions = "\n".join(f"- {s}" for s in summary.key_suggestions)
-    return (
+    sections = [
         "今天的模拟面试就到这里，感谢你的时间。\n\n"
         f"**整体表现**：{summary.overall_comment}\n\n"
         f"**最佳话题**：{summary.strongest_topic}\n\n"
         f"**薄弱环节**：{summary.weakest_topic}\n\n"
-        f"**改进建议**：\n{suggestions}\n\n"
-        f"**综合评分**：{summary.score_estimate}/10"
-    )
+        f"**改进建议**：\n{suggestions}\n\n",
+    ]
+    if summary.hiring_signal:
+        sections.append(f"**Hiring Signal**：{summary.hiring_signal}\n\n")
+    if summary.risk_points:
+        risks = "\n".join(f"- {risk}" for risk in summary.risk_points)
+        sections.append(f"**主要风险**：\n{risks}\n\n")
+    if summary.next_round_questions:
+        questions = "\n".join(f"- {q}" for q in summary.next_round_questions)
+        sections.append(f"**下一轮追问**：\n{questions}\n\n")
+    sections.append(f"**综合评分**：{summary.score_estimate}/10")
+    return "".join(sections)
+
+
+def _wants_structured_summary(user_message: str) -> bool:
+    """Return True when the closing request asks for evaluation, not just goodbye."""
+    normalized = user_message.lower()
+    return any(keyword in normalized for keyword in _SUMMARY_REQUEST_KEYWORDS)
 
 
 async def _generate_structured_summary(state: ChatState) -> str:
@@ -92,6 +144,7 @@ async def _generate_structured_summary(state: ChatState) -> str:
     user_content = (
         "以下是面试记录：\n\n"
         f"{transcript_section}\n\n"
+        f"候选人结束请求：{state.get('user_message', '')}\n"
         f"面试官备注：{session_notes}\n"
         f"总对话轮数：{len(history)}"
     )
@@ -112,12 +165,12 @@ async def _generate_structured_summary(state: ChatState) -> str:
         summary = InterviewSummary(**data)
         return _render_interview_summary_markdown(summary)
     except Exception as e:
-        logger.warning(
-            "Interview summary LLM call failed, using fallback: %s", e
-        )
+        logger.warning("Interview summary LLM call failed, using fallback: %s", e)
         # Improved fallback: at least mention topic count from session notes
         topic_count = len(re.findall(r"\[asked\]", session_notes))
-        topic_info = f"共覆盖了 {topic_count} 个话题" if topic_count else "覆盖了多个话题"
+        topic_info = (
+            f"共覆盖了 {topic_count} 个话题" if topic_count else "覆盖了多个话题"
+        )
         return (
             "今天的模拟面试就到这里，感谢你的时间。\n\n"
             f"**整体表现**：本次面试{topic_info}，"
@@ -133,10 +186,14 @@ async def _forced_closing_response(state: ChatState) -> str:
 
     Now generates a structured LLM-based summary instead of hardcoded text.
     """
-    from app.agents.chat.answer import _last_assistant_message, _looks_like_candidate_question
+    from app.agents.chat.answer import (
+        _last_assistant_message,
+        _looks_like_candidate_question,
+    )
 
     message_count = len(state.get("message_history", []) or [])
-    if message_count <= 44:
+    config = state.get("decision_config") or DecisionConfig()
+    if message_count <= config.hard_stop_message_count:
         return ""
 
     state["question_source"] = "conversation"
@@ -178,10 +235,7 @@ async def _generate_end_interview_response(state: ChatState) -> str:
 
     # If the user explicitly asks for a summary or the interview is substantial,
     # generate a structured LLM-based summary
-    wants_summary = any(
-        kw in user_message
-        for kw in ("总结", "总结报告", "面试总结", "生成总结", "生成一份")
-    )
+    wants_summary = _wants_structured_summary(user_message)
 
     if wants_summary or len(message_history) >= 20:
         return await _generate_structured_summary(state)

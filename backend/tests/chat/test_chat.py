@@ -1611,19 +1611,20 @@ class TestReasoningTraceHelpers:
         state = {
             "retrieved_questions": [
                 {
-                    "id": 101,
-                    "question": "Redis 缓存穿透怎么处理？",
+                    "id": question_id,
+                    "question": f"Redis 缓存问题 {question_id}",
                     "cat1": "中间件",
                     "cat2": "缓存",
                     "sources": [{"company": "腾讯", "round": "一面"}],
                 }
+                for question_id in range(101, 107)
             ],
             "selected_question": {"id": 101},
         }
         summary = {
             "ok": True,
-            "result_count": 1,
-            "result_ids": [101],
+            "result_count": 6,
+            "result_ids": [101, 102, 103, 104, 105, 106],
             "fallback_used": False,
             "debug_reason": "hybrid_search_ok",
         }
@@ -1640,9 +1641,11 @@ class TestReasoningTraceHelpers:
         assert trace["label"] == "检索题库"
         assert trace["args_summary"] == {"keywords": ["Redis"]}
         assert trace["elapsed_ms"] == 318
-        assert trace["result_count"] == 1
-        assert trace["result_ids"] == [101]
-        assert trace["result_preview"][0]["question"] == "Redis 缓存穿透怎么处理？"
+        assert trace["result_count"] == 6
+        assert trace["result_ids"] == [101, 102, 103, 104, 105]
+        assert len(trace["result_preview"]) == 5
+        assert trace["result_preview"][0]["question"] == "Redis 缓存问题 101"
+        assert trace["result_preview"][-1]["id"] == 105
         assert trace["result_preview"][0]["company"] == "腾讯"
         assert trace["selected_question_id"] == 101
         assert trace["debug_reason"] == "hybrid_search_ok"

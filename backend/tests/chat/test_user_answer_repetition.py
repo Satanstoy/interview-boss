@@ -10,14 +10,22 @@ import pytest
 
 
 def _make_state(user_messages: list[str], assistant_messages: list[str] | None = None) -> dict:
-    """Build a minimal ChatState for testing."""
+    """Build a minimal ChatState for testing.
+
+    Sets repetition_streak from the helper so stop_policy integration tests
+    do not duplicate the counting logic.
+    """
+    from app.agents.chat.question_plan import _count_consecutive_similar_user_answers
+
     history = []
     if assistant_messages is None:
         assistant_messages = ["你好，请自我介绍。"] * len(user_messages)
     for u, a in zip(user_messages, assistant_messages):
         history.append({"role": "assistant", "content": a})
         history.append({"role": "user", "content": u})
-    return {"message_history": history}
+    state = {"message_history": history}
+    state["repetition_streak"] = _count_consecutive_similar_user_answers(state)
+    return state
 
 
 # ── _count_consecutive_similar_user_answers ─────────────────────

@@ -10,9 +10,9 @@
 | `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
 | `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审）；内部侧栏折叠/展开动画对齐 ChatView |
-| `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题 |
-| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata |
-| `ReasoningTimeline.vue` | AI 思考过程展示组件（可展开/折叠）；展示公开思考摘要、技能加载、工具调用耗时、白名单参数和结果预览 |
+| `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
+| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正 |
+| `ReasoningTimeline.vue` | 面试官推理展示组件（可展开/折叠）；过滤 loading/context 等基础设施 step，把推理步骤、技能加载、工具调用串成左侧连线 timeline，连线需穿过圆点中心；展示 MiMo/DeepSeek reasoning_content、公开摘要 fallback、工具耗时、白名单参数和结果预览 |
 | `ThinkingBlock.vue` | 旧版 AI 思维链展示组件（可展开/折叠） |
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |

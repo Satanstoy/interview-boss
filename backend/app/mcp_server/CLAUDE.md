@@ -8,7 +8,7 @@
 |------|------|
 | `app.py` | FastMCP app 定义，导出 `mcp` 与可挂载的 `mcp_app`；处理 `/mcp` 认证、CSRF 豁免、session 加载/持久化 |
 | `interview_tools.py` | 加载 skill、搜索、抽题、选题工具的稳定执行层；更新 chat state 并返回统一 envelope |
-| `session.py` | MCP session 状态存储：Redis 优先，SQLite 兜底，支持跨调用保留 active_skills / retrieved_questions |
+| `session.py` | MCP session 状态存储：Redis 优先，SQLite 兜底，支持 sync/async API，跨调用保留 active_skills / retrieved_questions |
 | `__init__.py` | 包初始化 |
 
 ## 契约
@@ -26,10 +26,10 @@
 
 | 入口 | state 来源 | session 持久化 |
 |---|---|---|
-| 内部 ReAct (`pipeline.py`) | `ChatState` TypedDict，pipeline 内存流转 | ReAct 循环结束后调用 `save_mcp_session(session_id, state)` |
-| 外部 MCP (`app.py`) | `_init_tool_state` 从 `load_mcp_session` 加载 | `save_mcp_session` 持久化到 Redis/SQLite |
+| 内部 ReAct (`pipeline.py`) | `ChatState` TypedDict，pipeline 内存流转 | ReAct 循环结束后调用 `await save_mcp_session_async(session_id, state)` |
+| 外部 MCP (`app.py`) | `_init_tool_state_async` 从 `load_mcp_session_async` 加载 | `save_mcp_session_async` 持久化到 Redis/SQLite |
 
-两个入口共享同一个 `save_mcp_session` / `load_mcp_session` 基础设施。内部 ReAct 路径的 `session_id` 默认等于 `conversation_id`（存入 `ChatState.session_id`）。持久化白名单见 `session.py:_PERSISTED_STATE_KEYS`。内部路径只在 ReAct 循环结束时持久化，不在每次工具执行后（避免性能开销）。
+两个入口共享同一个 session 基础设施。ASGI / FastMCP / pipeline 路径必须使用 async 变体（`load_mcp_session_async` / `save_mcp_session_async`），因为运行时 Redis pool 的 `get` / `setex` 可能返回 coroutine；同步 `load_mcp_session` / `save_mcp_session` 只保留给同步测试或非 ASGI 调用，遇到 awaitable Redis 会关闭 coroutine 并降级 SQLite，避免 `Redis.execute_command was never awaited` warning。内部 ReAct 路径的 `session_id` 默认等于 `conversation_id`（存入 `ChatState.session_id`）。持久化白名单见 `session.py:_PERSISTED_STATE_KEYS`。内部路径只在 ReAct 循环结束时持久化，不在每次工具执行后（避免性能开销）。
 
 ## 修改后必做
 

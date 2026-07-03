@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from app.agents.chat.coverage_events import question_from_coverage_event
 from app.agents.chat.coverage_config import get_coverage_thresholds
+from app.agents.chat.decision_config import DecisionConfig
 from app.agents.chat.state import ChatState
 
 logger = logging.getLogger("interview-boss")
@@ -41,7 +42,9 @@ class InterviewLedger:
     question_type_counts: Counter[str] = field(default_factory=Counter)
     recent_topic_tokens: list[set[str]] = field(default_factory=list)
 
-    def record_question(self, question: dict | None, question_type: str | None = None) -> None:
+    def record_question(
+        self, question: dict | None, question_type: str | None = None
+    ) -> None:
         if not isinstance(question, dict):
             return
         raw_id = question.get("id")
@@ -68,7 +71,9 @@ class InterviewLedger:
         if qtype:
             self.question_type_counts[qtype] += 1
 
-        tokens = _tokenize_for_overlap(" ".join([question_text, cat1, cat2, str(question.get("tags") or "")]))
+        tokens = _tokenize_for_overlap(
+            " ".join([question_text, cat1, cat2, str(question.get("tags") or "")])
+        )
         if tokens:
             self.recent_topic_tokens.append(tokens)
             self.recent_topic_tokens = self.recent_topic_tokens[-8:]
@@ -91,18 +96,23 @@ def _infer_question_type(question: dict | None) -> str:
     if not isinstance(question, dict):
         return ""
     text = " ".join(
-        str(question.get(field) or "")
-        for field in ("question", "cat1", "cat2", "tags")
+        str(question.get(field) or "") for field in ("question", "cat1", "cat2", "tags")
     )
     normalized = text.lower()
     for phase in _BIG_TECH_PHASES:
         if phase in normalized:
             return phase
-    if "system_design" in normalized or re.search(r"(系统设计|架构设计|高可用|扩展性|scalability)", text, re.I):
+    if "system_design" in normalized or re.search(
+        r"(系统设计|架构设计|高可用|扩展性|scalability)", text, re.I
+    ):
         return "system_design"
-    if "behavioral" in normalized or re.search(r"(行为面|协作|冲突|失败|复盘|STAR|影响力)", text, re.I):
+    if "behavioral" in normalized or re.search(
+        r"(行为面|协作|冲突|失败|复盘|STAR|影响力)", text, re.I
+    ):
         return "behavioral"
-    if re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru|滑动窗口)", text, re.I):
+    if re.search(
+        r"(算法|代码|手撕|数据结构|链表|排序|二分|LRU|lru|滑动窗口)", text, re.I
+    ):
         return "algorithm_coding"
     if re.search(r"(项目|架构|系统设计|Agent|RAG|LangGraph)", text, re.I):
         return "project_followup"
@@ -113,7 +123,12 @@ def _infer_question_type(question: dict | None) -> str:
 
 def _canonical_interview_phase(question_type: str | None) -> str:
     qtype = (question_type or "").strip().lower()
-    if qtype in {"project_followup", "knowledge_probe", "algorithm_coding", "system_design"}:
+    if qtype in {
+        "project_followup",
+        "knowledge_probe",
+        "algorithm_coding",
+        "system_design",
+    }:
         return qtype
     if qtype in {"hr", "behavioral", "soft_skills", "hr_soft_skills"}:
         return "behavioral"
@@ -219,6 +234,7 @@ def _big_tech_phase_counts(ledger: InterviewLedger) -> Counter[str]:
 
 def _big_tech_next_focus(state: ChatState) -> dict:
     """Return runtime full-loop guidance derived from the asked-question ledger."""
+    config = state.get("decision_config") or DecisionConfig()
     ledger = _build_interview_ledger(state)
     phase_counts = _big_tech_phase_counts(ledger)
     asked_count = sum(phase_counts.values())
@@ -241,35 +257,44 @@ def _big_tech_next_focus(state: ChatState) -> dict:
             "question_type": "wrap_up",
             "reason": "核心覆盖维度已达标，进入 HR/反问和收尾",
         }
-    elif phase_counts["project_followup"] < 2:
+    elif phase_counts["project_followup"] < config.min_project_followup:
         focus = {
             "phase": "project_followup",
             "tool": "search_questions",
             "question_type": "project_followup",
             "reason": "先确认候选人真实项目贡献和架构取舍",
         }
-    elif phase_counts["knowledge_probe"] < 1:
+    elif phase_counts["knowledge_probe"] < config.min_knowledge_probe:
         focus = {
             "phase": "knowledge_probe",
             "tool": "search_questions",
             "question_type": "knowledge_probe",
             "reason": "从项目切到相关基础知识，验证不是只会背项目",
         }
-    elif asked_count >= 3 and phase_counts["algorithm_coding"] < 1:
+    elif (
+        asked_count >= config.algorithm_after_asked_count
+        and phase_counts["algorithm_coding"] < config.min_algorithm_coding
+    ):
         focus = {
             "phase": "algorithm_coding",
             "tool": "draw_questions",
             "question_type": "algorithm_coding",
             "reason": "大厂技术面通常需要至少一次 coding/算法信号",
         }
-    elif asked_count >= 5 and phase_counts["system_design"] < 1:
+    elif (
+        asked_count >= config.system_design_after_asked_count
+        and phase_counts["system_design"] < config.min_system_design
+    ):
         focus = {
             "phase": "system_design",
             "tool": "draw_questions",
             "question_type": "system_design",
             "reason": "补充系统设计/架构权衡信号",
         }
-    elif (asked_count >= 6 or message_count >= 14) and phase_counts["behavioral"] < 1:
+    elif (
+        asked_count >= config.behavioral_after_asked_count
+        or message_count >= config.behavioral_after_message_count
+    ) and phase_counts["behavioral"] < config.min_behavioral:
         focus = {
             "phase": "behavioral",
             "tool": "draw_questions",
@@ -287,7 +312,9 @@ def _big_tech_next_focus(state: ChatState) -> dict:
     return {
         "asked_count": asked_count,
         "message_count": message_count,
-        "phase_counts": {phase: phase_counts.get(phase, 0) for phase in _BIG_TECH_PHASES},
+        "phase_counts": {
+            phase: phase_counts.get(phase, 0) for phase in _BIG_TECH_PHASES
+        },
         "next_focus": focus,
     }
 
@@ -331,18 +358,20 @@ def _should_create_question_plan(state: ChatState) -> bool:
 def _should_require_bank_question(state: ChatState) -> bool:
     """Return True when the current turn should bind the next ask to the bank.
 
-    The first self-introduction turn is intentionally conversational: the
-    interviewer should ask a natural clarification before forcing a retrieved
-    bank question. Explicit practice/coding requests still require the bank.
+    The classifier writes ``requires_bank_question`` into state. This function
+    trusts that field and only applies two hard overrides:
+    - opening turns stay conversational (message_count below threshold)
+    - incomplete/off-topic/repeated answers do not force a bank question
     """
-    if state.get("intent") == "practice_request":
-        return True
-    if state.get("question_type") == "algorithm_coding":
-        return True
-    if state.get("intent") != "interview_question":
+    requires_bank = bool(state.get("requires_bank_question", False))
+    if not requires_bank:
         return False
-    if state.get("answer_complete") is not True:
+
+    # Hard overrides regardless of classifier suggestion.
+    answer_quality = state.get("answer_quality", "complete")
+    if answer_quality in ("incomplete", "off_topic", "repeated"):
         return False
+
     history = state.get("message_history")
     if history is None:
         return True
@@ -453,13 +482,17 @@ def _candidate_repeats_recent_topic(candidate: dict, ledger: InterviewLedger) ->
     for previous in ledger.recent_topic_tokens[-3:]:
         if not previous:
             continue
-        overlap = len(candidate_tokens & previous) / max(min(len(candidate_tokens), len(previous)), 1)
+        overlap = len(candidate_tokens & previous) / max(
+            min(len(candidate_tokens), len(previous)), 1
+        )
         if overlap >= 0.45:
             return True
     return False
 
 
-def _filter_candidates_by_ledger(candidates: list[dict], ledger: InterviewLedger) -> list[dict]:
+def _filter_candidates_by_ledger(
+    candidates: list[dict], ledger: InterviewLedger
+) -> list[dict]:
     if not candidates:
         return candidates
     filtered = []
@@ -724,7 +757,17 @@ def _count_consecutive_similar_user_answers(state: ChatState) -> int:
             tokens.add(t)
         for t in re.findall(r"[一-鿿]{2,4}", text):
             tokens.add(t)
-        _fillers = {"请", "问题", "回答", "面试", "一下", "具体", "详细", "介绍一下", "说说"}
+        _fillers = {
+            "请",
+            "问题",
+            "回答",
+            "面试",
+            "一下",
+            "具体",
+            "详细",
+            "介绍一下",
+            "说说",
+        }
         return tokens - _fillers
 
     recent = user_msgs[-6:]
@@ -745,23 +788,29 @@ def _count_consecutive_similar_user_answers(state: ChatState) -> int:
 
 
 def _build_repetition_protection_note(state: ChatState) -> str:
-    """If the interviewer has been asking about the same topic too many times
-    consecutively, or if the candidate is repeating the same answer,
-    return a hard constraint note for the system prompt.
+    """Return a hard constraint note when repetition/topic escalation is high.
 
-    Returns empty string when no protection is needed.
+    Values are read from typed state fields (set in pipeline._step_classify)
+    instead of being recomputed from message text.
     """
-    # Candidate repetition detection (from stop_policy)
-    if state.get("repetition_detected"):
-        user_repeat = _count_consecutive_similar_user_answers(state)
-        if user_repeat >= 2:
-            return (
-                "## ⚠️ 候选人重复回答（硬约束）\n"
-                f"候选人已连续 {user_repeat + 1} 次给出实质相同的回答。\n"
-                "- 不要继续追问同一话题，这没有意义。\n"
-                "- 直接指出候选人回答重复，然后切换到完全不同的面试方向。\n"
-                "- 或者问候选人：'你有什么想问我们的吗？' 进入反问环节。\n"
-            )
+    user_repeat = state.get("repetition_streak", 0)
+    if user_repeat >= 2:
+        return (
+            "## ⚠️ 候选人重复回答（硬约束）\n"
+            f"候选人已连续 {user_repeat + 1} 次给出实质相同的回答。\n"
+            "- 不要继续追问同一话题，这没有意义。\n"
+            "- 直接指出候选人回答重复，然后切换到完全不同的面试方向。\n"
+            "- 或者问候选人：'你有什么想问我们的吗？' 进入反问环节。\n"
+        )
+
+    escalation = state.get("escalation_level", 0)
+    if escalation >= 3:
+        return (
+            "## ⚠️ 追问升级（硬约束）\n"
+            "同一问题已连续追问多次且未能得到有效回答。\n"
+            "- 不要再继续追问同一问题。\n"
+            "- 切换到完全不同的面试方向。\n"
+        )
 
     count, topic_summary = _count_consecutive_similar_questions(state)
     if count < _MAX_CONSECUTIVE_SAME_QUESTION:

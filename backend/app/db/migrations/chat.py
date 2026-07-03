@@ -213,4 +213,30 @@ def _migration_040_chat_tool_traces(conn):
         conn.execute(
             "CREATE INDEX idx_ctt_conversation ON chat_tool_traces(conversation_id, created_at)"
         )
+
+
+def _migration_041_asked_questions(conn):
+    """Cross-conversation question dedup: track which questions were asked per user."""
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS interview_asked_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
+            question_id INTEGER NOT NULL,
+            asked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA index_list('interview_asked_questions')")
+    indexes = [row[1] for row in cursor.fetchall()]
+    if "idx_iaq_user_question" not in indexes:
+        conn.execute(
+            "CREATE INDEX idx_iaq_user_question "
+            "ON interview_asked_questions(user_id, question_id)"
+        )
+    if "idx_iaq_conversation" not in indexes:
+        conn.execute(
+            "CREATE INDEX idx_iaq_conversation "
+            "ON interview_asked_questions(conversation_id)"
+        )
     logger.info("已创建 chat_tool_traces 表")

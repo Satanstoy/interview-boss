@@ -16,6 +16,7 @@ import json
 import logging
 import time
 import uuid
+from inspect import isawaitable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,14 @@ def _prune_sqlite_sessions(conn) -> None:
 def _load_from_redis(pool, session_id: str) -> dict[str, Any] | None:
     try:
         raw = pool.get(session_id)
+        if isawaitable(raw):
+            if hasattr(raw, "close"):
+                raw.close()
+            logger.debug(
+                "Redis get returned awaitable in sync MCP session loader; "
+                "falling back to SQLite"
+            )
+            return None
         if raw is None:
             return None
         return json.loads(raw)
@@ -84,12 +93,49 @@ def _load_from_redis(pool, session_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _save_to_redis(pool, session_id: str, state: dict[str, Any]) -> None:
-    pool.setex(
+def _save_to_redis(
+    pool,
+    session_id: str,
+    state: dict[str, Any],
+    ttl_seconds: int = _MCP_SESSION_TTL_SECONDS,
+) -> None:
+    result = pool.setex(
         session_id,
-        _MCP_SESSION_TTL_SECONDS,
+        ttl_seconds,
         json.dumps(state, ensure_ascii=False),
     )
+    if isawaitable(result):
+        if hasattr(result, "close"):
+            result.close()
+        raise RuntimeError("Redis setex returned awaitable in sync MCP session saver")
+
+
+async def _load_from_redis_async(pool, session_id: str) -> dict[str, Any] | None:
+    try:
+        raw = pool.get(session_id)
+        if isawaitable(raw):
+            raw = await raw
+        if raw is None:
+            return None
+        return json.loads(raw)
+    except Exception:
+        logger.exception("Failed to load MCP session from Redis")
+        return None
+
+
+async def _save_to_redis_async(
+    pool,
+    session_id: str,
+    state: dict[str, Any],
+    ttl_seconds: int = _MCP_SESSION_TTL_SECONDS,
+) -> None:
+    result = pool.setex(
+        session_id,
+        ttl_seconds,
+        json.dumps(state, ensure_ascii=False),
+    )
+    if isawaitable(result):
+        await result
 
 
 def _load_from_sqlite(session_id: str) -> dict[str, Any] | None:
@@ -137,6 +183,20 @@ def load_mcp_session(session_id: str | None) -> dict[str, Any] | None:
     return _load_from_sqlite(session_id)
 
 
+async def load_mcp_session_async(session_id: str | None) -> dict[str, Any] | None:
+    """Async variant for ASGI/MCP paths backed by async Redis clients."""
+    if not session_id:
+        return None
+
+    pool = _get_redis_pool()
+    if pool is not None:
+        state = await _load_from_redis_async(pool, session_id)
+        if state is not None:
+            return state
+
+    return _load_from_sqlite(session_id)
+
+
 def save_mcp_session(
     session_id: str,
     state: dict[str, Any],
@@ -148,7 +208,28 @@ def save_mcp_session(
     pool = _get_redis_pool()
     if pool is not None:
         try:
-            _save_to_redis(pool, session_id, persisted)
+            _save_to_redis(pool, session_id, persisted, ttl_seconds)
+            return
+        except Exception:
+            logger.exception(
+                "Failed to save MCP session to Redis, falling back to SQLite"
+            )
+
+    _save_to_sqlite(session_id, persisted)
+
+
+async def save_mcp_session_async(
+    session_id: str,
+    state: dict[str, Any],
+    ttl_seconds: int = _MCP_SESSION_TTL_SECONDS,
+) -> None:
+    """Async variant for ASGI/MCP paths backed by async Redis clients."""
+    persisted = {k: state.get(k) for k in _PERSISTED_STATE_KEYS if k in state}
+
+    pool = _get_redis_pool()
+    if pool is not None:
+        try:
+            await _save_to_redis_async(pool, session_id, persisted, ttl_seconds)
             return
         except Exception:
             logger.exception(

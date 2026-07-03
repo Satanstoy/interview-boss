@@ -8,7 +8,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from app.mcp_server import interview_tools
-from app.mcp_server.session import load_mcp_session, new_session_id, save_mcp_session
+from app.mcp_server.session import (
+    load_mcp_session_async,
+    new_session_id,
+    save_mcp_session_async,
+)
 
 
 MCP_API_KEY = os.getenv("MCP_API_KEY", "")
@@ -51,12 +55,12 @@ mcp = FastMCP(
 )
 
 
-def _init_tool_state(
+async def _init_tool_state_async(
     session_id: str | None, overrides: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
-    """Load persisted session state or start fresh, then apply call-specific overrides."""
+    """Async session loader for ASGI paths backed by async Redis clients."""
     sid = session_id or new_session_id()
-    state = load_mcp_session(sid) or {}
+    state = await load_mcp_session_async(sid) or {}
     state.update(overrides)
     return sid, state
 
@@ -69,19 +73,21 @@ def _attach_session_metadata(result: dict[str, Any], session_id: str) -> dict[st
 
 
 @mcp.tool()
-def load_skill(
+async def load_skill(
     skill_name: str,
     session_id: str = None,
     active_skills: list = None,
 ) -> dict:
     """Load one interview skill instruction."""
-    sid, state = _init_tool_state(session_id, {"active_skills": active_skills or []})
+    sid, state = await _init_tool_state_async(
+        session_id, {"active_skills": active_skills or []}
+    )
     result = interview_tools.load_skill_tool({"skill_name": skill_name}, state)
     result.setdefault("metadata", {})["state"] = {
         "active_skills": state.get("active_skills", []),
         "active_skill_instructions": state.get("active_skill_instructions", []),
     }
-    save_mcp_session(sid, state)
+    await save_mcp_session_async(sid, state)
     return _attach_session_metadata(result, sid)
 
 
@@ -115,9 +121,9 @@ async def search_questions(
     if negative_terms:
         overrides["search_negative_terms"] = negative_terms
 
-    sid, state = _init_tool_state(session_id, overrides)
+    sid, state = await _init_tool_state_async(session_id, overrides)
     result = await interview_tools.search_questions_tool(args, state)
-    save_mcp_session(sid, state)
+    await save_mcp_session_async(sid, state)
     return _attach_session_metadata(result, sid)
 
 
@@ -153,14 +159,14 @@ async def draw_questions(
     if session_notes:
         overrides["session_notes"] = session_notes
 
-    sid, state = _init_tool_state(session_id, overrides)
+    sid, state = await _init_tool_state_async(session_id, overrides)
     result = await interview_tools.draw_questions_tool(args, state)
-    save_mcp_session(sid, state)
+    await save_mcp_session_async(sid, state)
     return _attach_session_metadata(result, sid)
 
 
 @mcp.tool()
-def select_question(
+async def select_question(
     candidates: list,
     session_id: str = None,
     question_type: str = None,
@@ -172,13 +178,13 @@ def select_question(
     if question_type:
         overrides["question_type"] = question_type
 
-    sid, state = _init_tool_state(session_id, overrides)
+    sid, state = await _init_tool_state_async(session_id, overrides)
     result = interview_tools.select_question_tool(
         {"candidates": candidates},
         state,
         candidate_index=candidate_index,
     )
-    save_mcp_session(sid, state)
+    await save_mcp_session_async(sid, state)
     return _attach_session_metadata(result, sid)
 
 

@@ -26,103 +26,73 @@
     <!-- Collapsible content -->
     <Transition name="expand">
       <div v-show="isOpen" class="mt-2">
-        <!-- Steps timeline -->
-        <div v-if="steps.length > 0" class="space-y-1 mb-3">
+        <!-- Connected timeline -->
+        <div v-if="timelineItems.length > 0" class="mb-3">
           <div
-            v-for="(step, i) in steps"
-            :key="i"
-            class="group/step"
+            v-for="(item, i) in timelineItems"
+            :key="item.key"
+            class="reasoning-timeline-item relative pl-7 pb-1 last:pb-0"
           >
-            <!-- Step row -->
-            <button
-              @click="toggleStep(i)"
-              class="flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-muted/50 transition-colors"
+            <span
+              v-if="i < timelineItems.length - 1"
+              class="reasoning-timeline-connector absolute top-5 bottom-[-4px] bg-border"
+              aria-hidden="true"
+            />
+            <span
+              class="reasoning-timeline-marker absolute top-1.5 flex items-center justify-center rounded-full bg-background ring-1 ring-border"
+              :class="item.done ? 'text-emerald-500' : 'text-muted-foreground'"
+              aria-hidden="true"
             >
-              <CheckCircle2 v-if="step.done !== false" :size="12" class="text-emerald-500 shrink-0" />
-              <Loader2 v-else :size="12" class="animate-spin text-muted-foreground shrink-0" />
+              <Loader2 v-if="!item.done" :size="11" class="animate-spin" />
+              <Brain v-else-if="item.type === 'skill'" :size="11" class="text-primary" />
+              <Wrench v-else-if="item.type === 'tool'" :size="11" class="text-sky-500" />
+              <CheckCircle2 v-else :size="11" />
+            </span>
+            <button
+              @click="toggleTimelineItem(item)"
+              class="flex items-center gap-2 w-full min-h-7 text-left px-2 py-1 rounded-md text-xs hover:bg-muted/50 transition-colors"
+            >
               <span class="text-muted-foreground flex-1">
-                {{ step.message }}
-                <span v-if="step.skill_name" class="text-primary ml-1">({{ step.skill_name }})</span>
+                {{ item.title }}
+                <span v-if="item.subtitle" class="text-primary ml-1">({{ item.subtitle }})</span>
               </span>
+              <span v-if="item.meta" class="text-xs text-muted-foreground/50">{{ item.meta }}</span>
               <ChevronDown
-                v-if="step.reason || step.insight"
+                v-if="item.expandable"
                 :size="12"
                 class="text-muted-foreground/50 shrink-0 transition-transform duration-200"
-                :class="{ 'rotate-180': expandedSteps[i] }"
+                :class="{ 'rotate-180': isTimelineItemExpanded(item) }"
               />
             </button>
 
-            <!-- Step detail (reason + insight) -->
             <Transition name="expand">
-              <div v-if="expandedSteps[i] && (step.reason || step.insight)" class="pl-7 pr-2 pb-1">
-                <p v-if="step.reason" class="text-xs text-muted-foreground/60 leading-relaxed">
-                  {{ step.reason }}
+              <div v-if="isTimelineItemExpanded(item) && item.type === 'step'" class="pr-2 pb-1">
+                <p v-if="item.payload.reason" class="text-xs text-muted-foreground/60 leading-relaxed">
+                  {{ item.payload.reason }}
                 </p>
-                <p v-if="step.insight" class="text-xs text-amber-600/70 dark:text-amber-400/70 mt-0.5 flex items-center gap-1">
+                <p v-if="item.payload.insight" class="text-xs text-amber-600/70 dark:text-amber-400/70 mt-0.5 flex items-center gap-1">
                   <Lightbulb :size="10" />
-                  {{ step.insight }}
+                  {{ item.payload.insight }}
                 </p>
               </div>
             </Transition>
-          </div>
-        </div>
-
-        <!-- Skill trace -->
-        <div v-if="skillSteps.length > 0" class="space-y-1 mb-3">
-          <div v-for="(skill, i) in skillSteps" :key="skill.skill_name || i">
-            <button
-              @click="toggleSkillStep(i)"
-              class="flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-muted/50 transition-colors"
-            >
-              <Brain :size="12" class="text-primary shrink-0" />
-              <span class="text-muted-foreground flex-1">{{ skill.label || skill.skill_name }}</span>
-              <span v-if="skill.status" class="text-[11px] text-muted-foreground/50">{{ formatStatus(skill.status) }}</span>
-              <ChevronDown
-                v-if="skill.reason"
-                :size="12"
-                class="text-muted-foreground/50 shrink-0 transition-transform duration-200"
-                :class="{ 'rotate-180': expandedSkillSteps[i] }"
-              />
-            </button>
             <Transition name="expand">
-              <div v-if="expandedSkillSteps[i] && skill.reason" class="pl-7 pr-2 pb-1">
-                <p class="text-xs text-muted-foreground/60 leading-relaxed">{{ skill.reason }}</p>
+              <div v-if="isTimelineItemExpanded(item) && item.type === 'skill'" class="pr-2 pb-1">
+                <p class="text-xs text-muted-foreground/60 leading-relaxed">{{ item.payload.reason }}</p>
               </div>
             </Transition>
-          </div>
-        </div>
-
-        <!-- Tool steps -->
-        <div v-if="toolSteps.length > 0" class="space-y-1 mb-3">
-          <div v-for="(step, i) in toolSteps" :key="i" class="group/step">
-            <button
-              @click="toggleToolStep(i)"
-              class="flex items-center gap-2 w-full text-left px-2 py-1 rounded-md text-xs hover:bg-muted/50 transition-colors"
-            >
-              <Wrench v-if="step.done !== false" :size="12" class="text-sky-500 shrink-0" />
-              <Loader2 v-else :size="12" class="animate-spin text-muted-foreground shrink-0" />
-              <span class="text-muted-foreground flex-1">{{ step.label || step.message }}</span>
-              <span v-if="step.elapsed_ms" class="text-xs text-muted-foreground/50">{{ step.elapsed_ms }}ms</span>
-              <span v-if="step.result_count !== undefined" class="text-xs text-muted-foreground/50">{{ step.result_count }} 结果</span>
-              <ChevronDown
-                v-if="hasToolDetails(step)"
-                :size="12"
-                class="text-muted-foreground/50 shrink-0 transition-transform duration-200"
-                :class="{ 'rotate-180': expandedToolSteps[i] }"
-              />
-            </button>
             <Transition name="expand">
               <div
-                v-if="expandedToolSteps[i] && hasToolDetails(step)"
-                class="ml-7 mr-2 mb-1 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                v-if="isTimelineItemExpanded(item) && item.type === 'tool'"
+                class="mr-2 mb-1 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
               >
-                <div v-if="step.summary" class="mb-2 leading-relaxed">{{ step.summary }}</div>
+                <div v-if="item.payload.summary" class="mb-2 leading-relaxed">{{ item.payload.summary }}</div>
 
-                <div v-if="argEntries(step).length" class="mb-2">
+                <div v-if="argEntries(item.payload).length" class="mb-2">
                   <div class="text-[11px] font-medium text-foreground/70 mb-1">参数</div>
                   <div class="flex flex-wrap gap-1.5">
                     <span
-                      v-for="entry in argEntries(step)"
+                      v-for="entry in argEntries(item.payload)"
                       :key="entry.key"
                       class="rounded-md bg-background/70 border border-border/50 px-2 py-0.5"
                     >
@@ -131,16 +101,16 @@
                   </div>
                 </div>
 
-                <div v-if="resultPreview(step).length">
+                <div v-if="resultPreview(item.payload).length">
                   <div class="text-[11px] font-medium text-foreground/70 mb-1">结果</div>
                   <div class="space-y-1.5">
                     <div
-                      v-for="item in resultPreview(step)"
-                      :key="item.id || item.question || item.title"
+                      v-for="result in resultPreview(item.payload)"
+                      :key="result.id || result.question || result.title"
                       class="rounded-md bg-background/70 border border-border/50 px-2 py-1.5"
                     >
-                      <div class="text-foreground/90 leading-relaxed">{{ item.question || item.title || item.name || `结果 ${item.id}` }}</div>
-                      <div v-if="resultMeta(item)" class="mt-0.5 text-[11px] text-muted-foreground/60">{{ resultMeta(item) }}</div>
+                      <div class="text-foreground/90 leading-relaxed">{{ result.question || result.title || result.name || `结果 ${result.id}` }}</div>
+                      <div v-if="resultMeta(result)" class="mt-0.5 text-[11px] text-muted-foreground/60">{{ resultMeta(result) }}</div>
                     </div>
                   </div>
                 </div>
@@ -183,25 +153,59 @@ const props = defineProps({
 
 const isOpen = ref(true)
 const contentRef = ref(null)
-const expandedSteps = reactive({})
-const expandedToolSteps = reactive({})
-const expandedSkillSteps = reactive({})
+const expandedTimelineItems = reactive({})
 
-const stepCount = computed(() => props.steps.length)
+const hiddenStepNames = new Set(['loading', 'context'])
+const visibleSteps = computed(() => props.steps.filter(step => !hiddenStepNames.has(step?.step)))
+
+const stepCount = computed(() => visibleSteps.value.length)
 const toolCount = computed(() => props.toolSteps.length)
 const skillCount = computed(() => props.skillSteps.length)
 
+const timelineItems = computed(() => [
+  ...visibleSteps.value.map((step, index) => ({
+    key: `step-${index}-${step.step || step.message || ''}`,
+    type: 'step',
+    title: step.message,
+    subtitle: step.skill_name || '',
+    meta: '',
+    done: step.done !== false,
+    expandable: Boolean(step.reason || step.insight),
+    payload: step,
+  })),
+  ...props.skillSteps.map((skill, index) => ({
+    key: `skill-${index}-${skill.skill_name || skill.label || ''}`,
+    type: 'skill',
+    title: skill.label || skill.skill_name,
+    subtitle: '',
+    meta: skill.status ? formatStatus(skill.status) : '',
+    done: skill.status !== 'running',
+    expandable: Boolean(skill.reason),
+    payload: skill,
+  })),
+  ...props.toolSteps.map((step, index) => ({
+    key: `tool-${index}-${step.tool_name || step.label || step.message || ''}`,
+    type: 'tool',
+    title: step.label || step.message,
+    subtitle: '',
+    meta: formatToolMeta(step),
+    done: step.done !== false,
+    expandable: hasToolDetails(step),
+    payload: step,
+  })),
+])
+
 const displayLabel = computed(() => {
   if (props.isStreaming || (props.isSending && props.duration > 0 && !props.content)) {
-    return `思考中 ${formatDuration(props.duration)}`
+    return `面试官推理中 ${formatDuration(props.duration)}`
   }
-  if (props.isSending && props.duration <= 0) return '思考中'
+  if (props.isSending && props.duration <= 0) return '面试官推理中'
   const parts = []
-  if (props.duration > 0) parts.push(`思考了 ${formatDuration(props.duration)}`)
+  if (props.duration > 0) parts.push(`面试官推理了 ${formatDuration(props.duration)}`)
   if (stepCount.value > 0) parts.push(`${stepCount.value} 步`)
   if (toolCount.value > 0) parts.push(`${toolCount.value} 次工具`)
   if (skillCount.value > 0) parts.push(`${skillCount.value} 个策略`)
-  return parts.length > 0 ? parts.join(' · ') : '思考过程'
+  return parts.length > 0 ? parts.join(' · ') : '面试官推理过程'
 })
 
 function formatDuration(duration) {
@@ -210,20 +214,24 @@ function formatDuration(duration) {
   return `${Number.isInteger(value) ? value : value.toFixed(1)} 秒`
 }
 
-function toggleStep(index) {
-  expandedSteps[index] = !expandedSteps[index]
+function toggleTimelineItem(item) {
+  if (!item.expandable) return
+  expandedTimelineItems[item.key] = !expandedTimelineItems[item.key]
 }
 
-function toggleToolStep(index) {
-  expandedToolSteps[index] = !expandedToolSteps[index]
-}
-
-function toggleSkillStep(index) {
-  expandedSkillSteps[index] = !expandedSkillSteps[index]
+function isTimelineItemExpanded(item) {
+  return Boolean(expandedTimelineItems[item.key])
 }
 
 function hasToolDetails(step) {
   return Boolean(step.summary || argEntries(step).length || resultPreview(step).length)
+}
+
+function formatToolMeta(step) {
+  const parts = []
+  if (step.elapsed_ms) parts.push(`${step.elapsed_ms}ms`)
+  if (step.result_count !== undefined) parts.push(`${step.result_count} 结果`)
+  return parts.join(' · ')
 }
 
 function argEntries(step) {
@@ -276,7 +284,7 @@ watch(() => props.content, () => {
 
 // Collapse only when the entire message is done (not just thinking done)
 watch(() => props.isSending, (sending, oldSending) => {
-  if (oldSending && !sending && (props.content || props.steps.length > 0 || props.toolSteps.length > 0 || props.skillSteps.length > 0)) {
+  if (oldSending && !sending && (props.content || visibleSteps.value.length > 0 || props.toolSteps.length > 0 || props.skillSteps.length > 0)) {
     setTimeout(() => {
       isOpen.value = false
     }, 1000)
@@ -284,7 +292,7 @@ watch(() => props.isSending, (sending, oldSending) => {
 })
 
 onMounted(() => {
-  if ((props.content || props.steps.length > 0 || props.toolSteps.length > 0 || props.skillSteps.length > 0) && !props.isSending) {
+  if ((props.content || visibleSteps.value.length > 0 || props.toolSteps.length > 0 || props.skillSteps.length > 0) && !props.isSending) {
     isOpen.value = false
   }
 })
@@ -306,5 +314,24 @@ onMounted(() => {
 .expand-enter-to,
 .expand-leave-from {
   max-height: 600px;
+}
+
+.reasoning-timeline-item {
+  --timeline-marker-left: 0.25rem;
+  --timeline-marker-size: 1rem;
+  --timeline-line-width: 1px;
+}
+
+.reasoning-timeline-marker {
+  left: var(--timeline-marker-left);
+  width: var(--timeline-marker-size);
+  height: var(--timeline-marker-size);
+}
+
+.reasoning-timeline-connector {
+  left: calc(
+    var(--timeline-marker-left) + var(--timeline-marker-size) / 2 - var(--timeline-line-width) / 2
+  );
+  width: var(--timeline-line-width);
 }
 </style>

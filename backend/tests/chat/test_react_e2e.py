@@ -271,6 +271,7 @@ class TestReactE2E:
             _make_question(102, "Redis 分布式锁如何实现？", round_name="二面"),
             _make_question(103, "Redis 缓存击穿怎么处理？", round_name="三面"),
             _make_question(104, "Redis 持久化策略有哪些？", round_name="四面"),
+            _make_question(105, "Redis 大 key 怎么治理？", round_name="五面"),
         ]
         search_mock = MagicMock(return_value=search_results)
 
@@ -331,10 +332,11 @@ class TestReactE2E:
 
         retrieved_events = [e for e in events if e["type"] == "retrieved"]
         assert len(retrieved_events) == 1
-        assert len(retrieved_events[0]["questions"]) == 3
+        assert len(retrieved_events[0]["questions"]) == 5
         assert retrieved_events[0]["questions"][0]["id"] == 101
         assert retrieved_events[0]["questions"][0]["company"] == "腾讯"
         assert retrieved_events[0]["questions"][0]["round"] == "一面"
+        assert retrieved_events[0]["questions"][-1]["id"] == 105
 
         basis_event = next(e for e in events if e["type"] == "basis")
         assert basis_event["basis_type"] == "interview_question"
@@ -345,8 +347,8 @@ class TestReactE2E:
 
         assert state["retrieved_questions"] == search_results
         assert state["metadata"]["basis_type"] == "interview_question"
-        assert len(state["metadata"]["retrieved_questions"]) == 3
-        assert len(state["metadata"]["candidate_questions"]) == 3
+        assert len(state["metadata"]["retrieved_questions"]) == 5
+        assert len(state["metadata"]["candidate_questions"]) == 5
         assert state["metadata"]["selected_question"]["id"] == 101
         assert state["metadata"]["question_source"] == "search"
         assert len(state["metadata"]["selected_basis_questions"]) == 2
@@ -439,15 +441,10 @@ class TestReactE2E:
         assert draw_mock.call_args.kwargs["count"] == 2
 
         visible_events = [e for e in events if e["type"] != "insight"]
-        assert [e["type"] for e in visible_events] == [
-            "step",
-            "step",
-            "retrieved",
-            "step",
-            "chunk",
-            "basis",
-            "done",
-        ]
+        visible_types = [e["type"] for e in visible_events]
+        assert visible_types[:4] == ["step", "step", "retrieved", "step"]
+        assert visible_types[-2:] == ["basis", "done"]
+        assert visible_types[4:-2] == ["chunk", "chunk"]
         assert [e["step"] for e in events if e["type"] == "step"] == [
             "load_skill",
             "draw_questions",

@@ -7,7 +7,7 @@
 import json
 import os
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 LIVE_LLM_ENABLED = os.environ.get("RUN_LIVE_LLM_TESTS") == "1" and bool(os.environ.get("OPENAI_API_KEY"))
@@ -374,7 +374,49 @@ class TestMakeToolResultMessage:
 
 
 # ─────────────────────────────────────────────────
-# 5. llm_with_tools 集成测试（需要真实 API）
+# 5. OpenAI-compatible reasoning_content propagation
+# ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestOpenAIReasoningContent:
+    async def test_llm_with_tools_call_returns_reasoning_content(self):
+        """MiMo/OpenAI-compatible reasoning_content should survive llm_with_tools."""
+        from app.services.llm import _llm_with_tools_call
+
+        mock_msg = MagicMock()
+        mock_msg.content = "391"
+        mock_msg.reasoning_content = "先计算 17*23"
+        mock_msg.tool_calls = None
+
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_choice.finish_reason = "stop"
+
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        result = await _llm_with_tools_call(
+            mock_client,
+            "mimo-v2.5-pro",
+            [{"role": "user", "content": "17*23"}],
+            [],
+            "openai",
+            512,
+            0,
+            None,
+        )
+
+        assert result["content"] == "391"
+        assert result["reasoning_content"] == "先计算 17*23"
+        assert result["tool_calls"] is None
+
+
+# ─────────────────────────────────────────────────
+# 6. llm_with_tools 集成测试（需要真实 API）
 # ─────────────────────────────────────────────────
 
 

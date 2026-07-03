@@ -26,6 +26,7 @@
 ## 核心规则
 
 - LLM 调用必须通过 `llm.py` 的函数，禁止直接实例化 OpenAI client
+- OpenAI-compatible reasoning 模型（MiMo/DeepSeek 类）使用 `reasoning_content` 字段；`llm_with_tools()` 必须把非流式 `message.reasoning_content` 透出，`stream_llm_messages(yield_thinking=True)` 必须读取流式 `delta.reasoning_content`
 - 重试逻辑用 tenacity，不要手写 retry 循环
 - 错误处理：捕获异常后记录日志，向上抛出业务异常
 - 聚类维护禁止用 embedding 阈值自动合并；embedding 最多作为候选排序/预筛信号

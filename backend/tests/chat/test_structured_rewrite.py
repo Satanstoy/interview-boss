@@ -307,6 +307,8 @@ class TestClassifyAndRecallIntegration:
                 search_query,
                 answer_complete,
                 _structured_rewrite,
+
+                _classify_result,
             ) = await classify_and_recall(
                 user_message="面试官好，我来回答一下关于 Redis 缓存穿透和布隆过滤器的技术问题",
                 recent_context="",
@@ -351,6 +353,8 @@ class TestClassifyAndRecallIntegration:
                 search_query,
                 answer_complete,
                 _structured_rewrite,
+
+                _classify_result,
             ) = await classify_and_recall(
                 user_message="Redis 有哪些数据结构",
                 recent_context="",
@@ -394,6 +398,8 @@ class TestClassifyAndRecallIntegration:
                 search_query,
                 answer_complete,
                 _structured_rewrite,
+
+                _classify_result,
             ) = await classify_and_recall(
                 user_message="测试消息",
                 recent_context="",

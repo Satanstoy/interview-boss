@@ -40,7 +40,7 @@ build/
 AGENTS.md
 
 # Local OMO/Codex session state
-.omo/run-continuation/*.json
+.omo/
 
 # Issue tracker (local markdown)
 .scratch/

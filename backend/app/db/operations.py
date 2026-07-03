@@ -682,3 +682,24 @@ def query_public_taxonomies() -> list:
         }
         for row in rows
     ]
+
+
+# ── Cross-conversation question dedup ────────────────────────────────────────
+
+
+def record_asked_question(conn, user_id: int, conversation_id: str, question_id: int):
+    """Record that a question was asked to a user (for cross-conversation dedup)."""
+    conn.execute(
+        "INSERT INTO interview_asked_questions (user_id, conversation_id, question_id) "
+        "VALUES (?, ?, ?)",
+        (user_id, conversation_id, question_id),
+    )
+
+
+def get_asked_question_ids(conn, user_id: int) -> set[int]:
+    """Get all question IDs ever asked to a user across all conversations."""
+    rows = conn.execute(
+        "SELECT DISTINCT question_id FROM interview_asked_questions WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    return {row[0] for row in rows}

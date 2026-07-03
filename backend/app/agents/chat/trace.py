@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents.chat.chat_constants import PUBLIC_QUESTION_PREVIEW_LIMIT
 from app.agents.chat.metadata import _extract_company, _extract_round
 
 SAFE_TOOL_ARG_KEYS = {
@@ -55,7 +56,6 @@ SUMMARY_BY_STEP = {
     "search_questions": "根据关键词检索题库中的相关面试题",
     "draw_questions": "从题库抽取符合当前阶段的题目",
     "select_question": "选择一道题作为本轮追问依据",
-    "force_search_guard": "补充检索题库，确保追问有题库依据",
     "generating": "综合上下文、题库结果和面试阶段组织追问",
     "closing": "根据本轮对话生成面试总结",
 }
@@ -128,12 +128,15 @@ def build_tool_trace(
     output: str = "",
 ) -> dict:
     del output
-    result_preview = [_preview_question(q) for q in _question_candidates(state)[:3]]
+    result_preview = [
+        _preview_question(q)
+        for q in _question_candidates(state)[:PUBLIC_QUESTION_PREVIEW_LIMIT]
+    ]
     result_ids = summary.get("result_ids")
     if not isinstance(result_ids, list):
         result_ids = [
             q.get("id")
-            for q in _question_candidates(state)[:5]
+            for q in _question_candidates(state)[:PUBLIC_QUESTION_PREVIEW_LIMIT]
             if q.get("id") is not None
         ]
     error = summary.get("error") or ""
@@ -146,7 +149,7 @@ def build_tool_trace(
         "elapsed_ms": max(int(elapsed_ms or 0), 0),
         "ok": ok,
         "result_count": int(summary.get("result_count") or 0),
-        "result_ids": result_ids[:5],
+        "result_ids": result_ids[:PUBLIC_QUESTION_PREVIEW_LIMIT],
         "result_preview": result_preview,
         "selected_question_id": _selected_question_id(state),
         "fallback_used": bool(summary.get("fallback_used", False)),

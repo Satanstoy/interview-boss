@@ -8,19 +8,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents.chat.chat_constants import (
+    CANDIDATE_QUESTION_MARKER,
+    CANDIDATE_QUESTION_PROMPT,
+)
 from app.agents.chat.coverage_config import (
     InterviewPhase,
     get_coverage_thresholds,
 )
+from app.agents.chat.decision_config import DecisionConfig
 from app.agents.chat.question_plan import (
     _big_tech_phase_counts,
     _build_interview_ledger,
-    _count_consecutive_similar_user_answers,
 )
-
-SOFT_CLOSE_MESSAGE_COUNT = 32
-STRONG_CLOSE_MESSAGE_COUNT = 44
-HARD_STOP_MESSAGE_COUNT = 56
 
 _STOP_PHASES = (
     InterviewPhase.PROJECT_FOLLOWUP,
@@ -28,10 +28,6 @@ _STOP_PHASES = (
     InterviewPhase.ALGORITHM_CODING,
     InterviewPhase.SYSTEM_DESIGN,
     InterviewPhase.BEHAVIORAL,
-)
-
-_CANDIDATE_QUESTION_PROMPT = (
-    "技术问题先到这里。你有什么想问我们的吗？"
 )
 
 
@@ -45,6 +41,7 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
     - ``close``: generate the final structured summary.
     """
 
+    config = state.get("decision_config") or DecisionConfig()
     message_count = len(state.get("message_history") or [])
     coverage = _coverage_status(state)
     missing_phases = [
@@ -61,17 +58,20 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
     }
 
     # Candidate repetition detection — hard guard before any other logic.
-    # Returns decision signals only; the caller (LLM / summary) generates
-    # the actual wording — no hardcoded messages here.
-    user_repeat_count = _count_consecutive_similar_user_answers(state)
-    if user_repeat_count >= 5:
+    # The repetition streak is computed in pipeline._step_classify and written
+    # to state; stop policy reads it instead of counting text again.
+    user_repeat_count = state.get("repetition_streak", 0)
+    if user_repeat_count >= config.candidate_repeat_close:
         return {
             **base,
             "action": "close",
             "mode": "forced_by_repetition",
             "reason": "candidate_repeated_answers_excessive",
         }
-    if user_repeat_count >= 3 and not _last_assistant_asked_candidate_question(state):
+    if (
+        user_repeat_count >= config.candidate_repeat_degraded
+        and not _last_assistant_asked_candidate_question(state)
+    ):
         return {
             **base,
             "action": "ask_candidate_question",
@@ -79,7 +79,7 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
             "reason": "candidate_repeated_answers",
         }
 
-    if message_count > HARD_STOP_MESSAGE_COUNT:
+    if message_count > config.hard_stop_message_count:
         return {
             **base,
             "action": "close",
@@ -87,7 +87,7 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
             "reason": "hard_stop_by_message_count",
         }
 
-    if all_covered and message_count >= SOFT_CLOSE_MESSAGE_COUNT:
+    if all_covered and message_count >= config.soft_close_message_count:
         if _last_assistant_asked_candidate_question(state):
             return {
                 **base,
@@ -100,12 +100,12 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
             "action": "ask_candidate_question",
             "mode": "wrap_up",
             "reason": "coverage_complete_ready_for_candidate_question",
-            "message": _CANDIDATE_QUESTION_PROMPT,
+            "message": CANDIDATE_QUESTION_PROMPT,
         }
 
     mode = (
         "strong_close"
-        if message_count >= STRONG_CLOSE_MESSAGE_COUNT
+        if message_count >= config.strong_close_message_count
         else "active"
     )
     return {
@@ -141,5 +141,5 @@ def _last_assistant_asked_candidate_question(state: dict[str, Any]) -> bool:
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
         content = str(msg.get("content") or "")
-        return "你有什么想问" in content
+        return CANDIDATE_QUESTION_MARKER in content
     return False

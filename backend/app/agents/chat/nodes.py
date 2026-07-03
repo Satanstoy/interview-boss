@@ -9,6 +9,15 @@ from app.services.llm import stream_llm_messages, _call_llm_with_retry, _extract
 from app.services import chat_service
 from app.services.fts_service import search_questions_fts
 from app.agents.chat.state import ChatState
+from app.agents.chat.chat_constants import (
+    CHAT_KEYWORDS,
+    PRACTICE_KEYWORDS,
+    END_KEYWORDS,
+    FOLLOW_UP_KEYWORDS,
+    FOLLOW_UP_MAX_LENGTH,
+    PUBLIC_QUESTION_PREVIEW_LIMIT,
+)
+from app.agents.chat.decision_config import DecisionConfig
 from app.agents.chat.question_plan import (
     _big_tech_next_focus,
     _build_big_tech_interview_harness_prompt,
@@ -41,6 +50,13 @@ RETRIEVED_BUDGET = 1000  # ~250 tokens
 RERANK_CANDIDATE_LIMIT = 15
 RERANK_RETURN_LIMIT = 5
 PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
+REASONING_LANGUAGE_GUARDRAIL = """## 语言约束
+你正在扮演中文面试官。所有输出都必须使用简体中文，包括：
+- 面向候选人的最终回复
+- reasoning_content / 推理过程 / 工具调用前后的分析
+- 面试节奏判断、追问依据和题目选择理由
+
+技术名词、代码、库名、英文原文引用可以保留英文，但不得用英文整句组织推理。"""
 
 
 def _count_chars(messages: list[dict]) -> int:
@@ -204,7 +220,15 @@ async def summarize_context(state: ChatState) -> dict:
 
 
 async def classify_intent(state: ChatState) -> dict:
-    """LLM 意图分类：判断用户消息类型"""
+    """LLM 意图分类：输出结构化 ClassifyResult。
+
+    Note: the live pipeline uses memory_recall_service.classify_and_recall.
+    This node is kept for backward compatibility / standalone usage and mirrors
+    the same structured output shape.
+    """
+    from app.agents.chat.classify_result import ClassifyResult
+    from app.services import llm as llm_service
+
     user_message = state["user_message"]
     recent = state.get("recent_messages", [])
 
@@ -220,66 +244,50 @@ async def classify_intent(state: ChatState) -> dict:
     lower_msg = user_message.lower()
 
     # 问候/闲聊关键词
-    chat_keywords = ["你好", "hello", "hi", "谢谢", "再见", "拜拜", "ok", "好的", "嗯"]
-    if any(kw == lower_msg.strip() for kw in chat_keywords):
-        return {"intent": "chat"}
+    if any(kw == lower_msg.strip() for kw in CHAT_KEYWORDS):
+        return ClassifyResult(intent="chat").to_state()
 
     # 练习请求关键词
-    practice_keywords = ["出题", "来一道", "换一个", "换个", "练习", "开始", "出个"]
-    if any(kw in user_message for kw in practice_keywords):
-        return {"intent": "practice_request"}
+    if any(kw in user_message for kw in PRACTICE_KEYWORDS):
+        return ClassifyResult(
+            intent="practice_request",
+            should_retrieve=True,
+            requires_bank_question=True,
+        ).to_state()
 
     # 结束面试关键词（优先于 practice_request，避免"结束"被误判为换题）
-    end_keywords = [
-        "结束面试",
-        "面试结束",
-        "面试到此",
-        "到此为止",
-        "面试先到这里",
-        "请你结束",
-        "请结束",
-        "生成面试总结",
-        "生成一份面试总结",
-        "面试总结",
-        "收尾吧",
-        "可以结束了",
-        "今天就到这里",
-        "先到这里吧",
-    ]
-    if any(kw in user_message for kw in end_keywords):
-        return {"intent": "end_interview"}
+    if any(kw in user_message for kw in END_KEYWORDS):
+        return ClassifyResult(
+            intent="end_interview",
+            transition_style="closing",
+        ).to_state()
 
     # 追问关键词
-    follow_up_keywords = [
-        "解释",
-        "详细",
-        "具体",
-        "为什么",
-        "怎么",
-        "能再说",
-        "不太明白",
-        "什么意思",
-    ]
-    if any(kw in user_message for kw in follow_up_keywords) and len(user_message) < 50:
-        return {"intent": "follow_up"}
+    if (
+        any(kw in user_message for kw in FOLLOW_UP_KEYWORDS)
+        and len(user_message) < FOLLOW_UP_MAX_LENGTH
+    ):
+        return ClassifyResult(intent="follow_up").to_state()
 
-    # 默认：用 LLM 分类
+    # 默认：用 LLM 分类并输出 JSON
     try:
         prompt = INTENT_CLASSIFY_PROMPT.format(
             user_message=user_message,
             recent_context=recent_context,
         )
-        result = await _call_llm_with_retry(prompt, user_id=state.get("user_id"))
-        intent = result.strip().lower()
-
-        valid_intents = {"interview_question", "practice_request", "chat", "follow_up"}
-        if intent in valid_intents:
-            return {"intent": intent}
+        result = await _call_llm_with_retry(
+            prompt,
+            user_id=state.get("user_id"),
+            response_format={"type": "json_object"},
+        )
+        parsed = _extract_json(result)
+        classify_result = ClassifyResult.from_dict(parsed)
+        return classify_result.to_state()
     except Exception as e:
         logger.warning(f"意图分类 LLM 调用失败: {e}")
 
     # 默认当作面试回答
-    return {"intent": "interview_question"}
+    return ClassifyResult.default().to_state()
 
 
 async def extract_keywords(state: ChatState) -> dict:
@@ -396,7 +404,9 @@ def should_retrieve(state: ChatState) -> bool:
     return state.get("answer_complete", False)
 
 
-def _determine_interview_phase(recent_count: int) -> str:
+def _determine_interview_phase(
+    recent_count: int, config: DecisionConfig | None = None
+) -> str:
     """根据对话轮数判定当前面试阶段
 
     目标：12-15 个问题，约 30-50 分钟（每题 ~2 条消息）。
@@ -404,14 +414,16 @@ def _determine_interview_phase(recent_count: int) -> str:
 
     Args:
         recent_count: 总消息数（不含当前用户消息）
+        config: 决策配置（可选，默认使用全局默认值）
     """
-    if recent_count <= 2:
+    cfg = config or DecisionConfig()
+    if recent_count <= cfg.phase_opening_max:
         return "开场阶段：候选人刚做完自我介绍。简短过渡（不要夸奖），直接问第一个技术问题，从项目深挖开始。"
-    if recent_count <= 32:
+    if recent_count <= cfg.phase_active_max:
         return "面试进行中。根据候选人回答和你的判断，自由穿插项目深挖、八股、算法。"
-    if recent_count <= 44:
+    if recent_count <= cfg.phase_soft_close_max:
         return "面试已进行较长时间。如果已覆盖项目、八股、算法至少各 1 轮，可以收尾。"
-    if recent_count <= 56:
+    if recent_count <= cfg.phase_strong_close_max:
         return "面试进入强收口阶段。只补最后一个未覆盖维度，或进入 HR/反问/收尾，不要开启新的长链路话题。"
     return '面试时间已到。请结束技术提问，问一句"你有什么想问的吗？"后收尾。'
 
@@ -1010,7 +1022,8 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     # 构建面试阶段提示（基于消息数，简单规则）
     total_message_count = len(state.get("message_history", []))
-    interview_phase = _determine_interview_phase(total_message_count)
+    config = state.get("decision_config") or DecisionConfig()
+    interview_phase = _determine_interview_phase(total_message_count, config)
 
     # 构建 system prompt
     if mode == "jd_resume":
@@ -1220,7 +1233,7 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
                 "company": _extract_company_from_sources(q),
                 "round": _extract_round_from_sources(q),
             }
-            for q in retrieved[:3]
+            for q in retrieved[:PUBLIC_QUESTION_PREVIEW_LIMIT]
         ]
 
     if basis["basis_question_ids"] and retrieved:
@@ -1305,10 +1318,52 @@ def _response_references_resume(response: str, resume_summary: str) -> bool:
         return False
     import re
 
+    resume_cues = (
+        "简历",
+        "履历",
+        "背景",
+        "项目经历",
+        "工作经历",
+        "你的经历",
+        "你在",
+        "你曾",
+        "你负责",
+        "你做过",
+    )
+    if not any(cue in response for cue in resume_cues):
+        return False
+
     cjk_words = re.findall(r"[\u4e00-\u9fff]{2,6}", resume_summary[:500])
     en_words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", resume_summary[:500])
-    keywords = list(set(cjk_words + en_words))[:15]
-    return any(kw in response for kw in keywords)
+    stopwords = {
+        "主要做",
+        "负责",
+        "包含",
+        "项目",
+        "经验",
+        "应用",
+        "方向",
+        "系统",
+        "能力",
+    }
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for word in cjk_words + en_words:
+        normalized = word.strip()
+        lookup = normalized.lower()
+        if len(normalized) < 3 or normalized in stopwords or lookup in seen:
+            continue
+        seen.add(lookup)
+        keywords.append(normalized)
+
+    hits = 0
+    response_lower = response.lower()
+    for keyword in keywords[:30]:
+        if keyword.lower() in response_lower:
+            hits += 1
+        if hits >= 2:
+            return True
+    return False
 
 
 def _response_references_jd(response: str, jd_text: str) -> bool:
@@ -1540,10 +1595,14 @@ async def extract_memory(state: ChatState) -> dict:
             qid = selected_question.get("id") or ""
             cat1 = str(selected_question.get("cat1") or "").strip()
             cat2 = str(selected_question.get("cat2") or "").strip()
-            qtype = str(state.get("question_type") or selected_question.get("tags") or "general").strip()
+            qtype = str(
+                state.get("question_type") or selected_question.get("tags") or "general"
+            ).strip()
             question = str(selected_question.get("question") or "")[:80]
             category = f"{cat1}/{cat2}".strip("/")
-            note_parts.append(f"[asked] {category} #{qid} [{qtype}]: {question}".strip())
+            note_parts.append(
+                f"[asked] {category} #{qid} [{qtype}]: {question}".strip()
+            )
 
         if note_parts:
             current_notes = state.get("session_notes", "")
@@ -1642,138 +1701,66 @@ async def generate_direct_response(state: ChatState) -> AsyncGenerator[dict, Non
 
 
 def _build_tool_strategy(state: ChatState) -> str:
-    """Build tool usage strategy guidance based on current intent and state.
+    """Build tool usage strategy guidance based on typed state fields.
 
-    核心原则：开场先自然澄清；进入正式追问轮次后，完整回答默认检索。
+    The heavy branching has moved to ``compute_tool_strategy``; this thin
+    wrapper preserves the call site in ``build_react_system_prompt``.
     """
-    intent = state.get("intent", "chat")
-    answer_complete = state.get("answer_complete", False)
-    has_retrieved = bool(state.get("retrieved_questions"))
-    active_skills = state.get("active_skills", [])
-    is_deep_dive = "project-deep-dive" in active_skills
-    harness_focus = _big_tech_next_focus(state).get("next_focus", {})
-    interview_state = state.get("interview_state") or {}
-    message_count = len(state.get("message_history", []) or [])
+    from app.agents.chat.tool_strategy import compute_tool_strategy
 
-    requires_bank_question = _should_require_bank_question(state)
+    strategy = compute_tool_strategy(state)
+    return strategy.to_prompt_text()
 
-    # Hard limit: if interviewer has been asking about the same topic 3+ times
-    # consecutively, force a topic switch instead of continuing.
-    from app.agents.chat.question_plan import _count_consecutive_similar_questions
 
-    consecutive_same_topic, topic_summary = _count_consecutive_similar_questions(state)
-    if consecutive_same_topic >= 2 and intent == "interview_question":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：你已连续多次追问同一话题，候选人未能有效回答。\n"
-            "必须：切换到完全不同的面试方向（如从项目转算法，或从八股转系统设计），"
-            "调用 draw_questions 换一个类型。\n"
-            f"之前的话题：{topic_summary}。不要再围绕这个话题追问。\n"
-            "禁止：继续围绕同一话题追问或检索。\n"
-            "</tool_strategy>"
-        )
+def build_runtime_tool_contract_message(state: ChatState) -> str:
+    """Build a short current-turn tool contract for ReAct messages.
 
-    if intent == "end_interview":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户明确要求结束面试。\n"
-            "严格禁止：不得调用任何工具（load_skill / search_questions / draw_questions）。\n"
-            "必须：直接生成面试总结或简单收尾，然后结束。\n"
-            "</tool_strategy>"
-        )
+    This belongs to prompt construction: it does not execute tools or retry the
+    model. The ReAct loop remains responsible only for sending messages to the
+    model and executing whatever valid tool calls the model returns.
+    """
+    from app.agents.chat.tool_strategy import compute_tool_strategy
 
-    if harness_focus.get("phase") == "wrap_up":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：核心评估维度已覆盖，进入收尾。\n"
-            "严格禁止：不要再调用 search_questions / draw_questions 出新题。\n"
-            "必须：如果还没问过候选人反问，问“你有什么想问我们的吗？”；"
-            "如果已经问过反问，则简短回应后结束面试。\n"
-            "</tool_strategy>"
-        )
+    strategy = compute_tool_strategy(state)
+    if not strategy.requires_retrieval:
+        return ""
 
-    if message_count >= 44:
-        next_focus = interview_state.get("next_focus") or harness_focus.get("phase")
-        return (
-            "<tool_strategy>\n"
-            "当前状态：面试已进入强收口阶段。\n"
-            "必须：只补最后一个未覆盖维度，或进入 HR/反问/收尾；"
-            "不要继续自由项目深挖，不要开启新的长链路话题。\n"
-            f"最后缺口：{next_focus or '未知'}。\n"
-            "</tool_strategy>"
-        )
+    allowed = []
+    if strategy.allow_search:
+        allowed.append("search_questions")
+    if strategy.allow_draw:
+        allowed.append("draw_questions")
+    allowed_text = ", ".join(allowed) if allowed else "none"
+    lines = [
+        "[当前回合工具策略]",
+        "requires_retrieval=true",
+        f"allowed_question_tools={allowed_text}",
+        "请在回答候选人前先调用允许的题库工具；不要直接输出自然语言问题。",
+    ]
+    if strategy.next_phase_hint:
+        lines.append(f"next_phase_hint={strategy.next_phase_hint}")
+    return "\n".join(lines)
 
-    if intent == "interview_question" and answer_complete and not has_retrieved and requires_bank_question:
-        if harness_focus.get("tool") == "draw_questions":
-            question_type = harness_focus.get("question_type") or "new_question"
-            phase = harness_focus.get("phase") or question_type
-            reason = harness_focus.get("reason") or "补齐面试覆盖维度"
-            return (
-                "<tool_strategy>\n"
-                "当前状态：用户刚回答完面试问题，且大厂 full-loop 覆盖存在缺口。\n"
-                f"必须：调用 draw_questions(question_type=\"{question_type}\") 进入 {phase} 维度；"
-                "不要继续围绕同一项目或同一 RAG 主题检索追问。\n"
-                f"原因：{reason}。\n"
-                "</tool_strategy>"
-            )
-        if is_deep_dive:
-            return (
-                "<tool_strategy>\n"
-                "当前状态：用户回答完毕，项目深挖模式，且还没有候选题。\n"
-                "必须：从用户回答中提取 2-5 个技术关键词，调用 search_questions 检索追问题；"
-                "不要直接基于对话继续追问，以免跳过题库选题和 question_plan 绑定。\n"
-                "</tool_strategy>"
-            )
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户刚回答完面试问题。\n"
-            "必须：从用户回答中提取 2-5 个技术关键词，调用 search_questions 检索追问题。\n"
-            "如果需要切换面试类型（如从项目深挖转理论），先调用 load_skill。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "interview_question" and answer_complete and not has_retrieved:
-        return (
-            "<tool_strategy>\n"
-            "当前状态：候选人刚完成开场自我介绍或早期背景说明。\n"
-            "建议：不调用题库工具，先基于候选人的项目、技术栈和职责做自然追问；"
-            "等候选人回答过一轮具体项目细节后，再根据需要检索题库绑定正式问题。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "interview_question" and answer_complete and has_retrieved:
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户回答完毕，已有检索结果。\n"
-            "建议：直接使用已检索的题目进行追问，无需再次检索。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "interview_question" and not answer_complete:
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户尚未回答完毕。\n"
-            "建议：不调用工具，等待用户完成回答或给出追问引导。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "practice_request":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户请求练习。\n"
-            "必须：调用 search_questions 检索相关题目，结果不足时用 draw_questions 补充。\n"
-            "</tool_strategy>"
-        )
-    elif intent == "follow_up":
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户在追问或确认。\n"
-            "建议：基于上下文直接回答，如需补充题目再调用 search_questions。\n"
-            "</tool_strategy>"
-        )
-    else:  # chat
-        return (
-            "<tool_strategy>\n"
-            "当前状态：用户在闲聊或过渡。\n"
-            "建议：不调用工具，自然回复后引导回面试。\n"
-            "</tool_strategy>"
-        )
+
+def _format_runtime_state_prompt(state: ChatState) -> str:
+    """Render the current turn's typed routing state for the LLM."""
+
+    lines = ["## 当前回合状态"]
+    for key, label in (
+        ("answer_quality", "回答质量"),
+        ("should_retrieve", "需要检索"),
+        ("transition_style", "过渡风格"),
+        ("escalation_level", "追问升级层级"),
+        ("off_topic_streak", "连续答非所问"),
+        ("repetition_streak", "连续重复回答"),
+        ("requires_bank_question", "必须绑定题库"),
+    ):
+        value = state.get(key)
+        if value not in (None, ""):
+            lines.append(f"- {label}: {value}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
 
 
 def _format_interview_state_prompt(state: ChatState) -> str:
@@ -1826,7 +1813,8 @@ def build_react_system_prompt(state: ChatState) -> str:
     memory_summaries = state.get("memory_summaries", [])
     compressed = state.get("compressed_context")
     total_message_count = len(state.get("message_history", []))
-    interview_phase = _determine_interview_phase(total_message_count)
+    config = state.get("decision_config") or DecisionConfig()
+    interview_phase = _determine_interview_phase(total_message_count, config)
 
     # Layer 1: Base prompt
     if mode == "jd_resume" and state.get("jd_text"):
@@ -1866,7 +1854,13 @@ def build_react_system_prompt(state: ChatState) -> str:
             basis_guidance="",
         )
 
-    parts = [base]
+    parts = [base, REASONING_LANGUAGE_GUARDRAIL]
+
+    # Layer 1.5: Runtime classification state so the LLM can route naturally
+    # instead of relying on hardcoded prompt rules.
+    runtime_state = _format_runtime_state_prompt(state)
+    if runtime_state:
+        parts.append(runtime_state)
 
     # Layer 2: Memory summaries
     if memory_summaries:

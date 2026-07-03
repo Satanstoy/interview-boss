@@ -17,6 +17,12 @@ from app.agents.chat.nodes import (
     _question_plan_adherence,
     _repair_response_to_question_plan,
 )
+from app.agents.chat.chat_constants import (
+    FALLBACK_PROJECT_DEEP_DIVE,
+    FALLBACK_ALGORITHM_CODING,
+    FALLBACK_GENERIC,
+    FALLBACK_EMPTY_QUESTION,
+)
 from app.agents.chat.state import ChatState
 from app.agents.chat.tools import SKILL_NAMES
 from app.agents.shared.events import _event_queue_var
@@ -112,9 +118,7 @@ def _fallback_coding_question(state: ChatState) -> str:
         haystack = " ".join(
             str(q.get(k) or "") for k in ("question", "cat1", "cat2", "tags")
         )
-        if re.search(
-            r"(算法|代码|手撕|数据结构|链表|排序|二分)", haystack, re.I
-        ):
+        if re.search(r"(算法|代码|手撕|数据结构|链表|排序|二分)", haystack, re.I):
             coding_candidate = q
             break
     if coding_candidate:
@@ -178,12 +182,16 @@ async def _enforce_question_plan_on_text(
         plan=plan,
     )
     repaired_text = str(repair.get("response") or "").strip()
-    repaired_adherence = repair.get("adherence") or _question_plan_adherence(repaired_text, plan)
-    metadata.update({
-        "adherence": repaired_adherence,
-        "repaired": True,
-        "repair_reason": repair.get("reason", "plan_drift_repaired"),
-    })
+    repaired_adherence = repair.get("adherence") or _question_plan_adherence(
+        repaired_text, plan
+    )
+    metadata.update(
+        {
+            "adherence": repaired_adherence,
+            "repaired": True,
+            "repair_reason": repair.get("reason", "plan_drift_repaired"),
+        }
+    )
 
     if repaired_text and repaired_adherence.get("adheres"):
         state["question_plan_metadata"] = metadata
@@ -203,7 +211,10 @@ async def _enforce_question_plan_on_text(
         return rewritten
 
     # Last resort: deterministic fallback (no LLM available)
-    fallback = _format_bank_question_fallback(question_text, style="plan")
+    transition_style = state.get("transition_style", "natural")
+    fallback = _format_bank_question_fallback(
+        question_text, style="plan", transition_style=transition_style
+    )
     metadata["fallback_used"] = True
     metadata["adherence"] = _question_plan_adherence(fallback, plan)
     metadata["transition_source"] = "deterministic_fallback"
@@ -216,7 +227,7 @@ async def _enforce_question_plan_on_text(
 
 
 def _normalize_react_marker(text: str) -> str:
-    return text.strip().strip("`'\"""''").lower()
+    return text.strip().strip("`'\"''").lower()
 
 
 def _is_internal_react_marker(text: str) -> bool:
@@ -313,10 +324,12 @@ def _format_bank_question_fallback(
     question_text: str,
     *,
     style: str = "candidate",
+    transition_style: str = "natural",
 ) -> str:
     """Deterministic fallback when LLM rewrite is not available.
 
     Only used as last resort (LLM rewrite failed or not attempted).
+    The wording is chosen by ``transition_style`` instead of a hardcoded prefix.
     """
     question = (question_text or "").strip()
     if not question:
@@ -324,8 +337,14 @@ def _format_bank_question_fallback(
             "我先追问你刚才提到的一个点。选一个你最熟的模块，"
             "把关键设计和你当时做的取舍讲清楚。"
         )
-    if style == "plan":
-        return f"好，{question}"
+
+    transition_style = (transition_style or "natural").lower()
+    if transition_style == "from_candidate_keyword":
+        return f"顺着你说到的方向，{question}"
+    if transition_style == "pivot":
+        return f"{question}"
+    if transition_style == "closing":
+        return f"{question}"
     return f"好，{question}"
 
 
@@ -334,12 +353,16 @@ def _fallback_react_answer(state: ChatState, reason: str) -> str:
     candidates = (
         state.get("candidate_questions") or state.get("retrieved_questions") or []
     )
+    transition_style = state.get("transition_style", "natural")
     if candidates:
         selected = candidates[0]
         state["selected_question"] = selected
         state["question_source"] = state.get("question_source") or "search"
         state["question_source_reason"] = f"fallback_after_{reason}"
-        return _format_bank_question_fallback(str(selected.get("question") or ""))
+        return _format_bank_question_fallback(
+            str(selected.get("question") or ""),
+            transition_style=transition_style,
+        )
 
     state["question_source"] = "conversation"
     state["question_source_reason"] = f"fallback_after_{reason}"
@@ -402,6 +425,7 @@ async def _stream_final_answer(
     repeated responses before they reach the user.
     """
     chunks: list[str] = []
+    streamed_any = False
 
     # Track thinking lifecycle for synthesizing thinking_done
     is_thinking = False
@@ -433,27 +457,38 @@ async def _stream_final_answer(
                         if thinking_start_time
                         else 0
                     )
-                    _emit({
-                        "type": "thinking_done",
-                        "duration": duration,
-                        "content": thinking_content,
-                    })
+                    _emit(
+                        {
+                            "type": "thinking_done",
+                            "duration": duration,
+                            "content": thinking_content,
+                        }
+                    )
                 chunks.append(content)
+                if content:
+                    streamed_any = True
+                    yield {"type": "chunk", "content": content}
         else:
             chunks.append(event)
+            if event:
+                streamed_any = True
+                yield {"type": "chunk", "content": event}
 
     # Handle case where stream ended while still in thinking mode
     if is_thinking:
         duration = (
             round(time.time() - thinking_start_time, 1) if thinking_start_time else 0
         )
-        _emit({
-            "type": "thinking_done",
-            "duration": duration,
-            "content": thinking_content,
-        })
+        _emit(
+            {
+                "type": "thinking_done",
+                "duration": duration,
+                "content": thinking_content,
+            }
+        )
 
-    final_text = "".join(chunks)
+    streamed_text = "".join(chunks)
+    final_text = streamed_text
     if _is_internal_react_marker(final_text):
         final_text = _fallback_interviewer_response(final_text, state)
     final_text = _ensure_final_answer_quality(final_text, state)
@@ -470,11 +505,17 @@ async def _stream_final_answer(
                 state.get("conversation_id"),
             )
             # Inject note and regenerate once
-            messages.append({
-                "role": "user",
-                "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "【系统提示】你刚才的回答和之前的完全相同，请换一个角度或切换话题。",
+                }
+            )
+            first_replacement = streamed_any
             async for event in _regenerate_after_dup(messages, state):
+                if first_replacement and event.get("type") == "chunk":
+                    event = {**event, "replace": True}
+                    first_replacement = False
                 yield event
             return
         elif dup_result == "similar":
@@ -483,17 +524,25 @@ async def _stream_final_answer(
                 state.get("conversation_id"),
             )
             # Inject note and regenerate once
-            messages.append({
-                "role": "user",
-                "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "【系统提示】你刚才的回答和之前的高度相似，请用不同的话术重新回答。",
+                }
+            )
+            first_replacement = streamed_any
             async for event in _regenerate_after_dup(messages, state):
+                if first_replacement and event.get("type") == "chunk":
+                    event = {**event, "replace": True}
+                    first_replacement = False
                 yield event
             return
         else:
             deduplicator.record(final_text)
 
-    if final_text:
+    if final_text and final_text != streamed_text:
+        yield {"type": "chunk", "content": final_text, "replace": streamed_any}
+    elif final_text and not streamed_any:
         yield {"type": "chunk", "content": final_text}
 
 

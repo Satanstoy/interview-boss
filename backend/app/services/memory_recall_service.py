@@ -412,7 +412,7 @@ def _infer_rule_based_rewrite(
 
 # ── 合并 Prompt ──
 
-INTENT_AND_MEMORY_PROMPT = """分析用户的最新消息，完成四个任务：
+INTENT_AND_MEMORY_PROMPT = """分析用户的最新消息，完成以下任务：
 
 ## 任务1: 意图分类
 从以下类别中选择一个:
@@ -461,17 +461,36 @@ search_query = keywords 用空格拼接即可。
 - 面试官问"说说 Redis 缓存穿透" → {{"retrieval_intent": "find_similar", "main_topic": "Redis 缓存穿透", "positive_terms": ["Redis", "缓存穿透", "布隆过滤器"], "negative_terms": []}}
 - 面试官问"高并发怎么做" → {{"retrieval_intent": "find_similar", "main_topic": "高并发限流", "positive_terms": ["高并发", "限流", "令牌桶"], "negative_terms": []}}
 
-## 任务5: 回答完整性判断
-判断用户对当前面试问题的回答是否完整（面试官可以出下一道题了）。
+## 任务5: 回答质量与路由状态判断
+根据用户最新消息和最近对话，输出以下结构化状态字段：
 
-answer_complete 判断标准：
-- true: 用户明确表示回答完毕（"就这些"、"答完了"、"大概就是这样"）
-- true: 用户给出了完整的项目描述或技术方案（有开头有结尾，超过 30 字）
-- false: 用户只说了几个关键词或片段（"用了 Redis"、"微服务"）
-- false: 用户在反问或确认（"你是说...？"、"这样对吗？"）
-- false: 用户说"嗯"、"好的"等过渡词（可能是思考中）
+- answer_quality: 回答质量，五选一
+  - complete: 回答完整，可进入下一题/检索
+  - incomplete: 只给片段、反问确认、过渡词
+  - off_topic: 回答与问题明显不相关
+  - repeated: 与之前回答实质重复
+  - vague: 笼统、背书式、缺乏细节
+- should_retrieve: boolean（本轮是否需要先调用 search_questions / draw_questions）
+  - true 当 intent=interview_question 且 answer_quality 为 complete/vague，且当前没有未使用候选题
+  - true 当 intent=practice_request
+  - false 当 intent=chat/follow_up/end_interview 或 answer_quality 为 incomplete/off_topic/repeated
+- transition_style: 过渡风格，四选一
+  - natural: 正常承接
+  - from_candidate_keyword: 用候选人上一个回答中的技术关键词承接
+  - pivot: 明确切换方向
+  - closing: 进入收尾
+- escalation_level: 0-3，同一问题/话题的追问升级层级
+  - 0: 正常回答或首次追问
+  - 1: 已指出问题/要求展开
+  - 2: 已给出提示或缩小范围
+  - 3: 必须放弃当前问题换方向
+- requires_bank_question: boolean（本轮是否必须绑定题库题目）
+  - true 当 intent=practice_request 或明确请求算法/代码题
+  - false 当开场前 N 轮或 answer_quality 为 incomplete/off_topic/repeated
 
-注意: 如果意图不是 interview_question（如闲聊、追问），answer_complete 设为 false。
+判断标准:
+- answer_complete 等价于 answer_quality 为 complete 或 vague
+- 如果意图不是 interview_question，answer_quality 设为 complete，should_retrieve 设为 false
 
 ## 可用记忆
 {memory_list}
@@ -485,7 +504,7 @@ answer_complete 判断标准：
 {recent_context}
 
 严格返回JSON格式:
-{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "answer_complete": true/false}}"""
+{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "classify_result": {{"answer_quality": "...", "should_retrieve": true/false, "transition_style": "...", "escalation_level": 0, "requires_bank_question": true/false}}}}"""
 
 
 # ── 规则预判断（零 LLM 成本）──
@@ -529,6 +548,63 @@ _END_INTERVIEW_KEYWORDS = [
     "今天就到这里",
     "先到这里吧",
 ]
+_END_INTERVIEW_LIFECYCLE_HINTS = [
+    "数据流",
+    "流程",
+    "系统",
+    "模块",
+    "链路",
+    "pipeline",
+    "metadata",
+    "trace",
+    "rag",
+    "工具调用",
+    "题目选择",
+    "落库",
+    "从候选人",
+    "进来到",
+]
+_END_INTERVIEW_DIRECT_PREFIXES = (
+    "请",
+    "帮我",
+    "麻烦",
+    "我要",
+    "我想",
+    "可以",
+    "能不能",
+    "我们",
+    "今天",
+    "先",
+    "就",
+)
+
+
+def _is_explicit_end_interview_request(message: str) -> bool:
+    """Return True only when the user is asking to end this interview.
+
+    Candidate answers may mention lifecycle phrases such as "面试结束时" while
+    describing an interview product. Those should stay interview_question.
+    """
+
+    text = str(message or "").strip()
+    if not text:
+        return False
+
+    has_end_keyword = any(keyword in text for keyword in _END_INTERVIEW_KEYWORDS)
+    if not has_end_keyword:
+        return False
+
+    lower = text.lower()
+    looks_like_product_lifecycle = len(text) > 50 and any(
+        hint in lower or hint in text for hint in _END_INTERVIEW_LIFECYCLE_HINTS
+    )
+    if looks_like_product_lifecycle:
+        return False
+
+    if len(text) <= 50:
+        return True
+
+    return text.startswith(_END_INTERVIEW_DIRECT_PREFIXES)
 
 
 def _rule_based_intent(message: str) -> str | None:
@@ -539,10 +615,9 @@ def _rule_based_intent(message: str) -> str | None:
         if kw == lower:
             return "chat"
 
-    # end_interview 检测优先于 practice_request（"结束面试" 包含 "结束" 但不是换题）
-    for kw in _END_INTERVIEW_KEYWORDS:
-        if kw in message:
-            return "end_interview"
+    # end_interview 检测优先于 practice_request，但必须是明确结束请求。
+    if _is_explicit_end_interview_request(message):
+        return "end_interview"
 
     for kw in _PRACTICE_KEYWORDS:
         if kw in message:
@@ -606,12 +681,14 @@ async def classify_and_recall_fast(
     user_message: str,
     memory_summaries: list[dict],
     recent_context: str = "",
-) -> tuple[str, list[int], list[str], str, bool, dict]:
+) -> tuple[str, list[int], list[str], str, bool, dict, dict]:
     """快速分类 + 记忆召回（零 LLM 成本）
 
     Returns:
-        (intent, memory_ids, keywords, search_query, answer_complete, structured_rewrite)
+        (intent, memory_ids, keywords, search_query, answer_complete, structured_rewrite, classify_result)
     """
+    from app.agents.chat.classify_result import ClassifyResult
+
     intent = _rule_based_intent(user_message) or "interview_question"
     keywords = _extract_keywords_fallback(user_message)
     search_query = " ".join(keywords) if keywords else ""
@@ -620,6 +697,12 @@ async def classify_and_recall_fast(
 
     structured_rewrite = _infer_rule_based_rewrite(user_message, keywords, intent)
 
+    classify_result = _build_classify_result(
+        intent=intent,
+        answer_complete=answer_complete,
+        question_type=structured_rewrite.get("question_type"),
+    ).to_state()
+
     return (
         intent,
         memory_ids,
@@ -627,6 +710,60 @@ async def classify_and_recall_fast(
         search_query,
         answer_complete,
         structured_rewrite,
+        classify_result,
+    )
+
+
+def _build_classify_result(
+    *,
+    intent: str,
+    answer_complete: bool,
+    question_type: str | None = None,
+    llm_classify: dict | None = None,
+) -> "ClassifyResult":
+    """Build a ClassifyResult from rule/LLM inputs.
+
+    The LLM may suggest routing fields; rules provide a safety floor.
+    """
+    from app.agents.chat.classify_result import ClassifyResult
+
+    llm = llm_classify or {}
+    quality = str(llm.get("answer_quality") or "").strip()
+    if quality not in ("complete", "incomplete", "off_topic", "repeated", "vague"):
+        quality = "complete" if answer_complete else "incomplete"
+
+    should_retrieve = bool(llm.get("should_retrieve", False))
+    if intent in ("chat", "follow_up", "end_interview"):
+        should_retrieve = False
+    elif quality in ("incomplete", "off_topic", "repeated"):
+        should_retrieve = False
+    elif intent == "practice_request":
+        should_retrieve = True
+
+    requires_bank = bool(llm.get("requires_bank_question", False))
+    if intent == "practice_request":
+        requires_bank = True
+    elif quality in ("incomplete", "off_topic", "repeated"):
+        requires_bank = False
+
+    transition = str(llm.get("transition_style") or "").strip()
+    if transition not in ("natural", "from_candidate_keyword", "pivot", "closing"):
+        transition = "natural"
+
+    escalation = llm.get("escalation_level", 0)
+    try:
+        escalation = max(0, min(3, int(escalation)))
+    except (TypeError, ValueError):
+        escalation = 0
+
+    return ClassifyResult(
+        intent=intent,  # type: ignore[arg-type]
+        answer_quality=quality,  # type: ignore[arg-type]
+        question_type=question_type,  # type: ignore[arg-type]
+        should_retrieve=should_retrieve,
+        transition_style=transition,  # type: ignore[arg-type]
+        escalation_level=escalation,
+        requires_bank_question=requires_bank,
     )
 
 
@@ -635,19 +772,35 @@ async def classify_and_recall(
     recent_context: str,
     memory_summaries: list[dict],
     user_id: int,
-) -> tuple[str, list[int], list[str], str, bool, dict]:
+) -> tuple[str, list[int], list[str], str, bool, dict, dict]:
     """合并意图分类 + 记忆召回 + 检索查询生成 + 回答完整性判断（单次 LLM 调用）
 
     Returns:
-        (intent, relevant_memory_ids, keywords, search_query, answer_complete, structured_rewrite)
+        (intent, relevant_memory_ids, keywords, search_query, answer_complete, structured_rewrite, classify_result)
     """
+    from app.agents.chat.classify_result import ClassifyResult
+
     rule_intent = _rule_based_intent(user_message)
     if rule_intent == "chat":
         structured = _infer_rule_based_rewrite(user_message, [], "chat")
-        return "chat", [], [], "", False, structured
+        classify_result = ClassifyResult(
+            intent="chat",
+            answer_quality="complete",
+            should_retrieve=False,
+            transition_style="natural",
+            requires_bank_question=False,
+        ).to_state()
+        return "chat", [], [], "", False, structured, classify_result
     if rule_intent == "end_interview":
         structured = _infer_rule_based_rewrite(user_message, [], "end_interview")
-        return "end_interview", [], [], "", False, structured
+        classify_result = ClassifyResult(
+            intent="end_interview",
+            answer_quality="complete",
+            should_retrieve=False,
+            transition_style="closing",
+            requires_bank_question=False,
+        ).to_state()
+        return "end_interview", [], [], "", False, structured, classify_result
 
     # Rules are now only hints, not authoritative
     rule_hint = ""
@@ -677,6 +830,10 @@ async def classify_and_recall(
         intent = parsed.get("intent", "interview_question")
         valid_intents = {"interview_question", "end_interview", "practice_request", "chat", "follow_up"}
         if intent not in valid_intents:
+            intent = "interview_question"
+        if intent == "end_interview" and not _is_explicit_end_interview_request(
+            user_message
+        ):
             intent = "interview_question"
 
         # 验证 memory IDs
@@ -719,6 +876,14 @@ async def classify_and_recall(
         if not isinstance(answer_complete, bool):
             answer_complete = False
 
+        llm_classify = parsed.get("classify_result") if isinstance(parsed.get("classify_result"), dict) else {}
+        classify_result = _build_classify_result(
+            intent=intent,
+            answer_complete=answer_complete,
+            question_type=structured_rewrite.get("question_type"),
+            llm_classify=llm_classify,
+        ).to_state()
+
         return (
             intent,
             memory_ids,
@@ -726,6 +891,7 @@ async def classify_and_recall(
             search_query,
             answer_complete,
             structured_rewrite,
+            classify_result,
         )
 
     except Exception as e:
@@ -734,7 +900,12 @@ async def classify_and_recall(
         keywords = _extract_keywords_fallback(user_message)
         answer_complete = _heuristic_answer_complete(user_message)
         structured = _infer_rule_based_rewrite(user_message, keywords, intent)
-        return intent, [], keywords, " ".join(keywords), answer_complete, structured
+        classify_result = _build_classify_result(
+            intent=intent,
+            answer_complete=answer_complete,
+            question_type=structured.get("question_type"),
+        ).to_state()
+        return intent, [], keywords, " ".join(keywords), answer_complete, structured, classify_result
 
 
 async def _classify_intent_only(
@@ -753,6 +924,10 @@ async def _classify_intent_only(
 
         valid_intents = {"interview_question", "end_interview", "practice_request", "chat", "follow_up"}
         if intent in valid_intents:
+            if intent == "end_interview" and not _is_explicit_end_interview_request(
+                user_message
+            ):
+                return "interview_question"
             return intent
     except Exception as e:
         logger.warning(f"意图分类 LLM 调用失败: {e}")

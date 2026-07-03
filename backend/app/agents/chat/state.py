@@ -3,6 +3,8 @@
 from typing import TypedDict, Annotated, Optional
 from operator import add
 
+from app.agents.chat.decision_config import DecisionConfig
+
 
 class BudgetSnapshotType(TypedDict, total=False):
     """预算快照类型（与 budget.BudgetSnapshot dataclass 对应）"""
@@ -45,6 +47,8 @@ class ChatState(TypedDict, total=False):
     interview_config: dict  # 会话级面试配置（难度、覆盖阈值、节奏来源）
     rhythm_profile: dict  # 面经节奏学习结果
     interview_state: dict  # InterviewLedger 派生的产品化快照
+    interview_stop_decision: dict  # 本轮进入 ReAct 前的停止策略判定
+    decision_config: DecisionConfig  # 面试决策阈值（可按对话覆盖）
 
     # === 上下文压缩 ===
     message_history: list[dict]  # 完整消息历史
@@ -53,8 +57,16 @@ class ChatState(TypedDict, total=False):
     budget_snapshot: Optional[BudgetSnapshotType]  # 上下文预算快照
 
     # === 意图分类 ===
-    intent: str  # 'interview_question' | 'practice_request' | 'chat' | 'follow_up'
+    intent: str  # 'interview_question' | 'practice_request' | 'chat' | 'follow_up' | 'end_interview'
     answer_complete: bool  # 用户回答是否完整（面试官可以出下一题）
+    answer_quality: str  # 'complete' | 'incomplete' | 'off_topic' | 'repeated' | 'vague'
+    should_retrieve: bool  # 本轮是否需要先调用 search_questions / draw_questions
+    transition_style: Optional[str]  # 'natural' | 'from_candidate_keyword' | 'pivot' | 'closing'
+    escalation_level: int  # 同一问题/话题追问升级层级 (0-3)
+    off_topic_streak: int  # 连续答非所问次数
+    repetition_streak: int  # 连续重复回答次数
+    requires_bank_question: bool  # 本轮是否必须绑定题库题目
+    classify_result: dict  # classify_intent 原始结构化结果快照
 
     # === RAG 检索 ===
     keywords: list[str]  # LLM 提取的检索关键词

@@ -67,6 +67,44 @@ def test_save_updates_existing_session(sample_state, client):
     assert loaded["active_skills"] == ["algorithm-coding", "theory-qa"]
 
 
+@pytest.mark.asyncio
+async def test_async_redis_session_roundtrip(sample_state, monkeypatch):
+    """Async Redis clients should be awaited instead of silently falling back."""
+    from app.mcp_server.session import (
+        load_mcp_session_async,
+        save_mcp_session_async,
+        new_session_id,
+    )
+
+    class AsyncRedisLike:
+        def __init__(self):
+            self.store = {}
+            self.get_awaits = 0
+            self.setex_awaits = 0
+
+        async def get(self, key):
+            self.get_awaits += 1
+            return self.store.get(key)
+
+        async def setex(self, key, ttl, value):
+            self.setex_awaits += 1
+            self.store[key] = value
+
+    redis = AsyncRedisLike()
+    monkeypatch.setattr("app.mcp_server.session._get_redis_pool", lambda: redis)
+
+    session_id = new_session_id()
+    await save_mcp_session_async(session_id, sample_state)
+    loaded = await load_mcp_session_async(session_id)
+
+    assert loaded is not None
+    assert loaded["active_skills"] == ["algorithm-coding"]
+    assert loaded["retrieved_questions"][0]["id"] == 1
+    assert "user_id" not in loaded
+    assert redis.get_awaits == 1
+    assert redis.setex_awaits == 1
+
+
 # ── Fix 3: internal ReAct path session persistence ─────────
 
 
@@ -116,7 +154,8 @@ class TestInternalReactSessionPersistence:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.agents.chat.pipeline.save_mcp_session",
+                "app.agents.chat.pipeline.save_mcp_session_async",
+                new_callable=AsyncMock,
             ) as mock_save,
         ):
             async for event in run_chat(
@@ -127,7 +166,7 @@ class TestInternalReactSessionPersistence:
             ):
                 pass
 
-        mock_save.assert_called_once()
+        mock_save.assert_awaited_once()
         call_args = mock_save.call_args
         session_id = call_args[0][0]
         assert session_id == "conv-persist-test"
@@ -176,7 +215,8 @@ class TestInternalReactSessionPersistence:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.agents.chat.pipeline.save_mcp_session",
+                "app.agents.chat.pipeline.save_mcp_session_async",
+                new_callable=AsyncMock,
             ) as mock_save,
         ):
             async for event in run_chat(

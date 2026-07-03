@@ -25,6 +25,7 @@ npx playwright test tests/e2e/     # E2E 测试
 - **禁止截图断言**：用文本/元素断言
 - **禁止真实密码**：测试数据用 fake 值
 - **测试先行**：先写失败测试，再写实现
+- **Chat reasoning 断言**：模拟面试 reasoning E2E 应断言用户可见文案“面试官推理”，并覆盖 `reasoning_trace.source=model_reasoning` 时 `thinking` 优先于 summary 的展示；`ReasoningTimeline.vue` 的连线式 timeline 需断言 `.reasoning-timeline-connector` 存在
 
 ## 修改后必做
 

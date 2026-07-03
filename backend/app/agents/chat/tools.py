@@ -15,6 +15,9 @@ from app.agents.chat.state import ChatState
 
 logger = logging.getLogger(__name__)
 
+# Relevance threshold for LLM rerank scores
+_RERANK_RELEVANCE_THRESHOLD = 0.3
+
 
 # ── Dependency Injection (for easy test mocking) ──────────
 
@@ -280,11 +283,95 @@ def _execute_load_skill(args: dict, state: ChatState) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+async def _llm_rerank_in_tool(
+    candidates: list[dict],
+    conversation_context: str,
+    user_id: int,
+    model: str = None,
+) -> list[dict]:
+    """LLM-based reranking inside search_questions tool.
+
+    Uses the LLM to score candidate questions by relevance to the current
+    conversation context. Filters by _RERANK_RELEVANCE_THRESHOLD.
+    Falls back to original order on failure.
+    """
+    if len(candidates) < 3:
+        return candidates
+
+    candidate_text = "\n".join(
+        f"{i+1}. [{q.get('cat1', '')}/{q.get('cat2', '')}] {q.get('question', '')}"
+        for i, q in enumerate(candidates[:15])
+    )
+
+    prompt = (
+        "根据以下面试对话上下文，对候选题目的相关性评分（0-1）。\n"
+        "只输出JSON，不要解释。\n\n"
+        f"对话上下文：\n{conversation_context[:500]}\n\n"
+        f"候选题目：\n{candidate_text}\n\n"
+        '输出格式：{"scores": [0.9, 0.3, 0.8, ...]}  # 与候选顺序一一对应'
+    )
+
+    try:
+        from app.services.llm import raw_llm_call
+
+        result = await raw_llm_call(
+            user_id=user_id,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=200,
+        )
+        parsed = json.loads(result)
+        scores = parsed.get("scores", [])
+
+        for i, q in enumerate(candidates[: len(scores)]):
+            q["_relevance_score"] = float(scores[i])
+
+        filtered = [
+            q
+            for q in candidates
+            if q.get("_relevance_score", 0) >= _RERANK_RELEVANCE_THRESHOLD
+        ]
+        filtered.sort(key=lambda q: q.get("_relevance_score", 0), reverse=True)
+
+        if filtered:
+            logger.info(
+                "LLM rerank: %d/%d candidates above threshold %.1f",
+                len(filtered),
+                len(candidates),
+                _RERANK_RELEVANCE_THRESHOLD,
+            )
+            return filtered[:5]
+
+        logger.info("LLM rerank: all candidates below threshold, using top 3")
+        return candidates[:3]
+
+    except Exception as e:
+        logger.warning("LLM rerank in search_questions failed: %s", e)
+        return candidates[:5]
+
+
 async def _execute_search_questions(args: dict, state: ChatState) -> str:
     """Search questions through the backend MCP tool boundary."""
     from app.mcp_server.interview_tools import search_questions_tool
 
     envelope = await search_questions_tool(args, state)
+
+    # LLM rerank: score candidates by relevance to conversation context
+    questions = envelope.get("questions", [])
+    if len(questions) >= 3:
+        recent = state.get("recent_messages", [])
+        context = "\n".join(
+            f"{'面试官' if m.get('role') == 'assistant' else '候选人'}: "
+            f"{m.get('content', '')[:100]}"
+            for m in recent[-4:]
+        )
+        reranked = await _llm_rerank_in_tool(
+            questions, context, state["user_id"], state.get("model")
+        )
+        envelope["questions"] = reranked
+        envelope["result_count"] = len(reranked)
+
     return json.dumps(envelope, ensure_ascii=False)
 
 

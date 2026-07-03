@@ -296,7 +296,7 @@ DEFAULT_COVERAGE_THRESHOLDS = {
 - `InterviewLedger` 中已问问题和类别计数。
 - 候选人上一轮回答是否完整。
 - 当前是否存在 `must_ask` question plan。
-- forced search guard 是否已经触发。
+- 是否存在 `retrieval_gap`（系统建议检索，但模型选择基于上下文自然追问）。
 
 ## 面经节奏学习
 

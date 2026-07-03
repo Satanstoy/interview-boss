@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.agents.chat.chat_constants import PUBLIC_QUESTION_PREVIEW_LIMIT
 from tests.chat.multi_turn_helpers import (
     run_single_turn,
     tool_call,
@@ -72,8 +73,8 @@ class TestSearchQuestionsRAG:
         assert call_kwargs["query_text"] == "Redis 缓存"
         assert call_kwargs["question_type"] == "knowledge_probe"
 
-    async def test_retrieved_event_contains_top3(self):
-        """RG2: 检索结果正确存入 retrieved_questions，SSE retrieved 事件包含 top-3"""
+    async def test_retrieved_event_contains_public_preview_limit(self):
+        """RG2: 检索结果正确存入 retrieved_questions，SSE retrieved 事件包含公开预览"""
         search_results = [
             make_question(101, "Redis 数据结构"),
             make_question(102, "Redis 分布式锁"),
@@ -114,10 +115,12 @@ class TestSearchQuestionsRAG:
             ],
         )
 
-        # Retrieved event should contain top 3
+        # Retrieved event should contain the public preview window, not every match.
         retrieved_events = [e for e in events if e["type"] == "retrieved"]
         assert len(retrieved_events) == 1
-        assert len(retrieved_events[0]["questions"]) == 3
+        assert len(retrieved_events[0]["questions"]) == min(
+            PUBLIC_QUESTION_PREVIEW_LIMIT, len(search_results)
+        )
 
         # First question should be the top result
         assert retrieved_events[0]["questions"][0]["id"] == 101

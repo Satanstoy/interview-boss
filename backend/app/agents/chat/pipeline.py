@@ -27,11 +27,13 @@ from app.agents.chat.state import ChatState
 from app.agents.chat.interview_state import build_interview_state_snapshot
 from app.agents.shared.events import _event_queue_var
 from app.services import chat_service
-from app.mcp_server.session import save_mcp_session
+from app.mcp_server.session import save_mcp_session_async
+from app.agents.chat.decision_config import get_decision_config
 from app.services.memory_recall_service import (
     classify_and_recall,
     classify_and_recall_fast,
 )
+
 # Re-exports from submodules (backward compatibility for tests and graph.py)
 from app.agents.chat.react_loop import (  # noqa: F401
     MAX_REACT_STEPS,
@@ -231,7 +233,11 @@ async def _step_classify(state: ChatState) -> ChatState:
 
     is_first_message = len(state.get("message_history", [])) <= 1
     if is_first_message:
-        _step("understanding", "正在理解你的问题...", reason=STEP_REASONS["understanding_first"])
+        _step(
+            "understanding",
+            "正在理解你的问题...",
+            reason=STEP_REASONS["understanding_first"],
+        )
         (
             intent,
             memory_ids,
@@ -239,13 +245,18 @@ async def _step_classify(state: ChatState) -> ChatState:
             search_query,
             answer_complete,
             structured_rewrite,
+            classify_result,
         ) = await classify_and_recall_fast(
             user_message=state["user_message"],
             memory_summaries=state.get("memory_summaries", []),
             recent_context=recent_context,
         )
     else:
-        _step("understanding", "正在分析你的回答...", reason=STEP_REASONS["understanding_follow"])
+        _step(
+            "understanding",
+            "正在分析你的回答...",
+            reason=STEP_REASONS["understanding_follow"],
+        )
         (
             intent,
             memory_ids,
@@ -253,6 +264,7 @@ async def _step_classify(state: ChatState) -> ChatState:
             search_query,
             answer_complete,
             structured_rewrite,
+            classify_result,
         ) = await classify_and_recall(
             user_message=state["user_message"],
             recent_context=recent_context,
@@ -264,6 +276,38 @@ async def _step_classify(state: ChatState) -> ChatState:
     state["keywords"] = keywords
     state["search_query"] = search_query
     state["answer_complete"] = answer_complete
+
+    # Spread structured classification fields into state.
+    if classify_result:
+        state["classify_result"] = classify_result
+        for key in (
+            "answer_quality",
+            "should_retrieve",
+            "transition_style",
+            "escalation_level",
+            "off_topic_streak",
+            "repetition_streak",
+            "requires_bank_question",
+        ):
+            if key in classify_result:
+                state[key] = classify_result[key]
+
+    # Compute reliable streak counters from message history and override LLM estimates.
+    if not is_first_message:
+        from app.agents.chat.question_plan import (
+            _count_consecutive_similar_questions,
+            _count_consecutive_similar_user_answers,
+        )
+
+        user_repeat = _count_consecutive_similar_user_answers(state)
+        assistant_repeat, _ = _count_consecutive_similar_questions(state)
+        state["repetition_streak"] = user_repeat
+        # If the user is repeating, upgrade answer_quality and escalate.
+        if user_repeat >= 1 and state.get("answer_quality") not in ("off_topic",):
+            state["answer_quality"] = "repeated"
+        # Assistant has pressed the same topic too many times.
+        if assistant_repeat >= 2:
+            state["escalation_level"] = max(state.get("escalation_level", 0), 2)
 
     if structured_rewrite:
         state["retrieval_intent"] = structured_rewrite.get("retrieval_intent")
@@ -374,16 +418,44 @@ def _add_interview_observability_metadata(
         ledger,
         state.get("rhythm_profile") or {},
     )
-    metadata["observability"] = {
+    observability = {
         "thinking_duration": metadata.get("thinking_duration", 0),
         "step_count": len(collected_steps),
         "active_skills": state.get("active_skills", []),
-        "tool_step_count": len(
-            collected_tool_steps or state.get("tool_steps", [])
-        ),
+        "tool_step_count": len(collected_tool_steps or state.get("tool_steps", [])),
         "tool_trace_persisted": False,
     }
+    stop_policy = _public_stop_policy_decision(state.get("interview_stop_decision"))
+    if stop_policy:
+        observability["stop_policy"] = stop_policy
+    metadata["observability"] = observability
     return metadata
+
+
+def _public_stop_policy_decision(decision: object) -> dict:
+    """Return a compact JSON-safe stop-policy trace for done metadata."""
+
+    if not isinstance(decision, dict):
+        return {}
+    public = {
+        "action": decision.get("action"),
+        "mode": decision.get("mode"),
+        "reason": decision.get("reason"),
+        "message_count": decision.get("message_count"),
+        "missing_phases": decision.get("missing_phases", []),
+    }
+    coverage = decision.get("coverage")
+    if isinstance(coverage, dict):
+        public["coverage"] = {
+            str(phase): {
+                "current_count": data.get("current_count"),
+                "threshold": data.get("threshold"),
+                "is_covered": data.get("is_covered"),
+            }
+            for phase, data in coverage.items()
+            if isinstance(data, dict)
+        }
+    return {key: value for key, value in public.items() if value is not None}
 
 
 def _refresh_interview_state_snapshot(state: ChatState) -> None:
@@ -398,6 +470,28 @@ def _refresh_interview_state_snapshot(state: ChatState) -> None:
         ledger,
         state.get("rhythm_profile") or {},
     )
+
+
+def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
+    """Record asked question to DB for cross-conversation dedup."""
+    selected = metadata.get("selected_question") or state.get("selected_question")
+    if not selected or not isinstance(selected, dict):
+        return
+    qid = selected.get("id")
+    if not qid:
+        return
+    try:
+        from app.db.operations import get_db_connection, record_asked_question
+
+        with get_db_connection() as conn:
+            record_asked_question(
+                conn,
+                user_id=state.get("user_id"),
+                conversation_id=state.get("conversation_id", ""),
+                question_id=int(qid),
+            )
+    except Exception as e:
+        logger.warning("Failed to record asked question %s: %s", qid, e)
 
 
 # ═══════════════════════════════════════════════════
@@ -444,6 +538,9 @@ async def run_chat(
             # 1. 加载上下文
             await _step_load_context(state)
             await _load_interview_config(state)
+            state["decision_config"] = get_decision_config(
+                state.get("interview_config")
+            )
             _refresh_interview_state_snapshot(state)
 
             # 2. 意图分类 + 关键词
@@ -470,6 +567,7 @@ async def run_chat(
                 if built_metadata:
                     metadata = built_metadata
                 response = clean_response
+                _record_asked_question_if_any(state, metadata)
                 _emit({"type": "basis", **_basis_event_payload(metadata)})
                 _emit({"type": "done", "metadata": metadata})
             else:
@@ -483,6 +581,8 @@ async def run_chat(
                         if built_metadata:
                             metadata = {**built_metadata, **metadata}
                         response = clean_response
+                        # Record asked question for cross-conversation dedup
+                        _record_asked_question_if_any(state, metadata)
                         _emit({"type": "basis", **_basis_event_payload(metadata)})
                         _emit({"type": "done", "metadata": metadata})
                         continue
@@ -502,7 +602,9 @@ async def run_chat(
 
             # Persist/clear cross-turn skills so turn-scoped modes do not stick.
             await _persist_active_skills(state)
-            save_mcp_session(state.get("session_id") or state["conversation_id"], state)
+            await save_mcp_session_async(
+                state.get("session_id") or state["conversation_id"], state
+            )
 
             # 后台记忆提取
             asyncio.create_task(_step_extract_memory(dict(state)))
@@ -596,7 +698,9 @@ async def run_chat(
                 )
                 metadata["steps"] = collected_steps
                 metadata["insights"] = collected_insights
-                metadata["tool_steps"] = collected_tool_steps or state.get("tool_steps", [])
+                metadata["tool_steps"] = collected_tool_steps or state.get(
+                    "tool_steps", []
+                )
                 metadata = _add_interview_observability_metadata(
                     metadata,
                     state,
