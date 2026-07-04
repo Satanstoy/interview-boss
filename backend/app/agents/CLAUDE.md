@@ -11,6 +11,7 @@ agents/
 ├── build/          ← 题库构建流程（备份→加载→聚类→生成答案→写入）
 ├── batch_generate/ ← 批量答案生成
 ├── chat/           ← 面试 chatbot（记忆召回→上下文构建→LLM 回复）
+├── candidate/      ← 评测框架候选人 Skill 包（供 scripts/eval_interview_agent.py 加载）
 └── shared/         ← submit/build/batch_generate 共享模块（state.py, events.py, quality.py）
 ```
 
@@ -22,6 +23,8 @@ agents/
 | `nodes.py` | 节点实现（每个节点是一个 async 函数） |
 | `state.py` | TypedDict 状态定义；submit/build/batch_generate 在 `shared/state.py`，chat 在 `chat/state.py` |
 | `prompts.py` | 提示词模板（如有；chat 有独立 prompts/pipeline/tools） |
+
+`candidate/` 当前只提供评测用 `skills/`，不是生产 LangGraph agent；新增候选人行为策略时保持标准 `SKILL.md` 目录结构，并通过 `get_agent_skill_registry("candidate")` 加载。
 
 ## 核心规则
 

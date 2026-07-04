@@ -57,6 +57,7 @@ backend/scripts/*
 !backend/scripts/CLAUDE.md
 !backend/scripts/check_embedding_health.py
 !backend/scripts/backfill_embeddings.py
+!backend/scripts/eval_interview_agent.py
 !backend/scripts/verify_chat_tools_real_e2e.py
 !backend/scripts/verify_interview_agent_real_e2e.py
 *.log

@@ -50,6 +50,7 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 - **Reasoning 字段回归**：模拟 MiMo/DeepSeek 时使用 `reasoning_content`，断言非流式 `message.reasoning_content` 和流式 `delta.reasoning_content` 都进入 `thinking`/metadata 链路
 - **Reasoning 语言契约**：`backend/tests/chat/test_react_prompt.py` 必须覆盖 `build_react_system_prompt()` 注入简体中文约束，确保 `reasoning_content` / 推理过程 / 工具调用分析默认要求中文
 - **最终回答流式契约**：`backend/tests/chat/test_react_loop.py` 必须覆盖 ReAct 非流式草稿不会直接展示，最终面向候选人的回复走 `stream_llm_messages()` 分块输出；工具决策/最终流式生成异常必须覆盖“有限重试或直接返回 error、不 fallback 成候选题模板”；相关 E2E 不要硬编码单个 chunk
+- **评测脚本契约**：`backend/tests/chat/test_eval_interview_agent.py` 覆盖 `backend/scripts/eval_interview_agent.py` 的场景矩阵、候选人 Skill 加载、SSE 指标提取、评分和报告输出；不得调用真实 HTTP 或真实 LLM。
 - **命名**：`test_<场景>_<预期行为>`
 - **Bug 回归**：`bugs/test_bug_xxx.py` 中每个 bug 对应 `BUG-XXX` ID
 

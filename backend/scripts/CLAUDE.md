@@ -8,6 +8,7 @@
 |------|------|
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
+| `eval_interview_agent.py` | 统一 Interview Agent 评测框架（多场景、LLM 候选人、评分、JSON/MD 报告） |
 | `verify_chat_tools_real_e2e.py` | 真实后端 + 真实 LLM 的 chat tools 稳定性手动 E2E 验证 |
 | `verify_interview_agent_real_e2e.py` | 真实后端面试官 + 轻量 LLM 候选人的多轮模拟面试质量验证 |
 | `verify_compaction_*.py` / `evaluate_clustering.py` | 聚类/孤岛碎片整理的真实库验证和质量评估 |
@@ -34,6 +35,10 @@ RUN_REAL_CHAT_E2E=1 \
 # 真实多轮模拟面试 E2E（会调用真实 LLM；候选人 agent 从 CANDIDATE_* 或系统 OPENAI_* env 读取配置）
 RUN_REAL_INTERVIEW_E2E=1 \
   docker compose exec backend uv run python backend/scripts/verify_interview_agent_real_e2e.py
+
+# 统一 Interview Agent 评测框架（会调用真实后端和候选人 LLM）
+RUN_REAL_INTERVIEW_EVAL=1 \
+  docker compose exec backend uv run python backend/scripts/eval_interview_agent.py --scenario error_correction
 ```
 
 ## Chat tools E2E 观测
@@ -43,6 +48,10 @@ RUN_REAL_INTERVIEW_E2E=1 \
 ## Interview agent E2E 观测
 
 `verify_interview_agent_real_e2e.py` 通过真实 `/api/chat` SSE 调用系统面试官，同时用轻量候选人 LLM actor 根据简历和能力画像作答。脚本只从环境变量或参数读取候选人 LLM 配置，默认拒绝运行，必须设置 `RUN_REAL_INTERVIEW_E2E=1`。候选人侧变量优先级为 `CANDIDATE_OPENAI_API_KEY` / `CANDIDATE_OPENAI_BASE_URL` / `CANDIDATE_LLM_MODEL`，缺省回退到系统 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `LLM_MODEL_NAME`。默认清理测试 conversation，传 `--keep-conversation` 才保留。
+
+## Interview Agent 评测框架
+
+`eval_interview_agent.py` 固化长程面试、错误纠正和结束策略场景。运行前必须设置 `RUN_REAL_INTERVIEW_EVAL=1`，候选人 LLM 从 `CANDIDATE_OPENAI_API_KEY`、`CANDIDATE_OPENAI_BASE_URL` 或设计文档中的 `CANDIDATE_LLM_BASE_URL`、`CANDIDATE_LLM_MODEL` 读取；面试官认证可用 `EVAL_USER_NAME`/`EVAL_USER_PASSWORD` 或内部短期 token。报告写入 `backend/data/evaluations/`，默认运行后删除测试 conversation，传 `--keep-conversation` 才保留。
 
 ## 安全警告
 
