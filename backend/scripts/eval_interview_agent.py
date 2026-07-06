@@ -400,8 +400,11 @@ def _resolve_candidate_config(args: argparse.Namespace) -> CandidateLLMConfig:
 def _resolve_judge_config(args: argparse.Namespace) -> JudgeLLMConfig | None:
     """Resolve judge LLM config from args and env vars.
 
-    Returns None if no judge API key is configured (falls back to rule-based scoring).
+    Priority: --judge-* CLI args > JUDGE_* env vars > OPENAI_* env vars (same as interviewer).
+    Returns None only if --no-llm-judge is set or no API key is available at all.
     """
+    if args.no_llm_judge:
+        return None
     api_key = (
         args.judge_api_key
         or os.getenv("JUDGE_OPENAI_API_KEY")
@@ -421,9 +424,15 @@ def _resolve_judge_config(args: argparse.Namespace) -> JudgeLLMConfig | None:
     model = (
         args.judge_model
         or os.getenv("JUDGE_LLM_MODEL")
-        or "gpt-4o"
+        or os.getenv("LLM_MODEL_NAME")
+        or "mimo-v2.5-pro"
     )
-    timeout = int(args.judge_timeout or os.getenv("JUDGE_LLM_TIMEOUT") or "120")
+    timeout = int(
+        args.judge_timeout
+        or os.getenv("JUDGE_LLM_TIMEOUT")
+        or os.getenv("LLM_TIMEOUT")
+        or "120"
+    )
     return JudgeLLMConfig(
         api_key=api_key,
         base_url=base_url,
@@ -988,6 +997,10 @@ def llm_score_scenario(
         result = score_scenario(scenario, metrics)
         result["judge_error"] = str(exc)
         result["judge_model"] = judge_config.model
+        result["fallback_notice"] = (
+            f"⚠️ LLM 评分失败（{judge_config.model}: {exc}），已降级为规则评分。"
+            f"规则评分使用关键词匹配，可能不够准确。"
+        )
         return result
 
 
@@ -1018,6 +1031,11 @@ def llm_generate_report(
     critical_issues = scores.get("critical_issues", [])
     highlights = scores.get("highlights", [])
     overall_score = scores.get("overall_score", 0)
+    fallback_notice = scores.get("fallback_notice", "")
+
+    fallback_section = ""
+    if fallback_notice:
+        fallback_section = f"\n\n## ⚠️ 降级提醒\n{fallback_notice}\n请注意：以下评分基于规则匹配（关键词+阈值），非 LLM 语义判断，评分可能不够准确。\n"
 
     prompt = f"""你是一位资深技术面试质量分析专家。请根据以下评测数据生成一份结构化的评测报告。
 
@@ -1027,7 +1045,7 @@ def llm_generate_report(
 - 总体得分: {overall_score:.2f}/1.00
 - 通过状态: {'通过' if scores.get('passed') else '未通过'}
 - 评测模型: {scores.get('judge_model', 'unknown')}
-
+{fallback_section}
 ## 各维度评分
 {score_summary}
 
@@ -1058,6 +1076,7 @@ def llm_generate_report(
 5. **改进建议** — 针对每个失败维度给出具体可操作的改进方向
 6. **代表性对话** — 挑选 2-3 段最能说明问题的对话片段
 
+{'注意：本次评分因 LLM 评分失败而使用了规则评分（关键词匹配），请在报告中明确标注这一限制。' if fallback_notice else ''}
 报告语言：中文简体。语气：专业、客观、有建设性。"""
 
     try:
@@ -1067,10 +1086,18 @@ def llm_generate_report(
             temperature=0.3,
             max_tokens=6000,
         )
+        # Prepend fallback notice if scoring used rule-based fallback
+        if fallback_notice:
+            report = f"> ⚠️ **降级提醒**: {fallback_notice}\n\n{report}"
         return report
     except Exception as exc:
         print(f"Warning: LLM report generation failed, falling back to template: {exc}", file=sys.stderr)
-        return _render_markdown_report(result, time.strftime("%Y%m%d_%H%M%S"))
+        template = _render_markdown_report(result, time.strftime("%Y%m%d_%H%M%S"))
+        notice = (
+            f"\n\n> ⚠️ **降级提醒**: LLM 报告生成失败（{judge_config.model}: {exc}），"
+            f"已降级为模板报告。模板报告仅包含结构化数据，缺少定性分析和改进建议。\n"
+        )
+        return notice + template
 
 
 def send_message_and_collect(
@@ -1291,11 +1318,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         auth_token = _resolve_token(args)
         candidate_config = _resolve_candidate_config(args)
-        judge_config = None if args.no_llm_judge else _resolve_judge_config(args)
+        judge_config = _resolve_judge_config(args)
         if judge_config:
             print(f"LLM Judge enabled: model={judge_config.model}, base_url={judge_config.base_url}")
         else:
-            print("LLM Judge disabled: using rule-based scoring.")
+            print("LLM Judge disabled: using rule-based scoring (set OPENAI_API_KEY or use --judge-api-key to enable).")
         scenario_ids = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
         all_passed = True
         for scenario_id in scenario_ids:

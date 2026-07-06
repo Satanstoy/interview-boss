@@ -281,7 +281,7 @@ def test_llm_score_scenario_parses_json_response(monkeypatch):
 
 
 def test_llm_score_scenario_fallback_on_parse_error(monkeypatch):
-    """LLM judge should fallback to rule-based on JSON parse error."""
+    """LLM judge should fallback to rule-based on JSON parse error with fallback notice."""
     module = _load_eval_module()
     scenario = module.SCENARIOS["long_session_mid"]
     turns = [{"user": "test", "assistant": "ok", "events": [], "latency_sec": 1.0}]
@@ -305,6 +305,10 @@ def test_llm_score_scenario_fallback_on_parse_error(monkeypatch):
     assert "items" in result
     assert "passed" in result
     assert result.get("judge_error") is not None
+    # Must include fallback notice
+    assert "fallback_notice" in result
+    assert "降级" in result["fallback_notice"]
+    assert "规则评分" in result["fallback_notice"]
 
 
 def test_llm_generate_report_uses_llm_output(monkeypatch):
@@ -340,7 +344,7 @@ def test_llm_generate_report_uses_llm_output(monkeypatch):
 
 
 def test_llm_generate_report_fallback_on_error(monkeypatch):
-    """LLM report should fallback to template on error."""
+    """LLM report should fallback to template with fallback notice."""
     module = _load_eval_module()
     result = {
         "scenario_id": "long_session_mid",
@@ -366,17 +370,30 @@ def test_llm_generate_report_fallback_on_error(monkeypatch):
     judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
     report = module.llm_generate_report(result, judge_config)
 
-    # Should fallback to template report
+    # Should fallback to template report with fallback notice
+    assert "降级提醒" in report
+    assert "LLM 报告生成失败" in report
     assert "# 评测报告：long_session_mid" in report
 
 
 def test_resolve_judge_config_returns_none_without_key(monkeypatch):
-    """No judge API key → returns None (falls back to rule-based)."""
+    """No API key at all → returns None (falls back to rule-based)."""
     module = _load_eval_module()
     parser = module._build_parser()
     monkeypatch.delenv("JUDGE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("JUDGE_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    args = parser.parse_args([])
+
+    config = module._resolve_judge_config(args)
+    assert config is None
+
+
+def test_resolve_judge_config_returns_none_when_explicitly_disabled(monkeypatch):
+    """--no-llm-judge → returns None even if API key exists."""
+    module = _load_eval_module()
+    parser = module._build_parser()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     args = parser.parse_args(["--no-llm-judge"])
 
     config = module._resolve_judge_config(args)
@@ -398,6 +415,62 @@ def test_resolve_judge_config_from_env(monkeypatch):
     assert config.api_key == "judge-key"
     assert config.base_url == "https://judge.example/v1"
     assert config.model == "gpt-4o-mini"
+
+
+def test_resolve_judge_config_defaults_to_interviewer_config(monkeypatch):
+    """Without JUDGE_* vars, judge should use OPENAI_* (interviewer's config)."""
+    module = _load_eval_module()
+    parser = module._build_parser()
+    monkeypatch.delenv("JUDGE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("JUDGE_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "interviewer-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://interviewer.example/v1")
+    monkeypatch.setenv("LLM_MODEL_NAME", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_TIMEOUT", "60")
+    args = parser.parse_args([])
+
+    config = module._resolve_judge_config(args)
+
+    assert config is not None
+    assert config.api_key == "interviewer-key"
+    assert config.base_url == "https://interviewer.example/v1"
+    assert config.model == "mimo-v2.5-pro"
+    assert config.timeout == 60
+
+
+def test_llm_generate_report_includes_scoring_fallback_notice(monkeypatch):
+    """When scoring fell back to rules, report should include fallback notice."""
+    module = _load_eval_module()
+    result = {
+        "scenario_id": "long_session_mid",
+        "turns": [{"turn": 1, "user": "test", "assistant": "ok", "events": [], "latency_sec": 1.0}],
+        "metrics": {
+            "turn_count": 1, "tool_count": 0, "tool_names": [], "selected_ids": [],
+            "cross_turn_duplicate_candidates": [], "errors": [], "thinking_turns": 0,
+        },
+        "scores": {
+            "passed": False, "overall_score": 0.5, "judge_model": "gpt-4o",
+            "fallback_notice": "⚠️ LLM 评分失败（gpt-4o: timeout），已降级为规则评分。",
+            "items": {
+                "tool_call_rate": {"passed": False, "score": 0.0, "reasoning": "规则判断"},
+            },
+            "critical_issues": [], "highlights": [],
+        },
+    }
+
+    def mock_call(config, messages, **kwargs):
+        # Verify the prompt includes fallback context
+        prompt = messages[0]["content"]
+        assert "降级提醒" in prompt
+        return "# 评测报告\n\n评分使用了规则匹配。"
+
+    monkeypatch.setattr(module, "_call_openai_compatible_chat", mock_call)
+
+    judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
+    report = module.llm_generate_report(result, judge_config)
+
+    assert "降级提醒" in report
+    assert "评测报告" in report
 
 
 def test_write_reports_with_llm_report(tmp_path):
