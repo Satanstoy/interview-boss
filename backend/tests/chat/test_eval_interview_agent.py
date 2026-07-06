@@ -164,3 +164,255 @@ def test_candidate_config_accepts_design_and_existing_env_names(monkeypatch):
     assert config.api_key == "test-key"
     assert config.base_url == "https://design-env.example/v1"
     assert config.model == "mimo-v2.5"
+
+
+# ── LLM Judge Tests ──────────────────────────────────────
+
+
+def test_build_conversation_transcript_short():
+    """Short transcript should not be truncated."""
+    module = _load_eval_module()
+    turns = [
+        {"user": "我做过 RAG。", "assistant": "请继续。", "events": []},
+        {"user": "用的 Faiss。", "assistant": "不错。", "events": []},
+    ]
+    transcript = module._build_conversation_transcript(turns)
+    assert "候选人: 我做过 RAG。" in transcript
+    assert "面试官: 请继续。" in transcript
+    assert "省略" not in transcript
+
+
+def test_build_conversation_transcript_long_truncated():
+    """Long transcript should be truncated from the middle, preserving head and tail."""
+    module = _load_eval_module()
+    turns = [
+        {"user": f"回答第{i}轮" + "x" * 500, "assistant": f"追问第{i}轮" + "y" * 500, "events": []}
+        for i in range(20)
+    ]
+    transcript = module._build_conversation_transcript(turns, max_chars=2000)
+    assert "省略" in transcript
+    # Should preserve beginning (first turn) and end (last turn's assistant)
+    assert "回答第0轮" in transcript
+    assert "追问第19轮" in transcript
+
+
+def test_build_conversation_transcript_with_tool_tags():
+    """Tool calls should be annotated in transcript."""
+    module = _load_eval_module()
+    turns = [
+        {
+            "user": "介绍一下项目",
+            "assistant": "请看这道题。",
+            "events": [
+                {"type": "tool_step", "data": {"tool": "search_questions"}},
+            ],
+        },
+    ]
+    transcript = module._build_conversation_transcript(turns)
+    assert "[tools: search_questions]" in transcript
+
+
+def test_build_scoring_criteria_text():
+    """Scoring criteria should be formatted as readable text."""
+    module = _load_eval_module()
+    scenario = module.SCENARIOS["long_session_mid"]
+    text = module._build_scoring_criteria_text(scenario)
+    assert "tool_call_rate" in text
+    assert "weight=" in text
+    assert "至少 60%" in text
+
+
+def test_llm_score_scenario_parses_json_response(monkeypatch):
+    """LLM judge should parse structured JSON response into score items."""
+    module = _load_eval_module()
+    scenario = module.SCENARIOS["long_session_mid"]
+    turns = [
+        {"user": "我做过 RAG。", "assistant": "请继续介绍。", "events": [
+            {"type": "tool_step", "data": {"tool": "search_questions"}},
+        ], "latency_sec": 1.5},
+    ]
+    metrics = {
+        "turn_count": 1,
+        "tool_count": 1,
+        "tool_names": ["search_questions"],
+        "selected_ids": [101],
+        "cross_turn_duplicate_candidates": [],
+        "asked_questions": [101],
+        "has_summary": False,
+        "thinking_turns": 0,
+        "errors": [],
+        "correction_in_output_count": 0,
+        "early_close_refused": False,
+        "has_insufficient_evidence_marker": False,
+        "counter_question_answered": False,
+    }
+
+    judge_response = json.dumps({
+        "dimensions": {
+            "tool_call_rate": {"passed": True, "score": 1.0, "reasoning": "1/1=100%>60%", "evidence": "T0: search_questions"},
+            "selected_question_present": {"passed": True, "score": 1.0, "reasoning": "有1个selected", "evidence": "selected_id=101"},
+            "asked_questions_recorded": {"passed": True, "score": 1.0, "reasoning": "DB有记录", "evidence": "asked=101"},
+            "no_cross_turn_duplicate_candidates": {"passed": True, "score": 1.0, "reasoning": "无重复", "evidence": "N/A"},
+            "has_summary": {"passed": False, "score": 0.0, "reasoning": "只有1轮，无总结", "evidence": "N/A"},
+            "no_sse_errors": {"passed": True, "score": 1.0, "reasoning": "无错误", "evidence": "N/A"},
+            "thinking_transparency": {"passed": False, "score": 0.0, "reasoning": "无thinking事件", "evidence": "N/A"},
+        },
+        "overall_score": 0.71,
+        "overall_passed": False,
+        "critical_issues": ["无结构化总结"],
+        "highlights": ["工具调用率达标"],
+    }, ensure_ascii=False)
+
+    def mock_call(config, messages, **kwargs):
+        return judge_response
+
+    monkeypatch.setattr(module, "_call_openai_compatible_chat", mock_call)
+
+    judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
+    result = module.llm_score_scenario(scenario, turns, metrics, judge_config)
+
+    assert result["passed"] is False
+    assert result["items"]["tool_call_rate"]["passed"] is True
+    assert result["items"]["tool_call_rate"]["reasoning"] == "1/1=100%>60%"
+    assert result["items"]["has_summary"]["passed"] is False
+    assert result["critical_issues"] == ["无结构化总结"]
+    assert result["highlights"] == ["工具调用率达标"]
+    assert result["judge_model"] == "gpt-4o"
+
+
+def test_llm_score_scenario_fallback_on_parse_error(monkeypatch):
+    """LLM judge should fallback to rule-based on JSON parse error."""
+    module = _load_eval_module()
+    scenario = module.SCENARIOS["long_session_mid"]
+    turns = [{"user": "test", "assistant": "ok", "events": [], "latency_sec": 1.0}]
+    metrics = {
+        "turn_count": 1, "tool_count": 0, "tool_names": [], "selected_ids": [],
+        "cross_turn_duplicate_candidates": [], "asked_questions": [], "has_summary": False,
+        "thinking_turns": 0, "errors": [], "correction_in_output_count": 0,
+        "early_close_refused": False, "has_insufficient_evidence_marker": False,
+        "counter_question_answered": False,
+    }
+
+    def mock_call(config, messages, **kwargs):
+        return "This is not valid JSON at all!"
+
+    monkeypatch.setattr(module, "_call_openai_compatible_chat", mock_call)
+
+    judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
+    result = module.llm_score_scenario(scenario, turns, metrics, judge_config)
+
+    # Should fallback to rule-based and still return valid structure
+    assert "items" in result
+    assert "passed" in result
+    assert result.get("judge_error") is not None
+
+
+def test_llm_generate_report_uses_llm_output(monkeypatch):
+    """LLM report generation should return LLM-generated markdown."""
+    module = _load_eval_module()
+    result = {
+        "scenario_id": "long_session_mid",
+        "turns": [{"turn": 1, "user": "test", "assistant": "ok", "events": [], "latency_sec": 1.0}],
+        "metrics": {
+            "turn_count": 1, "tool_count": 0, "tool_names": [], "selected_ids": [],
+            "cross_turn_duplicate_candidates": [], "errors": [], "thinking_turns": 0,
+        },
+        "scores": {
+            "passed": True, "overall_score": 0.85, "judge_model": "gpt-4o",
+            "items": {
+                "tool_call_rate": {"passed": True, "score": 1.0, "reasoning": "达标"},
+            },
+            "critical_issues": [],
+            "highlights": ["工具调用正常"],
+        },
+    }
+
+    def mock_call(config, messages, **kwargs):
+        return "# 评测报告\n\n面试质量良好。"
+
+    monkeypatch.setattr(module, "_call_openai_compatible_chat", mock_call)
+
+    judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
+    report = module.llm_generate_report(result, judge_config)
+
+    assert "# 评测报告" in report
+    assert "面试质量良好" in report
+
+
+def test_llm_generate_report_fallback_on_error(monkeypatch):
+    """LLM report should fallback to template on error."""
+    module = _load_eval_module()
+    result = {
+        "scenario_id": "long_session_mid",
+        "turns": [{"turn": 1, "user": "test", "assistant": "ok", "events": [], "latency_sec": 1.0}],
+        "metrics": {
+            "turn_count": 1, "tool_count": 0, "tool_names": [], "selected_ids": [],
+            "cross_turn_duplicate_candidates": [], "errors": [], "thinking_turns": 0,
+        },
+        "scores": {
+            "passed": True, "overall_score": 0.85, "judge_model": "gpt-4o",
+            "items": {
+                "tool_call_rate": {"passed": True, "score": 1.0, "reasoning": "达标", "description": "test"},
+            },
+            "critical_issues": [], "highlights": [],
+        },
+    }
+
+    def mock_call(config, messages, **kwargs):
+        raise RuntimeError("LLM unavailable")
+
+    monkeypatch.setattr(module, "_call_openai_compatible_chat", mock_call)
+
+    judge_config = module.JudgeLLMConfig(api_key="test", base_url="http://test", model="gpt-4o", timeout=30)
+    report = module.llm_generate_report(result, judge_config)
+
+    # Should fallback to template report
+    assert "# 评测报告：long_session_mid" in report
+
+
+def test_resolve_judge_config_returns_none_without_key(monkeypatch):
+    """No judge API key → returns None (falls back to rule-based)."""
+    module = _load_eval_module()
+    parser = module._build_parser()
+    monkeypatch.delenv("JUDGE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("JUDGE_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    args = parser.parse_args(["--no-llm-judge"])
+
+    config = module._resolve_judge_config(args)
+    assert config is None
+
+
+def test_resolve_judge_config_from_env(monkeypatch):
+    """Judge config should resolve from environment variables."""
+    module = _load_eval_module()
+    parser = module._build_parser()
+    monkeypatch.setenv("JUDGE_OPENAI_API_KEY", "judge-key")
+    monkeypatch.setenv("JUDGE_LLM_BASE_URL", "https://judge.example/v1")
+    monkeypatch.setenv("JUDGE_LLM_MODEL", "gpt-4o-mini")
+    args = parser.parse_args([])
+
+    config = module._resolve_judge_config(args)
+
+    assert config is not None
+    assert config.api_key == "judge-key"
+    assert config.base_url == "https://judge.example/v1"
+    assert config.model == "gpt-4o-mini"
+
+
+def test_write_reports_with_llm_report(tmp_path):
+    """write_reports should use LLM report when provided."""
+    module = _load_eval_module()
+    result = {
+        "scenario_id": "test",
+        "turns": [],
+        "metrics": {"turn_count": 0},
+        "scores": {"passed": True, "items": {}},
+    }
+    llm_report = "# LLM 生成的报告\n\n这是 LLM 生成的内容。"
+
+    json_path, md_path = module.write_reports(result, tmp_path, llm_report=llm_report)
+
+    md_content = md_path.read_text(encoding="utf-8")
+    assert "LLM 生成的报告" in md_content
+    assert "LLM 生成的内容" in md_content

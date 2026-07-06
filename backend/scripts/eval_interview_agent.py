@@ -51,6 +51,16 @@ class CandidateLLMConfig:
 
 
 @dataclass(frozen=True)
+class JudgeLLMConfig:
+    """Configuration for the LLM judge used in scoring and report generation."""
+
+    api_key: str
+    base_url: str
+    model: str
+    timeout: int
+
+
+@dataclass(frozen=True)
 class Scenario:
     scenario_id: str
     mode: str
@@ -380,6 +390,41 @@ def _resolve_candidate_config(args: argparse.Namespace) -> CandidateLLMConfig:
             "Candidate LLM API key missing. Set CANDIDATE_OPENAI_API_KEY or OPENAI_API_KEY."
         )
     return CandidateLLMConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout=timeout,
+    )
+
+
+def _resolve_judge_config(args: argparse.Namespace) -> JudgeLLMConfig | None:
+    """Resolve judge LLM config from args and env vars.
+
+    Returns None if no judge API key is configured (falls back to rule-based scoring).
+    """
+    api_key = (
+        args.judge_api_key
+        or os.getenv("JUDGE_OPENAI_API_KEY")
+        or os.getenv("JUDGE_LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or ""
+    )
+    if not api_key:
+        return None
+    base_url = (
+        args.judge_base_url
+        or os.getenv("JUDGE_OPENAI_BASE_URL")
+        or os.getenv("JUDGE_LLM_BASE_URL")
+        or os.getenv("OPENAI_BASE_URL")
+        or "https://api.openai.com/v1"
+    ).rstrip("/")
+    model = (
+        args.judge_model
+        or os.getenv("JUDGE_LLM_MODEL")
+        or "gpt-4o"
+    )
+    timeout = int(args.judge_timeout or os.getenv("JUDGE_LLM_TIMEOUT") or "120")
+    return JudgeLLMConfig(
         api_key=api_key,
         base_url=base_url,
         model=model,
@@ -761,6 +806,273 @@ def score_scenario(scenario: Scenario, metrics: dict[str, Any]) -> dict[str, Any
     }
 
 
+# ── LLM Judge Scoring & Report ────────────────────────────────
+
+
+def _build_conversation_transcript(turns: list[dict[str, Any]], max_chars: int = 12000) -> str:
+    """Build a compact conversation transcript for the LLM judge.
+
+    Truncates from the middle if the transcript exceeds max_chars,
+    preserving the opening and the most recent turns.
+    """
+    lines: list[str] = []
+    for turn in turns:
+        user = str(turn.get("user") or "").strip()
+        assistant = str(turn.get("assistant") or "").strip()
+        tools = _event_tools_for_turn(turn)
+        tool_tag = f" [tools: {', '.join(tools)}]" if tools else ""
+        lines.append(f"候选人: {user}")
+        lines.append(f"面试官{tool_tag}: {assistant}")
+        lines.append("")
+
+    transcript = "\n".join(lines)
+    if len(transcript) <= max_chars:
+        return transcript
+
+    # Truncate from the middle: keep first 40% and last 50%
+    head_end = int(max_chars * 0.4)
+    tail_start = len(transcript) - int(max_chars * 0.5)
+    # Find nearest newline boundaries
+    head_end = transcript.rfind("\n", 0, head_end)
+    tail_start = transcript.find("\n", tail_start)
+    if head_end < 0:
+        head_end = int(max_chars * 0.4)
+    if tail_start < 0:
+        tail_start = len(transcript) - int(max_chars * 0.5)
+    return transcript[:head_end] + f"\n\n... [省略 {tail_start - head_end} 字符] ...\n\n" + transcript[tail_start:]
+
+
+def _build_scoring_criteria_text(scenario: Scenario) -> str:
+    """Format scenario scoring criteria as LLM-readable text."""
+    lines: list[str] = []
+    for key, config in scenario.scoring.items():
+        desc = config.get("description", key)
+        weight = config.get("weight", 1.0)
+        lines.append(f"- **{key}** (weight={weight}): {desc}")
+    return "\n".join(lines)
+
+
+def llm_score_scenario(
+    scenario: Scenario,
+    turns: list[dict[str, Any]],
+    metrics: dict[str, Any],
+    judge_config: JudgeLLMConfig,
+) -> dict[str, Any]:
+    """Use LLM judge to evaluate the interview against scenario criteria.
+
+    Returns the same structure as score_scenario() but with LLM-generated
+    pass/fail judgments and reasoning for each dimension.
+    """
+    transcript = _build_conversation_transcript(turns)
+    criteria_text = _build_scoring_criteria_text(scenario)
+
+    # Build hard metrics summary for the judge
+    hard_metrics = {
+        "turn_count": metrics.get("turn_count", 0),
+        "tool_count": metrics.get("tool_count", 0),
+        "tool_names": metrics.get("tool_names", []),
+        "selected_ids_count": len(metrics.get("selected_ids", [])),
+        "cross_turn_duplicates": metrics.get("cross_turn_duplicate_candidates", []),
+        "asked_questions_count": len(metrics.get("asked_questions", [])),
+        "has_summary": metrics.get("has_summary", False),
+        "thinking_turns": metrics.get("thinking_turns", 0),
+        "error_count": len(metrics.get("errors", [])),
+        "correction_in_output_count": metrics.get("correction_in_output_count", 0),
+        "early_close_refused": metrics.get("early_close_refused", False),
+        "has_insufficient_evidence_marker": metrics.get("has_insufficient_evidence_marker", False),
+        "counter_question_answered": metrics.get("counter_question_answered", False),
+    }
+
+    prompt = f"""你是一位资深技术面试质量评审专家。请根据以下面试对话记录和指标数据，对面试质量进行逐项评估。
+
+## 评测场景
+- 场景: {scenario.scenario_id}
+- 模式: {scenario.mode}
+- 难度: {scenario.difficulty}
+- 预期轮数: {scenario.max_turns}
+
+## 评分维度
+{criteria_text}
+
+## 硬指标数据
+```json
+{json.dumps(hard_metrics, ensure_ascii=False, indent=2)}
+```
+
+## 面试对话记录
+{transcript}
+
+## 评估要求
+
+请对每个评分维度进行独立判断。对于每个维度：
+1. 结合硬指标数据和对话内容进行综合判断
+2. 不要仅依赖硬指标 — 用对话内容验证指标的准确性
+3. 给出具体的判断依据（引用对话中的具体轮次或内容）
+
+请严格按以下 JSON 格式返回（不要包含其他文本）：
+```json
+{{
+  "dimensions": {{
+    "dimension_key_1": {{
+      "passed": true/false,
+      "score": 0.0-1.0,
+      "reasoning": "具体判断依据，引用对话内容",
+      "evidence": "引用的具体对话片段"
+    }},
+    "dimension_key_2": {{ ... }}
+  }},
+  "overall_score": 0.0-1.0,
+  "overall_passed": true/false,
+  "critical_issues": ["严重问题1", "严重问题2"],
+  "highlights": ["亮点1", "亮点2"]
+}}
+```
+
+维度 key 列表: {', '.join(scenario.scoring.keys())}"""
+
+    try:
+        raw = _call_openai_compatible_chat(
+            judge_config,
+            [{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=4000,
+        )
+        # Extract JSON from response (handle markdown code blocks)
+        json_match = re.search(r"```json\s*(.*?)\s*```", raw, re.DOTALL)
+        json_str = json_match.group(1) if json_match else raw
+        # Try to find JSON object if no code block
+        if not json_match:
+            obj_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            json_str = obj_match.group(0) if obj_match else raw
+
+        parsed = json.loads(json_str)
+        dimensions = parsed.get("dimensions", {})
+
+        # Build score items matching the old format
+        items: dict[str, dict[str, Any]] = {}
+        total_weight = 0.0
+        passed_weight = 0.0
+
+        for key, config in scenario.scoring.items():
+            weight = float(config.get("weight", 1.0))
+            total_weight += weight
+            dim = dimensions.get(key, {})
+            passed = bool(dim.get("passed", False))
+            if passed:
+                passed_weight += weight
+            items[key] = {
+                "passed": passed,
+                "weight": weight,
+                "description": config.get("description", key),
+                "score": float(dim.get("score", 0.0)),
+                "reasoning": str(dim.get("reasoning", "")),
+                "evidence": str(dim.get("evidence", "")),
+                "error": None,
+            }
+
+        return {
+            "passed": bool(parsed.get("overall_passed", passed_weight == total_weight)),
+            "passed_weight": passed_weight,
+            "total_weight": total_weight,
+            "ratio": passed_weight / total_weight if total_weight else 0.0,
+            "items": items,
+            "overall_score": float(parsed.get("overall_score", passed_weight / total_weight if total_weight else 0.0)),
+            "critical_issues": parsed.get("critical_issues", []),
+            "highlights": parsed.get("highlights", []),
+            "judge_model": judge_config.model,
+        }
+
+    except Exception as exc:
+        print(f"Warning: LLM judge scoring failed, falling back to rule-based: {exc}", file=sys.stderr)
+        # Fallback to rule-based scoring
+        result = score_scenario(scenario, metrics)
+        result["judge_error"] = str(exc)
+        result["judge_model"] = judge_config.model
+        return result
+
+
+def llm_generate_report(
+    result: dict[str, Any],
+    judge_config: JudgeLLMConfig,
+) -> str:
+    """Use LLM to generate a qualitative evaluation report.
+
+    Combines quantitative scores with conversation analysis to produce
+    actionable insights and improvement suggestions.
+    """
+    scenario_id = result["scenario_id"]
+    scores = result["scores"]
+    metrics = result["metrics"]
+    turns = result["turns"]
+    transcript = _build_conversation_transcript(turns, max_chars=10000)
+
+    # Build scoring summary
+    score_lines: list[str] = []
+    for key, item in scores.get("items", {}).items():
+        status = "✅ PASS" if item.get("passed") else "❌ FAIL"
+        score_val = item.get("score", 0)
+        reasoning = item.get("reasoning", "")
+        score_lines.append(f"- {key}: {status} (score={score_val:.1f}) — {reasoning}")
+    score_summary = "\n".join(score_lines)
+
+    critical_issues = scores.get("critical_issues", [])
+    highlights = scores.get("highlights", [])
+    overall_score = scores.get("overall_score", 0)
+
+    prompt = f"""你是一位资深技术面试质量分析专家。请根据以下评测数据生成一份结构化的评测报告。
+
+## 评测概况
+- 场景: {scenario_id}
+- 总轮数: {metrics.get('turn_count', 0)}
+- 总体得分: {overall_score:.2f}/1.00
+- 通过状态: {'通过' if scores.get('passed') else '未通过'}
+- 评测模型: {scores.get('judge_model', 'unknown')}
+
+## 各维度评分
+{score_summary}
+
+## 严重问题
+{chr(10).join(f'- {issue}' for issue in critical_issues) if critical_issues else '- 无'}
+
+## 亮点
+{chr(10).join(f'- {h}' for h in highlights) if highlights else '- 无'}
+
+## 硬指标摘要
+- 工具调用次数: {metrics.get('tool_count', 0)}
+- 选中题目数: {len(metrics.get('selected_ids', []))}
+- 跨轮重复候选: {len(metrics.get('cross_turn_duplicate_candidates', []))}
+- thinking 轮次: {metrics.get('thinking_turns', 0)}/{metrics.get('turn_count', 0)}
+- SSE 错误数: {len(metrics.get('errors', []))}
+
+## 面试对话记录
+{transcript}
+
+## 报告要求
+
+请生成一份 Markdown 格式的评测报告，包含以下部分：
+
+1. **执行摘要** — 一句话总结面试质量
+2. **评分总览** — 表格形式展示各维度得分和状态
+3. **质量分析** — 分析面试官的表现模式（好的和需改进的），引用具体对话轮次
+4. **关键发现** — 列出 3-5 个最重要的发现（正面和负面各半）
+5. **改进建议** — 针对每个失败维度给出具体可操作的改进方向
+6. **代表性对话** — 挑选 2-3 段最能说明问题的对话片段
+
+报告语言：中文简体。语气：专业、客观、有建设性。"""
+
+    try:
+        report = _call_openai_compatible_chat(
+            judge_config,
+            [{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=6000,
+        )
+        return report
+    except Exception as exc:
+        print(f"Warning: LLM report generation failed, falling back to template: {exc}", file=sys.stderr)
+        return _render_markdown_report(result, time.strftime("%Y%m%d_%H%M%S"))
+
+
 def send_message_and_collect(
     base_url: str,
     token: str,
@@ -791,6 +1103,7 @@ def run_evaluation(
     args: argparse.Namespace,
     auth_token: str,
     candidate_config: CandidateLLMConfig,
+    judge_config: JudgeLLMConfig | None = None,
 ) -> dict[str, Any]:
     conversation_id, opening = create_conversation(args.base_url, auth_token, scenario)
     candidate = SmartCandidateAgent(scenario.persona, scenario.active_skills, candidate_config)
@@ -833,7 +1146,10 @@ def run_evaluation(
                 break
 
         metrics = extract_metrics(turns, conversation_id)
-        scores = score_scenario(scenario, metrics)
+        if judge_config:
+            scores = llm_score_scenario(scenario, turns, metrics, judge_config)
+        else:
+            scores = score_scenario(scenario, metrics)
         return {
             "scenario_id": scenario.scenario_id,
             "conversation_id": conversation_id,
@@ -865,6 +1181,7 @@ def write_reports(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     *,
     timestamp: str | None = None,
+    llm_report: str | None = None,
 ) -> tuple[Path, Path]:
     timestamp = timestamp or time.strftime("%Y%m%d_%H%M%S")
     scenario_id = result["scenario_id"]
@@ -873,7 +1190,8 @@ def write_reports(
     md_path = output_dir / f"eval_{scenario_id}_{timestamp}.md"
 
     json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    md_path.write_text(_render_markdown_report(result, timestamp), encoding="utf-8")
+    md_content = llm_report if llm_report else _render_markdown_report(result, timestamp)
+    md_path.write_text(md_content, encoding="utf-8")
     return json_path, md_path
 
 
@@ -950,6 +1268,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--candidate-model", default=os.getenv("CANDIDATE_LLM_MODEL"))
     parser.add_argument("--candidate-timeout", type=int, default=None)
+    parser.add_argument("--judge-api-key", default=os.getenv("JUDGE_OPENAI_API_KEY"))
+    parser.add_argument("--judge-base-url", default=os.getenv("JUDGE_OPENAI_BASE_URL") or os.getenv("JUDGE_LLM_BASE_URL"))
+    parser.add_argument("--judge-model", default=os.getenv("JUDGE_LLM_MODEL"))
+    parser.add_argument("--judge-timeout", type=int, default=None)
+    parser.add_argument("--no-llm-judge", action="store_true", help="Disable LLM judge, use rule-based scoring only.")
     parser.add_argument("--turn-timeout", type=int, default=int(os.getenv("EVAL_TURN_TIMEOUT", "120")))
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--keep-conversation", action="store_true")
@@ -968,13 +1291,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         auth_token = _resolve_token(args)
         candidate_config = _resolve_candidate_config(args)
+        judge_config = None if args.no_llm_judge else _resolve_judge_config(args)
+        if judge_config:
+            print(f"LLM Judge enabled: model={judge_config.model}, base_url={judge_config.base_url}")
+        else:
+            print("LLM Judge disabled: using rule-based scoring.")
         scenario_ids = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
         all_passed = True
         for scenario_id in scenario_ids:
             scenario = SCENARIOS[scenario_id]
             print(f"Running scenario: {scenario_id}")
-            result = run_evaluation(scenario, args, auth_token, candidate_config)
-            json_path, md_path = write_reports(result, args.output_dir)
+            result = run_evaluation(scenario, args, auth_token, candidate_config, judge_config)
+
+            # Generate report: LLM if judge available, otherwise template
+            llm_report = None
+            if judge_config:
+                print(f"  Generating LLM report for {scenario_id}...")
+                llm_report = llm_generate_report(result, judge_config)
+
+            json_path, md_path = write_reports(result, args.output_dir, llm_report=llm_report)
             if args.verbose:
                 print(json.dumps(result["scores"], ensure_ascii=False, indent=2))
             print(f"- JSON: {json_path}")
