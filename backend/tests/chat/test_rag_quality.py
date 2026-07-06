@@ -64,6 +64,12 @@ class TestSearchQuestionsRAG:
             stream_chunks=("说说 Redis 缓存穿透。",),
             tool_patches=[
                 patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+                patch(
+                    "app.services.llm.raw_llm_call",
+                    new=AsyncMock(
+                        return_value=json.dumps({"scores": [0.9, 0.8, 0.7, 0.6]})
+                    ),
+                ),
             ],
         )
 
@@ -112,6 +118,12 @@ class TestSearchQuestionsRAG:
             stream_chunks=("说说 Redis。",),
             tool_patches=[
                 patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+                patch(
+                    "app.services.llm.raw_llm_call",
+                    new=AsyncMock(
+                        return_value=json.dumps({"scores": [0.9, 0.8, 0.7, 0.6]})
+                    ),
+                ),
             ],
         )
 

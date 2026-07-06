@@ -19,6 +19,29 @@ logger = logging.getLogger(__name__)
 _RERANK_RELEVANCE_THRESHOLD = 0.3
 
 
+def _parse_rerank_scores(raw: str) -> list[float]:
+    """Extract rerank scores from strict JSON or JSON embedded in model prose."""
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("empty rerank response")
+
+    decoder = json.JSONDecoder()
+    starts = [idx for idx, char in enumerate(text) if char in "[{"]
+    for start in starts:
+        try:
+            parsed, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            scores = parsed.get("scores")
+        else:
+            scores = parsed
+        if isinstance(scores, list):
+            return [float(score) for score in scores]
+
+    raise ValueError("rerank response does not contain a JSON scores array")
+
+
 # ── Dependency Injection (for easy test mocking) ──────────
 
 
@@ -288,12 +311,12 @@ async def _llm_rerank_in_tool(
     conversation_context: str,
     user_id: int,
     model: str = None,
-) -> list[dict]:
+) -> list[dict] | None:
     """LLM-based reranking inside search_questions tool.
 
     Uses the LLM to score candidate questions by relevance to the current
     conversation context. Filters by _RERANK_RELEVANCE_THRESHOLD.
-    Falls back to original order on failure.
+    Returns None on failure so callers can preserve the original tool envelope.
     """
     if len(candidates) < 3:
         return candidates
@@ -305,10 +328,10 @@ async def _llm_rerank_in_tool(
 
     prompt = (
         "根据以下面试对话上下文，对候选题目的相关性评分（0-1）。\n"
-        "只输出JSON，不要解释。\n\n"
+        "只输出一个JSON对象，不要解释，不要使用Markdown。\n\n"
         f"对话上下文：\n{conversation_context[:500]}\n\n"
         f"候选题目：\n{candidate_text}\n\n"
-        '输出格式：{"scores": [0.9, 0.3, 0.8, ...]}  # 与候选顺序一一对应'
+        '输出格式：{"scores": [0.9, 0.3, 0.8]}，scores长度必须与候选题数量一致。'
     )
 
     try:
@@ -317,12 +340,21 @@ async def _llm_rerank_in_tool(
         result = await raw_llm_call(
             user_id=user_id,
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你是面试题相关性打分器。必须只返回JSON对象，"
+                        '格式为{"scores":[数字数组]}。'
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.1,
-            max_tokens=200,
+            max_tokens=512,
+            response_format={"type": "json_object"},
         )
-        parsed = json.loads(result)
-        scores = parsed.get("scores", [])
+        scores = _parse_rerank_scores(result)
 
         for i, q in enumerate(candidates[: len(scores)]):
             q["_relevance_score"] = float(scores[i])
@@ -348,7 +380,7 @@ async def _llm_rerank_in_tool(
 
     except Exception as e:
         logger.warning("LLM rerank in search_questions failed: %s", e)
-        return candidates[:5]
+        return None
 
 
 async def _execute_search_questions(args: dict, state: ChatState) -> str:
@@ -358,7 +390,7 @@ async def _execute_search_questions(args: dict, state: ChatState) -> str:
     envelope = await search_questions_tool(args, state)
 
     # LLM rerank: score candidates by relevance to conversation context
-    questions = envelope.get("questions", [])
+    questions = envelope.get("items", [])
     if len(questions) >= 3:
         recent = state.get("recent_messages", [])
         context = "\n".join(
@@ -369,8 +401,11 @@ async def _execute_search_questions(args: dict, state: ChatState) -> str:
         reranked = await _llm_rerank_in_tool(
             questions, context, state["user_id"], state.get("model")
         )
-        envelope["questions"] = reranked
-        envelope["result_count"] = len(reranked)
+        if reranked is not None:
+            envelope["items"] = reranked
+            envelope.setdefault("metadata", {})["result_count"] = len(reranked)
+            state["candidate_questions"] = reranked
+            state["retrieved_questions"] = reranked
 
     return json.dumps(envelope, ensure_ascii=False)
 

@@ -18,7 +18,7 @@
 - `interview_tools.py` 可以调用 service 层；`agents/chat/tools.py` 不应直接组装搜索或抽题 envelope（纯转发）。
 - MCP 对外函数参数注解保持朴素类型（如 `str`、`int`、`list`、`dict`），避免 FastMCP 对 `str | None`、`list[str]` 等注解解析失败。
 - 每个 MCP 工具都接受 `session_id: str`；不传则自动生成。同一 session 内的 state 会持久化，外部 agent 可以分步调用 `load_skill` → `draw_questions` → `select_question`。
-- `search_questions_tool()` / `draw_questions_tool()` 必须从 chat state 构建 `InterviewLedger`，把历史已问题号合并进 service 层 `exclude_ids`；防重题属于工具执行边界，不能只靠模型 prompt 自觉。
+- `search_questions_tool()` / `draw_questions_tool()` 必须通过 `question_plan._collect_question_exclusion_ids()` 合并本轮和历史 metadata 中已问/已展示候选题号，并从 `interview_asked_questions` 合并跨对话历史已问题号到 service 层 `exclude_ids`；防重题属于工具执行边界，不能只靠模型 prompt 自觉。
 - `/mcp` 端点已豁免 CSRF；若环境变量 `MCP_API_KEY` 设置，则要求请求头 `X-MCP-API-Key` 或查询参数 `mcp_api_key` 匹配，否则返回 401。
 - 新增可执行工具时，先在本目录落工具函数，再由 agent executor 或 FastMCP app 转发调用；同时更新 `session.py` 的持久化字段白名单。
 

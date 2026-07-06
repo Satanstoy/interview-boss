@@ -382,9 +382,15 @@ class TestExecuteToolSearchQuestions:
             }
         }
 
-        with patch(
-            "app.mcp_server.interview_tools._hybrid_search_for_tool",
-            new=AsyncMock(return_value=mock_results),
+        with (
+            patch(
+                "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                new=AsyncMock(return_value=mock_results),
+            ),
+            patch(
+                "app.services.llm.raw_llm_call",
+                new=AsyncMock(return_value=json.dumps({"scores": [0.9, 0.8, 0.7, 0.6]})),
+            ),
         ):
             result = await execute_tool(tool_call, sample_state)
 
@@ -397,13 +403,76 @@ class TestExecuteToolSearchQuestions:
         assert parsed["metadata"]["result_count"] == 4
         assert parsed["metadata"]["metrics"]["total_ms"] >= 0
         assert parsed["error"] is None
-        assert sample_state["retrieved_questions"] == mock_results
-        assert sample_state["candidate_questions"] == mock_results
+        assert [q["id"] for q in sample_state["retrieved_questions"]] == [1, 2, 3, 4]
+        assert [q["id"] for q in sample_state["candidate_questions"]] == [1, 2, 3, 4]
         assert sample_state["question_source"] == "search"
+
+    async def test_search_rerank_updates_envelope_and_state(self, sample_state):
+        """LLM rerank should reorder/filter search tool items and state."""
+        from app.agents.chat.tools import execute_tool
+
+        sample_state["recent_messages"] = [
+            {"role": "assistant", "content": "你做过 Redis 缓存吗？"},
+            {"role": "user", "content": "我用了 Redis 做热点缓存和过期策略。"},
+        ]
+
+        mock_results = [
+            {"id": 1, "question": "What is JVM?", "cat1": "Java", "cat2": "Basics"},
+            {"id": 2, "question": "Redis 缓存穿透怎么解决？", "cat1": "Backend", "cat2": "Redis"},
+            {"id": 3, "question": "Redis 过期策略有哪些？", "cat1": "Backend", "cat2": "Redis"},
+            {"id": 4, "question": "CSS 盒模型是什么？", "cat1": "Frontend", "cat2": "CSS"},
+        ]
+        tool_call = {
+            "function": {
+                "name": "search_questions",
+                "arguments": json.dumps({"keywords": ["Redis"]}),
+            }
+        }
+
+        with (
+            patch(
+                "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                new=AsyncMock(return_value=mock_results),
+            ),
+            patch(
+                "app.services.llm.raw_llm_call",
+                new=AsyncMock(return_value=json.dumps({"scores": [0.1, 0.9, 0.8, 0.0]})),
+            ) as mock_rerank,
+        ):
+            result = await execute_tool(tool_call, sample_state)
+
+        parsed = json.loads(result)
+        assert mock_rerank.await_count == 1
+        assert mock_rerank.await_args.kwargs["response_format"] == {"type": "json_object"}
+        assert mock_rerank.await_args.kwargs["max_tokens"] >= 512
+        assert [item["id"] for item in parsed["items"]] == [2, 3]
+        assert parsed["metadata"]["result_count"] == 2
+        assert [item["id"] for item in sample_state["retrieved_questions"]] == [2, 3]
+        assert [item["id"] for item in sample_state["candidate_questions"]] == [2, 3]
+
+    def test_rerank_score_parser_accepts_fenced_or_prefixed_json(self):
+        """Rerank should tolerate model prose/code fences around the JSON object."""
+        from app.agents.chat.tools import _parse_rerank_scores
+
+        assert _parse_rerank_scores('```json\n{"scores": [0.1, 0.9]}\n```') == [
+            0.1,
+            0.9,
+        ]
+        assert _parse_rerank_scores('评分如下：{"scores": [0.2, 0.8]}') == [
+            0.2,
+            0.8,
+        ]
 
     async def test_search_with_question_type(self, sample_state):
         """search_questions should pass question_type through to hybrid_search."""
         from app.agents.chat.tools import execute_tool
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
 
         tool_call = {
             "function": {
@@ -417,14 +486,19 @@ class TestExecuteToolSearchQuestions:
             }
         }
 
-        with patch(
-            "app.mcp_server.interview_tools._hybrid_search_for_tool",
-            new=AsyncMock(return_value=[]),
-        ) as mock_search:
+        with (
+            patch(
+                "app.mcp_server.interview_tools._hybrid_search_for_tool",
+                new=AsyncMock(return_value=[]),
+            ) as mock_search,
+            patch("app.db.operations.get_db_connection", return_value=FakeConnection()),
+            patch("app.db.operations.get_asked_question_ids", return_value=set()),
+        ):
             await execute_tool(tool_call, sample_state)
 
         mock_search.assert_awaited_once_with(
             keywords=["Java"],
+            limit=15,
             question_type="knowledge_probe",
         )
 
@@ -672,6 +746,33 @@ class TestExecuteToolSelectQuestion:
         assert (
             sample_state["next_question_plan"]["selection_reason"]
             == "agent_explicit_selection"
+        )
+
+    async def test_select_question_explicit_index_overrides_follow_up_intent(
+        self, sample_state
+    ):
+        """Explicit select_question must bind even when default planning is off."""
+        from app.agents.chat.tools import execute_tool
+
+        candidates = self._make_candidates(2)
+        sample_state["candidate_questions"] = candidates
+        sample_state["retrieved_questions"] = candidates
+        sample_state["intent"] = "follow_up"
+
+        tool_call = {
+            "function": {
+                "name": "select_question",
+                "arguments": json.dumps({"candidate_index": 1}),
+            }
+        }
+
+        result = await execute_tool(tool_call, sample_state)
+        parsed = json.loads(result)
+
+        assert parsed["ok"] is True
+        assert parsed["selected_question"]["id"] == 2
+        assert sample_state["next_question_plan"]["selection_reason"] == (
+            "agent_explicit_selection"
         )
 
     async def test_select_question_negative_term_filtered(self, sample_state):

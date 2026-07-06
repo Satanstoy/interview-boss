@@ -555,6 +555,71 @@ def _previously_asked_question_keys(state: ChatState) -> tuple[set[int], set[str
     return ids, texts
 
 
+def _collect_question_exclusion_ids(state: ChatState) -> set[int]:
+    """Collect question IDs that retrieval/draw tools should not return again.
+
+    This is intentionally broader than ``InterviewLedger.asked_question_ids``:
+    the ledger represents questions actually used for coverage, while this
+    helper also includes candidates already exposed to the model/user in
+    current or previous turns. Excluding exposed candidates at the tool boundary
+    prevents the same candidate set from resurfacing in long interviews.
+    """
+    ids: set[int] = set(_build_interview_ledger(state).asked_question_ids)
+
+    def add_question(raw: object) -> None:
+        if not isinstance(raw, dict):
+            return
+        raw_id = raw.get("id")
+        try:
+            qid = int(raw_id)
+        except (TypeError, ValueError):
+            qid = 0
+        if qid > 0:
+            ids.add(qid)
+
+    def add_items(raw_items: object) -> None:
+        if not isinstance(raw_items, list):
+            return
+        for item in raw_items:
+            add_question(item)
+
+    add_question(state.get("selected_question"))
+    add_items(state.get("candidate_questions"))
+    add_items(state.get("retrieved_questions"))
+    plan = state.get("next_question_plan")
+    if isinstance(plan, dict):
+        try:
+            qid = int(plan.get("question_id") or 0)
+        except (TypeError, ValueError):
+            qid = 0
+        if qid > 0:
+            ids.add(qid)
+
+    for msg in state.get("message_history", []) or []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        metadata = msg.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            continue
+        add_question(metadata.get("selected_question"))
+        plan = metadata.get("question_plan")
+        if isinstance(plan, dict):
+            try:
+                qid = int(plan.get("question_id") or 0)
+            except (TypeError, ValueError):
+                qid = 0
+            if qid > 0:
+                ids.add(qid)
+        for key in (
+            "selected_basis_questions",
+            "candidate_questions",
+            "retrieved_questions",
+        ):
+            add_items(metadata.get(key))
+
+    return ids
+
+
 def _candidate_was_previously_asked(
     candidate: dict,
     asked_ids: set[int],
@@ -582,7 +647,7 @@ def _maybe_create_question_plan(
     sets ``state["question_plan_reason"]`` to ``"negative_term_filtered"`` when the
     forced candidate matches a ``search_negative_terms`` entry.
     """
-    if not _should_create_question_plan(state):
+    if force_candidate is None and not _should_create_question_plan(state):
         return None
 
     negative_terms = state.get("search_negative_terms", []) or []

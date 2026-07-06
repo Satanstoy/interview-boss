@@ -15,7 +15,7 @@ import time
 from pydantic import ValidationError
 
 from app.agents.chat.question_plan import (
-    _build_interview_ledger,
+    _collect_question_exclusion_ids,
     _maybe_create_question_plan,
 )
 
@@ -172,7 +172,7 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         search_args["retrieval_intent"] = state["retrieval_intent"]
     if state.get("search_negative_terms"):
         search_args["negative_terms"] = state["search_negative_terms"]
-    exclude_ids = set(_build_interview_ledger(state).asked_question_ids)
+    exclude_ids = set(_collect_question_exclusion_ids(state))
     # Cross-conversation dedup: exclude questions asked in previous interviews
     try:
         from app.db.operations import get_db_connection, get_asked_question_ids
@@ -182,12 +182,6 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         exclude_ids.update(cross_conversation_ids)
     except Exception as e:
         logger.debug("Cross-conversation dedup query failed: %s", e)
-    if state.get("retrieved_questions"):
-        exclude_ids.update(
-            q.get("id")
-            for q in state["retrieved_questions"]
-            if isinstance(q, dict) and q.get("id")
-        )
     if exclude_ids:
         search_args["exclude_ids"] = _positive_int_ids(exclude_ids)
 
@@ -277,13 +271,15 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         value = getattr(parsed_args, key)
         if value:
             draw_args[key] = value
-    exclude_ids = set(_build_interview_ledger(state).asked_question_ids)
-    if state.get("retrieved_questions"):
-        exclude_ids.update(
-            q.get("id")
-            for q in state["retrieved_questions"]
-            if isinstance(q, dict) and q.get("id")
-        )
+    exclude_ids = set(_collect_question_exclusion_ids(state))
+    try:
+        from app.db.operations import get_db_connection, get_asked_question_ids
+
+        with get_db_connection() as conn:
+            cross_conversation_ids = get_asked_question_ids(conn, user_id)
+        exclude_ids.update(cross_conversation_ids)
+    except Exception as e:
+        logger.debug("Cross-conversation dedup query failed: %s", e)
     if exclude_ids:
         draw_args["exclude_ids"] = _positive_int_ids(exclude_ids)
 

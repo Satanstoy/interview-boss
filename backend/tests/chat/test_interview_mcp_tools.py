@@ -140,6 +140,54 @@ async def test_search_questions_tool_excludes_ledger_question_ids(monkeypatch):
     assert captured["exclude_ids"] == {21, 22}
 
 
+@pytest.mark.asyncio
+async def test_search_questions_tool_excludes_previously_exposed_candidates(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    captured = {}
+
+    async def fake_search(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "id": 91,
+                "question": "Redis 缓存穿透怎么处理？",
+                "cat1": "C.后端基础",
+                "cat2": "Redis",
+                "tags": "redis",
+            }
+        ]
+
+    monkeypatch.setattr(interview_tools, "_hybrid_search_for_tool", fake_search)
+
+    state = {
+        "user_id": 5,
+        "candidate_questions": [
+            {"id": 23, "question": "当前轮已经展示的候选题"}
+        ],
+        "retrieved_questions": [{"id": 24, "question": "当前轮检索过的候选题"}],
+        "message_history": [
+            {
+                "role": "assistant",
+                "metadata": {
+                    "candidate_questions": [
+                        {"id": 25, "question": "上一轮展示过的候选题"}
+                    ],
+                    "retrieved_questions": [
+                        {"id": 26, "question": "上一轮检索过的候选题"}
+                    ],
+                    "selected_question": {"id": 27, "question": "上一轮问过的题"},
+                },
+            }
+        ],
+    }
+
+    result = await interview_tools.search_questions_tool({"keywords": ["Redis"]}, state)
+
+    assert result["ok"] is True
+    assert captured["exclude_ids"] == {23, 24, 25, 26, 27}
+
+
 def test_load_skill_tool_returns_unified_envelope():
     """load_skill_tool should use build_success_envelope with metadata.metrics.total_ms and debug_reason."""
     from app.mcp_server import interview_tools
@@ -372,6 +420,7 @@ async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
 @pytest.mark.asyncio
 async def test_draw_questions_tool_excludes_ledger_question_ids(monkeypatch):
     from app.mcp_server import interview_tools
+    from app.db import operations
 
     captured = {}
 
@@ -389,7 +438,16 @@ async def test_draw_questions_tool_excludes_ledger_question_ids(monkeypatch):
             }
         ]
 
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
     monkeypatch.setattr(interview_tools, "_draw_questions_for_tool", fake_draw)
+    monkeypatch.setattr(operations, "get_db_connection", lambda: FakeConnection())
+    monkeypatch.setattr(operations, "get_asked_question_ids", lambda conn, user_id: {88})
 
     state = {
         "user_id": 5,
@@ -404,7 +462,71 @@ async def test_draw_questions_tool_excludes_ledger_question_ids(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert captured["exclude_ids"] == {21}
+    assert captured["exclude_ids"] == {21, 88}
+
+
+@pytest.mark.asyncio
+async def test_draw_questions_tool_excludes_previously_exposed_candidates(monkeypatch):
+    from app.mcp_server import interview_tools
+    from app.db import operations
+
+    captured = {}
+
+    async def fake_draw(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "id": 31,
+                "question": "滑动窗口最大值",
+                "cat1": "E.算法与数据结构",
+                "cat2": "E2.算法手撕",
+                "tags": "算法",
+                "difficulty": "L2-中等",
+                "sources": [],
+            }
+        ]
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(interview_tools, "_draw_questions_for_tool", fake_draw)
+    monkeypatch.setattr(operations, "get_db_connection", lambda: FakeConnection())
+    monkeypatch.setattr(operations, "get_asked_question_ids", lambda conn, user_id: {89})
+
+    state = {
+        "user_id": 5,
+        "bank_mode": "public",
+        "candidate_questions": [
+            {"id": 23, "question": "当前轮已经展示的候选题"}
+        ],
+        "retrieved_questions": [{"id": 24, "question": "当前轮检索过的候选题"}],
+        "message_history": [
+            {
+                "role": "assistant",
+                "metadata": {
+                    "candidate_questions": [
+                        {"id": 25, "question": "上一轮展示过的候选题"}
+                    ],
+                    "retrieved_questions": [
+                        {"id": 26, "question": "上一轮检索过的候选题"}
+                    ],
+                    "selected_question": {"id": 27, "question": "上一轮问过的题"},
+                },
+            }
+        ],
+    }
+
+    result = await interview_tools.draw_questions_tool(
+        {"question_type": "algorithm_coding", "count": 1},
+        state,
+    )
+
+    assert result["ok"] is True
+    assert captured["exclude_ids"] == {23, 24, 25, 26, 27, 89}
 
 
 @pytest.mark.asyncio
