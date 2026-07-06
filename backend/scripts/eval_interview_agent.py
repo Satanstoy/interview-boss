@@ -71,6 +71,10 @@ class Scenario:
     scoring: dict[str, dict[str, Any]]
     extra_args: dict[str, Any] | None = None
     early_exit_check: Callable[[list[dict[str, Any]]], bool] | None = None
+    # Turn-level candidate behavior injection: {turn_number: extra_instruction}
+    # When the candidate responds at turn N, if N is in this dict,
+    # the extra instruction is appended to the candidate's system prompt.
+    candidate_prompt_overrides: dict[int, str] | None = None
 
 
 MID_LEVEL_PERSONA = {
@@ -203,6 +207,68 @@ END_POLICY_SCORING = {
     },
 }
 
+# ── Per-Scenario Scoring ──────────────────────────────────────
+
+EARLY_CLOSE_SCORING = {
+    "early_close_refused": {
+        "description": "候选人要求提前收尾时，面试官拒绝并继续提问",
+        "weight": 2.0,
+    },
+    "interviewer_probes_instead_of_closing": {
+        "description": "面试官在候选人要求收尾后，转而追问更多技术细节",
+        "weight": 1.0,
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 0.5,
+    },
+}
+
+PROPER_END_SCORING = {
+    "has_summary": {
+        "description": "面试官在候选人表示收尾后，给出结构化面试总结",
+        "weight": 2.0,
+    },
+    "summary_mentions_topics": {
+        "description": "总结中提到本次面试讨论的具体技术主题",
+        "weight": 1.0,
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 0.5,
+    },
+}
+
+INSUFFICIENT_EVIDENCE_SCORING = {
+    "interviewer_probes_for_details": {
+        "description": "面试官在候选人回答模糊时，主动追问具体细节",
+        "weight": 2.0,
+    },
+    "probe_count": {
+        "description": "面试官至少追问 2 次细节",
+        "weight": 1.0,
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 0.5,
+    },
+}
+
+COUNTER_QUESTION_SCORING = {
+    "counter_question_detected": {
+        "description": "候选人提出了反问（通过事件或对话内容检测）",
+        "weight": 1.0,
+    },
+    "counter_question_answered": {
+        "description": "面试官回答了候选人的反问",
+        "weight": 2.0,
+    },
+    "answer_substantive": {
+        "description": "面试官的回答是实质性的（非敷衍）",
+        "weight": 1.0,
+    },
+}
+
 
 def _candidate_asks_to_end(turns: list[dict[str, Any]]) -> bool:
     if not turns:
@@ -232,6 +298,9 @@ SCENARIOS = {
             "coding-answer",
         ],
         scoring=LONG_SESSION_SCORING,
+        candidate_prompt_overrides={
+            16: "这是最后一轮回答。回答完后，自然地表示'时间差不多了，今天先到这里'，给面试官一个收尾的机会。",
+        },
     ),
     "long_session_senior": Scenario(
         scenario_id="long_session_senior",
@@ -246,6 +315,9 @@ SCENARIOS = {
             "coding-answer",
         ],
         scoring=LONG_SESSION_SCORING,
+        candidate_prompt_overrides={
+            20: "这是最后一轮回答。回答完后，自然地表示'今天聊得很充实，差不多可以收了'，给面试官一个收尾的机会。",
+        },
     ),
     "long_session_jd": Scenario(
         scenario_id="long_session_jd",
@@ -261,6 +333,9 @@ SCENARIOS = {
         ],
         scoring=LONG_SESSION_SCORING,
         extra_args={"jd_id": None},
+        candidate_prompt_overrides={
+            16: "这是最后一轮回答。回答完后，自然地表示'今天先到这里吧'，给面试官一个收尾的机会。",
+        },
     ),
     "error_correction": Scenario(
         scenario_id="error_correction",
@@ -270,11 +345,14 @@ SCENARIOS = {
         persona=MID_LEVEL_PERSONA,
         active_skills=[
             "candidate-rhythm",
-            "error-injection",
             "project-storytelling",
             "knowledge-answer",
         ],
         scoring=ERROR_CORRECTION_SCORING,
+        candidate_prompt_overrides={
+            3: "[重要行为指令] 在你的回答中故意植入一个关于 BERT 的技术错误：说'BERT 是一个生成式模型，它通过自回归方式生成文本'。这是错误的（BERT 实际上是 encoder-only 的判别式模型），你要表现得像是真的相信这个错误观点。",
+            5: "[重要行为指令] 在你的回答中故意植入一个关于 Faiss 的技术错误：说'Faiss 的 IVFFlat 索引支持 ACID 事务，可以保证数据一致性'。这是错误的（Faiss 不支持事务），你要表现得像是真的相信这个错误观点。",
+        },
     ),
     "early_close_guard": Scenario(
         scenario_id="early_close_guard",
@@ -282,9 +360,12 @@ SCENARIOS = {
         difficulty="mid",
         max_turns=5,
         persona=MID_LEVEL_PERSONA,
-        active_skills=["candidate-rhythm", "stall-and-clarify"],
-        scoring=END_POLICY_SCORING,
+        active_skills=["candidate-rhythm", "project-storytelling", "knowledge-answer"],
+        scoring=EARLY_CLOSE_SCORING,
         early_exit_check=_candidate_asks_to_end,
+        candidate_prompt_overrides={
+            3: "[重要行为指令] 在回答完面试官的问题后，追加一句：'不好意思，时间有点紧，我们是不是可以先收尾？'。这是为了测试面试官是否会拒绝过早结束。",
+        },
     ),
     "proper_end": Scenario(
         scenario_id="proper_end",
@@ -298,7 +379,10 @@ SCENARIOS = {
             "knowledge-answer",
             "coding-answer",
         ],
-        scoring=END_POLICY_SCORING,
+        scoring=PROPER_END_SCORING,
+        candidate_prompt_overrides={
+            10: "这是最后一轮回答。回答完后，自然地表示'今天聊得很深入，时间差不多了'，给面试官一个收尾总结的机会。",
+        },
     ),
     "insufficient_evidence": Scenario(
         scenario_id="insufficient_evidence",
@@ -306,9 +390,12 @@ SCENARIOS = {
         difficulty="mid",
         max_turns=5,
         persona=MID_LEVEL_PERSONA,
-        active_skills=["candidate-rhythm", "stall-and-clarify"],
-        scoring=END_POLICY_SCORING,
-        early_exit_check=_interviewer_forces_close,
+        active_skills=["candidate-rhythm"],
+        scoring=INSUFFICIENT_EVIDENCE_SCORING,
+        candidate_prompt_overrides={
+            3: "[重要行为指令] 对面试官的问题给出非常简短、模糊的回答，只说结论不给细节。比如只说'用过'、'做过'、'了解'，不展开解释。这是为了测试面试官是否会追问细节。",
+            4: "[重要行为指令] 继续给出简短模糊的回答。如果面试官追问细节，你可以稍微展开一点，但仍然不够充分。",
+        },
     ),
     "counter_question": Scenario(
         scenario_id="counter_question",
@@ -317,7 +404,10 @@ SCENARIOS = {
         max_turns=6,
         persona=SENIOR_PERSONA,
         active_skills=["candidate-rhythm", "project-storytelling", "knowledge-answer"],
-        scoring=END_POLICY_SCORING,
+        scoring=COUNTER_QUESTION_SCORING,
+        candidate_prompt_overrides={
+            4: "[重要行为指令] 在回答完面试官的问题后，主动向面试官提一个技术相关的问题，比如：'我想了解一下，贵团队在 XX 方面是怎么做的？'或'这个岗位日常工作中，XX 技术栈的使用频率高吗？'。这是为了测试面试官是否会回答候选人的反问。",
+        },
     ),
 }
 
@@ -351,6 +441,18 @@ class SmartCandidateAgent:
 {skill_prompt}
 """
         self.messages = [{"role": "system", "content": system.strip()}]
+
+    def inject_turn_instruction(self, instruction: str) -> None:
+        """Inject a temporary instruction for the next candidate response.
+
+        Appends a system message before the candidate's next response,
+        guiding specific behavior (e.g., ask to end, give vague answer, ask counter-question).
+        The instruction is appended to the system prompt for this turn only.
+        """
+        self.messages.append({
+            "role": "system",
+            "content": f"[本轮行为指令] {instruction}",
+        })
 
     def respond(self, interviewer_message: str) -> str:
         self.messages.append({"role": "user", "content": interviewer_message})
@@ -447,6 +549,7 @@ def _call_openai_compatible_chat(
     *,
     temperature: float,
     max_tokens: int,
+    timeout: int | None = None,
 ) -> str:
     body = json.dumps(
         {
@@ -465,7 +568,7 @@ def _call_openai_compatible_chat(
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(request, timeout=config.timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout or config.timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return str(payload["choices"][0]["message"]["content"]).strip()
 
@@ -1139,6 +1242,11 @@ def run_evaluation(
 
     try:
         for turn_idx in range(1, scenario.max_turns + 1):
+            # Inject turn-level candidate behavior override if configured
+            if scenario.candidate_prompt_overrides and turn_idx in scenario.candidate_prompt_overrides:
+                override = scenario.candidate_prompt_overrides[turn_idx]
+                candidate.inject_turn_instruction(override)
+
             if turn_idx == 1:
                 user_msg = scenario.persona["opening"]
             else:
@@ -1222,6 +1330,197 @@ def write_reports(
     return json_path, md_path
 
 
+def write_unified_report(
+    results: list[dict[str, Any]],
+    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    judge_config: JudgeLLMConfig | None = None,
+) -> Path:
+    """Generate a unified report summarizing all scenario results.
+
+    Uses LLM to synthesize cross-scenario insights if judge config is available,
+    otherwise falls back to a template-based summary.
+    """
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    unified_path = output_dir / f"eval_unified_{timestamp}.md"
+
+    # Build summary data for each scenario
+    scenario_summaries: list[str] = []
+    for r in results:
+        scores = r["scores"]
+        metrics = r["metrics"]
+        overall = scores.get("overall_score", scores.get("ratio", 0))
+        passed = scores.get("passed", False)
+        status = "✅ PASS" if passed else "❌ FAIL"
+        fallback = " ⚠️降级" if scores.get("fallback_notice") else ""
+        turn_count = metrics.get("turn_count", len(r.get("turns", [])))
+
+        # Count passed/failed dimensions
+        items = scores.get("items", {})
+        passed_dims = sum(1 for v in items.values() if v.get("passed"))
+        total_dims = len(items)
+
+        scenario_summaries.append(
+            f"| {r['scenario_id']} | {turn_count}轮 | {overall:.2f} | {status}{fallback} "
+            f"| {passed_dims}/{total_dims} |"
+        )
+
+    summary_table = "\n".join(scenario_summaries)
+
+    # Collect all critical issues and highlights
+    all_issues: list[str] = []
+    all_highlights: list[str] = []
+    for r in results:
+        sid = r["scenario_id"]
+        scores = r["scores"]
+        for issue in scores.get("critical_issues", []):
+            all_issues.append(f"- **{sid}**: {issue}")
+        for h in scores.get("highlights", []):
+            all_highlights.append(f"- **{sid}**: {h}")
+
+    if judge_config:
+        # Use LLM to generate cross-scenario analysis with full conversation context
+        # Build per-scenario sections with transcripts and scoring details
+        scenario_sections: list[str] = []
+        for r in results:
+            sid = r["scenario_id"]
+            scores = r["scores"]
+            metrics = r["metrics"]
+            turns = r.get("turns", [])
+            transcript = _build_conversation_transcript(turns, max_chars=1500)
+            fallback = scores.get("fallback_notice", "")
+
+            # Scoring details
+            score_lines: list[str] = []
+            for key, item in scores.get("items", {}).items():
+                status = "✅" if item.get("passed") else "❌"
+                score_val = item.get("score", 0)
+                reasoning = item.get("reasoning", item.get("description", ""))
+                evidence = item.get("evidence", "")
+                line = f"  - {status} **{key}** ({score_val:.1f}): {reasoning}"
+                if evidence:
+                    line += f"\n    证据: {evidence[:150]}"
+                score_lines.append(line)
+
+            issues = scores.get("critical_issues", [])
+            highlights = scores.get("highlights", [])
+
+            section = f"""---
+### 场景: {sid}
+- 轮数: {len(turns)} | 总分: {scores.get('overall_score', scores.get('ratio', 0)):.2f} | 状态: {'通过' if scores.get('passed') else '未通过'}
+- 工具调用: {metrics.get('tool_count', 0)} | thinking轮次: {metrics.get('thinking_turns', 0)}/{len(turns)} | SSE错误: {len(metrics.get('errors', []))}
+{f'- 降级: {fallback}' if fallback else ''}
+
+**评分维度:**
+{chr(10).join(score_lines)}
+
+**严重问题:**
+{chr(10).join(f'  - {i}' for i in issues) if issues else '  - 无'}
+
+**亮点:**
+{chr(10).join(f'  - {h}' for h in highlights) if highlights else '  - 无'}
+
+**对话记录:**
+{transcript}"""
+            scenario_sections.append(section)
+
+        all_scenarios_text = "\n\n".join(scenario_sections)
+
+        prompt = f"""你是一位资深技术面试质量分析专家。请根据以下 8 个场景的完整评测数据（含对话记录），生成一份深度综合评测报告。
+
+## 场景总览
+| 场景 | 轮数 | 总分 | 状态 | 通过维度 |
+|------|------|------|------|---------|
+{summary_table}
+
+## 各场景详细数据（含对话记录）
+{all_scenarios_text}
+
+## 报告要求
+
+请生成一份 Markdown 格式的深度综合评测报告，包含以下部分：
+
+1. **总体评价** — 2-3 句话总结面试系统整体质量水平，指出最突出的优势和最紧迫的问题
+
+2. **场景得分对比** — 表格形式展示各场景得分、通过情况、核心失分点
+
+3. **共性问题深度分析** — 对跨场景反复出现的问题进行深入分析：
+   - 每个问题必须引用至少 2 个场景的具体对话轮次作为证据
+   - 分析问题的根本原因（是 prompt 设计问题、逻辑缺陷、还是评测标准不合理）
+   - 评估问题对候选人体验的实际影响
+
+4. **场景逐一分析** — 每个场景单独一节，包含：
+   - 场景目标与实际表现的差距分析
+   - 引用 1-2 段最具代表性的对话（好的或差的），附专家点评
+   - 该场景独有的发现
+
+5. **系统亮点详析** — 面试系统做得好的方面，引用具体对话证据
+
+6. **面试官表现画像** — 基于所有场景的对话，总结面试官的整体风格：
+   - 提问策略（追问深度、话题切换、难度控制）
+   - 互动模式（反馈频率、鼓励方式、反问处理）
+   - 流程管理（节奏控制、收尾质量）
+
+7. **优先改进清单** — 按 P0/P1/P2/P3 排序，每条包含：
+   - 具体问题描述
+   - 影响的场景和维度
+   - 可操作的改进方案
+   - 预期改进效果
+
+8. **各场景评分明细表** — 每个场景一个表格
+
+报告语言：中文简体。语气：专业、客观、有建设性。篇幅不限，力求深入。"""
+
+        try:
+            report = _call_openai_compatible_chat(
+                judge_config,
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=16000,
+                timeout=300,
+            )
+            unified_path.write_text(report, encoding="utf-8")
+            return unified_path
+        except Exception as exc:
+            print(f"Warning: LLM unified report failed, using template: {exc}", file=sys.stderr)
+
+    # Fallback: template-based unified report
+    lines = [
+        "# 面试系统综合评测报告",
+        f"时间: {timestamp}",
+        f"场景数: {len(results)}",
+        "",
+        "## 场景总览",
+        "| 场景 | 轮数 | 总分 | 状态 | 通过维度 |",
+        "|------|------|------|------|---------|",
+        summary_table,
+        "",
+        "## 共性问题",
+        *all_issues,
+        "",
+        "## 系统亮点",
+        *all_highlights,
+        "",
+    ]
+
+    # Per-scenario detail tables
+    for r in results:
+        sid = r["scenario_id"]
+        scores = r["scores"]
+        lines.append(f"## {sid} 评分明细")
+        lines.append("| 维度 | 状态 | 得分 | 说明 |")
+        lines.append("|------|------|------|------|")
+        for key, item in scores.get("items", {}).items():
+            status = "✅" if item.get("passed") else "❌"
+            score_val = item.get("score", 0)
+            reasoning = item.get("reasoning", item.get("description", ""))
+            lines.append(f"| {key} | {status} | {score_val:.1f} | {reasoning[:80]} |")
+        lines.append("")
+
+    unified_path.write_text("\n".join(lines), encoding="utf-8")
+    return unified_path
+
+
 def _render_markdown_report(result: dict[str, Any], timestamp: str) -> str:
     scenario_id = result["scenario_id"]
     scores = result["scores"]
@@ -1278,9 +1577,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate the real interview agent with LLM candidates.")
     parser.add_argument(
         "--scenario",
-        default="all",
+        nargs="+",
+        default=["all"],
         choices=["all", *SCENARIOS.keys()],
-        help="Scenario id to run, or all.",
+        help="Scenario id(s) to run, or 'all'. Can specify multiple: --scenario error_correction proper_end",
     )
     parser.add_argument("--base-url", default=os.getenv("E2E_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--username", default=os.getenv("EVAL_USER_NAME") or os.getenv("E2E_USERNAME"))
@@ -1316,18 +1616,20 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        auth_token = _resolve_token(args)
         candidate_config = _resolve_candidate_config(args)
         judge_config = _resolve_judge_config(args)
         if judge_config:
             print(f"LLM Judge enabled: model={judge_config.model}, base_url={judge_config.base_url}")
         else:
             print("LLM Judge disabled: using rule-based scoring (set OPENAI_API_KEY or use --judge-api-key to enable).")
-        scenario_ids = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
+        scenario_ids = list(SCENARIOS) if "all" in args.scenario else args.scenario
         all_passed = True
+        all_results: list[dict[str, Any]] = []
         for scenario_id in scenario_ids:
             scenario = SCENARIOS[scenario_id]
             print(f"Running scenario: {scenario_id}")
+            # Refresh token for each scenario to avoid expiry
+            auth_token = _resolve_token(args)
             result = run_evaluation(scenario, args, auth_token, candidate_config, judge_config)
 
             # Generate report: LLM if judge available, otherwise template
@@ -1342,6 +1644,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- JSON: {json_path}")
             print(f"- MD: {md_path}")
             all_passed = all_passed and bool(result["scores"]["passed"])
+            all_results.append(result)
+
+        # Write unified report when running multiple scenarios
+        if len(all_results) > 1:
+            unified_path = write_unified_report(all_results, args.output_dir, judge_config)
+            print(f"\n统一报告: {unified_path}")
         return 0 if all_passed else 1
     except Exception as exc:
         print(f"Interview eval failed: {exc}", file=sys.stderr)

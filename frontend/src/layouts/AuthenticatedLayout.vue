@@ -9,21 +9,10 @@ import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppSidebar from '@/components/AppSidebar.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import {
-  BookOpen,
-  BotMessageSquare,
-  ClipboardList,
-  Code2,
-  FileUp,
-  Filter,
-  Library,
-  Network,
-} from '@lucide/vue'
+  SidebarProvider,
+  Sidebar,
+  SidebarInset,
+} from '@/components/ui/sidebar'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
 import { useMergeDialog } from '@/composables/useMergeDialog.js'
@@ -143,7 +132,6 @@ const {
 
 // ── UI state ──
 const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
-const mobileNavOpen = ref(false)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
 const interviewCurrentPage = ref(1)
@@ -185,31 +173,11 @@ const sidebarGroups = computed(() => [
 
 const sidebarTabs = computed(() => sidebarGroups.value.flatMap(group => group.tabs))
 
-const navIconMap = {
-  MasterBank: BookOpen,
-  Chat: BotMessageSquare,
-  MockInterview: ClipboardList,
-  Coding: Code2,
-  Import: FileUp,
-  JD: Filter,
-  Interview: Library,
-  KnowledgeGraph: Network,
-}
-
 const activeTabLabel = computed(() => {
   if (!isAuthenticatedForUi.value) return 'InterviewBoss'
   if (activeTab.value === 'Settings') return '设置'
   return sidebarTabs.value.find(tab => tab.key === activeTab.value)?.label || '工作台'
 })
-
-function isActiveRoute(tabRoute) {
-  return route.path === tabRoute || route.path.startsWith(tabRoute + '/')
-}
-
-async function navigateMobile(tab) {
-  await router.push(routeLocation(tab.route))
-  mobileNavOpen.value = false
-}
 
 // ── Selection ──
 const jdSelection = useSelection(() => jdData.value)
@@ -533,94 +501,30 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
     <LoginPage v-if="!isAuthenticatedForUi" @login-success="handleLoginSuccess" />
 
     <!-- Main layout -->
-    <div v-else class="flex h-screen overflow-hidden">
-      <!-- Sidebar -->
-      <aside
-        class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 overflow-hidden"
-        :style="{ width: sidebarCollapsed ? '60px' : '256px', transition: 'width 380ms cubic-bezier(0.4, 0, 0.2, 1)' }"
-      >
+    <SidebarProvider v-else :open="!sidebarCollapsed" @update:open="sidebarCollapsed = !$event">
+      <Sidebar collapsible="icon">
         <AppSidebar
-          :collapsed="sidebarCollapsed"
           :active-tab="activeTab"
           :sidebar-tabs="sidebarTabs"
           :sidebar-groups="sidebarGroups"
           :display-user="displayUser"
           :pending-review-count="pendingReviewCount"
           @update:active-tab="activeTab = $event"
-          @update:collapsed="sidebarCollapsed = $event"
           @go-to-question="onGoToQuestion"
           @logout="handleLogout"
           @bank-mode-changed="handleBankModeChanged"
           @show-review="showReviewPanel = true"
           @show-settings="openSettings"
         />
-      </aside>
+      </Sidebar>
 
-      <!-- Main content -->
-      <main class="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <SidebarInset>
         <SiteHeader
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
           :no-border="route.path.startsWith('/chat')"
           @show-settings="openSettings"
-          @toggle-mobile-nav="mobileNavOpen = true"
         />
-
-        <Sheet v-model:open="mobileNavOpen">
-          <SheetContent side="left" class="w-[86vw] max-w-xs gap-0 p-0 md:hidden">
-            <SheetHeader class="border-b border-border px-4 py-4 text-left">
-              <div class="flex items-center gap-3">
-                <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl">
-                  <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
-                </div>
-                <div class="min-w-0">
-                  <SheetTitle class="truncate text-base">InterviewBoss</SheetTitle>
-                  <p class="truncate text-xs text-muted-foreground">AI 面试准备工作台</p>
-                </div>
-              </div>
-            </SheetHeader>
-
-            <nav class="flex-1 overflow-y-auto px-3 py-3">
-              <div
-                v-for="group in sidebarGroups"
-                :key="group.label || 'primary'"
-                class="mb-3 last:mb-0"
-              >
-                <div
-                  v-if="group.label"
-                  class="px-2 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground"
-                >
-                  {{ group.label }}
-                </div>
-                <div class="space-y-1">
-                  <button
-                    v-for="tab in group.tabs"
-                    :key="tab.key"
-                    type="button"
-                    class="flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors"
-                    :class="isActiveRoute(tab.route)
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-                      : 'text-foreground/75 hover:bg-muted hover:text-foreground'"
-                    @click="navigateMobile(tab)"
-                  >
-                    <component
-                      :is="navIconMap[tab.key]"
-                      class="h-4 w-4 shrink-0"
-                      :class="isActiveRoute(tab.route) ? 'text-primary' : 'text-muted-foreground'"
-                    />
-                    <span class="min-w-0 flex-1 truncate">{{ tab.label }}</span>
-                    <span
-                      v-if="tab.count != null && tab.count !== 0"
-                      class="shrink-0 text-xs font-medium text-muted-foreground"
-                    >
-                      {{ tab.count }}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </nav>
-          </SheetContent>
-        </Sheet>
 
         <!-- 统一 overflow-hidden：每个 View 组件自己管理滚动（消除双层滚动问题） -->
         <!-- h-full 确保 ChatView 的 h-full 能正确解析（CSS 百分比高度需要父链每一层都有明确高度） -->
@@ -631,8 +535,8 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
             </Transition>
           </router-view>
         </div>
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
 
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />

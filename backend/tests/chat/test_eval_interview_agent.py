@@ -32,10 +32,25 @@ def test_scenarios_cover_design_matrix_and_load_candidate_skills():
     assert module.SCENARIOS["long_session_senior"].max_turns == 20
     assert module.SCENARIOS["error_correction"].active_skills == [
         "candidate-rhythm",
-        "error-injection",
         "project-storytelling",
         "knowledge-answer",
     ]
+
+    # Verify candidate_prompt_overrides are set for scenarios that need them
+    assert module.SCENARIOS["early_close_guard"].candidate_prompt_overrides is not None
+    assert 3 in module.SCENARIOS["early_close_guard"].candidate_prompt_overrides
+    assert module.SCENARIOS["error_correction"].candidate_prompt_overrides is not None
+    assert 3 in module.SCENARIOS["error_correction"].candidate_prompt_overrides
+    assert module.SCENARIOS["counter_question"].candidate_prompt_overrides is not None
+    assert 4 in module.SCENARIOS["counter_question"].candidate_prompt_overrides
+    assert module.SCENARIOS["insufficient_evidence"].candidate_prompt_overrides is not None
+    assert 3 in module.SCENARIOS["insufficient_evidence"].candidate_prompt_overrides
+
+    # Verify long session scenarios have end signal at last turn
+    assert 16 in module.SCENARIOS["long_session_mid"].candidate_prompt_overrides
+    assert 20 in module.SCENARIOS["long_session_senior"].candidate_prompt_overrides
+    assert 16 in module.SCENARIOS["long_session_jd"].candidate_prompt_overrides
+    assert 10 in module.SCENARIOS["proper_end"].candidate_prompt_overrides
 
     candidate = module.SmartCandidateAgent(
         module.MID_LEVEL_PERSONA,
