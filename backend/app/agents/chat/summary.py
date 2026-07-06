@@ -78,12 +78,26 @@ _SUMMARY_REQUEST_KEYWORDS = (
     "强项",
     "风险",
     "薄弱",
+    "不足",
+    "证据不足",
+    "高级工程师标准",
     "改进",
     "下一轮",
     "追问",
     "压测",
     "是否值得",
     "进入下一轮",
+)
+
+_PREMATURE_SUMMARY_GUARD_MESSAGE_COUNT = 6
+_ABRUPT_EARLY_CLOSE_KEYWORDS = (
+    "先别问",
+    "别问了",
+    "现在就结束",
+    "现在结束",
+    "直接给我",
+    "是否通过",
+    "通过与否",
 )
 
 
@@ -127,6 +141,44 @@ def _wants_structured_summary(user_message: str) -> bool:
     """Return True when the closing request asks for evaluation, not just goodbye."""
     normalized = user_message.lower()
     return any(keyword in normalized for keyword in _SUMMARY_REQUEST_KEYWORDS)
+
+
+def _is_abrupt_premature_summary_request(
+    user_message: str,
+    message_history: list[dict],
+) -> bool:
+    """Return True for early pass/fail requests that should keep interviewing."""
+    if len(message_history) >= _PREMATURE_SUMMARY_GUARD_MESSAGE_COUNT:
+        return False
+    normalized = user_message.lower()
+    return any(keyword in normalized for keyword in _ABRUPT_EARLY_CLOSE_KEYWORDS)
+
+
+def _last_assistant_prompt(message_history: list[dict]) -> str:
+    for msg in reversed(message_history):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = str(msg.get("content") or "").strip()
+        if content:
+            return content
+    return ""
+
+
+def _premature_summary_guard_response(state: ChatState) -> str:
+    history = state.get("message_history", []) or []
+    last_prompt = _last_assistant_prompt(history)
+    state["question_source"] = "conversation"
+    state["question_source_reason"] = "end_interview_premature_summary_guard"
+    if last_prompt:
+        return (
+            "现在证据还不够，我不能基于这么少的信息给你“是否通过”的结论。"
+            "我们先继续把关键证据补齐："
+            f"{last_prompt}"
+        )
+    return (
+        "现在证据还不够，我不能基于这么少的信息给你“是否通过”的结论。"
+        "我们先继续面试：请你选一个最能代表你水平的项目，讲清楚背景、架构、你的职责和关键取舍。"
+    )
 
 
 async def _generate_structured_summary(state: ChatState) -> str:
@@ -236,6 +288,11 @@ async def _generate_end_interview_response(state: ChatState) -> str:
     # If the user explicitly asks for a summary or the interview is substantial,
     # generate a structured LLM-based summary
     wants_summary = _wants_structured_summary(user_message)
+
+    if wants_summary and _is_abrupt_premature_summary_request(
+        user_message, message_history
+    ):
+        return _premature_summary_guard_response(state)
 
     if wants_summary or len(message_history) >= 20:
         return await _generate_structured_summary(state)

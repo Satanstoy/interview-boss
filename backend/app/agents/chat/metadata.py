@@ -88,6 +88,26 @@ def _infer_selected_question(
         ):
             return q, "question_text_match"
 
+    response_tokens = _tokenize_for_overlap(response_text)
+    if len(candidates) > 1 and response_tokens:
+        best_candidate = None
+        best_score = 0.0
+        best_overlap_count = 0
+        for q in candidates:
+            question_tokens = _tokenize_for_overlap(str(q.get("question") or ""))
+            if not question_tokens:
+                continue
+            overlap_count = len(question_tokens & response_tokens)
+            score = overlap_count / max(min(len(question_tokens), len(response_tokens)), 1)
+            if overlap_count > best_overlap_count or (
+                overlap_count == best_overlap_count and score > best_score
+            ):
+                best_candidate = q
+                best_score = score
+                best_overlap_count = overlap_count
+        if best_candidate and best_overlap_count >= 3 and best_score >= 0.4:
+            return best_candidate, "multi_candidate_token_overlap"
+
     # Single-candidate heuristic: if there's exactly one candidate and the
     # response contains meaningful overlap with its question tokens, bind it.
     # This covers the common case where draw_questions returns 1 question and
@@ -95,7 +115,6 @@ def _infer_selected_question(
     if len(candidates) == 1:
         single = candidates[0]
         single_tokens = _tokenize_for_overlap(str(single.get("question") or ""))
-        response_tokens = _tokenize_for_overlap(response_text)
         if single_tokens and response_tokens:
             overlap = single_tokens & response_tokens
             # Require at least 2 meaningful token overlaps

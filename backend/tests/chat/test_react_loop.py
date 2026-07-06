@@ -327,7 +327,7 @@ class TestReactLoop:
         mock_llm.assert_not_called()
 
     async def test_direct_answer_no_tools(self):
-        """LLM returns no tool_calls -> should stream final answer directly."""
+        """LLM returns no tool_calls -> should emit the direct ReAct answer."""
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -345,28 +345,27 @@ class TestReactLoop:
                 "app.services.llm.llm_with_tools",
                 new_callable=AsyncMock,
                 return_value={
-                    "content": None,
+                    "content": "Hello World",
                     "tool_calls": None,
                     "finish_reason": "stop",
                 },
-            ),
-            patch(
-                "app.services.llm.stream_llm_messages",
-                side_effect=lambda *a, **kw: _mock_stream_strings("Hello", " World"),
-            ),
+            ) as mock_llm,
+            patch("app.services.llm.stream_llm_messages") as mock_stream,
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         chunk_events = [e for e in events if e.get("type") == "chunk"]
-        assert [e["content"] for e in chunk_events] == ["Hello", " World"]
+        assert [e["content"] for e in chunk_events] == ["Hello World"]
         assert "".join(e["content"] for e in chunk_events) == "Hello World"
+        mock_llm.assert_awaited_once()
+        mock_stream.assert_not_called()
         # Last event should be "done"
         assert events[-1]["type"] == "done"
 
-    async def test_nonstream_react_answer_regenerates_final_answer_as_stream(self):
-        """A direct ReAct answer is only a draft; final user-visible answer streams."""
+    async def test_nonstream_react_answer_is_used_without_second_llm_call(self):
+        """A direct ReAct answer is user-visible without a second LLM stream call."""
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -403,8 +402,10 @@ class TestReactLoop:
                 events.append(event)
 
         chunk_events = [e for e in events if e.get("type") == "chunk"]
-        assert [e["content"] for e in chunk_events] == ["流式", "回答"]
-        assert mock_stream.called
+        assert [e["content"] for e in chunk_events] == [
+            "非流式草稿，不应该直接展示"
+        ]
+        assert not mock_stream.called
         assert events[-1]["type"] == "done"
 
     async def test_tool_call_then_answer(self):
@@ -826,11 +827,10 @@ class TestReactLoop:
                 side_effect=_mock_execute_tool,
             ),
             patch(
-                "app.services.llm.stream_llm_messages",
-                side_effect=lambda *a, **kw: _mock_stream_strings(
-                    "Final answer after max steps"
-                ),
-            ),
+                "app.services.llm.raw_llm_call",
+                new_callable=AsyncMock,
+                return_value="Final answer after max steps",
+            ) as mock_synthesis,
         ):
             events = []
             async for event in _react_loop(state):
@@ -839,7 +839,8 @@ class TestReactLoop:
         # LLM called exactly MAX_REACT_STEPS times (loop capped)
         assert mock_llm.call_count == MAX_REACT_STEPS
 
-        # stream_llm_messages was still called (generates answer after loop)
+        # raw_llm_call synthesizes the final answer after max steps.
+        mock_synthesis.assert_awaited_once()
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         assert len(chunk_events) > 0
         assert chunk_events[0]["content"] == "Final answer after max steps"
@@ -942,15 +943,12 @@ class TestReactLoop:
                 "app.services.llm.llm_with_tools",
                 new_callable=AsyncMock,
                 return_value={
-                    "content": None,
+                    "content": "project-deep-dive",
                     "tool_calls": None,
                     "finish_reason": "stop",
                 },
             ),
-            patch(
-                "app.services.llm.stream_llm_messages",
-                side_effect=lambda *a, **kw: _mock_stream_strings("project-deep-dive"),
-            ),
+            patch("app.services.llm.stream_llm_messages") as mock_stream,
         ):
             events = []
             async for event in _react_loop(state):
@@ -963,6 +961,7 @@ class TestReactLoop:
         assert chunk_text != "project-deep-dive"
         assert "项目做深挖" in chunk_text
         assert "internal_marker_filtered" in caplog.text
+        mock_stream.assert_not_called()
 
 
 class TestAnswerCompleteHeuristic:
@@ -1181,7 +1180,7 @@ class TestFinalAnswerQuality:
         assert "来写一道代码题" in events[0]["content"]
         assert state["question_source"] == "generated"
 
-    async def test_final_answer_stream_failure_retries_then_returns_error(self):
+    async def test_direct_react_answer_skips_stream_even_when_stream_would_fail(self):
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -1198,11 +1197,7 @@ class TestFinalAnswerQuality:
             "question_source": "search",
         }
 
-        attempts = 0
-
         async def broken_stream(*args, **kwargs):
-            nonlocal attempts
-            attempts += 1
             raise RuntimeError("upstream failed")
             yield  # pragma: no cover
 
@@ -1229,16 +1224,12 @@ class TestFinalAnswerQuality:
             async for event in _react_loop(state):
                 events.append(event)
 
-        assert attempts == 3
-        assert [event["type"] for event in events][-2:] == ["error", "done"]
-        assert not any(
-            event.get("type") == "chunk"
-            and "介绍一下 RAG 的完整流程" in event.get("content", "")
-            for event in events
-        )
+        chunks = [event["content"] for event in events if event["type"] == "chunk"]
+        assert chunks == ["正常草稿：请你解释 Agent 的整体架构是什么？"]
+        assert [event["type"] for event in events][-2:] == ["chunk", "done"]
         assert "selected_question" not in state
 
-    async def test_final_answer_stream_failure_retries_until_success(self):
+    async def test_direct_react_answer_does_not_retry_final_stream(self):
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -1248,14 +1239,9 @@ class TestFinalAnswerQuality:
             "model": None,
         }
 
-        attempts = 0
-
         async def flaky_stream(*args, **kwargs):
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise RuntimeError("temporary upstream failed")
-            yield {"type": "content", "content": "重试后成功的问题"}
+            raise RuntimeError("should not be called")
+            yield  # pragma: no cover
 
         with (
             patch(
@@ -1280,9 +1266,8 @@ class TestFinalAnswerQuality:
             async for event in _react_loop(state):
                 events.append(event)
 
-        assert attempts == 2
         assert [event for event in events if event["type"] == "chunk"] == [
-            {"type": "chunk", "content": "重试后成功的问题"}
+            {"type": "chunk", "content": "非流式草稿"}
         ]
         assert not any(event["type"] == "error" for event in events)
 
@@ -1671,6 +1656,109 @@ class TestQuestionPlanEnforcement:
         assert "RAG 检索怎么设计" in second_messages_text
         assert state["next_question_plan"]["question_id"] == 11
 
+    async def test_empty_final_answer_uses_bound_question_plan_fallback(self):
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "conversation_id": "conv",
+            "user_id": 1,
+            "user_message": "那继续问一个 coding 题吧",
+            "model": None,
+            "intent": "practice_request",
+            "question_type": "algorithm_coding",
+            "answer_complete": False,
+        }
+        tc_draw = _tc("draw_questions", {"question_type": "algorithm_coding"})
+        tc_select = _tc("select_question", {"candidate_index": 1}, tc_id="call_2")
+        captured_messages = []
+
+        async def mock_llm(messages, *args, **kwargs):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                return {
+                    "content": None,
+                    "tool_calls": [tc_draw],
+                    "finish_reason": "tool_calls",
+                }
+            if len(captured_messages) == 2:
+                return {
+                    "content": None,
+                    "tool_calls": [tc_select],
+                    "finish_reason": "tool_calls",
+                }
+            return {"content": "", "tool_calls": None, "finish_reason": "stop"}
+
+        async def mock_execute_tool(tc, st):
+            name = tc["function"]["name"]
+            candidates = [
+                {
+                    "id": 6274,
+                    "question": "跳表索引是怎么建立的？",
+                    "cat1": "E.算法与数据结构",
+                    "cat2": "E1.数据结构",
+                    "tags": "跳表",
+                },
+                {
+                    "id": 6000,
+                    "question": "深度遍历用迭代和递归分别如何实现？",
+                    "cat1": "E.算法与数据结构",
+                    "cat2": "E2.算法手撕",
+                    "tags": "DFS,代码",
+                },
+            ]
+            st["candidate_questions"] = candidates
+            st["retrieved_questions"] = candidates
+            st["question_source"] = "draw"
+            if name == "select_question":
+                selected = candidates[1]
+                st["selected_question"] = selected
+                st["next_question_plan"] = {
+                    "must_ask": True,
+                    "question_id": selected["id"],
+                    "question_text": selected["question"],
+                    "source": "draw",
+                    "selection_reason": "agent_explicit_selection",
+                }
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "tool": "select_question",
+                        "items": [selected],
+                        "selected_question": selected,
+                        "question_plan": st["next_question_plan"],
+                        "metadata": {"result_count": 1},
+                        "error": None,
+                    },
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "tool": "draw_questions",
+                    "items": candidates,
+                    "metadata": {"result_count": len(candidates)},
+                    "error": None,
+                },
+                ensure_ascii=False,
+            )
+
+        with (
+            patch(
+                "app.agents.chat.nodes.build_react_system_prompt",
+                return_value="Prompt.",
+            ),
+            patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
+            patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
+        ):
+            events = []
+            async for event in _react_loop(state):
+                events.append(event)
+
+        chunks = [event["content"] for event in events if event["type"] == "chunk"]
+        assert not any(event["type"] == "error" for event in events)
+        assert chunks == ["好，深度遍历用迭代和递归分别如何实现？"]
+        assert state["final_answer_error"]["reason"] == "empty_answer_plan_fallback"
+
     async def test_plan_drift_is_repaired_once(self):
         from app.agents.chat.pipeline import _final_answer_events_from_text
 
@@ -1716,6 +1804,34 @@ class TestQuestionPlanEnforcement:
         assert "RAG 检索怎么设计" in events[0]["content"]
         assert state["question_plan_metadata"]["repaired"] is True
         mock_repair.assert_awaited_once()
+
+    async def test_unrequested_summary_is_replaced_with_continuation_question(self):
+        from app.agents.chat.pipeline import _final_answer_events_from_text
+
+        state = {
+            "conversation_id": "conv",
+            "user_id": 1,
+            "user_message": "如果还要继续，我可以补充 RAG hybrid search 和 rerank。",
+            "intent": "follow_up",
+            "keywords": ["RAG", "hybrid search", "rerank"],
+            "interview_stop_decision": {"action": "continue"},
+            "message_history": [
+                {"role": "assistant", "content": "说说这个系统的整体架构。"}
+            ],
+        }
+
+        events = await _final_answer_events_from_text(
+            "## 面试总结\n\n**整体表现**：信息不足，无法评价。\n\n**综合评分**：3/10",
+            state,
+        )
+
+        assert events
+        text = events[0]["content"]
+        assert "面试总结" not in text
+        assert "整体表现" not in text
+        assert "综合评分" not in text
+        assert "RAG" in text
+        assert state["question_source_reason"] == "fallback_after_unrequested_summary"
 
     def test_react_metadata_prefers_planned_selected_question(self):
         from app.agents.chat.pipeline import _build_react_metadata
@@ -2292,6 +2408,83 @@ class TestEndInterviewHardRoute:
         assert state["question_source"] == "conversation"
         assert state["question_source_reason"] == "end_interview_hard_route"
 
+    @pytest.mark.asyncio
+    async def test_abrupt_too_early_end_request_continues_interview(self):
+        """A too-early request for pass/fail evaluation should not end the interview."""
+        from app.agents.chat.pipeline import _generate_end_interview_response
+
+        state = {
+            "user_message": "我们先别问了，我想现在就结束面试，你直接给我完整评价和是否通过吧。",
+            "message_history": [
+                {"role": "assistant", "content": "请先做一下自我介绍。"},
+                {"role": "user", "content": "我做过 RAG 和 Agent 平台。"},
+                {
+                    "role": "assistant",
+                    "content": "你先说说这个平台的整体架构，以及你负责的模块。",
+                },
+            ],
+            "question_source": None,
+            "question_source_reason": None,
+            "session_notes": "",
+            "user_id": 1,
+        }
+
+        with patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+        ) as mock_call:
+            response = await _generate_end_interview_response(state)
+
+        mock_call.assert_not_called()
+        assert "证据还不够" in response
+        assert "是否通过" in response
+        assert "整体表现" not in response
+        assert "你先说说这个平台的整体架构" in response
+        assert state["question_source_reason"] == "end_interview_premature_summary_guard"
+
+    @pytest.mark.asyncio
+    async def test_end_interview_with_evidence_gap_request_generates_summary(self):
+        """Requests for senior-level evidence gaps should generate feedback."""
+        from app.agents.chat.pipeline import _generate_end_interview_response
+
+        mock_summary_json = json.dumps(
+            {
+                "overall_comment": "候选人的平台经验有数据，但关键证据链不完整。",
+                "strongest_topic": "工具调用平台指标，能给出成功率和延迟变化。",
+                "weakest_topic": "证据不足：没有说明失败原因分布和 schema 校验改动细节。",
+                "key_suggestions": [
+                    "补齐失败原因分布",
+                    "说明 schema 校验前后的数据结构变化",
+                    "准备一次端到端事故复盘",
+                ],
+                "score_estimate": 6,
+            },
+            ensure_ascii=False,
+        )
+        state = {
+            "user_message": "请结束这轮，并按照高级工程师标准指出我证据不足的地方。",
+            "message_history": [
+                {"role": "assistant", "content": "schema 校验具体改了什么？"},
+                {"role": "user", "content": "我做了限流和幂等。"},
+            ],
+            "question_source": None,
+            "question_source_reason": None,
+            "session_notes": "[asked] schema 校验具体改了什么？",
+            "user_id": 1,
+        }
+
+        with patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=mock_summary_json,
+        ) as mock_call:
+            response = await _generate_end_interview_response(state)
+
+        mock_call.assert_awaited_once()
+        assert "整体表现" in response
+        assert "证据不足" in response
+        assert "综合评分" in response
+
 
 class TestAssessmentFocusMetadata:
     def test_conversation_followup_without_selected_question_has_assessment_focus(self):
@@ -2631,6 +2824,26 @@ class TestSelectedQuestionBinding:
         assert selected is not None
         assert selected["id"] == 1
         assert reason == "question_text_match"
+
+    def test_multiple_candidates_token_overlap_binds_natural_rewrite(self):
+        """Natural rewrites of one candidate among many should still bind."""
+        from app.agents.chat.pipeline import _infer_selected_question
+
+        candidates = [
+            {"id": 5880, "question": "介绍一下React模式，它和CoT还有Plan-and-Execute有什么区别？"},
+            {"id": 6366, "question": "Agent Loop 是什么？和普通工作流有什么区别？"},
+            {"id": 6350, "question": "你的项目有前后端吗？大概结构是怎样的？"},
+        ]
+        response = (
+            "你提到用了ReAct agent，能具体说说你理解的ReAct模式吗？"
+            "它和CoT、Plan-and-Execute有什么核心区别？"
+        )
+
+        selected, reason = _infer_selected_question(response, [], candidates)
+
+        assert selected is not None
+        assert selected["id"] == 5880
+        assert reason == "multi_candidate_token_overlap"
 
 
 # ── TestToolStrategyEndInterview ───────────────────────────

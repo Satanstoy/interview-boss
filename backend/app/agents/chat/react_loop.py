@@ -15,6 +15,7 @@ from typing import AsyncGenerator
 
 from app.agents.chat.answer import (
     _final_answer_events_from_text,
+    _format_bank_question_fallback,
     OutputDeduplicator,
     _stream_final_answer,  # kept for backward compat, no longer called in main path
 )
@@ -891,7 +892,23 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         for event in events:
             yield event
     else:
-        # No text from ReAct — shouldn't happen, surface error.
-        yield {"type": "error", "message": "模型未能生成回复，请稍后再试。"}
+        plan = state.get("next_question_plan") or {}
+        question_text = str(plan.get("question_text") or "").strip()
+        if plan.get("must_ask") and question_text:
+            state["final_answer_error"] = {
+                "reason": "empty_answer_plan_fallback",
+                "attempts": 0,
+                "question_id": plan.get("question_id"),
+            }
+            fallback_text = _format_bank_question_fallback(
+                question_text,
+                transition_style=state.get("transition_style", "natural"),
+            )
+            events = await _final_answer_events_from_text(fallback_text, state)
+            for event in events:
+                yield event
+        else:
+            # No text from ReAct — shouldn't happen, surface error.
+            yield {"type": "error", "message": "模型未能生成回复，请稍后再试。"}
 
     yield {"type": "done"}

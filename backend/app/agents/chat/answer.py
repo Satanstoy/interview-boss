@@ -40,6 +40,26 @@ _INTERNAL_REACT_MARKERS = frozenset(
 )
 
 _TRACE_STRING_LIMIT = 120
+_UNREQUESTED_SUMMARY_MARKERS = (
+    "面试总结",
+    "面试评价",
+    "整体表现",
+    "综合评分",
+    "评估基础",
+    "整体判断",
+)
+_END_REQUEST_MARKERS = (
+    "结束面试",
+    "面试结束",
+    "结束这轮",
+    "到此结束",
+    "到这里结束",
+    "收尾",
+    "总结",
+    "评价",
+    "评估",
+    "复盘",
+)
 
 
 # ── Output Deduplication (hash + Jaccard) ─────────────────
@@ -145,7 +165,26 @@ def _ensure_final_answer_quality(text: str, state: ChatState) -> str:
             state.get("conversation_id"),
         )
         return _fallback_coding_question(state)
+    if _is_unrequested_summary(text, state):
+        logger.warning(
+            "ReAct trace: event=unrequested_summary_fallback conversation_id=%s",
+            state.get("conversation_id"),
+        )
+        return _fallback_react_answer(state, "unrequested_summary")
     return text
+
+
+def _is_unrequested_summary(text: str, state: ChatState) -> bool:
+    if not text or state.get("intent") == "end_interview":
+        return False
+    stop_decision = state.get("interview_stop_decision") or {}
+    if isinstance(stop_decision, dict) and stop_decision.get("action") == "close":
+        return False
+    user_message = str(state.get("user_message") or "")
+    if any(marker in user_message for marker in _END_REQUEST_MARKERS):
+        return False
+    marker_count = sum(1 for marker in _UNREQUESTED_SUMMARY_MARKERS if marker in text)
+    return marker_count >= 2 or "## 面试总结" in text or "## 面试评价" in text
 
 
 async def _enforce_question_plan_on_text(
