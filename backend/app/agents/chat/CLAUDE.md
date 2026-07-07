@@ -33,7 +33,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
-| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools`；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
+| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.services.interview_tools`；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `skills/base.py` | shared Skill/SkillRegistry/SkillResourceIndex 兼容导出 |
 | `skills/builder.py` | chat-specific skill catalog 包装 + shared build_skill_prompt() |
@@ -56,7 +56,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 
 ## 质量保护机制
 
-- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具。若用户要求总结、评价、复盘、hiring signal、风险点或下一轮追问，通常走 `_generate_structured_summary()`；但短历史中出现“先别问/现在就结束/直接给是否通过”这类过早打断式请求时，`summary.py` 必须拒绝给通过结论并回到上一道关键问题继续取证。只有单纯结束且对话很短时才返回简短告别
+- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具。若用户要求总结、评价、复盘、hiring signal、风险点或下一轮追问，通常走 `_generate_structured_summary()`；但短历史中出现“先别问/现在就结束/直接给是否通过”这类过早打断式请求，或“时间紧/先收尾/提前结束”这类证据不足的提前收尾请求时，`summary.py` 必须拒绝收尾并回到上一道关键问题继续取证。回答正文里夹带提前收尾请求时，`pipeline._apply_premature_close_guardrails()` 会在分类后、ReAct 前改走 `end_interview` 硬路由，禁止让 ReAct 自行收尾。只有单纯结束且证据量已经足够时才简短告别或总结。`end_interview` 不是 ReAct/MCP 工具；结束面试只能由 `intent=end_interview`、`stop_policy.py` 或持久化的 `closing_stage` workflow gate 触发。
 - **自然停止策略**：`stop_policy.py` 是何时结束面试的代码级裁判：`>=32` 条消息且核心覆盖完整时先问候选人“你有什么想问我们的吗？”，候选人回应后生成结构化总结；`>=44` 条消息进入 strong-close，只允许补最后缺口或 HR/反问/收尾；`>56` 条消息才硬停止并直接总结。不要把 45 条消息重新改成硬停
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
@@ -70,13 +70,15 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - **自然话术兜底**：`answer.py` 的 deterministic fallback 只负责把已选题自然问出来，不要重新引入“我抽个题”“来聊一个八股题”或固定四段式要求（如“场景背景、实现细节、风险处理和验证方式”）
 - **未授权总结保护**：非 `end_interview` 且 stop policy 未要求 close 的轮次，最终回答不能输出“面试总结/面试评价/整体表现/综合评分”等收尾报告；`answer.py` 必须拦截这类模型漂移并转成继续追问，避免上一轮过早结束请求污染下一轮。
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；不要再读取旧 `questions` 字段。`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容；`search_questions` rerank 成功时必须同步更新 envelope `items`、`metadata.result_count`、`state.retrieved_questions` 和 `state.candidate_questions`，rerank 失败时保留原工具结果
-- **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成
+- **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成。不要把 `end_interview`、总结、评估报告生成加入 `ALL_TOOLS` 或 `_ALLOWED_TOOL_NAMES`；closing workflow 在 ReAct 前/外由后端状态机裁决。
 - **公开候选题预览**：SSE `retrieved`、done metadata 的 `retrieved_questions/candidate_questions`、以及 `tool_calls_trace.result_preview` 使用 `chat_constants.PUBLIC_QUESTION_PREVIEW_LIMIT` 统一控制，当前为 5；不要让工具显示的 result_count 与可展开预览数量再次脱节
-- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；偏离计划时触发一次 repair，仍失败则使用确定性 fallback。若 ReAct 已经成功 `draw/select` 并绑定了 `must_ask` 计划题，但最终模型返回空文本，`react_loop.py` 必须用计划题确定性话术恢复，不能向前端发空白轮次或“模型未能生成回复”。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`
+- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；`should_retrieve=True` 且回答完整时，工具返回的候选题也必须绑定 plan，不能只检索不选题。偏离计划时触发一次 repair，仍失败则使用确定性 fallback。若 ReAct 已经成功 `draw/select` 并绑定了 `must_ask` 计划题，但最终模型返回空文本，`react_loop.py` 必须用计划题确定性话术恢复，不能向前端发空白轮次或“模型未能生成回复”。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`。`question_type=algorithm_coding` 时只允许算法/手撕代码候选绑定 plan，不能用普通 RAG/项目题兜底。
 - **检索建议缺口记录（非接管）**：`should_record_retrieval_gap(state)` 为 true 且本轮没有执行 `search_questions` / `draw_questions` 时，`react_loop.py` 只记录 `state["retrieval_gap"]`、`question_source=conversation` 和 `question_source_reason=retrieval_recommended_but_skipped`。不要在 ReAct 循环后注入额外系统消息、不要二次调用 LLM、不要由代码替模型执行题库工具；题库检索应通过本轮 `<tool_strategy>` 和常驻 tool-use skill 在主路径自然发生。
-- **后端 MCP 执行边界**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`，`tools.py` 只负责 ReAct schema 与 JSON 转发；同一工具层通过 `/mcp` 暴露给后端内嵌 MCP app，支持 `session_id` 跨调用状态持久化
+- **检索护栏边界**：`pipeline._apply_retrieval_guardrails()` 只在分类后修正过保守的结构化路由字段：候选人给出足够长、包含明确技术信号且已有 `search_query`/多关键词的回答时，可把 `answer_quality` 纠正为 `complete` 并打开 `should_retrieve`，让后续 `ToolStrategy` 和 tool-use skill 自然驱动工具调用。它不能直接调用 `search_questions`/`draw_questions`，也不能覆盖 `off_topic`、`repeated`、候选人反问或已有候选题的状态。
+- **显式题型护栏**：`pipeline._apply_explicit_question_type_guardrails()` 只做结构化字段纠偏：用户明确说“手撕/代码题/写代码/算法题/coding”时写入 `question_type=algorithm_coding`、`should_retrieve=True`、`requires_bank_question=True`。随后由 `tool_strategy.py` 要求 `draw_questions(question_type='algorithm_coding')`，工具服务负责过滤候选；不要在该护栏里直接抽题或选题。
+- **工具执行边界**：4 个工具的实际执行集中在 `app.services.interview_tools`；`tools.py` 只负责 ReAct schema、JSON 转发和 search rerank 后同步 state；`app.mcp_server.interview_tools` 只是兼容 adapter，外部 `/mcp` 入口由 `mcp_server/app.py` 转发到同一 service。内部 ReAct 不要 import `app.mcp_server.*`。
 - **Thinking/Steps/Tool Steps/Insights 持久化**：`run_chat()` 在事件循环中累积 `step`、`tool_step`、`thinking`、`insight` 事件，在 `done` 事件时合并进 metadata（兼容字段：`thinking`、`thinking_duration`、`steps`、`tool_steps`、`insights`；新结构化字段：`reasoning_trace`、`tool_calls_trace`、`skill_trace`）。`reasoning_trace.summary` 是公开摘要 fallback；当 `reasoning_trace.source == "model_reasoning"` 且 `thinking` 非空时，前端优先展示模型返回的 `reasoning_content` 作为“面试官推理”。`tool_calls_trace` 只保存白名单参数、耗时、结果数和短结果预览。thinking chunks 上限 `_MAX_THINKING_CHUNKS=50`，避免 metadata 膨胀。页面刷新后前端通过 `getMessages()` 可取回这些字段
-- **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `await save_mcp_session_async(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session_async` 有白名单过滤（`active_skills`、`retrieved_questions` 等），性能开销可控
+- **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `await save_mcp_session_async(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session_async` 有白名单过滤（`active_skills`、`retrieved_questions` 等），且只持久化 skill names，不持久化 `active_skill_instructions` 完整正文。
 
 ## 模块依赖图
 
@@ -98,3 +100,9 @@ pipeline.py ──→ react_loop.py ──→ answer.py ──→ nodes.py
 
 1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/chat/ -q`
 2. 更新本文件
+
+## 数据库操作注意事项
+
+- **删除对话**：`chat_service.delete_conversation()` 只检查 `user_id` 和 `conversation_id`，不检查 `job_position`。用户应该能删除自己创建的任何对话，不管当前岗位是什么。
+- **级联删除**：`chat_messages` 表有 `ON DELETE CASCADE`，删除 `chat_conversations` 时会自动删除相关消息。
+- **孤立记录清理**：`chat_tool_traces` 和 `interview_asked_questions` 表没有外键约束，删除对话时需要手动清理。
