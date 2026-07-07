@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { SidebarTrigger } from '@/components/ui/sidebar'
 import { AlertCircle, Clock3, Loader2, Menu, Settings, X } from '@lucide/vue'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
@@ -21,7 +20,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['show-settings'])
+const emit = defineEmits(['show-settings', 'toggle-mobile-nav'])
 
 // ── 全局上传任务进度 ──
 const { activeJobs } = useSubmitJobs()
@@ -42,9 +41,17 @@ const onCloseJob = (jobId) => {
   <header
     class="flex h-11 shrink-0 items-center gap-3 bg-background/80 px-3 lg:px-5"
   >
-    <SidebarTrigger class="h-8 w-8 text-muted-foreground hover:bg-muted/50 hover:text-foreground md:hidden">
-      <Menu class="h-4 w-4" />
-    </SidebarTrigger>
+    <AppTooltip text="打开导航">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground md:hidden"
+        aria-label="打开导航"
+        @click="emit('toggle-mobile-nav')"
+      >
+        <Menu class="h-4 w-4" />
+      </Button>
+    </AppTooltip>
 
     <div class="flex h-8 min-w-0 items-center">
       <h1 class="truncate text-[13px] font-medium leading-5 text-foreground">

@@ -12,22 +12,11 @@ import {
   Network,
   PanelLeft,
 } from '@lucide/vue'
-import {
-  SidebarHeader,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarGroupContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarMenuBadge,
-  SidebarFooter,
-  useSidebar,
-} from '@/components/ui/sidebar'
 import UserMenu from '@/components/business/UserMenu.vue'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
+  collapsed: { type: Boolean, default: false },
   activeTab: { type: String, default: '' },
   sidebarTabs: { type: Array, default: () => [] },
   sidebarGroups: { type: Array, default: () => [] },
@@ -41,13 +30,12 @@ const emit = defineEmits([
   'bank-mode-changed',
   'show-review',
   'show-settings',
+  'update:collapsed',
 ])
 
 const router = useRouter()
 const route = useRoute()
-const { state, toggleSidebar } = useSidebar()
 
-const collapsed = computed(() => state.value === 'collapsed')
 const logoHovered = ref(false)
 
 const groupedTabs = computed(() => (
@@ -57,6 +45,11 @@ const groupedTabs = computed(() => (
 ))
 
 const flatTabs = computed(() => groupedTabs.value.flatMap(group => group.tabs))
+
+function toggleCollapsed() {
+  logoHovered.value = false
+  emit('update:collapsed', !props.collapsed)
+}
 
 const iconMap = {
   MasterBank: BookOpen,
@@ -101,90 +94,185 @@ function handleShowSettings() { emit('show-settings') }
 </script>
 
 <template>
-  <!-- Header: logo hover (collapsed) or brand (expanded) -->
-  <SidebarHeader>
-    <!-- Collapsed: logo + hover PanelLeft interaction -->
-    <div v-if="collapsed" class="flex justify-center">
+  <!-- Collapsed: logo + nav icons + avatar -->
+  <div v-if="props.collapsed" class="flex flex-col h-full items-center py-3 px-2 gap-1 animate-sidebar-collapse">
+    <!-- Logo → hover shows PanelLeft icon → click expands -->
+    <AppTooltip text="展开侧栏" side="right">
       <button
         @mouseenter="logoHovered = true"
         @mouseleave="logoHovered = false"
-        @click="toggleSidebar"
-        class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-300 overflow-hidden"
+        @click="toggleCollapsed"
+        class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300 mb-1 overflow-hidden"
         :class="logoHovered
           ? 'bg-sidebar-accent text-sidebar-foreground cursor-pointer'
           : 'bg-transparent text-sidebar-foreground'"
       >
+        <!-- App logo -->
         <img
           src="/favicon-b.png"
           alt="InterviewBoss"
           class="h-7 w-7 object-contain transition-all duration-300 ease-out"
           :class="logoHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'"
         />
+        <!-- PanelLeft icon -->
         <PanelLeft
           :size="18"
           class="absolute transition-all duration-300 ease-out"
           :class="logoHovered ? 'opacity-100 scale-100' : 'opacity-0 scale-75'"
         />
       </button>
-    </div>
+    </AppTooltip>
 
-    <!-- Expanded: brand header -->
-    <a
-      v-else
-      :href="route.query.preview === '1' ? '/master-bank?preview=1' : '/master-bank'"
-      class="flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sidebar-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      @click.prevent="goHome"
+    <!-- Navigation icons -->
+    <AppTooltip
+      v-for="tab in flatTabs"
+      :key="tab.key"
+      :text="tab.label"
+      side="right"
     >
-      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform hover:scale-105 overflow-hidden">
-        <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
-      </div>
-      <div class="flex flex-col items-start leading-tight">
-        <span class="text-base font-semibold tracking-tight text-sidebar-foreground whitespace-nowrap">InterviewBoss</span>
-        <span class="text-[11px] text-sidebar-foreground/50 whitespace-nowrap">AI 面试准备工作台</span>
-      </div>
-    </a>
-  </SidebarHeader>
+      <button
+        @click="onTabChange(tab)"
+        :aria-label="tab.label"
+        class="flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300"
+        :class="isActive(tab.route)
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+          : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+      >
+        <component
+          v-if="iconMap[tab.key]"
+          :is="iconMap[tab.key]"
+          :size="18"
+          :class="isActive(tab.route) ? 'text-primary' : ''"
+        />
+      </button>
+    </AppTooltip>
 
-  <!-- Navigation -->
-  <SidebarContent>
-    <SidebarGroup v-for="group in groupedTabs" :key="group.label || 'primary'">
-      <SidebarGroupLabel v-if="group.label">{{ group.label }}</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          <SidebarMenuItem v-for="tab in group.tabs" :key="tab.key">
-            <SidebarMenuButton
-              :tooltip="tab.label"
-              :is-active="isActive(tab.route)"
-              @click="onTabChange(tab)"
-            >
-              <component
-                v-if="iconMap[tab.key]"
-                :is="iconMap[tab.key]"
-                :class="isActive(tab.route) ? 'text-primary' : ''"
-              />
-              <span>{{ tab.label }}</span>
-            </SidebarMenuButton>
-            <SidebarMenuBadge v-if="tab.count != null && tab.count !== 0">
-              {{ tab.count }}
-            </SidebarMenuBadge>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
-  </SidebarContent>
+    <div class="flex-1"></div>
 
-  <!-- Footer: user menu -->
-  <SidebarFooter>
+    <!-- User avatar -->
     <UserMenu
       v-if="displayUser"
       :user="displayUser"
       :pending-count="pendingReviewCount"
       placement="top"
-      button-class="w-full justify-start rounded-lg hover:bg-sidebar-accent px-2 py-2 gap-2 transition-colors"
+      compact
+      button-class="rounded-lg hover:bg-sidebar-accent transition-colors p-0"
       @logout="handleLogout"
       @bank-mode-changed="handleBankModeChanged"
       @show-review="handleShowReview"
       @show-settings="handleShowSettings"
     />
-  </SidebarFooter>
+  </div>
+
+  <!-- Expanded: full sidebar -->
+  <div v-else class="flex flex-col h-full overflow-hidden animate-sidebar-expand">
+    <!-- Header: logo + PanelLeft toggle -->
+    <div class="flex items-center justify-between px-4 py-3 shrink-0">
+      <a
+        :href="route.query.preview === '1' ? '/master-bank?preview=1' : '/master-bank'"
+        class="flex min-w-0 items-center gap-3 rounded-lg text-left transition-colors hover:bg-sidebar-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        @click.prevent="goHome"
+      >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform hover:scale-105 overflow-hidden">
+          <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
+        </div>
+        <div class="flex flex-col items-start leading-tight">
+          <span class="text-base font-semibold tracking-tight text-sidebar-foreground whitespace-nowrap">InterviewBoss</span>
+          <span class="text-[11px] text-sidebar-foreground/50 whitespace-nowrap">AI 面试准备工作台</span>
+        </div>
+      </a>
+      <AppTooltip text="收起侧栏">
+        <button
+          @click="toggleCollapsed"
+          aria-label="收起侧栏"
+          class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+        >
+          <PanelLeft :size="18" />
+        </button>
+      </AppTooltip>
+    </div>
+
+    <!-- Navigation -->
+    <div class="flex-1 min-h-0 flex flex-col overflow-y-auto custom-scrollbar py-1 px-2 gap-0.5">
+      <div
+        v-for="group in groupedTabs"
+        :key="group.label || 'primary'"
+        class="mb-2 last:mb-0"
+      >
+        <div
+          v-if="group.label"
+          data-sidebar-section
+          class="px-3 pb-1.5 pt-2 text-[11px] font-medium text-sidebar-foreground/40"
+        >
+          {{ group.label }}
+        </div>
+        <button
+          v-for="tab in group.tabs"
+          :key="tab.key"
+          data-sidebar-route
+          @click="onTabChange(tab)"
+          class="group relative flex items-center w-full rounded-lg transition-all duration-200 gap-3 px-3 py-2"
+          :class="isActive(tab.route)
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+        >
+          <component
+            v-if="iconMap[tab.key]"
+            :is="iconMap[tab.key]"
+            :size="18"
+            class="transition-colors shrink-0"
+            :class="isActive(tab.route) ? 'text-primary' : 'text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70'"
+          />
+          <span class="text-sm whitespace-nowrap">{{ tab.label }}</span>
+          <span
+          v-if="tab.count != null && tab.count !== 0"
+          class="ml-auto text-[11px] font-medium text-sidebar-foreground/50 whitespace-nowrap"
+        >
+            {{ ` ${tab.count}` }}
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer: user menu -->
+    <div class="shrink-0 p-3 border-t border-sidebar-border/50">
+      <UserMenu
+        v-if="displayUser"
+        :user="displayUser"
+        :pending-count="pendingReviewCount"
+        placement="top"
+        button-class="w-full justify-start rounded-lg hover:bg-sidebar-accent px-3 py-2 gap-3 transition-colors"
+        @logout="handleLogout"
+        @bank-mode-changed="handleBankModeChanged"
+        @show-review="handleShowReview"
+        @show-settings="handleShowSettings"
+      />
+    </div>
+  </div>
 </template>
+
+<style scoped>
+/*
+  Sidebar animation strategy:
+  - Container width: handled by App.vue's inline transition (380ms cubic-bezier(0.4,0,0.2,1))
+  - Content entrance: 300ms ease-out (decelerate into place)
+  - Content exit: 250ms ease-in (accelerate out)
+  - Per NN/G and Material Design: ease-out for entrances, ease-in for exits
+  - "Side panels stay nearby" → use standard easing, not exit easing
+*/
+.animate-sidebar-expand {
+  animation: sidebarExpand 300ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+.animate-sidebar-collapse {
+  animation: sidebarCollapse 250ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes sidebarExpand {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sidebarCollapse {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+</style>

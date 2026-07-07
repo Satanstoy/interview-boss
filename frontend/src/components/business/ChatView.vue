@@ -6,41 +6,43 @@
       @click="sidebarCollapsed = true"
     />
 
-    <!-- Conversation list sidebar (always visible) -->
-    <div 
+    <!-- Conversation list sidebar -->
+    <div
       class="sidebar-container z-30 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden md:z-auto"
       :class="{ 'sidebar-collapsed': sidebarCollapsed }"
-      :style="{ width: sidebarCollapsed ? '0px' : '288px' }"
+      :style="{ width: sidebarCollapsed ? '0px' : '16rem' }"
     >
-      <div class="p-4 border-b border-border flex items-center gap-2 sidebar-content">
+      <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
         <Button @click="showNewChat = true" class="flex-1" size="sm">
           <Plus :size="16" />
           新建面试
         </Button>
-        <Button variant="ghost" size="icon" @click="sidebarCollapsed = true" class="shrink-0">
-          <PanelLeftClose :size="16" />
+        <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" @click="sidebarCollapsed = true">
+          <PanelLeftClose :size="14" />
         </Button>
       </div>
-      <div class="flex-1 overflow-y-auto custom-scrollbar p-2 sidebar-content">
+      <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-2 sidebar-content">
         <div v-if="conversations.length === 0" class="p-4 text-center text-sm text-muted-foreground">
           暂无对话
         </div>
         <div v-else class="flex flex-col gap-0.5">
           <div v-for="conv in conversations" :key="conv.id"
             @click="selectConversation(conv.id)"
-            class="group flex items-center gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150 text-left"
-            :class="activeConversationId === conv.id ? 'bg-accent' : 'hover:bg-accent/50'">
+            class="group relative flex w-full items-center gap-2 rounded-md p-2 text-left text-sm cursor-pointer transition-colors"
+            :class="activeConversationId === conv.id
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'">
             <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium truncate text-foreground">{{ conv.title || '新对话' }}</div>
+              <div class="truncate">{{ conv.title || '新对话' }}</div>
               <div class="text-[11px] mt-0.5 truncate text-muted-foreground">
                 {{ conv.mode === 'jd_resume' ? 'JD定制' : '自由练习' }} · {{ formatRelativeTime(conv.updated_at) }}
               </div>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button 
-                  variant="ghost" 
-                  size="icon-xs" 
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                   @click.stop
                 >
@@ -69,12 +71,12 @@
     </div>
 
     <!-- Sidebar collapsed: show expand button -->
-    <div v-if="sidebarCollapsed" class="hidden flex-col items-center py-3 px-2 gap-1 shrink-0 border-r border-border sidebar-expand-buttons md:flex">
-      <Button variant="ghost" size="icon" aria-label="展开面试会话列表" @click="sidebarCollapsed = false" class="shrink-0">
-        <PanelLeft :size="16" />
+    <div v-if="sidebarCollapsed" class="hidden flex-col items-center py-2 px-2 gap-1 shrink-0 sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" class="size-7" aria-label="展开面试会话列表" @click="sidebarCollapsed = false">
+        <PanelLeft :size="14" />
       </Button>
-      <Button variant="ghost" size="icon" aria-label="新建面试" @click="showNewChat = true" class="shrink-0">
-        <Plus :size="16" />
+      <Button variant="ghost" size="icon" class="size-7" aria-label="新建面试" @click="showNewChat = true">
+        <Plus :size="14" />
       </Button>
     </div>
 
@@ -375,7 +377,7 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
-import { useConfirm } from '@/composables/useNotification.js'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
@@ -425,6 +427,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+const { success: toastSuccess, error: toastError } = useToast()
 const { confirm: showConfirm } = useConfirm()
 
 // State
@@ -1056,8 +1059,10 @@ async function handleDelete(id) {
       messages.value = []
     }
     await loadConversations()
+    toastSuccess('对话已删除')
   } catch (e) {
     console.error('删除对话失败:', e)
+    toastError(`删除失败: ${e.message}`)
   }
 }
 
@@ -1207,7 +1212,7 @@ onActivated(async () => {
   .sidebar-container {
     position: absolute;
     inset: 0 auto 0 0;
-    width: min(82vw, 288px) !important;
+    width: min(82vw, 256px) !important;
     max-width: calc(100vw - 24px);
     box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
     transform: translateX(0);

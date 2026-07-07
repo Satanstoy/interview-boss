@@ -202,18 +202,27 @@ def archive_conversation(conversation_id: str, user_id: int, job_position: str =
 
 
 def delete_conversation(conversation_id: str, user_id: int, job_position: str = "") -> bool:
-    """删除对话（级联删除消息）"""
+    """删除对话（级联删除消息）
+
+    注意：删除操作只检查 user_id 和 conversation_id，不检查 job_position。
+    用户应该能删除自己创建的任何对话，不管当前岗位是什么。
+    """
     with get_db_connection() as conn:
-        if job_position:
-            cursor = conn.execute(
-                "DELETE FROM chat_conversations WHERE id = ? AND user_id = ? AND job_position = ?",
-                (conversation_id, user_id, job_position)
-            )
-        else:
-            cursor = conn.execute(
-                "DELETE FROM chat_conversations WHERE id = ? AND user_id = ?",
-                (conversation_id, user_id)
-            )
+        # 先清理没有外键约束的关联表
+        conn.execute(
+            "DELETE FROM chat_tool_traces WHERE conversation_id = ?",
+            (conversation_id,)
+        )
+        conn.execute(
+            "DELETE FROM interview_asked_questions WHERE conversation_id = ? AND user_id = ?",
+            (conversation_id, user_id)
+        )
+
+        # 删除对话（chat_messages 会通过 ON DELETE CASCADE 自动删除）
+        cursor = conn.execute(
+            "DELETE FROM chat_conversations WHERE id = ? AND user_id = ?",
+            (conversation_id, user_id)
+        )
         conn.commit()
         return cursor.rowcount > 0
 
