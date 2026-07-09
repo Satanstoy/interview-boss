@@ -250,7 +250,15 @@ def _big_tech_next_focus(state: ChatState) -> dict:
         if thresholds.get(phase, 0) > 0
     )
 
-    if coverage_complete:
+    # Opening phase: no tools, just greet and ask for self-introduction.
+    if message_count < _MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION:
+        focus = {
+            "phase": "opening",
+            "tool": "none",
+            "question_type": "none",
+            "reason": "开场阶段：邀请自我介绍或基于介绍自然追问，不要调用题库工具",
+        }
+    elif coverage_complete:
         focus = {
             "phase": "wrap_up",
             "tool": "none",
