@@ -254,17 +254,14 @@ function handleShowSettings() { emit('show-settings') }
 <style scoped>
 /*
   Sidebar animation strategy:
-  - Container width: handled by App.vue's inline transition (380ms cubic-bezier(0.4,0,0.2,1))
-  - Content entrance: 300ms ease-out (decelerate into place)
-  - Content exit: 250ms ease-in (accelerate out)
-  - Per NN/G and Material Design: ease-out for entrances, ease-in for exits
-  - "Side panels stay nearby" → use standard easing, not exit easing
+  - Content entrance/exit: unified medium-2 (300ms) + standard easing
+  - Motion tokens defined in variables.css (--motion-medium-2, --ease-standard)
 */
 .animate-sidebar-expand {
-  animation: sidebarExpand 300ms cubic-bezier(0, 0, 0.2, 1) both;
+  animation: sidebarExpand var(--motion-medium-2) var(--ease-standard) both;
 }
 .animate-sidebar-collapse {
-  animation: sidebarCollapse 250ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: sidebarCollapse var(--motion-medium-2) var(--ease-standard) both;
 }
 
 @keyframes sidebarExpand {

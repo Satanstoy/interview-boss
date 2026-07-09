@@ -1,3 +1,25 @@
+/* ── Motion Design Tokens (MD3-inspired) ── */
+/* Duration scale: short(100-200ms) → medium(250-350ms) → long(400-500ms) */
+:root {
+  /* Duration tokens */
+  --motion-short-1: 100ms;   /* micro-interactions: hover, focus, toggle */
+  --motion-short-2: 150ms;   /* small fades, tooltips, badges */
+  --motion-short-3: 200ms;   /* color transitions, small reveals */
+  --motion-medium-1: 250ms;  /* dropdowns, small panels */
+  --motion-medium-2: 300ms;  /* accordion expand/collapse, sidebar */
+  --motion-medium-3: 350ms;  /* larger content reveals */
+  --motion-long-1: 400ms;    /* page transitions, stagger entrance */
+  --motion-long-2: 500ms;    /* full-sheet slides */
+
+  /* Easing tokens */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);       /* MD3 standard — most motions */
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);        /* entering elements */
+  --ease-accelerate: cubic-bezier(0.3, 0, 1, 1);      /* exiting elements */
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);      /* MD3 emphasized (same as standard) */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);   /* bouncy, for modals/attention */
+  --ease-linear: linear;                               /* progress bars, width changes */
+}
+
 /* ── Legacy color ramps mapped to the shadcn-vue reka-vega preset ── */
 :root {
   --c-primary-50: 238 242 255;

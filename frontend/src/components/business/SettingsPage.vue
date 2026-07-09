@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { User, Target, Bot, Shield, Settings, PanelLeft } from '@lucide/vue'
+import { User, Target, Bot, Shield, Settings } from '@lucide/vue'
 import SettingsNav from './SettingsNav.vue'
 import SettingsProfile from './SettingsProfile.vue'
 import SettingsInterview from './SettingsInterview.vue'
@@ -26,7 +26,6 @@ const emit = defineEmits([
 ])
 
 const activeSection = ref('profile')
-const settingsSidebarCollapsed = ref(false)
 
 const sections = computed(() => {
   const items = [
@@ -38,16 +37,12 @@ const sections = computed(() => {
   if (props.isAdmin) items.push({ id: 'admin', label: '管理员设置', description: '分类和题库操作', icon: Settings })
   return items
 })
-
-const activeSectionMeta = computed(() => sections.value.find(item => item.id === activeSection.value) || sections.value[0])
 </script>
 
 <template>
   <div class="flex h-full min-h-0 bg-background">
     <div
-      class="sidebar-container flex shrink-0 flex-col overflow-hidden border-r border-border"
-      :class="{ 'sidebar-collapsed': settingsSidebarCollapsed }"
-      :style="{ width: settingsSidebarCollapsed ? '0px' : '288px' }"
+      class="flex w-64 shrink-0 flex-col overflow-hidden border-r border-border"
     >
       <div class="sidebar-content h-full">
         <SettingsNav
@@ -56,25 +51,11 @@ const activeSectionMeta = computed(() => sections.value.find(item => item.id ===
           :is-admin="isAdmin"
           @update:active-section="activeSection = $event"
           @close="emit('close')"
-          @collapse="settingsSidebarCollapsed = true"
         />
       </div>
     </div>
 
-    <div v-if="settingsSidebarCollapsed" class="sidebar-expand-buttons flex shrink-0 flex-col items-center gap-1 border-r border-border px-2 py-3">
-      <Button variant="ghost" size="icon" class="shrink-0" @click="settingsSidebarCollapsed = false">
-        <PanelLeft :size="16" />
-      </Button>
-    </div>
-
     <div class="flex min-w-0 flex-1 flex-col">
-      <div class="shrink-0 px-6 py-1">
-        <div class="flex min-w-0 items-center gap-2">
-          <component :is="activeSectionMeta?.icon" :size="15" class="shrink-0 text-primary" />
-          <h3 class="truncate text-xs font-medium text-muted-foreground">{{ activeSectionMeta?.label }}</h3>
-        </div>
-      </div>
-
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex w-full max-w-4xl flex-col px-6 py-6">
           <div v-if="activeSection === 'profile'" class="animate-fade-in">
@@ -123,32 +104,10 @@ const activeSectionMeta = computed(() => sections.value.find(item => item.id ===
 
 <style scoped>
 .animate-fade-in {
-  animation: fadeIn 200ms ease-out;
+  animation: fadeIn var(--motion-short-3) var(--ease-decelerate);
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-.sidebar-container {
-  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.sidebar-content {
-  transition: opacity 200ms ease-out;
-}
-
-.sidebar-collapsed .sidebar-content {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.sidebar-expand-buttons {
-  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
-}
-
-@keyframes sidebarExpandButtons {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
 }
 </style>

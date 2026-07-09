@@ -336,9 +336,12 @@ const toggleSources = () => {
 }
 
 const animateExpand = (el, from, to, scroller, btn, savedScroll, savedBtnOffset, onDone) => {
-  const duration = 280
+  // Read duration from motion token (--motion-medium-2 = 300ms)
+  const durationStr = getComputedStyle(document.documentElement).getPropertyValue('--motion-medium-2').trim()
+  const duration = parseInt(durationStr) || 300
   const start = performance.now()
-  const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  // Standard easing: cubic-bezier(0.2, 0, 0, 1) approximation
+  const ease = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
 
   const step = (now) => {
     const t = Math.min(1, (now - start) / duration)

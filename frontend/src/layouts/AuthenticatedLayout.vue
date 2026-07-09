@@ -694,7 +694,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 
 /* ── Tab transition ── */
 .tab-fade-enter-active,
-.tab-fade-leave-active { transition: opacity 0.16s ease; }
+.tab-fade-leave-active { transition: opacity var(--motion-short-2) var(--ease-decelerate); }
 .tab-fade-enter-from,
 .tab-fade-leave-to { opacity: 0; }
 

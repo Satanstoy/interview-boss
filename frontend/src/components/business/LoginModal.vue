@@ -1124,7 +1124,7 @@ onUnmounted(() => {
 }
 
 .animate-slide-up {
-  animation: slide-up 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: slide-up var(--motion-medium-1) var(--ease-spring);
 }
 
 @media (prefers-reduced-motion: reduce) {
