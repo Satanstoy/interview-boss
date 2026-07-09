@@ -113,7 +113,7 @@
     <div v-if="contentOnly || question._showAnswer" :class="contentOnly ? '' : 'border-t border-border bg-muted/30 dark:bg-muted/15 relative group answer-section'">
 
       <!-- Answer (primary content — shown first) -->
-      <div class="p-5 pb-0">
+      <div class="px-4 pt-3 pb-0">
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
@@ -181,18 +181,18 @@
       </div>
 
       <!-- Sources & original questions (secondary — collapsible) -->
-      <div v-if="hasSources" class="border-t border-border/50 mt-5">
+      <div v-if="hasSources" class="border-t border-border/50 mt-4">
         <button ref="sourceBtnRef" @click.stop="toggleSources"
-          class="w-full px-5 py-3 flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/25 transition-colors">
+          class="w-full px-4 py-2 flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/25 transition-colors">
           <svg class="size-3 transform transition-transform duration-200" :class="question._showSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           <span>来源详情</span>
           <span class="text-label text-muted-foreground ml-0.5">{{ sourceCount }}条</span>
         </button>
 
         <div ref="sourcesContentRef" :style="{ height: question._showSources ? 'auto' : '0px', overflow: question._showSources ? '' : 'hidden' }">
-        <div class="px-5 pb-5 flex flex-col gap-2">
+        <div class="px-4 pb-4 flex flex-col gap-1.5">
           <div v-for="(src, idx) in dedupedSources" :key="src.url || idx"
-            class="bg-card border border-border rounded-md p-3 flex items-start gap-3">
+            class="bg-card border border-border rounded-md p-2.5 flex items-start gap-2.5">
             <span class="text-caption text-muted-foreground font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>
             <div class="flex-1 min-w-0">
               <div v-if="src._origQuestion" class="text-xs text-muted-foreground mb-1 whitespace-pre-line">{{ src._origQuestion }}</div>

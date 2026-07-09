@@ -27,7 +27,7 @@
         type="multiple"
         :model-value="openItems"
         @update:model-value="onOpenChange"
-        class="flex flex-col gap-2 pb-4"
+        class="flex flex-col gap-1.5 pb-4"
       >
         <AccordionItem
           v-for="q in items"
@@ -35,7 +35,7 @@
           :value="String(q.id)"
           class="min-w-0 max-w-full border border-border rounded-xl overflow-hidden bg-card shadow-sm data-[state=open]:border-primary/30"
         >
-          <AccordionTrigger class="w-full min-w-0 max-w-full px-3 py-3 hover:no-underline sm:px-4">
+          <AccordionTrigger class="w-full min-w-0 max-w-full px-3 py-2 hover:no-underline sm:px-4">
             <div class="flex min-w-0 flex-1 items-center gap-2 text-left pr-1 sm:gap-3 sm:pr-2">
               <!-- Checkbox -->
               <input
@@ -47,13 +47,13 @@
               <!-- Content -->
               <div class="flex-1 min-w-0">
                 <span class="text-sm font-medium text-foreground truncate block">{{ q.question }}</span>
-                <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span v-if="q.frequency > 1" class="text-xs px-1.5 py-0.5 rounded-md bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
-                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded-md font-semibold">{{ q.cat1 || '未分类' }}</span>
+                <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-1">
+                  <span v-if="q.frequency > 1" class="text-xs px-1 py-px rounded bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
+                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-1.5 py-px rounded font-semibold">{{ q.cat1 || '未分类' }}</span>
                   <span
                     v-for="tag in (q.tags || '').split(',').filter(Boolean).slice(0, 3)"
                     :key="tag"
-                    class="text-xs px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground"
+                    class="text-xs px-1 py-px rounded bg-muted text-muted-foreground"
                   >{{ tag.trim() }}</span>
                   <span class="text-xs font-medium px-2 py-0.5 rounded-md shrink-0 sm:ml-auto"
                     :class="difficultyClass(q.difficulty)">
