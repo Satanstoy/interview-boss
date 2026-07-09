@@ -17,6 +17,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `answer.py` | 答案生成与质量：`OutputDeduplicator`、`GenerationError`（替代机械题干 fallback）、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、`_rewrite_transition_with_llm()`（LLM 自然过渡重写）、fallback 响应、内部 marker 过滤 |
 | `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护（含 `_count_consecutive_similar_user_answers()` 候选人重复检测）、已问题列表构建 |
 | `stop_policy.py` | 产品级停止策略：32 条后覆盖完整进入反问，44 条后强收口，56 条后硬停止；候选人重复回答检测（3 次切方向，5 次结束）；避免只靠 prompt 判断何时结束 |
+| `turn_controller.py` | 显式路由决策：`decide_turn_action(state)` 根据 closing_stage、counter_question、收尾信号、requires_bank_question 等状态字段决定 turn_action（closing_summary/bank_question/answer_counter_question/natural_followup）和 question_intent，解决 E2E 中的 proper_end、long_session_senior、early_close_guard 问题 |
 | `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
 | `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
