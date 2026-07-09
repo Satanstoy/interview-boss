@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.chat.answer import _enforce_question_plan_on_text
+from app.agents.chat.answer import GenerationError, _enforce_question_plan_on_text
 from app.agents.chat.pipeline import (
     _fallback_react_answer,
     _is_internal_react_marker,
@@ -63,17 +63,24 @@ class TestValidateToolCall:
 
     def test_all_allowed_tools_pass(self):
         """所有允许的工具名都通过验证"""
-        for name in ["load_skill", "search_questions", "draw_questions"]:
+        for name in ["load_skill", "search_questions", "draw_questions", "select_question"]:
             tc = tool_call(name, {"test": True})
             result = validate_tool_call(tc)
             assert result["function"]["name"] == name
+
+    def test_end_interview_tool_call_is_denied(self):
+        """结束面试必须走 backend closing workflow，不允许模型用工具触发。"""
+        tc = tool_call("end_interview", {})
+
+        with pytest.raises(StopRun, match="tool_denied:end_interview"):
+            validate_tool_call(tc)
 
 
 class TestFallbackReactAnswer:
     """_fallback_react_answer() — fallback generation."""
 
     def test_fallback_with_candidates(self):
-        """ER2: 有候选题时 → 使用第一道候选题"""
+        """ER2: 有候选题时 → 抛出 GenerationError（不再生成机械题干）"""
         state = {
             "candidate_questions": [
                 make_question(101, "Redis 缓存穿透怎么处理？"),
@@ -81,12 +88,13 @@ class TestFallbackReactAnswer:
             "retrieved_questions": [],
             "keywords": ["Redis"],
         }
-        result = _fallback_react_answer(state, "test_reason")
-        assert "Redis 缓存穿透怎么处理" in result
+        with pytest.raises(GenerationError) as exc_info:
+            _fallback_react_answer(state, "test_reason")
+        assert "mechanical_fallback_blocked" in exc_info.value.code
         assert state["question_source_reason"] == "fallback_after_test_reason"
 
-    def test_fallback_with_candidates_avoids_rigid_question_template(self):
-        """ER2: candidate fallback should not reuse the stiff old template."""
+    def test_fallback_with_candidates_raises_generation_error(self):
+        """ER2: candidate fallback should raise GenerationError instead of mechanical template."""
         state = {
             "candidate_questions": [
                 make_question(101, "Agent 的整体架构是什么？"),
@@ -95,20 +103,14 @@ class TestFallbackReactAnswer:
             "keywords": ["Agent"],
         }
 
-        result = _fallback_react_answer(state, "test_reason")
+        with pytest.raises(GenerationError) as exc_info:
+            _fallback_react_answer(state, "test_reason")
 
-        assert "Agent 的整体架构是什么" in result
-        assert "收束到" not in result
-        assert "核心思路、关键取舍" not in result
-        assert "验证这个方案" not in result
-        assert "请结合实际项目或工程经验展开" not in result
-        assert "场景背景" not in result
-        assert "实现细节" not in result
-        assert "风险处理" not in result
-        assert "验证方式" not in result
+        assert "mechanical_fallback_blocked" in exc_info.value.code
+        assert exc_info.value.guard == "no_mechanical_question"
 
     def test_fallback_with_retrieved(self):
-        """ER2: 无 candidate 但有 retrieved → 使用 retrieved"""
+        """ER2: 无 candidate 但有 retrieved → 抛出 GenerationError（不再生成机械题干）"""
         state = {
             "candidate_questions": [],
             "retrieved_questions": [
@@ -116,8 +118,9 @@ class TestFallbackReactAnswer:
             ],
             "keywords": ["Redis"],
         }
-        result = _fallback_react_answer(state, "test_reason")
-        assert "Redis 分布式锁" in result
+        with pytest.raises(GenerationError) as exc_info:
+            _fallback_react_answer(state, "test_reason")
+        assert "mechanical_fallback_blocked" in exc_info.value.code
 
     def test_fallback_without_candidates(self):
         """ER2: 无候选题 → 使用关键词生成追问"""
@@ -140,8 +143,8 @@ class TestFallbackReactAnswer:
         assert "你刚才提到的项目" in result
 
     @pytest.mark.asyncio
-    async def test_plan_fallback_avoids_rigid_question_template(self):
-        """Plan repair fallback should ask the bound question without old boilerplate."""
+    async def test_plan_fallback_raises_generation_error(self):
+        """Plan repair fallback should raise GenerationError instead of mechanical fallback."""
         state = {
             "user_id": 1,
             "user_message": "我讲一下多 Agent 架构",
@@ -167,18 +170,12 @@ class TestFallbackReactAnswer:
                 "adherence": {"adheres": False, "score": 0.0},
             },
         ):
-            result = await _enforce_question_plan_on_text("说说你的项目难点？", state)
+            with pytest.raises(GenerationError) as exc_info:
+                await _enforce_question_plan_on_text("说说你的项目难点？", state)
 
-        assert "多Agent架构" in result
-        assert "收束到" not in result
-        assert "核心思路、关键取舍" not in result
-        assert "验证这个方案" not in result
-        assert "请结合实际项目或工程经验展开" not in result
-        assert "场景背景" not in result
-        assert "实现细节" not in result
-        assert "风险处理" not in result
-        assert "验证方式" not in result
-        assert state["question_source_reason"] == "question_plan_fallback"
+        assert "question_plan_generation_failed" in exc_info.value.code
+        assert exc_info.value.guard == "no_mechanical_question"
+        assert state["question_source_reason"] == "question_plan_generation_error"
 
 
 class TestForcedClosing:

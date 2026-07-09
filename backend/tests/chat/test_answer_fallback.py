@@ -2,7 +2,7 @@
 
 Covers:
 - _rewrite_transition_with_llm: LLM-based natural transition generation
-- _format_bank_question_fallback: deterministic last-resort fallback
+- GenerationError: raised instead of mechanical fallback
 """
 from __future__ import annotations
 
@@ -11,47 +11,20 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 
-# ── _format_bank_question_fallback (deterministic last resort) ──
+# ── GenerationError (replaces mechanical fallback) ────────────
 
 
-class TestFormatBankQuestionFallback:
-    """Deterministic fallback when LLM rewrite is not available."""
+class TestGenerationError:
+    """Verify GenerationError is available and has expected attributes."""
 
-    def test_plan_style_no_mechanical_prefix(self):
-        from app.agents.chat.answer import _format_bank_question_fallback
+    def test_generation_error_importable(self):
+        from app.agents.chat.answer import GenerationError
 
-        result = _format_bank_question_fallback("MySQL 索引原理", style="plan")
-        assert "换个具体点的问题：" not in result
-        assert "MySQL" in result
-
-    def test_plan_style_starts_with_natural_prefix(self):
-        from app.agents.chat.answer import _format_bank_question_fallback
-
-        result = _format_bank_question_fallback("Redis 跳表结构", style="plan")
-        assert result.startswith("好，")
-
-    def test_candidate_style_no_mechanical_prefix(self):
-        from app.agents.chat.answer import _format_bank_question_fallback
-
-        result = _format_bank_question_fallback("说说 Redis 跳表", style="candidate")
-        assert "换个具体点的问题" not in result
-        assert "顺着你刚才的回答" not in result
-        assert "Redis" in result
-
-    def test_empty_question_returns_generic(self):
-        from app.agents.chat.answer import _format_bank_question_fallback
-
-        result = _format_bank_question_fallback("", style="plan")
-        assert len(result) > 10
-
-    def test_no_last_user_answer_parameter(self):
-        """_format_bank_question_fallback should NOT accept last_user_answer —
-        natural transitions are handled by _rewrite_transition_with_llm."""
-        import inspect
-        from app.agents.chat.answer import _format_bank_question_fallback
-
-        sig = inspect.signature(_format_bank_question_fallback)
-        assert "last_user_answer" not in sig.parameters
+        err = GenerationError(code="test_code", message="test message", guard="test")
+        assert err.code == "test_code"
+        assert err.message == "test message"
+        assert err.guard == "test"
+        assert str(err) == "test message"
 
 
 # ── _rewrite_transition_with_llm ────────────────────────────────

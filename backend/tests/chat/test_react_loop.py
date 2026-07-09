@@ -1754,10 +1754,10 @@ class TestQuestionPlanEnforcement:
             async for event in _react_loop(state):
                 events.append(event)
 
-        chunks = [event["content"] for event in events if event["type"] == "chunk"]
-        assert not any(event["type"] == "error" for event in events)
-        assert chunks == ["好，深度遍历用迭代和递归分别如何实现？"]
-        assert state["final_answer_error"]["reason"] == "empty_answer_plan_fallback"
+        error_events = [event for event in events if event["type"] == "error"]
+        assert len(error_events) == 1
+        assert error_events[0].get("code") == "empty_answer_plan_generation_failed"
+        assert state["final_answer_error"]["reason"] == "empty_answer_plan_generation_error"
 
     async def test_plan_drift_is_repaired_once(self):
         from app.agents.chat.pipeline import _final_answer_events_from_text
@@ -2440,6 +2440,40 @@ class TestEndInterviewHardRoute:
         assert "是否通过" in response
         assert "整体表现" not in response
         assert "你先说说这个平台的整体架构" in response
+        assert state["question_source_reason"] == "end_interview_premature_summary_guard"
+
+    @pytest.mark.asyncio
+    async def test_too_early_close_request_without_summary_continues_interview(self):
+        """A too-early close request should keep collecting technical evidence."""
+        from app.agents.chat.pipeline import _generate_end_interview_response
+
+        state = {
+            "user_message": "不好意思，时间有点紧，我们是不是可以先收尾？",
+            "message_history": [
+                {"role": "assistant", "content": "请先做一下自我介绍。"},
+                {"role": "user", "content": "我主要做 RAG 和 Agent。"},
+                {
+                    "role": "assistant",
+                    "content": "你说一下 Agent 工作流里状态管理是怎么设计的？",
+                },
+            ],
+            "question_source": None,
+            "question_source_reason": None,
+            "session_notes": "",
+            "user_id": 1,
+        }
+
+        with patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+        ) as mock_call:
+            response = await _generate_end_interview_response(state)
+
+        mock_call.assert_not_called()
+        assert "证据还不够" in response
+        assert "先不收尾" in response
+        assert "状态管理" in response
+        assert "好的，面试先到这里" not in response
         assert state["question_source_reason"] == "end_interview_premature_summary_guard"
 
     @pytest.mark.asyncio

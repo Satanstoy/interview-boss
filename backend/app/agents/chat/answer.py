@@ -30,6 +30,24 @@ from app.services import llm as llm_service
 
 logger = logging.getLogger("interview-boss")
 
+
+class GenerationError(Exception):
+    """自然问题生成失败时抛出。
+
+    替代机械题干 fallback，让调用方明确感知失败。
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        guard: str | None = None,
+    ):
+        self.code = code
+        self.message = message
+        self.guard = guard
+        super().__init__(message)
+
 _INTERNAL_REACT_MARKERS = frozenset(
     {
         "load_skill",
@@ -249,17 +267,19 @@ async def _enforce_question_plan_on_text(
         state["question_source_reason"] = "question_plan_llm_rewrite"
         return rewritten
 
-    # Last resort: deterministic fallback (no LLM available)
-    transition_style = state.get("transition_style", "natural")
-    fallback = _format_bank_question_fallback(
-        question_text, style="plan", transition_style=transition_style
-    )
+    # Mechanical fallback removed — raise explicit error instead
     metadata["fallback_used"] = True
-    metadata["adherence"] = _question_plan_adherence(fallback, plan)
-    metadata["transition_source"] = "deterministic_fallback"
+    metadata["transition_source"] = "generation_error"
     state["question_plan_metadata"] = metadata
-    state["question_source_reason"] = "question_plan_fallback"
-    return fallback
+    state["question_source_reason"] = "question_plan_generation_error"
+    raise GenerationError(
+        code="question_plan_generation_failed",
+        message=(
+            f"Question plan enforcement failed: LLM rewrite unavailable; "
+            f"plan question_text={question_text!r}"
+        ),
+        guard="no_mechanical_question",
+    )
 
 
 # ── Fallback & Marker Detection ───────────────────────────
@@ -359,48 +379,27 @@ async def _rewrite_transition_with_llm(
     return None
 
 
-def _format_bank_question_fallback(
-    question_text: str,
-    *,
-    style: str = "candidate",
-    transition_style: str = "natural",
-) -> str:
-    """Deterministic fallback when LLM rewrite is not available.
-
-    Only used as last resort (LLM rewrite failed or not attempted).
-    The wording is chosen by ``transition_style`` instead of a hardcoded prefix.
-    """
-    question = (question_text or "").strip()
-    if not question:
-        return (
-            "我先追问你刚才提到的一个点。选一个你最熟的模块，"
-            "把关键设计和你当时做的取舍讲清楚。"
-        )
-
-    transition_style = (transition_style or "natural").lower()
-    if transition_style == "from_candidate_keyword":
-        return f"顺着你说到的方向，{question}"
-    if transition_style == "pivot":
-        return f"{question}"
-    if transition_style == "closing":
-        return f"{question}"
-    return f"好，{question}"
-
-
 def _fallback_react_answer(state: ChatState, reason: str) -> str:
-    """Return a safe interviewer turn when ReAct/tool/final generation fails."""
+    """Return a safe interviewer turn when ReAct/tool/final generation fails.
+
+    Raises GenerationError instead of generating mechanical question fallback
+    when candidate questions are available.
+    """
     candidates = (
         state.get("candidate_questions") or state.get("retrieved_questions") or []
     )
-    transition_style = state.get("transition_style", "natural")
     if candidates:
         selected = candidates[0]
         state["selected_question"] = selected
         state["question_source"] = state.get("question_source") or "search"
         state["question_source_reason"] = f"fallback_after_{reason}"
-        return _format_bank_question_fallback(
-            str(selected.get("question") or ""),
-            transition_style=transition_style,
+        raise GenerationError(
+            code="mechanical_fallback_blocked",
+            message=(
+                f"ReAct fallback blocked for reason={reason}; "
+                f"candidate question available: {selected.get('question', '')}"
+            ),
+            guard="no_mechanical_question",
         )
 
     state["question_source"] = "conversation"

@@ -15,7 +15,6 @@ from typing import AsyncGenerator
 
 from app.agents.chat.answer import (
     _final_answer_events_from_text,
-    _format_bank_question_fallback,
     OutputDeduplicator,
     _stream_final_answer,  # kept for backward compat, no longer called in main path
 )
@@ -444,6 +443,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     if stop_decision["action"] == "ask_candidate_question":
         state["question_source"] = "conversation"
         state["question_source_reason"] = stop_decision["reason"]
+        # Advance closing_stage to candidate_question_asked
+        state["closing_stage"] = "candidate_question_asked"
         message = stop_decision.get("message")
         if message:
             # Pre-set message from stop_policy (e.g. coverage-complete prompt)
@@ -456,7 +457,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 }
             )
             yield {"type": "chunk", "content": message}
-            yield {"type": "done"}
+            yield {"type": "done", "metadata": {"closing_stage": "candidate_question_asked"}}
             return
         # No pre-set message (e.g. candidate_repeated_answers) —
         # inject a system note and let the ReAct loop generate a natural response.
@@ -469,6 +470,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             closing_text = await _forced_closing_response(state)
         else:
             closing_text = await _generate_structured_summary(state)
+        # Mark closing_stage as closed after summary
+        state["closing_stage"] = "closed"
         _emit(
             {
                 "type": "step",
@@ -478,7 +481,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             }
         )
         yield {"type": "chunk", "content": closing_text}
-        yield {"type": "done"}
+        yield {"type": "done", "metadata": {"closing_stage": "closed", "has_summary": True}}
         return
 
     # 1. Build system prompt
@@ -873,6 +876,58 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         yield {"type": "error", "message": "模型生成超时，请稍后再试。"}
     elif final_answer_text:
         state["react_direct_answer_draft"] = final_answer_text
+
+        # Output guardrail: validate before emitting
+        from app.agents.chat.output_guardrails import needs_output_repair, build_repair_prompt
+
+        guardrail = needs_output_repair(state, final_answer_text)
+        if guardrail["needs_repair"]:
+            logger.info(
+                "ReAct trace: event=output_guardrail_repair conversation_id=%s reason=%s",
+                state.get("conversation_id"),
+                guardrail["reason"],
+            )
+            repair_prompt = build_repair_prompt(final_answer_text, state, guardrail["repair_type"])
+            try:
+                from app.services.llm import raw_llm_call
+
+                repaired = await raw_llm_call(
+                    user_id=state["user_id"],
+                    model=state.get("model"),
+                    messages=[
+                        {"role": "system", "content": "你是面试系统的输出修复组件。直接输出修改后的回复，不要解释修改原因。"},
+                        {"role": "user", "content": repair_prompt},
+                    ],
+                    temperature=0.5,
+                    max_tokens=1024,
+                )
+                if repaired and repaired.strip():
+                    # Validate repair result
+                    recheck = needs_output_repair(state, repaired.strip())
+                    if not recheck["needs_repair"]:
+                        final_answer_text = repaired.strip()
+                        logger.info(
+                            "ReAct trace: event=guardrail_repair_success conversation_id=%s",
+                            state.get("conversation_id"),
+                        )
+                    else:
+                        logger.info(
+                            "ReAct trace: event=guardrail_repair_failed conversation_id=%s reason=%s",
+                            state.get("conversation_id"),
+                            recheck["reason"],
+                        )
+                        # Use deterministic fallback
+                        if guardrail["repair_type"] == "summary":
+                            final_answer_text = await _forced_closing_response(state)
+                        # For counter_question, keep original (better than nothing)
+            except Exception as e:
+                logger.warning("Guardrail repair LLM call failed: %s", e)
+                if guardrail["repair_type"] == "summary":
+                    try:
+                        final_answer_text = await _forced_closing_response(state)
+                    except Exception:
+                        pass  # keep original
+
         # Use ReAct answer directly — apply quality pipeline without
         # a second LLM streaming call (which causes intermittent 500s).
         events = await _final_answer_events_from_text(final_answer_text, state)
@@ -896,17 +951,21 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         question_text = str(plan.get("question_text") or "").strip()
         if plan.get("must_ask") and question_text:
             state["final_answer_error"] = {
-                "reason": "empty_answer_plan_fallback",
+                "reason": "empty_answer_plan_generation_error",
                 "attempts": 0,
                 "question_id": plan.get("question_id"),
             }
-            fallback_text = _format_bank_question_fallback(
+            logger.error(
+                "ReAct trace: event=empty_answer_plan_generation_error "
+                "conversation_id=%s question_text=%r",
+                state.get("conversation_id"),
                 question_text,
-                transition_style=state.get("transition_style", "natural"),
             )
-            events = await _final_answer_events_from_text(fallback_text, state)
-            for event in events:
-                yield event
+            yield {
+                "type": "error",
+                "message": "模型未能生成回复，请稍后再试。",
+                "code": "empty_answer_plan_generation_failed",
+            }
         else:
             # No text from ReAct — shouldn't happen, surface error.
             yield {"type": "error", "message": "模型未能生成回复，请稍后再试。"}
