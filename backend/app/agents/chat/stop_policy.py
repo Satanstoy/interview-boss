@@ -6,7 +6,10 @@ LLM can still choose natural wording, but the backend owns the stop gates.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("interview-boss")
 
 from app.agents.chat.chat_constants import (
     CANDIDATE_QUESTION_MARKER,
@@ -39,10 +42,20 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
     - ``ask_candidate_question``: coverage is complete; ask the candidate's
       reverse-question prompt before final closing.
     - ``close``: generate the final structured summary.
+
+    The primary signal is ``state["closing_stage"]`` (persisted across turns).
+    Text-based heuristics are only used as fallback for legacy sessions.
     """
 
     config = state.get("decision_config") or DecisionConfig()
     message_count = len(state.get("message_history") or [])
+    closing_stage = state.get("closing_stage", "technical")
+    logger.info(
+        "Stop policy evaluate: closing_stage=%s message_count=%s counter_question=%s",
+        closing_stage,
+        message_count,
+        state.get("counter_question"),
+    )
     coverage = _coverage_status(state)
     missing_phases = [
         phase
@@ -55,11 +68,49 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
         "message_count": message_count,
         "coverage": coverage,
         "missing_phases": missing_phases,
+        "closing_stage": closing_stage,
     }
 
+    # ── closing_stage state machine (primary path) ──
+
+    # If we already asked the candidate question, this turn should close.
+    if closing_stage == "candidate_question_asked":
+        # But if candidate asks a counter question, let them answer first.
+        if state.get("counter_question"):
+            return {
+                **base,
+                "action": "continue",
+                "mode": "wrap_up",
+                "reason": "counter_question_during_closing",
+            }
+        return {
+            **base,
+            "action": "close",
+            "mode": "wrap_up",
+            "reason": "candidate_question_already_asked",
+        }
+
+    # If we're in final_summary, force close.
+    if closing_stage == "final_summary":
+        return {
+            **base,
+            "action": "close",
+            "mode": "wrap_up",
+            "reason": "closing_stage_final_summary",
+        }
+
+    # If already closed, keep closed (shouldn't normally reach here).
+    if closing_stage == "closed":
+        return {
+            **base,
+            "action": "close",
+            "mode": "wrap_up",
+            "reason": "already_closed",
+        }
+
+    # ── Legacy/fallback path for sessions without closing_stage ──
+
     # Candidate repetition detection — hard guard before any other logic.
-    # The repetition streak is computed in pipeline._step_classify and written
-    # to state; stop policy reads it instead of counting text again.
     user_repeat_count = state.get("repetition_streak", 0)
     if user_repeat_count >= config.candidate_repeat_close:
         return {
@@ -88,6 +139,14 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     if all_covered and message_count >= config.soft_close_message_count:
+        # Use closing_stage if available, else fall back to text detection
+        if closing_stage == "candidate_question_answered":
+            return {
+                **base,
+                "action": "close",
+                "mode": "wrap_up",
+                "reason": "candidate_question_answered",
+            }
         if _last_assistant_asked_candidate_question(state):
             return {
                 **base,
@@ -143,3 +202,21 @@ def _last_assistant_asked_candidate_question(state: dict[str, Any]) -> bool:
         content = str(msg.get("content") or "")
         return CANDIDATE_QUESTION_MARKER in content
     return False
+
+
+_CLOSING_SIGNALS = (
+    "时间差不多了",
+    "感谢您的时间",
+    "感谢面试官的时间",
+    "今天先到这里",
+    "就到这里吧",
+    "差不多可以收了",
+    "差不多可以结束了",
+    "可以收尾了",
+    "想请教几个问题就收尾",
+)
+
+
+def detect_closing_signal(user_message: str) -> bool:
+    """检测候选人是否发出收尾信号。"""
+    return any(signal in user_message for signal in _CLOSING_SIGNALS)
