@@ -1,6 +1,6 @@
 """Chat Agent State — 面试对话状态机的状态定义"""
 
-from typing import TypedDict, Annotated, Optional
+from typing import Literal, TypedDict, Annotated, Optional
 from operator import add
 
 from app.agents.chat.decision_config import DecisionConfig
@@ -101,6 +101,28 @@ class ChatState(TypedDict, total=False):
     active_skill_instructions: list[
         dict
     ]  # [{"skill_name": str, "instruction": str}] 当前 ReAct loop 待注入 system prompt；跨轮只持久化 skill_name
+
+    # === 收尾状态机 ===
+    closing_stage: str  # technical | candidate_question_asked | candidate_question_answered | final_summary | closed
+    counter_question: bool  # 本轮是否为候选人反问
+    counter_question_topic: str | None  # 反问主题
+
+    # === Workflow 路由 ===
+    turn_action: Literal[
+        "natural_followup",
+        "bank_question",
+        "answer_counter_question",
+        "closing_summary",
+        "complex_open_task",
+        "error",
+    ] | None
+    turn_reason: str | None
+    question_intent: dict | None  # TurnController 输出的意图
+    natural_question_text: str | None  # NaturalQuestionWriter 输出
+    generation_error: dict | None  # 生成失败时的错误信息
+
+    # === 题目暴露 Ledger ===
+    exposed_question_ids: list[int]  # 本会话已暴露给模型/用户的所有题目 ID
 
     # === 检索元数据 ===
     retrieved_questions: list[dict]  # RAG 检索到的相关题目
