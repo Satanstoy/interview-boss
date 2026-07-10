@@ -1160,6 +1160,16 @@ def score_scenario(scenario: Scenario, metrics: dict[str, Any]) -> dict[str, Any
     for key, config in scenario.scoring.items():
         weight = float(config.get("weight", 1.0))
         total_weight += weight
+        if "check" not in config:
+            # LLM-judge-only dimension, skip code-based scoring
+            items[key] = {
+                "passed": None,
+                "weight": weight,
+                "description": config.get("description", key),
+                "error": None,
+                "note": "requires LLM judge",
+            }
+            continue
         try:
             passed = bool(config["check"](metrics))
             error = None
@@ -1175,11 +1185,18 @@ def score_scenario(scenario: Scenario, metrics: dict[str, Any]) -> dict[str, Any
             "error": error,
         }
 
+    # Only count weights for dimensions that have code-based checks
+    checked_weight = sum(
+        float(config.get("weight", 1.0))
+        for config in scenario.scoring.values()
+        if "check" in config
+    )
     return {
-        "passed": passed_weight == total_weight,
+        "passed": passed_weight == checked_weight if checked_weight > 0 else None,
         "passed_weight": passed_weight,
         "total_weight": total_weight,
-        "ratio": passed_weight / total_weight if total_weight else 0.0,
+        "checked_weight": checked_weight,
+        "ratio": passed_weight / checked_weight if checked_weight > 0 else 0.0,
         "items": items,
     }
 
