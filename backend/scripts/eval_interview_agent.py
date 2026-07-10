@@ -1371,6 +1371,7 @@ def llm_score_scenario(
         normalized_score = (weighted_avg - 1) / 4.0
 
         return {
+            "passed": weighted_avg >= 3.0,  # pass threshold: 3/5
             "overall_score": round(normalized_score, 3),
             "weighted_avg": round(weighted_avg, 2),
             "items": items,
@@ -1822,7 +1823,13 @@ def _render_markdown_report(result: dict[str, Any], timestamp: str) -> str:
         "|------|------|------|",
     ]
     for key, item in scores["items"].items():
-        state = "PASS" if item["passed"] else "FAIL"
+        passed = item.get("passed")
+        if passed is None:
+            state = "N/A (LLM judge)"
+        elif passed:
+            state = "PASS"
+        else:
+            state = "FAIL"
         lines.append(f"| {key} | {state} | {item['description']} |")
 
     lines.extend(
