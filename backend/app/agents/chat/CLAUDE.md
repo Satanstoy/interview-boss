@@ -31,6 +31,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
 | `classify_result.py` | `ClassifyResult` Pydantic 模型：分类节点结构化输出（含 Phase 1 语义信号扩展：candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
 | `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：读取结构化事实输出本轮契约（Phase 1 旁路观测，不影响现有输出） |
+| `writers/closing_writer.py` | 自然收尾语生成：不含结构化总结，由 closing_writer 生成，summary_writer 生成总结（Phase 2 两阶段收尾） |
+| `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
 | `tool_strategy.py` | `ToolStrategy` + `compute_tool_strategy(state)`：基于状态字段推导工具策略 |
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |

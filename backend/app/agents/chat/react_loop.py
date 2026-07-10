@@ -38,6 +38,7 @@ from app.agents.chat.summary import (
     _forced_closing_response,
     _generate_structured_summary,
 )
+from app.agents.chat.writers.closing_writer import generate_closing_utterance
 from app.agents.chat.trace import build_skill_trace_from_tool, build_tool_trace
 from app.agents.chat import tools as chat_tools
 from app.agents.shared.events import _event_queue_var
@@ -351,6 +352,26 @@ def _emit_reasoning_content(reasoning_content: str | None, elapsed_ms: int) -> N
     )
 
 
+# ── Closing Context ──────────────────────────────────────
+
+
+def _build_closing_context(state: ChatState) -> str:
+    """为 closing_writer 构建最近面试上下文。"""
+    history = state.get("message_history", []) or []
+    recent = history[-6:] if len(history) > 6 else history
+    lines: list[str] = []
+    for msg in recent:
+        role = "面试官" if msg.get("role") == "assistant" else "候选人"
+        content = str(msg.get("content") or "")[:100]
+        if content.strip():
+            lines.append(f"{role}: {content}")
+    session_notes = state.get("session_notes", "") or ""
+    context = "\n".join(lines)
+    if session_notes:
+        context += f"\n\n面试备注: {session_notes[:200]}"
+    return context
+
+
 # ── ReAct Loop ────────────────────────────────────────────
 
 
@@ -466,12 +487,6 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     if stop_decision["action"] == "close":
         state["question_source"] = "conversation"
         state["question_source_reason"] = stop_decision["reason"]
-        if stop_decision["reason"] == "hard_stop_by_message_count":
-            closing_text = await _forced_closing_response(state)
-        else:
-            closing_text = await _generate_structured_summary(state)
-        # Mark closing_stage as closed after summary
-        state["closing_stage"] = "closed"
         _emit(
             {
                 "type": "step",
@@ -480,8 +495,46 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "reason": STEP_REASONS["closing"],
             }
         )
+
+        # Phase 2: 两阶段收尾 — closing_writer + summary_writer
+        closing_reason = stop_decision["reason"]
+        recent_context = _build_closing_context(state)
+
+        # Stage 1: 自然收尾语
+        closing_result = await generate_closing_utterance(
+            closing_reason=closing_reason,
+            recent_context=recent_context,
+            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                msgs, user_id=state.get("user_id")
+            ),
+        )
+        writer_trace = {"writer": "closing_writer", "result": closing_result["status"]}
+
+        # Stage 2: 结构化总结
+        if closing_reason == "hard_stop_by_message_count":
+            summary_text = await _forced_closing_response(state)
+        else:
+            summary_text = await _generate_structured_summary(state)
+
+        # Combine: 收尾语 + 总结
+        if closing_result["status"] == "success":
+            closing_text = f"{closing_result['text']}\n\n{summary_text}"
+        else:
+            # closing_writer 失败时，只用总结
+            logger.warning("Closing writer failed: %s", closing_result.get("message"))
+            closing_text = summary_text
+
+        # Mark closing_stage as closed after summary
+        state["closing_stage"] = "closed"
         yield {"type": "chunk", "content": closing_text}
-        yield {"type": "done", "metadata": {"closing_stage": "closed", "has_summary": True}}
+        yield {
+            "type": "done",
+            "metadata": {
+                "closing_stage": "closed",
+                "has_summary": True,
+                "writer_trace": writer_trace,
+            },
+        }
         return
 
     # 1. Build system prompt

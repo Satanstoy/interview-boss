@@ -116,10 +116,12 @@ def _build_interview_transcript(state: ChatState) -> str:
 
 
 def _render_interview_summary_markdown(summary: InterviewSummary) -> str:
-    """Render an InterviewSummary as user-facing markdown."""
+    """Render an InterviewSummary as user-facing markdown.
+
+    Phase 2: 不再内置固定收尾句。收尾语由 closing_writer 单独生成。
+    """
     suggestions = "\n".join(f"- {s}" for s in summary.key_suggestions)
     sections = [
-        "今天的模拟面试就到这里，感谢你的时间。\n\n"
         f"**整体表现**：{summary.overall_comment}\n\n"
         f"**最佳话题**：{summary.strongest_topic}\n\n"
         f"**薄弱环节**：{summary.weakest_topic}\n\n"
@@ -224,7 +226,6 @@ async def _generate_structured_summary(state: ChatState) -> str:
             f"共覆盖了 {topic_count} 个话题" if topic_count else "覆盖了多个话题"
         )
         return (
-            "今天的模拟面试就到这里，感谢你的时间。\n\n"
             f"**整体表现**：本次面试{topic_info}，"
             "你在项目经验和基础知识方面都有一定积累，回答思路基本清晰。"
             "建议后续重点复盘面试中暴露的知识盲区，"
