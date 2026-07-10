@@ -46,6 +46,7 @@ from app.agents.chat.react_loop import (  # noqa: F401
     _SAFE_TOOL_ARG_KEYS,
     _TRACE_LIST_LIMIT,
     _TRACE_STRING_LIMIT,
+    _build_closing_context,
     _emit,
     _log_react_llm_step,
     _log_react_tool_call,
@@ -571,6 +572,7 @@ async def run_chat(
             metadata = {}
 
             # Hard route: end_interview bypasses ReAct entirely — no tools
+            # Phase 5: unified two-stage closing (closing_writer + summary_writer)
             if state.get("intent") == "end_interview":
                 _emit(
                     {
@@ -580,12 +582,30 @@ async def run_chat(
                         "reason": STEP_REASONS["closing"],
                     }
                 )
-                closing_text = await _generate_end_interview_response(state)
+                from app.agents.chat.writers.closing_writer import generate_closing_utterance
+
+                recent_context = _build_closing_context(state)
+                closing_result = await generate_closing_utterance(
+                    closing_reason="end_interview",
+                    recent_context=recent_context,
+                    llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                        msgs, user_id=state.get("user_id")
+                    ),
+                )
+                summary_text = await _generate_end_interview_response(state)
+                if closing_result["status"] == "success":
+                    closing_text = f"{closing_result['text']}\n\n{summary_text}"
+                else:
+                    closing_text = summary_text
                 response = closing_text
                 _emit({"type": "chunk", "content": closing_text})
                 built_metadata, clean_response = _build_react_metadata(state, response)
                 if built_metadata:
                     metadata = built_metadata
+                metadata["writer_trace"] = {
+                    "writer": "closing_writer",
+                    "result": closing_result["status"],
+                }
                 response = clean_response
                 _sidecar_turn_contract(state, metadata)
                 _record_asked_question_if_any(state, metadata)

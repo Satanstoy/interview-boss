@@ -256,16 +256,25 @@ async def _enforce_question_plan_on_text(
         return repaired_text
 
     # Try LLM rewrite for natural transition
+    # Phase 5: tightened — rewrite must also adhere to plan, otherwise raise GenerationError
     question_text = str(plan.get("question_text") or "")
     last_answer = str(state.get("user_message") or "")
     rewritten = await _rewrite_transition_with_llm(question_text, last_answer)
     if rewritten:
-        metadata["fallback_used"] = True
-        metadata["adherence"] = _question_plan_adherence(rewritten, plan)
-        metadata["transition_source"] = "llm_rewrite"
-        state["question_plan_metadata"] = metadata
-        state["question_source_reason"] = "question_plan_llm_rewrite"
-        return rewritten
+        rewritten_adherence = _question_plan_adherence(rewritten, plan)
+        if rewritten_adherence.get("adheres"):
+            metadata["fallback_used"] = True
+            metadata["adherence"] = rewritten_adherence
+            metadata["transition_source"] = "llm_rewrite"
+            state["question_plan_metadata"] = metadata
+            state["question_source_reason"] = "question_plan_llm_rewrite"
+            return rewritten
+        # Rewrite drifted — don't accept it
+        logger.warning(
+            "Rewrite transition drifted: adherence=%s question_text=%r",
+            rewritten_adherence,
+            question_text,
+        )
 
     # Mechanical fallback removed — raise explicit error instead
     metadata["fallback_used"] = True

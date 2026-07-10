@@ -321,7 +321,7 @@ class TestReactLoop:
                 events.append(event)
 
         assert [e["type"] for e in events] == ["chunk", "done"]
-        assert "模拟面试就到这里" in events[0]["content"]
+        # Phase 2: closing sentence is no longer embedded in summary renderer
         assert "整体表现良好" in events[0]["content"]
         assert state["question_source_reason"] == "coverage_complete_after_candidate_question"
         mock_llm.assert_not_called()

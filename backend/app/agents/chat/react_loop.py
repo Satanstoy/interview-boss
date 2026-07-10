@@ -981,6 +981,93 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     except Exception:
                         pass  # keep original
 
+        # Phase 5: Semantic validator for ask_selected_question
+        # When selected_question exists and answer_quality is complete,
+        # validate that the generated text actually asks the planned question.
+        selected_q = state.get("selected_question")
+        answer_quality = state.get("answer_quality", "complete")
+        if (
+            selected_q
+            and selected_q.get("id")
+            and answer_quality not in ("vague", "incomplete", "off_topic")
+        ):
+            from app.agents.chat.validators.semantic_question_adherence import (
+                validate_question_adherence,
+            )
+
+            validator_result = await validate_question_adherence(
+                generated_text=final_answer_text,
+                selected_question=selected_q,
+                llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            )
+            if not validator_result.get("passes"):
+                logger.warning(
+                    "ReAct trace: event=semantic_validation_failed conversation_id=%s "
+                    "score=%.2f reason=%s detected=%s",
+                    state.get("conversation_id"),
+                    validator_result.get("score", 0),
+                    validator_result.get("reason", ""),
+                    validator_result.get("detected_question", ""),
+                )
+                # Retry once with validator feedback
+                retry_prompt = (
+                    f"你的上一个回复被验证为偏离了计划题。\n"
+                    f"- 计划题: {selected_q.get('question', '')}\n"
+                    f"- 你生成的: {validator_result.get('detected_question', final_answer_text[:100])}\n"
+                    f"- 原因: {validator_result.get('reason', '')}\n\n"
+                    f"请重新生成，确保问题与计划题语义一致。直接输出面试官可以说的话。"
+                )
+                try:
+                    from app.services.llm import raw_llm_call
+
+                    retried_text = await raw_llm_call(
+                        user_id=state["user_id"],
+                        model=state.get("model"),
+                        messages=[
+                            {"role": "system", "content": "你是技术面试官。请根据反馈重新生成问题。"},
+                            {"role": "user", "content": retry_prompt},
+                        ],
+                        temperature=0.5,
+                        max_tokens=512,
+                    )
+                    if retried_text and retried_text.strip():
+                        retry_validation = await validate_question_adherence(
+                            generated_text=retried_text.strip(),
+                            selected_question=selected_q,
+                            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                                msgs, user_id=state.get("user_id")
+                            ),
+                        )
+                        if retry_validation.get("passes"):
+                            final_answer_text = retried_text.strip()
+                            logger.info(
+                                "ReAct trace: event=semantic_retry_success conversation_id=%s",
+                                state.get("conversation_id"),
+                            )
+                        else:
+                            logger.warning(
+                                "ReAct trace: event=semantic_retry_failed conversation_id=%s",
+                                state.get("conversation_id"),
+                            )
+                            yield {
+                                "type": "error",
+                                "message": "问题生成验证失败，请稍后再试。",
+                                "code": "semantic_validation_failed",
+                            }
+                            yield {"type": "done"}
+                            return
+                except Exception as e:
+                    logger.warning("Semantic retry LLM call failed: %s", e)
+                    yield {
+                        "type": "error",
+                        "message": "问题生成验证失败，请稍后再试。",
+                        "code": "semantic_validation_failed",
+                    }
+                    yield {"type": "done"}
+                    return
+
         # Use ReAct answer directly — apply quality pipeline without
         # a second LLM streaming call (which causes intermittent 500s).
         events = await _final_answer_events_from_text(final_answer_text, state)
