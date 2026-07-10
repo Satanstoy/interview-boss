@@ -29,7 +29,7 @@ from app.agents.shared.skills.resolver import get_agent_skill_registry
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_OUTPUT_DIR = Path("backend/data/evaluations")
-SUMMARY_SIGNALS = ("面试总结", "整体表现", "模拟面试就到这里", "面试到这里结束")
+SUMMARY_SIGNALS = ("面试总结", "整体表现", "模拟面试就到这里", "面试到这里结束", "面试就到这里", "就到这里", "有什么想问")
 CORRECTION_OUTPUT_SIGNALS = (
     "不是生成式",
     "判别式",
@@ -1049,7 +1049,8 @@ def _detect_counter_question_answered(turns: list[dict[str, Any]]) -> bool:
     for turn in turns:
         user_text = str(turn.get("user") or "")
         assistant_text = str(turn.get("assistant") or "")
-        if any(signal in user_text for signal in ("想问", "请问", "反问")) and assistant_text.strip():
+        signals = ("想问", "请问", "反问", "您觉得", "你觉得", "想了解")
+        if any(signal in user_text for signal in signals) and assistant_text.strip():
             return True
     return False
 
@@ -1096,9 +1097,10 @@ def _detect_self_intro_invite(assistant_texts: list[str]) -> bool:
 
 def _count_tools_on_counter_turn(turns: list[dict[str, Any]]) -> int:
     """Count tool calls on the turn where candidate asks a counter-question."""
+    signals = ("想问", "请问", "反问", "您觉得", "你觉得", "想了解")
     for turn in turns:
         user_text = str(turn.get("user") or "")
-        if any(signal in user_text for signal in ("想问", "请问", "反问", "您觉得")):
+        if any(signal in user_text for signal in signals):
             events = turn.get("events", [])
             return sum(
                 1 for e in events
