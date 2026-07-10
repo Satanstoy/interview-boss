@@ -284,6 +284,118 @@ def _interviewer_forces_close(turns: list[dict[str, Any]]) -> bool:
     return any(sig in last_assistant for sig in SUMMARY_SIGNALS)
 
 
+GREETING_SCORING = {
+    "no_tools_in_greeting": {
+        "description": "寒暄轮（Turn 1）无工具调用",
+        "weight": 2.0,
+        "check": lambda m: m.get("tools_by_turn", {}).get(1, 0) == 0,
+    },
+    "no_tools_in_intro": {
+        "description": "自我介绍轮（Turn 2）无工具调用",
+        "weight": 2.0,
+        "check": lambda m: m.get("tools_by_turn", {}).get(2, 0) == 0,
+    },
+    "role_consistency": {
+        "description": "全程无元说明（请提供岗位信息等）",
+        "weight": 1.5,
+        "check": lambda m: not m.get("has_meta_remarks", False),
+    },
+    "invites_self_intro": {
+        "description": "寒暄回复包含自我介绍邀请",
+        "weight": 1.0,
+        "check": lambda m: m.get("invites_self_intro", False),
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 1.0,
+        "check": lambda m: len(m.get("errors", [])) == 0,
+    },
+}
+
+TOOL_TIMING_SCORING = {
+    "no_tools_first_two_turns": {
+        "description": "前 2 轮无工具调用",
+        "weight": 2.0,
+        "check": lambda m: all(
+            m.get("tools_by_turn", {}).get(i, 0) == 0 for i in [1, 2]
+        ),
+    },
+    "tools_after_intro": {
+        "description": "自我介绍后有工具调用（检索或抽题）",
+        "weight": 1.0,
+        "check": lambda m: m.get("tool_count", 0) > 0,
+    },
+    "role_consistency": {
+        "description": "全程无元说明",
+        "weight": 1.5,
+        "check": lambda m: not m.get("has_meta_remarks", False),
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 1.0,
+        "check": lambda m: len(m.get("errors", [])) == 0,
+    },
+}
+
+NATURAL_CLOSING_SCORING = {
+    "has_summary": {
+        "description": "面试官自主生成结构化总结",
+        "weight": 2.0,
+        "check": lambda m: bool(m.get("has_summary", False)),
+    },
+    "reasonable_turn_count": {
+        "description": "在 8-16 轮之间自然收口（非硬停）",
+        "weight": 1.5,
+        "check": lambda m: 8 <= m.get("turn_count", 0) <= 16,
+    },
+    "role_consistency": {
+        "description": "全程无元说明",
+        "weight": 1.5,
+        "check": lambda m: not m.get("has_meta_remarks", False),
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 1.0,
+        "check": lambda m: len(m.get("errors", [])) == 0,
+    },
+    "thinking_transparency": {
+        "description": "至少 50% 的轮次有 thinking 事件",
+        "weight": 0.5,
+        "check": lambda m: _check_ratio(
+            m.get("thinking_turns", 0), m.get("turn_count", 1), 0.5
+        ),
+    },
+}
+
+COUNTER_QUESTION_FLOW_SCORING = {
+    "counter_question_answered": {
+        "description": "候选人反问被回答",
+        "weight": 2.0,
+        "check": lambda m: bool(m.get("counter_question_answered", False)),
+    },
+    "no_tools_on_counter": {
+        "description": "反问轮不调用工具",
+        "weight": 1.5,
+        "check": lambda m: m.get("tools_on_counter_turn", 0) == 0,
+    },
+    "interview_continues": {
+        "description": "反问后面试继续（有后续追问）",
+        "weight": 1.0,
+        "check": lambda m: m.get("turn_count", 0) >= 5,
+    },
+    "role_consistency": {
+        "description": "全程无元说明",
+        "weight": 1.0,
+        "check": lambda m: not m.get("has_meta_remarks", False),
+    },
+}
+
+
+def _candidate_greets(turns: list[dict[str, Any]]) -> bool:
+    """Check if candidate greeted in turn 1."""
+    return bool(turns) and "你好" in str(turns[0].get("user") or "")
+
+
 SCENARIOS = {
     "long_session_mid": Scenario(
         scenario_id="long_session_mid",
@@ -407,6 +519,57 @@ SCENARIOS = {
         scoring=COUNTER_QUESTION_SCORING,
         candidate_prompt_overrides={
             4: "[重要行为指令] 在回答完面试官的问题后，主动向面试官提一个技术相关的问题，比如：'我想了解一下，贵团队在 XX 方面是怎么做的？'或'这个岗位日常工作中，XX 技术栈的使用频率高吗？'。这是为了测试面试官是否会回答候选人的反问。",
+        },
+    ),
+    # ── 新增：prompt 质量验证场景 ──
+    "greeting_role_adherence": Scenario(
+        scenario_id="greeting_role_adherence",
+        mode="free_practice",
+        difficulty="mid",
+        max_turns=6,
+        persona={**MID_LEVEL_PERSONA, "opening": "面试官你好，我来参加今天的模拟面试。"},
+        active_skills=["candidate-rhythm", "project-storytelling", "knowledge-answer"],
+        scoring=GREETING_SCORING,
+    ),
+    "tool_timing": Scenario(
+        scenario_id="tool_timing",
+        mode="free_practice",
+        difficulty="mid",
+        max_turns=6,
+        persona={**MID_LEVEL_PERSONA, "opening": "你好，我是今天的候选人。"},
+        active_skills=[
+            "candidate-rhythm",
+            "project-storytelling",
+            "knowledge-answer",
+            "coding-answer",
+        ],
+        scoring=TOOL_TIMING_SCORING,
+    ),
+    "natural_closing": Scenario(
+        scenario_id="natural_closing",
+        mode="free_practice",
+        difficulty="mid",
+        max_turns=14,
+        persona=MID_LEVEL_PERSONA,
+        active_skills=[
+            "candidate-rhythm",
+            "project-storytelling",
+            "knowledge-answer",
+            "coding-answer",
+        ],
+        scoring=NATURAL_CLOSING_SCORING,
+        # 全程不注入结束指令，看面试官是否自主收口
+    ),
+    "counter_question_flow": Scenario(
+        scenario_id="counter_question_flow",
+        mode="free_practice",
+        difficulty="mid",
+        max_turns=8,
+        persona=MID_LEVEL_PERSONA,
+        active_skills=["candidate-rhythm", "project-storytelling", "knowledge-answer"],
+        scoring=COUNTER_QUESTION_FLOW_SCORING,
+        candidate_prompt_overrides={
+            3: "[重要行为指令] 回答完面试官的问题后，追加一个反问：'您觉得这个方案在实际业务里好落地吗？有什么需要改进的地方？'",
         },
     ),
 }
@@ -863,6 +1026,11 @@ def extract_metrics(turns: list[dict[str, Any]], conv_id: str) -> dict[str, Any]
             re.search(r"证据不足|信息不足|无法充分判断", text) for text in assistant_texts[-2:]
         ),
         "counter_question_answered": _detect_counter_question_answered(turns),
+        # ── 新增 metrics ──
+        "tools_by_turn": _count_tools_by_turn(turns),
+        "has_meta_remarks": _detect_meta_remarks(assistant_texts),
+        "invites_self_intro": _detect_self_intro_invite(assistant_texts),
+        "tools_on_counter_turn": _count_tools_on_counter_turn(turns),
     }
 
 
@@ -884,6 +1052,60 @@ def _detect_counter_question_answered(turns: list[dict[str, Any]]) -> bool:
         if any(signal in user_text for signal in ("想问", "请问", "反问")) and assistant_text.strip():
             return True
     return False
+
+
+def _count_tools_by_turn(turns: list[dict[str, Any]]) -> dict[int, int]:
+    """Count tool calls per turn (1-indexed)."""
+    result = {}
+    for i, turn in enumerate(turns, 1):
+        events = turn.get("events", [])
+        tool_count = sum(
+            1 for e in events
+            if e.get("type") == "step"
+            and e.get("step") in ("search_questions", "draw_questions", "select_question", "load_skill")
+        )
+        result[i] = tool_count
+    return result
+
+
+def _detect_meta_remarks(assistant_texts: list[str]) -> bool:
+    """Detect meta-remarks that break the interviewer role."""
+    meta_patterns = [
+        "请提供岗位信息",
+        "请告诉我你想练习什么",
+        "请提供简历",
+        "请告诉我你的背景",
+        "你设置这个面试场景",
+        "作为AI",
+        "作为语言模型",
+        "我是一个AI",
+    ]
+    return any(
+        pattern in text for text in assistant_texts for pattern in meta_patterns
+    )
+
+
+def _detect_self_intro_invite(assistant_texts: list[str]) -> bool:
+    """Check if the first response invites self-introduction."""
+    if not assistant_texts:
+        return False
+    first = assistant_texts[0]
+    intro_signals = ["自我介绍", "介绍一下", "简单介绍", "先说说", "请介绍"]
+    return any(signal in first for signal in intro_signals)
+
+
+def _count_tools_on_counter_turn(turns: list[dict[str, Any]]) -> int:
+    """Count tool calls on the turn where candidate asks a counter-question."""
+    for turn in turns:
+        user_text = str(turn.get("user") or "")
+        if any(signal in user_text for signal in ("想问", "请问", "反问", "您觉得")):
+            events = turn.get("events", [])
+            return sum(
+                1 for e in events
+                if e.get("type") == "step"
+                and e.get("step") in ("search_questions", "draw_questions", "select_question", "load_skill")
+            )
+    return 0
 
 
 def score_scenario(scenario: Scenario, metrics: dict[str, Any]) -> dict[str, Any]:

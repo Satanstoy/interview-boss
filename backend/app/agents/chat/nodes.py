@@ -1723,6 +1723,16 @@ def build_runtime_tool_contract_message(state: ChatState) -> str:
 
     strategy = compute_tool_strategy(state)
     if not strategy.requires_retrieval:
+        # Inject explicit "no tools" instruction for opening/greeting turns.
+        # Without this, the model may ignore the system prompt and call tools anyway.
+        message_count = len(state.get("message_history", []) or [])
+        if message_count < 4:
+            return (
+                "[当前回合工具策略]\n"
+                "requires_retrieval=false\n"
+                "CRITICAL: 本轮是开场阶段（寒暄或自我介绍），绝对不要调用任何工具。\n"
+                "直接以面试官身份用文字回复，邀请自我介绍或基于项目内容自然追问。"
+            )
         return ""
 
     allowed = []
