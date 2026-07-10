@@ -109,6 +109,7 @@ from app.agents.chat.metadata import (  # noqa: F401
     _public_question,
 )
 from app.agents.chat.trace import build_reasoning_trace, merge_trace_metadata
+from app.agents.chat.turn_contract import plan_turn
 
 logger = logging.getLogger("interview-boss")
 
@@ -175,6 +176,7 @@ def _initial_state(
         "should_show_references": False,
         "active_skills": [],
         "tool_steps": [],
+        "turn_contract": None,
     }
 
 
@@ -494,6 +496,24 @@ def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
         logger.warning("Failed to record asked question %s: %s", qid, e)
 
 
+def _sidecar_turn_contract(state: ChatState, metadata: dict) -> None:
+    """Phase 1 旁路观测：调用 TurnPlanner 生成 TurnContract，记录到 metadata。
+
+    不改变现有输出流程，只做观测记录。
+    """
+    try:
+        contract = plan_turn(state)
+        state["turn_contract"] = contract.to_metadata_dict()
+        metadata["turn_contract"] = contract.to_metadata_dict()
+        logger.info(
+            "TurnContract (sidecar): action=%s reason=%s",
+            contract.action.value,
+            contract.reason,
+        )
+    except Exception as e:
+        logger.debug("TurnContract sidecar failed (不影响输出): %s", e)
+
+
 # ═══════════════════════════════════════════════════
 #  Main Entry Point
 # ═══════════════════════════════════════════════════
@@ -567,6 +587,7 @@ async def run_chat(
                 if built_metadata:
                     metadata = built_metadata
                 response = clean_response
+                _sidecar_turn_contract(state, metadata)
                 _record_asked_question_if_any(state, metadata)
                 _emit({"type": "basis", **_basis_event_payload(metadata)})
                 _emit({"type": "done", "metadata": metadata})
@@ -581,6 +602,8 @@ async def run_chat(
                         if built_metadata:
                             metadata = {**built_metadata, **metadata}
                         response = clean_response
+                        # Phase 1 旁路观测：TurnContract
+                        _sidecar_turn_contract(state, metadata)
                         # Record asked question for cross-conversation dedup
                         _record_asked_question_if_any(state, metadata)
                         _emit({"type": "basis", **_basis_event_payload(metadata)})

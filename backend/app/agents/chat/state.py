@@ -121,6 +121,9 @@ class ChatState(TypedDict, total=False):
     natural_question_text: str | None  # NaturalQuestionWriter 输出
     generation_error: dict | None  # 生成失败时的错误信息
 
+    # === TurnContract（Phase 1: 旁路观测，不影响现有输出） ===
+    turn_contract: dict | None  # TurnPlanner 输出的本轮契约（metadata trace 用）
+
     # === 题目暴露 Ledger ===
     exposed_question_ids: list[int]  # 本会话已暴露给模型/用户的所有题目 ID
 

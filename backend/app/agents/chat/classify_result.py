@@ -50,6 +50,9 @@ class ClassifyResult(BaseModel):
 
     All fields have safe defaults so that a parse failure can fall back to a
     known state and the interview can continue.
+
+    Phase 1 扩展：新增语义信号字段（candidate_act, needs_clarification 等），
+    供 TurnPlanner 消费。向后兼容——新字段全部有默认值。
     """
 
     intent: IntentType = "interview_question"
@@ -65,6 +68,44 @@ class ClassifyResult(BaseModel):
     repetition_streak: int = Field(default=0)
     requires_bank_question: bool = False
 
+    # ── Phase 1 语义信号扩展（TurnPlanner 消费） ──
+    candidate_act: Optional[str] = Field(
+        default=None,
+        description="候选人的语义行为: answered_question, asked_counter_question, asked_for_summary, requested_end, greeting, chitchat 等",
+    )
+    asked_counter_question: bool = Field(
+        default=False,
+        description="候选人本轮是否提出了反问",
+    )
+    asked_for_summary: bool = Field(
+        default=False,
+        description="候选人是否要求总结/评价",
+    )
+    requested_end: bool = Field(
+        default=False,
+        description="候选人是否要求结束面试",
+    )
+    needs_clarification: bool = Field(
+        default=False,
+        description="候选人回答含糊，需要澄清",
+    )
+    needs_new_dimension: bool = Field(
+        default=False,
+        description="候选人回答完整，需要切换到新维度",
+    )
+    suggested_question_type: Optional[str] = Field(
+        default=None,
+        description="LLM 建议的下一题类型（语义推断，非硬路由）",
+    )
+    confidence: float = Field(
+        default=0.0,
+        description="分类置信度 0.0-1.0",
+    )
+    evidence: Optional[str] = Field(
+        default=None,
+        description="分类依据的简短说明",
+    )
+
     @field_validator("intent", "answer_quality", "question_type", "transition_style", mode="before")
     @classmethod
     def _normalize_empty_strings(cls, value: object) -> object | None:
@@ -78,6 +119,7 @@ class ClassifyResult(BaseModel):
         self.escalation_level = max(0, min(3, int(self.escalation_level)))
         self.off_topic_streak = max(0, int(self.off_topic_streak))
         self.repetition_streak = max(0, int(self.repetition_streak))
+        self.confidence = max(0.0, min(1.0, float(self.confidence)))
         return self
 
     def to_state(self) -> dict:
@@ -104,6 +146,16 @@ class ClassifyResult(BaseModel):
             off_topic_streak=0,
             repetition_streak=0,
             requires_bank_question=False,
+            # Phase 1 语义信号默认值
+            candidate_act=None,
+            asked_counter_question=False,
+            asked_for_summary=False,
+            requested_end=False,
+            needs_clarification=False,
+            needs_new_dimension=False,
+            suggested_question_type=None,
+            confidence=0.0,
+            evidence=None,
         )
 
     @classmethod
