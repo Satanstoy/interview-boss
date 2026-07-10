@@ -33,6 +33,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：读取结构化事实输出本轮契约（Phase 1 旁路观测，不影响现有输出） |
 | `writers/closing_writer.py` | 自然收尾语生成：不含结构化总结，由 closing_writer 生成，summary_writer 生成总结（Phase 2 两阶段收尾） |
 | `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
+| `validators/semantic_question_adherence.py` | LLM semantic validator：验证 ask_selected_question 输出是否语义一致（阈值 0.75） |
+| `validators/__init__.py` | Validator registry：导出 semantic_question_adherence 等 |
 | `tool_strategy.py` | `ToolStrategy` + `compute_tool_strategy(state)`：基于状态字段推导工具策略 |
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
@@ -93,6 +95,8 @@ pipeline.py ──→ react_loop.py ──→ answer.py ──→ nodes.py
     │               │                 │
     │               ├──→ question_plan.py (自包含)
     │               ├──→ summary.py ──→ llm.py
+    │               ├──→ writers/closing_writer.py (Phase 2: 两阶段收尾)
+    │               ├──→ validators/semantic_question_adherence.py (Phase 3)
     │               ├──→ metadata.py ──→ nodes.py, db.connection
     │               └──→ tools.py, llm.py
     ├──→ turn_contract.py ──→ stop_policy.py (Phase 1: 旁路观测)
