@@ -1725,8 +1725,9 @@ def build_runtime_tool_contract_message(state: ChatState) -> str:
     if not strategy.requires_retrieval:
         # Inject explicit "no tools" instruction for opening/greeting turns.
         # Without this, the model may ignore the system prompt and call tools anyway.
-        message_count = len(state.get("message_history", []) or [])
-        if message_count < 4:
+        # Use recent_messages count (excludes opening) to detect early interview phase.
+        recent_count = len(state.get("recent_messages", []) or [])
+        if recent_count < 4:
             return (
                 "[当前回合工具策略]\n"
                 "requires_retrieval=false\n"
