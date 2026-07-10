@@ -1725,14 +1725,17 @@ def build_runtime_tool_contract_message(state: ChatState) -> str:
     if not strategy.requires_retrieval:
         # Inject explicit "no tools" instruction for opening/greeting turns.
         # Without this, the model may ignore the system prompt and call tools anyway.
-        # Use recent_messages count (excludes opening) to detect early interview phase.
-        recent_count = len(state.get("recent_messages", []) or [])
-        if recent_count < 4:
+        # Use message_history count to detect early interview phase.
+        # message_history includes opening + all user/assistant pairs.
+        # Turn 1 (greeting): ~2 messages; Turn 2 (intro): ~4 messages.
+        # We block tools for the first 3 turns (greeting + intro + first follow-up).
+        message_count = len(state.get("message_history", []) or [])
+        if message_count <= 6:
             return (
                 "[当前回合工具策略]\n"
                 "requires_retrieval=false\n"
-                "CRITICAL: 本轮是开场阶段（寒暄或自我介绍），绝对不要调用任何工具。\n"
-                "直接以面试官身份用文字回复，邀请自我介绍或基于项目内容自然追问。"
+                "CRITICAL: 本轮是面试开场阶段（前3轮），绝对不要调用任何工具。\n"
+                "直接以面试官身份用文字回复。开场阶段应邀请自我介绍或基于候选人回答自然追问，不需要检索题库。"
             )
         return ""
 
