@@ -313,80 +313,100 @@ GREETING_SCORING = {
 }
 
 TOOL_TIMING_SCORING = {
-    "no_tools_first_two_turns": {
-        "description": "前 2 轮无工具调用",
+    # ── 效果导向维度（LLM judge 评估）──
+    "tool_effectiveness": {
+        "description": "工具调用是否有效：检索到的题目是否被面试官实际引用到提问中，而不是白调一次",
         "weight": 2.0,
-        "check": lambda m: all(
-            m.get("tools_by_turn", {}).get(i, 0) == 0 for i in [1, 2]
-        ),
     },
-    "tools_after_intro": {
-        "description": "自我介绍后有工具调用（检索或抽题）",
-        "weight": 1.0,
-        "check": lambda m: m.get("tool_count", 0) > 0,
+    "interview_depth": {
+        "description": "项目深挖是否充分：对同一话题至少追问 3 层（架构→决策原因→困难与解决），不要浅尝辄止",
+        "weight": 2.0,
     },
+    "topic_coverage": {
+        "description": "面试是否覆盖多个维度：项目深挖、基础知识（八股）、算法/编码至少各涉及 1 轮",
+        "weight": 1.5,
+    },
+    "conversation_flow": {
+        "description": "话题切换是否自然：用候选人回答中的关键词承接，不要机械地说'换个方向'",
+        "weight": 1.5,
+    },
+    # ── 基础健康检查（代码检测）──
     "role_consistency": {
-        "description": "全程无元说明",
+        "description": "全程无元说明（请提供岗位信息等跳出角色的内容）",
         "weight": 1.5,
         "check": lambda m: not m.get("has_meta_remarks", False),
     },
     "no_sse_errors": {
         "description": "零 SSE 错误事件",
-        "weight": 1.0,
+        "weight": 0.5,
         "check": lambda m: len(m.get("errors", [])) == 0,
     },
 }
 
 NATURAL_CLOSING_SCORING = {
-    "has_summary": {
-        "description": "面试官自主生成结构化总结",
-        "weight": 2.0,
-        "check": lambda m: bool(m.get("has_summary", False)),
+    # ── 效果导向维度（LLM judge 评估）──
+    "closing_quality": {
+        "description": "面试收口质量：面试官是否在覆盖充分后自然结束，给出对候选人表现的简要评价（整体印象、亮点、不足），不要突然中断或机械总结",
+        "weight": 2.5,
     },
+    "interview_depth": {
+        "description": "项目深挖是否充分：对同一话题至少追问 3 层",
+        "weight": 2.0,
+    },
+    "topic_coverage": {
+        "description": "面试是否覆盖多个维度：项目、八股、算法、系统设计、HR 至少涉及 3 个",
+        "weight": 2.0,
+    },
+    "conversation_flow": {
+        "description": "话题切换是否自然，全程节奏是否像真实面试",
+        "weight": 1.5,
+    },
+    # ── 基础健康检查（代码检测）──
     "reasonable_turn_count": {
         "description": "在 8-16 轮之间自然收口（非硬停）",
-        "weight": 1.5,
+        "weight": 1.0,
         "check": lambda m: 8 <= m.get("turn_count", 0) <= 16,
     },
     "role_consistency": {
         "description": "全程无元说明",
-        "weight": 1.5,
+        "weight": 0.5,
         "check": lambda m: not m.get("has_meta_remarks", False),
     },
     "no_sse_errors": {
         "description": "零 SSE 错误事件",
-        "weight": 1.0,
-        "check": lambda m: len(m.get("errors", [])) == 0,
-    },
-    "thinking_transparency": {
-        "description": "至少 50% 的轮次有 thinking 事件",
         "weight": 0.5,
-        "check": lambda m: _check_ratio(
-            m.get("thinking_turns", 0), m.get("turn_count", 1), 0.5
-        ),
+        "check": lambda m: len(m.get("errors", [])) == 0,
     },
 }
 
 COUNTER_QUESTION_FLOW_SCORING = {
-    "counter_question_answered": {
-        "description": "候选人反问被回答",
+    # ── 效果导向维度（LLM judge 评估）──
+    "counter_question_quality": {
+        "description": "候选人反问是否被认真回答：面试官应该简短回应反问内容（1-2句），展示对候选人问题的尊重，然后自然拉回面试话题",
+        "weight": 2.5,
+    },
+    "interview_depth": {
+        "description": "项目深挖是否充分：对同一话题至少追问 3 层",
         "weight": 2.0,
-        "check": lambda m: bool(m.get("counter_question_answered", False)),
     },
-    "no_tools_on_counter": {
-        "description": "反问轮不调用工具",
+    "topic_coverage": {
+        "description": "面试是否覆盖多个维度：项目、八股、算法至少各 1 轮",
         "weight": 1.5,
-        "check": lambda m: m.get("tools_on_counter_turn", 0) == 0,
     },
-    "interview_continues": {
-        "description": "反问后面试继续（有后续追问）",
-        "weight": 1.0,
-        "check": lambda m: m.get("turn_count", 0) >= 5,
+    "conversation_flow": {
+        "description": "话题切换是否自然，反问后是否平滑过渡回面试",
+        "weight": 1.5,
     },
+    # ── 基础健康检查（代码检测）──
     "role_consistency": {
         "description": "全程无元说明",
         "weight": 1.0,
         "check": lambda m: not m.get("has_meta_remarks", False),
+    },
+    "no_sse_errors": {
+        "description": "零 SSE 错误事件",
+        "weight": 0.5,
+        "check": lambda m: len(m.get("errors", [])) == 0,
     },
 }
 
