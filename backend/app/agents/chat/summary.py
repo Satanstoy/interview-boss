@@ -183,10 +183,16 @@ def _premature_summary_guard_response(state: ChatState) -> str:
     )
 
 
-async def _generate_structured_summary(state: ChatState) -> str:
+async def _generate_structured_summary(
+    state: ChatState,
+    *,
+    allow_fallback: bool = True,
+) -> str:
     """Call LLM to generate structured interview feedback.
 
-    Falls back to an improved generic summary if LLM call fails.
+    Falls back to an improved generic summary only for legacy callers.
+    The close_with_summary contract sets ``allow_fallback=False`` so a failed
+    LLM summary never becomes a fabricated interview conclusion.
     """
     transcript = _build_interview_transcript(state)
     history = state.get("message_history", []) or []
@@ -219,6 +225,8 @@ async def _generate_structured_summary(state: ChatState) -> str:
         summary = InterviewSummary(**data)
         return _render_interview_summary_markdown(summary)
     except Exception as e:
+        if not allow_fallback:
+            raise
         logger.warning("Interview summary LLM call failed, using fallback: %s", e)
         # Improved fallback: at least mention topic count from session notes
         topic_count = len(re.findall(r"\[asked\]", session_notes))
@@ -239,11 +247,6 @@ async def _forced_closing_response(state: ChatState) -> str:
 
     Now generates a structured LLM-based summary instead of hardcoded text.
     """
-    from app.agents.chat.answer import (
-        _last_assistant_message,
-        _looks_like_candidate_question,
-    )
-
     message_count = len(state.get("message_history", []) or [])
     config = state.get("decision_config") or DecisionConfig()
     if message_count <= config.hard_stop_message_count:
@@ -251,18 +254,6 @@ async def _forced_closing_response(state: ChatState) -> str:
 
     state["question_source"] = "conversation"
     state["question_source_reason"] = "forced_closing_by_message_count"
-
-    last_assistant = _last_assistant_message(state)
-    user_message = state.get("user_message", "")
-    if "你有什么想问" in last_assistant or _looks_like_candidate_question(user_message):
-        # Candidate asked a counter-question; give a brief answer then the summary
-        summary = await _generate_structured_summary(state)
-        return (
-            "这个问题简单回应一下：真实业务里的 Agent 落地，团队通常最看重稳定性和可评估性，"
-            "工具调用、权限边界、状态管理和业务系统集成都要能闭环。实习生一般会从一个可控模块切入，"
-            "比如评测体系、badcase 分析、某个工具接入或一条业务链路优化。\n\n"
-            f"{summary}"
-        )
 
     return await _generate_structured_summary(state)
 
@@ -272,8 +263,8 @@ async def _generate_end_interview_response(state: ChatState) -> str:
 
     This function is called when intent == 'end_interview'.  It MUST NOT call
     any tools (load_skill / search_questions / draw_questions).  It produces
-    either a brief farewell or a structured LLM-generated summary depending
-    on message count and whether the user explicitly requested a summary.
+    a structured LLM-generated summary. Natural closing wording is owned by
+    closing_writer in the close_with_summary contract.
 
     Side-effects on *state*:
     - Sets question_source / question_source_reason for metadata.
@@ -283,22 +274,7 @@ async def _generate_end_interview_response(state: ChatState) -> str:
     state["question_source"] = "conversation"
     state["question_source_reason"] = "end_interview_hard_route"
 
-    message_history = state.get("message_history", []) or []
-    user_message = state.get("user_message", "")
-
-    # If the user explicitly asks for a summary or the interview is substantial,
-    # generate a structured LLM-based summary
-    wants_summary = _wants_structured_summary(user_message)
-
-    if wants_summary and _is_abrupt_premature_summary_request(
-        user_message, message_history
-    ):
-        return _premature_summary_guard_response(state)
-
-    if wants_summary or len(message_history) >= 20:
-        return await _generate_structured_summary(state)
-
-    return "好的，面试先到这里。感谢你的时间，后续可以根据面试中暴露的问题继续针对性复盘。祝顺利！"
+    return await _generate_structured_summary(state)
 
 
 def _sanitize_error_message(e: Exception) -> str:

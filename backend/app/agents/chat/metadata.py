@@ -176,7 +176,21 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     retrieved_ids = {q.get("id") for q in retrieved if q.get("id")}
 
     basis = validate_basis(parsed, retrieved_ids)
-    if basis.get("should_show_references") and basis.get("basis_question_ids"):
+    turn_contract = state.get("turn_contract") or {}
+    contract_selected = state.get("selected_question") or {}
+    if (
+        turn_contract.get("action") == "ask_selected_question"
+        and contract_selected.get("id")
+    ):
+        # Contract-owned question text has passed semantic validation, so it
+        # must not depend on a legacy [BASIS] marker or lexical overlap.
+        basis = {
+            "basis_type": "interview_question",
+            "basis_question_ids": [contract_selected["id"]],
+            "basis_confidence": 1.0,
+            "should_show_references": True,
+        }
+    elif basis.get("should_show_references") and basis.get("basis_question_ids"):
         aligned_basis_ids = _filter_basis_ids_by_response(
             clean_response, basis["basis_question_ids"], retrieved
         )
@@ -331,6 +345,9 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             "repaired": bool(plan_metadata.get("repaired", False)),
             "fallback_used": bool(plan_metadata.get("fallback_used", False)),
         }
+
+    if state.get("validator_trace"):
+        metadata["validator_trace"] = state["validator_trace"]
 
     if state.get("resume_summary") and _response_references_resume(
         clean_response, state["resume_summary"]

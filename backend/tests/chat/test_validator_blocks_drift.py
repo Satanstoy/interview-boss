@@ -1,19 +1,15 @@
-"""Tests that semantic validator blocks drifted questions from reaching the user.
+"""Pipeline tests for the ask_selected_question contract.
 
-When ask_selected_question contract is active and the validator returns false,
-the user must NOT receive the drifted question. Instead, the pipeline should
-either retry with feedback or yield an error event.
+ReAct may gather evidence and produce a draft, but a selected-question contract
+must hand final output ownership to question_writer.  A stale selected question
+must not validate unrelated counter-question answers.
 """
 
 import pytest
 from unittest.mock import AsyncMock, patch
 from contextlib import ExitStack
 
-from tests.chat.multi_turn_helpers import (
-    _async_stream,
-    make_question,
-    tool_call,
-)
+from tests.chat.multi_turn_helpers import _async_stream
 
 
 async def _run_turn_with_validator(
@@ -24,8 +20,10 @@ async def _run_turn_with_validator(
     retry_passes: bool = False,
     retry_score: float = 0.38,
     llm_answer: str = "你们怎么保证工具调用稳定？",
+    counter_question: bool = False,
+    writer_result: dict | None = None,
 ):
-    """Run a turn where ask_selected_question is active and validator returns specified result."""
+    """Run a turn with a selected question and capture its output contracts."""
     from app.agents.chat.pipeline import run_chat
     import asyncio
 
@@ -77,6 +75,8 @@ async def _run_turn_with_validator(
             "escalation_level": 0,
             "off_topic_streak": 0,
             "repetition_streak": 0,
+            "counter_question": counter_question,
+            "counter_question_topic": "团队如何做 Agent 落地" if counter_question else None,
             "classify_result": {
                 "intent": "interview_question",
                 "answer_quality": "complete",
@@ -97,6 +97,16 @@ async def _run_turn_with_validator(
     def stream_side_effect(*args, **kwargs):
         return _async_stream(llm_answer)
 
+    question_writer = AsyncMock(
+        return_value=writer_result
+        or {
+            "status": "success",
+            "text": "你在项目中有实际用过 Agent 范式吗？能具体说说落地过程吗？",
+            "validator_result": {"passes": True, "score": 0.91, "reason": "语义一致"},
+            "retry_count": 0,
+        }
+    )
+
     patchers = [
         patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Test prompt."),
         patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock, side_effect=mock_load_context),
@@ -104,9 +114,18 @@ async def _run_turn_with_validator(
         patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock, side_effect=mock_extract_memory),
         patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch("app.services.llm.stream_llm_messages", side_effect=stream_side_effect),
+        patch("app.services.llm.raw_llm_call", new_callable=AsyncMock, return_value=""),
+        patch(
+            "app.agents.chat.output_guardrails.needs_output_repair",
+            return_value={"needs_repair": False},
+        ),
         patch(
             "app.agents.chat.validators.semantic_question_adherence.validate_question_adherence",
             side_effect=mock_validator,
+        ),
+        patch(
+            "app.agents.chat.writers.question_writer.generate_question_with_validation",
+            new=question_writer,
         ),
     ]
 
@@ -122,87 +141,57 @@ async def _run_turn_with_validator(
         ):
             raw_events.append(event)
 
-    return raw_events, validation_count
+    return raw_events, validation_count, question_writer
 
 
-class TestValidatorBlocksDrift:
-    """When validator returns false, user must NOT receive drifted question."""
+class TestAskSelectedQuestionContract:
+    """The writer, not the ReAct draft, owns a selected-question response."""
 
     @pytest.mark.asyncio
-    async def test_validator_pass_streams_normally(self):
-        """When validator passes, the question should be streamed to the user."""
-        events, count = await _run_turn_with_validator(
+    async def test_selected_question_uses_writer_not_react_draft(self):
+        """A drifted ReAct draft must not reach the candidate when writer succeeds."""
+        events, count, question_writer = await _run_turn_with_validator(
             validator_passes=True,
-            validator_score=0.91,
-            llm_answer="你在项目中有实际用过 Agent 范式吗？",
-        )
-        chunk_events = [e for e in events if e.get("type") == "chunk"]
-        chunk_content = "".join(e.get("content", "") for e in chunk_events)
-        assert "Agent" in chunk_content
-        assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_validator_fail_blocks_drifted_question(self):
-        """When validator fails, the drifted question must NOT reach the user as a chunk.
-
-        This is the KEY test: if the validator says the question drifted,
-        the user should either see a retry result or an error — NOT the drifted text.
-        """
-        events, count = await _run_turn_with_validator(
-            validator_passes=False,
-            validator_score=0.38,
-            validator_reason="话题偏离",
-            llm_answer="你们怎么保证工具调用稳定？",  # drifted from "Agent范式"
-        )
-        chunk_events = [e for e in events if e.get("type") == "chunk"]
-        chunk_content = "".join(e.get("content", "") for e in chunk_events)
-        error_events = [e for e in events if e.get("type") == "error"]
-
-        # The drifted text "工具调用稳定" must NOT appear in user-visible output
-        # Either the validator blocked it (error event) or retry succeeded
-        has_drifted_text = "工具调用稳定" in chunk_content
-        has_error = len(error_events) > 0
-
-        # One of these must be true:
-        # 1. Drifted text is NOT in chunks (blocked)
-        # 2. There's an error event (generation failed)
-        assert not has_drifted_text or has_error, (
-            f"Drifted question '工具调用稳定' reached the user without being blocked! "
-            f"chunk_content={chunk_content!r}, error_events={error_events}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_validator_retry_then_pass(self):
-        """When first attempt fails but retry passes, the retry result should be used."""
-        events, count = await _run_turn_with_validator(
-            validator_passes=False,
-            validator_score=0.38,
-            retry_passes=True,
-            retry_score=0.88,
-            llm_answer="你在项目中有实际用过 Agent 范式吗？",
-        )
-        chunk_events = [e for e in events if e.get("type") == "chunk"]
-        chunk_content = "".join(e.get("content", "") for e in chunk_events)
-        # Should have retried
-        assert count == 2
-        # The passed retry content should be in the output
-        assert len(chunk_content) > 0
-
-    @pytest.mark.asyncio
-    async def test_validator_retry_also_fails_yields_error(self):
-        """When both attempts fail, should yield error event, not drifted text."""
-        events, count = await _run_turn_with_validator(
-            validator_passes=False,
-            validator_score=0.38,
-            retry_passes=False,
-            retry_score=0.38,
             llm_answer="你们怎么保证工具调用稳定？",
         )
-        error_events = [e for e in events if e.get("type") == "error"]
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         chunk_content = "".join(e.get("content", "") for e in chunk_events)
+        assert "工具调用稳定" not in chunk_content
+        assert "Agent 范式" in chunk_content
+        question_writer.assert_awaited_once()
+        assert count == 0
 
-        # Should have retried
-        assert count == 2
-        # Should have error event or no drifted content
-        assert len(error_events) > 0 or "工具调用稳定" not in chunk_content
+    @pytest.mark.asyncio
+    async def test_question_writer_failure_blocks_react_draft(self):
+        """A failed writer must emit an error instead of leaking the ReAct draft."""
+        events, count, question_writer = await _run_turn_with_validator(
+            validator_passes=False,
+            llm_answer="你们怎么保证工具调用稳定？",
+            writer_result={
+                "status": "error",
+                "error_code": "question_validation_failed",
+                "message": "验证失败: 话题偏离",
+            },
+        )
+        chunk_events = [e for e in events if e.get("type") == "chunk"]
+        chunk_content = "".join(e.get("content", "") for e in chunk_events)
+        error_events = [e for e in events if e.get("type") == "error"]
+        assert "工具调用稳定" not in chunk_content
+        assert any(event["code"] == "question_validation_failed" for event in error_events)
+        question_writer.assert_awaited_once()
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_counter_question_bypasses_selected_question_writer(self):
+        """A stale selected question cannot hijack a candidate counter-question."""
+        events, count, question_writer = await _run_turn_with_validator(
+            validator_passes=True,
+            llm_answer="团队会先用离线评测确认稳定性，再逐步扩大到真实链路。",
+            counter_question=True,
+        )
+        chunk_content = "".join(
+            e.get("content", "") for e in events if e.get("type") == "chunk"
+        )
+        assert "离线评测" in chunk_content
+        question_writer.assert_not_awaited()
+        assert count == 0

@@ -1,7 +1,6 @@
 """Basis tracking E2E tests.
 
-Covers: BS1-BS7 from the test plan.
-Tests the full pipeline from LLM [BASIS] output → parse → validate → SSE event.
+Covers legacy [BASIS] parsing and the contract-owned selected-question path.
 """
 
 from __future__ import annotations
@@ -250,6 +249,16 @@ async def _run_basis_turn(
         stream_chunks=stream_chunks,
         tool_patches=[
             patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+            patch(
+                "app.agents.chat.writers.question_writer.generate_question_with_validation",
+                new_callable=AsyncMock,
+                return_value={
+                    "status": "success",
+                    "text": "请你讲讲 Redis 缓存穿透和布隆过滤器的关系。",
+                    "validator_result": {"passes": True, "score": 0.91, "reason": "语义一致"},
+                    "retry_count": 0,
+                },
+            ),
         ],
     )
     return events, state
@@ -258,8 +267,8 @@ async def _run_basis_turn(
 class TestBasisE2E:
     """End-to-end basis tracking through the full pipeline."""
 
-    async def test_normal_basis_extraction(self):
-        """BS1: LLM 输出含 [BASIS] → 正确解析、验证、注入 SSE basis 事件"""
+    async def test_selected_question_contract_sets_single_basis(self):
+        """A validated selected question is the sole source of final basis."""
         events, state = await _run_basis_turn(
             llm_response_text=(
                 "你先讲讲 Redis 缓存穿透和布隆过滤器的关系。"
@@ -275,7 +284,7 @@ class TestBasisE2E:
 
         basis_event = next(e for e in events if e["type"] == "basis")
         assert basis_event["basis_type"] == "interview_question"
-        assert basis_event["basis_question_ids"] == [101, 102]
+        assert basis_event["basis_question_ids"] == [101]
         assert basis_event["should_show_references"] is True
         assert basis_event["basis_confidence"] >= 0.65
 
@@ -298,17 +307,17 @@ class TestBasisE2E:
         assert 999 not in basis_event["basis_question_ids"]
         assert 101 in basis_event["basis_question_ids"]
 
-    async def test_no_basis_defaults_to_conversation(self):
-        """BS4: LLM 不输出 BASIS 标记 → basis_type="conversation", 不展示引用"""
+    async def test_selected_question_contract_does_not_need_basis_marker(self):
+        """The writer does not emit legacy markers, but provenance remains explicit."""
         events, state = await _run_basis_turn(
             llm_response_text="你先讲讲 Redis 缓存穿透。",
             stream_chunks=("你先讲讲 Redis 缓存穿透。",),
         )
 
         basis_event = next(e for e in events if e["type"] == "basis")
-        assert basis_event["basis_type"] == "conversation"
-        assert basis_event["basis_question_ids"] == []
-        assert basis_event["should_show_references"] is False
+        assert basis_event["basis_type"] == "interview_question"
+        assert basis_event["basis_question_ids"] == [101]
+        assert basis_event["should_show_references"] is True
 
     async def test_basis_marker_stripped_from_response(self):
         """BS6: 最终 state response 中不包含 [BASIS]...[/BASIS]
@@ -336,8 +345,8 @@ class TestBasisE2E:
         basis_event = next(e for e in events if e["type"] == "basis")
         assert basis_event["basis_type"] == "interview_question"
 
-    async def test_low_confidence_basis_not_shown(self):
-        """BS3: confidence < 0.65 → should_show_references=False"""
+    async def test_selected_question_contract_overrides_legacy_marker_confidence(self):
+        """Semantic validation, not a legacy marker score, proves the final basis."""
         events, state = await _run_basis_turn(
             llm_response_text=(
                 "Redis 是一个内存数据库。"
@@ -352,4 +361,4 @@ class TestBasisE2E:
         )
 
         basis_event = next(e for e in events if e["type"] == "basis")
-        assert basis_event["should_show_references"] is False
+        assert basis_event["should_show_references"] is True

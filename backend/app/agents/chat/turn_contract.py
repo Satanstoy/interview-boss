@@ -139,6 +139,19 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
     )
 
     # Priority 1: close_with_summary
+    if state.get("intent") == "end_interview" or classify_result.get("requested_end"):
+        return TurnContract(
+            action=TurnContractAction.CLOSE_WITH_SUMMARY,
+            priority="explicit_end_request",
+            payload={"closing_reason": "explicit_end_request"},
+            reason="candidate explicitly requested to end the interview",
+            source_facts={
+                "intent": state.get("intent"),
+                "requested_end": classify_result.get("requested_end", False),
+                "message_count": message_count,
+            },
+        )
+
     if closing_stage in ("final_summary", "candidate_question_answered", "closed"):
         return TurnContract(
             action=TurnContractAction.CLOSE_WITH_SUMMARY,

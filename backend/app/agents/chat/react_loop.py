@@ -35,7 +35,6 @@ from app.agents.chat.question_plan import (
 from app.agents.chat.state import ChatState
 from app.agents.chat.stop_policy import evaluate_interview_stop
 from app.agents.chat.summary import (
-    _forced_closing_response,
     _generate_structured_summary,
 )
 from app.agents.chat.writers.closing_writer import generate_closing_utterance
@@ -372,6 +371,52 @@ def _build_closing_context(state: ChatState) -> str:
     return context
 
 
+async def _generate_close_with_summary(
+    state: ChatState,
+    closing_reason: str,
+) -> dict:
+    """Generate the required natural close and structured summary atomically."""
+    closing_result = await generate_closing_utterance(
+        closing_reason=closing_reason,
+        recent_context=_build_closing_context(state),
+        llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+            msgs, user_id=state.get("user_id")
+        ),
+    )
+    if closing_result["status"] != "success":
+        return {
+            "status": "error",
+            "error_code": closing_result.get("error_code", "closing_generation_failed"),
+            "message": closing_result.get("message", "自然收尾语生成失败"),
+            "writer_trace": {"writer": "closing_writer", "result": "error"},
+        }
+
+    try:
+        summary_text = await _generate_structured_summary(state, allow_fallback=False)
+    except Exception as exc:
+        logger.warning("Structured summary generation failed: %s", exc)
+        return {
+            "status": "error",
+            "error_code": "summary_generation_failed",
+            "message": "面试总结生成失败，请稍后再试。",
+            "writer_trace": {
+                "writer": "closing_writer",
+                "result": "success",
+                "summary_writer": "error",
+            },
+        }
+
+    return {
+        "status": "success",
+        "text": f"{closing_result['text']}\n\n{summary_text}",
+        "writer_trace": {
+            "writer": "closing_writer",
+            "result": "success",
+            "summary_writer": "success",
+        },
+    }
+
+
 # ── ReAct Loop ────────────────────────────────────────────
 
 
@@ -496,43 +541,25 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             }
         )
 
-        # Phase 2: 两阶段收尾 — closing_writer + summary_writer
-        closing_reason = stop_decision["reason"]
-        recent_context = _build_closing_context(state)
-
-        # Stage 1: 自然收尾语
-        closing_result = await generate_closing_utterance(
-            closing_reason=closing_reason,
-            recent_context=recent_context,
-            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                msgs, user_id=state.get("user_id")
-            ),
-        )
-        writer_trace = {"writer": "closing_writer", "result": closing_result["status"]}
-
-        # Stage 2: 结构化总结
-        if closing_reason == "hard_stop_by_message_count":
-            summary_text = await _forced_closing_response(state)
-        else:
-            summary_text = await _generate_structured_summary(state)
-
-        # Combine: 收尾语 + 总结
-        if closing_result["status"] == "success":
-            closing_text = f"{closing_result['text']}\n\n{summary_text}"
-        else:
-            # closing_writer 失败时，只用总结
-            logger.warning("Closing writer failed: %s", closing_result.get("message"))
-            closing_text = summary_text
+        close_result = await _generate_close_with_summary(state, stop_decision["reason"])
+        if close_result["status"] != "success":
+            yield {
+                "type": "error",
+                "message": close_result["message"],
+                "code": close_result["error_code"],
+            }
+            yield {"type": "done", "metadata": {"writer_trace": close_result["writer_trace"]}}
+            return
 
         # Mark closing_stage as closed after summary
         state["closing_stage"] = "closed"
-        yield {"type": "chunk", "content": closing_text}
+        yield {"type": "chunk", "content": close_result["text"]}
         yield {
             "type": "done",
             "metadata": {
                 "closing_stage": "closed",
                 "has_summary": True,
-                "writer_trace": writer_trace,
+                "writer_trace": close_result["writer_trace"],
             },
         }
         return
@@ -930,6 +957,37 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     elif final_answer_text:
         state["react_direct_answer_draft"] = final_answer_text
 
+        # The contract is computed after ReAct has gathered evidence but before
+        # any draft is exposed or repaired. A close contract owns the output.
+        from app.agents.chat.turn_contract import TurnContractAction, plan_turn
+
+        contract = plan_turn(state)
+        state["turn_contract"] = contract.to_metadata_dict()
+        if contract.action == TurnContractAction.CLOSE_WITH_SUMMARY:
+            close_result = await _generate_close_with_summary(
+                state,
+                str(contract.payload.get("closing_reason") or "turn_contract"),
+            )
+            if close_result["status"] != "success":
+                yield {
+                    "type": "error",
+                    "message": close_result["message"],
+                    "code": close_result["error_code"],
+                }
+                yield {"type": "done", "metadata": {"writer_trace": close_result["writer_trace"]}}
+                return
+            state["closing_stage"] = "closed"
+            yield {"type": "chunk", "content": close_result["text"]}
+            yield {
+                "type": "done",
+                "metadata": {
+                    "closing_stage": "closed",
+                    "has_summary": True,
+                    "writer_trace": close_result["writer_trace"],
+                },
+            }
+            return
+
         # Output guardrail: validate before emitting
         from app.agents.chat.output_guardrails import needs_output_repair, build_repair_prompt
 
@@ -981,92 +1039,43 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     except Exception:
                         pass  # keep original
 
-        # Phase 5: Semantic validator for ask_selected_question
-        # When selected_question exists and answer_quality is complete,
-        # validate that the generated text actually asks the planned question.
-        selected_q = state.get("selected_question")
-        answer_quality = state.get("answer_quality", "complete")
-        if (
-            selected_q
-            and selected_q.get("id")
-            and answer_quality not in ("vague", "incomplete", "off_topic")
-        ):
+        # ReAct owns tools and evidence. The turn contract owns final wording.
+        if contract.action == TurnContractAction.ASK_SELECTED_QUESTION:
             from app.agents.chat.validators.semantic_question_adherence import (
                 validate_question_adherence,
             )
+            from app.agents.chat.writers.question_writer import (
+                generate_question_with_validation,
+            )
 
-            validator_result = await validate_question_adherence(
-                generated_text=final_answer_text,
-                selected_question=selected_q,
+            writer_result = await generate_question_with_validation(
+                selected_question=state.get("selected_question") or {},
+                context_anchor=str(state.get("user_message") or ""),
+                question_type=str(state.get("question_type") or "unknown"),
                 llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
                     msgs, user_id=state.get("user_id")
                 ),
+                validator=validate_question_adherence,
             )
-            if not validator_result.get("passes"):
-                logger.warning(
-                    "ReAct trace: event=semantic_validation_failed conversation_id=%s "
-                    "score=%.2f reason=%s detected=%s",
-                    state.get("conversation_id"),
-                    validator_result.get("score", 0),
-                    validator_result.get("reason", ""),
-                    validator_result.get("detected_question", ""),
-                )
-                # Retry once with validator feedback
-                retry_prompt = (
-                    f"你的上一个回复被验证为偏离了计划题。\n"
-                    f"- 计划题: {selected_q.get('question', '')}\n"
-                    f"- 你生成的: {validator_result.get('detected_question', final_answer_text[:100])}\n"
-                    f"- 原因: {validator_result.get('reason', '')}\n\n"
-                    f"请重新生成，确保问题与计划题语义一致。直接输出面试官可以说的话。"
-                )
-                try:
-                    from app.services.llm import raw_llm_call
-
-                    retried_text = await raw_llm_call(
-                        user_id=state["user_id"],
-                        model=state.get("model"),
-                        messages=[
-                            {"role": "system", "content": "你是技术面试官。请根据反馈重新生成问题。"},
-                            {"role": "user", "content": retry_prompt},
-                        ],
-                        temperature=0.5,
-                        max_tokens=512,
-                    )
-                    if retried_text and retried_text.strip():
-                        retry_validation = await validate_question_adherence(
-                            generated_text=retried_text.strip(),
-                            selected_question=selected_q,
-                            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                                msgs, user_id=state.get("user_id")
-                            ),
-                        )
-                        if retry_validation.get("passes"):
-                            final_answer_text = retried_text.strip()
-                            logger.info(
-                                "ReAct trace: event=semantic_retry_success conversation_id=%s",
-                                state.get("conversation_id"),
-                            )
-                        else:
-                            logger.warning(
-                                "ReAct trace: event=semantic_retry_failed conversation_id=%s",
-                                state.get("conversation_id"),
-                            )
-                            yield {
-                                "type": "error",
-                                "message": "问题生成验证失败，请稍后再试。",
-                                "code": "semantic_validation_failed",
-                            }
-                            yield {"type": "done"}
-                            return
-                except Exception as e:
-                    logger.warning("Semantic retry LLM call failed: %s", e)
-                    yield {
-                        "type": "error",
-                        "message": "问题生成验证失败，请稍后再试。",
-                        "code": "semantic_validation_failed",
-                    }
-                    yield {"type": "done"}
-                    return
+            validator_result = writer_result.get("validator_result") or {}
+            state["validator_trace"] = [
+                {
+                    "name": "semantic_question_adherence",
+                    "status": writer_result["status"],
+                    "score": validator_result.get("score"),
+                    "reason": validator_result.get("reason", writer_result.get("message", "")),
+                    "retry_count": writer_result.get("retry_count", 1),
+                }
+            ]
+            if writer_result["status"] != "success":
+                yield {
+                    "type": "error",
+                    "message": writer_result.get("message", "问题生成验证失败，请稍后再试。"),
+                    "code": writer_result.get("error_code", "question_generation_failed"),
+                }
+                yield {"type": "done"}
+                return
+            final_answer_text = writer_result["text"]
 
         # Use ReAct answer directly — apply quality pipeline without
         # a second LLM streaming call (which causes intermittent 500s).

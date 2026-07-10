@@ -47,6 +47,7 @@ from app.agents.chat.react_loop import (  # noqa: F401
     _TRACE_LIST_LIMIT,
     _TRACE_STRING_LIMIT,
     _build_closing_context,
+    _generate_close_with_summary,
     _emit,
     _log_react_llm_step,
     _log_react_tool_call,
@@ -582,31 +583,28 @@ async def run_chat(
                         "reason": STEP_REASONS["closing"],
                     }
                 )
-                from app.agents.chat.writers.closing_writer import generate_closing_utterance
-
-                recent_context = _build_closing_context(state)
-                closing_result = await generate_closing_utterance(
-                    closing_reason="end_interview",
-                    recent_context=recent_context,
-                    llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                        msgs, user_id=state.get("user_id")
-                    ),
+                close_result = await _generate_close_with_summary(
+                    state, "explicit_end_request"
                 )
-                summary_text = await _generate_end_interview_response(state)
-                if closing_result["status"] == "success":
-                    closing_text = f"{closing_result['text']}\n\n{summary_text}"
+                if close_result["status"] == "success":
+                    response = close_result["text"]
+                    _emit({"type": "chunk", "content": response})
+                    built_metadata, clean_response = _build_react_metadata(state, response)
+                    if built_metadata:
+                        metadata = built_metadata
+                    metadata["writer_trace"] = close_result["writer_trace"]
+                    metadata["closing_stage"] = "closed"
+                    metadata["has_summary"] = True
+                    response = clean_response
                 else:
-                    closing_text = summary_text
-                response = closing_text
-                _emit({"type": "chunk", "content": closing_text})
-                built_metadata, clean_response = _build_react_metadata(state, response)
-                if built_metadata:
-                    metadata = built_metadata
-                metadata["writer_trace"] = {
-                    "writer": "closing_writer",
-                    "result": closing_result["status"],
-                }
-                response = clean_response
+                    metadata["writer_trace"] = close_result["writer_trace"]
+                    _emit(
+                        {
+                            "type": "error",
+                            "message": close_result["message"],
+                            "code": close_result["error_code"],
+                        }
+                    )
                 _sidecar_turn_contract(state, metadata)
                 _record_asked_question_if_any(state, metadata)
                 _emit({"type": "basis", **_basis_event_payload(metadata)})

@@ -13,12 +13,12 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | 文件 | 职责 |
 |------|------|
 | `pipeline.py` | 入口点：`run_chat()` + pipeline steps（`_step_load_context`、`_step_classify`、`_step_extract_memory`、`_persist_active_skills`、`_initial_state`）+ 事件累积（thinking/steps/insights → done metadata）+ MCP session 持久化 + 所有子模块的 re-export（向后兼容） |
-| `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射；空回答 + 计划题场景 yield error 事件而非机械 fallback |
+| `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射；ReAct 负责工具/证据，`ask_selected_question` 的最终话术由 question_writer 接管，收尾通过原子两阶段 helper 输出 |
 | `answer.py` | 答案生成与质量：`OutputDeduplicator`、`GenerationError`（替代机械题干 fallback）、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、`_rewrite_transition_with_llm()`（LLM 自然过渡重写）、fallback 响应、内部 marker 过滤 |
 | `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护（含 `_count_consecutive_similar_user_answers()` 候选人重复检测）、已问题列表构建 |
 | `stop_policy.py` | 产品级停止策略：32 条后覆盖完整进入反问，44 条后强收口，56 条后硬停止；候选人重复回答检测（3 次切方向，5 次结束）；避免只靠 prompt 判断何时结束 |
 | `turn_controller.py` | 显式路由决策：`decide_turn_action(state)` 根据 closing_stage、counter_question、收尾信号、requires_bank_question 等状态字段决定 turn_action（closing_summary/bank_question/answer_counter_question/natural_followup）和 question_intent，解决 E2E 中的 proper_end、long_session_senior、early_close_guard 问题 |
-| `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()` |
+| `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()`；所有显式结束都生成结构化总结，收尾话术不在本模块生成 |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
 | `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
 | `coverage_config.py` | 面试阶段枚举和岗位/难度覆盖阈值；可根据高置信 rhythm profile 调整阈值 |
@@ -30,8 +30,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `state.py` | ChatState TypedDict，含分类阶段写入的结构化路由字段 |
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
 | `classify_result.py` | `ClassifyResult` Pydantic 模型：分类节点结构化输出（含 Phase 1 语义信号扩展：candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
-| `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：读取结构化事实输出本轮契约（Phase 1 旁路观测，不影响现有输出） |
-| `writers/closing_writer.py` | 自然收尾语生成：不含结构化总结，由 closing_writer 生成，summary_writer 生成总结（Phase 2 两阶段收尾） |
+| `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：读取结构化事实输出本轮契约；`ask_selected_question` 与 `close_with_summary` 在 ReAct 工具证据完成后接管最终输出，其他契约仍逐步迁移 |
+| `writers/closing_writer.py` | 自然收尾语生成：不含结构化总结；与 summary writer 组成原子两阶段收尾，任一阶段失败都返回 error，不得输出 summary-only fallback |
 | `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
 | `validators/semantic_question_adherence.py` | LLM semantic validator：验证 ask_selected_question 输出是否语义一致（阈值 0.75） |
 | `validators/__init__.py` | Validator registry：导出 semantic_question_adherence 等 |
@@ -63,7 +63,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 
 ## 质量保护机制
 
-- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具。若用户要求总结、评价、复盘、hiring signal、风险点或下一轮追问，通常走 `_generate_structured_summary()`；但短历史中出现“先别问/现在就结束/直接给是否通过”这类过早打断式请求，或“时间紧/先收尾/提前结束”这类证据不足的提前收尾请求时，`summary.py` 必须拒绝收尾并回到上一道关键问题继续取证。回答正文里夹带提前收尾请求时，`pipeline._apply_premature_close_guardrails()` 会在分类后、ReAct 前改走 `end_interview` 硬路由，禁止让 ReAct 自行收尾。只有单纯结束且证据量已经足够时才简短告别或总结。`end_interview` 不是 ReAct/MCP 工具；结束面试只能由 `intent=end_interview`、`stop_policy.py` 或持久化的 `closing_stage` workflow gate 触发。
+- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，并进入 `close_with_summary`：LLM 自然收尾语后紧接 LLM 结构化总结。短历史也不能退化成固定告别；总结必须基于已有证据，并可明确说明证据有限。回答正文夹带结束意图时，`pipeline._apply_premature_close_guardrails()` 会在分类后、ReAct 前改走该硬路由。`end_interview` 不是 ReAct/MCP 工具；结束只能由 `intent=end_interview`、`stop_policy.py` 或持久化的 `closing_stage` workflow gate 触发。
 - **自然停止策略**：`stop_policy.py` 是何时结束面试的代码级裁判：`>=32` 条消息且核心覆盖完整时先问候选人“你有什么想问我们的吗？”，候选人回应后生成结构化总结；`>=44` 条消息进入 strong-close，只允许补最后缺口或 HR/反问/收尾；`>56` 条消息才硬停止并直接总结。不要把 45 条消息重新改成硬停
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑
@@ -79,7 +79,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - **Tool Gateway 契约**：`load_skill` / `search_questions` / `draw_questions` / `select_question` 统一返回 `ok/tool/items|selected_question/metadata/error` envelope；不要再读取旧 `questions` 字段。`tools.py` 保持 ReAct schema 与 JSON 转发，同时保持 `retrieved_questions` 和 SSE retrieved 兼容；`search_questions` rerank 成功时必须同步更新 envelope `items`、`metadata.result_count`、`state.retrieved_questions` 和 `state.candidate_questions`，rerank 失败时保留原工具结果
 - **Agent 可调用的 4 个工具**：`load_skill`、`search_questions`、`draw_questions`、`select_question`。`select_question` 允许 Agent 显式从候选题中绑定下一题，但通常由 `search/draw` 后的默认选择逻辑自动完成。不要把 `end_interview`、总结、评估报告生成加入 `ALL_TOOLS` 或 `_ALLOWED_TOOL_NAMES`；closing workflow 在 ReAct 前/外由后端状态机裁决。
 - **公开候选题预览**：SSE `retrieved`、done metadata 的 `retrieved_questions/candidate_questions`、以及 `tool_calls_trace.result_preview` 使用 `chat_constants.PUBLIC_QUESTION_PREVIEW_LIMIT` 统一控制，当前为 5；不要让工具显示的 result_count 与可展开预览数量再次脱节
-- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入最终生成；`should_retrieve=True` 且回答完整时，工具返回的候选题也必须绑定 plan，不能只检索不选题。偏离计划时触发一次 repair，仍失败则抛出 `GenerationError`。若 ReAct 已经成功 `draw/select` 并绑定了 `must_ask` 计划题，但最终模型返回空文本，`react_loop.py` yield error 事件（code=`empty_answer_plan_generation_failed`），不再用机械题干恢复。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason=”agent_explicit_selection”`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`。`question_type=algorithm_coding` 时只允许算法/手撕代码候选绑定 plan，不能用普通 RAG/项目题兜底。
+- **题目计划绑定**：出新题场景会从候选题中本地选择 `selected_question`，生成 `next_question_plan` 注入工具证据循环；`should_retrieve=True` 且回答完整时，工具返回的候选题也必须绑定 plan，不能只检索不选题。最终 `TurnPlanner.action == ask_selected_question` 时，`question_writer` 生成自然问题并执行 blocking `semantic_question_adherence`；失败后仅重试一次，仍失败 yield error，绝不输出 ReAct 草稿或机械题干。其他 contract（例如候选人反问）即使 state 还保有 `selected_question` 也不能调用该 validator。Agent 显式调用 `select_question(candidate_index=N)` 会覆盖默认选择（`selection_reason="agent_explicit_selection"`），但若候选命中 `search_negative_terms` 则返回 `NEGATIVE_TERM_FILTERED` 错误 envelope，越界索引返回 `INDEX_OUT_OF_RANGE`。`question_type=algorithm_coding` 时只允许算法/手撕代码候选绑定 plan，不能用普通 RAG/项目题兜底。
 - **检索建议缺口记录（非接管）**：`should_record_retrieval_gap(state)` 为 true 且本轮没有执行 `search_questions` / `draw_questions` 时，`react_loop.py` 只记录 `state["retrieval_gap"]`、`question_source=conversation` 和 `question_source_reason=retrieval_recommended_but_skipped`。不要在 ReAct 循环后注入额外系统消息、不要二次调用 LLM、不要由代码替模型执行题库工具；题库检索应通过本轮 `<tool_strategy>` 和常驻 tool-use skill 在主路径自然发生。
 - **检索护栏边界**：`pipeline._apply_retrieval_guardrails()` 只在分类后修正过保守的结构化路由字段：候选人给出足够长、包含明确技术信号且已有 `search_query`/多关键词的回答时，可把 `answer_quality` 纠正为 `complete` 并打开 `should_retrieve`，让后续 `ToolStrategy` 和 tool-use skill 自然驱动工具调用。它不能直接调用 `search_questions`/`draw_questions`，也不能覆盖 `off_topic`、`repeated`、候选人反问或已有候选题的状态。
 - **显式题型护栏**：`pipeline._apply_explicit_question_type_guardrails()` 只做结构化字段纠偏：用户明确说“手撕/代码题/写代码/算法题/coding”时写入 `question_type=algorithm_coding`、`should_retrieve=True`、`requires_bank_question=True`。随后由 `tool_strategy.py` 要求 `draw_questions(question_type='algorithm_coding')`，工具服务负责过滤候选；不要在该护栏里直接抽题或选题。
@@ -95,11 +95,11 @@ pipeline.py ──→ react_loop.py ──→ answer.py ──→ nodes.py
     │               │                 │
     │               ├──→ question_plan.py (自包含)
     │               ├──→ summary.py ──→ llm.py
-    │               ├──→ writers/closing_writer.py (Phase 2: 两阶段收尾)
-    │               ├──→ validators/semantic_question_adherence.py (Phase 3)
+    │               ├──→ writers/closing_writer.py + question_writer.py (active contract writers)
+    │               ├──→ validators/semantic_question_adherence.py (ask_selected_question blocking gate)
     │               ├──→ metadata.py ──→ nodes.py, db.connection
     │               └──→ tools.py, llm.py
-    ├──→ turn_contract.py ──→ stop_policy.py (Phase 1: 旁路观测)
+    ├──→ turn_contract.py ──→ stop_policy.py (ask_selected_question / close_with_summary active; other contracts migrate incrementally)
     ├──→ nodes.py, context_builder.py
     └──→ chat_service, memory_recall_service
 ```

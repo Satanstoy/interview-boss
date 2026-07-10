@@ -381,6 +381,16 @@ class TestLoadSkillE2E:
             tool_patches=[
                 patch("app.agents.chat.tools._get_skill_registry", return_value=registry),
                 patch("app.mcp_server.interview_tools._draw_questions_for_tool", draw_mock),
+                patch(
+                    "app.agents.chat.writers.question_writer.generate_question_with_validation",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "status": "success",
+                        "text": "请你实现一下 LRU Cache，并说明时间复杂度。",
+                        "validator_result": {"passes": True, "score": 0.91, "reason": "语义一致"},
+                        "retry_count": 0,
+                    },
+                ),
             ],
         )
 

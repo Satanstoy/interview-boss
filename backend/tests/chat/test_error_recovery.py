@@ -218,7 +218,7 @@ class TestForcedClosing:
 
     @pytest.mark.asyncio
     async def test_over_hard_stop_messages_after_question(self):
-        """FC2: 已问过"你有什么想问"且用户提了反问 → LLM 总结 + 反问回应"""
+        """FC2: 反问后的 hard-stop 只生成结构化总结，不伪造团队回应。"""
         state = {
             "message_history": [{"role": "user", "content": "答"}] * 57,
             "user_message": "请问团队的技术栈是什么？",
@@ -241,7 +241,7 @@ class TestForcedClosing:
             return_value=mock_summary_json,
         ):
             result = await _forced_closing_response(state)
-        assert "模拟面试就到这里" in result
+        assert "Agent 落地" not in result
         assert "整体一般" in result
 
     @pytest.mark.asyncio
@@ -537,7 +537,10 @@ class TestForcedClosingE2E:
                 patch(
                     "app.services.llm._call_llm_with_retry_messages",
                     new_callable=AsyncMock,
-                    return_value=mock_summary_json,
+                    side_effect=[
+                        "感谢你的时间，今天这轮模拟面试就先到这里。",
+                        mock_summary_json,
+                    ],
                 )
             )
 

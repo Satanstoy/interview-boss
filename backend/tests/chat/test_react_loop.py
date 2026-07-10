@@ -313,7 +313,10 @@ class TestReactLoop:
             patch(
                 "app.services.llm._call_llm_with_retry_messages",
                 new_callable=AsyncMock,
-                return_value=mock_summary_json,
+                side_effect=[
+                    "感谢你的时间，今天这轮模拟面试就先到这里。",
+                    mock_summary_json,
+                ],
             ),
         ):
             events = []
@@ -325,6 +328,125 @@ class TestReactLoop:
         assert "整体表现良好" in events[0]["content"]
         assert state["question_source_reason"] == "coverage_complete_after_candidate_question"
         mock_llm.assert_not_called()
+
+    async def test_closing_writer_failure_does_not_emit_summary_alone(self):
+        """A close contract fails visibly when the natural closing writer fails."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "结束吧",
+            "message_history": [{"role": "user", "content": "test"}] * 44,
+            "session_notes": "",
+            "model": None,
+        }
+
+        with (
+            patch(
+                "app.agents.chat.react_loop.evaluate_interview_stop",
+                return_value={"action": "close", "reason": "hard_stop_by_message_count"},
+            ),
+            patch(
+                "app.agents.chat.react_loop.generate_closing_utterance",
+                new_callable=AsyncMock,
+                return_value={
+                    "status": "error",
+                    "error_code": "closing_generation_failed",
+                    "message": "LLM 输出为空",
+                },
+            ),
+            patch(
+                "app.agents.chat.react_loop._generate_structured_summary",
+                new_callable=AsyncMock,
+                return_value="**整体表现**：不应单独输出",
+            ) as mock_summary,
+        ):
+            events = [event async for event in _react_loop(state)]
+
+        assert [event["type"] for event in events] == ["error", "done"]
+        assert events[0]["code"] == "closing_generation_failed"
+        mock_summary.assert_not_awaited()
+
+    async def test_summary_writer_failure_does_not_emit_generic_summary(self):
+        """A close contract cannot replace a failed LLM summary with generic prose."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "结束吧",
+            "message_history": [{"role": "user", "content": "test"}] * 44,
+            "session_notes": "",
+            "model": None,
+        }
+
+        with (
+            patch(
+                "app.agents.chat.react_loop.evaluate_interview_stop",
+                return_value={"action": "close", "reason": "hard_stop_by_message_count"},
+            ),
+            patch(
+                "app.agents.chat.react_loop.generate_closing_utterance",
+                new_callable=AsyncMock,
+                return_value={"status": "success", "text": "感谢你的时间，今天先到这里。"},
+            ),
+            patch(
+                "app.services.llm._call_llm_with_retry_messages",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("LLM timeout"),
+            ),
+        ):
+            events = [event async for event in _react_loop(state)]
+
+        assert [event["type"] for event in events] == ["error", "done"]
+        assert events[0]["code"] == "summary_generation_failed"
+
+    async def test_planner_close_contract_replaces_react_draft(self):
+        """A close_with_summary contract owns the final output after tool evidence."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "继续",
+            "message_history": [],
+            "session_notes": "",
+            "closing_stage": "final_summary",
+            "model": None,
+        }
+
+        with (
+            patch(
+                "app.agents.chat.react_loop.evaluate_interview_stop",
+                return_value={"action": "continue"},
+            ),
+            patch(
+                "app.agents.chat.react_loop.build_react_system_prompt",
+                return_value="test prompt",
+            ),
+            patch(
+                "app.services.llm.llm_with_tools",
+                new_callable=AsyncMock,
+                return_value={
+                    "content": "这是不应输出的 ReAct 草稿。",
+                    "tool_calls": None,
+                    "finish_reason": "stop",
+                },
+            ),
+            patch(
+                "app.agents.chat.react_loop.generate_closing_utterance",
+                new_callable=AsyncMock,
+                return_value={"status": "success", "text": "感谢你的时间，今天先到这里。"},
+            ),
+            patch(
+                "app.agents.chat.react_loop._generate_structured_summary",
+                new_callable=AsyncMock,
+                return_value="**整体表现**：本轮总结。",
+            ),
+        ):
+            events = [event async for event in _react_loop(state)]
+
+        content = "".join(event.get("content", "") for event in events if event["type"] == "chunk")
+        assert "ReAct 草稿" not in content
+        assert "**整体表现**" in content
 
     async def test_direct_answer_no_tools(self):
         """LLM returns no tool_calls -> should emit the direct ReAct answer."""
@@ -2409,8 +2531,8 @@ class TestEndInterviewHardRoute:
         assert state["question_source_reason"] == "end_interview_hard_route"
 
     @pytest.mark.asyncio
-    async def test_abrupt_too_early_end_request_continues_interview(self):
-        """A too-early request for pass/fail evaluation should not end the interview."""
+    async def test_abrupt_too_early_end_request_returns_structured_summary(self):
+        """Once explicit end is accepted, the contract always returns a summary."""
         from app.agents.chat.pipeline import _generate_end_interview_response
 
         state = {
@@ -2429,22 +2551,28 @@ class TestEndInterviewHardRoute:
             "user_id": 1,
         }
 
+        mock_summary_json = json.dumps({
+            "overall_comment": "证据较少，结论仅供本轮复盘参考。",
+            "strongest_topic": "RAG 和 Agent 平台经验",
+            "weakest_topic": "架构细节证据不足",
+            "key_suggestions": ["补充架构取舍"],
+            "score_estimate": 5,
+        }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
+            return_value=mock_summary_json,
         ) as mock_call:
             response = await _generate_end_interview_response(state)
 
-        mock_call.assert_not_called()
-        assert "证据还不够" in response
-        assert "是否通过" in response
-        assert "整体表现" not in response
-        assert "你先说说这个平台的整体架构" in response
-        assert state["question_source_reason"] == "end_interview_premature_summary_guard"
+        mock_call.assert_awaited_once()
+        assert "整体表现" in response
+        assert "证据较少" in response
+        assert state["question_source_reason"] == "end_interview_hard_route"
 
     @pytest.mark.asyncio
-    async def test_too_early_close_request_without_summary_continues_interview(self):
-        """A too-early close request should keep collecting technical evidence."""
+    async def test_too_early_close_request_without_summary_returns_structured_summary(self):
+        """An explicit close has the same two-stage summary contract."""
         from app.agents.chat.pipeline import _generate_end_interview_response
 
         state = {
@@ -2463,18 +2591,24 @@ class TestEndInterviewHardRoute:
             "user_id": 1,
         }
 
+        mock_summary_json = json.dumps({
+            "overall_comment": "对话较短，结论仅供参考。",
+            "strongest_topic": "Agent 工作流经验",
+            "weakest_topic": "状态管理细节不足",
+            "key_suggestions": ["补充状态设计细节"],
+            "score_estimate": 5,
+        }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
             new_callable=AsyncMock,
+            return_value=mock_summary_json,
         ) as mock_call:
             response = await _generate_end_interview_response(state)
 
-        mock_call.assert_not_called()
-        assert "证据还不够" in response
-        assert "先不收尾" in response
-        assert "状态管理" in response
-        assert "好的，面试先到这里" not in response
-        assert state["question_source_reason"] == "end_interview_premature_summary_guard"
+        mock_call.assert_awaited_once()
+        assert "整体表现" in response
+        assert "对话较短" in response
+        assert state["question_source_reason"] == "end_interview_hard_route"
 
     @pytest.mark.asyncio
     async def test_end_interview_with_evidence_gap_request_generates_summary(self):

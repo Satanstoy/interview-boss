@@ -196,6 +196,35 @@ class TestClosingTwoStage:
             if metadata.get("closing_stage") == "closed":
                 assert "writer_trace" in metadata
 
+    @pytest.mark.asyncio
+    async def test_short_explicit_end_always_includes_structured_summary(self):
+        """Explicit end must not degrade to the legacy generic farewell."""
+        summary_json = (
+            '{"overall_comment":"回答能落到项目细节。","strongest_topic":"缓存",'
+            '"weakest_topic":"系统设计","key_suggestions":["补齐设计取舍"],'
+            '"score_estimate":7}'
+        )
+        events, _, _ = await run_single_turn_with_raw_events(
+            user_message="今天先结束吧",
+            classify_updates={
+                "intent": "end_interview",
+                "answer_quality": "complete",
+                "should_retrieve": False,
+            },
+            llm_responses=[],
+            stream_chunks=(),
+            state_overrides={"message_history": [{"role": "user", "content": "我做过缓存优化。"}]},
+            tool_patches=[
+                patch(
+                    "app.services.llm._call_llm_with_retry_messages",
+                    new=AsyncMock(side_effect=["感谢你的时间，今天的交流先到这里。", summary_json]),
+                )
+            ],
+        )
+        content = "".join(e.get("content", "") for e in events if e.get("type") == "chunk")
+        assert "感谢你的时间" in content
+        assert "**整体表现**" in content
+
 
 class TestContractCoverage:
     """Verify contract paths cover all 5 actions."""
