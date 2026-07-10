@@ -284,131 +284,153 @@ def _interviewer_forces_close(turns: list[dict[str, Any]]) -> bool:
     return any(sig in last_assistant for sig in SUMMARY_SIGNALS)
 
 
-GREETING_SCORING = {
-    "no_tools_in_greeting": {
-        "description": "寒暄轮（Turn 1）无工具调用",
-        "weight": 2.0,
-        "check": lambda m: m.get("tools_by_turn", {}).get(1, 0) == 0,
-    },
-    "no_tools_in_intro": {
-        "description": "自我介绍轮（Turn 2）无工具调用",
-        "weight": 2.0,
-        "check": lambda m: m.get("tools_by_turn", {}).get(2, 0) == 0,
-    },
-    "role_consistency": {
-        "description": "全程无元说明（请提供岗位信息等）",
-        "weight": 1.5,
-        "check": lambda m: not m.get("has_meta_remarks", False),
-    },
-    "invites_self_intro": {
-        "description": "寒暄回复包含自我介绍邀请",
-        "weight": 1.0,
-        "check": lambda m: m.get("invites_self_intro", False),
-    },
-    "no_sse_errors": {
-        "description": "零 SSE 错误事件",
-        "weight": 1.0,
-        "check": lambda m: len(m.get("errors", [])) == 0,
+# ── Rubric-Based Scoring (1-5 integer scale) ──────────────
+# Best practices: 1-5 integer scale, concrete anchors, reasoning BEFORE score,
+# max 5 dimensions, weights sum to 1.0.
+
+
+def _make_rubric(dimensions: list[dict]) -> dict:
+    """Build a scoring dict with rubric metadata for the LLM judge."""
+    result = {}
+    for dim in dimensions:
+        key = dim["key"]
+        entry = {
+            "description": dim["description"],
+            "weight": dim["weight"],
+            "rubric": dim["rubric"],
+        }
+        if "check" in dim:
+            entry["check"] = dim["check"]
+        result[key] = entry
+    return result
+
+
+# ── 共用 rubric 维度定义 ──
+
+_ROLE_ADHERENCE = {
+    "key": "role_adherence",
+    "description": "面试官角色一致性：全程是否保持面试官身份",
+    "weight": 0.25,
+    "rubric": {
+        1: "面试官多次跳出角色，要求候选人提供岗位信息、简历等系统侧内容，或暴露内部工具名/评分逻辑",
+        2: "面试官偶尔跳出角色（1-2次），如做元说明或暴露系统信息",
+        3: "面试官基本保持角色，但有轻微偏差（如语气偶尔不像真实面试官）",
+        4: "面试官全程保持角色，语气专业，无元说明",
+        5: "面试官完全像一个真实的中国互联网大厂技术面试官，语气、追问方式、节奏都高度自然",
     },
 }
 
-TOOL_TIMING_SCORING = {
-    # ── 效果导向维度（LLM judge 评估）──
-    "tool_effectiveness": {
-        "description": "工具调用是否有效：检索到的题目是否被面试官实际引用到提问中，而不是白调一次",
-        "weight": 2.0,
-    },
-    "interview_depth": {
-        "description": "项目深挖是否充分：对同一话题至少追问 3 层（架构→决策原因→困难与解决），不要浅尝辄止",
-        "weight": 2.0,
-    },
-    "topic_coverage": {
-        "description": "面试是否覆盖多个维度：项目深挖、基础知识（八股）、算法/编码至少各涉及 1 轮",
-        "weight": 1.5,
-    },
-    "conversation_flow": {
-        "description": "话题切换是否自然：用候选人回答中的关键词承接，不要机械地说'换个方向'",
-        "weight": 1.5,
-    },
-    # ── 基础健康检查（代码检测）──
-    "role_consistency": {
-        "description": "全程无元说明（请提供岗位信息等跳出角色的内容）",
-        "weight": 1.5,
-        "check": lambda m: not m.get("has_meta_remarks", False),
-    },
-    "no_sse_errors": {
-        "description": "零 SSE 错误事件",
-        "weight": 0.5,
-        "check": lambda m: len(m.get("errors", [])) == 0,
+_INTERVIEW_DEPTH = {
+    "key": "interview_depth",
+    "description": "面试深度：对核心话题的追问是否充分",
+    "weight": 0.25,
+    "rubric": {
+        1: "面试官只问表面问题，没有追问，像在走流程",
+        2: "面试官有追问但只到第2层，没有深入到决策原因或困难解决",
+        3: "面试官对主要话题追问到第3层（架构→决策→困难），但有些话题浅尝辄止",
+        4: "面试官对大多数话题追问到第3-4层，能引导候选人展示真实能力",
+        5: "面试官追问层层递进，能从候选人回答中发现盲点并深入考察，像真正的资深面试官",
     },
 }
 
-NATURAL_CLOSING_SCORING = {
-    # ── 效果导向维度（LLM judge 评估）──
-    "closing_quality": {
-        "description": "面试收口质量：面试官是否在覆盖充分后自然结束，给出对候选人表现的简要评价（整体印象、亮点、不足），不要突然中断或机械总结",
-        "weight": 2.5,
-    },
-    "interview_depth": {
-        "description": "项目深挖是否充分：对同一话题至少追问 3 层",
-        "weight": 2.0,
-    },
-    "topic_coverage": {
-        "description": "面试是否覆盖多个维度：项目、八股、算法、系统设计、HR 至少涉及 3 个",
-        "weight": 2.0,
-    },
-    "conversation_flow": {
-        "description": "话题切换是否自然，全程节奏是否像真实面试",
-        "weight": 1.5,
-    },
-    # ── 基础健康检查（代码检测）──
-    "reasonable_turn_count": {
-        "description": "在 8-16 轮之间自然收口（非硬停）",
-        "weight": 1.0,
-        "check": lambda m: 8 <= m.get("turn_count", 0) <= 16,
-    },
-    "role_consistency": {
-        "description": "全程无元说明",
-        "weight": 0.5,
-        "check": lambda m: not m.get("has_meta_remarks", False),
-    },
-    "no_sse_errors": {
-        "description": "零 SSE 错误事件",
-        "weight": 0.5,
-        "check": lambda m: len(m.get("errors", [])) == 0,
+_TOPIC_COVERAGE = {
+    "key": "topic_coverage",
+    "description": "面试维度覆盖：是否考察了多个技术维度",
+    "weight": 0.20,
+    "rubric": {
+        1: "面试只涉及1个维度（如只问项目），完全偏科",
+        2: "面试涉及2个维度（如项目+八股），缺少算法/系统设计",
+        3: "面试涉及3个维度（项目+八股+算法或系统设计），基本覆盖",
+        4: "面试涉及4个维度，且每个维度都有实质性考察",
+        5: "面试覆盖项目深挖、八股基础、算法/编码、系统设计、HR/软素质，且穿插自然",
     },
 }
 
-COUNTER_QUESTION_FLOW_SCORING = {
-    # ── 效果导向维度（LLM judge 评估）──
-    "counter_question_quality": {
-        "description": "候选人反问是否被认真回答：面试官应该简短回应反问内容（1-2句），展示对候选人问题的尊重，然后自然拉回面试话题",
-        "weight": 2.5,
-    },
-    "interview_depth": {
-        "description": "项目深挖是否充分：对同一话题至少追问 3 层",
-        "weight": 2.0,
-    },
-    "topic_coverage": {
-        "description": "面试是否覆盖多个维度：项目、八股、算法至少各 1 轮",
-        "weight": 1.5,
-    },
-    "conversation_flow": {
-        "description": "话题切换是否自然，反问后是否平滑过渡回面试",
-        "weight": 1.5,
-    },
-    # ── 基础健康检查（代码检测）──
-    "role_consistency": {
-        "description": "全程无元说明",
-        "weight": 1.0,
-        "check": lambda m: not m.get("has_meta_remarks", False),
-    },
-    "no_sse_errors": {
-        "description": "零 SSE 错误事件",
-        "weight": 0.5,
-        "check": lambda m: len(m.get("errors", [])) == 0,
+_CONVERSATION_FLOW = {
+    "key": "conversation_flow",
+    "description": "对话流畅度：话题切换是否自然，节奏是否像真实面试",
+    "weight": 0.15,
+    "rubric": {
+        1: "话题切换生硬（如'换个方向'），对话像在读脚本",
+        2: "话题切换偶尔自然，但有明显机械痕迹（如重复使用相同句式）",
+        3: "话题切换基本自然，但偶尔缺乏承接（突然跳到不相关话题）",
+        4: "话题切换自然，善于用候选人回答中的关键词做承接",
+        5: "对话节奏完全像真实面试，深挖→穿插→收尾的过渡流畅自然",
     },
 }
+
+_TOOL_EFFECTIVENESS = {
+    "key": "tool_effectiveness",
+    "description": "工具使用效果：工具调用是否服务于面试质量",
+    "weight": 0.15,
+    "rubric": {
+        1: "工具调用完全无效——调了工具但结果从未被引用到提问中，纯粹浪费",
+        2: "工具调用偶尔有效，但大多数调用是多余的（检索了但没用）",
+        3: "工具调用基本有效，至少50%的检索结果被引用到后续提问中",
+        4: "工具调用高效，检索结果自然融入面试官的提问，不突兀",
+        5: "工具调用精准且高效，每次检索都直接服务于面试节奏，候选人感受不到工具的存在",
+    },
+}
+
+_CLOSING_QUALITY = {
+    "key": "closing_quality",
+    "description": "收口质量：面试结束时是否给出有价值的总结",
+    "weight": 0.20,
+    "rubric": {
+        1: "面试官突然中断，没有任何总结或评价",
+        2: "面试官简单说'面试就到这里'，没有对候选人表现做任何评价",
+        3: "面试官给出了简要总结，但缺乏具体评价（如只说'聊得不错'）",
+        4: "面试官给出了结构化总结，包含整体印象、亮点和不足",
+        5: "面试官给出了专业且有建设性的总结，包含具体技术评价、改进建议和后续流程说明",
+    },
+}
+
+_COUNTER_QUESTION_QUALITY = {
+    "key": "counter_question_handling",
+    "description": "反问处理：候选人反问时面试官的应对质量",
+    "weight": 0.25,
+    "rubric": {
+        1: "面试官完全忽略候选人的反问，直接跳到下一个问题",
+        2: "面试官敷衍回应反问（如'嗯'），没有实质内容",
+        3: "面试官简短回应了反问，但没有展示对候选人问题的尊重",
+        4: "面试官认真回应反问（1-2句实质内容），然后自然拉回面试话题",
+        5: "面试官对反问给出有深度的回应，展示了对候选人问题的重视，然后平滑过渡回面试",
+    },
+}
+
+# ── 场景评分表（权重求和 = 1.0）──
+
+GREETING_SCORING = _make_rubric([
+    {**_ROLE_ADHERENCE, "weight": 0.30, "check": lambda m: not m.get("has_meta_remarks", False)},
+    _INTERVIEW_DEPTH,
+    _TOPIC_COVERAGE,
+    _CONVERSATION_FLOW,
+    {**_TOOL_EFFECTIVENESS, "weight": 0.10},
+])
+
+TOOL_TIMING_SCORING = _make_rubric([
+    _TOOL_EFFECTIVENESS,
+    _INTERVIEW_DEPTH,
+    _TOPIC_COVERAGE,
+    _CONVERSATION_FLOW,
+    {**_ROLE_ADHERENCE, "check": lambda m: not m.get("has_meta_remarks", False)},
+])
+
+NATURAL_CLOSING_SCORING = _make_rubric([
+    _CLOSING_QUALITY,
+    _INTERVIEW_DEPTH,
+    _TOPIC_COVERAGE,
+    _CONVERSATION_FLOW,
+    {**_ROLE_ADHERENCE, "weight": 0.10, "check": lambda m: not m.get("has_meta_remarks", False)},
+])
+
+COUNTER_QUESTION_FLOW_SCORING = _make_rubric([
+    _COUNTER_QUESTION_QUALITY,
+    _INTERVIEW_DEPTH,
+    _TOPIC_COVERAGE,
+    _CONVERSATION_FLOW,
+    {**_ROLE_ADHERENCE, "weight": 0.10, "check": lambda m: not m.get("has_meta_remarks", False)},
+])
 
 
 def _candidate_greets(turns: list[dict[str, Any]]) -> bool:
@@ -1199,12 +1221,19 @@ def _build_conversation_transcript(turns: list[dict[str, Any]], max_chars: int =
 
 
 def _build_scoring_criteria_text(scenario: Scenario) -> str:
-    """Format scenario scoring criteria as LLM-readable text."""
+    """Format scenario scoring criteria as LLM-readable rubric."""
     lines: list[str] = []
     for key, config in scenario.scoring.items():
         desc = config.get("description", key)
         weight = config.get("weight", 1.0)
-        lines.append(f"- **{key}** (weight={weight}): {desc}")
+        rubric = config.get("rubric", {})
+        lines.append(f"### {key} (权重={weight})")
+        lines.append(f"说明: {desc}")
+        if rubric:
+            lines.append("评分标准:")
+            for score, anchor in sorted(rubric.items()):
+                lines.append(f"  {score}分: {anchor}")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -1239,7 +1268,7 @@ def llm_score_scenario(
         "counter_question_answered": metrics.get("counter_question_answered", False),
     }
 
-    prompt = f"""你是一位资深技术面试质量评审专家。请根据以下面试对话记录和指标数据，对面试质量进行逐项评估。
+    prompt = f"""你是一位资深技术面试质量评审专家。请根据以下面试对话记录，对面试质量进行逐项评估。
 
 ## 评测场景
 - 场景: {scenario.scenario_id}
@@ -1247,7 +1276,7 @@ def llm_score_scenario(
 - 难度: {scenario.difficulty}
 - 预期轮数: {scenario.max_turns}
 
-## 评分维度
+## 评分维度与评分标准
 {criteria_text}
 
 ## 硬指标数据
@@ -1260,27 +1289,23 @@ def llm_score_scenario(
 
 ## 评估要求
 
-请对每个评分维度进行独立判断。对于每个维度：
-1. 结合硬指标数据和对话内容进行综合判断
-2. 不要仅依赖硬指标 — 用对话内容验证指标的准确性
-3. 给出具体的判断依据（引用对话中的具体轮次或内容）
+对每个维度：
+1. 先写 reasoning（判断依据，引用对话中的具体轮次或内容）
+2. 再写 score（1-5 整数，参照评分标准中的锚点描述）
+3. 不要仅依赖硬指标 — 用对话内容验证
 
 请严格按以下 JSON 格式返回（不要包含其他文本）：
 ```json
 {{
   "dimensions": {{
     "dimension_key_1": {{
-      "passed": true/false,
-      "score": 0.0-1.0,
-      "reasoning": "具体判断依据，引用对话内容",
-      "evidence": "引用的具体对话片段"
+      "reasoning": "先写判断依据，引用对话内容",
+      "score": 3
     }},
     "dimension_key_2": {{ ... }}
   }},
-  "overall_score": 0.0-1.0,
-  "overall_passed": true/false,
-  "critical_issues": ["严重问题1", "严重问题2"],
-  "highlights": ["亮点1", "亮点2"]
+  "critical_issues": ["最严重的1-2个问题"],
+  "highlights": ["1-2个亮点"]
 }}
 ```
 
@@ -1304,35 +1329,34 @@ def llm_score_scenario(
         parsed = json.loads(json_str)
         dimensions = parsed.get("dimensions", {})
 
-        # Build score items matching the old format
+        # Build score items with 1-5 rubric scores
         items: dict[str, dict[str, Any]] = {}
+        weighted_sum = 0.0
         total_weight = 0.0
-        passed_weight = 0.0
 
         for key, config in scenario.scoring.items():
             weight = float(config.get("weight", 1.0))
             total_weight += weight
             dim = dimensions.get(key, {})
-            passed = bool(dim.get("passed", False))
-            if passed:
-                passed_weight += weight
+            score = int(dim.get("score", 3))  # default to 3 if missing
+            score = max(1, min(5, score))  # clamp to 1-5
+            weighted_sum += score * weight
             items[key] = {
-                "passed": passed,
+                "score": score,
                 "weight": weight,
                 "description": config.get("description", key),
-                "score": float(dim.get("score", 0.0)),
                 "reasoning": str(dim.get("reasoning", "")),
-                "evidence": str(dim.get("evidence", "")),
                 "error": None,
             }
 
+        # Normalize to 0-1: (weighted_avg - 1) / 4
+        weighted_avg = weighted_sum / total_weight if total_weight else 3.0
+        normalized_score = (weighted_avg - 1) / 4.0
+
         return {
-            "passed": bool(parsed.get("overall_passed", passed_weight == total_weight)),
-            "passed_weight": passed_weight,
-            "total_weight": total_weight,
-            "ratio": passed_weight / total_weight if total_weight else 0.0,
+            "overall_score": round(normalized_score, 3),
+            "weighted_avg": round(weighted_avg, 2),
             "items": items,
-            "overall_score": float(parsed.get("overall_score", passed_weight / total_weight if total_weight else 0.0)),
             "critical_issues": parsed.get("critical_issues", []),
             "highlights": parsed.get("highlights", []),
             "judge_model": judge_config.model,
