@@ -4,5 +4,6 @@
 """
 
 from app.agents.chat.writers.closing_writer import generate_closing_utterance
+from app.agents.chat.writers.question_writer import generate_question_with_validation
 
-__all__ = ["generate_closing_utterance"]
+__all__ = ["generate_closing_utterance", "generate_question_with_validation"]
