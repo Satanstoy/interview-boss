@@ -379,7 +379,8 @@ class TestSSEErrorEvents:
         chunk_text = "".join(
             e.get("content", "") for e in events if e["type"] == "chunk"
         )
-        assert "搜索服务暂时不可用" in chunk_text
+        assert chunk_text
+        assert "搜索服务暂时不可用，我直接出一道题。" not in chunk_text
 
 
 # ── JD Mode Tests (JD1-JD3) ───────────────────────────

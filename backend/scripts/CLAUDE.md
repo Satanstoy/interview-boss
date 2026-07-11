@@ -12,7 +12,10 @@
 | `verify_chat_tools_real_e2e.py` | 真实后端 + 真实 LLM 的 chat tools 稳定性手动 E2E 验证 |
 | `verify_interview_agent_real_e2e.py` | 真实后端面试官 + 轻量 LLM 候选人的多轮模拟面试质量验证 |
 | `verify_compaction_*.py` / `evaluate_clustering.py` | 聚类/孤岛碎片整理的真实库验证和质量评估 |
+| `mock_clustering_approaches.py` | 聚类策略 mock 对比脚本（产出 `mock_clustering_report.json`） |
+| `rescore_with_judge.py` | 用 judge 模型对已有评测结果重新评分 |
 | `fix_sources_frequency.py` | 来源数量/frequency 修复脚本 |
+| `eval_framework/` | Interview Agent 评测框架内部模块（candidate、scenarios、rubrics、scoring、reports、metrics、http_client、runner、types）；由 `eval_interview_agent.py` 调用 |
 
 本目录还包含历史 `.md` 报告和 `.log/.json` 产物；不要把它们当成测试入口。新增手动验证脚本用 `verify_`，数据修复脚本用 `fix_`，健康检查用 `check_`。
 

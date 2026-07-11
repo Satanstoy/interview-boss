@@ -16,6 +16,7 @@
 | `test_rebuild_position_filter.py` | 岗位过滤重建 |
 | `test_source_url_count_mismatch.py` | 来源 URL 计数不匹配 |
 | `test_split_question_data_loss.py` | 拆分题目数据丢失 |
+| `test_soft_delete_and_ux.py` | 软删除与 UX 行为 |
 
 ## 运行
 

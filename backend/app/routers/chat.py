@@ -346,6 +346,11 @@ async def send_message(
                     # 附带 reasoning metadata 给前端，用于思维链/步骤/工具/skill 显示
                     done_payload: dict = {"type": "done"}
                     for key in (
+                        "turn_contract",
+                        "writer_trace",
+                        "validator_trace",
+                        "tool_contract_trace",
+                        "generation_error_code",
                         "reasoning_trace",
                         "tool_calls_trace",
                         "skill_trace",
@@ -361,7 +366,13 @@ async def send_message(
                     yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "error":
-                    yield f"data: {json.dumps({'type': 'error', 'message': event.get('message', '未知错误')}, ensure_ascii=False)}\n\n"
+                    error_payload = {
+                        "type": "error",
+                        "message": event.get("message", "未知错误"),
+                    }
+                    if event.get("code"):
+                        error_payload["code"] = event["code"]
+                    yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"Chat 流式输出异常: {e}", exc_info=True)

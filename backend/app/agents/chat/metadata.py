@@ -349,6 +349,16 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     if state.get("validator_trace"):
         metadata["validator_trace"] = state["validator_trace"]
 
+    if state.get("writer_trace"):
+        metadata["writer_trace"] = state["writer_trace"]
+
+    selected_tool_fact = state.get("selected_question") or {}
+    if selected_tool_fact.get("id"):
+        metadata["tool_contract_trace"] = {
+            "selected_question_id": selected_tool_fact["id"],
+            "source": state.get("question_source") or "unknown",
+        }
+
     if state.get("resume_summary") and _response_references_resume(
         clean_response, state["resume_summary"]
     ):

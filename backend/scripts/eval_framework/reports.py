@@ -52,7 +52,12 @@ def llm_generate_report(result: dict, judge_config: JudgeLLMConfig) -> str | Non
         return raw
     except Exception as exc:
         print(f"Warning: LLM report generation failed: {exc}", file=sys.stderr)
-        return None
+        fallback = _render_markdown_report(result, time.strftime("%Y%m%d_%H%M%S"))
+        return (
+            "## 降级提醒\n\n"
+            f"LLM 报告生成失败：{exc}。以下为规则模板报告。\n\n"
+            f"{fallback}"
+        )
 
 
 def write_reports(
@@ -83,8 +88,8 @@ def _render_markdown_report(result: dict, timestamp: str) -> str:
     turns = result.get("turns", [])
 
     lines = [
-        f"# 评测报告: {scenario_id}",
-        f"时间: {timestamp}",
+        f"# 评测报告：{scenario_id}",
+        f"时间：{timestamp}",
         "",
         "## 评分",
         "| 维度 | 得分 | 说明 |",

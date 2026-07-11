@@ -19,6 +19,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `operations.py` | 可复用 CRUD（提交、去重、软删除） |
 | `queries.py` | 跨领域查询（岗位、频率、分类体系） |
 | `question_bank_sources.py` | 题库来源表 CRUD + dual-write 工具 |
+| `utils.py` | DB 层工具函数（migration 辅助、SQL helpers） |
 
 ## 关键模式
 

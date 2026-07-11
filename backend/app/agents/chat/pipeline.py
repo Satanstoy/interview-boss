@@ -26,12 +26,11 @@ from app.agents.chat.nodes import (
 from app.agents.chat.state import ChatState
 from app.agents.chat.interview_state import build_interview_state_snapshot
 from app.agents.shared.events import _event_queue_var
-from app.services import chat_service
+from app.services import chat_service, llm as llm_service
 from app.mcp_server.session import save_mcp_session_async
 from app.agents.chat.decision_config import get_decision_config
 from app.services.memory_recall_service import (
     classify_and_recall,
-    classify_and_recall_fast,
 )
 
 # Re-exports from submodules (backward compatibility for tests and graph.py)
@@ -242,39 +241,30 @@ async def _step_classify(state: ChatState) -> ChatState:
             "正在理解你的问题...",
             reason=STEP_REASONS["understanding_first"],
         )
-        (
-            intent,
-            memory_ids,
-            keywords,
-            search_query,
-            answer_complete,
-            structured_rewrite,
-            classify_result,
-        ) = await classify_and_recall_fast(
-            user_message=state["user_message"],
-            memory_summaries=state.get("memory_summaries", []),
-            recent_context=recent_context,
-        )
     else:
         _step(
             "understanding",
             "正在分析你的回答...",
             reason=STEP_REASONS["understanding_follow"],
         )
-        (
-            intent,
-            memory_ids,
-            keywords,
-            search_query,
-            answer_complete,
-            structured_rewrite,
-            classify_result,
-        ) = await classify_and_recall(
-            user_message=state["user_message"],
-            recent_context=recent_context,
-            memory_summaries=state.get("memory_summaries", []),
-            user_id=state["user_id"],
-        )
+
+    # The LLM semantic classifier owns the live routing decision on every
+    # turn. Rule-based parsing is retained inside the classifier only for an
+    # LLM-failure fallback, never as the normal first-turn path.
+    (
+        intent,
+        memory_ids,
+        keywords,
+        search_query,
+        answer_complete,
+        structured_rewrite,
+        classify_result,
+    ) = await classify_and_recall(
+        user_message=state["user_message"],
+        recent_context=recent_context,
+        memory_summaries=state.get("memory_summaries", []),
+        user_id=state["user_id"],
+    )
 
     state["intent"] = intent
     state["keywords"] = keywords
@@ -292,9 +282,25 @@ async def _step_classify(state: ChatState) -> ChatState:
             "off_topic_streak",
             "repetition_streak",
             "requires_bank_question",
+            "candidate_act",
+            "asked_counter_question",
+            "counter_question_topic",
+            "asked_for_summary",
+            "requested_end",
+            "needs_clarification",
+            "needs_new_dimension",
+            "suggested_question_type",
+            "confidence",
+            "evidence",
         ):
             if key in classify_result:
                 state[key] = classify_result[key]
+        state["counter_question"] = bool(
+            classify_result.get("asked_counter_question", False)
+        )
+        state["counter_question_topic"] = classify_result.get(
+            "counter_question_topic"
+        )
 
     # Compute reliable streak counters from message history and override LLM estimates.
     if not is_first_message:
@@ -498,22 +504,23 @@ def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
         logger.warning("Failed to record asked question %s: %s", qid, e)
 
 
-def _sidecar_turn_contract(state: ChatState, metadata: dict) -> None:
-    """Phase 1 旁路观测：调用 TurnPlanner 生成 TurnContract，记录到 metadata。
-
-    不改变现有输出流程，只做观测记录。
-    """
-    try:
-        contract = plan_turn(state)
-        state["turn_contract"] = contract.to_metadata_dict()
-        metadata["turn_contract"] = contract.to_metadata_dict()
-        logger.info(
-            "TurnContract (sidecar): action=%s reason=%s",
-            contract.action.value,
-            contract.reason,
-        )
-    except Exception as e:
-        logger.debug("TurnContract sidecar failed (不影响输出): %s", e)
+def _attach_executed_contract_metadata(state: ChatState, metadata: dict) -> None:
+    """Persist the contract that actually produced this turn's output."""
+    contract = state.get("turn_contract")
+    if isinstance(contract, dict):
+        metadata["turn_contract"] = contract
+    if state.get("writer_trace"):
+        metadata["writer_trace"] = state["writer_trace"]
+    if state.get("validator_trace"):
+        metadata["validator_trace"] = state["validator_trace"]
+    if state.get("generation_error_code"):
+        metadata["generation_error_code"] = state["generation_error_code"]
+    selected = state.get("selected_question") or {}
+    if selected.get("id"):
+        metadata["tool_contract_trace"] = {
+            "selected_question_id": selected["id"],
+            "source": state.get("question_source") or "unknown",
+        }
 
 
 # ═══════════════════════════════════════════════════
@@ -583,9 +590,21 @@ async def run_chat(
                         "reason": STEP_REASONS["closing"],
                     }
                 )
-                close_result = await _generate_close_with_summary(
-                    state, "explicit_end_request"
+                from app.agents.chat.contract_executor import execute_turn_contract
+
+                contract = plan_turn(state)
+                state["turn_contract"] = contract.to_metadata_dict()
+                close_result = await execute_turn_contract(
+                    state=state,
+                    contract=contract,
+                    llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                        msgs, user_id=state.get("user_id")
+                    ),
                 )
+                state["writer_trace"] = close_result.get("writer_trace") or {}
+                state["validator_trace"] = close_result.get("validator_trace") or []
+                if close_result["status"] != "success":
+                    state["generation_error_code"] = close_result.get("error_code")
                 if close_result["status"] == "success":
                     response = close_result["text"]
                     _emit({"type": "chunk", "content": response})
@@ -605,7 +624,7 @@ async def run_chat(
                             "code": close_result["error_code"],
                         }
                     )
-                _sidecar_turn_contract(state, metadata)
+                _attach_executed_contract_metadata(state, metadata)
                 _record_asked_question_if_any(state, metadata)
                 _emit({"type": "basis", **_basis_event_payload(metadata)})
                 _emit({"type": "done", "metadata": metadata})
@@ -620,8 +639,7 @@ async def run_chat(
                         if built_metadata:
                             metadata = {**built_metadata, **metadata}
                         response = clean_response
-                        # Phase 1 旁路观测：TurnContract
-                        _sidecar_turn_contract(state, metadata)
+                        _attach_executed_contract_metadata(state, metadata)
                         # Record asked question for cross-conversation dedup
                         _record_asked_question_if_any(state, metadata)
                         _emit({"type": "basis", **_basis_event_payload(metadata)})

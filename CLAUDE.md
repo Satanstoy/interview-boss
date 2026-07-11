@@ -70,8 +70,10 @@ backend/
 ├── app/services/      ← 业务逻辑（LLM 调用、聚类、pipeline）
 ├── app/core/          ← 配置、认证、提示词模板
 ├── app/db/            ← SQLite 连接、CRUD、查询、迁移
-├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate/chat）
+├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate/chat + candidate 评测 skills + shared 共享模块）
 ├── app/models/        ← Pydantic schemas
+├── app/middleware/    ← ASGI 中间件（请求日志、安全头、CSRF）
+├── app/mcp_server/    ← 内嵌 MCP 工具服务（面试 agent 工具执行边界）
 └── tests/
     ├── bank/          ← 题库管理
     ├── chat/          ← 模拟面试
@@ -85,20 +87,28 @@ backend/
     └── taxonomy/      ← 分类体系
 
 frontend/
+├── src/api/           ← 兼容层 re-export（新代码直接 import services/）
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
 ├── src/composables/   ← 领域逻辑复用（use* 前缀）
+├── src/router/        ← Vue Router 4 配置（路由表 + 认证守卫）
+├── src/stores/        ← Pinia 状态层（当前为空，状态走 composables）
 ├── src/layouts/       ← AuthenticatedLayout / BlankLayout / DefaultLayout
 ├── src/views/         ← Vue Router 页面
 ├── src/components/
 │   ├── common/        ← 通用 UI（无业务依赖）
 │   ├── business/      ← 业务组件
-│   └── ui/            ← shadcn-vue 原始组件
+│   ├── ui/            ← shadcn-vue 原始组件
+│   └── *.vue          ← 应用壳层组件（AppSidebar / NavMain / NavUser / SiteHeader 等）
 ├── src/utils/         ← 纯工具函数
+├── src/constants/     ← 应用常量与枚举（config.js / enums.js）
+├── src/assets/styles/ ← CSS 变量、重置、全局样式 + Tailwind
 └── tests/             ← Playwright E2E/diagnosis 测试
 
 deploy/                ← 部署脚本（docker-deploy.sh 是生产用）
 nginx/                 ← Docker Nginx 配置
 docs/                  ← 历史经验库（bug-reports、tdd-reports、superpowers、analysis）
+scripts/               ← 项目级辅助脚本（check.sh 质量门禁入口）
+backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详见该目录 CLAUDE.md）
 ```
 
 子目录各有自己的 CLAUDE.md，Claude 按需自动加载，不需要在此列出。
@@ -109,16 +119,21 @@ docs/                  ← 历史经验库（bug-reports、tdd-reports、superpo
 |------|---------|---------|
 | 登录/注册/刷新 | `routers/auth.py` + `core/auth.py` | `services/authApi.js` + `components/business/LoginModal.vue` |
 | JD/面经提交 | `routers/submit.py` + `agents/submit/` + `services/pipeline/` | `views/ImportView.vue` + `components/business/StagingPanel.vue` + `services/dataApi.js` |
-| 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
+| 数据管理（JD/面经 CRUD） | `routers/data.py` | `services/dataApi.js` |
+| 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` + `routers/bank_build.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
-| 练习/模拟面试 | `routers/practice.py` + `routers/interview.py` | `components/business/PracticePanel.vue` + `MockInterview.vue` |
+| 练习/抽测 | `routers/practice.py` + `services/question_draw_service.py` | `components/business/PracticePanel.vue` + `components/business/MockInterview.vue` |
+| 模拟面试（Chat） | `routers/chat.py` + `routers/interview.py` + `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `views/ChatView.vue` + `components/business/ChatView.vue` + `services/chatApi.js` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `routers/profile.py` + `routers/profile_pkg/` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
 | 手撕代码 | `routers/coding.py` | `services/codingApi.js` + `components/business/CodingPractice.vue` |
-| 题目去重 | `services/clustering.py` | — |
+| 音频转写 | `routers/audio.py` + `services/deepgram_service.py` | — |
+| 题目去重 | `services/clustering/` + `services/clustering_maintenance.py` | — |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |
-| 认证中间件 | `core/auth.py` | `services/http.js` |
-| 数据库操作 | `db/operations.py` + `queries.py` | — |
+| 认证中间件 | `core/auth.py` + `middleware/` | `services/http.js` |
+| 数据库操作 | `db/operations.py` + `queries.py` + `question_bank_sources.py` | — |
+| 健康检查 | `routers/health.py` | — |
+| 错误上报 | `routers/error_report.py` | `utils/logger.js` |
 
 ## 测试基础设施
 

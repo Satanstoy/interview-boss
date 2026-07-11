@@ -509,25 +509,45 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     if stop_decision["action"] == "ask_candidate_question":
         state["question_source"] = "conversation"
         state["question_source_reason"] = stop_decision["reason"]
-        # Advance closing_stage to candidate_question_asked
-        state["closing_stage"] = "candidate_question_asked"
-        message = stop_decision.get("message")
-        if message:
-            # Pre-set message from stop_policy (e.g. coverage-complete prompt)
-            _emit(
-                {
-                    "type": "step",
-                    "step": "closing",
-                    "message": "正在进入反问收尾...",
-                    "reason": STEP_REASONS["closing"],
-                }
-            )
-            yield {"type": "chunk", "content": message}
-            yield {"type": "done", "metadata": {"closing_stage": "candidate_question_asked"}}
+        _emit(
+            {
+                "type": "step",
+                "step": "closing",
+                "message": "正在进入反问收尾...",
+                "reason": STEP_REASONS["closing"],
+            }
+        )
+        from app.agents.chat.contract_executor import execute_turn_contract
+        from app.agents.chat.turn_contract import plan_turn
+
+        contract = plan_turn(state)
+        state["turn_contract"] = contract.to_metadata_dict()
+        result = await execute_turn_contract(
+            state=state,
+            contract=contract,
+            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                msgs, user_id=state.get("user_id")
+            ),
+        )
+        state["writer_trace"] = result.get("writer_trace") or {}
+        state["validator_trace"] = result.get("validator_trace") or []
+        if result["status"] != "success":
+            state["generation_error_code"] = result.get("error_code")
+        if result["status"] != "success":
+            yield {"type": "error", "message": result["message"], "code": result["error_code"]}
+            yield {"type": "done", "metadata": {"writer_trace": state["writer_trace"]}}
             return
-        # No pre-set message (e.g. candidate_repeated_answers) —
-        # inject a system note and let the ReAct loop generate a natural response.
-        state["repetition_detected"] = True
+        state["closing_stage"] = "candidate_question_asked"
+        yield {"type": "chunk", "content": result["text"]}
+        yield {
+            "type": "done",
+            "metadata": {
+                "closing_stage": "candidate_question_asked",
+                "writer_trace": state["writer_trace"],
+                "validator_trace": state["validator_trace"],
+            },
+        }
+        return
 
     if stop_decision["action"] == "close":
         state["question_source"] = "conversation"
@@ -541,14 +561,29 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             }
         )
 
-        close_result = await _generate_close_with_summary(state, stop_decision["reason"])
+        from app.agents.chat.contract_executor import execute_turn_contract
+        from app.agents.chat.turn_contract import plan_turn
+
+        contract = plan_turn(state)
+        state["turn_contract"] = contract.to_metadata_dict()
+        close_result = await execute_turn_contract(
+            state=state,
+            contract=contract,
+            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                msgs, user_id=state.get("user_id")
+            ),
+        )
+        state["writer_trace"] = close_result.get("writer_trace") or {}
+        state["validator_trace"] = close_result.get("validator_trace") or []
+        if close_result["status"] != "success":
+            state["generation_error_code"] = close_result.get("error_code")
         if close_result["status"] != "success":
             yield {
                 "type": "error",
                 "message": close_result["message"],
                 "code": close_result["error_code"],
             }
-            yield {"type": "done", "metadata": {"writer_trace": close_result["writer_trace"]}}
+            yield {"type": "done", "metadata": {"writer_trace": state["writer_trace"]}}
             return
 
         # Mark closing_stage as closed after summary
@@ -559,7 +594,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             "metadata": {
                 "closing_stage": "closed",
                 "has_summary": True,
-                "writer_trace": close_result["writer_trace"],
+                "writer_trace": state["writer_trace"],
+                "validator_trace": state["validator_trace"],
             },
         }
         return
@@ -927,7 +963,6 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     # the strategy prompt, not a post-hoc control-flow takeover.
     if (
         not stop_reason
-        and final_answer_text
         and should_record_retrieval_gap(state)
         and not search_or_draw_called
     ):
@@ -954,169 +989,52 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             "attempts": 0,
         }
         yield {"type": "error", "message": "模型生成超时，请稍后再试。"}
-    elif final_answer_text:
-        state["react_direct_answer_draft"] = final_answer_text
-
-        # The contract is computed after ReAct has gathered evidence but before
-        # any draft is exposed or repaired. A close contract owns the output.
-        from app.agents.chat.turn_contract import TurnContractAction, plan_turn
+    else:
+        # ReAct content is evidence only. Empty content is valid once tools
+        # have completed; a contract writer owns all user-visible wording.
+        state["react_evidence_draft"] = final_answer_text
+        from app.agents.chat.contract_executor import execute_turn_contract
+        from app.agents.chat.turn_contract import plan_turn
 
         contract = plan_turn(state)
         state["turn_contract"] = contract.to_metadata_dict()
-        if contract.action == TurnContractAction.CLOSE_WITH_SUMMARY:
-            close_result = await _generate_close_with_summary(
-                state,
-                str(contract.payload.get("closing_reason") or "turn_contract"),
-            )
-            if close_result["status"] != "success":
-                yield {
-                    "type": "error",
-                    "message": close_result["message"],
-                    "code": close_result["error_code"],
-                }
-                yield {"type": "done", "metadata": {"writer_trace": close_result["writer_trace"]}}
-                return
-            state["closing_stage"] = "closed"
-            yield {"type": "chunk", "content": close_result["text"]}
-            yield {
-                "type": "done",
-                "metadata": {
-                    "closing_stage": "closed",
-                    "has_summary": True,
-                    "writer_trace": close_result["writer_trace"],
-                },
-            }
-            return
-
-        # Output guardrail: validate before emitting
-        from app.agents.chat.output_guardrails import needs_output_repair, build_repair_prompt
-
-        guardrail = needs_output_repair(state, final_answer_text)
-        if guardrail["needs_repair"]:
-            logger.info(
-                "ReAct trace: event=output_guardrail_repair conversation_id=%s reason=%s",
-                state.get("conversation_id"),
-                guardrail["reason"],
-            )
-            repair_prompt = build_repair_prompt(final_answer_text, state, guardrail["repair_type"])
-            try:
-                from app.services.llm import raw_llm_call
-
-                repaired = await raw_llm_call(
-                    user_id=state["user_id"],
-                    model=state.get("model"),
-                    messages=[
-                        {"role": "system", "content": "你是面试系统的输出修复组件。直接输出修改后的回复，不要解释修改原因。"},
-                        {"role": "user", "content": repair_prompt},
-                    ],
-                    temperature=0.5,
-                    max_tokens=1024,
-                )
-                if repaired and repaired.strip():
-                    # Validate repair result
-                    recheck = needs_output_repair(state, repaired.strip())
-                    if not recheck["needs_repair"]:
-                        final_answer_text = repaired.strip()
-                        logger.info(
-                            "ReAct trace: event=guardrail_repair_success conversation_id=%s",
-                            state.get("conversation_id"),
-                        )
-                    else:
-                        logger.info(
-                            "ReAct trace: event=guardrail_repair_failed conversation_id=%s reason=%s",
-                            state.get("conversation_id"),
-                            recheck["reason"],
-                        )
-                        # Use deterministic fallback
-                        if guardrail["repair_type"] == "summary":
-                            final_answer_text = await _forced_closing_response(state)
-                        # For counter_question, keep original (better than nothing)
-            except Exception as e:
-                logger.warning("Guardrail repair LLM call failed: %s", e)
-                if guardrail["repair_type"] == "summary":
-                    try:
-                        final_answer_text = await _forced_closing_response(state)
-                    except Exception:
-                        pass  # keep original
-
-        # ReAct owns tools and evidence. The turn contract owns final wording.
-        if contract.action == TurnContractAction.ASK_SELECTED_QUESTION:
-            from app.agents.chat.validators.semantic_question_adherence import (
-                validate_question_adherence,
-            )
-            from app.agents.chat.writers.question_writer import (
-                generate_question_with_validation,
-            )
-
-            writer_result = await generate_question_with_validation(
-                selected_question=state.get("selected_question") or {},
-                context_anchor=str(state.get("user_message") or ""),
-                question_type=str(state.get("question_type") or "unknown"),
-                llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                    msgs, user_id=state.get("user_id")
-                ),
-                validator=validate_question_adherence,
-            )
-            validator_result = writer_result.get("validator_result") or {}
-            state["validator_trace"] = [
-                {
-                    "name": "semantic_question_adherence",
-                    "status": writer_result["status"],
-                    "score": validator_result.get("score"),
-                    "reason": validator_result.get("reason", writer_result.get("message", "")),
-                    "retry_count": writer_result.get("retry_count", 1),
-                }
-            ]
-            if writer_result["status"] != "success":
-                yield {
-                    "type": "error",
-                    "message": writer_result.get("message", "问题生成验证失败，请稍后再试。"),
-                    "code": writer_result.get("error_code", "question_generation_failed"),
-                }
-                yield {"type": "done"}
-                return
-            final_answer_text = writer_result["text"]
-
-        # Use ReAct answer directly — apply quality pipeline without
-        # a second LLM streaming call (which causes intermittent 500s).
-        events = await _final_answer_events_from_text(final_answer_text, state)
-        final_text = events[0]["content"] if events else final_answer_text
-        # Dedup check
-        deduplicator = state.setdefault(
-            "output_deduplicator", OutputDeduplicator()
+        result = await execute_turn_contract(
+            state=state,
+            contract=contract,
+            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
+                msgs, user_id=state.get("user_id")
+            ),
         )
-        dedup_result = deduplicator.check(final_text)
-        if dedup_result != "ok":
-            logger.info(
-                "ReAct trace: event=output_dedup conversation_id=%s result=%s",
-                state.get("conversation_id"),
-                dedup_result,
-            )
-        deduplicator.record(final_text)
-        for event in events:
-            yield event
-    else:
-        plan = state.get("next_question_plan") or {}
-        question_text = str(plan.get("question_text") or "").strip()
-        if plan.get("must_ask") and question_text:
-            state["final_answer_error"] = {
-                "reason": "empty_answer_plan_generation_error",
-                "attempts": 0,
-                "question_id": plan.get("question_id"),
-            }
-            logger.error(
-                "ReAct trace: event=empty_answer_plan_generation_error "
-                "conversation_id=%s question_text=%r",
-                state.get("conversation_id"),
-                question_text,
-            )
+        state["writer_trace"] = result.get("writer_trace") or {}
+        state["validator_trace"] = result.get("validator_trace") or []
+        if result["status"] != "success":
+            state["generation_error_code"] = result.get("error_code")
+        if result["status"] != "success":
             yield {
                 "type": "error",
-                "message": "模型未能生成回复，请稍后再试。",
-                "code": "empty_answer_plan_generation_failed",
+                "message": result["message"],
+                "code": result["error_code"],
             }
         else:
-            # No text from ReAct — shouldn't happen, surface error.
-            yield {"type": "error", "message": "模型未能生成回复，请稍后再试。"}
+            final_text = result["text"]
+            deduplicator = state.setdefault("output_deduplicator", OutputDeduplicator())
+            dedup_result = deduplicator.check(final_text)
+            if dedup_result != "ok":
+                logger.info(
+                    "ReAct trace: event=output_dedup conversation_id=%s result=%s",
+                    state.get("conversation_id"),
+                    dedup_result,
+                )
+            deduplicator.record(final_text)
+            metadata = {
+                "writer_trace": state["writer_trace"],
+                "validator_trace": state["validator_trace"],
+            }
+            if contract.action.value == "close_with_summary":
+                state["closing_stage"] = "closed"
+                metadata.update({"closing_stage": "closed", "has_summary": True})
+            yield {"type": "chunk", "content": final_text}
+            yield {"type": "done", "metadata": metadata}
+            return
 
     yield {"type": "done"}

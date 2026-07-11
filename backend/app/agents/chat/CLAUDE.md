@@ -1,11 +1,11 @@
 # Chat Agent — 面试 Chatbot
 
-纯 async pipeline（替代 LangGraph StateGraph）：记忆召回 → 上下文构建 → 意图分类 → ReAct 循环 → 记忆提取。
+纯 async harness（替代 LangGraph StateGraph）：记忆召回 → 上下文构建 → LLM 语义分类 → ReAct 工具证据循环 → TurnPlanner → contract writer/validator → 记忆提取。
 
 ## 流程
 
 ```
-run_chat() → _step_load_context → _step_classify (writes ClassifyResult fields) → _react_loop (reads state) → _persist_active_skills → save_mcp_session_async → _step_extract_memory
+run_chat() → _step_load_context → _step_classify (writes ClassifyResult fields) → _react_loop (tools/evidence only) → TurnPlanner → contract_executor → _persist_active_skills → save_mcp_session_async → _step_extract_memory
 ```
 
 ## 文件职责
@@ -13,11 +13,10 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | 文件 | 职责 |
 |------|------|
 | `pipeline.py` | 入口点：`run_chat()` + pipeline steps（`_step_load_context`、`_step_classify`、`_step_extract_memory`、`_persist_active_skills`、`_initial_state`）+ 事件累积（thinking/steps/insights → done metadata）+ MCP session 持久化 + 所有子模块的 re-export（向后兼容） |
-| `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射；ReAct 负责工具/证据，`ask_selected_question` 的最终话术由 question_writer 接管，收尾通过原子两阶段 helper 输出 |
-| `answer.py` | 答案生成与质量：`OutputDeduplicator`、`GenerationError`（替代机械题干 fallback）、`_stream_final_answer()`、`_enforce_question_plan_on_text()`、`_rewrite_transition_with_llm()`（LLM 自然过渡重写）、fallback 响应、内部 marker 过滤 |
+| `react_loop.py` | ReAct 循环核心：`_react_loop()`、`Budget`/`StopRun`、`validate_tool_call()`、trace 日志、事件发射；它只负责工具/证据，任何最终用户话术都交给 `contract_executor` |
+| `answer.py` | 旧输出辅助与兼容函数：`OutputDeduplicator`、`GenerationError`、内部 marker 清洗；正常 harness 不得从这里直接发送 ReAct 最终文本 |
 | `question_plan.py` | 题目计划管理：`_maybe_create_question_plan(force_candidate=)`、`_select_question_for_plan()`、`InterviewLedger`、重复追问保护（含 `_count_consecutive_similar_user_answers()` 候选人重复检测）、已问题列表构建 |
 | `stop_policy.py` | 产品级停止策略：32 条后覆盖完整进入反问，44 条后强收口，56 条后硬停止；候选人重复回答检测（3 次切方向，5 次结束）；避免只靠 prompt 判断何时结束 |
-| `turn_controller.py` | 显式路由决策：`decide_turn_action(state)` 根据 closing_stage、counter_question、收尾信号、requires_bank_question 等状态字段决定 turn_action（closing_summary/bank_question/answer_counter_question/natural_followup）和 question_intent，解决 E2E 中的 proper_end、long_session_senior、early_close_guard 问题 |
 | `summary.py` | 面试总结：`InterviewSummary`、`_generate_structured_summary()`、`_forced_closing_response()`、`_generate_end_interview_response()`；所有显式结束都生成结构化总结，收尾话术不在本模块生成 |
 | `metadata.py` | Basis 追踪与元数据：`_build_react_metadata()`、`_infer_selected_question()`、`_extract_company()`/`_extract_round()` |
 | `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
@@ -29,9 +28,9 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `nodes.py` | 节点实现（recall、build_context、stream、extract）、面试阶段判定、`build_react_system_prompt()` 注入 runtime state |
 | `state.py` | ChatState TypedDict，含分类阶段写入的结构化路由字段 |
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
-| `classify_result.py` | `ClassifyResult` Pydantic 模型：分类节点结构化输出（含 Phase 1 语义信号扩展：candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
-| `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：读取结构化事实输出本轮契约；`ask_selected_question` 与 `close_with_summary` 在 ReAct 工具证据完成后接管最终输出，其他契约仍逐步迁移 |
-| `writers/closing_writer.py` | 自然收尾语生成：不含结构化总结；与 summary writer 组成原子两阶段收尾，任一阶段失败都返回 error，不得输出 summary-only fallback |
+| `classify_result.py` | `ClassifyResult` Pydantic 模型：LLM 语义分类的结构化输出（candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
+| `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：只读取语义、ledger、stop policy 与工具事实；五种契约都在 ReAct 工具证据完成后接管最终输出 |
+| `writers/` | `question`、`clarify`、`counter`、`followup`、`closing`、`summary` writers；每个 writer 只表达已选 contract，不能决定流程或生成机械 fallback |
 | `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
 | `validators/semantic_question_adherence.py` | LLM semantic validator：验证 ask_selected_question 输出是否语义一致（阈值 0.75） |
 | `validators/__init__.py` | Validator registry：导出 semantic_question_adherence 等 |
@@ -50,7 +49,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 
 ## 核心模式
 
-- **流式输出**：通过 SSE yield 每个 chunk；ReAct 工具/推理决策继续使用非流式 `llm_with_tools()`，但最终面向候选人的回复必须走 `_stream_final_answer()` 流式输出。工具决策或最终生成请求异常时只允许有限重试/返回 `error` 事件，不要用题库候选或模板话术伪造 fallback 回答。若完整文本校验、去重或题目计划修复后需要覆盖已流出的内容，发送 `chunk` + `replace=true`，路由和前端必须保留该字段
+- **流式输出**：通过 SSE yield 最终 contract writer 的完整 chunk；ReAct 工具/推理决策继续使用非流式 `llm_with_tools()`，但 ReAct 文本只能保存为非公开 evidence，绝不能直接发给候选人。writer 或必需 validator 失败时只返回 `error` 事件，不能用题库候选或模板话术伪造 fallback。
 - **Thinking 支持**：`stream_llm_messages(yield_thinking=True)` 支持 MiMo/DeepSeek 的 `reasoning_content` 和 Anthropic ThinkingBlock，事件类型：`thinking_start` → `thinking` → `thinking_done` → `chunk`；`react_loop.py` 也会把 `llm_with_tools()` 非流式返回的 `reasoning_content` 桥接成同样的 thinking 事件，供前端展示“面试官推理”
 - **Reasoning 语言约束**：`build_react_system_prompt()` 必须注入 `REASONING_LANGUAGE_GUARDRAIL`，要求面试官最终回复以及 MiMo/DeepSeek `reasoning_content` / 推理过程 / 工具调用分析都使用简体中文；技术名词、代码、库名和英文原文引用可保留英文
 - **记忆系统**：`chat_memories` 表存储用户长期记忆，每次对话自动召回

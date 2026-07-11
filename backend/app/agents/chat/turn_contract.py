@@ -78,7 +78,9 @@ class TurnContract(BaseModel):
             "action": self.action.value,
             "priority": self.priority,
             "payload": self.payload,
+            "validation": self.validation,
             "reason": self.reason,
+            "source_facts": self.source_facts,
         }
 
     @classmethod
@@ -123,8 +125,14 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
     """
     classify_result = state.get("classify_result") or {}
     closing_stage = state.get("closing_stage", "technical")
-    counter_question = state.get("counter_question", False)
-    counter_question_topic = state.get("counter_question_topic")
+    asked_counter_question = bool(
+        classify_result.get("asked_counter_question", False)
+    )
+    counter_question = bool(state.get("counter_question", False)) or asked_counter_question
+    counter_question_topic = (
+        classify_result.get("counter_question_topic")
+        or state.get("counter_question_topic")
+    )
     selected_question = state.get("selected_question")
     answer_quality = classify_result.get("answer_quality", "complete")
     message_count = state.get("message_count", 0)
@@ -180,6 +188,18 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
     from app.agents.chat.stop_policy import evaluate_interview_stop
 
     stop_result = evaluate_interview_stop(state)
+    if stop_result.get("action") == "ask_candidate_question":
+        return TurnContract(
+            action=TurnContractAction.CONTINUE_NATURAL_FOLLOWUP,
+            priority="candidate_question_prompt",
+            payload={"next_focus": "candidate_question"},
+            reason=f"stop_policy: {stop_result.get('reason')}",
+            source_facts={
+                "stop_policy_action": stop_result.get("action"),
+                "stop_policy_reason": stop_result.get("reason"),
+                "message_count": message_count,
+            },
+        )
     if stop_result.get("action") == "close":
         return TurnContract(
             action=TurnContractAction.CLOSE_WITH_SUMMARY,
@@ -203,13 +223,14 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
             reason=f"candidate asked: {counter_question_topic or 'unknown'}",
             source_facts={
                 "counter_question": counter_question,
+                "asked_counter_question": asked_counter_question,
                 "counter_question_topic": counter_question_topic,
                 "closing_stage": closing_stage,
             },
         )
 
     # Priority 3: clarify_candidate_answer
-    if answer_quality in ("vague", "incomplete"):
+    if classify_result.get("needs_clarification") or answer_quality in ("vague", "incomplete"):
         return TurnContract(
             action=TurnContractAction.CLARIFY_CANDIDATE_ANSWER,
             priority=f"answer_{answer_quality}",
@@ -218,6 +239,9 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
             source_facts={
                 "answer_quality": answer_quality,
                 "intent": classify_result.get("intent"),
+                "needs_clarification": bool(
+                    classify_result.get("needs_clarification", False)
+                ),
             },
         )
 
@@ -238,6 +262,9 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
                 "answer_quality": answer_quality,
                 "selected_question_id": qid,
                 "should_retrieve": classify_result.get("should_retrieve"),
+                "needs_new_dimension": classify_result.get("needs_new_dimension"),
+                "semantic_confidence": classify_result.get("confidence", 0.0),
+                "selection_confidence": _selection_confidence(state),
             },
         )
 
@@ -270,25 +297,49 @@ def _should_ask_selected_question(state: dict, classify_result: dict) -> bool:
     if answer_quality in ("vague", "incomplete", "off_topic"):
         return False
 
-    intent = classify_result.get("intent", "")
-    if intent == "practice_request":
+    if not classify_result.get("needs_new_dimension", False):
+        return False
+
+    try:
+        semantic_confidence = float(classify_result.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        semantic_confidence = 0.0
+    if semantic_confidence < 0.75:
+        return False
+
+    if _selection_confidence(state) < 0.75:
         return False
 
     return True
 
 
+def _selection_confidence(state: dict) -> float:
+    """Read a structured selection confidence without inspecting question text."""
+    selected = state.get("selected_question") or {}
+    raw = state.get("selection_confidence", selected.get("selection_confidence", 0.0))
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _extract_expected_focus(question: dict) -> list[str]:
-    """从题目中提取期望的评估焦点关键词。"""
-    text = question.get("question", "")
-    focus = []
-    # 提取技术关键词
-    import re
+    """Return structured assessment facets supplied by the question source.
 
-    english_terms = re.findall(r"[a-zA-Z][a-zA-Z0-9_+#.-]{1,}", text)
-    focus.extend(english_terms[:3])
+    This is trace metadata for the writer/evaluator, never a text-derived
+    routing heuristic.  The question bank already owns categories and tags,
+    so do not re-interpret natural language with regex here.
+    """
+    values: list[object] = [question.get("cat1"), question.get("cat2")]
+    tags = question.get("tags")
+    if isinstance(tags, str):
+        values.extend(tags.split(","))
+    elif isinstance(tags, list):
+        values.extend(tags)
 
-    # 提取中文关键短语（2-4字）
-    chinese_segments = re.findall(r"[一-鿿]{2,4}", text)
-    focus.extend(chinese_segments[:3])
-
-    return focus[:5]  # 最多5个焦点
+    focus: list[str] = []
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized and normalized not in focus:
+            focus.append(normalized)
+    return focus[:5]

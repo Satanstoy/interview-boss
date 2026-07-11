@@ -220,10 +220,11 @@ class TestOpeningPhaseE2E:
         retrieved = [e for e in events if e["type"] == "retrieved"]
         assert len(retrieved) == 1
 
-        # Basis should reference the question
+        # Opening stays a natural project follow-up even if retrieval returned
+        # candidates; it must not force a selected question before evidence.
         basis = next(e for e in events if e["type"] == "basis")
-        assert basis["basis_type"] == "interview_question"
-        assert 101 in basis["basis_question_ids"]
+        assert basis["basis_type"] == "conversation"
+        assert basis["basis_question_ids"] == []
 
 
 class TestAnswerCompleteness:

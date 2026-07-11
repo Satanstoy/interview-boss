@@ -67,6 +67,16 @@ class ChatState(TypedDict, total=False):
     repetition_streak: int  # 连续重复回答次数
     requires_bank_question: bool  # 本轮是否必须绑定题库题目
     classify_result: dict  # classify_intent 原始结构化结果快照
+    candidate_act: str | None  # LLM 语义行为
+    asked_counter_question: bool  # LLM 是否判定候选人提出反问
+    counter_question_topic: str | None  # LLM 提取的候选人反问主题
+    asked_for_summary: bool  # LLM 是否判定候选人要求总结
+    requested_end: bool  # LLM 是否判定候选人要求结束
+    needs_clarification: bool  # LLM 是否判定当前回答需要澄清
+    needs_new_dimension: bool  # LLM 是否判定可切换评估维度
+    suggested_question_type: str | None  # LLM 建议的下一题类型
+    confidence: float  # LLM 对本轮语义信号的置信度
+    evidence: str | None  # LLM 对本轮语义信号的简短证据
 
     # === RAG 检索 ===
     keywords: list[str]  # LLM 提取的检索关键词
@@ -84,6 +94,7 @@ class ChatState(TypedDict, total=False):
     selected_question: Optional[dict]  # 本轮最终采用的题目（如能从候选中确认）
     question_source: Optional[str]  # search | draw | conversation | generated
     question_source_reason: Optional[str]  # 简短说明采用/未采用候选题的原因
+    selection_confidence: float  # selected_question 的结构化选择置信度
 
     # === 输出 ===
     response: str  # AI 面试官回复
@@ -107,7 +118,7 @@ class ChatState(TypedDict, total=False):
     counter_question: bool  # 本轮是否为候选人反问
     counter_question_topic: str | None  # 反问主题
 
-    # === Workflow 路由 ===
+    # === Legacy workflow compatibility (not a live routing authority) ===
     turn_action: Literal[
         "natural_followup",
         "bank_question",
@@ -121,8 +132,8 @@ class ChatState(TypedDict, total=False):
     natural_question_text: str | None  # NaturalQuestionWriter 输出
     generation_error: dict | None  # 生成失败时的错误信息
 
-    # === TurnContract（Phase 1: 旁路观测，不影响现有输出） ===
-    turn_contract: dict | None  # TurnPlanner 输出的本轮契约（metadata trace 用）
+    # === TurnContract ===
+    turn_contract: dict | None  # 本轮已执行的 TurnPlanner 契约
 
     # === 题目暴露 Ledger ===
     exposed_question_ids: list[int]  # 本会话已暴露给模型/用户的所有题目 ID

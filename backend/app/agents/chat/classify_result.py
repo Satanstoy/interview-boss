@@ -51,8 +51,8 @@ class ClassifyResult(BaseModel):
     All fields have safe defaults so that a parse failure can fall back to a
     known state and the interview can continue.
 
-    Phase 1 扩展：新增语义信号字段（candidate_act, needs_clarification 等），
-    供 TurnPlanner 消费。向后兼容——新字段全部有默认值。
+    Semantic signal fields are consumed by TurnPlanner. All fields retain
+    safe defaults so an LLM failure can use the explicit fallback path.
     """
 
     intent: IntentType = "interview_question"
@@ -68,7 +68,7 @@ class ClassifyResult(BaseModel):
     repetition_streak: int = Field(default=0)
     requires_bank_question: bool = False
 
-    # ── Phase 1 语义信号扩展（TurnPlanner 消费） ──
+    # ── Semantic signals consumed by TurnPlanner ──
     candidate_act: Optional[str] = Field(
         default=None,
         description="候选人的语义行为: answered_question, asked_counter_question, asked_for_summary, requested_end, greeting, chitchat 等",
@@ -76,6 +76,10 @@ class ClassifyResult(BaseModel):
     asked_counter_question: bool = Field(
         default=False,
         description="候选人本轮是否提出了反问",
+    )
+    counter_question_topic: Optional[str] = Field(
+        default=None,
+        description="候选人反问的主题，供 counter_writer 回答，不参与文本匹配路由",
     )
     asked_for_summary: bool = Field(
         default=False,
@@ -146,9 +150,10 @@ class ClassifyResult(BaseModel):
             off_topic_streak=0,
             repetition_streak=0,
             requires_bank_question=False,
-            # Phase 1 语义信号默认值
+            # Semantic signal defaults for the LLM-failure fallback
             candidate_act=None,
             asked_counter_question=False,
+            counter_question_topic=None,
             asked_for_summary=False,
             requested_end=False,
             needs_clarification=False,

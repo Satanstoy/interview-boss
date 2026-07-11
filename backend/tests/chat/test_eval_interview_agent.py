@@ -27,6 +27,10 @@ def test_scenarios_cover_design_matrix_and_load_candidate_skills():
         "proper_end",
         "insufficient_evidence",
         "counter_question",
+        "greeting_role_adherence",
+        "tool_timing",
+        "natural_closing",
+        "counter_question_flow",
     }
     assert module.SCENARIOS["long_session_mid"].max_turns == 16
     assert module.SCENARIOS["long_session_senior"].max_turns == 20

@@ -1819,7 +1819,6 @@ def build_react_system_prompt(state: ChatState) -> str:
     6. Basis extraction guidance (so the final answer can still emit metadata)
     """
     from app.agents.chat.skills.builder import build_skill_catalog
-    from app.agents.chat.prompts import BASIS_EXTRACT_GUIDANCE
 
     mode = state.get("mode", "free_practice")
     interview_context = state.get("interview_context", "")
@@ -1949,9 +1948,5 @@ def build_react_system_prompt(state: ChatState) -> str:
                 + "\n\n".join(skill_parts)
                 + "\n</active_skill_instructions>"
             )
-
-    # Layer 6: Preserve the existing basis metadata contract
-    if BASIS_EXTRACT_GUIDANCE.strip():
-        parts.append(BASIS_EXTRACT_GUIDANCE)
 
     return "\n\n".join(parts)

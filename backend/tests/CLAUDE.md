@@ -35,12 +35,12 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 | `services/` | 业务逻辑测试（LLM、聚类、pipeline、chat 等） |
 | `bank/` | 题库操作测试（模式、拆分、合并、编辑） |
 | `chat/` | Chatbot 测试（agent、记忆、预算、路由） |
+| `coding/` | 手撕代码测试（题目、提交、AI 评审） |
 | `pipeline/` | 提交流程测试 |
 | `taxonomy/` | 分类体系测试 |
 | `security/` | 安全测试（认证、CSRF、注入） |
 | `interview/` | 面试流程测试 |
 | `infra/` | 基础设施测试（DB、migration、config） |
-| `bugs/` | Bug 回归测试（BUG-XXX 命名） |
 
 ## 核心规则
 

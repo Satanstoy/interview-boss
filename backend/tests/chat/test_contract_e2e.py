@@ -166,6 +166,61 @@ class TestTurnContractMetadata:
         action = metadata.get("turn_contract", {}).get("action")
         assert action in valid_actions
 
+    @pytest.mark.asyncio
+    async def test_done_metadata_records_executed_contract_evidence(self):
+        """Trajectory eval must see the writer, validator, and selected tool fact."""
+        executor_result = {
+            "status": "success",
+            "text": "你在项目里是怎么把 Agent 评测接进发布流程的？",
+            "writer_trace": {"writer": "question_writer", "result": "success", "retry_count": 1},
+            "validator_trace": [
+                {
+                    "name": "semantic_question_adherence",
+                    "blocking": True,
+                    "passes": True,
+                    "score": 0.91,
+                    "issues": [],
+                }
+            ],
+        }
+        events, _, _ = await run_single_turn_with_raw_events(
+            user_message="我完成了 Agent 评测平台的改造。",
+            classify_updates={
+                "intent": "interview_question",
+                "answer_quality": "complete",
+                "needs_new_dimension": True,
+                "confidence": 0.9,
+                "should_retrieve": False,
+                "classify_result": {
+                    "intent": "interview_question",
+                    "answer_quality": "complete",
+                    "needs_new_dimension": True,
+                    "confidence": 0.9,
+                },
+            },
+            llm_responses=[{"content": "", "tool_calls": None, "finish_reason": "stop"}],
+            stream_chunks=(),
+            state_overrides={
+                "selected_question": {"id": 6370, "question": "Agent 评测如何落地？", "selection_confidence": 0.9},
+                "question_source": "draw_questions",
+            },
+            tool_patches=[
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(return_value=executor_result),
+                )
+            ],
+        )
+
+        metadata = next(event["metadata"] for event in events if event.get("type") == "done")
+        assert metadata["turn_contract"]["action"] == "ask_selected_question"
+        assert metadata["writer_trace"]["writer"] == "question_writer"
+        assert metadata["validator_trace"][0]["passes"] is True
+        assert metadata["tool_contract_trace"] == {
+            "selected_question_id": 6370,
+            "source": "draw_questions",
+        }
+
 
 class TestClosingTwoStage:
     """Verify closing uses two-stage output."""
@@ -221,6 +276,8 @@ class TestClosingTwoStage:
                 )
             ],
         )
+        errors = [event for event in events if event.get("type") == "error"]
+        assert not errors, errors
         content = "".join(e.get("content", "") for e in events if e.get("type") == "chunk")
         assert "感谢你的时间" in content
         assert "**整体表现**" in content

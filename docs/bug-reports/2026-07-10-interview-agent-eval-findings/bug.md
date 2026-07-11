@@ -78,7 +78,7 @@ error = 处理消息时出现错误: Question plan enforcement failed: LLM rewri
 
 根因判断：
 
-为了避免机械拼接题目，当前代码移除了 deterministic fallback。但真实面试系统里，兜底失败不应让本轮空掉。强绑定题目是后端控制流承诺，不能完全依赖第二次 LLM rewrite 成功。
+当前问题不是“缺少一个机械 fallback”，而是自然出题链路不够可靠。强绑定题目是后端控制流承诺，但最终展示给用户的仍必须是自然的面试官提问。若系统只能通过硬编码转场句拼出题目，说明 plan enforcement / question writer 本身还没有达到产品要求。
 
 ### 3. 收尾总结和反问处理不稳定
 
@@ -138,18 +138,21 @@ turn 14: 再见，祝你一切顺利。
 
 ## 建议修复顺序
 
-### P0：强绑定题目失败不能空回复
+### P0：强绑定题目必须自然生成，不能空回复也不能机械兜底
 
 修复目标：
 
-- `must_ask` plan 已存在时，即使 repair / rewrite LLM 都失败，也必须生成一个可用的下一问。
-- fallback 应保留自然承接，但以 `plan.question_text` 为核心，不再抛出用户可见 error。
-- metadata 标记 `fallback_used=true`、`transition_source=deterministic_plan_fallback`，方便评测识别。
+- `must_ask` plan 已存在时，后端必须把本轮导入一个专门的 natural question writer / repair workflow，而不是让通用 ReAct 自由发挥后再补救。
+- repair 失败时允许内部重试、换更窄的 prompt、降低温度、扩大上下文或切换到专门的出题模型，但不能向用户展示硬编码模板式转场。
+- 输出必须同时满足两件事：语气自然、问题目标仍围绕 `plan.question_text`。
+- 如果多次自然生成都失败，应记录为内部 generation failure，并进入可观测告警；不应把机械拼接文本伪装成正常面试官回复。
+- metadata 标记 `repair_attempted=true`、`natural_rewrite_attempts=N`、`question_plan_adherence`，方便评测识别自然生成链路是否稳定。
 
 建议测试：
 
-- 构造 `next_question_plan.must_ask=true`，mock repair 和 rewrite 都返回空，断言输出包含计划题目且无 error。
-- 覆盖 `_final_answer_events_from_text()` 和 `run_chat()` SSE 路径。
+- 构造 `next_question_plan.must_ask=true`，mock 首次 ReAct 输出偏离，断言进入 natural question writer，并输出自然提问。
+- 构造自然提问包含计划题意但不是题库原文，断言 adherence 通过。
+- 构造多次 rewrite 失败，断言不会输出硬编码转场文本，并记录可观测 error / failure metadata。
 
 ### P1：coverage-driven 题库绑定
 
@@ -164,18 +167,23 @@ turn 14: 再见，祝你一切顺利。
 - 构造缺少算法维度且工具返回算法候选，断言 `selected_question`、`question_plan`、`interview_asked_questions` 都有记录。
 - 构造 search 结果全部弱相关，断言走 draw fallback 或记录 `retrieval_miss`，不会产生 `candidate_questions_not_explicitly_used` 的假成功。
 
-### P2：收尾 workflow 稳定进入结构化总结
+### P2：收尾 workflow 拆成自然收尾语 + LLM 结构化总结
 
 修复目标：
 
-- 候选人已经完成反问并表达结束时，后端应根据 `closing_stage` 进入 summary workflow。
-- 不依赖 ReAct 自己说“面试结束”来代表完成。
+- 候选人已经完成反问并表达结束时，后端应根据 `closing_stage` 进入 closing workflow。
+- closing workflow 分两步：
+  1. 由面试官 LLM 输出一段自然收尾语，例如感谢、结束语、后续说明，保持真实面试语气。
+  2. 随后调用独立的 LLM 级结构化总结组件，根据完整面试记录生成面试总结。
+- 不依赖 ReAct 自己说“面试结束”来代表完成；总结生成应是后端显式步骤。
 - 结构化总结至少包含整体表现、技术主题、亮点、不足/待观察、后续建议。
+- 总结输出应有稳定 schema，再渲染成 Markdown，避免自由文本漏字段。
 
 建议测试：
 
-- 构造 `closing_stage=candidate_question_asked` 且用户反问已回答后的下一轮，断言走 `_generate_end_interview_response()`。
+- 构造 `closing_stage=candidate_question_asked` 且用户反问已回答后的下一轮，断言先输出自然收尾语，再调用结构化总结。
 - 构造候选人连续告别，断言不会只输出短告别，至少第一次收尾生成结构化总结。
+- 构造 summary LLM 返回缺字段，断言 schema 校验失败后重试或降级为结构化模板，但不能只给一句“再见”。
 
 ### P3：eval 报告展示修复
 
@@ -187,14 +195,15 @@ turn 14: 再见，祝你一切顺利。
 ## 不建议的修复方式
 
 - 不建议把每一次 `search_questions` 都强制绑定第一题。项目深挖场景中，工具结果可能确实不如自然追问合适。
-- 不建议只改 prompt 要求“请使用工具结果”。当前问题发生在状态机和 metadata/ledger 记录边界，必须有后端控制流兜底。
+- 不建议用硬编码转场句作为用户可见 fallback。面试官不能自然提问本身就是需要修复的问题，机械兜底会掩盖质量缺陷。
+- 不建议只改 prompt 要求“请使用工具结果”。当前问题发生在状态机和 metadata/ledger 记录边界，必须有后端控制流约束和自然提问生成校验。
 - 不建议用评估脚本的 Markdown FAIL 直接指导修 agent；应优先看 JSON 的 `score`、`reasoning`、`metrics` 和原始事件。
 
 ## 后续派发建议
 
 等 `eval_interview_agent.py` 拆分完成后，建议按以下顺序派发：
 
-1. 先修 `answer.py` 的 plan fallback，防止用户可见 error。
+1. 先修 `answer.py` / question writer 的自然 plan enforcement，防止用户可见 error 和机械兜底。
 2. 再修 `question_plan.py` / `react_loop.py` 的 coverage-driven binding。
-3. 再修 `stop_policy.py` / `turn_controller.py` / `summary.py` 的收尾状态机。
+3. 再修 `stop_policy.py` / `turn_controller.py` / `summary.py` 的两阶段收尾状态机：自然收尾语 + LLM 结构化总结。
 4. 最后修 eval 报告渲染，避免分析噪声继续污染判断。

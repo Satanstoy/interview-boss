@@ -12,9 +12,13 @@ from .http_client import _call_openai_compatible_chat
 
 
 def _event_tool_name(event: dict) -> str | None:
-    if event.get("type") != "step":
+    if event.get("type") == "tool_step":
+        data = event.get("data") if isinstance(event.get("data"), dict) else event
+        step = data.get("tool_name") or data.get("tool") or ""
+    elif event.get("type") == "step":
+        step = event.get("step", "")
+    else:
         return None
-    step = event.get("step", "")
     if step in ("search_questions", "draw_questions", "select_question", "load_skill"):
         return step
     return None
@@ -69,7 +73,7 @@ def _build_scoring_criteria_text(scenario: Scenario) -> str:
         desc = config.get("description", key)
         weight = config.get("weight", 1.0)
         rubric = config.get("rubric", {})
-        lines.append(f"### {key} (权重={weight})")
+        lines.append(f"### {key} (weight={weight}, 权重={weight})")
         lines.append(f"说明: {desc}")
         if rubric:
             lines.append("评分标准:")
@@ -216,11 +220,19 @@ def llm_score_scenario(
             weight = float(config.get("weight", 1.0))
             total_weight += weight
             dim = dimensions.get(key, {})
-            score = int(dim.get("score", 3))
+            raw_score = dim.get("score", 3)
+            score = float(raw_score)
+            if 0.0 <= score <= 1.0:
+                score *= 5.0
+            score = int(round(score))
             score = max(1, min(5, score))
             weighted_sum += score * weight
+            passed = dim.get("passed")
+            if not isinstance(passed, bool):
+                passed = score >= 3
             items[key] = {
                 "score": score,
+                "passed": passed,
                 "weight": weight,
                 "description": config.get("description", key),
                 "reasoning": str(dim.get("reasoning", "")),
@@ -230,8 +242,9 @@ def llm_score_scenario(
         weighted_avg = weighted_sum / total_weight if total_weight else 3.0
         normalized_score = (weighted_avg - 1) / 4.0
 
+        overall_passed = parsed.get("overall_passed")
         return {
-            "passed": weighted_avg >= 3.0,
+            "passed": overall_passed if isinstance(overall_passed, bool) else weighted_avg >= 3.0,
             "overall_score": round(normalized_score, 3),
             "weighted_avg": round(weighted_avg, 2),
             "items": items,

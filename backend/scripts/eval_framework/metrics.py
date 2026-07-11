@@ -18,10 +18,15 @@ def _event_data(event: dict) -> dict:
 
 
 def _event_tool_name(event: dict) -> str | None:
-    """Extract tool name from a step event."""
-    if event.get("type") != "step":
+    """Extract a tool name from either public SSE tool representation."""
+    event_type = event.get("type")
+    if event_type == "tool_step":
+        data = _event_data(event)
+        step = data.get("tool_name") or data.get("tool") or ""
+    elif event_type == "step":
+        step = event.get("step", "")
+    else:
         return None
-    step = event.get("step", "")
     if step in ("search_questions", "draw_questions", "select_question", "load_skill"):
         return step
     return None
@@ -50,10 +55,11 @@ def _candidate_ids_for_turn(turn: dict) -> list[int]:
     ids = []
     for event in turn.get("events", []):
         data = _event_data(event)
-        if event.get("type") in ("candidates", "candidate_questions"):
+        if event.get("type") in ("candidates", "candidate_questions", "retrieved"):
             for q in data.get("questions", data.get("candidates", [])):
                 if isinstance(q, dict):
                     ids.extend(_ids_from_object(q.get("id")))
+            ids.extend(_ids_from_object(data.get("ids", data.get("candidate_ids", []))))
     return ids
 
 

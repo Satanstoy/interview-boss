@@ -109,6 +109,7 @@ def _resolve_judge_config(args: argparse.Namespace) -> JudgeLLMConfig | None:
     base_url = (
         args.judge_base_url
         or os.getenv("JUDGE_OPENAI_BASE_URL")
+        or os.getenv("JUDGE_LLM_BASE_URL")
         or os.getenv("OPENAI_BASE_URL")
         or "https://api.openai.com/v1"
     ).rstrip("/")
@@ -118,7 +119,12 @@ def _resolve_judge_config(args: argparse.Namespace) -> JudgeLLMConfig | None:
         or os.getenv("LLM_MODEL_NAME")
         or "mimo-v2.5"
     )
-    timeout = int(args.judge_timeout or os.getenv("JUDGE_LLM_TIMEOUT") or "120")
+    timeout = int(
+        args.judge_timeout
+        or os.getenv("JUDGE_LLM_TIMEOUT")
+        or os.getenv("LLM_TIMEOUT")
+        or "120"
+    )
     return JudgeLLMConfig(
         api_key=api_key,
         base_url=base_url,

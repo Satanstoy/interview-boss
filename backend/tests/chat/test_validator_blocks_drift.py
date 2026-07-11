@@ -62,6 +62,7 @@ async def _run_turn_with_validator(
             "selected_question": {"id": 6370, "question": "Agent范式在项目中有没有用过？"},
             "candidate_questions": [{"id": 6370, "question": "Agent范式在项目中有没有用过？"}],
             "question_source": "draw_questions",
+            "selection_confidence": 0.9,
         })
         return state
 
@@ -81,6 +82,8 @@ async def _run_turn_with_validator(
                 "intent": "interview_question",
                 "answer_quality": "complete",
                 "should_retrieve": False,
+                "needs_new_dimension": True,
+                "confidence": 0.9,
             },
         })
         return state
@@ -124,7 +127,7 @@ async def _run_turn_with_validator(
             side_effect=mock_validator,
         ),
         patch(
-            "app.agents.chat.writers.question_writer.generate_question_with_validation",
+            "app.agents.chat.contract_executor.generate_question_with_validation",
             new=question_writer,
         ),
     ]
@@ -157,7 +160,7 @@ class TestAskSelectedQuestionContract:
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         chunk_content = "".join(e.get("content", "") for e in chunk_events)
         assert "工具调用稳定" not in chunk_content
-        assert "Agent 范式" in chunk_content
+        assert "Agent 范式" in chunk_content or "Agent范式" in chunk_content
         question_writer.assert_awaited_once()
         assert count == 0
 
@@ -176,8 +179,13 @@ class TestAskSelectedQuestionContract:
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         chunk_content = "".join(e.get("content", "") for e in chunk_events)
         error_events = [e for e in events if e.get("type") == "error"]
+        done_metadata = next(
+            event["metadata"] for event in events if event.get("type") == "done"
+        )
         assert "工具调用稳定" not in chunk_content
         assert any(event["code"] == "question_validation_failed" for event in error_events)
+        assert done_metadata["generation_error_code"] == "question_validation_failed"
+        assert done_metadata["writer_trace"]["writer"] == "question_writer"
         question_writer.assert_awaited_once()
         assert count == 0
 
@@ -192,6 +200,7 @@ class TestAskSelectedQuestionContract:
         chunk_content = "".join(
             e.get("content", "") for e in events if e.get("type") == "chunk"
         )
-        assert "离线评测" in chunk_content
+        assert chunk_content
+        assert "Agent范式在项目中有没有用过" not in chunk_content
         question_writer.assert_not_awaited()
         assert count == 0

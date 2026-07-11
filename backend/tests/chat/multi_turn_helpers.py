@@ -227,6 +227,28 @@ async def run_single_turn(
 
     async def mock_classify(state):
         state.update(classify_updates)
+        # Older E2E cases describe only the legacy top-level fields.  The
+        # production classifier bridges those into classify_result before the
+        # planner runs, so mirror that bridge rather than exercising an
+        # impossible half-populated state.
+        if "classify_result" not in classify_updates:
+            intent = classify_updates.get("intent", "interview_question")
+            answer_complete = bool(classify_updates.get("answer_complete", False))
+            state["classify_result"] = {
+                "intent": intent,
+                "answer_quality": classify_updates.get(
+                    "answer_quality",
+                    "complete" if answer_complete else "incomplete",
+                ),
+                "should_retrieve": bool(classify_updates.get("should_retrieve", False)),
+                "needs_new_dimension": bool(
+                    classify_updates.get(
+                        "needs_new_dimension",
+                        answer_complete or intent == "practice_request",
+                    )
+                ),
+                "confidence": float(classify_updates.get("confidence", 0.9)),
+            }
         return state
 
     async def mock_extract_memory(snapshot):

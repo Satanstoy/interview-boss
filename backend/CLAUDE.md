@@ -85,7 +85,7 @@ Routers → Services → Core/DB → (external)
 **数据库：** SQLite `backend/data/interview-boss.db`
 
 ### Agents (`app/agents/`) — LangGraph 状态机
-`submit/`, `build/`, `batch_generate/`, `chat/` 四个 agent；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline（拆分为 pipeline/react_loop/answer/question_plan/summary/metadata）。
+`submit/`, `build/`, `batch_generate/`, `chat/` 四个 LangGraph agent + `candidate/` 评测用 skills 包；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline（拆分为 pipeline/react_loop/answer/question_plan/summary/metadata），`candidate/` 只承载评测用 `skills/` 不是生产 agent。
 
 ### Scripts (`scripts/`) — 运维脚本
 一次性运维脚本、数据修复工具。前缀：`fix_*.py`（修复）、`verify_*.py`（验证）、`check_*.py`（检查）。详见 `scripts/CLAUDE.md`。
@@ -96,13 +96,19 @@ Routers → Services → Core/DB → (external)
 |------|------|---------|--------|
 | 认证 | `routers/auth.py` | `core/auth.py` | `db/operations.py` |
 | 提交 | `routers/submit.py` | `agents/submit/` + `services/pipeline/` | `db/operations.py` |
+| 数据管理 | `routers/data.py` | — | `db/operations.py` |
 | 题库 | `routers/questions.py` + `bank_build.py` + `admin_review.py` | `services/clustering/` | `db/queries.py` |
 | 答案 | `routers/answers.py` | `services/llm.py` + `core/prompts.py` | `db/operations.py` |
-| 练习 | `routers/practice.py` | — | `db/queries.py` |
+| 练习 | `routers/practice.py` | `services/question_draw_service.py` | `db/queries.py` |
 | 面试 | `routers/interview.py` | — | `db/queries.py` |
+| 模拟面试（Chat） | `routers/chat.py` | `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `db/queries.py` |
 | 分析 | `routers/analytics.py` | — | `db/queries.py` |
-| 配置 | `routers/profile.py` | `core/config.py` | `db/operations.py` |
-| Agent | `routers/submit.py` / `bank_build.py` / `answers.py` / `chat.py` | `agents/submit/` `agents/build/` `agents/batch_generate/` `agents/chat/` | — |
+| 配置 | `routers/profile.py` + `profile_pkg/` | `core/config.py` + `services/email_service.py` + `services/resume_service.py` | `db/operations.py` |
+| 手撕代码 | `routers/coding.py` | — | `db/queries.py` |
+| 音频转写 | `routers/audio.py` | `services/deepgram_service.py` | — |
+| 健康检查 | `routers/health.py` | — | — |
+| 错误上报 | `routers/error_report.py` | — | — |
+| Agent | `routers/submit.py` / `bank_build.py` / `answers.py` / `chat.py` | `agents/submit/` `agents/build/` `agents/batch_generate/` `agents/chat/` `agents/candidate/`（skills） `agents/shared/` | — |
 
 ## 修改前必读
 

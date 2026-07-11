@@ -343,7 +343,7 @@ def _infer_rule_based_rewrite(
 ) -> dict:
     """轻量规则推断 structured rewrite（零 LLM 成本）。
 
-    用于 classify_and_recall_fast 和 classify_and_recall 的非 LLM 路径。
+    Only used by the explicit LLM-failure fallback in ``classify_and_recall``.
     """
     msg_lower = user_message.lower()
     kw_lower = [k.lower() for k in keywords]
@@ -487,6 +487,16 @@ search_query = keywords 用空格拼接即可。
 - requires_bank_question: boolean（本轮是否必须绑定题库题目）
   - true 当 intent=practice_request 或明确请求算法/代码题
   - false 当开场前 N 轮或 answer_quality 为 incomplete/off_topic/repeated
+- candidate_act: answered_question / asked_counter_question / asked_for_summary / requested_end / greeting / chitchat
+- asked_counter_question: boolean，候选人是否提出对团队、岗位或流程的反问
+- counter_question_topic: 反问主题；没有反问时为 null
+- asked_for_summary: boolean，候选人是否要求总结或评价
+- requested_end: boolean，候选人是否要求结束本轮面试
+- needs_clarification: boolean，当前回答是否需要围绕原题补充证据
+- needs_new_dimension: boolean，当前回答完整后是否应切换评估维度
+- suggested_question_type: project_followup / knowledge_probe / algorithm_coding / system_design / behavioral / null
+- confidence: 0.0-1.0，对上述语义判断的置信度
+- evidence: 一句基于当前消息和最近对话的判断依据
 
 判断标准:
 - answer_complete 等价于 answer_quality 为 complete 或 vague
@@ -504,7 +514,7 @@ search_query = keywords 用空格拼接即可。
 {recent_context}
 
 严格返回JSON格式:
-{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "classify_result": {{"answer_quality": "...", "should_retrieve": true/false, "transition_style": "...", "escalation_level": 0, "requires_bank_question": true/false}}}}"""
+{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "classify_result": {{"answer_quality": "...", "should_retrieve": true/false, "transition_style": "...", "escalation_level": 0, "requires_bank_question": true/false, "candidate_act": "...", "asked_counter_question": false, "counter_question_topic": null, "asked_for_summary": false, "requested_end": false, "needs_clarification": false, "needs_new_dimension": false, "suggested_question_type": null, "confidence": 0.0, "evidence": "..."}}}}"""
 
 
 # ── 规则预判断（零 LLM 成本）──
@@ -677,43 +687,6 @@ def _extract_keywords_fallback(message: str) -> list[str]:
     return keywords[:5]
 
 
-async def classify_and_recall_fast(
-    user_message: str,
-    memory_summaries: list[dict],
-    recent_context: str = "",
-) -> tuple[str, list[int], list[str], str, bool, dict, dict]:
-    """快速分类 + 记忆召回（零 LLM 成本）
-
-    Returns:
-        (intent, memory_ids, keywords, search_query, answer_complete, structured_rewrite, classify_result)
-    """
-    from app.agents.chat.classify_result import ClassifyResult
-
-    intent = _rule_based_intent(user_message) or "interview_question"
-    keywords = _extract_keywords_fallback(user_message)
-    search_query = " ".join(keywords) if keywords else ""
-    memory_ids = [m["id"] for m in memory_summaries[:3]] if memory_summaries else []
-    answer_complete = _heuristic_answer_complete(user_message)
-
-    structured_rewrite = _infer_rule_based_rewrite(user_message, keywords, intent)
-
-    classify_result = _build_classify_result(
-        intent=intent,
-        answer_complete=answer_complete,
-        question_type=structured_rewrite.get("question_type"),
-    ).to_state()
-
-    return (
-        intent,
-        memory_ids,
-        keywords,
-        search_query,
-        answer_complete,
-        structured_rewrite,
-        classify_result,
-    )
-
-
 def _build_classify_result(
     *,
     intent: str,
@@ -756,6 +729,24 @@ def _build_classify_result(
     except (TypeError, ValueError):
         escalation = 0
 
+    def semantic_bool(name: str) -> bool:
+        value = llm.get(name, False)
+        return value if isinstance(value, bool) else False
+
+    try:
+        confidence = max(0.0, min(1.0, float(llm.get("confidence", 0.0))))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    candidate_act = llm.get("candidate_act")
+    candidate_act = candidate_act.strip() if isinstance(candidate_act, str) else None
+    counter_topic = llm.get("counter_question_topic")
+    counter_topic = counter_topic.strip() if isinstance(counter_topic, str) else None
+    suggested_type = llm.get("suggested_question_type")
+    suggested_type = suggested_type.strip() if isinstance(suggested_type, str) else None
+    evidence = llm.get("evidence")
+    evidence = evidence.strip() if isinstance(evidence, str) else None
+
     return ClassifyResult(
         intent=intent,  # type: ignore[arg-type]
         answer_quality=quality,  # type: ignore[arg-type]
@@ -764,6 +755,16 @@ def _build_classify_result(
         transition_style=transition,  # type: ignore[arg-type]
         escalation_level=escalation,
         requires_bank_question=requires_bank,
+        candidate_act=candidate_act,
+        asked_counter_question=semantic_bool("asked_counter_question"),
+        counter_question_topic=counter_topic,
+        asked_for_summary=semantic_bool("asked_for_summary"),
+        requested_end=semantic_bool("requested_end"),
+        needs_clarification=semantic_bool("needs_clarification"),
+        needs_new_dimension=semantic_bool("needs_new_dimension"),
+        suggested_question_type=suggested_type,
+        confidence=confidence,
+        evidence=evidence,
     )
 
 
@@ -780,33 +781,6 @@ async def classify_and_recall(
     """
     from app.agents.chat.classify_result import ClassifyResult
 
-    rule_intent = _rule_based_intent(user_message)
-    if rule_intent == "chat":
-        structured = _infer_rule_based_rewrite(user_message, [], "chat")
-        classify_result = ClassifyResult(
-            intent="chat",
-            answer_quality="complete",
-            should_retrieve=False,
-            transition_style="natural",
-            requires_bank_question=False,
-        ).to_state()
-        return "chat", [], [], "", False, structured, classify_result
-    if rule_intent == "end_interview":
-        structured = _infer_rule_based_rewrite(user_message, [], "end_interview")
-        classify_result = ClassifyResult(
-            intent="end_interview",
-            answer_quality="complete",
-            should_retrieve=False,
-            transition_style="closing",
-            requires_bank_question=False,
-        ).to_state()
-        return "end_interview", [], [], "", False, structured, classify_result
-
-    # Rules are now only hints, not authoritative
-    rule_hint = ""
-    if rule_intent in ("practice_request", "follow_up"):
-        rule_hint = f"\n注意：规则预判为 {rule_intent}，但请根据完整上下文重新判断，规则可能误判。"
-
     # 3. 合并 LLM 调用：意图 + 记忆选择 + 检索查询
     memory_list = "\n".join(
         f"[id:{m['id']} {m['memory_type']}] {m['summary']}" for m in memory_summaries
@@ -817,7 +791,7 @@ async def classify_and_recall(
             memory_list=memory_list,
             user_message=user_message,
             recent_context=recent_context,
-            rule_hint=rule_hint,
+            rule_hint="",
         )
         result = await _call_llm_with_retry(
             prompt,
@@ -831,10 +805,6 @@ async def classify_and_recall(
         valid_intents = {"interview_question", "end_interview", "practice_request", "chat", "follow_up"}
         if intent not in valid_intents:
             intent = "interview_question"
-        if intent == "end_interview" and not _is_explicit_end_interview_request(
-            user_message
-        ):
-            intent = "interview_question"
 
         # 验证 memory IDs
         memory_ids = parsed.get("relevant_memory_ids", [])
@@ -846,7 +816,7 @@ async def classify_and_recall(
         if not isinstance(keywords, list):
             keywords = []
         keywords = _clean_terms(keywords, limit=5)
-        if not keywords:
+        if not keywords and intent in ("interview_question", "practice_request", "follow_up"):
             keywords = _extract_keywords_fallback(user_message)
 
         # 验证 search_query
@@ -896,8 +866,12 @@ async def classify_and_recall(
 
     except Exception as e:
         logger.warning(f"合并意图+召回 LLM 调用失败，降级到规则: {e}")
-        intent = await _classify_intent_only(user_message, recent_context, user_id)
-        keywords = _extract_keywords_fallback(user_message)
+        intent = _rule_based_intent(user_message) or "interview_question"
+        keywords = (
+            _extract_keywords_fallback(user_message)
+            if intent in ("interview_question", "practice_request", "follow_up")
+            else []
+        )
         answer_complete = _heuristic_answer_complete(user_message)
         structured = _infer_rule_based_rewrite(user_message, keywords, intent)
         classify_result = _build_classify_result(

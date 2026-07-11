@@ -692,6 +692,7 @@ def _maybe_create_question_plan(
     }
     state["selected_question"] = selected
     state["next_question_plan"] = plan
+    state["selection_confidence"] = 1.0
     state["question_source_reason"] = "question_plan_bound"
     return plan
 

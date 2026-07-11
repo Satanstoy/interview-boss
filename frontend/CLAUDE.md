@@ -54,6 +54,7 @@ src/
 │   └── index.js      ← Vue Router 配置（路由表 + 认证守卫）
 ├── layouts/
 │   ├── AuthenticatedLayout.vue ← 已登录布局（数据层：调用 composables + provide/inject + 侧边栏 + 全局模态框）
+│   ├── DefaultLayout.vue       ← 默认布局（min-h-screen + 背景色，支持 light/dark）
 │   └── BlankLayout.vue         ← 无侧边栏布局（登录页）
 ├── views/            ← 页面组件（inject('appData') 获取共享数据）
 │   ├── MasterBankView.vue
@@ -71,9 +72,13 @@ src/
 ├── composables/      ← 领域逻辑（use* 前缀）
 ├── components/
 │   ├── common/       ← 通用 UI（无业务依赖）
-│   └── business/     ← 业务组件
+│   ├── business/     ← 业务组件
+│   ├── ui/           ← shadcn-vue 原始组件
+│   └── *.vue         ← 应用壳层组件（AppSidebar / NavMain / NavUser / NavDocuments / NavSecondary / SiteHeader / ChartAreaInteractive / DashboardDataTable / DraggableRow / DragHandle）
 ├── utils/            ← 纯工具函数
 ├── constants/        ← config.js、enums.js
+├── stores/           ← Pinia 状态层（当前为空，状态走 composables）
+├── lib/              ← shadcn-vue 工具函数（gitignored，不提交）
 └── assets/styles/    ← CSS 变量、重置、全局样式 + Tailwind
 ```
 

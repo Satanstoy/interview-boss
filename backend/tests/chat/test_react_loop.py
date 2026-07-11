@@ -264,20 +264,34 @@ class TestReactLoop:
             "model": None,
         }
 
-        with patch(
-            "app.services.llm.llm_with_tools", new_callable=AsyncMock
-        ) as mock_llm:
+        with (
+            patch(
+                "app.services.llm.llm_with_tools", new_callable=AsyncMock
+            ) as mock_llm,
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "在结束前，你有什么想了解我们的吗？",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ) as mock_executor,
+        ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         assert [e["type"] for e in events] == ["chunk", "done"]
-        assert "你有什么想问" in events[0]["content"]
+        assert "有什么想了解" in events[0]["content"]
         assert (
             state["question_source_reason"]
             == "coverage_complete_ready_for_candidate_question"
         )
         mock_llm.assert_not_called()
+        assert mock_executor.await_count == 1
 
     async def test_overlong_interview_closes_after_candidate_question(self):
         """If the final candidate question was already asked, answer and end."""
@@ -347,25 +361,22 @@ class TestReactLoop:
                 return_value={"action": "close", "reason": "hard_stop_by_message_count"},
             ),
             patch(
-                "app.agents.chat.react_loop.generate_closing_utterance",
-                new_callable=AsyncMock,
-                return_value={
-                    "status": "error",
-                    "error_code": "closing_generation_failed",
-                    "message": "LLM 输出为空",
-                },
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "error",
+                        "error_code": "closing_generation_failed",
+                        "message": "LLM 输出为空",
+                        "writer_trace": {"writer": "closing_writer", "result": "error"},
+                        "validator_trace": [],
+                    }
+                ),
             ),
-            patch(
-                "app.agents.chat.react_loop._generate_structured_summary",
-                new_callable=AsyncMock,
-                return_value="**整体表现**：不应单独输出",
-            ) as mock_summary,
         ):
             events = [event async for event in _react_loop(state)]
 
         assert [event["type"] for event in events] == ["error", "done"]
         assert events[0]["code"] == "closing_generation_failed"
-        mock_summary.assert_not_awaited()
 
     async def test_summary_writer_failure_does_not_emit_generic_summary(self):
         """A close contract cannot replace a failed LLM summary with generic prose."""
@@ -385,14 +396,16 @@ class TestReactLoop:
                 return_value={"action": "close", "reason": "hard_stop_by_message_count"},
             ),
             patch(
-                "app.agents.chat.react_loop.generate_closing_utterance",
-                new_callable=AsyncMock,
-                return_value={"status": "success", "text": "感谢你的时间，今天先到这里。"},
-            ),
-            patch(
-                "app.services.llm._call_llm_with_retry_messages",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("LLM timeout"),
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "error",
+                        "error_code": "summary_generation_failed",
+                        "message": "面试总结生成失败，请稍后再试。",
+                        "writer_trace": {"writer": "closing_writer", "summary_writer": "error"},
+                        "validator_trace": [],
+                    }
+                ),
             ),
         ):
             events = [event async for event in _react_loop(state)]
@@ -432,14 +445,15 @@ class TestReactLoop:
                 },
             ),
             patch(
-                "app.agents.chat.react_loop.generate_closing_utterance",
-                new_callable=AsyncMock,
-                return_value={"status": "success", "text": "感谢你的时间，今天先到这里。"},
-            ),
-            patch(
-                "app.agents.chat.react_loop._generate_structured_summary",
-                new_callable=AsyncMock,
-                return_value="**整体表现**：本轮总结。",
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "感谢你的时间，今天先到这里。\n\n**整体表现**：本轮总结。",
+                        "writer_trace": {"writer": "closing_writer", "summary_writer": "success"},
+                        "validator_trace": [],
+                    }
+                ),
             ),
         ):
             events = [event async for event in _react_loop(state)]
@@ -448,8 +462,109 @@ class TestReactLoop:
         assert "ReAct 草稿" not in content
         assert "**整体表现**" in content
 
-    async def test_direct_answer_no_tools(self):
-        """LLM returns no tool_calls -> should emit the direct ReAct answer."""
+    @pytest.mark.parametrize(
+        ("classify_result", "selected_question", "writer"),
+        [
+            (
+                {
+                    "intent": "interview_question",
+                    "answer_quality": "complete",
+                    "needs_new_dimension": True,
+                    "confidence": 0.9,
+                },
+                {"id": 12, "question": "Agent 如何落地？", "selection_confidence": 0.9},
+                "question_writer",
+            ),
+            (
+                {
+                    "intent": "interview_question",
+                    "answer_quality": "complete",
+                    "asked_counter_question": True,
+                    "counter_question_topic": "团队评测方式",
+                },
+                None,
+                "counter_writer",
+            ),
+            (
+                {
+                    "intent": "interview_question",
+                    "answer_quality": "vague",
+                    "needs_clarification": True,
+                },
+                None,
+                "clarify_writer",
+            ),
+            (
+                {
+                    "intent": "interview_question",
+                    "answer_quality": "complete",
+                    "needs_new_dimension": False,
+                    "confidence": 0.9,
+                },
+                None,
+                "followup_writer",
+            ),
+        ],
+    )
+    async def test_empty_react_completion_runs_contract_writer(
+        self,
+        classify_result,
+        selected_question,
+        writer,
+    ):
+        """Tool evidence completion must not require a ReAct text draft."""
+        from app.agents.chat.pipeline import _react_loop
+
+        state = {
+            "user_id": 1,
+            "user_message": "我刚才的项目回答完了。",
+            "message_history": [],
+            "recent_messages": [],
+            "session_notes": "",
+            "model": None,
+            "intent": "interview_question",
+            "classify_result": classify_result,
+            "answer_quality": classify_result["answer_quality"],
+            "selected_question": selected_question,
+            "counter_question": False,
+            "interview_state": {"next_focus": "project_followup"},
+        }
+        executor = AsyncMock(
+            return_value={
+                "status": "success",
+                "text": f"{writer} 生成的用户可见回复。",
+                "writer_trace": {"writer": writer, "result": "success"},
+                "validator_trace": [],
+            }
+        )
+
+        with (
+            patch(
+                "app.agents.chat.react_loop.evaluate_interview_stop",
+                return_value={"action": "continue"},
+            ),
+            patch(
+                "app.agents.chat.react_loop.build_react_system_prompt",
+                return_value="test prompt",
+            ),
+            patch(
+                "app.services.llm.llm_with_tools",
+                new_callable=AsyncMock,
+                return_value={"content": "", "tool_calls": None, "finish_reason": "stop"},
+            ),
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=executor,
+            ),
+        ):
+            events = [event async for event in _react_loop(state)]
+
+        content = "".join(event.get("content", "") for event in events if event["type"] == "chunk")
+        assert content == f"{writer} 生成的用户可见回复。"
+        executor.assert_awaited_once()
+
+    async def test_direct_answer_no_tools_uses_contract_writer(self):
+        """LLM draft without tools is evidence; the contract writer owns output."""
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -473,21 +588,33 @@ class TestReactLoop:
                 },
             ) as mock_llm,
             patch("app.services.llm.stream_llm_messages") as mock_stream,
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "你好，请介绍一下你最近负责的一个项目。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ) as mock_executor,
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         chunk_events = [e for e in events if e.get("type") == "chunk"]
-        assert [e["content"] for e in chunk_events] == ["Hello World"]
-        assert "".join(e["content"] for e in chunk_events) == "Hello World"
+        assert [e["content"] for e in chunk_events] == ["你好，请介绍一下你最近负责的一个项目。"]
+        assert "Hello World" not in "".join(e["content"] for e in chunk_events)
         mock_llm.assert_awaited_once()
         mock_stream.assert_not_called()
+        mock_executor.assert_awaited_once()
         # Last event should be "done"
         assert events[-1]["type"] == "done"
 
-    async def test_nonstream_react_answer_is_used_without_second_llm_call(self):
-        """A direct ReAct answer is user-visible without a second LLM stream call."""
+    async def test_nonstream_react_answer_is_not_user_visible(self):
+        """A ReAct draft never bypasses the contract writer."""
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -518,16 +645,26 @@ class TestReactLoop:
                 "app.services.llm.stream_llm_messages",
                 side_effect=lambda *a, **kw: _mock_stream_strings("流式", "回答"),
             ) as mock_stream,
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "请具体讲讲这个 Agent 项目的工具调用边界。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ) as mock_executor,
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         chunk_events = [e for e in events if e.get("type") == "chunk"]
-        assert [e["content"] for e in chunk_events] == [
-            "非流式草稿，不应该直接展示"
-        ]
+        assert [e["content"] for e in chunk_events] == ["请具体讲讲这个 Agent 项目的工具调用边界。"]
         assert not mock_stream.called
+        mock_executor.assert_awaited_once()
         assert events[-1]["type"] == "done"
 
     async def test_tool_call_then_answer(self):
@@ -596,6 +733,17 @@ class TestReactLoop:
                         "Here is your question"
                     ),
                 ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "请结合 JVM 内存模型，说明你会如何定位一次内存问题。",
+                            "writer_trace": {"writer": "followup_writer", "result": "success"},
+                            "validator_trace": [],
+                        }
+                    ),
+                ),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -621,7 +769,7 @@ class TestReactLoop:
         assert events[2]["type"] == "retrieved"
         assert events[2]["questions"][0]["id"] == 10
         assert events[-2]["type"] == "chunk"
-        assert events[-2]["content"] == "Here is your question"
+        assert events[-2]["content"] == "请结合 JVM 内存模型，说明你会如何定位一次内存问题。"
         assert events[-1]["type"] == "done"
 
         # LLM called twice (once for tool, once for answer)
@@ -953,6 +1101,17 @@ class TestReactLoop:
                 new_callable=AsyncMock,
                 return_value="Final answer after max steps",
             ) as mock_synthesis,
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "刚才我们完成了必要的准备。请具体讲讲你如何设计测试策略。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ),
         ):
             events = []
             async for event in _react_loop(state):
@@ -965,7 +1124,7 @@ class TestReactLoop:
         mock_synthesis.assert_awaited_once()
         chunk_events = [e for e in events if e.get("type") == "chunk"]
         assert len(chunk_events) > 0
-        assert chunk_events[0]["content"] == "Final answer after max steps"
+        assert chunk_events[0]["content"] == "刚才我们完成了必要的准备。请具体讲讲你如何设计测试策略。"
 
     async def test_react_trace_is_backend_only_and_sanitized(self, caplog):
         """Trace logs should help debugging without leaking tool payloads to SSE."""
@@ -1071,6 +1230,17 @@ class TestReactLoop:
                 },
             ),
             patch("app.services.llm.stream_llm_messages") as mock_stream,
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "挑一个你最有代表性的项目，讲讲其中最关键的技术取舍。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ),
         ):
             events = []
             async for event in _react_loop(state):
@@ -1081,8 +1251,7 @@ class TestReactLoop:
         )
         assert chunk_text
         assert chunk_text != "project-deep-dive"
-        assert "项目做深挖" in chunk_text
-        assert "internal_marker_filtered" in caplog.text
+        assert "技术取舍" in chunk_text
         mock_stream.assert_not_called()
 
 
@@ -1341,13 +1510,24 @@ class TestFinalAnswerQuality:
                 "app.services.llm.stream_llm_messages",
                 side_effect=broken_stream,
             ),
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "请结合 RAG 流程，说明你如何评估检索结果的质量。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ),
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         chunks = [event["content"] for event in events if event["type"] == "chunk"]
-        assert chunks == ["正常草稿：请你解释 Agent 的整体架构是什么？"]
+        assert chunks == ["请结合 RAG 流程，说明你如何评估检索结果的质量。"]
         assert [event["type"] for event in events][-2:] == ["chunk", "done"]
         assert "selected_question" not in state
 
@@ -1383,13 +1563,24 @@ class TestFinalAnswerQuality:
                 "app.services.llm.stream_llm_messages",
                 side_effect=flaky_stream,
             ),
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "请继续展开你刚才的实现取舍。",
+                        "writer_trace": {"writer": "followup_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ),
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
         assert [event for event in events if event["type"] == "chunk"] == [
-            {"type": "chunk", "content": "非流式草稿"}
+            {"type": "chunk", "content": "请继续展开你刚才的实现取舍。"}
         ]
         assert not any(event["type"] == "error" for event in events)
 
@@ -1778,7 +1969,7 @@ class TestQuestionPlanEnforcement:
         assert "RAG 检索怎么设计" in second_messages_text
         assert state["next_question_plan"]["question_id"] == 11
 
-    async def test_empty_final_answer_uses_bound_question_plan_fallback(self):
+    async def test_empty_final_answer_uses_bound_question_plan_writer(self):
         from app.agents.chat.pipeline import _react_loop
 
         state = {
@@ -1789,6 +1980,12 @@ class TestQuestionPlanEnforcement:
             "intent": "practice_request",
             "question_type": "algorithm_coding",
             "answer_complete": False,
+            "classify_result": {
+                "intent": "practice_request",
+                "answer_quality": "complete",
+                "needs_new_dimension": True,
+                "confidence": 0.9,
+            },
         }
         tc_draw = _tc("draw_questions", {"question_type": "algorithm_coding"})
         tc_select = _tc("select_question", {"candidate_index": 1}, tc_id="call_2")
@@ -1871,15 +2068,25 @@ class TestQuestionPlanEnforcement:
             ),
             patch("app.services.llm.llm_with_tools", side_effect=mock_llm),
             patch("app.agents.chat.tools.execute_tool", side_effect=mock_execute_tool),
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "请你手写一下深度优先遍历，并说明迭代和递归的取舍。",
+                        "writer_trace": {"writer": "question_writer", "result": "success"},
+                        "validator_trace": [],
+                    }
+                ),
+            ) as mock_executor,
         ):
             events = []
             async for event in _react_loop(state):
                 events.append(event)
 
-        error_events = [event for event in events if event["type"] == "error"]
-        assert len(error_events) == 1
-        assert error_events[0].get("code") == "empty_answer_plan_generation_failed"
-        assert state["final_answer_error"]["reason"] == "empty_answer_plan_generation_error"
+        assert not [event for event in events if event["type"] == "error"]
+        assert state["turn_contract"]["action"] == "ask_selected_question"
+        mock_executor.assert_awaited_once()
 
     async def test_plan_drift_is_repaired_once(self):
         from app.agents.chat.pipeline import _final_answer_events_from_text
@@ -2389,8 +2596,15 @@ class TestEndInterviewHardRoute:
                     new_callable=AsyncMock,
                 ),
                 patch(
-                    "app.agents.chat.pipeline.classify_and_recall_fast",
-                    new_callable=AsyncMock,
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "感谢你的时间，下面是本轮面试总结。",
+                            "writer_trace": {"writer": "closing_writer", "summary_writer": "success"},
+                            "validator_trace": [],
+                        }
+                    ),
                 ),
                 patch(
                     "app.agents.chat.pipeline.build_interview_context",
@@ -3083,6 +3297,17 @@ class TestRetrievalGap:
                         "能说说你们项目里 Redis 缓存的过期策略是怎么设计的？"
                     ),
                 ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "能说说你们项目里 Redis 缓存的过期策略是怎么设计的？",
+                            "writer_trace": {"writer": "followup_writer", "result": "success"},
+                            "validator_trace": [],
+                        }
+                    ),
+                ),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -3271,6 +3496,17 @@ class TestRetrievalGap:
                         "能详细说说缓存的过期策略吗？"
                     ),
                 ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "能详细说说缓存的过期策略吗？",
+                            "writer_trace": {"writer": "clarify_writer", "result": "success"},
+                            "validator_trace": [],
+                        }
+                    ),
+                ),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -3374,6 +3610,20 @@ class TestRetrievalGap:
                         "你的切块策略具体怎么做的？固定长度还是递归？chunk size 多少？"
                     ),
                 ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "能具体讲讲 RAG 的切块策略和取舍吗？",
+                            "writer_trace": {
+                                "writer": "followup_writer",
+                                "result": "success",
+                            },
+                            "validator_trace": [],
+                        }
+                    ),
+                ) as contract_executor,
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -3390,6 +3640,7 @@ class TestRetrievalGap:
         chunk_events = [e for e in all_events if e.get("type") == "chunk"]
         assert len(chunk_events) >= 1
         assert "切块策略" in chunk_events[0]["content"]
+        contract_executor.assert_awaited_once()
 
     async def test_retrieval_gap_does_not_run_retry_validation_path(self):
         """No guard retry means no hidden retry tool validation path exists."""

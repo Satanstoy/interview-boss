@@ -202,21 +202,3 @@ def _last_assistant_asked_candidate_question(state: dict[str, Any]) -> bool:
         content = str(msg.get("content") or "")
         return CANDIDATE_QUESTION_MARKER in content
     return False
-
-
-_CLOSING_SIGNALS = (
-    "时间差不多了",
-    "感谢您的时间",
-    "感谢面试官的时间",
-    "今天先到这里",
-    "就到这里吧",
-    "差不多可以收了",
-    "差不多可以结束了",
-    "可以收尾了",
-    "想请教几个问题就收尾",
-)
-
-
-def detect_closing_signal(user_message: str) -> bool:
-    """检测候选人是否发出收尾信号。"""
-    return any(signal in user_message for signal in _CLOSING_SIGNALS)

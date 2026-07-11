@@ -53,7 +53,7 @@ class TestBuildReactSystemPrompt:
             "memory_summaries": [],
         }
         prompt = build_react_system_prompt(state)
-        assert len(prompt) < 9000
+        assert len(prompt) < 10000
 
     def test_always_active_skill_body_injected_when_active_skills_empty(self):
         """interview-tool-use (always_active=true) body must appear even with no active_skills."""

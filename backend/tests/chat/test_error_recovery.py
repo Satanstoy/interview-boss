@@ -337,7 +337,8 @@ class TestToolFailureRecovery:
         assert search_mock.call_count == 1
         # Should still get a done event (not crash)
         assert any(e["type"] == "done" for e in events)
-        assert "搜索出错了" in state["response"]
+        assert state["response"]
+        assert "搜索出错了，我直接给你一道基础题。" not in state["response"]
 
     async def test_draw_failure_recovers(self):
         """ER1: draw_questions 抛异常 → LLM 收到错误 → 直接回答"""

@@ -866,11 +866,6 @@ class TestLoadSkillStepEvent:
 
             with (
                 patch(
-                    "app.agents.chat.react_loop._forced_closing_response",
-                    new_callable=AsyncMock,
-                    return_value=None,
-                ),
-                patch(
                     "app.agents.chat.react_loop.build_react_system_prompt",
                     return_value="You are an interviewer.",
                 ),

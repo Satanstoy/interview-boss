@@ -132,6 +132,7 @@ class TestPlanTurn:
             "user_message": "我的回答是这样的...",
             "repetition_streak": 0,
             "decision_config": None,
+            "selection_confidence": 0.9,
         }
         base.update(overrides)
         return base
@@ -202,6 +203,7 @@ class TestPlanTurn:
                 "answer_quality": "complete",
                 "should_retrieve": True,
                 "needs_new_dimension": True,
+                "confidence": 0.9,
             },
         )
         contract = plan_turn(state)
@@ -270,6 +272,8 @@ class TestPlanTurn:
                 "intent": "interview_question",
                 "answer_quality": "complete",
                 "should_retrieve": True,
+                "needs_new_dimension": True,
+                "confidence": 0.9,
             },
         )
         contract = plan_turn(state)
@@ -290,6 +294,8 @@ class TestPlanTurn:
                 "intent": "interview_question",
                 "answer_quality": "complete",
                 "should_retrieve": True,
+                "needs_new_dimension": True,
+                "confidence": 0.9,
             },
         )
         contract = plan_turn(state)
