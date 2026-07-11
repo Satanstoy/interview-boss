@@ -1,86 +1,70 @@
-# Interview Turn Intent and Rhythm Design
+# 模拟面试 TurnIntent 与节奏控制设计
 
-Date: 2026-07-11
-Status: approved design, awaiting implementation-plan review
+日期：2026-07-11
+状态：设计已讨论确认，等待实现计划 review
 
-## Problem
+## 问题
 
-The current chat harness correctly separates ReAct tool execution from final
-user-visible writers, but it leaves rhythm control split across three places:
+当前 chat harness 已经把 ReAct 的工具执行和最终面向候选人的话术分开，但节奏控制仍分散在三处：
 
-- `interview-rhythm` and domain skills influence the ReAct prompt.
-- `rhythm_profile`, coverage, and stop policy influence thresholds and closing.
-- Contract writers receive only a small `next_focus` string and recreate the
-  next question from scratch.
+- `interview-rhythm` 与领域 skill 影响 ReAct prompt；
+- `rhythm_profile`、覆盖率与 stop policy 影响题型阈值和收尾；
+- contract writer 只拿到很薄的 `next_focus`，重新猜下一问。
 
-This means a skill can be loaded and its tool instructions can be followed,
-while the final writer still asks a generic or rhythm-inappropriate question.
-The system has no single, observable decision that says why this turn is a
-deep-dive, clarification, topic shift, counter-question response, or close.
+因此 skill 即使已加载、ReAct 即使已按它调用工具，最终 writer 仍可能提出泛化或节奏不合适的问题。系统缺少一个唯一且可观测的决策，说明本轮为什么是深挖、澄清、切题、回答反问或收尾。
 
-## Goals
+## 目标
 
-- Keep the async harness. Do not reintroduce LangGraph state edges.
-- Keep ReAct as evidence and tool execution only.
-- Make `rhythm_profile`, `interview-rhythm`, and focused skills such as
-  `project-deep-dive` jointly affect the final user-visible turn.
-- Avoid enumerating candidate phrasings or maintaining conversational keyword
-  states. Use LLM semantic interpretation and structured interview facts.
-- Preserve the five existing `TurnContract` actions.
-- Make the executed pacing decision observable in API done metadata and E2E.
+- 保持纯 async harness，不重新引入 LangGraph 的状态边。
+- 保持 ReAct 只负责证据与工具执行。
+- 让 `rhythm_profile`、`interview-rhythm` 与 `project-deep-dive` 等聚焦 skill 一起影响最终用户可见回合。
+- 不枚举候选人的说法，也不维护关键词式对话状态；使用 LLM 语义理解与结构化面试事实。
+- 保留现有五种 `TurnContract` action。
+- 将实际执行的节奏决策写入 done metadata，并可在 API E2E 中验证。
 
-## Non-goals
+## 非目标
 
-- Do not generate a fixed 10-15 question script at conversation start.
-- Do not let one LLM prompt select tools, change policy, and write the final
-  question without a structured boundary.
-- Do not turn skill examples into literal questions.
-- Do not make every turn require a blocking LLM validator.
+- 不在会话开始时生成固定的 10-15 题脚本。
+- 不让一个 LLM prompt 同时决定工具、策略和最终问题。
+- 不把 skill 内的示例变成字面题目。
+- 不让每轮都需要阻断式 LLM validator。
 
-## Architecture
+## 总体架构
 
 ```text
-Semantic Interpreter
-  -> Interview Strategy Engine
+LLM 语义解释器
+  -> 面试策略引擎
   -> TurnIntent
   -> TurnContract
-  -> ReAct evidence collection when required
+  -> ReAct 证据采集（需要工具时）
   -> Contract writer
   -> validator / metadata
 ```
 
-### Semantic Interpreter
+### LLM 语义解释器
 
-The existing structured classifier continues to interpret the current user
-turn. It reports facts such as answer quality, candidate act, counter-question
-status, request to end, clarification need, and confidence. It does not pick
-the final question or transition policy.
+沿用现有结构化 classifier，负责理解当前候选人回合：回答质量、候选人行为、是否反问、是否要求结束、是否需要澄清，以及语义置信度。它不决定最终问题，也不决定节奏策略。
 
-### Interview Strategy Engine
+### 面试策略引擎
 
-This is the single pacing authority. It combines:
+这是唯一的节奏决策权威，综合以下输入：
 
-- semantic facts from the interpreter;
-- question coverage and repeated-topic facts from `InterviewLedger`;
-- macro coverage preferences from `rhythm_profile`;
-- `interview-rhythm` rules, including excessive consecutive depth and missing
-  dimensions;
-- the active focused skill's local tactic, for example the next project
-  deep-dive layer.
+- 语义解释器的结构化事实；
+- `InterviewLedger` 中的题目覆盖、最近话题和重复事实；
+- `rhythm_profile` 提供的宏观覆盖偏好；
+- `interview-rhythm` 提供的连续深挖和维度切换规则；
+- 当前聚焦 skill 的局部追问策略，例如项目深挖的下一层。
 
-The engine uses a hybrid decision model:
+策略采用混合裁决：
 
-- semantic interpretation may say whether the current project still contains
-  unresolved, useful material;
-- deterministic ledger and coverage rules prevent excessive consecutive topic
-  depth, repeated questions, missing dimensions, and premature completion.
+- LLM 语义理解可判断当前项目是否仍有值得继续深挖的未解决材料；
+- ledger 与覆盖规则负责硬边界，防止同类追问过多、重复题、遗漏关键维度和过早收尾。
 
 ### TurnIntent
 
-`TurnIntent` is a short-lived decision record for one turn. It is not a
-conversation state machine and it does not classify candidate wording.
+`TurnIntent` 是单轮短生命周期决策记录，不是会话状态机，也不负责分类候选人措辞。
 
-Suggested shape:
+建议结构：
 
 ```python
 class TurnIntent(BaseModel):
@@ -97,69 +81,49 @@ class TurnIntent(BaseModel):
     reason: str
 ```
 
-Examples:
+示例：
 
-- `deep_dive` plus `drill_layer=decision_rationale` asks why a candidate made
-  an already-mentioned architecture choice.
-- `topic_shift` plus `target_dimension=algorithm_coding` requires question
-  selection from the corresponding bank category.
-- `clarification` stays on the same assessed signal and does not retrieve a
-  new bank question.
+- `deep_dive + drill_layer=decision_rationale`：围绕候选人已经提到的架构选择追问取舍；
+- `topic_shift + target_dimension=algorithm_coding`：必须从对应题库类别选择算法题；
+- `clarification`：保持同一个评估信号，不检索新题。
 
-`writer_brief` contains the evidence anchor, what signal to collect, and
-semantic boundaries. It is an output brief, not a literal question template.
+`writer_brief` 只包含证据锚点、本轮要收集的信号和语义边界，不包含固定题目模板。
 
-### Skill roles
+### 两类节奏来源的职责
 
-`rhythm_profile` is macro policy: coverage proportions, missing dimensions,
-and stop readiness.
+`rhythm_profile` 是宏观 policy：题型比例、缺失维度和是否具备收尾条件。
 
-`interview-rhythm` is the policy rule set that translates macro facts into a
-turn strategy: remain in a deep dive, clarify, or shift dimensions.
+`interview-rhythm` 是策略规则：根据宏观事实选择本轮继续深挖、澄清或切换维度。
 
-Focused skills provide local tactics only after the strategy is chosen:
+聚焦 skill 只在策略已经确定后提供局部追问策略：
 
-- `project-deep-dive`: architecture, rationale, failure recovery, pressure
-  test, personal contribution, or measured impact;
-- `theory-qa`: the allowed depth and evidence expected for fundamentals;
-- `algorithm-coding`: algorithm-specific evidence and question-bank usage.
+- `project-deep-dive`：架构、取舍、故障恢复、压力测试、个人贡献或量化影响；
+- `theory-qa`：基础知识允许的追问深度和预期证据；
+- `algorithm-coding`：算法题的预期证据与题库使用方式。
 
-Skills no longer rely on a final writer re-reading their prose from an
-unstructured ReAct prompt.
+skill 不再依赖最终 writer 从非结构化 ReAct prompt 中重新理解长篇说明。
 
-### TurnContract, ReAct, and writers
+### TurnContract、ReAct 与 writer 的边界
 
-The current five `TurnContract` actions stay in place. `TurnIntent` is created
-before final output and explains how that action must be carried out.
+现有五种 `TurnContract` action 保持不变。`TurnIntent` 在最终输出前生成，说明这个 action 应如何执行。
 
-ReAct receives the intent's tool requirements and may collect candidates,
-load skills, and explicitly select a question. It cannot change the chosen
-strategy or final contract.
+ReAct 只接收 intent 指定的工具需要，可检索候选题、抽题、显式选题和加载 skill；它不能改掉已经确定的策略或最终 contract。
 
-Writers receive both `TurnContract` and `TurnIntent`:
+writer 同时接收 `TurnContract` 与 `TurnIntent`：
 
-- a follow-up writer renders the selected deep-dive layer or topic shift;
-- a question writer renders the selected bank question while preserving the
-  intent's assessment goal;
-- counter and close writers preserve the current interview intent in metadata
-  so later summary/coverage can distinguish a normal counter-question from a
-  missing answer.
+- follow-up writer 按确定的深挖层或切题方向表达问题；
+- question writer 在保持 intent 评估目标的前提下表达已选题；
+- counter 与 close writer 在 metadata 保留当前 intent，供后续总结与覆盖记录区分正常反问和未收集到的回答信号。
 
-## Assessment evidence follow-up
+## 评估证据的后续衔接
 
-The same intent records the expected signal for an interviewer question.
-Subsequent semantic interpretation records whether that signal was observed,
-partially observed, or not assessed. A counter-question after an unanswered
-technical question creates `not_assessed`; it does not create a weakness or
-avoidance conclusion.
+同一份 intent 会记录面试官期望收集的信号。下一轮语义解释器记录该信号是已观察、部分观察还是未观察。技术问题尚未回答时出现候选人反问，应记录为 `not_assessed`，不能记录为薄弱或回避。
 
-This evidence will become the input to the practice-feedback summary path.
-It is deliberately separate from rhythm selection, but shares the same
-question and turn identity.
+该证据是后续练习反馈 summary 的输入，与节奏策略分层，但共享题目和回合标识。
 
-## Observability
+## 可观测性
 
-Done metadata will include:
+done metadata 新增：
 
 ```json
 {
@@ -174,28 +138,19 @@ Done metadata will include:
 }
 ```
 
-The metadata must describe the executed intent, not a later sidecar decision.
+metadata 必须记录实际执行的 intent，不能在输出后另做一个旁路决策。
 
-## TDD acceptance scenarios
+## TDD 验收场景
 
-1. After two sufficiently answered project layers, with theory coverage
-   missing, the engine emits `topic_shift` to theory. The writer cannot continue
-   project deep-dive.
-2. With an unresolved project trade-off, the engine emits `deep_dive` with
-   `decision_rationale`. It cannot retrieve or ask an algorithm question.
-3. A candidate counter-question receives `answer_counter_question`; the
-   outstanding technical signal remains `not_assessed`, not negative evidence.
-4. A candidate requesting close receives `close_with_summary`; summary input
-   marks unobserved signals as `not_assessed` rather than weak or avoided.
-5. API E2E asserts the done event exposes the executed `turn_intent`, contract,
-   tool trace, and writer trace for each relevant turn.
+1. 项目已完成两层充分回答且理论覆盖不足：策略引擎必须生成 `topic_shift -> theory`，writer 不能继续项目深挖。
+2. 项目仍缺技术取舍信号：策略引擎必须生成 `deep_dive -> decision_rationale`，不能检索或提出算法题。
+3. 候选人提出反问：contract 为 `answer_counter_question`；尚未收集到的技术信号保持 `not_assessed`，不是负面证据。
+4. 候选人要求结束：contract 为 `close_with_summary`；summary 输入将未观察信号标为 `not_assessed`，不能写成薄弱或回避。
+5. API E2E：每个相关回合的 done 事件必须暴露实际执行的 `turn_intent`、contract、工具 trace 和 writer trace。
 
-## Migration
+## 迁移步骤
 
-1. Introduce `TurnIntent` and its strategy engine in observation mode with
-   focused pure-function tests.
-2. Feed the intent into contract execution and writers, then make it the only
-   source for the final writer brief.
-3. Persist executed intent and assessment evidence in metadata.
-4. Add the real `sj` journey as a mocked API E2E fixture and retain a manual
-   real-model acceptance run for naturalness.
+1. 引入 `TurnIntent` 与策略引擎，先以旁路观测方式运行，并补纯函数测试。
+2. 将 intent 注入 contract executor 与 writer，使其成为最终 writer brief 的唯一来源。
+3. 在 metadata 中持久化实际 intent 与评估证据。
+4. 把刚才 `sj` 的真实会话转成 mock API E2E fixture，并保留真实模型手工验收以判断自然度。
