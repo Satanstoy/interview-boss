@@ -76,3 +76,6 @@ Thumbs.db
 
 # Playwright
 .playwright-mcp/
+
+# MiMo/CoCode runtime
+.mimocode/
