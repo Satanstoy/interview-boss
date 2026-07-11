@@ -50,52 +50,74 @@ async def _run_turn_with_validator(
         }
 
     async def mock_load_context(state):
-        state.update({
-            "message_history": [{"role": "user", "content": "test"}] * 10,
-            "recent_messages": [{"role": "user", "content": "test"}] * 4,
-            "compressed_context": None,
-            "session_notes": "",
-            "interview_context": "目标岗位：后端开发",
-            "job_position": "后端开发",
-            "memory_summaries": [],
-            "retrieved_questions": [],
-            "selected_question": {"id": 6370, "question": "Agent范式在项目中有没有用过？"},
-            "candidate_questions": [{"id": 6370, "question": "Agent范式在项目中有没有用过？"}],
-            "question_source": "draw_questions",
-            "selection_confidence": 0.9,
-        })
+        state.update(
+            {
+                "message_history": [{"role": "user", "content": "test"}] * 10,
+                "recent_messages": [{"role": "user", "content": "test"}] * 4,
+                "compressed_context": None,
+                "session_notes": "",
+                "interview_context": "目标岗位：后端开发",
+                "job_position": "后端开发",
+                "memory_summaries": [],
+                "retrieved_questions": [],
+                "selected_question": {
+                    "id": 6370,
+                    "question": "Agent范式在项目中有没有用过？",
+                },
+                "candidate_questions": [
+                    {"id": 6370, "question": "Agent范式在项目中有没有用过？"}
+                ],
+                "question_source": "draw_questions",
+                "selection_confidence": 0.9,
+            }
+        )
         return state
 
     async def mock_classify(state):
-        state.update({
+        counter_evidence = (
+            {"text": "团队如何做 Agent 落地", "topic": "团队如何做 Agent 落地"}
+            if counter_question
+            else None
+        )
+        classify_result = {
             "intent": "interview_question",
             "answer_quality": "complete",
             "should_retrieve": False,
-            "requires_bank_question": False,
-            "transition_style": "natural",
-            "escalation_level": 0,
-            "off_topic_streak": 0,
-            "repetition_streak": 0,
-            "counter_question": counter_question,
-            "counter_question_topic": "团队如何做 Agent 落地" if counter_question else None,
-            "classify_result": {
+            "needs_new_dimension": True,
+            "confidence": 0.9,
+        }
+        if counter_evidence is not None:
+            classify_result["counter_question"] = counter_evidence
+        state.update(
+            {
                 "intent": "interview_question",
                 "answer_quality": "complete",
                 "should_retrieve": False,
-                "needs_new_dimension": True,
-                "confidence": 0.9,
-            },
-        })
+                "requires_bank_question": False,
+                "transition_style": "natural",
+                "escalation_level": 0,
+                "off_topic_streak": 0,
+                "repetition_streak": 0,
+                "counter_question": counter_question,
+                "counter_question_evidence": counter_evidence,
+                "counter_question_topic": "团队如何做 Agent 落地"
+                if counter_question
+                else None,
+                "classify_result": classify_result,
+            }
+        )
         return state
 
     async def mock_extract_memory(snapshot):
         pass
 
-    llm_mock = AsyncMock(return_value={
-        "content": llm_answer,
-        "tool_calls": None,
-        "finish_reason": "stop",
-    })
+    llm_mock = AsyncMock(
+        return_value={
+            "content": llm_answer,
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+    )
 
     def stream_side_effect(*args, **kwargs):
         return _async_stream(llm_answer)
@@ -111,10 +133,25 @@ async def _run_turn_with_validator(
     )
 
     patchers = [
-        patch("app.agents.chat.nodes.build_react_system_prompt", return_value="Test prompt."),
-        patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock, side_effect=mock_load_context),
-        patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock, side_effect=mock_classify),
-        patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock, side_effect=mock_extract_memory),
+        patch(
+            "app.agents.chat.nodes.build_react_system_prompt",
+            return_value="Test prompt.",
+        ),
+        patch(
+            "app.agents.chat.pipeline._step_load_context",
+            new_callable=AsyncMock,
+            side_effect=mock_load_context,
+        ),
+        patch(
+            "app.agents.chat.pipeline._step_classify",
+            new_callable=AsyncMock,
+            side_effect=mock_classify,
+        ),
+        patch(
+            "app.agents.chat.pipeline._step_extract_memory",
+            new_callable=AsyncMock,
+            side_effect=mock_extract_memory,
+        ),
         patch("app.services.llm.llm_with_tools", new=llm_mock),
         patch("app.services.llm.stream_llm_messages", side_effect=stream_side_effect),
         patch("app.services.llm.raw_llm_call", new_callable=AsyncMock, return_value=""),
@@ -183,7 +220,9 @@ class TestAskSelectedQuestionContract:
             event["metadata"] for event in events if event.get("type") == "done"
         )
         assert "工具调用稳定" not in chunk_content
-        assert any(event["code"] == "question_validation_failed" for event in error_events)
+        assert any(
+            event["code"] == "question_validation_failed" for event in error_events
+        )
         assert done_metadata["generation_error_code"] == "question_validation_failed"
         assert done_metadata["writer_trace"]["writer"] == "question_writer"
         question_writer.assert_awaited_once()

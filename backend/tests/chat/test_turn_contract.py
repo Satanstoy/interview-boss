@@ -15,7 +15,9 @@ class TestTurnContractAction:
         assert TurnContractAction.ANSWER_COUNTER_QUESTION == "answer_counter_question"
         assert TurnContractAction.CLARIFY_CANDIDATE_ANSWER == "clarify_candidate_answer"
         assert TurnContractAction.ASK_SELECTED_QUESTION == "ask_selected_question"
-        assert TurnContractAction.CONTINUE_NATURAL_FOLLOWUP == "continue_natural_followup"
+        assert (
+            TurnContractAction.CONTINUE_NATURAL_FOLLOWUP == "continue_natural_followup"
+        )
 
 
 class TestTurnContract:
@@ -29,7 +31,11 @@ class TestTurnContract:
                 "source": "draw_questions",
                 "expected_focus": ["agent范式", "项目落地经验"],
             },
-            validation=["non_empty", "no_internal_marker", "semantic_question_adherence"],
+            validation=[
+                "non_empty",
+                "no_internal_marker",
+                "semantic_question_adherence",
+            ],
             reason="knowledge_probe gap with high-confidence selected question",
             source_facts={
                 "answer_quality": "complete",
@@ -46,7 +52,9 @@ class TestTurnContract:
         contract = TurnContract(
             action=TurnContractAction.CLOSE_WITH_SUMMARY,
             priority="coverage_complete",
-            payload={"closing_reason": "coverage_complete_ready_for_candidate_question"},
+            payload={
+                "closing_reason": "coverage_complete_ready_for_candidate_question"
+            },
             validation=["non_empty", "no_unrequested_summary"],
             reason="coverage complete",
             source_facts={"message_count": 32, "all_covered": True},
@@ -115,7 +123,15 @@ class TestPlanTurn:
     """Test the deterministic TurnPlanner priority logic."""
 
     def _make_state(self, **overrides) -> dict:
-        """Create a minimal state dict for testing."""
+        """Create a minimal state dict for testing.
+
+        `plan_turn` (commit 5307ee7) now reads counter evidence from
+        `classify_result.counter_question` (a dict `{text, topic}`) or
+        `state["counter_question_evidence"]`; the legacy bare boolean
+        `state["counter_question"]` is no longer honored. Translate the
+        test shim's `counter_question=True/False` + `counter_question_topic`
+        kwargs into the dict shape `plan_turn` actually consumes.
+        """
         base = {
             "classify_result": {
                 "intent": "interview_question",
@@ -135,6 +151,15 @@ class TestPlanTurn:
             "selection_confidence": 0.9,
         }
         base.update(overrides)
+        # Translate shim kwargs → plan_turn contract.
+        if base.get("counter_question") is True:
+            topic = base.get("counter_question_topic") or "test_topic"
+            evidence = {"text": "测试反问", "topic": topic}
+            base["counter_question_evidence"] = evidence
+            classify = base.get("classify_result") or {}
+            if isinstance(classify, dict):
+                classify = {**classify, "counter_question": evidence}
+                base["classify_result"] = classify
         return base
 
     def test_close_with_summary_when_stop_policy_says_close(self):
