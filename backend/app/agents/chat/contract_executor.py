@@ -60,7 +60,9 @@ def _deterministic_validation(text: str, rules: list[str]) -> list[dict[str, Any
         )
     if "no_internal_marker" in rules:
         normalized = text.lower()
-        marker = next((item for item in _INTERNAL_OUTPUT_MARKERS if item in normalized), None)
+        marker = next(
+            (item for item in _INTERNAL_OUTPUT_MARKERS if item in normalized), None
+        )
         trace.append(
             {
                 "name": "no_internal_marker",
@@ -72,7 +74,11 @@ def _deterministic_validation(text: str, rules: list[str]) -> list[dict[str, Any
     return trace
 
 
-def _success(text: str, writer_trace: dict[str, Any], validator_trace: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _success(
+    text: str,
+    writer_trace: dict[str, Any],
+    validator_trace: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "status": "success",
         "text": text,
@@ -82,7 +88,9 @@ def _success(text: str, writer_trace: dict[str, Any], validator_trace: list[dict
 
 
 def _error(
-    result: dict[str, Any], writer: str, validator_trace: list[dict[str, Any]] | None = None
+    result: dict[str, Any],
+    writer: str,
+    validator_trace: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "status": "error",
@@ -102,7 +110,9 @@ def _validate_success(
     trace = _deterministic_validation(text, contract.validation)
     if validator_trace:
         trace.extend(validator_trace)
-    failed = next((item for item in trace if item["blocking"] and not item["passes"]), None)
+    failed = next(
+        (item for item in trace if item["blocking"] and not item["passes"]), None
+    )
     if failed:
         return _error(
             {
@@ -115,12 +125,83 @@ def _validate_success(
     return _success(text, writer_trace, trace)
 
 
+def _pick_fallback_candidate(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Pick a viable fallback candidate distinct from the current selected_question.
+
+    Used when the first writer/validator fails — we swap to another candidate
+    rather than surfacing an error to the candidate. Returns None if no
+    distinct viable candidate is available.
+    """
+    candidates = state.get("candidate_questions") or []
+    selected = state.get("selected_question") or {}
+    selected_id = selected.get("id")
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if not candidate.get("id") or not candidate.get("question"):
+            continue
+        if candidate.get("id") == selected_id:
+            continue
+        return candidate
+    return None
+
+
+async def _run_question_writer_with_fallback(
+    *,
+    state: dict[str, Any],
+    context_anchor: str,
+    llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
+    question_validator: Callable[..., Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Run question_writer; on failure, swap to a fallback candidate once.
+
+    Restricted to one retry on a distinct viable candidate — never loop.
+    Mechanical templates and ReAct drafts stay banned; the fallback still
+    goes through the same writer + validator path.
+    """
+    result = await generate_question_with_validation(
+        selected_question=state.get("selected_question") or {},
+        context_anchor=context_anchor,
+        question_type=str(state.get("question_type") or "unknown"),
+        llm_call=llm_call,
+        validator=question_validator,
+    )
+    if result["status"] == "success":
+        return {**result, "fallback_attempted": False}
+
+    fallback = _pick_fallback_candidate(state)
+    if fallback is None:
+        return {**result, "fallback_attempted": False}
+
+    logger.warning(
+        "Question writer failed (error_code=%s); retrying with fallback candidate id=%s",
+        result.get("error_code"),
+        fallback.get("id"),
+    )
+    state["selected_question"] = fallback
+    fallback_result = await generate_question_with_validation(
+        selected_question=fallback,
+        context_anchor=context_anchor,
+        question_type=str(state.get("question_type") or "unknown"),
+        llm_call=llm_call,
+        validator=question_validator,
+    )
+    if fallback_result["status"] == "success":
+        return {**fallback_result, "fallback_attempted": True}
+    # Surface the original error_code as the diagnostic of record; the
+    # fallback also failed, but the first failure is the more informative
+    # one for the candidate-facing error event.
+    return {**result, "fallback_attempted": True}
+
+
 async def execute_turn_contract(
     *,
     state: dict[str, Any],
     contract: TurnContract,
     llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
-    question_validator: Callable[..., Awaitable[dict[str, Any]]] = validate_question_adherence,
+    question_validator: Callable[
+        ..., Awaitable[dict[str, Any]]
+    ] = validate_question_adherence,
     summary_generator: Callable[..., Awaitable[str]] = generate_structured_summary,
 ) -> dict[str, Any]:
     """Return the only user-visible response permitted for *contract*."""
@@ -137,28 +218,41 @@ async def execute_turn_contract(
             )
             if part.strip()
         )
-        result = await generate_question_with_validation(
-            selected_question=state.get("selected_question") or {},
+        result = await _run_question_writer_with_fallback(
+            state=state,
             context_anchor=question_context,
-            question_type=str(state.get("question_type") or "unknown"),
             llm_call=llm_call,
-            validator=question_validator,
+            question_validator=question_validator,
         )
         if result["status"] != "success":
-            return _error(result, "question_writer")
+            error = _error(result, "question_writer")
+            error["writer_trace"] = {
+                "writer": "question_writer",
+                "result": "error",
+                "fallback_attempted": bool(result.get("fallback_attempted")),
+            }
+            return error
         validator = result.get("validator_result") or {}
+        writer_trace = {
+            "writer": "question_writer",
+            "result": "success",
+            "retry_count": result.get("retry_count", 0),
+            "fallback_attempted": bool(result.get("fallback_attempted")),
+        }
         return _validate_success(
             result["text"],
-            {"writer": "question_writer", "result": "success", "retry_count": result.get("retry_count", 0)},
+            writer_trace,
             contract,
-            [{
-                "name": "semantic_question_adherence",
-                "blocking": True,
-                "passes": bool(validator.get("passes")),
-                "score": validator.get("score"),
-                "issues": validator.get("issues", []),
-                "reason": validator.get("reason", ""),
-            }],
+            [
+                {
+                    "name": "semantic_question_adherence",
+                    "blocking": True,
+                    "passes": bool(validator.get("passes")),
+                    "score": validator.get("score"),
+                    "issues": validator.get("issues", []),
+                    "reason": validator.get("reason", ""),
+                }
+            ],
         )
 
     if action == TurnContractAction.CLARIFY_CANDIDATE_ANSWER:
@@ -167,7 +261,15 @@ async def execute_turn_contract(
             recent_context=context,
             llm_call=llm_call,
         )
-        return _validate_success(result["text"], {"writer": "clarify_writer", "result": "success"}, contract) if result["status"] == "success" else _error(result, "clarify_writer")
+        return (
+            _validate_success(
+                result["text"],
+                {"writer": "clarify_writer", "result": "success"},
+                contract,
+            )
+            if result["status"] == "success"
+            else _error(result, "clarify_writer")
+        )
 
     if action == TurnContractAction.ANSWER_COUNTER_QUESTION:
         result = await generate_counter_answer(
@@ -176,7 +278,15 @@ async def execute_turn_contract(
             recent_context=context,
             llm_call=llm_call,
         )
-        return _validate_success(result["text"], {"writer": "counter_writer", "result": "success"}, contract) if result["status"] == "success" else _error(result, "counter_writer")
+        return (
+            _validate_success(
+                result["text"],
+                {"writer": "counter_writer", "result": "success"},
+                contract,
+            )
+            if result["status"] == "success"
+            else _error(result, "counter_writer")
+        )
 
     if action == TurnContractAction.CONTINUE_NATURAL_FOLLOWUP:
         focus = str(
@@ -191,7 +301,15 @@ async def execute_turn_contract(
             turn_intent=state.get("turn_intent"),
             llm_call=llm_call,
         )
-        return _validate_success(result["text"], {"writer": "followup_writer", "result": "success"}, contract) if result["status"] == "success" else _error(result, "followup_writer")
+        return (
+            _validate_success(
+                result["text"],
+                {"writer": "followup_writer", "result": "success"},
+                contract,
+            )
+            if result["status"] == "success"
+            else _error(result, "followup_writer")
+        )
 
     closing = await generate_closing_utterance(
         closing_reason=str(contract.payload.get("closing_reason") or "turn_contract"),
@@ -215,7 +333,11 @@ async def execute_turn_contract(
             "status": "error",
             "error_code": "summary_generation_failed",
             "message": "面试总结生成失败，请稍后再试。",
-            "writer_trace": {"writer": "closing_writer", "result": "success", "summary_writer": "error"},
+            "writer_trace": {
+                "writer": "closing_writer",
+                "result": "success",
+                "summary_writer": "error",
+            },
             "validator_trace": [],
         }
     return _validate_success(

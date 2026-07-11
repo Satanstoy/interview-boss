@@ -2,6 +2,10 @@
 
 import pytest
 
+from app.agents.chat.turn_contract import (
+    TurnContractAction,
+    plan_turn,
+)
 from app.agents.chat.turn_intent import TurnStrategy, build_turn_intent
 
 
@@ -58,9 +62,7 @@ def test_runtime_rhythm_applies_without_active_skill_or_load_tool():
 
     from app.agents.chat.tool_strategy import compute_tool_strategy
 
-    strategy = compute_tool_strategy(
-        _state(turn_intent=intent.to_metadata_dict())
-    )
+    strategy = compute_tool_strategy(_state(turn_intent=intent.to_metadata_dict()))
     assert strategy.requires_retrieval is True
     assert strategy.allow_draw is True
     assert strategy.allow_search is False
@@ -152,7 +154,10 @@ async def test_followup_writer_receives_turn_intent_brief():
             "strategy": "deep_dive",
             "assessment_goal": "decision_rationale",
             "drill_layer": "decision_rationale",
-            "writer_brief": {"anchor": "RRF 融合", "assessment_goal": "decision_rationale"},
+            "writer_brief": {
+                "anchor": "RRF 融合",
+                "assessment_goal": "decision_rationale",
+            },
         },
         llm_call=llm_call,
     )
@@ -160,3 +165,120 @@ async def test_followup_writer_receives_turn_intent_brief():
     assert result["status"] == "success"
     assert "decision_rationale" in captured[1]["content"]
     assert "RRF 融合" in captured[1]["content"]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Invariant: build_turn_intent strategy and plan_turn contract action must
+# stay semantically aligned for the same state. Without this guard, future
+# edits to either module can silently split pacing (writer_brief says deep
+# dive, contract asks a selected question) and no test catches it.
+# ──────────────────────────────────────────────────────────────────────────
+
+_STRATEGY_TO_ALLOWED_ACTIONS = {
+    TurnStrategy.CLOSE: {TurnContractAction.CLOSE_WITH_SUMMARY},
+    TurnStrategy.COUNTER_RESPONSE: {TurnContractAction.ANSWER_COUNTER_QUESTION},
+    TurnStrategy.CLARIFICATION: {TurnContractAction.CLARIFY_CANDIDATE_ANSWER},
+    TurnStrategy.TOPIC_SHIFT: {
+        TurnContractAction.ASK_SELECTED_QUESTION,
+        TurnContractAction.CONTINUE_NATURAL_FOLLOWUP,
+    },
+    TurnStrategy.DEEP_DIVE: {
+        TurnContractAction.CONTINUE_NATURAL_FOLLOWUP,
+        TurnContractAction.ASK_SELECTED_QUESTION,
+    },
+}
+
+
+def _intent_to_planner_state(state: dict) -> dict:
+    """Promote turn_intent metadata into the state shape plan_turn reads.
+
+    plan_turn consumes ``state["turn_intent"]`` only for tracing; it reads
+    counter evidence from classify_result / counter_question_evidence, and
+    requested_end from classify_result. The intent builder already set
+    those, so we only need to ensure turn_intent is present as metadata.
+    """
+    intent = build_turn_intent(state)
+    return {**state, "turn_intent": intent.to_metadata_dict()}
+
+
+@pytest.mark.parametrize(
+    "label, overrides",
+    [
+        (
+            "end_interview",
+            {"classify_result": {**_state()["classify_result"], "requested_end": True}},
+        ),
+        (
+            "counter_question",
+            {
+                "classify_result": {
+                    **_state()["classify_result"],
+                    "counter_question": {"text": "你们团队多大", "topic": "团队规模"},
+                }
+            },
+        ),
+        (
+            "vague_answer",
+            {
+                "classify_result": {
+                    **_state()["classify_result"],
+                    "answer_quality": "vague",
+                }
+            },
+        ),
+        (
+            "incomplete_answer",
+            {
+                "classify_result": {
+                    **_state()["classify_result"],
+                    "answer_quality": "incomplete",
+                }
+            },
+        ),
+        ("topic_shift_after_two_deep_dives", {}),
+        (
+            "project_deep_dive_active",
+            {
+                "active_skills": ["project-deep-dive"],
+                "interview_state": {
+                    **_state()["interview_state"],
+                    "recent_decisions": [{"strategy": "deep_dive"}],
+                },
+            },
+        ),
+        (
+            "default_opening",
+            {
+                "interview_state": {
+                    **_state()["interview_state"],
+                    "recent_decisions": [],
+                }
+            },
+        ),
+    ],
+)
+def test_turn_intent_strategy_aligns_with_plan_turn_action(label, overrides):
+    """For every reachable (intent, contract) pair, the contract action must
+    be in the allow-list for the intent's strategy."""
+    state = _state(**overrides)
+    intent = build_turn_intent(state)
+    planner_state = _intent_to_planner_state(state)
+    contract = plan_turn(planner_state)
+
+    allowed = _STRATEGY_TO_ALLOWED_ACTIONS[intent.strategy]
+    assert contract.action in allowed, (
+        f"{label}: intent.strategy={intent.strategy.value} but "
+        f"contract.action={contract.action.value}; "
+        f"allowed={sorted(a.value for a in allowed)}"
+    )
+
+
+def test_strategy_action_mapping_covers_all_strategies():
+    """If a new TurnStrategy is added without updating the invariant map,
+    fail loudly here so the alignment test stays meaningful."""
+    from app.agents.chat.turn_intent import TurnStrategy as AllStrategies
+
+    missing = set(AllStrategies) - set(_STRATEGY_TO_ALLOWED_ACTIONS)
+    assert not missing, (
+        f"_STRATEGY_TO_ALLOWED_ACTIONS missing: {sorted(s.value for s in missing)}"
+    )

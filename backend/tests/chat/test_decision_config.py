@@ -100,6 +100,46 @@ class TestConfigFromInterviewConfig:
         assert dc == DecisionConfig()
 
 
+class TestDifficultyScaling:
+    """Stop-policy thresholds scale with interview difficulty."""
+
+    def test_easy_difficulty_scales_down(self):
+        ic = {"difficulty": "easy"}
+        dc = get_decision_config(ic)
+        assert dc.soft_close_message_count == 24
+        assert dc.strong_close_message_count == 33
+        assert dc.hard_stop_message_count == 42
+
+    def test_hard_difficulty_scales_up(self):
+        ic = {"difficulty": "hard"}
+        dc = get_decision_config(ic)
+        assert dc.soft_close_message_count == 40
+        assert dc.strong_close_message_count == 55
+        assert dc.hard_stop_message_count == 70
+
+    def test_mid_difficulty_uses_defaults(self):
+        ic = {"difficulty": "mid"}
+        dc = get_decision_config(ic)
+        assert dc.soft_close_message_count == 32
+        assert dc.strong_close_message_count == 44
+        assert dc.hard_stop_message_count == 56
+
+    def test_missing_difficulty_uses_defaults(self):
+        ic = {}
+        dc = get_decision_config(ic)
+        assert dc.soft_close_message_count == 32
+        assert dc.strong_close_message_count == 44
+        assert dc.hard_stop_message_count == 56
+
+    def test_explicit_overrides_take_precedence(self):
+        ic = {"difficulty": "easy", "decision_config": {"soft_close_message_count": 20}}
+        dc = get_decision_config(ic)
+        assert dc.soft_close_message_count == 20
+        # Other thresholds still scaled by difficulty.
+        assert dc.strong_close_message_count == 33
+        assert dc.hard_stop_message_count == 42
+
+
 class TestImmutability:
     """DecisionConfig must be frozen (immutable)."""
 
