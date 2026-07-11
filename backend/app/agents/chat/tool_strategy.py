@@ -112,6 +112,7 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
     config = state.get("decision_config") or DecisionConfig()
     message_count = len(state.get("message_history", []) or [])
     harness = _harness_focus(state)
+    turn_intent = state.get("turn_intent") or {}
 
     # End interview: no tools at all.
     if intent == "end_interview":
@@ -121,6 +122,21 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
             allow_draw=False,
             allow_load_skill=False,
             instruction="当前状态：用户要求结束面试。严格禁止调用任何工具，直接生成总结或收尾。",
+        )
+
+    if (
+        isinstance(turn_intent, dict)
+        and turn_intent.get("strategy") == "topic_shift"
+        and (turn_intent.get("tool_intent") or {}).get("requires_question_bank")
+    ):
+        target_dimension = str(turn_intent.get("target_dimension") or "")
+        return ToolStrategy(
+            requires_retrieval=True,
+            allow_search=False,
+            allow_draw=True,
+            allow_load_skill=False,
+            instruction="当前状态：节奏策略已决定切换评估维度。必须从目标维度抽题，不能继续当前项目搜索。",
+            next_phase_hint=target_dimension,
         )
 
     # Wrap-up / strong close: do not start new topics.

@@ -134,6 +134,7 @@ class ChatState(TypedDict, total=False):
 
     # === TurnContract ===
     turn_contract: dict | None  # 本轮已执行的 TurnPlanner 契约
+    turn_intent: dict | None  # 本轮由节奏策略引擎实际执行的面试意图
 
     # === 题目暴露 Ledger ===
     exposed_question_ids: list[int]  # 本会话已暴露给模型/用户的所有题目 ID

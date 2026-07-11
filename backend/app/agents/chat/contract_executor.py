@@ -188,6 +188,7 @@ async def execute_turn_contract(
             candidate_answer=str(state.get("user_message") or ""),
             next_focus=focus,
             recent_context=context,
+            turn_intent=state.get("turn_intent"),
             llm_call=llm_call,
         )
         return _validate_success(result["text"], {"writer": "followup_writer", "result": "success"}, contract) if result["status"] == "success" else _error(result, "followup_writer")

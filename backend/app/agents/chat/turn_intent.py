@@ -37,6 +37,23 @@ class TurnIntent:
     source_facts: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
 
+    def to_metadata_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy.value,
+            "assessment_goal": self.assessment_goal,
+            "target_dimension": self.target_dimension,
+            "drill_layer": self.drill_layer,
+            "tool_intent": {
+                "requires_question_bank": self.tool_intent.requires_question_bank,
+            },
+            "writer_brief": {
+                "assessment_goal": self.writer_brief.assessment_goal,
+                "anchor": self.writer_brief.anchor,
+            },
+            "source_facts": self.source_facts,
+            "reason": self.reason,
+        }
+
 
 def _missing_dimension(interview_state: dict[str, Any]) -> str | None:
     coverage = interview_state.get("coverage") or {}

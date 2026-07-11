@@ -10,8 +10,11 @@ async def generate_followup(
     candidate_answer: str,
     next_focus: str,
     recent_context: str,
+    turn_intent: dict[str, Any] | None = None,
     llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
 ) -> dict[str, Any]:
+    intent = turn_intent or {}
+    brief = intent.get("writer_brief") or {}
     messages = [
         {
             "role": "system",
@@ -25,7 +28,13 @@ async def generate_followup(
         },
         {
             "role": "user",
-            "content": f"当前评估焦点：{next_focus or '项目细节'}\n候选人回答：{candidate_answer}\n\n最近上下文：\n{recent_context}",
+            "content": (
+                f"当前评估焦点：{next_focus or '项目细节'}\n"
+                f"本轮策略：{intent.get('strategy') or 'deep_dive'}\n"
+                f"本轮评估目标：{brief.get('assessment_goal') or intent.get('assessment_goal') or '项目细节'}\n"
+                f"追问锚点：{brief.get('anchor') or '无'}\n"
+                f"候选人回答：{candidate_answer}\n\n最近上下文：\n{recent_context}"
+            ),
         },
     ]
     try:

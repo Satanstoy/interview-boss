@@ -346,6 +346,7 @@ async def send_message(
                     # 附带 reasoning metadata 给前端，用于思维链/步骤/工具/skill 显示
                     done_payload: dict = {"type": "done"}
                     for key in (
+                        "turn_intent",
                         "turn_contract",
                         "writer_trace",
                         "validator_trace",

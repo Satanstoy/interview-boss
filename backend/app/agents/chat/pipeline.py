@@ -178,6 +178,7 @@ def _initial_state(
         "active_skills": [],
         "tool_steps": [],
         "turn_contract": None,
+        "turn_intent": None,
     }
 
 
@@ -506,6 +507,9 @@ def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
 
 def _attach_executed_contract_metadata(state: ChatState, metadata: dict) -> None:
     """Persist the contract that actually produced this turn's output."""
+    turn_intent = state.get("turn_intent")
+    if isinstance(turn_intent, dict):
+        metadata["turn_intent"] = turn_intent
     contract = state.get("turn_contract")
     if isinstance(contract, dict):
         metadata["turn_contract"] = contract
@@ -574,6 +578,9 @@ async def run_chat(
 
             # 2. 意图分类 + 关键词
             await _step_classify(state)
+            from app.agents.chat.turn_intent import build_turn_intent
+
+            state["turn_intent"] = build_turn_intent(state).to_metadata_dict()
 
             # 3-5. ReAct 循环（替代 resolve_skills + route_and_generate）
             response = ""
