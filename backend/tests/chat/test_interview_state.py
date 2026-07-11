@@ -38,6 +38,32 @@ def test_build_interview_state_snapshot_from_ledger():
     assert snapshot["coverage"]["knowledge_probe"]["current_count"] == 1
 
 
+def test_snapshot_restores_recent_turn_intents_from_assistant_metadata():
+    """Rhythm must continue from durable decisions, not reset on each request."""
+    state = {
+        "conversation_id": "test-123",
+        "message_history": [
+            {
+                "role": "assistant",
+                "content": "你当时为什么选择 RRF？",
+                "metadata": {"turn_intent": {"strategy": "deep_dive"}},
+            },
+            {
+                "role": "assistant",
+                "content": "reranker 的阈值如何确定？",
+                "metadata": {"turn_intent": {"strategy": "deep_dive"}},
+            },
+        ],
+    }
+
+    snapshot = build_interview_state_snapshot(state, InterviewLedger())
+
+    assert [item["strategy"] for item in snapshot["recent_decisions"]] == [
+        "deep_dive",
+        "deep_dive",
+    ]
+
+
 def test_determine_current_phase_prefers_first_uncovered_phase():
     coverage = {
         "project_followup": {

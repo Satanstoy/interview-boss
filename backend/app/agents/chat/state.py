@@ -70,6 +70,7 @@ class ChatState(TypedDict, total=False):
     candidate_act: str | None  # LLM 语义行为
     asked_counter_question: bool  # LLM 是否判定候选人提出反问
     counter_question_topic: str | None  # LLM 提取的候选人反问主题
+    counter_question_evidence: dict | None  # 已验证的反问文本和主题
     asked_for_summary: bool  # LLM 是否判定候选人要求总结
     requested_end: bool  # LLM 是否判定候选人要求结束
     needs_clarification: bool  # LLM 是否判定当前回答需要澄清

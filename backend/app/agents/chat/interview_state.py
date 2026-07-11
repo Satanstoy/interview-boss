@@ -16,6 +16,32 @@ _SNAPSHOT_PHASES = (
     InterviewPhase.SYSTEM_DESIGN,
     InterviewPhase.BEHAVIORAL,
 )
+_RECENT_DECISION_LIMIT = 6
+
+
+def _recent_turn_decisions(state: dict[str, Any]) -> list[dict]:
+    """Restore durable turn strategies from previous assistant metadata.
+
+    The strategy engine makes one decision per request, while the next request
+    receives a newly constructed ChatState.  Assistant metadata is therefore
+    the source of truth for pacing history; do not infer this from prose.
+    """
+    decisions: list[dict] = []
+    for message in state.get("message_history") or []:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        intent = metadata.get("turn_intent")
+        if not isinstance(intent, dict) or not isinstance(intent.get("strategy"), str):
+            continue
+        decisions.append({
+            "strategy": intent["strategy"],
+            "target_dimension": intent.get("target_dimension"),
+            "assessment_goal": intent.get("assessment_goal"),
+        })
+    return decisions[-_RECENT_DECISION_LIMIT:]
 
 
 @dataclass
@@ -70,7 +96,7 @@ def build_interview_state_snapshot(
         turn_count=len(state.get("message_history") or []),
         coverage=coverage,
         last_answer_evaluation=state.get("last_answer_evaluation"),
-        recent_decisions=list(state.get("recent_decisions") or []),
+        recent_decisions=_recent_turn_decisions(state),
         rhythm_profile=dict(rhythm),
         generated_at=time.time(),
     )

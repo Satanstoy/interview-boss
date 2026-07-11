@@ -67,6 +67,24 @@ def test_runtime_rhythm_applies_without_active_skill_or_load_tool():
     assert strategy.next_phase_hint == "knowledge_probe"
 
 
+def test_runtime_rhythm_pivots_after_two_persisted_deep_dives():
+    """The third project answer must change dimension using durable decisions."""
+    state = _state(
+        interview_state={
+            **_state()["interview_state"],
+            "recent_decisions": [
+                {"strategy": "deep_dive"},
+                {"strategy": "deep_dive"},
+            ],
+        }
+    )
+
+    intent = build_turn_intent(state)
+
+    assert intent.strategy == TurnStrategy.TOPIC_SHIFT
+    assert intent.target_dimension == "knowledge_probe"
+
+
 def test_project_tactic_keeps_unresolved_tradeoff_in_deep_dive():
     """A missing decision rationale takes precedence over a generic coverage shift."""
     state = _state(
