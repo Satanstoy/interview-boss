@@ -2,25 +2,28 @@
 自动化测试 — 针对 BUG-001 ~ BUG-005
 使用 pytest + unittest.mock，所有外部依赖均已 mock
 """
+
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import re
+import os
 
 
 from pathlib import Path
+
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
-FRONTEND_ROOT = REPO_ROOT / 'frontend'
+FRONTEND_ROOT = REPO_ROOT / "frontend"
 
 
 def _read_router_sources() -> str:
     """Return current master-bank router sources after route package split."""
     files = [
-        BACKEND_ROOT / 'app/routers/questions.py',
-        BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py',
-        BACKEND_ROOT / 'app/routers/bank_build.py',
+        BACKEND_ROOT / "app/routers/questions.py",
+        BACKEND_ROOT / "app/routers/questions_pkg/bulk.py",
+        BACKEND_ROOT / "app/routers/bank_build.py",
     ]
-    return '\n'.join(path.read_text() for path in files)
+    return "\n".join(path.read_text() for path in files)
 
 
 class TestBug001SoftDelete:
@@ -29,32 +32,33 @@ class TestBug001SoftDelete:
     def test_bug001_question_bank_should_have_deleted_at_column(self):
         """question_bank 表应有 deleted_at 字段"""
         # 读取 connection.py 中的迁移代码
-        content = ''
-        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
-            content += _p.read_text() + '\n'
+        content = ""
+        for _p in sorted((BACKEND_ROOT / "app/db/migrations").glob("*.py")):
+            content += _p.read_text() + "\n"
 
         # 检查是否有为 question_bank 添加 deleted_at 的迁移代码
         # 修复前：没有这个迁移代码
         # 修复后：应该有类似 "ALTER TABLE question_bank ADD COLUMN deleted_at" 的代码
         has_migration = (
-            "ALTER TABLE question_bank ADD COLUMN deleted_at" in content or
-            '"deleted_at" not in qb_columns' in content
+            "ALTER TABLE question_bank ADD COLUMN deleted_at" in content
+            or '"deleted_at" not in qb_columns' in content
         )
         assert has_migration, "question_bank 表应有 deleted_at 字段的迁移代码"
 
     def test_bug001_single_delete_should_use_update_not_delete(self):
         """单条删除应使用 UPDATE 而非 DELETE FROM"""
         # 读取 master_bank.py 中的删除代码
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 找到 delete_master_question 函数
         # 提取该函数的内容（从 @router.delete 到下一个 @router）
         import re
+
         # 查找 delete_master_question 函数
         func_match = re.search(
             r'@router\.delete\("/api/master-bank/\{question_id\}"\).*?(?=\n@router|\Z)',
             content,
-            re.DOTALL
+            re.DOTALL,
         )
         assert func_match, "应存在 delete_master_question 函数"
 
@@ -66,58 +70,72 @@ class TestBug001SoftDelete:
 
         # 修复前：有 DELETE，没有 UPDATE
         # 修复后：没有 DELETE，有 UPDATE
-        assert not has_delete, "单条删除不应使用 DELETE FROM question_bank，应使用软删除"
+        assert not has_delete, (
+            "单条删除不应使用 DELETE FROM question_bank，应使用软删除"
+        )
         assert has_update, "单条删除应使用 UPDATE question_bank SET deleted_at"
 
     def test_bug001_batch_delete_should_use_update_not_delete(self):
         """批量删除应使用 UPDATE 而非 DELETE FROM"""
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 查找批量删除函数中的关键操作
         # 修复前：使用 DELETE FROM question_bank WHERE id IN
         # 修复后：使用 UPDATE question_bank SET deleted_at WHERE id IN
-        delete_pattern = r'DELETE FROM question_bank WHERE id IN'
-        update_pattern = r'UPDATE question_bank SET deleted_at.*WHERE id IN'
+        delete_pattern = r"DELETE FROM question_bank WHERE id IN"
+        update_pattern = r"UPDATE question_bank SET deleted_at.*WHERE id IN"
 
         has_delete = bool(re.search(delete_pattern, content))
         has_update = bool(re.search(update_pattern, content))
 
-        assert not has_delete, "批量删除不应使用 DELETE FROM question_bank，应使用软删除"
+        assert not has_delete, (
+            "批量删除不应使用 DELETE FROM question_bank，应使用软删除"
+        )
         assert has_update, "批量删除应使用 UPDATE question_bank SET deleted_at"
 
     def test_bug001_build_should_use_update_not_delete(self):
         """题库重建应使用 UPDATE 而非 DELETE FROM"""
-        content = (BACKEND_ROOT / 'app/routers/bank_build.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/bank_build.py").read_text()
 
         has_delete = "DELETE FROM question_bank WHERE job_position" in content
         has_update = "UPDATE question_bank SET deleted_at" in content
 
-        assert not has_delete, "题库重建不应使用 DELETE FROM question_bank，应使用软删除"
+        assert not has_delete, (
+            "题库重建不应使用 DELETE FROM question_bank，应使用软删除"
+        )
         assert has_update, "题库重建应使用 UPDATE question_bank SET deleted_at"
 
     def test_bug001_should_have_trash_endpoint(self):
         """应存在回收站查询接口"""
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 检查是否有 /api/master-bank/trash 路由
-        has_trash = '/api/master-bank/trash' in content or '@router.get("/master-bank/trash")' in content
+        has_trash = (
+            "/api/master-bank/trash" in content
+            or '@router.get("/master-bank/trash")' in content
+        )
         assert has_trash, "应存在回收站查询接口 GET /api/master-bank/trash"
 
     def test_bug001_should_have_restore_endpoint(self):
         """应存在恢复接口"""
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 检查是否有 /api/master-bank/restore/{question_id} 路由
-        has_restore = 'master-bank/restore' in content or '@router.post("/master-bank/restore' in content
+        has_restore = (
+            "master-bank/restore" in content
+            or '@router.post("/master-bank/restore' in content
+        )
         assert has_restore, "应存在恢复接口 POST /api/master-bank/restore/{id}"
 
     def test_bug001_should_have_batch_restore_endpoint(self):
         """应存在批量恢复接口"""
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 检查是否有批量恢复路由
-        has_batch_restore = 'master-bank/batch-restore' in content
-        assert has_batch_restore, "应存在批量恢复接口 POST /api/master-bank/batch-restore"
+        has_batch_restore = "master-bank/batch-restore" in content
+        assert has_batch_restore, (
+            "应存在批量恢复接口 POST /api/master-bank/batch-restore"
+        )
 
     def test_bug001_normal_query_should_exclude_deleted(self):
         """普通查询应排除已删除记录"""
@@ -125,7 +143,7 @@ class TestBug001SoftDelete:
 
         # 查找列表查询函数，检查是否有 deleted_at IS NULL 条件
         # 注意：这可能在多个查询中
-        has_filter = 'deleted_at IS NULL' in content
+        has_filter = "deleted_at IS NULL" in content
         assert has_filter, "普通查询应排除已删除记录（添加 deleted_at IS NULL 条件）"
 
 
@@ -134,29 +152,39 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_staging_panel_should_have_type_selector(self):
         """StagingPanel 应包含类型选择控件"""
-        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / "src/components/business/StagingPanel.vue", "r") as f:
             content = f.read()
 
-        has_type_selector = 'importConfig.type' in content or '导入类型' in content or '>类型<' in content
+        has_type_selector = (
+            "importConfig.type" in content
+            or "导入类型" in content
+            or ">类型<" in content
+        )
         assert has_type_selector, "StagingPanel 应包含类型选择控件"
 
     def test_bug002_staging_panel_should_have_season_selector(self):
         """StagingPanel 应包含季节选择控件"""
-        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / "src/components/business/StagingPanel.vue", "r") as f:
             content = f.read()
 
-        has_season_selector = 'importConfig.season' in content or '招聘季节' in content or '>季节<' in content
+        has_season_selector = (
+            "importConfig.season" in content
+            or "招聘季节" in content
+            or ">季节<" in content
+        )
         assert has_season_selector, "StagingPanel 应包含季节选择控件"
 
     def test_bug002_type_selector_should_have_options(self):
         """类型选择应包含 JD 和面经选项"""
-        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / "src/components/business/StagingPanel.vue", "r") as f:
             content = f.read()
 
         # 检查是否有 JD 和面经选项
-        has_jd_option = "value=\"jd\"" in content or "value='jd'" in content
-        has_interview_option = "value=\"interview\"" in content or "value='interview'" in content
-        has_auto_option = "value=\"auto\"" in content or "value='auto'" in content
+        has_jd_option = 'value="jd"' in content or "value='jd'" in content
+        has_interview_option = (
+            'value="interview"' in content or "value='interview'" in content
+        )
+        has_auto_option = 'value="auto"' in content or "value='auto'" in content
 
         assert has_auto_option, "类型选择应包含'自动识别'选项"
         assert has_jd_option, "类型选择应包含'JD'选项"
@@ -164,12 +192,17 @@ class TestBug002ImportTypeAndSeason:
 
     def test_bug002_type_should_be_passed_to_api(self):
         """选择的类型应传递给 API"""
-        with open(FRONTEND_ROOT / 'src/components/business/StagingPanel.vue', 'r') as f:
+        with open(FRONTEND_ROOT / "src/components/business/StagingPanel.vue", "r") as f:
             content = f.read()
 
         # 检查 FormData 中是否包含 content_type 字段（后端期望的字段名）
-        has_type_in_form = "formData.append('content_type'" in content or 'formData.append("content_type"' in content
-        assert has_type_in_form, "选择的类型应通过 FormData 的 content_type 字段传递给 API"
+        has_type_in_form = (
+            "formData.append('content_type'" in content
+            or 'formData.append("content_type"' in content
+        )
+        assert has_type_in_form, (
+            "选择的类型应通过 FormData 的 content_type 字段传递给 API"
+        )
 
 
 class TestBug003DirtyDataPositions:
@@ -177,15 +210,15 @@ class TestBug003DirtyDataPositions:
 
     def test_bug003_should_have_cleanup_migration(self):
         """应有清理脏数据的迁移代码"""
-        content = ''
-        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
-            content += _p.read_text() + '\n'
+        content = ""
+        for _p in sorted((BACKEND_ROOT / "app/db/migrations").glob("*.py")):
+            content += _p.read_text() + "\n"
 
         # 检查是否有清理 job_positions 脏数据的代码
         has_cleanup = (
-            'invalid_positions' in content or
-            'clean.*position' in content.lower() or
-            'job_positions.*test' in content
+            "invalid_positions" in content
+            or "clean.*position" in content.lower()
+            or "job_positions.*test" in content
         )
         assert has_cleanup, "应有清理 job_positions 表脏数据的迁移代码"
 
@@ -194,13 +227,15 @@ class TestBug003DirtyDataPositions:
         rows = test_db.execute("SELECT id, name FROM job_positions").fetchall()
         invalid_names = []
         for row in rows:
-            name = row['name']
+            name = row["name"]
             # 检查无效岗位：包含 test、超长、包含特殊字符
-            if ('test' in name.lower() or
-                '测试' in name or
-                len(name) > 50 or
-                '@#$' in name or
-                'AAAA' in name):
+            if (
+                "test" in name.lower()
+                or "测试" in name
+                or len(name) > 50
+                or "@#$" in name
+                or "AAAA" in name
+            ):
                 invalid_names.append(name)
 
         assert len(invalid_names) == 0, f"数据库中存在无效岗位数据: {invalid_names}"
@@ -211,34 +246,39 @@ class TestBug004DirtyDataCategories:
 
     def test_bug004_should_have_cleanup_migration(self):
         """应有清理脏分类的迁移代码"""
-        content = ''
-        for _p in sorted((BACKEND_ROOT / 'app/db/migrations').glob('*.py')):
-            content += _p.read_text() + '\n'
+        content = ""
+        for _p in sorted((BACKEND_ROOT / "app/db/migrations").glob("*.py")):
+            content += _p.read_text() + "\n"
 
         # 检查是否有清理 question_bank.cat1 脏数据的代码
-        has_cleanup = (
-            "cat1 = 'test'" in content or
-            'cat1.*test' in content.lower()
-        )
+        has_cleanup = "cat1 = 'test'" in content or "cat1.*test" in content.lower()
         assert has_cleanup, "应有清理 question_bank 表 cat1 脏数据的迁移代码"
 
     def test_bug004_real_database_should_not_have_test_category(self):
-        """实际数据库中不应有 test 分类"""
+        """实际数据库中不应有 test 分类。
+
+        该校验直连生产 DB，违反 conftest"禁止连接生产数据库"约定，故仅在显式
+        打开 RUN_LIVE_DB_CHECK=1 时运行；默认改为 fail-loud 提醒——
+        之前的 `pytest.skip("无法连接数据库")` 会把任何连接异常吞掉伪装通过。
+        """
+        if os.environ.get("RUN_LIVE_DB_CHECK") != "1":
+            pytest.fail(
+                "本测试默认禁用（直连生产 DB 违反约定）。"
+                "如需运行，设置 RUN_LIVE_DB_CHECK=1；"
+                "清理脏分类的契约已由 test_bug004_should_have_cleanup_migration 静态校验。"
+            )
         import sqlite3
+
+        conn = sqlite3.connect(BACKEND_ROOT / "data/interview-boss.db")
         try:
-            conn = sqlite3.connect(BACKEND_ROOT / 'data/interview-boss.db')
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-
-            # 查询是否有 test 分类
             rows = cursor.execute(
                 "SELECT COUNT(*) as cnt FROM question_bank WHERE cat1 = 'test' AND deleted_at IS NULL"
             ).fetchone()
-
+            assert rows["cnt"] == 0, f"数据库中存在 {rows['cnt']} 条 cat1='test' 的记录"
+        finally:
             conn.close()
-            assert rows['cnt'] == 0, f"数据库中存在 {rows['cnt']} 条 cat1='test' 的记录"
-        except Exception as e:
-            pytest.skip(f"无法连接数据库: {e}")
 
 
 class TestBug005LLMConfigModification:
@@ -246,37 +286,43 @@ class TestBug005LLMConfigModification:
 
     def test_bug005_should_have_delete_endpoint(self):
         """应存在删除 LLM 配置的接口"""
-        content = (BACKEND_ROOT / 'app/routers/profile_pkg/llm.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/profile_pkg/llm.py").read_text()
 
         # 检查是否有 DELETE /api/profile/llm 路由
         has_delete_endpoint = (
-            '@router.delete("/api/profile/llm")' in content or
-            'delete.*llm' in content.lower()
+            '@router.delete("/api/profile/llm")' in content
+            or "delete.*llm" in content.lower()
         )
         assert has_delete_endpoint, "应存在删除 LLM 配置的接口 DELETE /api/profile/llm"
 
     def test_bug005_frontend_should_have_delete_button(self):
         """前端应有清除配置按钮"""
-        content = (FRONTEND_ROOT / 'src/components/business/SettingsAIConfig.vue').read_text()
+        content = (
+            FRONTEND_ROOT / "src/components/business/SettingsAIConfig.vue"
+        ).read_text()
 
         # 检查是否有清除配置按钮
-        has_delete_button = '清除配置' in content or 'deleteMyLLM' in content
+        has_delete_button = "清除配置" in content or "deleteMyLLM" in content
         assert has_delete_button, "前端应有清除配置按钮"
 
     def test_bug005_frontend_should_have_prominent_edit_button(self):
         """前端修改配置按钮应明显"""
-        content = (FRONTEND_ROOT / 'src/components/business/SettingsAIConfig.vue').read_text()
+        content = (
+            FRONTEND_ROOT / "src/components/business/SettingsAIConfig.vue"
+        ).read_text()
 
         # 检查修改配置按钮是否有明显的样式
         # 修复前：可能是简单的 text-xs 链接样式
         # 修复后：应该有更明显的按钮样式（如 bg-primary-50 等）
         has_prominent_button = (
-            'bg-primary-50' in content and '修改配置' in content or
-            'bg-primary-100' in content and '修改配置' in content
+            "bg-primary-50" in content
+            and "修改配置" in content
+            or "bg-primary-100" in content
+            and "修改配置" in content
         )
         # 注意：这个测试可能需要根据实际修复调整
         # 目前先检查按钮是否存在
-        has_edit_button = '修改配置' in content
+        has_edit_button = "修改配置" in content
         assert has_edit_button, "应有修改配置按钮"
 
 
@@ -285,30 +331,30 @@ class TestIntegration:
 
     def test_api_should_have_all_required_endpoints(self):
         """API 应包含所有必要的端点"""
-        content = (BACKEND_ROOT / 'app/routers/questions_pkg/bulk.py').read_text()
+        content = (BACKEND_ROOT / "app/routers/questions_pkg/bulk.py").read_text()
 
         # 检查所有必要的端点
         endpoints = [
-            '/api/master-bank/trash',
-            '/api/master-bank/restore',
-            '/api/master-bank/batch-restore',
+            "/api/master-bank/trash",
+            "/api/master-bank/restore",
+            "/api/master-bank/batch-restore",
         ]
 
         for endpoint in endpoints:
             # 简单检查端点是否在文件中
-            endpoint_name = endpoint.split('/')[-1]
+            endpoint_name = endpoint.split("/")[-1]
             assert endpoint_name in content, f"应存在端点 {endpoint}"
 
     def test_frontend_api_should_have_all_required_functions(self):
         """前端 API 应包含所有必要的函数"""
-        with open(FRONTEND_ROOT / 'src/api/index.js', 'r') as f:
+        with open(FRONTEND_ROOT / "src/api/index.js", "r") as f:
             content = f.read()
 
         # 检查所有必要的 API 函数
         functions = [
-            'fetchTrash',
-            'restoreRecord',
-            'batchRestoreMasterBank',
+            "fetchTrash",
+            "restoreRecord",
+            "batchRestoreMasterBank",
         ]
 
         for func in functions:
