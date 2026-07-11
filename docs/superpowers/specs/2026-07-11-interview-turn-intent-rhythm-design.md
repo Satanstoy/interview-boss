@@ -129,6 +129,20 @@ writer 同时接收 `TurnContract` 与 `TurnIntent`：
 
 该证据是后续练习反馈 summary 的输入，与节奏策略分层，但共享题目和回合标识。
 
+## 候选人反问的语义事实
+
+语义解释器不能再使用可单独劫持流程的 `asked_counter_question: bool` 作为
+planner 输入。它必须输出候选人回合的结构化事实：回答状态，以及可选的反问
+对象。反问对象至少包含候选人实际提出的问题文本、主题和置信度；没有明确
+反问时该对象为 `null`。
+
+当语义解释器声称存在反问时，系统只对这个少见的正例调用语义确认器，比较
+原始候选人消息和提取的问题文本。确认器失败时清空反问对象，继续回答、澄清
+或节奏策略路径。该确认不使用关键词或正则。
+
+候选人可以既回答上一题又提出反问。系统应同时记录回答证据和反问事实：本轮
+先礼貌回答反问，下一轮从已经完成的面试节奏继续，而不是把回答标成未发生。
+
 ## 可观测性
 
 done metadata 新增：
@@ -155,6 +169,8 @@ metadata 必须记录实际执行的 intent，不能在输出后另做一个旁�
 3. 候选人提出反问：contract 为 `answer_counter_question`；尚未收集到的技术信号保持 `not_assessed`，不是负面证据。
 4. 候选人要求结束：contract 为 `close_with_summary`；summary 输入将未观察信号标为 `not_assessed`，不能写成薄弱或回避。
 5. API E2E：每个相关回合的 done 事件必须暴露实际执行的 `turn_intent`、contract、工具 trace 和 writer trace。
+6. 候选人只介绍 RAG、BM25、RRF 与 reranker 时，反问对象必须为空，contract 不能为 `answer_counter_question`。
+7. 候选人先回答再明确询问岗位能力时，回答证据与反问对象必须同时保留；本轮可以回答反问，但不得丢失回答完成事实。
 
 ## 迁移步骤
 
