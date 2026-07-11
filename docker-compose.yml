@@ -119,6 +119,7 @@ services:
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=test
     volumes:
+      - ./backend:/app/backend:ro
       - ./backend/data:/app/backend/data
       - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
     networks:
