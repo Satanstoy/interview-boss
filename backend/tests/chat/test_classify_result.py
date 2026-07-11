@@ -106,7 +106,7 @@ class TestClassifyResultPhase1Signals:
     def test_counter_question_signal(self):
         result = ClassifyResult(
             candidate_act="asked_counter_question",
-            asked_counter_question=True,
+            counter_question={"text": "团队如何评估 RAG 效果？", "topic": "评估方式"},
         )
         assert result.asked_counter_question is True
         assert result.candidate_act == "asked_counter_question"
@@ -142,7 +142,7 @@ class TestClassifyResultPhase1Signals:
             "intent": "interview_question",
             "answer_quality": "complete",
             "candidate_act": "answered_question",
-            "asked_counter_question": True,
+            "counter_question": {"text": "团队如何评估 RAG 效果？", "topic": "评估方式"},
             "needs_clarification": False,
             "confidence": 0.75,
             "evidence": "test evidence",

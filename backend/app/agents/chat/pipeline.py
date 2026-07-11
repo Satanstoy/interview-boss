@@ -284,6 +284,7 @@ async def _step_classify(state: ChatState) -> ChatState:
             "repetition_streak",
             "requires_bank_question",
             "candidate_act",
+            "counter_question",
             "asked_counter_question",
             "counter_question_topic",
             "asked_for_summary",
@@ -296,12 +297,15 @@ async def _step_classify(state: ChatState) -> ChatState:
         ):
             if key in classify_result:
                 state[key] = classify_result[key]
-        state["counter_question"] = bool(
-            classify_result.get("asked_counter_question", False)
+        counter_evidence = classify_result.get("counter_question")
+        state["counter_question_evidence"] = (
+            counter_evidence if isinstance(counter_evidence, dict) else None
         )
-        state["counter_question_topic"] = classify_result.get(
-            "counter_question_topic"
-        )
+        state["counter_question"] = bool(state["counter_question_evidence"])
+        state["asked_counter_question"] = state["counter_question"]
+        state["counter_question_topic"] = (
+            state["counter_question_evidence"] or {}
+        ).get("topic")
 
     # Compute reliable streak counters from message history and override LLM estimates.
     if not is_first_message:

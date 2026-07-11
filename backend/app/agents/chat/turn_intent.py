@@ -105,7 +105,7 @@ def build_turn_intent(state: dict[str, Any]) -> TurnIntent:
             reason="candidate_requested_end",
         )
 
-    if semantic.get("asked_counter_question"):
+    if isinstance(semantic.get("counter_question"), dict):
         return TurnIntent(
             strategy=TurnStrategy.COUNTER_RESPONSE,
             assessment_goal="counter_question_grounding",

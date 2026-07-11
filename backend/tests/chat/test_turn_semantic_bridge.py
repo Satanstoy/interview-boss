@@ -20,7 +20,7 @@ async def test_classifier_semantic_signals_are_available_to_turn_planner():
         "intent": "interview_question",
         "answer_quality": "complete",
         "should_retrieve": False,
-        "asked_counter_question": True,
+        "counter_question": {"text": "团队怎么评估 Agent 效果？", "topic": "团队评估方式"},
         "candidate_act": "asked_counter_question",
         "needs_clarification": False,
         "needs_new_dimension": False,
@@ -47,6 +47,7 @@ async def test_classifier_semantic_signals_are_available_to_turn_planner():
 
     assert state["asked_counter_question"] is True
     assert state["counter_question"] is True
+    assert state["counter_question_evidence"]["text"] == "团队怎么评估 Agent 效果？"
     assert state["candidate_act"] == "asked_counter_question"
     assert state["confidence"] == 0.91
     assert state["classify_result"]["evidence"] == "候选人在询问团队的评估方式"

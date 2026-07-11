@@ -81,6 +81,10 @@ class ClassifyResult(BaseModel):
         default=None,
         description="候选人反问的主题，供 counter_writer 回答，不参与文本匹配路由",
     )
+    counter_question: Optional[dict[str, str]] = Field(
+        default=None,
+        description="候选人实际反问的结构化证据，必须包含 text；无反问时为 null。",
+    )
     asked_for_summary: bool = Field(
         default=False,
         description="候选人是否要求总结/评价",
@@ -124,6 +128,21 @@ class ClassifyResult(BaseModel):
         self.off_topic_streak = max(0, int(self.off_topic_streak))
         self.repetition_streak = max(0, int(self.repetition_streak))
         self.confidence = max(0.0, min(1.0, float(self.confidence)))
+        question = self.counter_question or {}
+        text = question.get("text") if isinstance(question, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            self.counter_question = None
+            self.asked_counter_question = False
+            self.counter_question_topic = None
+            if self.candidate_act == "asked_counter_question":
+                self.candidate_act = None
+        else:
+            self.counter_question = {
+                "text": text.strip(),
+                "topic": str(question.get("topic") or self.counter_question_topic or "").strip(),
+            }
+            self.asked_counter_question = True
+            self.counter_question_topic = self.counter_question["topic"] or None
         return self
 
     def to_state(self) -> dict:

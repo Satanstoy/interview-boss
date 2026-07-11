@@ -53,7 +53,7 @@ class TestTurnPlannerIntegration:
 
     def test_answer_counter_question(self):
         state = self._make_state(
-            counter_question=True,
+            counter_question_evidence={"text": "团队规模多大？", "topic": "团队规模"},
             counter_question_topic="团队规模",
         )
         contract = plan_turn(state)
@@ -66,7 +66,7 @@ class TestTurnPlannerIntegration:
             classify_result={
                 "intent": "interview_question",
                 "answer_quality": "complete",
-                "asked_counter_question": True,
+                "counter_question": {"text": "团队怎么评估？", "topic": "团队评测方式"},
                 "candidate_act": "asked_counter_question",
             },
             selected_question={"id": 100, "question": "不应抢走反问的题"},
@@ -77,8 +77,8 @@ class TestTurnPlannerIntegration:
 
     def test_answer_counter_question_during_closing(self):
         state = self._make_state(
-            closing_stage="candidate_question_asked",
-            counter_question=True,
+            closing_stage="technical",
+            counter_question_evidence={"text": "技术栈是什么？", "topic": "技术栈"},
             counter_question_topic="技术栈",
         )
         contract = plan_turn(state)
@@ -164,7 +164,7 @@ class TestTurnPlannerIntegration:
 
         # counter > clarify
         state = self._make_state(
-            counter_question=True,
+            counter_question_evidence={"text": "团队规模多大？", "topic": "团队规模"},
             classify_result={"answer_quality": "vague"},
         )
         contract = plan_turn(state)

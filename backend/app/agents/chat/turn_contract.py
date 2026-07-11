@@ -125,12 +125,13 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
     """
     classify_result = state.get("classify_result") or {}
     closing_stage = state.get("closing_stage", "technical")
-    asked_counter_question = bool(
-        classify_result.get("asked_counter_question", False)
-    )
-    counter_question = bool(state.get("counter_question", False)) or asked_counter_question
+    counter_evidence = classify_result.get("counter_question")
+    if not isinstance(counter_evidence, dict):
+        counter_evidence = state.get("counter_question_evidence")
+    asked_counter_question = bool(counter_evidence)
+    counter_question = asked_counter_question
     counter_question_topic = (
-        classify_result.get("counter_question_topic")
+        (counter_evidence or {}).get("topic")
         or state.get("counter_question_topic")
     )
     selected_question = state.get("selected_question")

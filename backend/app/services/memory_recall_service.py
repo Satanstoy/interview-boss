@@ -488,8 +488,7 @@ search_query = keywords 用空格拼接即可。
   - true 当 intent=practice_request 或明确请求算法/代码题
   - false 当开场前 N 轮或 answer_quality 为 incomplete/off_topic/repeated
 - candidate_act: answered_question / asked_counter_question / asked_for_summary / requested_end / greeting / chitchat
-- asked_counter_question: boolean，候选人是否提出对团队、岗位或流程的反问
-- counter_question_topic: 反问主题；没有反问时为 null
+- counter_question: 候选人实际反问；没有明确向面试官提出的问题时必须为 null。存在时输出 {"text":"候选人原话中的问题","topic":"主题"}，不得把项目介绍或技术陈述当作反问
 - asked_for_summary: boolean，候选人是否要求总结或评价
 - requested_end: boolean，候选人是否要求结束本轮面试
 - needs_clarification: boolean，当前回答是否需要围绕原题补充证据
@@ -514,7 +513,7 @@ search_query = keywords 用空格拼接即可。
 {recent_context}
 
 严格返回JSON格式:
-{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "classify_result": {{"answer_quality": "...", "should_retrieve": true/false, "transition_style": "...", "escalation_level": 0, "requires_bank_question": true/false, "candidate_act": "...", "asked_counter_question": false, "counter_question_topic": null, "asked_for_summary": false, "requested_end": false, "needs_clarification": false, "needs_new_dimension": false, "suggested_question_type": null, "confidence": 0.0, "evidence": "..."}}}}"""
+{{"intent": "类别", "relevant_memory_ids": [id1, id2], "keywords": ["技术词1", "技术词2"], "search_query": "技术词1 技术词2", "rewrite": {{"retrieval_intent": "...", "main_topic": "...", "positive_terms": [...], "negative_terms": [...]}}, "classify_result": {{"answer_quality": "...", "should_retrieve": true/false, "transition_style": "...", "escalation_level": 0, "requires_bank_question": true/false, "candidate_act": "...", "counter_question": null, "asked_for_summary": false, "requested_end": false, "needs_clarification": false, "needs_new_dimension": false, "suggested_question_type": null, "confidence": 0.0, "evidence": "..."}}}}"""
 
 
 # ── 规则预判断（零 LLM 成本）──
@@ -740,8 +739,8 @@ def _build_classify_result(
 
     candidate_act = llm.get("candidate_act")
     candidate_act = candidate_act.strip() if isinstance(candidate_act, str) else None
-    counter_topic = llm.get("counter_question_topic")
-    counter_topic = counter_topic.strip() if isinstance(counter_topic, str) else None
+    counter_question = llm.get("counter_question")
+    counter_question = counter_question if isinstance(counter_question, dict) else None
     suggested_type = llm.get("suggested_question_type")
     suggested_type = suggested_type.strip() if isinstance(suggested_type, str) else None
     evidence = llm.get("evidence")
@@ -756,8 +755,7 @@ def _build_classify_result(
         escalation_level=escalation,
         requires_bank_question=requires_bank,
         candidate_act=candidate_act,
-        asked_counter_question=semantic_bool("asked_counter_question"),
-        counter_question_topic=counter_topic,
+        counter_question=counter_question,
         asked_for_summary=semantic_bool("asked_for_summary"),
         requested_end=semantic_bool("requested_end"),
         needs_clarification=semantic_bool("needs_clarification"),
