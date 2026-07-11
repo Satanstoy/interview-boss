@@ -95,13 +95,21 @@ class TurnIntent(BaseModel):
 
 `interview-rhythm` 是策略规则：根据宏观事实选择本轮继续深挖、澄清或切换维度。
 
+`interview-rhythm` 是策略引擎的内建 policy，必须每轮直接执行。它不走
+`load_skill`，不依赖 `active_skills`，也不依赖 ReAct system prompt 的
+`always_active` 过滤条件。一个新会话即使没有加载任何 skill，策略引擎也必须
+应用它的连续深挖、维度切换和覆盖规则。
+
 聚焦 skill 只在策略已经确定后提供局部追问策略：
 
 - `project-deep-dive`：架构、取舍、故障恢复、压力测试、个人贡献或量化影响；
 - `theory-qa`：基础知识允许的追问深度和预期证据；
 - `algorithm-coding`：算法题的预期证据与题库使用方式。
 
-skill 不再依赖最终 writer 从非结构化 ReAct prompt 中重新理解长篇说明。
+这些聚焦 skill 由策略引擎根据 `TurnIntent` 选择，而不是交给 ReAct 自主决定
+是否 `load_skill`。ReAct 只接收当前 intent 对应的工具使用说明；它不拥有 skill
+激活权或节奏决策权。skill 不再依赖最终 writer 从非结构化 ReAct prompt 中重新
+理解长篇说明。
 
 ### TurnContract、ReAct 与 writer 的边界
 
@@ -142,7 +150,7 @@ metadata 必须记录实际执行的 intent，不能在输出后另做一个旁�
 
 ## TDD 验收场景
 
-1. 项目已完成两层充分回答且理论覆盖不足：策略引擎必须生成 `topic_shift -> theory`，writer 不能继续项目深挖。
+1. 新会话没有 `active_skills`，也没有任何 `load_skill` 工具调用；策略引擎仍必须应用 `interview-rhythm`。项目深挖超限且理论覆盖缺失时，必须生成 `topic_shift -> theory`。
 2. 项目仍缺技术取舍信号：策略引擎必须生成 `deep_dive -> decision_rationale`，不能检索或提出算法题。
 3. 候选人提出反问：contract 为 `answer_counter_question`；尚未收集到的技术信号保持 `not_assessed`，不是负面证据。
 4. 候选人要求结束：contract 为 `close_with_summary`；summary 输入将未观察信号标为 `not_assessed`，不能写成薄弱或回避。
