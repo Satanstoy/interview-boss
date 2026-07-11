@@ -139,6 +139,20 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
             next_phase_hint=target_dimension,
         )
 
+    if (
+        isinstance(turn_intent, dict)
+        and turn_intent.get("strategy") == "deep_dive"
+        and not (turn_intent.get("tool_intent") or {}).get("requires_question_bank")
+    ):
+        return ToolStrategy(
+            requires_retrieval=False,
+            allow_search=False,
+            allow_draw=False,
+            allow_load_skill=False,
+            instruction="当前状态：节奏策略要求围绕已有项目证据深挖，不调用题库工具。",
+            next_phase_hint=str(turn_intent.get("drill_layer") or "project_followup"),
+        )
+
     # Wrap-up / strong close: do not start new topics.
     if harness.get("phase") == "wrap_up" or message_count >= config.strong_close_message_count:
         return ToolStrategy(

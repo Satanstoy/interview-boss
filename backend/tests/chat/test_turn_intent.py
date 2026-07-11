@@ -84,6 +84,19 @@ def test_project_tactic_keeps_unresolved_tradeoff_in_deep_dive():
     assert intent.tool_intent.requires_question_bank is False
     assert intent.writer_brief.assessment_goal == "decision_rationale"
 
+    from app.agents.chat.tool_strategy import compute_tool_strategy
+
+    tool_strategy = compute_tool_strategy(
+        _state(
+            active_skills=["project-deep-dive"],
+            should_retrieve=True,
+            turn_intent=intent.to_metadata_dict(),
+            interview_state=state["interview_state"],
+        )
+    )
+    assert tool_strategy.requires_retrieval is False
+    assert tool_strategy.allow_search is False
+
 
 def test_done_metadata_records_executed_turn_intent():
     """The final trace must expose the decision that owned pacing this turn."""
