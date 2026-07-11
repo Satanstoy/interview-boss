@@ -71,6 +71,7 @@ Routers → Services → Core/DB → (external)
 - `submit_service.py` — 提交业务逻辑（标签、答案生成、增量更新）
 - `embedding_service.py` — ONNX Runtime 向量编码 + FAISS 预筛选 + hash fallback
 - `chat_service.py` — 对话管理、记忆提取
+- `memory_recall_service.py` — LLM 语义记忆召回 + 意图分类（`classify_and_recall()` 并行执行意图分类和控制事实解析）
 
 ### Core (`app/core/`) — 配置层
 - `config.py` — 数据库热加载配置，同步回 `.env`

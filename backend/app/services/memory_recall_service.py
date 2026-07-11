@@ -6,6 +6,7 @@
 - 优雅降级：LLM 失败时回退到规则分类
 """
 
+import asyncio
 import re
 import json
 import logging
@@ -853,11 +854,18 @@ async def classify_and_recall(
             recent_context=recent_context,
             rule_hint="",
         )
-        result = await _call_llm_with_retry(
+        # 并行执行两次LLM调用：意图分类 + 控制事实解析
+        classify_task = _call_llm_with_retry(
             prompt,
             user_id=user_id,
             response_format={"type": "json_object"},
         )
+        control_facts_task = _interpret_turn_control_facts(
+            user_message=user_message,
+            recent_context=recent_context,
+            user_id=user_id,
+        )
+        result, control_facts = await asyncio.gather(classify_task, control_facts_task)
         parsed = _extract_json(result)
 
         # 验证 intent
@@ -914,14 +922,7 @@ async def classify_and_recall(
             llm_classify=llm_classify,
         ).to_state()
 
-        # A separate LLM owns the rare but high-priority control facts.  This
-        # prevents the broad recall/classification call from treating an
-        # explicit reverse question or close request as an incomplete answer.
-        control_facts = await _interpret_turn_control_facts(
-            user_message=user_message,
-            recent_context=recent_context,
-            user_id=user_id,
-        )
+        # 使用并行执行的 control_facts 结果（已在上面通过 asyncio.gather 获取）
         if control_facts.get("requested_end"):
             intent = "end_interview"
             answer_complete = True
