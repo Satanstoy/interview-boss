@@ -30,6 +30,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
 | `classify_result.py` | `ClassifyResult` Pydantic 模型：LLM 语义分类的结构化输出（candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
 | `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：只读取语义、ledger、stop policy 与工具事实；五种契约都在 ReAct 工具证据完成后接管最终输出 |
+| `turn_intent.py` | `TurnIntent` 与策略引擎：每轮直接应用 `interview-rhythm` policy，结合 ledger/profile 与聚焦 tactic skill 生成深挖、澄清、切题、反问或收尾的 writer brief；不依赖 ReAct `load_skill` 激活 |
 | `writers/` | `question`、`clarify`、`counter`、`followup`、`closing`、`summary` writers；每个 writer 只表达已选 contract，不能决定流程或生成机械 fallback |
 | `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
 | `validators/semantic_question_adherence.py` | LLM semantic validator：验证 ask_selected_question 输出是否语义一致（阈值 0.75） |
