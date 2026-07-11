@@ -1,6 +1,12 @@
-# MCP Server — Interview Tool Boundary
+# MCP Server — Interview Tool Boundary（单轨双入口架构）
 
-后端内嵌 MCP 工具服务。这里承载模拟面试 agent 的可执行动作，agent 只决定“调用什么工具”和“如何对用户表达”，不在提示词里自由执行搜索、抽题或选题逻辑。
+后端内嵌 MCP 工具服务。这里承载模拟面试 agent 的可执行动作，agent 只决定"调用什么工具"和"如何对用户表达"，不在提示词里自由执行搜索、抽题或选题逻辑。
+
+**架构说明**：这是**单轨双入口**架构——`interview_tools.py` 是唯一的工具执行层，被两个入口共享：
+- **内部 ReAct**（`pipeline.py` → `agents/chat/tools.py`）：直接函数调用，低延迟
+- **外部 MCP**（`/mcp` 端点）：通过 MCP 协议调用，支持外部 agent
+
+两个入口共享同一个执行层和 session 基础设施，不是"双轨"。
 
 ## 文件职责
 

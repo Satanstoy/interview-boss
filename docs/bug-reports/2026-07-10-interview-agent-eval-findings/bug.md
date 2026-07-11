@@ -1,9 +1,13 @@
 # 模拟面试 Agent 评测问题报告
 
 **日期：** 2026-07-10
-**类型：** Bug 分析 / 待修复
-**状态：** 待修复
+**类型：** Bug 分析 / 部分已修复
+**状态：** 问题2已修复（2026-07-11），问题1/3待验证
 **来源：** `backend/scripts/eval_interview_agent.py` 生成的真实评测 JSON/Markdown
+
+## 修复记录
+
+- **问题2（强绑定题目失败会导致空回复/error）**：已通过韧性兜底修复（`contract_executor._run_question_writer_with_fallback`）。当第一个 selected_question 的 writer/validator 失败时，自动换到候选题重试一次，不再直接断流。详见 commit `55e043b`。
 
 ## 结论摘要
 

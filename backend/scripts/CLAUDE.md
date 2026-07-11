@@ -2,6 +2,21 @@
 
 一次性运维脚本、数据修复工具、手动验证脚本。
 
+## 快速参考：脚本分类
+
+| 类型 | 运行方式 | 环境变量 | 何时用 |
+|------|---------|---------|--------|
+| **pytest 测试** | `docker compose --profile test run --rm test uv run pytest backend/tests/` | 无 | CI/日常开发 |
+| **真实 E2E 验证** | `docker compose exec backend uv run python backend/scripts/verify_*.py` | `RUN_REAL_*=1` | 手动验证、发版前 |
+| **评测框架** | `docker compose exec backend uv run python backend/scripts/eval_interview_agent.py` | `RUN_REAL_INTERVIEW_EVAL=1` | 质量评估、回归测试 |
+| **数据修复** | `docker compose exec backend uv run python backend/scripts/fix_*.py` | 无 | 一次性数据修复 |
+| **健康检查** | `docker compose exec backend uv run python backend/scripts/check_*.py` | 无 | 运维诊断 |
+
+**关键区别**：
+- `backend/tests/` 下的文件由 **pytest 自动收集**，CI 会跑
+- `backend/scripts/` 下的文件是 **手动运行**，CI 不跑（除非显式调用）
+- `verify_*.py` 和 `eval_interview_agent.py` 需要 **真实 LLM API**，默认拒绝运行
+
 ## 文件清单
 
 | 文件 | 用途 |

@@ -39,7 +39,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
-| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.services.interview_tools`；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
+| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools`（单轨双入口架构）；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `output_guardrails.py` | Output validation: closing summary structure, counter question grounding, context grounding (prevents interviewer from introducing entities not mentioned by candidate) |
 | `skills/base.py` | shared Skill/SkillRegistry/SkillResourceIndex 兼容导出 |
@@ -85,7 +85,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - **检索建议缺口记录（非接管）**：`should_record_retrieval_gap(state)` 为 true 且本轮没有执行 `search_questions` / `draw_questions` 时，`react_loop.py` 只记录 `state["retrieval_gap"]`、`question_source=conversation` 和 `question_source_reason=retrieval_recommended_but_skipped`。不要在 ReAct 循环后注入额外系统消息、不要二次调用 LLM、不要由代码替模型执行题库工具；题库检索应通过本轮 `<tool_strategy>` 和常驻 tool-use skill 在主路径自然发生。
 - **检索护栏边界**：`pipeline._apply_retrieval_guardrails()` 只在分类后修正过保守的结构化路由字段：候选人给出足够长、包含明确技术信号且已有 `search_query`/多关键词的回答时，可把 `answer_quality` 纠正为 `complete` 并打开 `should_retrieve`，让后续 `ToolStrategy` 和 tool-use skill 自然驱动工具调用。它不能直接调用 `search_questions`/`draw_questions`，也不能覆盖 `off_topic`、`repeated`、候选人反问或已有候选题的状态。
 - **显式题型护栏**：`pipeline._apply_explicit_question_type_guardrails()` 只做结构化字段纠偏：用户明确说“手撕/代码题/写代码/算法题/coding”时写入 `question_type=algorithm_coding`、`should_retrieve=True`、`requires_bank_question=True`。随后由 `tool_strategy.py` 要求 `draw_questions(question_type='algorithm_coding')`，工具服务负责过滤候选；不要在该护栏里直接抽题或选题。
-- **工具执行边界**：4 个工具的实际执行集中在 `app.services.interview_tools`；`tools.py` 只负责 ReAct schema、JSON 转发和 search rerank 后同步 state；`app.mcp_server.interview_tools` 只是兼容 adapter，外部 `/mcp` 入口由 `mcp_server/app.py` 转发到同一 service。内部 ReAct 不要 import `app.mcp_server.*`。
+- **工具执行边界（单轨双入口架构）**：4 个工具的实际执行集中在 `app.mcp_server.interview_tools`；`tools.py` 只负责 ReAct schema、JSON 转发和 search rerank 后同步 state。内部 ReAct（`pipeline.py`）和外部 MCP（`/mcp` 端点）共享同一执行层，通过统一 envelope 返回结果。这不是"双轨"，而是**单轨双入口**——同一个执行层被两个入口使用。
 - **Context Grounding 防护**：`output_guardrails.check_context_grounding()` 检查面试官输出是否引入候选人未提及的实体（如凭空捏造的项目名）。提取输出中的专有名词/项目名，与候选人上下文（自我介绍、简历、历史回答）和题库题实体对比，过滤常见技术术语（Redis、Docker 等）避免误报。这是防止"事实漂移"的关键机制，由 OutputGuard 在输出到达用户之前调用。
 - **Thinking/Steps/Tool Steps/Insights 持久化**：`run_chat()` 在事件循环中累积 `step`、`tool_step`、`thinking`、`insight` 事件，在 `done` 事件时合并进 metadata（兼容字段：`thinking`、`thinking_duration`、`steps`、`tool_steps`、`insights`；新结构化字段：`reasoning_trace`、`tool_calls_trace`、`skill_trace`）。`reasoning_trace.summary` 是公开摘要 fallback；当 `reasoning_trace.source == "model_reasoning"` 且 `thinking` 非空时，前端优先展示模型返回的 `reasoning_content` 作为“面试官推理”。`tool_calls_trace` 只保存白名单参数、耗时、结果数和短结果预览。thinking chunks 上限 `_MAX_THINKING_CHUNKS=50`，避免 metadata 膨胀。页面刷新后前端通过 `getMessages()` 可取回这些字段
 - **内部 ReAct Session 持久化**：`run_chat()` 在 ReAct 循环结束后调用 `await save_mcp_session_async(session_id, state)`，与外部 MCP 路径统一。`session_id` 默认等于 `conversation_id`，存入 `ChatState.session_id`。`save_mcp_session_async` 有白名单过滤（`active_skills`、`retrieved_questions` 等），且只持久化 skill names，不持久化 `active_skill_instructions` 完整正文。
@@ -101,7 +101,7 @@ pipeline.py ──→ react_loop.py ──→ answer.py ──→ nodes.py
     │               ├──→ validators/semantic_question_adherence.py (ask_selected_question blocking gate)
     │               ├──→ metadata.py ──→ nodes.py, db.connection
     │               └──→ tools.py, llm.py
-    ├──→ turn_contract.py ──→ stop_policy.py (ask_selected_question / close_with_summary active; other contracts migrate incrementally)
+    ├──→ turn_contract.py ──→ stop_policy.py (all 5 contract actions active via execute_turn_contract)
     ├──→ nodes.py, context_builder.py
     └──→ chat_service, memory_recall_service
 ```
