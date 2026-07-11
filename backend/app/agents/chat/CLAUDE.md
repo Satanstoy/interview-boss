@@ -63,7 +63,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 
 ## 质量保护机制
 
-- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，并进入 `close_with_summary`：LLM 自然收尾语后紧接 LLM 结构化总结。短历史也不能退化成固定告别；总结必须基于已有证据，并可明确说明证据有限。回答正文夹带结束意图时，`pipeline._apply_premature_close_guardrails()` 会在分类后、ReAct 前改走该硬路由。`end_interview` 不是 ReAct/MCP 工具；结束只能由 `intent=end_interview`、`stop_policy.py` 或持久化的 `closing_stage` workflow gate 触发。
+- **结束意图硬路由**：`intent == 'end_interview'` 时跳过 ReAct 循环，不调用工具，并进入 `close_with_summary`：LLM 自然收尾语后紧接 LLM 结构化练习复盘。短历史也不能退化成固定告别；总结必须基于已有证据，并可明确说明证据有限。默认 summary 只呈现已观察表现、`not_assessed`、建议和覆盖说明，不能输出综合评分、Hiring Signal、风险标签或招聘结论。回答正文夹带结束意图时，`pipeline._apply_premature_close_guardrails()` 会在分类后、ReAct 前改走该硬路由。`end_interview` 不是 ReAct/MCP 工具；结束只能由 `intent=end_interview`、`stop_policy.py` 或持久化的 `closing_stage` workflow gate 触发。
 - **自然停止策略**：`stop_policy.py` 是何时结束面试的代码级裁判：`>=32` 条消息且核心覆盖完整时先问候选人“你有什么想问我们的吗？”，候选人回应后生成结构化总结；`>=44` 条消息进入 strong-close，只允许补最后缺口或 HR/反问/收尾；`>56` 条消息才硬停止并直接总结。不要把 45 条消息重新改成硬停
 - **重复追问保护**：`_count_consecutive_similar_questions()` 检测连续相似追问，超过 2 次注入 system prompt 硬约束
 - **selected_question 绑定**：单候选 + token overlap 时自动绑定，避免弱相关 search 结果被强绑

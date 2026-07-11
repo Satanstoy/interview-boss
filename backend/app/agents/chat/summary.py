@@ -22,40 +22,31 @@ _FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 
 
 
 class InterviewSummary(BaseModel):
-    """LLM-generated structured interview feedback."""
+    """Evidence-bound feedback for a simulated interview practice session."""
 
-    overall_comment: str  # 2-3 sentences, based on actual dialogue
-    strongest_topic: str  # Best performed topic + specific reason
-    weakest_topic: str  # Weakest topic + specific evidence
-    key_suggestions: list[str]  # 3 actionable suggestions
-    score_estimate: int  # 1-10 overall estimate
-    hiring_signal: str = ""  # Optional pass/fail signal when requested
-    risk_points: list[str] = Field(default_factory=list)  # Optional concrete risks
-    next_round_questions: list[str] = Field(
-        default_factory=list
-    )  # Optional follow-up questions
+    overall_comment: str
+    observed_strengths: list[str] = Field(default_factory=list)
+    not_assessed: list[str] = Field(default_factory=list)
+    key_suggestions: list[str] = Field(default_factory=list)
+    coverage_note: str
 
 
 _SUMMARY_SYSTEM_PROMPT = (
-    "你是一个面试复盘教练。基于以下面试记录，给出一份结构化的面试反馈。\n\n"
+    "你是一个模拟面试复盘教练。基于以下面试记录，给出一份结构化的练习反馈。\n\n"
     "要求：\n"
-    "- 评价必须基于候选人实际说了什么，不要用泛泛的套话\n"
-    '- 最弱的话题要给出具体的"答不上来"或"答得浅"的证据\n'
+    "- 只能陈述候选人实际说过的内容和本轮实际覆盖到的主题，不要补全不存在的表现\n"
+    "- 某个问题没有回答、只说到一半或被候选人反问打断时，写入 not_assessed，绝不能推断为回避、薄弱或风险\n"
+    "- 不输出招聘结论、是否进入下一轮、风险标签、综合评分或下一轮淘汰建议；这是练习反馈，不是招聘决策\n"
     '- 建议要具体可操作（如"建议复习 LangGraph 的条件路由机制"），'
     '不要给空泛建议（如"继续深度学习"）\n'
-    "- 整体评价要诚实，好的夸、差的指出\n\n"
-    "- 如果候选人要求 hiring signal、风险点、下一轮追问或完整评价，"
-    "必须在 JSON 的可选字段中回应\n\n"
+    "- overall_comment 必须说明证据范围，不足时直接说明本轮样本有限\n\n"
     "请严格以 JSON 格式输出，schema 如下：\n"
     "{\n"
-    '  "overall_comment": "2-3句整体评价",\n'
-    '  "strongest_topic": "表现最好的话题及原因",\n'
-    '  "weakest_topic": "最薄弱的话题及具体证据",\n'
+    '  "overall_comment": "基于本轮证据的整体观察",\n'
+    '  "observed_strengths": ["已观察到的具体表现和证据"],\n'
+    '  "not_assessed": ["尚未充分覆盖或未作答的主题"],\n'
     '  "key_suggestions": ["具体建议1", "具体建议2", "具体建议3"],\n'
-    '  "score_estimate": 7,\n'
-    '  "hiring_signal": "可选：是否建议进入下一轮及原因",\n'
-    '  "risk_points": ["可选：主要风险1", "主要风险2"],\n'
-    '  "next_round_questions": ["可选：下一轮建议追问1"]\n'
+    '  "coverage_note": "本轮已覆盖和未覆盖范围的说明"\n'
     "}\n"
     "不要包含任何其他文字或 markdown 代码块，只输出纯 JSON。"
 )
@@ -120,22 +111,16 @@ def _render_interview_summary_markdown(summary: InterviewSummary) -> str:
 
     Phase 2: 不再内置固定收尾句。收尾语由 closing_writer 单独生成。
     """
-    suggestions = "\n".join(f"- {s}" for s in summary.key_suggestions)
+    strengths = "\n".join(f"- {item}" for item in summary.observed_strengths) or "- 本轮尚未积累足够的可确认亮点。"
+    not_assessed = "\n".join(f"- {item}" for item in summary.not_assessed) or "- 无。"
+    suggestions = "\n".join(f"- {s}" for s in summary.key_suggestions) or "- 建议下一次围绕一个完整项目补充架构、取舍和结果。"
     sections = [
         f"**整体表现**：{summary.overall_comment}\n\n"
-        f"**最佳话题**：{summary.strongest_topic}\n\n"
-        f"**薄弱环节**：{summary.weakest_topic}\n\n"
+        f"**已观察到的表现**：\n{strengths}\n\n"
+        f"**尚未充分评估**：\n{not_assessed}\n\n"
         f"**改进建议**：\n{suggestions}\n\n",
+        f"**覆盖说明**：{summary.coverage_note}",
     ]
-    if summary.hiring_signal:
-        sections.append(f"**Hiring Signal**：{summary.hiring_signal}\n\n")
-    if summary.risk_points:
-        risks = "\n".join(f"- {risk}" for risk in summary.risk_points)
-        sections.append(f"**主要风险**：\n{risks}\n\n")
-    if summary.next_round_questions:
-        questions = "\n".join(f"- {q}" for q in summary.next_round_questions)
-        sections.append(f"**下一轮追问**：\n{questions}\n\n")
-    sections.append(f"**综合评分**：{summary.score_estimate}/10")
     return "".join(sections)
 
 
@@ -228,17 +213,19 @@ async def _generate_structured_summary(
         if not allow_fallback:
             raise
         logger.warning("Interview summary LLM call failed, using fallback: %s", e)
-        # Improved fallback: at least mention topic count from session notes
+        # Legacy callers may opt into a fallback, but it must not fabricate an
+        # assessment. The close contract itself never permits this path.
         topic_count = len(re.findall(r"\[asked\]", session_notes))
         topic_info = (
-            f"共覆盖了 {topic_count} 个话题" if topic_count else "覆盖了多个话题"
+            f"共覆盖了 {topic_count} 个话题" if topic_count else "没有形成可确认的题目覆盖记录"
         )
         return (
-            f"**整体表现**：本次面试{topic_info}，"
-            "你在项目经验和基础知识方面都有一定积累，回答思路基本清晰。"
-            "建议后续重点复盘面试中暴露的知识盲区，"
-            "尤其是回答不够深入的部分，可以结合实际项目多做总结。\n\n"
-            "建议继续保持对核心技术的深度学习，祝后续面试顺利。"
+            "**整体表现**：本轮结构化复盘未能生成，因此不对表现作推断。\n\n"
+            "**尚未充分评估**：\n"
+            f"- {topic_info}，无法据此得出完整结论。\n\n"
+            "**改进建议**：\n"
+            "- 下一次请围绕一个项目完整说明背景、取舍、结果和复盘，以便获得基于证据的反馈。\n\n"
+            "**覆盖说明**：本次仅保留已记录的对话事实。"
         )
 
 

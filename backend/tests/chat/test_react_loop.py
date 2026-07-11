@@ -312,10 +312,10 @@ class TestReactLoop:
         mock_summary_json = json.dumps(
             {
                 "overall_comment": "整体表现良好",
-                "strongest_topic": "项目经验丰富",
-                "weakest_topic": "算法基础薄弱",
+                "observed_strengths": ["项目经历讲解包含具体检索方案。"],
+                "not_assessed": ["算法能力本轮未覆盖。"],
                 "key_suggestions": ["多练算法"],
-                "score_estimate": 6,
+                "coverage_note": "本轮完成了项目和基础能力的部分覆盖。",
             },
             ensure_ascii=False,
         )
@@ -2656,14 +2656,14 @@ class TestEndInterviewHardRoute:
         mock_summary_json = json.dumps(
             {
                 "overall_comment": "候选人项目经验丰富，基础知识扎实",
-                "strongest_topic": "Redis 缓存策略，回答深入全面",
-                "weakest_topic": "算法基础薄弱，手撕题解题思路不清晰",
+                "observed_strengths": ["能结合 Redis 缓存策略说明实际实现。"],
+                "not_assessed": ["算法题本轮未覆盖。"],
                 "key_suggestions": [
                     "复习常见排序算法",
                     "练习链表题目",
                     "深入理解时间复杂度",
                 ],
-                "score_estimate": 7,
+                "coverage_note": "本轮覆盖了项目和 Redis 主题，算法尚未讨论。",
             },
             ensure_ascii=False,
         )
@@ -2701,17 +2701,14 @@ class TestEndInterviewHardRoute:
         mock_summary_json = json.dumps(
             {
                 "overall_comment": "候选人的项目讲解有亮点，但系统设计深度还不稳定。",
-                "strongest_topic": "Agent 工具调用链路，能结合项目细节说明取舍。",
-                "weakest_topic": "容量评估和异常兜底，缺少可量化的压测依据。",
+                "observed_strengths": ["Agent 工具调用链路能结合项目细节说明取舍。"],
+                "not_assessed": ["容量评估和异常兜底本轮没有充分展开。"],
                 "key_suggestions": [
                     "补充关键链路的容量估算",
                     "整理工具调用失败时的降级策略",
                     "用一次真实复盘串起指标和结论",
                 ],
-                "score_estimate": 6,
-                "hiring_signal": "有进入下一轮的基础，但需要继续压系统设计细节。",
-                "risk_points": ["压测依据不足", "异常恢复方案不够具体"],
-                "next_round_questions": ["如果 Redis 不可用，面试链路如何降级？"],
+                "coverage_note": "本轮主要覆盖 Agent 工具调用，系统设计证据有限。",
             },
             ensure_ascii=False,
         )
@@ -2737,9 +2734,9 @@ class TestEndInterviewHardRoute:
 
         mock_call.assert_awaited_once()
         assert "整体表现" in response
-        assert "Hiring Signal" in response
-        assert "主要风险" in response
-        assert "下一轮追问" in response
+        assert "已观察到的表现" in response
+        assert "尚未充分评估" in response
+        assert "Hiring Signal" not in response
         assert "戛然而止" not in response
         assert state["question_source"] == "conversation"
         assert state["question_source_reason"] == "end_interview_hard_route"
@@ -2767,10 +2764,10 @@ class TestEndInterviewHardRoute:
 
         mock_summary_json = json.dumps({
             "overall_comment": "证据较少，结论仅供本轮复盘参考。",
-            "strongest_topic": "RAG 和 Agent 平台经验",
-            "weakest_topic": "架构细节证据不足",
+            "observed_strengths": ["候选人提到 RAG 和 Agent 平台经验。"],
+            "not_assessed": ["架构细节本轮未作答。"],
             "key_suggestions": ["补充架构取舍"],
-            "score_estimate": 5,
+            "coverage_note": "对话较短，尚未形成完整评估样本。",
         }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
@@ -2807,10 +2804,10 @@ class TestEndInterviewHardRoute:
 
         mock_summary_json = json.dumps({
             "overall_comment": "对话较短，结论仅供参考。",
-            "strongest_topic": "Agent 工作流经验",
-            "weakest_topic": "状态管理细节不足",
+            "observed_strengths": ["候选人提到 Agent 工作流经验。"],
+            "not_assessed": ["状态管理细节本轮未作答。"],
             "key_suggestions": ["补充状态设计细节"],
-            "score_estimate": 5,
+            "coverage_note": "对话较短，状态管理尚未覆盖。",
         }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
@@ -2832,14 +2829,14 @@ class TestEndInterviewHardRoute:
         mock_summary_json = json.dumps(
             {
                 "overall_comment": "候选人的平台经验有数据，但关键证据链不完整。",
-                "strongest_topic": "工具调用平台指标，能给出成功率和延迟变化。",
-                "weakest_topic": "证据不足：没有说明失败原因分布和 schema 校验改动细节。",
+                "observed_strengths": ["工具调用平台指标能给出成功率和延迟变化。"],
+                "not_assessed": ["失败原因分布和 schema 校验细节尚未充分说明。"],
                 "key_suggestions": [
                     "补齐失败原因分布",
                     "说明 schema 校验前后的数据结构变化",
                     "准备一次端到端事故复盘",
                 ],
-                "score_estimate": 6,
+                "coverage_note": "本轮仅覆盖了部分平台指标和实现细节。",
             },
             ensure_ascii=False,
         )
@@ -2864,8 +2861,8 @@ class TestEndInterviewHardRoute:
 
         mock_call.assert_awaited_once()
         assert "整体表现" in response
-        assert "证据不足" in response
-        assert "综合评分" in response
+        assert "尚未充分评估" in response
+        assert "综合评分" not in response
 
 
 class TestAssessmentFocusMetadata:
