@@ -255,9 +255,9 @@ class TestClosingTwoStage:
     async def test_short_explicit_end_always_includes_structured_summary(self):
         """Explicit end must not degrade to the legacy generic farewell."""
         summary_json = (
-            '{"overall_comment":"回答能落到项目细节。","strongest_topic":"缓存",'
-            '"weakest_topic":"系统设计","key_suggestions":["补齐设计取舍"],'
-            '"score_estimate":7}'
+            '{"overall_comment":"回答能落到项目细节。","observed_strengths":["缓存项目细节"],'
+            '"not_assessed":["系统设计"],"key_suggestions":["补齐设计取舍"],'
+            '"coverage_note":"本轮覆盖缓存项目。"}'
         )
         events, _, _ = await run_single_turn_with_raw_events(
             user_message="今天先结束吧",

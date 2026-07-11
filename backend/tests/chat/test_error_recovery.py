@@ -202,10 +202,10 @@ class TestForcedClosing:
         }
         mock_summary_json = json.dumps({
             "overall_comment": "候选人基础知识扎实",
-            "strongest_topic": "Redis，回答全面",
-            "weakest_topic": "算法，答得浅",
+            "observed_strengths": ["Redis 主题回答覆盖全面。"],
+            "not_assessed": ["算法本轮未覆盖。"],
             "key_suggestions": ["建议复习排序算法"],
-            "score_estimate": 7,
+            "coverage_note": "本轮记录了 Redis 主题。",
         }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
@@ -227,10 +227,10 @@ class TestForcedClosing:
         }
         mock_summary_json = json.dumps({
             "overall_comment": "整体一般",
-            "strongest_topic": "项目经验",
-            "weakest_topic": "算法基础薄弱",
+            "observed_strengths": ["候选人介绍了项目经验。"],
+            "not_assessed": ["算法本轮未覆盖。"],
             "key_suggestions": ["多练习"],
-            "score_estimate": 6,
+            "coverage_note": "本轮覆盖有限。",
         }, ensure_ascii=False)
         with patch(
             "app.agents.chat.pipeline._last_assistant_message",
@@ -255,10 +255,10 @@ class TestForcedClosing:
         }
         mock_summary_json = json.dumps({
             "overall_comment": "test",
-            "strongest_topic": "t",
-            "weakest_topic": "w",
+            "observed_strengths": ["t"],
+            "not_assessed": ["w"],
             "key_suggestions": ["s"],
-            "score_estimate": 5,
+            "coverage_note": "test coverage",
         }, ensure_ascii=False)
         with patch(
             "app.services.llm._call_llm_with_retry_messages",
@@ -497,10 +497,10 @@ class TestForcedClosingE2E:
 
         mock_summary_json = json.dumps({
             "overall_comment": "候选人整体表现出色",
-            "strongest_topic": "项目经验丰富",
-            "weakest_topic": "算法基础薄弱",
+            "observed_strengths": ["项目经验叙述具体。"],
+            "not_assessed": ["算法本轮未覆盖。"],
             "key_suggestions": ["多练算法题"],
-            "score_estimate": 7,
+            "coverage_note": "本轮覆盖项目经验。",
         }, ensure_ascii=False)
 
         with ExitStack() as stack:
