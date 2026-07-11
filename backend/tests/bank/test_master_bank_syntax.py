@@ -2,6 +2,7 @@
 测试 master_bank.py 模块语法正确性
 针对 Bug INDENT-001: _gen_one 函数缩进错误
 """
+
 import ast
 import pytest
 import sys
@@ -27,14 +28,14 @@ class TestMasterBankSyntax:
 
     def test_file_syntax_valid(self):
         """验证 master_bank.py 文件语法正确"""
-        with open(self.MODULE_PATH, 'r') as f:
+        with open(self.MODULE_PATH, "r") as f:
             source = f.read()
         # ast.parse 会在语法错误时抛出 SyntaxError
         ast.parse(source)
 
     def test_gen_one_function_syntax(self):
         """验证 _gen_one 函数的语法正确性"""
-        with open(self.ANSWERS_PATH, 'r') as f:
+        with open(self.ANSWERS_PATH, "r") as f:
             source = f.read()
 
         tree = ast.parse(source)
@@ -42,7 +43,7 @@ class TestMasterBankSyntax:
         # 查找 _gen_one 函数定义
         gen_one_func = None
         for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == '_gen_one':
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_gen_one":
                 gen_one_func = node
                 break
 
@@ -53,8 +54,9 @@ class TestMasterBankSyntax:
 
         # 验证第一行是 nonlocal 语句
         first_stmt = gen_one_func.body[0]
-        assert isinstance(first_stmt, ast.Nonlocal), \
+        assert isinstance(first_stmt, ast.Nonlocal), (
             f"_gen_one 函数第一行应该是 nonlocal 语句，实际是 {type(first_stmt).__name__}"
+        )
 
     def test_import_module(self):
         """验证模块可以正常导入"""
@@ -70,9 +72,13 @@ class TestMasterBankSyntax:
             pytest.fail(f"questions.py 存在缩进错误: {e}")
         except ImportError as e:
             # 导入错误可能是依赖问题，不是语法问题
-            pytest.skip(f"导入失败（可能是依赖问题）: {e}")
+            pytest.fail(
+                f"导入失败（Docker test-runtime 应包含全部依赖，导入失败几乎一定是代码问题）: {e}",
+                pytrace=True,
+            )
         except Exception as e:
             pytest.fail(f"导入 questions.py 时发生意外错误: {e}")
+
 
 class TestBackendStartup:
     """测试后端服务能否正常启动"""
@@ -88,7 +94,10 @@ class TestBackendStartup:
         except IndentationError as e:
             pytest.fail(f"asgi.py 或其依赖存在缩进错误: {e}")
         except ImportError as e:
-            pytest.skip(f"导入失败（可能是依赖问题）: {e}")
+            pytest.fail(
+                f"导入失败（Docker test-runtime 应包含全部依赖，导入失败几乎一定是代码问题）: {e}",
+                pytrace=True,
+            )
         except Exception as e:
             pytest.fail(f"导入 asgi.py 时发生意外错误: {e}")
 
@@ -99,24 +108,30 @@ class TestBackendStartup:
             sys.path.insert(0, str(backend_dir))
 
         routers = [
-            'app.routers.auth',
-            'app.routers.submit',
-            'app.routers.data',
-            'app.routers.questions',
-            'app.routers.answers',
-            'app.routers.practice',
-            'app.routers.admin_review',
-            'app.routers.bank_build',
-            'app.routers.interview',
-            'app.routers.analytics',
-            'app.routers.profile',
-            'app.routers.health',
+            "app.routers.auth",
+            "app.routers.submit",
+            "app.routers.data",
+            "app.routers.questions",
+            "app.routers.answers",
+            "app.routers.practice",
+            "app.routers.admin_review",
+            "app.routers.bank_build",
+            "app.routers.interview",
+            "app.routers.analytics",
+            "app.routers.profile",
+            "app.routers.health",
         ]
 
+        failures: list[str] = []
         for router_name in routers:
             try:
                 __import__(router_name)
             except IndentationError as e:
-                pytest.fail(f"{router_name} 存在缩进错误: {e}")
+                failures.append(f"{router_name} 缩进错误: {e}")
             except ImportError as e:
-                pytest.skip(f"{router_name} 导入失败（可能是依赖问题）: {e}")
+                failures.append(
+                    f"{router_name} 导入失败（Docker test-runtime 含全部依赖，几乎一定是代码问题）: {e}"
+                )
+            except Exception as e:
+                failures.append(f"{router_name} 意外错误: {e}")
+        assert not failures, "\n".join(failures)
