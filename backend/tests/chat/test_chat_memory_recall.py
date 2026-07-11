@@ -125,7 +125,7 @@ class TestClassifyAndRecall:
                 user_id=1,
             )
 
-            mock_llm.assert_called_once()
+            assert mock_llm.call_count == 2
 
         assert intent == "interview_question"
         assert memory_ids == []
@@ -217,8 +217,8 @@ class TestPipelineIntegration:
     """Pipeline 集成测试"""
 
     @pytest.mark.asyncio
-    async def test_interview_path_uses_one_llm_call(self):
-        """M-008: 面试路径在 generate_response 前应仅 1 次 LLM 调用"""
+    async def test_interview_path_uses_classification_and_control_fact_calls(self):
+        """M-008: 面试路径独立解释高优先级控制事实。"""
         from app.services.memory_recall_service import classify_and_recall
 
         summaries = [
@@ -243,5 +243,81 @@ class TestPipelineIntegration:
                 user_id=1,
             )
 
-            # Only 1 LLM call for the combined classify + recall + keywords
-            assert mock_llm.call_count == 1
+            assert mock_llm.call_count == 2
+
+
+class TestTurnControlFacts:
+    @pytest.mark.asyncio
+    async def test_control_interpreter_recovers_explicit_counter_question(self):
+        """A broad classifier's incomplete result cannot hide a reverse question."""
+        from app.services.memory_recall_service import classify_and_recall
+
+        broad_result = json.dumps({
+            "intent": "interview_question",
+            "relevant_memory_ids": [],
+            "keywords": [],
+            "search_query": "",
+            "answer_complete": False,
+            "classify_result": {"answer_quality": "incomplete"},
+        })
+        control_result = json.dumps({
+            "requested_end": False,
+            "counter_question": {
+                "text": "团队通常最看重哪些工程能力？",
+                "topic": "岗位能力要求",
+            },
+            "answer_state": "not_answered",
+            "evidence": "候选人明确向面试官询问岗位能力要求。",
+        })
+
+        with patch(
+            "app.services.memory_recall_service._call_llm_with_retry",
+            new_callable=AsyncMock,
+            side_effect=[broad_result, control_result],
+        ):
+            _, _, _, _, _, _, classify_result = await classify_and_recall(
+                user_message="团队通常最看重哪些工程能力？",
+                recent_context="面试官刚提出了技术问题。",
+                memory_summaries=[],
+                user_id=1,
+            )
+
+        assert classify_result["counter_question"]["text"] == "团队通常最看重哪些工程能力？"
+        assert classify_result["asked_counter_question"] is True
+        assert classify_result["needs_clarification"] is False
+
+    @pytest.mark.asyncio
+    async def test_control_interpreter_gives_explicit_end_priority(self):
+        from app.services.memory_recall_service import classify_and_recall
+
+        broad_result = json.dumps({
+            "intent": "interview_question",
+            "relevant_memory_ids": [],
+            "keywords": [],
+            "search_query": "",
+            "answer_complete": False,
+            "classify_result": {"answer_quality": "incomplete"},
+        })
+        control_result = json.dumps({
+            "requested_end": True,
+            "counter_question": None,
+            "answer_state": "not_answered",
+            "evidence": "候选人明确要求结束本次模拟面试。",
+        })
+
+        with patch(
+            "app.services.memory_recall_service._call_llm_with_retry",
+            new_callable=AsyncMock,
+            side_effect=[broad_result, control_result],
+        ):
+            intent, _, _, _, answer_complete, _, classify_result = await classify_and_recall(
+                user_message="今天的模拟面试就到这里吧。",
+                recent_context="面试官正在等待技术回答。",
+                memory_summaries=[],
+                user_id=1,
+            )
+
+        assert intent == "end_interview"
+        assert answer_complete is True
+        assert classify_result["requested_end"] is True
+        assert classify_result["needs_clarification"] is False

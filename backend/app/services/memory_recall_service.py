@@ -14,6 +14,68 @@ from app.agents.chat.prompts import INTENT_CLASSIFY_PROMPT
 
 logger = logging.getLogger("interview-boss")
 
+_TURN_CONTROL_FACTS_PROMPT = """你是模拟面试系统的语义控制事实解释器。只根据候选人的最新原话和最近上下文，返回 JSON；不要继续面试、不要给建议。
+
+你的唯一任务是识别会改变回合控制权的候选人行为：
+1. requested_end：候选人是否明确要求结束本次模拟面试。只要为 true，即使上一题尚未回答，也必须结束，不得把它当作 incomplete。
+2. counter_question：候选人是否向面试官提出了明确问题。若有，返回候选人原话中可直接引用的问题 text 和简短 topic；否则为 null。项目介绍、技术陈述、修辞性自问不是反问。
+3. answer_state：answered / not_answered / unclear，表示候选人对上一道技术问题的作答状态。它不影响前两项的优先级。
+
+要求：
+- 不要因为候选人未回答上一题就否认明确结束或明确反问。
+- `counter_question.text` 必须是候选人原话的直接摘录，不能改写或补造。
+
+候选人最新消息：
+{user_message}
+
+最近上下文：
+{recent_context}
+
+只输出以下 JSON：
+{{"requested_end": false, "counter_question": null, "answer_state": "answered", "evidence": "一句简短依据"}}"""
+
+
+async def _interpret_turn_control_facts(
+    *, user_message: str, recent_context: str, user_id: int
+) -> dict:
+    """Independently interpret high-priority candidate control facts with an LLM.
+
+    This intentionally does not share the broad recall/classification prompt:
+    ending and reverse questions must not lose to retrieval or answer-quality
+    fields produced by a multi-task call.  It is semantic, not text matching.
+    """
+    try:
+        raw = await _call_llm_with_retry(
+            _TURN_CONTROL_FACTS_PROMPT.format(
+                user_message=user_message,
+                recent_context=recent_context,
+            ),
+            user_id=user_id,
+            response_format={"type": "json_object"},
+        )
+        data = _extract_json(raw)
+    except Exception as exc:
+        logger.warning("Turn control fact interpretation failed: %s", exc)
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+    question = data.get("counter_question")
+    if not isinstance(question, dict) or not isinstance(question.get("text"), str):
+        question = None
+    else:
+        text = question["text"].strip()
+        question = {"text": text, "topic": str(question.get("topic") or "").strip()} if text else None
+    answer_state = data.get("answer_state")
+    if answer_state not in {"answered", "not_answered", "unclear"}:
+        answer_state = "unclear"
+    return {
+        "requested_end": data.get("requested_end") is True,
+        "counter_question": question,
+        "answer_state": answer_state,
+        "evidence": str(data.get("evidence") or "").strip(),
+    }
+
 # answer_complete 启发式判断
 _EXPLICIT_COMPLETE_MARKERS = {"就这些", "答完了", "大概就是这样", "大概就是这样吧", "说完了", "完了", "没有了"}
 _EXPLICIT_INCOMPLETE_MARKERS = {"嗯", "好的", "对", "是的", "没错", "ok", "OK"}
@@ -488,7 +550,7 @@ search_query = keywords 用空格拼接即可。
   - true 当 intent=practice_request 或明确请求算法/代码题
   - false 当开场前 N 轮或 answer_quality 为 incomplete/off_topic/repeated
 - candidate_act: answered_question / asked_counter_question / asked_for_summary / requested_end / greeting / chitchat
-- counter_question: 候选人实际反问；没有明确向面试官提出的问题时必须为 null。存在时输出 {"text":"候选人原话中的问题","topic":"主题"}，不得把项目介绍或技术陈述当作反问
+- counter_question: 候选人实际反问；没有明确向面试官提出的问题时必须为 null。存在时输出 {{"text":"候选人原话中的问题","topic":"主题"}}，不得把项目介绍或技术陈述当作反问
 - asked_for_summary: boolean，候选人是否要求总结或评价
 - requested_end: boolean，候选人是否要求结束本轮面试
 - needs_clarification: boolean，当前回答是否需要围绕原题补充证据
@@ -851,6 +913,43 @@ async def classify_and_recall(
             question_type=structured_rewrite.get("question_type"),
             llm_classify=llm_classify,
         ).to_state()
+
+        # A separate LLM owns the rare but high-priority control facts.  This
+        # prevents the broad recall/classification call from treating an
+        # explicit reverse question or close request as an incomplete answer.
+        control_facts = await _interpret_turn_control_facts(
+            user_message=user_message,
+            recent_context=recent_context,
+            user_id=user_id,
+        )
+        if control_facts.get("requested_end"):
+            intent = "end_interview"
+            answer_complete = True
+            classify_result.update(
+                {
+                    "intent": "end_interview",
+                    "answer_quality": "complete",
+                    "should_retrieve": False,
+                    "requires_bank_question": False,
+                    "candidate_act": "requested_end",
+                    "requested_end": True,
+                    "needs_clarification": False,
+                    "needs_new_dimension": False,
+                    "evidence": control_facts.get("evidence") or classify_result.get("evidence"),
+                }
+            )
+        elif isinstance(control_facts.get("counter_question"), dict):
+            counter_question = control_facts["counter_question"]
+            classify_result.update(
+                {
+                    "counter_question": counter_question,
+                    "asked_counter_question": True,
+                    "counter_question_topic": counter_question.get("topic") or None,
+                    "candidate_act": "asked_counter_question",
+                    "needs_clarification": False,
+                    "evidence": control_facts.get("evidence") or classify_result.get("evidence"),
+                }
+            )
 
         return (
             intent,
