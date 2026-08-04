@@ -24,11 +24,12 @@ def _backend_url() -> str:
 
 
 def _mcp_error(status: int, detail: str) -> JSONResponse:
+    public = os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
     return JSONResponse(
         {"detail": detail},
         status_code=status,
         headers={
-            "WWW-Authenticate": f'Bearer resource_metadata="{_backend_url()}/.well-known/oauth-protected-resource"'
+            "WWW-Authenticate": f'Bearer resource_metadata="{public}/.well-known/oauth-protected-resource"'
         },
     )
 
