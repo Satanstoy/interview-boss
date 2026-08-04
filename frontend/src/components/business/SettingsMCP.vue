@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
-import { AlertTriangle, Check, Copy, KeyRound, RefreshCw, Server, Trash2 } from '@lucide/vue'
+import { AlertTriangle, Check, Copy, KeyRound, RefreshCw, Server, Trash2, BotMessageSquare } from '@lucide/vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { fetchMyMCPConfig, rotateMyMCPToken, revokeMyMCPToken } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,26 @@ const agentConfigPrompt = computed(() => {
     `MCP 地址：${endpoint}`,
     `Authorization：Bearer ${token}`,
     '连接后请加载 InterviewBoss 的 interview-tool-use skill，按岗位使用题库搜索、抽题和选题工具。',
+  ].join('\n')
+})
+
+const baseUrl = computed(() => {
+  const endpoint = settings.value?.endpoint || ''
+  try {
+    return new URL(endpoint).origin
+  } catch {
+    return ''
+  }
+})
+
+const chatgptPrompt = computed(() => {
+  const endpoint = settings.value?.endpoint || `${baseUrl.value}/mcp`
+  return [
+    '请帮我配置 ChatGPT MCP 连接器接入 InterviewBoss。',
+    `MCP 地址：${endpoint}`,
+    '认证方式：OAuth（ChatGPT 自动发现端点）',
+    `OAuth 发现：${baseUrl.value}/.well-known/oauth-protected-resource`,
+    '连接后 ChatGPT 会跳转登录页，用 InterviewBoss 账号授权即可。',
   ].join('\n')
 })
 
@@ -331,6 +351,67 @@ onMounted(loadConfig)
             {{ copied === 'prompt' ? '已复制配置 Prompt' : '复制给 Agent 的配置 Prompt' }}
           </Button>
           <span v-if="!issuedToken" class="text-xs text-muted-foreground">请先生成或重置 Token，才能复制包含认证信息的 Prompt。</span>
+        </div>
+      </div>
+
+      <div class="rounded-xl border bg-card p-6 space-y-5">
+        <div class="flex items-start gap-3">
+          <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+            <BotMessageSquare class="size-5" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <h4 class="text-sm font-semibold text-foreground">ChatGPT 接入</h4>
+            <p class="mt-1 text-xs leading-5 text-muted-foreground">
+              通过 OAuth 2.1 + PKCE 让 ChatGPT 连接 InterviewBoss。ChatGPT 会自动发现 OAuth 端点并引导你登录授权。
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <div class="space-y-1.5">
+            <span class="text-xs font-semibold text-muted-foreground">MCP 地址（ChatGPT 填这个）</span>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 break-all rounded-md bg-muted px-3 py-2 text-xs text-foreground">{{ settings?.endpoint }}</code>
+              <Button variant="ghost" size="sm" class="h-7 shrink-0 gap-1.5" @click="copyText(settings?.endpoint, 'chatgpt-mcp')">
+                <Check v-if="copied === 'chatgpt-mcp'" class="size-3.5 text-emerald-500" />
+                <Copy v-else class="size-3.5" />
+              </Button>
+            </div>
+          </div>
+
+          <div class="grid gap-3 text-xs sm:grid-cols-2">
+            <div class="space-y-1">
+              <span class="font-semibold text-muted-foreground">OAuth 发现端点</span>
+              <code class="block break-all rounded-md bg-muted px-2.5 py-1.5 text-foreground">{{ baseUrl }}/.well-known/oauth-protected-resource</code>
+            </div>
+            <div class="space-y-1">
+              <span class="font-semibold text-muted-foreground">授权服务器元数据</span>
+              <code class="block break-all rounded-md bg-muted px-2.5 py-1.5 text-foreground">{{ baseUrl }}/.well-known/oauth-authorization-server</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
+          <h5 class="text-xs font-semibold text-foreground">配置步骤</h5>
+          <ol class="list-decimal space-y-1.5 pl-4 text-xs leading-5 text-muted-foreground">
+            <li>在 ChatGPT 设置中添加 MCP 连接器，URL 填上方 <strong class="font-semibold text-foreground">MCP 地址</strong>。</li>
+            <li>认证方式选择 <strong class="font-semibold text-foreground">OAuth</strong>（ChatGPT 会自动发现端点）。</li>
+            <li>点击连接后会跳转到 InterviewBoss 登录页，用你的账号登录并授权。</li>
+            <li>授权完成后 ChatGPT 自动获取 Token，即可使用题库搜索、抽题和选题能力。</li>
+          </ol>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            class="gap-2"
+            :disabled="!settings?.endpoint"
+            @click="copyText(chatgptPrompt, 'chatgpt-prompt')"
+          >
+            <Check v-if="copied === 'chatgpt-prompt'" class="size-4 text-emerald-500" />
+            <Copy v-else class="size-4" />
+            {{ copied === 'chatgpt-prompt' ? '已复制' : '复制 ChatGPT 配置提示词' }}
+          </Button>
         </div>
       </div>
     </template>
