@@ -123,11 +123,11 @@ onMounted(loadConfig)
 
         <div class="space-y-1.5">
           <div class="flex items-center justify-between gap-3">
-            <span class="text-xs font-semibold text-muted-foreground">MCP Endpoint</span>
+            <span class="text-xs font-semibold text-muted-foreground">MCP 地址</span>
             <Button variant="ghost" size="sm" class="h-7 gap-1.5" @click="copyText(settings?.endpoint, 'endpoint')">
               <Check v-if="copied === 'endpoint'" class="size-3.5 text-emerald-500" />
               <Copy v-else class="size-3.5" />
-              {{ copied === 'endpoint' ? '已复制' : '复制' }}
+              {{ copied === 'endpoint' ? '已复制' : '复制 MCP 地址' }}
             </Button>
           </div>
           <code class="block break-all rounded-md bg-muted px-3 py-2 text-xs text-foreground">{{ settings?.endpoint }}</code>
@@ -159,21 +159,35 @@ onMounted(loadConfig)
         <div class="flex items-start gap-3">
           <KeyRound class="mt-0.5 size-5 shrink-0 text-primary" />
           <div>
-            <h4 class="text-sm font-semibold text-foreground">新 Token 只在这里返回</h4>
-            <p class="mt-1 text-xs leading-5 text-muted-foreground">请复制到外部 agent 的 MCP 配置中。刷新页面后不会再次显示完整 Token。</p>
+            <h4 class="text-sm font-semibold text-foreground">连接信息（请立即复制）</h4>
+            <p class="mt-1 text-xs leading-5 text-muted-foreground">完整 Token 只在生成或重置后显示一次；刷新页面后不会再次显示。</p>
           </div>
         </div>
 
-        <div class="space-y-1.5">
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-xs font-semibold text-muted-foreground">Bearer Token</span>
-            <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(issuedToken, 'token')">
-              <Check v-if="copied === 'token'" class="size-3.5 text-emerald-500" />
-              <Copy v-else class="size-3.5" />
-              {{ copied === 'token' ? '已复制' : '复制 Token' }}
-            </Button>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs font-semibold text-muted-foreground">MCP 地址</span>
+              <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(settings?.endpoint, 'issued-endpoint')">
+                <Check v-if="copied === 'issued-endpoint'" class="size-3.5 text-emerald-500" />
+                <Copy v-else class="size-3.5" />
+                {{ copied === 'issued-endpoint' ? '已复制' : '复制地址' }}
+              </Button>
+            </div>
+            <code class="block min-h-10 break-all rounded-md border bg-background px-3 py-2 text-xs leading-5 text-foreground">{{ settings?.endpoint }}</code>
           </div>
-          <code class="block break-all rounded-md border bg-background px-3 py-2 text-xs text-foreground">{{ issuedToken }}</code>
+
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs font-semibold text-muted-foreground">访问 Token</span>
+              <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(issuedToken, 'token')">
+                <Check v-if="copied === 'token'" class="size-3.5 text-emerald-500" />
+                <Copy v-else class="size-3.5" />
+                {{ copied === 'token' ? '已复制' : '复制 Token' }}
+              </Button>
+            </div>
+            <code class="block min-h-10 break-all rounded-md border bg-background px-3 py-2 text-xs leading-5 text-foreground">{{ issuedToken }}</code>
+          </div>
         </div>
 
         <div class="space-y-1.5">
@@ -203,10 +217,11 @@ onMounted(loadConfig)
       </div>
 
       <div class="rounded-xl border bg-card p-6">
-        <h4 class="text-sm font-semibold text-foreground">接入步骤</h4>
+        <h4 class="text-sm font-semibold text-foreground">如何给 agent 配置 MCP</h4>
         <ol class="mt-3 list-decimal space-y-2 pl-5 text-xs leading-5 text-muted-foreground">
-          <li>生成 Token：支持远程 HTTP 的 agent 复制第一份 JSON；只支持 stdio 的 agent 复制 npx JSON。</li>
-          <li>npx 配置会把 Token 放在本机环境变量中，保持 <code class="text-foreground">Authorization: Bearer ...</code> 认证。</li>
+          <li>先生成 Token，然后复制上方的 <strong class="font-semibold text-foreground">MCP 地址</strong> 和 <strong class="font-semibold text-foreground">访问 Token</strong>。</li>
+          <li>在 agent 的 MCP 设置中新增一个 <strong class="font-semibold text-foreground">Streamable HTTP</strong> 服务：URL 填 MCP 地址，认证 Header 填 <code class="text-foreground">Authorization: Bearer 你的 Token</code>。</li>
+          <li>如果 agent 支持直接粘贴 MCP JSON，可复制上面的远程 HTTP 配置；只支持 stdio 的 agent 才使用 npx 配置 JSON。</li>
           <li>连接初始化时会自动加载 InterviewBoss 的 MCP 工具使用 skill，无需另行安装；领域技能会按需加载。</li>
           <li>连接后，agent 可以按岗位传入 <code class="text-foreground">job_position</code>，再调用搜索、抽题和选题工具。</li>
         </ol>
