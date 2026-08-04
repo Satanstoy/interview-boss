@@ -53,7 +53,7 @@
           <Badge v-for="tag in questionTags(currentQ).slice(0, 4)" :key="tag" variant="secondary" class="text-[10px]">{{ tag }}</Badge>
         </div>
 
-        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col py-6 text-center md:py-8" :class="answerRevealed ? 'justify-start' : 'justify-center'">
+        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-col py-6 text-center md:py-8" :class="answerRevealed ? 'flex-none justify-start' : 'flex-1 justify-center'">
           <h2 class="practice-question font-semibold leading-relaxed tracking-tight text-foreground">{{ currentQ.question }}</h2>
 
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">

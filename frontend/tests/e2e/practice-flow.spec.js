@@ -609,11 +609,18 @@ test.describe('练习完整流程 — PracticePanel', () => {
 
     await expect(page.getByTestId('practice-header')).toBeVisible()
     await expect(page.getByTestId('practice-focus-card')).toBeVisible()
-    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).toBeVisible()
+    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).not.toBeVisible()
 
     await page.getByTestId('practice-show-answer').click()
     await expect(page.getByTestId('practice-review-actions')).toBeVisible()
     await expect(page.getByRole('button', { name: '记得了' })).toBeVisible()
+
+    const answerAndActions = await page.evaluate(() => {
+      const answer = document.querySelector('.flashcard-answer')?.getBoundingClientRect()
+      const actions = document.querySelector('[data-testid="practice-review-actions"]')?.getBoundingClientRect()
+      return { answerBottom: answer?.bottom || 0, actionsTop: actions?.top || 0 }
+    })
+    expect(answerAndActions.actionsTop).toBeGreaterThanOrEqual(answerAndActions.answerBottom - 1)
   })
 
   test('刷题题单与高频题库联动并保存熟练度', async ({ page }) => {
