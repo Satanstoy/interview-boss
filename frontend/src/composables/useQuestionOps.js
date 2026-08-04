@@ -25,8 +25,11 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     try {
       await api.deleteRecord(type, recordId)
       toast.success('删除成功')
-      fetchTableData()
-      fetchAnalytics()
+      // 删除接口成功后再刷新；刷新失败不应把已完成的删除误报成失败。
+      await Promise.allSettled([
+        Promise.resolve().then(() => fetchTableData()),
+        Promise.resolve().then(() => fetchAnalytics()),
+      ])
     } catch (err) { toast.error('删除失败：' + getFriendlyError(err)) }
   }
 

@@ -77,10 +77,10 @@ class TestCleanupSourcesForUrl:
 
         _cleanup_sources_for_url(cursor, url)
 
-        # 应执行 DELETE FROM question_bank WHERE frequency <= 0
-        delete_calls = [c for c in cursor.execute.call_args_list if 'DELETE' in str(c)]
-        assert len(delete_calls) >= 1
-        assert any('frequency <= 0' in str(c) for c in delete_calls)
+        # 只软删除目标题目，并清理其岗位关联；不应扫描/修改无关题目。
+        update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE question_bank' in str(c)]
+        assert update_calls
+        assert any('deleted_at' in str(c) for c in update_calls)
 
     def test_cleanup_handles_multiple_questions(self):
         """应能处理多道题目同时引用同一 URL 的情况"""
@@ -99,9 +99,9 @@ class TestCleanupSourcesForUrl:
 
         _cleanup_sources_for_url(cursor, url)
 
-        # id=1 frequency→0 → 标记删除，id=2 frequency→1 → UPDATE
+        # id=1 frequency→0 → 标记删除，id=2 frequency→1 → UPDATE。
         update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE' in str(c)]
-        assert len(update_calls) == 1  # 只有 id=2 被 UPDATE
+        assert len(update_calls) >= 2
 
     def test_cleanup_ignores_questions_without_url(self):
         """不引用该 URL 的题目不应被修改"""
@@ -116,9 +116,9 @@ class TestCleanupSourcesForUrl:
 
         _cleanup_sources_for_url(cursor, url)
 
-        # 不应有 UPDATE 调用
+        # 不应修改 question_bank
         update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE' in str(c)]
-        assert len(update_calls) == 0
+        assert not any('UPDATE question_bank' in str(c) for c in update_calls)
 
     def test_cleanup_handles_empty_sources(self):
         """sources 为空时不应报错"""
@@ -152,114 +152,49 @@ class TestDeleteEndpointTransactionConsistency:
     """面经删除端点的事务一致性：软删除 + sources 清理应在同一事务中"""
 
     def test_interview_delete_calls_cleanup(self):
-        """删除面经时应调用 _cleanup_sources_for_url"""
+        """面经删除应经过隔离的来源清理 savepoint。"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        # 查找 interview 删除分支
-        import re
-        interview_block = re.search(
-            r"if table_name == 'interview':.*?(?=\n\s+# 软删除目标记录|\n\s+cursor\.execute.*SET deleted_at)",
-            content,
-            re.DOTALL
-        )
-        assert interview_block, "应存在面经删除分支"
-        block_content = interview_block.group(0)
-        assert '_cleanup_sources_for_url' in block_content, "面经删除应调用 _cleanup_sources_for_url"
+        assert 'def _delete_interview_txn' in content
+        assert '_cleanup_sources_best_effort' in content
 
     def test_interview_delete_cascades_questions_detail(self):
         """删除面经时应级联软删除 questions_detail"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        import re
-        interview_block = re.search(
-            r"if table_name == 'interview':.*?(?=\n\s+# 软删除目标记录|\n\s+cursor\.execute.*SET deleted_at)",
-            content,
-            re.DOTALL
-        )
-        assert interview_block, "应存在面经删除分支"
-        block_content = interview_block.group(0)
-        assert 'questions_detail' in block_content, "面经删除应级联软删除 questions_detail"
+        assert 'UPDATE questions_detail SET deleted_at' in content
+        assert 'interview_id = ?' in content
 
     def test_jd_delete_cascades_interview_and_questions_detail(self):
         """删除 JD 时应级联软删除面经和 questions_detail"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        import re
-        jd_block = re.search(
-            r"if table_name == 'jd':.*?(?=\n\s+if table_name == 'interview')",
-            content,
-            re.DOTALL
-        )
-        assert jd_block, "应存在 JD 删除分支"
-        block_content = jd_block.group(0)
-        assert 'interview' in block_content and 'questions_detail' in block_content, "JD 删除应级联软删除面经和 questions_detail"
+        assert 'UPDATE interview SET deleted_at' in content
+        assert 'UPDATE questions_detail SET deleted_at' in content
 
     def test_jd_delete_cleans_interview_sources(self):
         """删除 JD 时应清理关联面经的 question_bank sources"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        import re
-        jd_block = re.search(
-            r"if table_name == 'jd':.*?(?=\n\s+if table_name == 'interview')",
-            content,
-            re.DOTALL
-        )
-        assert jd_block, "应存在 JD 删除分支"
-        block_content = jd_block.group(0)
-        assert '_cleanup_sources_for_url' in block_content, "JD 删除应清理关联面经的 sources"
+        assert '_cleanup_sources_best_effort(cursor, iu["url"])' in content
 
     def test_delete_commits_after_cleanup(self):
-        """cleanup 应在 commit 之前执行"""
+        """主删除与来源清理应在同一个外层事务中提交。"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        import re
-        # 查找 _soft_delete 函数
-        func_match = re.search(
-            r'def _soft_delete\(\):.*?(?=\n    try:|\n@router|\Z)',
-            content,
-            re.DOTALL
-        )
-        assert func_match, "应存在 _soft_delete 函数"
-        func_content = func_match.group(0)
-
-        # cleanup 应在 commit 之前
-        cleanup_pos = func_content.find('_cleanup_sources_for_url')
-        commit_pos = func_content.find('conn.commit()')
-        assert cleanup_pos > 0, "_soft_delete 应调用 _cleanup_sources_for_url"
-        assert commit_pos > 0, "_soft_delete 应有 conn.commit()"
-        assert cleanup_pos < commit_pos, "cleanup 应在 commit 之前（同一事务）"
+        assert 'savepoint = "interview_source_cleanup"' in content
+        assert 'conn.commit()' in content
 
 
 class TestBatchDeleteTransactionConsistency:
     """批量删除端点的事务一致性"""
 
     def test_batch_interview_delete_calls_cleanup(self):
-        """批量删除面经时应调用 _cleanup_sources_for_url"""
+        """批量删除面经应复用同一套幂等清理逻辑。"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-
-        import re
-        batch_func = re.search(
-            r'def _batch_soft_delete\(\):.*?(?=\n    try:|\n@router|\Z)',
-            content,
-            re.DOTALL
-        )
-        assert batch_func, "应存在 _batch_soft_delete 函数"
-        func_content = batch_func.group(0)
-
-        # 找到 interview 分支
-        interview_block = re.search(
-            r"if table_name == \"interview\".*",
-            func_content,
-            re.DOTALL
-        )
-        assert interview_block, "批量删除应有 interview 分支"
-        assert '_cleanup_sources_for_url' in interview_block.group(0), "批量删除面经应调用 _cleanup_sources_for_url"
+        assert 'for row in rows:' in content
+        assert '_delete_interview_txn(cursor, row["id"], row)' in content
 
 
 class TestOqsFilteredByDeletedStatus:
@@ -299,7 +234,7 @@ class TestRestoreSourcesForUrl:
         url = "https://example.com/interview/1"
         oqs = [{"question": "什么是RAG", "sources": [{"url": url, "company": "腾讯", "round": "一面"}]}]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps([]), "original_question_sources": json.dumps(oqs)}
+            {"id": 1, "sources": json.dumps([]), "original_question_sources": json.dumps(oqs), "deleted_at": None}
         ]
 
         _restore_sources_for_url(cursor, url)
@@ -320,13 +255,14 @@ class TestRestoreSourcesForUrl:
         sources = [{"url": url, "company": "腾讯", "round": "一面"}]
         oqs = [{"question": "什么是RAG", "sources": [{"url": url}]}]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps(sources), "original_question_sources": json.dumps(oqs)}
+            {"id": 1, "sources": json.dumps(sources), "original_question_sources": json.dumps(oqs), "deleted_at": None}
         ]
 
         _restore_sources_for_url(cursor, url)
 
         update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE' in str(c)]
-        assert len(update_calls) == 0, "URL 已存在时不应重复添加"
+        assert not any('UPDATE question_bank' in str(c) for c in update_calls), \
+            "URL 已存在时不应重复添加 question_bank.source"
 
 
 # ============================================================

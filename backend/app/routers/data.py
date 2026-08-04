@@ -1,6 +1,7 @@
 import json
 import re
 import logging
+import sqlite3
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
@@ -41,30 +42,46 @@ def _safe_table_name(name: str) -> str:
 def _cleanup_sources_for_url(cursor, url: str):
     """清理 question_bank 中指向指定 URL 的所有贡献：sources、original_questions、original_question_sources。
     frequency=0 的公共 QB 及其 question_position 一并删除。"""
-    # Use normalized question_sources table with indexed url column instead of LIKE scan
+    # Normalized rows are the fast path, while the JSON columns remain the
+    # repair path.  A previous delete can leave one representation updated
+    # and the other untouched, so using only one of them is not sufficient.
+    affected_ids = set()
     try:
-        affected_ids = cursor.execute(
+        normalized_rows = cursor.execute(
             "SELECT DISTINCT question_bank_id FROM question_sources WHERE url = ?",
             (url,),
         ).fetchall()
-        if affected_ids:
-            id_list = [r[0] for r in affected_ids]
-            placeholders = ",".join("?" * len(id_list))
-            affected = cursor.execute(
-                f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({placeholders})",
-                id_list,
-            ).fetchall()
-        else:
-            affected = []
-    except Exception:
-        # Fallback for tests / missing normalized tables
-        affected = cursor.execute(
-            "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
-            (f"%{url}%",),
+        for row in normalized_rows:
+            try:
+                affected_ids.add(row[0])
+            except (KeyError, TypeError, IndexError):
+                # Keep lightweight legacy mocks/databases on the JSON path.
+                continue
+    except sqlite3.OperationalError:
+        # Older/test databases may not have the normalized source table yet.
+        pass
+
+    try:
+        json_rows = cursor.execute(
+            "SELECT id, sources, original_questions, original_question_sources "
+            "FROM question_bank WHERE sources LIKE ? OR original_question_sources LIKE ?",
+            (f"%{url}%", f"%{url}%"),
         ).fetchall()
+    except sqlite3.OperationalError:
+        json_rows = []
+    affected = {r["id"]: r for r in json_rows}
+
+    if affected_ids:
+        placeholders = ",".join("?" * len(affected_ids))
+        normalized_qb_rows = cursor.execute(
+            f"SELECT id, sources, original_questions, original_question_sources "
+            f"FROM question_bank WHERE id IN ({placeholders})",
+            tuple(affected_ids),
+        ).fetchall()
+        affected.update({r["id"]: r for r in normalized_qb_rows})
 
     ids_to_delete = []
-    for r in affected:
+    for r in affected.values():
         try:
             sources = json.loads(r["sources"]) if r["sources"] else []
         except Exception:
@@ -96,7 +113,11 @@ def _cleanup_sources_for_url(cursor, url: str):
         }
         new_oqs = [q for q in oqs if q not in removed_questions]
 
-        if len(new_sources) != len(sources):
+        sources_changed = len(new_sources) != len(sources)
+        oqs_sources_changed = len(new_oqs_sources) != len(oqs_sources)
+        oqs_changed = len(new_oqs) != len(oqs)
+
+        if sources_changed or oqs_sources_changed or oqs_changed:
             if len(new_sources) == 0:
                 ids_to_delete.append(r["id"])
             else:
@@ -129,19 +150,91 @@ def _cleanup_sources_for_url(cursor, url: str):
             ids_to_delete,
         )
 
-    cursor.execute(
-        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE frequency <= 0 AND owner_id IS NULL AND deleted_at IS NULL"
-    )
-    cursor.execute(
-        "DELETE FROM question_position WHERE question_id IN (SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL AND deleted_at IS NULL)"
-    )
-
     try:
         remove_original_items_by_url(cursor, url)
     except Exception:
         pass
 
-    delete_sources_by_url(cursor, url)
+    try:
+        delete_sources_by_url(cursor, url)
+    except sqlite3.OperationalError:
+        # Source cleanup is best-effort for legacy databases.  The interview
+        # delete itself must still be able to commit and can be retried later.
+        logger.warning("question_sources 表不可用，跳过 URL 来源清理: %s", url)
+
+
+def _cleanup_sources_best_effort(cursor, url: str):
+    """Run source cleanup in a savepoint so it cannot abort main deletion.
+
+    The main interview row is deliberately updated before this savepoint. If
+    malformed legacy data or an optional table makes cleanup fail, the
+    interview and its details still commit. A repeated DELETE is idempotent
+    and retries this cleanup for historical half-deleted records.
+    """
+    if not url:
+        return
+
+    savepoint = "interview_source_cleanup"
+    cursor.execute(f"SAVEPOINT {savepoint}")
+    try:
+        _cleanup_sources_for_url(cursor, url)
+    except Exception:
+        logger.exception("面经来源清理失败，将保留主记录删除结果: %s", url)
+        try:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        except Exception:
+            logger.exception("回滚面经来源清理 savepoint 失败: %s", url)
+    finally:
+        try:
+            cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+        except Exception:
+            logger.exception("释放面经来源清理 savepoint 失败: %s", url)
+
+
+def _delete_interview_txn(cursor, record_id: int, target_row):
+    """Soft-delete one interview and all of its derived data in one txn.
+
+    Details are scoped by interview_id whenever available.  URL is only the
+    legacy fallback for rows that predate that relation, preventing two
+    interviews that happen to share a URL from deleting each other's details.
+    """
+    _mark_distribution_refresh_for_interview_txn(cursor, record_id)
+
+    detail_columns = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info(questions_detail)").fetchall()
+    }
+    url = target_row["url"]
+    if "interview_id" in detail_columns:
+        if url:
+            cursor.execute(
+                "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE deleted_at IS NULL AND "
+                "(interview_id = ? OR (interview_id IS NULL AND url = ?))",
+                (record_id, url),
+            )
+        else:
+            cursor.execute(
+                "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE interview_id = ? AND deleted_at IS NULL",
+                (record_id,),
+            )
+    elif url:
+        # Compatibility with databases created before interview_id was added.
+        cursor.execute(
+            "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
+            "WHERE url = ? AND deleted_at IS NULL",
+            (url,),
+        )
+
+    # Mark the primary row before optional derived-data cleanup. This makes
+    # the operation durable even when legacy source data is malformed.
+    cursor.execute(
+        "UPDATE interview SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP) "
+        "WHERE id = ?",
+        (record_id,),
+    )
+    _cleanup_sources_best_effort(cursor, url)
 
 
 def _restore_sources_for_url(cursor, url: str):
@@ -351,17 +444,17 @@ async def delete_data(
         with get_db_connection() as conn:
             cursor = conn.cursor()
             target_columns = (
-                "id, url, owner_id, status, job_position"
+                "id, url, owner_id, status, job_position, deleted_at"
                 if table_name in {"jd", "interview"}
-                else "id, url, NULL AS owner_id, NULL AS status, '' AS job_position"
+                else "id, url, NULL AS owner_id, NULL AS status, '' AS job_position, deleted_at"
             )
             target_row = cursor.execute(
-                f"SELECT {target_columns} FROM {safe_name} WHERE id = ? AND deleted_at IS NULL",
+                f"SELECT {target_columns} FROM {safe_name} WHERE id = ?",
                 (record_id,),
             ).fetchone()
             if not target_row:
                 raise HTTPException(
-                    status_code=404, detail="未找到该记录，可能已被删除"
+                    status_code=404, detail="未找到该记录"
                 )
 
             # 权限检查：admin 可删任何，普通用户只能删自己的
@@ -386,7 +479,7 @@ async def delete_data(
                     ).fetchall()
                     for iu in interview_urls:
                         if iu["url"]:
-                            _cleanup_sources_for_url(cursor, iu["url"])
+                            _cleanup_sources_best_effort(cursor, iu["url"])
                     # 级联软删除关联的 interview 和 questions_detail
                     cursor.execute(
                         "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
@@ -398,24 +491,17 @@ async def delete_data(
                     )
 
             if table_name == "interview":
-                _mark_distribution_refresh_for_interview_txn(cursor, record_id)
-                if url:
-                    # 级联软删除关联的 questions_detail
-                    cursor.execute(
-                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
-                        (url,),
-                    )
-                    # 清理 question_bank.sources 中该 URL 的条目
-                    _cleanup_sources_for_url(cursor, url)
+                _delete_interview_txn(cursor, record_id, target_row)
 
             if table_name == "questions_detail":
                 _mark_distribution_refresh_for_detail_ids_txn(cursor, [record_id])
 
-            # 软删除目标记录本身
-            cursor.execute(
-                f"UPDATE {safe_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL",
-                (record_id,),
-            )
+            # interview 已由 _delete_interview_txn 完成主记录更新。
+            if table_name != "interview":
+                cursor.execute(
+                    f"UPDATE {safe_name} SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                    (record_id,),
+                )
             conn.commit()
 
     try:
@@ -459,7 +545,7 @@ async def batch_delete_data(
             if table_name == "jd":
                 for url in urls_to_delete:
                     # BUG-017: 先清理关联面经在 question_bank 中的 sources
-                    _cleanup_sources_for_url(cursor, url)
+                    _cleanup_sources_best_effort(cursor, url)
                     cursor.execute(
                         "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
                         (url,),
@@ -471,21 +557,16 @@ async def batch_delete_data(
 
             if table_name == "interview":
                 for row in rows:
-                    _mark_distribution_refresh_for_interview_txn(cursor, row["id"])
-                for url in urls_to_delete:
-                    cursor.execute(
-                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
-                        (url,),
-                    )
-                    _cleanup_sources_for_url(cursor, url)
+                    _delete_interview_txn(cursor, row["id"], row)
 
-            # 软删除主记录
+            # jd 批量删除一次性更新主记录；interview 已逐条复用幂等删除逻辑。
             found_ids = [r["id"] for r in rows]
-            ph2 = ",".join("?" * len(found_ids))
-            cursor.execute(
-                f"UPDATE {safe_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id IN ({ph2}) AND deleted_at IS NULL",
-                found_ids,
-            )
+            if table_name == "jd":
+                ph2 = ",".join("?" * len(found_ids))
+                cursor.execute(
+                    f"UPDATE {safe_name} SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP) WHERE id IN ({ph2})",
+                    found_ids,
+                )
             conn.commit()
             return len(found_ids)
 
