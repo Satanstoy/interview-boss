@@ -98,17 +98,22 @@ def get_interviewboss_conn() -> sqlite3.Connection:
 
 def verify_interviewboss_user(username: str, password: str) -> int | None:
     """Verify InterviewBoss credentials, return user_id or None."""
-    from passlib.context import CryptContext
+    import bcrypt
 
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
     conn = get_interviewboss_conn()
     try:
         row = conn.execute(
             "SELECT id, password_hash FROM users WHERE username = ?",
             (username,),
         ).fetchone()
-        if row and pwd_ctx.verify(password, row["password_hash"]):
-            return row["id"]
+        if not row:
+            return None
+
+        stored_hash = row["password_hash"]
+        # bcrypt hashes start with "$2"
+        if stored_hash.startswith("$2"):
+            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                return row["id"]
         return None
     finally:
         conn.close()

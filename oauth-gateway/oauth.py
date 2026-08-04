@@ -133,9 +133,9 @@ async def authorize(
         raise HTTPException(400, "only S256 code_challenge_method supported")
 
     return templates.TemplateResponse(
+        request,
         "login.html",
         {
-            "request": request,
             "client_name": client["client_name"],
             "client_id": client_id,
             "redirect_uri": redirect_uri,
@@ -166,9 +166,9 @@ async def authorize_post(
     if user_id is None:
         client = db.get_client(client_id)
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "client_name": client["client_name"] if client else "Unknown",
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
