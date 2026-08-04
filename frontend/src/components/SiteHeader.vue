@@ -102,9 +102,9 @@ const createPlaylist = async () => {
     </AppTooltip>
 
     <div class="flex h-8 min-w-0 shrink-0 items-center gap-2">
-      <h1 class="flex h-8 items-center truncate text-[13px] font-medium leading-none text-foreground">
+      <span class="flex h-8 items-center truncate text-[13px] font-medium leading-none text-foreground">
         {{ activeTabLabel }}
-      </h1>
+      </span>
 
       <template v-if="showCodingControls">
         <Select :model-value="codingSelectedListKey" @update:model-value="selectCodingList">
