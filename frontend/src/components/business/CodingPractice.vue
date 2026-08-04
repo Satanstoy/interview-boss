@@ -10,7 +10,7 @@
     <section
       class="problem-list-panel sidebar-container z-30 flex shrink-0 flex-col overflow-hidden border-r border-border bg-background md:z-auto"
       :class="{ 'sidebar-collapsed': sidebarCollapsed }"
-      :style="{ width: sidebarCollapsed ? '0px' : '320px' }"
+      :style="{ width: sidebarCollapsed ? '0px' : '16rem' }"
     >
       <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
         <div class="relative min-w-0 flex-1">
@@ -394,7 +394,7 @@ onMounted(async () => {
   .sidebar-container {
     position: absolute;
     inset: 0 auto 0 0;
-    width: min(86vw, 320px) !important;
+    width: min(82vw, 256px) !important;
     max-width: calc(100vw - 24px);
     box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
     transform: translateX(0);
