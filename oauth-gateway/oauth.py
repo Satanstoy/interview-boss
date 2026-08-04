@@ -107,13 +107,21 @@ async def register_client(request: Request):
 # ── Authorization ──
 
 
+def _is_chatgpt_client(client: dict) -> bool:
+    """Check if client is a ChatGPT connector (allowlist by redirect_uri prefix)."""
+    return any(
+        uri.startswith("https://chatgpt.com/connector/oauth/")
+        for uri in client.get("redirect_uris", [])
+    )
+
+
 @router.get("/oauth/authorize")
 async def authorize(
     request: Request,
     response_type: str = Query(...),
     client_id: str = Query(...),
     redirect_uri: str = Query(...),
-    code_challenge: str = Query(...),
+    code_challenge: str = Query(""),
     code_challenge_method: str = Query("S256"),
     state: str = Query(""),
     resource: str = Query(""),
@@ -129,7 +137,13 @@ async def authorize(
     if redirect_uri not in client["redirect_uris"]:
         raise HTTPException(400, "invalid redirect_uri")
 
-    if code_challenge_method != "S256":
+    # PKCE: required for non-ChatGPT clients, optional for ChatGPT
+    if not _is_chatgpt_client(client) and not code_challenge:
+        raise HTTPException(
+            400, "code_challenge required (PKCE mandatory for this client)"
+        )
+
+    if code_challenge and code_challenge_method != "S256":
         raise HTTPException(400, "only S256 code_challenge_method supported")
 
     return templates.TemplateResponse(
@@ -152,24 +166,110 @@ async def authorize(
 @router.post("/oauth/authorize")
 async def authorize_post(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-    client_id: str = Form(...),
-    redirect_uri: str = Form(...),
-    code_challenge: str = Form(...),
-    code_challenge_method: str = Form(...),
+    username: str = Form(""),
+    password: str = Form(""),
+    client_id: str = Form(""),
+    redirect_uri: str = Form(""),
+    code_challenge: str = Form(""),
+    code_challenge_method: str = Form("S256"),
     state: str = Form(""),
     resource: str = Form(""),
     scope: str = Form(""),
 ):
-    user_id = db.verify_interviewboss_user(username, password)
-    if user_id is None:
-        client = db.get_client(client_id)
+    # Graceful error on missing required fields (don't 500)
+    if not client_id or not redirect_uri:
         return templates.TemplateResponse(
             request,
             "login.html",
             {
-                "client_name": client["client_name"] if client else "Unknown",
+                "client_name": "",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "缺少必要参数",
+            },
+        )
+
+    client = db.get_client(client_id)
+    if not client:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "client_name": "Unknown",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "未知的 client_id",
+            },
+        )
+
+    if redirect_uri not in client["redirect_uris"]:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "client_name": client["client_name"],
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "redirect_uri 不匹配",
+            },
+        )
+
+    if not _is_chatgpt_client(client) and not code_challenge:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "client_name": client["client_name"],
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "此客户端必须提供 code_challenge (PKCE)",
+            },
+        )
+
+    if not username or not password:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "client_name": client["client_name"],
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "请输入用户名和密码",
+            },
+        )
+
+    user_id = db.verify_interviewboss_user(username, password)
+    if user_id is None:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "client_name": client["client_name"],
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
                 "code_challenge": code_challenge,
@@ -227,7 +327,7 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
     client_id = body.get("client_id")
     code_verifier = body.get("code_verifier")
 
-    if not all([code, redirect_uri, client_id, code_verifier]):
+    if not all([code, redirect_uri, client_id]):
         raise HTTPException(400, "missing required parameters")
 
     # Verify and consume the code
@@ -238,13 +338,19 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
     if code_data["client_id"] != client_id:
         raise HTTPException(400, "client_id mismatch")
 
-    # Verify PKCE
-    challenge = hashlib.sha256(code_verifier.encode()).digest()
-    import base64
+    # PKCE verification: only if code_challenge was bound to the authorization code
+    stored_challenge = code_data.get("code_challenge") or ""
+    if stored_challenge:
+        if not code_verifier:
+            raise HTTPException(400, "code_verifier required (PKCE)")
+        challenge = hashlib.sha256(code_verifier.encode()).digest()
+        import base64
 
-    computed_challenge = base64.urlsafe_b64encode(challenge).rstrip(b"=").decode()
-    if not secrets.compare_digest(computed_challenge, code_data["code_challenge"]):
-        raise HTTPException(400, "PKCE verification failed")
+        computed_challenge = base64.urlsafe_b64encode(challenge).rstrip(b"=").decode()
+        if not secrets.compare_digest(computed_challenge, stored_challenge):
+            raise HTTPException(400, "PKCE verification failed")
+    # If no code_challenge was stored (ChatGPT client without PKCE), skip verification.
+    # code_verifier is ignored if present without a stored challenge.
 
     # Issue tokens
     user_id = code_data["user_id"]
