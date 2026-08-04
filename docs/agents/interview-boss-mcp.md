@@ -21,13 +21,13 @@ MCP 和 skill 是两层东西：
 
 ## 1. 配置 MCP
 
-在 agent 客户端导入设置页生成的 JSON：
+在 agent 客户端导入设置页生成的 JSON（生产环境地址为 `https://interviewboss.online/mcp`）：
 
 ```json
 {
   "mcpServers": {
     "interview-boss": {
-      "url": "http://你的地址/mcp",
+      "url": "https://interviewboss.online/mcp",
       "headers": {
         "Authorization": "Bearer ib_mcp_..."
       }
@@ -36,9 +36,7 @@ MCP 和 skill 是两层东西：
 }
 ```
 
-以后服务器切换到 HTTPS，只需把 `url` 改为 `https://你的域名/mcp`。Token 不需要因为 URL 变化而重置。
-
-HTTP 阶段不要直接暴露到不可信公网；应优先使用内网、VPN 或安全隧道。不要把 Token 放在 URL 查询参数中。
+服务器已启用 HTTPS，上面的 URL 可直接使用。Token 不需要因为 URL 变化而重置。不要把 Token 放在 URL 查询参数中。
 
 ### 只支持 stdio 的客户端：npx 兼容模式
 
@@ -52,10 +50,9 @@ HTTP 阶段不要直接暴露到不可信公网；应优先使用内网、VPN �
       "args": [
         "-y",
         "mcp-remote",
-        "http://你的地址/mcp",
+        "https://interviewboss.online/mcp",
         "--transport",
         "http-only",
-        "--allow-http",
         "--header",
         "Authorization:${INTERVIEW_BOSS_MCP_AUTH}"
       ],
@@ -67,7 +64,7 @@ HTTP 阶段不要直接暴露到不可信公网；应优先使用内网、VPN �
 }
 ```
 
-`npx` 是 Node.js 的包运行器，不需要申请证书；用户本机需要 Node.js 18+。证书是服务器 HTTPS 的问题，不是 npx 的问题。HTTP 下的 `--allow-http` 只应在内网、VPN 或安全隧道中使用；将来切换 HTTPS 时，把 URL 改为 HTTPS 并移除 `--allow-http` 即可。原生支持远程 HTTP 的客户端应优先使用第一份配置，少运行一层桥接进程。
+`npx` 是 Node.js 的包运行器，不需要申请证书；用户本机需要 Node.js 18+。证书是服务器 HTTPS 的问题，不是 npx 的问题。服务器已启用 HTTPS，所以上面直接使用 `https://` 地址且不需要 `--allow-http`。原生支持远程 HTTP 的客户端应优先使用第一份配置，少运行一层桥接进程。
 
 参考：[mcp-remote 使用说明](https://github.com/geelen/mcp-remote#readme)。
 
@@ -194,14 +191,13 @@ select_question(
 
 MCP Token 已绑定账户。即使工具 schema 中出现 `user_id` 或 `bank_mode`，服务端也会以 Token 对应账户为准。外部 agent 不应尝试覆盖它们，也不能通过改参数访问其他账户的个人题库。
 
-## 6. HTTP 切换 HTTPS
+## 6. HTTPS 访问说明
 
-当前可以先通过 HTTP 使用。未来申请 HTTPS 后：
+生产环境已通过 `https://interviewboss.online/mcp` 提供 HTTPS 访问（Let's Encrypt 证书，由 certbot 自动续期）。对外暴露的 endpoint 由 Nginx 转发链路决定：
 
-1. 修改后端 `MCP_PUBLIC_URL` 为 `https://你的域名/mcp`；
-2. 配置 Nginx 或安全隧道的 HTTPS 证书和转发；
-3. 重启后端；
-4. 在 agent 配置里只更新 `url`；
-5. 原 MCP Token 可以继续使用。
+1. 设置页展示的 endpoint 由 `X-Forwarded-Proto`/`X-Forwarded-Host` 自动推导为 `https://interviewboss.online/mcp`，无需手动配置 `MCP_PUBLIC_URL`；
+2. 只有站点位于反向代理、端口映射或安全隧道后且推导地址不正确时，才需要在 `backend/.env` 设置 `MCP_PUBLIC_URL`；
+3. 在 agent 配置里使用 `https://interviewboss.online/mcp`；
+4. 原 MCP Token 可以继续使用。
 
 详细服务端实现见 [README 的 MCP 章节](../../README.md#外部-mcp-接入)。

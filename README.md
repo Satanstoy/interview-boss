@@ -494,7 +494,7 @@ sudo ss -tlnp | grep ':80 '
 {
   "mcpServers": {
     "interview-boss": {
-      "url": "http://your-host.example.com/mcp",
+      "url": "https://interviewboss.online/mcp",
       "headers": {
         "Authorization": "Bearer ib_mcp_..."
       }
@@ -505,7 +505,7 @@ sudo ss -tlnp | grep ':80 '
 
 如果外部 agent 只支持 stdio，设置页还会生成基于 `npx mcp-remote` 的兼容配置；它不需要额外申请证书，但本机需要 Node.js 18+。原生支持远程 Streamable HTTP 的客户端应优先使用直接 URL 配置。
 
-如果站点位于反向代理、端口映射或安全隧道后，请在 `backend/.env` 设置 `MCP_PUBLIC_URL`，它只影响设置页展示的 endpoint。当前服务器如果只能提供 HTTP，MCP 仍可在可达网络中工作，但 Bearer Token 会以明文传输，公网使用应优先通过 HTTPS、VPN/内网或 Cloudflare Tunnel、Tailscale 等安全隧道暴露；不要把 Token 放进 URL 查询参数。
+生产环境已启用 HTTPS（Let's Encrypt 证书，certbot 自动续期）。如果站点位于反向代理、端口映射或安全隧道后，请在 `backend/.env` 设置 `MCP_PUBLIC_URL`，它只影响设置页展示的 endpoint。不要把 Token 放进 URL 查询参数。
 
 管理端点：`GET /api/profile/mcp` 读取 endpoint 和脱敏元数据，`POST /api/profile/mcp/token` 创建/重置 Token，`DELETE /api/profile/mcp/token` 撤销 Token。题目检索和选题仍由后端现有业务层执行，外部 agent 传入的 `user_id`、`bank_mode` 不会覆盖 Token 对应账户。
 
