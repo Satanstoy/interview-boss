@@ -56,6 +56,7 @@ class Skill:
     always_active: bool = False
     strategy_rules: dict | None = None
     allowed_agents: list[str] = field(default_factory=list)
+    job_profiles: list[str] = field(default_factory=list)
     prompt_role: str | None = None
     kind: str | None = None
     resources: SkillResourceIndex = field(default_factory=SkillResourceIndex)
@@ -81,6 +82,16 @@ class Skill:
         """Read a standard skill resource file on demand."""
         return self.resources.read_text(relative_path)
 
+    def is_available_for(self, state: dict | None = None) -> bool:
+        """Check server-selected interview profile restrictions."""
+        if not self.job_profiles:
+            return True
+        profile = (state or {}).get("interview_profile")
+        if not profile:
+            config = (state or {}).get("interview_config") or {}
+            profile = config.get("interview_profile") if isinstance(config, dict) else None
+        return profile in self.job_profiles
+
 
 class SkillRegistry:
     """Registry for skills available to one agent."""
@@ -98,11 +109,13 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
-    def get_all_metadata(self) -> str:
+    def get_all_metadata(self, state: dict | None = None) -> str:
         if not self._skills:
             return ""
         sorted_skills = sorted(
-            self._skills.values(), key=lambda s: s.priority, reverse=True
+            (skill for skill in self._skills.values() if skill.is_available_for(state)),
+            key=lambda s: s.priority,
+            reverse=True,
         )
         return "\n".join(s.metadata_line for s in sorted_skills)
 
@@ -117,6 +130,8 @@ class SkillRegistry:
 
         matched = []
         for skill in self._skills.values():
+            if not skill.is_available_for(state):
+                continue
             if skill.always_active:
                 matched.append(skill)
                 continue

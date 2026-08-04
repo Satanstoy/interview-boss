@@ -47,6 +47,7 @@ class ChatState(TypedDict, total=False):
     interview_context: str  # 面试上下文（岗位、分类、练习统计）
     job_position: Optional[str]  # 用户目标岗位名
     interview_config: dict  # 会话级面试配置（难度、覆盖阈值、节奏来源）
+    interview_profile: Optional[str]  # 服务端选择的能力 profile，不由用户文本解锁
     rhythm_profile: dict  # 面经节奏学习结果
     interview_state: dict  # InterviewLedger 派生的产品化快照
     interview_stop_decision: dict  # 本轮进入 ReAct 前的停止策略判定

@@ -10,7 +10,10 @@ from app.agents.chat.skills.defaults import get_default_registry
 __all__ = ["build_skill_catalog", "build_skill_prompt"]
 
 
-def build_skill_catalog(registry: SkillRegistry | None = None) -> str:
+def build_skill_catalog(
+    registry: SkillRegistry | None = None,
+    state: dict | None = None,
+) -> str:
     """Build the chat agent's Layer 1 skill catalog.
 
     Shared code only renders generic skill metadata. Chat-specific wording
@@ -20,7 +23,7 @@ def build_skill_catalog(registry: SkillRegistry | None = None) -> str:
     if registry is None:
         registry = get_default_registry()
 
-    catalog = _build_shared_skill_catalog(registry)
+    catalog = _build_shared_skill_catalog(registry, state)
     if not catalog:
         return ""
 

@@ -19,6 +19,7 @@ skills/
 ├── interview-rhythm/    ← 面试节奏控制
 ├── interview-tool-use/  ← MCP 工具调用规范（始终激活，kind=tool-use）
 ├── project-deep-dive/   ← 项目深挖
+├── agent-interview/     ← Agent 开发 profile 专属的私有面试策略
 └── theory-qa/           ← 理论问答
 ```
 
@@ -60,7 +61,7 @@ metadata:
 - 新增 skill：创建目录 + `SKILL.md`，无需修改 Python 代码（自动扫描加载）
 - skill 名称必须与父目录一致，并使用小写字母、数字和单个连字符
 - 可选资源目录为 `references/`、`scripts/`、`assets/`；默认只索引不注入 prompt。`references/` 可作为开发者/测试文档；`scripts/` 不得由 Agent 自动执行，除非后续新增受限 runner 和对应测试
-- `load_skill` 的 enum 必须等于 registry 中所有非 `kind=tool-use` 的 skill；`interview-tool-use` 这类常驻工具策略不能暴露给模型手动加载
+- `load_skill` 的公共 enum 只包含普通 skill；`agent-interview` 及其私有工具 schema 仅由 Agent profile 的内部 ReAct 动态注入，不能出现在外部 MCP 工具清单
 - `base.py` 中的 `_triggers_match()` 做上下文感知匹配，减少误触发
 - `builder.py` 负责 chat-specific Layer 1 catalog 文案；Layer 2 指令合并复用 shared `build_skill_prompt()`
 - `interview-rhythm` 负责节奏和表达边界：它可以提醒 Agent 尊重后端 `InterviewLedger`，但不能替代 `question_plan.py` / MCP 工具层的题号和题型去重；同时避免“我抽个题”“来聊一个八股题”“换个方向”这类流程播报式话术

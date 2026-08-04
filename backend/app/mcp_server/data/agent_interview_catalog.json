@@ -1,0 +1,2251 @@
+{
+  "schema_version": 1,
+  "source_kind": "private_agent_interview_material",
+  "questions": [
+    {
+      "id": 900001,
+      "question": "你来设计一个多智能体系统，整体架构会怎么设计？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_orchestration",
+      "tags": [
+        "agent_orchestration",
+        "agent_loop_tool_use",
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [
+        "候选人能不能先定义为什么要多智能体",
+        "会不会区分 单 Agent / 多 Agent / workflow",
+        "会不会考虑 分工、协作、状态同步、失败处理",
+        "有没有“先简单后复杂”的意识"
+      ],
+      "must_have": [
+        "先定义业务目标，不要一上来就上多 Agent",
+        "说明哪些角色适合拆成独立 Agent",
+        "设计 Agent 之间的通信方式和共享状态",
+        "明确谁负责协调，谁负责执行",
+        "说明多 Agent 的成本：延迟、token、调试复杂度",
+        "提出一个演进路径：先单 Agent + tools，再逐步拆分"
+      ],
+      "bonus": [],
+      "red_flags": [
+        "一上来把系统拆成很多 Agent",
+        "只讲角色，不讲通信和状态",
+        "不提成本和失败处理",
+        "把“多 Agent”当卖点而不是取舍"
+      ],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900002,
+      "question": "你怎么看 vibe coding 前端的策略？如果要做这类产品，你会怎么设计策略？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [
+        "候选人对 AI 辅助前端开发 有没有产品理解",
+        "会不会从“生成代码”上升到“生成 + 预览 + 修改 + 校验”的闭环",
+        "会不会考虑前端场景的特殊性：视觉、交互、状态、组件复用",
+        "会不会考虑用户体验和风险控制"
+      ],
+      "must_have": [
+        "vibe coding 不是一次性生成，而是迭代式共同创作",
+        "前端比后端更强调“可视化反馈”和“局部修改”",
+        "需要设计从 prompt 到页面预览再到局部调整的闭环",
+        "需要关注组件复用、设计系统、现有项目约束",
+        "要有错误保护，比如不要乱删文件、不要把整个页面重写掉",
+        "最终目标是提升表达效率，不是让用户读一大堆代码"
+      ],
+      "bonus": [],
+      "red_flags": [
+        "用户说一句，AI 生成页面",
+        "然后继续修改就行这种回答太平，没有真正理解前端的特殊性。"
+      ],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900003,
+      "question": "如果你自己设计一个可以给别人用的 coding agent，你会怎么设计？要有哪些核心内容？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [
+        "候选人是不是有“产品 + 工程”双重视角",
+        "会不会从用户流程倒推能力设计",
+        "会不会想到 tools、context、memory、safety、评估这些核心模块"
+      ],
+      "must_have": [
+        "用户场景：这个 coding agent 是给谁用的",
+        "核心能力：检索、读文件、改文件、跑命令、解释结果",
+        "上下文系统：项目结构、历史会话、当前任务、检索结果",
+        "工具系统：文件、终端、搜索、测试、diff",
+        "安全机制：权限、确认、沙箱、回滚",
+        "交互方式：聊天、CLI、IDE 面板、diff 预览",
+        "评估与迭代：成功率、错误率、回滚率、用户满意度"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900004,
+      "question": "你来设计一个“上下文压缩 / compaction”策略，会怎么设计？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state"
+      ],
+      "evaluation_focus": [
+        "候选人能不能理解长上下文不是简单裁剪",
+        "会不会区分不同信息的重要性",
+        "会不会想到 system 规则、任务状态、工具结果、历史摘要的优先级"
+      ],
+      "must_have": [
+        "上下文压缩不是删字，是重构信息",
+        "不同信息优先级不同",
+        "system / safety / 当前目标要优先保留",
+        "老历史适合摘要，近期状态尽量保真",
+        "工具结果和错误信息要选关键的保留",
+        "压缩策略需要可解释、可评估"
+      ],
+      "bonus": [],
+      "red_flags": [
+        "先保留最近几条",
+        "其他做个 summary但没有讲清 summary 里到底保什么、为什么这样保。"
+      ],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900005,
+      "question": "如果你的 agent 效果不好，你会怎么定位问题、怎么迭代？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval"
+      ],
+      "evaluation_focus": [
+        "候选人是否具备系统化排障思维",
+        "会不会把问题拆成 prompt / retrieval / tools / orchestration / UI 这些层",
+        "会不会做评测和 badcase 归因"
+      ],
+      "must_have": [
+        "不要一句话归因成“模型不行”",
+        "分层定位：输入、检索、工具、上下文、生成",
+        "先建 badcase 集，再做定向优化",
+        "线上线下评估结合",
+        "改动要有指标验证，不靠感觉"
+      ],
+      "bonus": [],
+      "red_flags": [
+        "换更强模型",
+        "调一下 prompt",
+        "多试试这种回答没有形成方法论。"
+      ],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900006,
+      "question": "如果让你设计一个“给团队用”的 agent 平台，而不是个人玩具，你会额外考虑什么？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [
+        "候选人有没有平台化思维",
+        "能不能从“个人 demo”上升到“多人协作系统”",
+        "会不会想到权限、审计、配额、隔离、可观测性"
+      ],
+      "must_have": [
+        "用户不是一个人，而是团队",
+        "要考虑权限、租户隔离、审计",
+        "成本和配额要可控",
+        "工具调用要分级管理",
+        "要有平台治理能力：日志、评测、版本、灰度"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900007,
+      "question": "如果让你去评估一个 Coding Agent 的效果，你会怎么评估？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [
+        "候选人能不能先定义“什么是好的 Coding Agent”",
+        "会不会把评估拆成多个维度，而不是只看一个成功率",
+        "会不会区分直接指标和间接指标",
+        "会不会想到任务完成、速度、成本、稳定性之间的平衡",
+        "会不会考虑用户真实体验，而不是只看技术日志",
+        "会不会意识到“指标会被作弊”，所以需要多指标互相校验"
+      ],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900008,
+      "question": "如果让你设计一个 Agent 的日志系统，你会怎么设计？重点为了排查问题，你会记录什么？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [
+        "候选人有没有可观测性意识",
+        "会不会区分 日志、监控、评估、审计",
+        "会不会从 Agent 的完整链路思考问题来源",
+        "会不会设计“能排障”的日志，而不是只记输入输出",
+        "会不会考虑成本、隐私、采样、可检索性"
+      ],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [
+        "只说“把 prompt 和 response 记下来”",
+        "只会讲模型日志，不会讲 tool / 状态 / compaction",
+        "不提 traceid / taskid / sessionid",
+        "完全不考虑隐私、采样和存储成本",
+        "没有分层思维，所有内容混成一坨"
+      ],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "开放式设计 / 架构 / 策略题"
+    },
+    {
+      "id": 900009,
+      "question": "你要做一个“能查文档、能调用工具、还能自己决定下一步”的助手。你会怎么向产品同学解释：这个东西为什么叫 Agent，而不是普通的 LLM 问答？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900010,
+      "question": "现在有三个方案：一个 FAQ ChatBot、一个固定审批流、一个能自主查资料再执行动作的助手。你怎么区分 ChatBot、Workflow automation、RPA、Agent？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_engineering_general",
+      "tags": [
+        "agent_engineering_general"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900011,
+      "question": "一个 coding agent 接到任务后，通常会先读需求、再想步骤、再执行工具。你怎么用 perception-planning-action 来解释这个过程？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900012,
+      "question": "你设计一个 Agent loop，模型可能连续多轮“思考—调工具—读结果”。你怎么解释 think-act-observe 和普通一次性生成的差别？它和 ReAct 是什么关系？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900013,
+      "question": "你做一个 Agent，可以搜索文档、读文件、查天气、发请求。这里的 Tool Calling 和 function call 分别是什么？为什么 Agent 需要它们？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900014,
+      "question": "用户说“帮我修一下这个项目里最近的测试问题”，系统没有明确步骤。你会怎么解释 goal-driven execution？它和普通按步骤执行的脚本有什么不同？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900015,
+      "question": "你做一个长期使用的 coding assistant。它为什么需要 memory？如果没有 memory，系统会出现什么问题？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900016,
+      "question": "如果你要给 Agent 设计 short-term memory 和 long-term memory，你会怎么分？两者底层通常怎么配合？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900017,
+      "question": "一个 Agent 任务跑了 20 分钟，中间调用了很多工具。你觉得它的 state 应该如何管理？如果只存聊天记录，会有什么问题？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900018,
+      "question": "你现在有两个方案：一个是 单 Agent + 多工具，另一个是 多 Agent 分工协作。如果你做的是 coding agent，你会怎么选？为什么 Agent 比普通 ChatBot 更复杂？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900019,
+      "question": "Multi-Agent 和 Sub-agent 是一个概念吗？可追问多个 sub-agent 是否等于 multi-agent？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_orchestration",
+      "tags": [
+        "agent_orchestration"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900020,
+      "question": "MCP 和 skills 有什么本质区别？既然已经有了 skills，为什么还需要 MCP？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval",
+        "agent_safety_governance",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "A. Agent 基础必会"
+    },
+    {
+      "id": 900021,
+      "question": "你做一个企业知识库问答，老板问你：为什么不直接把文档内容都放进 prompt，让模型自己回答？为什么还要做 RAG？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "B. RAG 基础必会"
+    },
+    {
+      "id": 900022,
+      "question": "你从零搭一个企业文档问答系统。请你按顺序讲一下 RAG pipeline：文档进来之后，到最终回答给用户，中间一般会有哪些环节？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "B. RAG 基础必会"
+    },
+    {
+      "id": 900023,
+      "question": "你同事说：“向量检索不就是把文本变成数字然后查最像的吗？”你会怎么解释 embedding 和 向量检索，让一个普通后端也能听懂？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "B. RAG 基础必会"
+    },
+    {
+      "id": 900024,
+      "question": "你不需要从论文角度讲，只站在工程视角解释：为什么现在大模型大多基于 Transformer，它解决了什么问题？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "llm_fundamentals",
+      "tags": [
+        "llm_fundamentals",
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "C. 大模型基础必会"
+    },
+    {
+      "id": 900025,
+      "question": "你做一个代码助手，用户贴了很长一段代码。为什么模型在看某个 token 时，需要一种机制去“动态关注”上下文？这就是 self-attention 在做的事吗？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "llm_fundamentals",
+      "tags": [
+        "llm_fundamentals",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "C. 大模型基础必会"
+    },
+    {
+      "id": 900026,
+      "question": "很多人记不住 Q / K / V。如果你要用一个不太学术的方式解释它们为什么不一样，你会怎么说？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "llm_fundamentals",
+      "tags": [
+        "llm_fundamentals"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "C. 大模型基础必会"
+    },
+    {
+      "id": 900027,
+      "question": "你做一个流式聊天界面，后端持续返回 token。为什么很多场景会选 SSE，而不是普通 HTTP 一次性返回？什么时候会改用 WebSocket？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900028,
+      "question": "你上线了一个 Agent 服务，用户抱怨“感觉很慢”。如果你不能改模型权重，只能从工程侧优化 LLM latency，你会先看哪些地方？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900029,
+      "question": "如果你的 AI 服务每天有很多重复问题，或者很多请求会命中相似上下文，缓存 该怎么做？你会缓存哪些东西？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900030,
+      "question": "你怎么给一个 AI 系统做 监控？如果你只看接口成功率和 CPU 使用率，会漏掉什么？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900031,
+      "question": "如果线上出了一个 badcase，你怎么复盘？也就是 Prompt 和 Response 平时应该如何记录，才能方便排查问题？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900032,
+      "question": "大模型请求既贵又慢。你做平台时会怎么做 限流？为什么 AI 服务的限流和普通 CRUD 服务不太一样？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900033,
+      "question": "一个 Agent 跑到一半断了，用户希望下次能继续。你会怎么做 checkpoint / resume？什么信息必须保存？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900034,
+      "question": "你怎么避免一个 Agent 一直重复调用同一个工具，进入死循环？除了“设个最大次数”之外，你还会做什么？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_safety_governance",
+      "tags": [
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900035,
+      "question": "如果你要做一个统一的 Tool Registry，让多个 Agent 或多个业务都能复用工具，你会怎么设计？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900036,
+      "question": "如果让你抽象一个统一的 LLM API 接口，上层业务不直接绑死某一家模型供应商，你觉得这个接口至少要包含哪些能力？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900037,
+      "question": "如果团队里 prompt 越来越多，改一版线上效果就乱，你会怎么设计一个 Prompt 管理系统？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900038,
+      "question": "如果这个平台未来要支持很多用户同时跑 Agent 任务，而且任务有长有短、工具有快有慢，你会怎么设计一个 大规模 Agent 平台？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900039,
+      "question": "你做代码理解时，为什么很多系统不会只靠全文检索，还会引入 AST、symbol、引用关系？它们分别帮助了什么？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900040,
+      "question": "你觉得 XML 和 JSON 这两种结构，对模型理解来说会有什么差异？什么时候哪种更友好？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_protocols",
+      "tags": [
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900041,
+      "question": "如果 Agent 一轮里可能并发调用多个工具，比如同时查日志、读文件、发请求，结果又会互相影响，你怎么处理 并发冲突和加锁？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900042,
+      "question": "如果业务方说：“我们是不是直接微调一个大模型，比改 Agent 逻辑更彻底？”你会怎么从 工程和业务价值 角度做取舍？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900043,
+      "question": "如果上下文越来越长，已经快超过模型窗口了，你一般会怎么处理？哪些信息优先保留，哪些可以压缩或丢掉？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "D. 工程实现必会"
+    },
+    {
+      "id": 900044,
+      "question": "你们线上有一套 prompt 模板，团队里有人改了一版后主观感觉“更聪明了”。如果你来负责这件事，你会怎么设计 提示词模板的迭代和评估机制，并判断它是不是真的更好了？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900045,
+      "question": "你做一个 coding agent，模型每轮都要收到很多上下文。你会怎么构建上下文？又怎么避免 上下文过长和信息污染？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900046,
+      "question": "如果上下文窗口不够了，你会优先保留哪些信息？删掉哪些？为什么不能只是简单截断后半段？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900047,
+      "question": "线上出现 hallucination，你会怎么分析原因？又会如何做 工程治理，而不是只说“换个更强模型”？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900048,
+      "question": "你怎么证明一个线上问题是 模型能力问题，而不是 工程系统设计问题？如果让你排查，你会怎么一步步做？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900049,
+      "question": "你了解过 Cursor 早期更偏 RAG，Claude Code 从一开始更偏 function calling / tool use 这种设计差异吗？如果放在“写代码”这个场景里，你觉得为什么会这样设计？会带来什么效果差异？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_safety_governance",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900050,
+      "question": "做 coding agent 时，每一轮可能都要把很多信息发给模型：比如 系统提示词、项目环境、工具/MCP 列表、skills、subagents 索引、当前任务状态。如果每轮都原样重发，token 会很贵。你会怎么优化？可以聊到 KV Cache。",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "llm_fundamentals",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900051,
+      "question": "那你再继续讲一下：KV Cache 的原理 是什么？为什么它能省时间，但不一定直接减少账单上的输入 token？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "llm_fundamentals",
+      "tags": [
+        "llm_fundamentals",
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "创新"
+    },
+    {
+      "id": 900052,
+      "question": "简单（添油加醋）：Tool Registry 里找不到工具怎么办",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "核心改坏点有 2 个"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [
+        "可能调用到不存在的工具",
+        "需要先判空",
+        "any 太宽，不利于类型检查",
+        "应该做参数校验",
+        "应该统一包装工具调用错误",
+        "有副作用的工具不该只靠字符串分发就直接执行"
+      ],
+      "fixture_summary": "type ToolFn = (args: unknown) => Promise<unknown>;\n\nclass ToolRegistry {\n  private tools: Record<string, ToolFn> = {};\n\n  register(name: string, fn: ToolFn) {\n    this.tools[name] = fn;\n  }\n\n  async call(toolName: string, args: unknown) {\n    const fn = this.tools[toolName];\n    if (!fn) {\n      throw new Error(Unknown tool: ${toolName});\n    }\n    return fn(args);\n  }\n}\ntype ToolFn = (args: any) => Promise<any>;\n\nclass ToolRegistry {\n  private tools: Record<string, ToolFn> = {};\n\n  register(name: string, fn: ToolFn) {\n    this.tools[name] = fn;\n  }\n\n  async call(toolName: string, args: any) {\n    const fn = this.tools[toolName];\n    return fn(args);\n  }\n}",
+      "source_section": "JS / TypeScript"
+    },
+    {
+      "id": 900053,
+      "question": "中等（添油加醋）：上下文裁剪时把最重要的规则丢了",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_code_understanding",
+      "tags": [
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这题的重点不是语法，而是业务逻辑错了"
+      ],
+      "bonus": [
+        "提到 compaction 不只是“少放点字”，而是“重新设计上下文结构”",
+        "提到 system、user、assistant 应该区别对待",
+        "提到 summary 最好有独立结构，或至少明确标记它是 synthetic summary"
+      ],
+      "red_flags": [
+        "在很多 agent 系统里，system 不是普通对话，它更像“操作手册”或者“最高优先级规则”。",
+        "const head = messages.slice(...)",
+        "也就是说，前面的所有消息，不分角色，统统进了 summary。",
+        "这会导致什么？",
+        "原本应该被完整保留的 system 规则，被压缩成普通文本",
+        "模型后续不一定还能严格遵守这些规则",
+        "会话 compact 之后，原本的用户规则/系统规则丢了。(GitHub)"
+      ],
+      "followups": [],
+      "fixture_summary": "type Msg = { role: \"system\" | \"user\" | \"assistant\"; text: string };\n\nexport function compactMessages(messages: Msg[], keepLast: number) {\n  if (keepLast <= 0) return messages;\n\n  const systemMessages = messages.filter((m) => m.role === \"system\");\n  const nonSystem = messages.filter((m) => m.role !== \"system\");\n\n  const start = Math.max(0, nonSystem.length - keepLast);\n  const head = nonSystem.slice(0, start);\n  const tail = nonSystem.slice(start);\n\n  const summary =\n    head.length === 0\n      ? null\n      : {\n          role: \"assistant\" as const,\n          text: Summary of earlier context:\\\\n${head\ntype Msg = { role: \"system\" | \"user\" | \"assistant\"; text: string };\n\nexport function compactMessages(messages: Msg[], keepLast: number) {\n  const head = messages.slice(0, messages.length - keepLast);\n  const tail = messages.slice(messages.length - keepLast);\n\n  const summary = head.map((m) => [${m.role}] ${m.text}).join(\"\\\\n\");\n\n  return [\n    { role: \"assistant\", text: Summary:\\\\n${summary} },\n    ...tail,\n  ];\n}",
+      "source_section": "JS / TypeScript"
+    },
+    {
+      "id": 900054,
+      "question": "复杂（添油加醋）：共享可变状态导致不同会话串 prompt",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这是这组里最偏工程 review 的题"
+      ],
+      "bonus": [
+        "提到纯函数、可测试性",
+        "提到这是过早优化",
+        "提到真实线上 bug 会表现得非常诡异、很难复现"
+      ],
+      "red_flags": [
+        "const sections: Section[] = [];",
+        "每次调用都是自己的局部数组。",
+        "const sharedSections: Section[] = [];",
+        "所有调用共用同一个数组。"
+      ],
+      "followups": [],
+      "fixture_summary": "type Section = { name: string; text: string };\n\nexport function buildPrompt(\n  systemText: string,\n  memoryText: string | null,\n  userText: string,\n) {\n  const sections: Section[] = [];\n\n  sections.push({ name: \"system\", text: systemText });\n\n  if (memoryText) {\n    sections.push({ name: \"memory\", text: memoryText });\n  }\n\n  sections.push({ name: \"user\", text: userText });\n\n  return sections.map((s) => ## ${s.name}\\\\n${s.text}).join(\"\\\\n\\\\n\");\ntype Section = { name: string; text: string };\n\nconst sharedSections: Section[] = [];\n\nexport function buildPrompt(\n  systemText: string,\n  memoryText: string | null,\n  userText: string,\n) {\n  sharedSections.length = 0;\n\n  sharedSections.push({ name: \"system\", text: systemText });\n\n  if (memoryText) {\n    sharedSections.push({ name: \"memory\", text: memoryText });\n  }\n\n  sharedSections.push({ name: \"user\", text: userText });",
+      "source_section": "JS / TypeScript"
+    },
+    {
+      "id": 900055,
+      "question": "额外原题（不添油加醋，难度：中等）：去重逻辑没错，但业务语义还可以继续追问",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [
+        "业务追问点 1：保留第一次还是保留最后一次？",
+        "现在保留的是第一次出现。",
+        "score 更高",
+        "内容更新",
+        "来源更可靠业务上未必一定要保留第一次。",
+        "业务追问点 2：只按 id 去重够不够？",
+        "id 不同",
+        "文本几乎一样"
+      ],
+      "must_have": [
+        "本题不添油加醋",
+        "代码本身是正确的"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "type Doc = { id: string; text: string };\n\nexport function dedupeDocs(docs: Doc[]) {\n  const seen = new Set<string>();\n  const result: Doc[] = [];\n\n  for (const doc of docs) {\n    if (seen.has(doc.id)) continue;\n    seen.add(doc.id);\n    result.push(doc);\n  }\n\n  return result;\n}",
+      "source_section": "JS / TypeScript"
+    },
+    {
+      "id": 900056,
+      "question": "简单（添油加醋）：Tool Dispatcher 的空指针风险",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "核心改坏点很直接：没有判空"
+      ],
+      "bonus": [
+        "提到工具参数最好不要用裸 Object",
+        "提到应有统一的参数/返回值结构",
+        "提到工具调用错误最好做统一封装，方便日志和排障"
+      ],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "import java.util.HashMap;\nimport java.util.Map;\nimport java.util.function.Function;\n\npublic class ToolDispatcher {\n    private final Map<String, Function<Object, Object>> tools = new HashMap<>();\n\n    public void register(String name, Function<Object, Object> fn) {\n        tools.put(name, fn);\n    }\n\n    public Object call(String name, Object args) {\n        Function<Object, Object> fn = tools.get(name);\n        if (fn == null) {\n            throw new IllegalArgumentException(\"Unknown tool: \" + name);\n        }\n        return fn.apply(args);\n    }\nimport java.util.HashMap;\nimport java.util.Map;\nimport java.util.function.Function;\n\npublic class ToolDispatcher {\n    private final Map<String, Function<Object, Object>> tools = new HashMap<>();\n\n    public void register(String name, Function<Object, Object> fn) {\n        tools.put(name, fn);\n    }\n\n    public Object call(String name, Object args) {\n        return tools.get(name).apply(args);\n    }\n}",
+      "source_section": "Java"
+    },
+    {
+      "id": 900057,
+      "question": "中等（添油加醋）：保留最近 N 条消息的边界问题",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_code_understanding",
+      "tags": [
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "核心改坏点是边界和 off-by-one"
+      ],
+      "bonus": [
+        "会主动举例手推",
+        "提到 subList(from, to) 是左闭右开",
+        "提到这种函数适合补单测覆盖边界"
+      ],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "import java.util.List;\n\npublic class MessageWindow {\n    public static <T> List<T> keepLast(List<T> items, int n) {\n        if (n <= 0) return List.of();\n        int start = Math.max(0, items.size() - n);\n        return items.subList(start, items.size());\n    }\n}\nimport java.util.List;\n\npublic class MessageWindow {\n    public static <T> List<T> keepLast(List<T> items, int n) {\n        int start = items.size() - n + 1;\n        return items.subList(start, items.size());\n    }\n}",
+      "source_section": "Java"
+    },
+    {
+      "id": 900058,
+      "question": "复杂（添油加醋）：PromptBuilder 的共享 StringBuilder 导致跨请求污染",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这是这组里最偏工程 review 的题"
+      ],
+      "bonus": [
+        "提到这让函数失去“每次调用互相独立”的特性",
+        "提到这是过早优化",
+        "提到这种 bug 很难复现，线上排查会很痛苦"
+      ],
+      "red_flags": [
+        "StringBuilder sb = new StringBuilder();",
+        "每次调用都有自己的局部对象。",
+        "private static final StringBuilder SB = new StringBuilder();",
+        "所有调用共用同一个 SB。"
+      ],
+      "followups": [],
+      "fixture_summary": "public class PromptBuilder {\n    public static String build(String systemText, String userText, String memoryText) {\n        StringBuilder sb = new StringBuilder();\n        sb.append(\"[SYSTEM]\\\\n\").append(systemText).append(\"\\\\n\");\n\n        if (memoryText != null && !memoryText.isEmpty()) {\n            sb.append(\"[MEMORY]\\\\n\").append(memoryText).append(\"\\\\n\");\n        }\n\n        sb.append(\"[USER]\\\\n\").append(userText);\n        return sb.toString();\n    }\n}\npublic class PromptBuilder {\n    private static final StringBuilder SB = new StringBuilder();\n\n    public static String build(String systemText, String userText, String memoryText) {\n        SB.setLength(0);\n        SB.append(\"[SYSTEM]\\\\n\").append(systemText).append(\"\\\\n\");\n\n        if (memoryText != null && !memoryText.isEmpty()) {\n            SB.append(\"[MEMORY]\\\\n\").append(memoryText).append(\"\\\\n\");\n        }\n\n        SB.append(\"[USER]\\\\n\").append(userText);\n        return SB.toString();\n    }\n}",
+      "source_section": "Java"
+    },
+    {
+      "id": 900059,
+      "question": "额外原题（不添油加醋，难度：中等）：按 score 排序本身没错，但业务上还有什么可追问",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题不添油加醋",
+        "代码本身是正确的"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "import java.util.Comparator;\nimport java.util.List;\n\nclass ScoredDoc {\n    String id;\n    double score;\n\n    ScoredDoc(String id, double score) {\n        this.id = id;\n        this.score = score;\n    }\n}\n\npublic class SortDocs {\n    public static void sortByScoreDesc(List<ScoredDoc> docs) {\n        docs.sort(Comparator.comparingDouble((ScoredDoc d) -> d.score).reversed());\n    }\n}",
+      "source_section": "Java"
+    },
+    {
+      "id": 900060,
+      "question": "简单（添油加醋）：默认可变参数导致会话历史串味",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这是 Python 非常经典的一类问题"
+      ],
+      "bonus": [
+        "能现场举个调用例子证明",
+        "能联系到“多 session / 多请求状态串味”",
+        "能说出这是 Python 很高频但也很隐蔽的坑"
+      ],
+      "red_flags": [
+        "如果没传 history，那我就默认给一个空列表",
+        "函数定义时，这个 [] 就创建好了",
+        "后面每次不传 history，都会复用同一个列表"
+      ],
+      "followups": [],
+      "fixture_summary": "def addmessage(msg, history=None):\n    if history is None:\n        history = []\n    history.append(msg)\n    return history\ndef addmessage(msg, history=[]):\n    history.append(msg)\n    return history",
+      "source_section": "Python"
+    },
+    {
+      "id": 900061,
+      "question": "中等（添油加醋）：并发检索时把异常悄悄吞掉了",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这题的关键不是 async 语法，而是错误处理策略"
+      ],
+      "bonus": [
+        "提到返回值契约应该更清晰",
+        "提到可以保留 errors，由上游决定是否降级",
+        "提到还可以加 timeout / retriever name 等元信息"
+      ],
+      "red_flags": [
+        "continue",
+        "也就是说某一路失败了，就假装没看见。",
+        "调用方完全不知道哪一路失败了",
+        "日志也没有",
+        "后续排障很难"
+      ],
+      "followups": [],
+      "fixture_summary": "import asyncio\n\nasync def retrieveall(retrievers, query):\n    tasks = [r(query) for r in retrievers]\n    results = await asyncio.gather(tasks, returnexceptions=True)\n\n    merged = []\n    errors = []\n\n    for idx, item in enumerate(results):\n        if isinstance(item, Exception):\n            errors.append((idx, item))\n            continue\n        merged.extend(item)\n\n    return merged, errors\nimport asyncio\n\nasync def retrieveall(retrievers, query):\n    tasks = [r(query) for r in retrievers]\n    results = await asyncio.gather(tasks, returnexceptions=True)\n\n    merged = []\n    for item in results:\n        if isinstance(item, Exception):\n            continue\n        merged.extend(item)\n\n    return merged",
+      "source_section": "Python"
+    },
+    {
+      "id": 900062,
+      "question": "复杂（添油加醋）：缓存清理逻辑不仅会报错，还可能在业务上失控",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题是添油加醋题",
+        "这是这组里最偏“代码质量 + 业务后果”的题"
+      ],
+      "bonus": [
+        "提到容量上限 / LRU",
+        "提到并发读写问题",
+        "提到缓存策略要看业务读写模式，不是“能缓存就缓存”"
+      ],
+      "red_flags": [
+        "这在 Python 里是典型错误。",
+        "RuntimeError: dictionary changed size during iteration"
+      ],
+      "followups": [],
+      "fixture_summary": "import time\n\nclass PromptCache:\n    def init(self):\n        self.data = {}\n\n    def get(self, key):\n        value = self.data.get(key)\n        if not value:\n            return None\n        if value[\"expireat\"] < time.time():\n            del self.data[key]\n            return None\n        return value[\"content\"]\n\n    def cleanup(self):\n        now = time.time()\n        expiredkeys = []\nimport time\n\nclass PromptCache:\n    def init(self):\n        self.data = {}\n\n    def get(self, key):\n        value = self.data.get(key)\n        if not value:\n            return None\n        if value[\"expireat\"] < time.time():\n            del self.data[key]\n            return None\n        return value[\"content\"]\n\n    def cleanup(self):\n        for k, v in self.data.items():\n            if v[\"expireat\"] < time.time():",
+      "source_section": "Python"
+    },
+    {
+      "id": 900063,
+      "question": "额外原题（不添油加醋，难度：中等）：去重并保留顺序，代码没错，但业务还能继续追问",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "protocol_review",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "本题不添油加醋",
+        "代码本身是正确的"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [
+        "追问点 1：元素一定可 hash 吗？",
+        "当前实现依赖 item in seen，所以要求 item 可 hash。",
+        "如果元素是 dict 或 list，这段代码就不能直接用。",
+        "追问点 2：保留第一次还是最后一次？",
+        "当前保留的是第一次出现。",
+        "但业务上如果后一个结果更“新”或来源更可靠，也可能想保留最后一次。"
+      ],
+      "fixture_summary": "def dedupekeeporder(items):\n    seen = set()\n    result = []\n\n    for item in items:\n        if item in seen:\n            continue\n        seen.add(item)\n        result.append(item)\n\n    return result",
+      "source_section": "Python"
+    },
+    {
+      "id": 900064,
+      "question": "同样的信息，这种输入数据组织有什么明显问题？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "这题不是考 JSON 语法，JSON 本身没问题。",
+        "问题在于：字段名几乎没有语义。",
+        "ctx1 到底是目标、背景还是约束？",
+        "ctx2 是路径、用户输入还是日志位置？",
+        "ctx3 是工具、文件还是步骤？",
+        "ctx4 是规则、建议还是错误信息？",
+        "模型看到这种字段名时，很难稳定区分不同信息块的角色。",
+        "程序后续消费时也不友好，因为维护的人也要靠猜。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"ctx1\": \"Fix login page error\",\n  \"ctx2\": \"/workspace/app\",\n  \"ctx3\": [\"readfile\", \"searchcode\", \"runtests\"],\n  \"ctx4\": [\"do not delete files\", \"do not modify package.json\"]\n}",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900065,
+      "question": "这个 tool call 数据段哪里最容易让系统解析出错？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "protocol_review",
+      "capability": "agent_protocols",
+      "tags": [
+        "agent_protocols"
+      ],
+      "evaluation_focus": [
+        "第一条里 input 是字符串",
+        "第二条里 input 是对象"
+      ],
+      "must_have": [
+        "这题考的是数据契约一致性。",
+        "第一条里 input 是字符串",
+        "第二条里 input 是对象"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"action\": \"readfile\",\n  \"input\": \"src/app.ts\",\n  \"message\": \"I will read the file\"\n}\n{\n  \"action\": \"searchcode\",\n  \"input\": {\n    \"query\": \"login error\"\n  },\n  \"message\": \"I will search the codebase\"\n}\n{\n  \"actiontype\": \"toolcall\",\n  \"toolname\": \"readfile\",\n  \"arguments\": {\n    \"path\": \"src/app.ts\"\n  },\n  \"uservisiblemessage\": \"I will read the file\"\n}",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900066,
+      "question": "这个流式事件数据为什么不能直接都当文本展示？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "protocol_review",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [
+        "这些数据不是都拿来“展示给用户看的文本”的。",
+        "token 适合直接展示",
+        "toolstart 更适合更新状态，比如显示“正在读文件”",
+        "toolend 更适合更新结果或结束 loading",
+        "done 更适合标记流结束",
+        "普通文本",
+        "一个对象",
+        "null"
+      ],
+      "must_have": [
+        "这题考的是事件类型分流意识。",
+        "这些数据不是都拿来“展示给用户看的文本”的。",
+        "token 适合直接展示",
+        "toolstart 更适合更新状态，比如显示“正在读文件”",
+        "toolend 更适合更新结果或结束 loading",
+        "done 更适合标记流结束",
+        "普通文本",
+        "一个对象"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "[\n  { \"type\": \"token\", \"data\": \"I will inspect the file.\" },\n  { \"type\": \"toolstart\", \"data\": { \"tool\": \"readfile\", \"path\": \"src/app.ts\" } },\n  { \"type\": \"toolend\", \"data\": { \"tool\": \"readfile\", \"ok\": true } },\n  { \"type\": \"done\", \"data\": null }\n]",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900067,
+      "question": "这个上下文压缩后的数据，哪里会让规则变弱？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_protocols",
+      "tags": [
+        "agent_protocols"
+      ],
+      "evaluation_focus": [
+        "表面上看，这段数据也能喂给模型。"
+      ],
+      "must_have": [
+        "这题考的是压缩后的角色语义是否还清晰。",
+        "表面上看，这段数据也能喂给模型。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"summary\": \"[system] Never modify config files\\\\n[user] fix login page\\\\n[assistant] I will inspect auth flow\",\n  \"recentmessages\": [\n    { \"role\": \"user\", \"text\": \"Also check build logs\" }\n  ]\n}\n{\n  \"systemrules\": [\n    \"Never modify config files\"\n  ],\n  \"summaryofoldmessages\": [\n    { \"role\": \"user\", \"text\": \"fix login page\" },\n    { \"role\": \"assistant\", \"text\": \"I will inspect auth flow\" }\n  ],\n  \"recentmessages\": [\n    { \"role\": \"user\", \"text\": \"Also check build logs\" }\n  ]\n}",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900068,
+      "question": "这段模型输出数据为什么对程序不够友好？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_protocols",
+      "tags": [
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "这题考的是模型输出给程序消费时，结构化程度够不够。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"thought\": \"The login page error may come from auth.ts or Login.tsx\",\n  \"nextstep\": \"I should first read the login component and then maybe inspect auth.ts if needed\",\n  \"tool\": \"readfile\",\n  \"args\": \"Login.tsx\"\n}\n{\n  \"actiontype\": \"toolcall\",\n  \"toolname\": \"readfile\",\n  \"arguments\": {\n    \"path\": \"src/components/Login.tsx\"\n  },\n  \"uservisiblemessage\": \"I will inspect the login component first.\",\n  \"reasoningsummary\": \"The error may come from Login.tsx or auth.ts\"\n}",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900069,
+      "question": "这段输入数据为什么容易让模型忽略真正重要的信息？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_protocols",
+      "tags": [
+        "agent_protocols"
+      ],
+      "evaluation_focus": [
+        "真正重要的信息有",
+        "但也混了很多弱相关甚至无意义字段",
+        "importantrule 很关键",
+        "recentmessages 很关键",
+        "但 misc 明显是噪声",
+        "debugnotes 也有很多不稳定、模糊的信息",
+        "这会让模型在有限上下文里分散注意力。"
+      ],
+      "must_have": [
+        "这题考的是噪声字段和信息优先级。",
+        "真正重要的信息有",
+        "但也混了很多弱相关甚至无意义字段",
+        "importantrule 很关键",
+        "recentmessages 很关键",
+        "但 misc 明显是噪声",
+        "debugnotes 也有很多不稳定、模糊的信息",
+        "这会让模型在有限上下文里分散注意力。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"recentmessages\": [\n    { \"role\": \"user\", \"text\": \"Fix login bug\" }\n  ],\n  \"debugnotes\": [\n    \"temporary\",\n    \"check later\",\n    \"old attempt failed\",\n    \"maybe auth issue\",\n    \"not sure\"\n  ],\n  \"toolhistory\": [\n    { \"tool\": \"searchcode\", \"result\": \"many files\" },\n    { \"tool\": \"readfile\", \"result\": \"large output omitted\" }\n  ],\n  \"importantrule\": \"Never modify package.json\",\n  \"misc\": [\n    \"unused field 1\",",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900070,
+      "question": "复杂：这段流式 tool call 数据协议，为什么可能在多轮调用时失控？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "protocol_review",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "这题考的是流式协议的状态机意识。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "[\n  { \"type\": \"toolname\", \"data\": \"readfile\" },\n  { \"type\": \"toolargschunk\", \"data\": \"{\\\\\"path\\\\\":\\\\\"src/\" },\n  { \"type\": \"toolargschunk\", \"data\": \"app.ts\\\\\"}\" },\n  { \"type\": \"toolcallend\", \"data\": null },\n\n  { \"type\": \"toolname\", \"data\": \"searchcode\" },\n  { \"type\": \"toolargschunk\", \"data\": \"{\\\\\"query\\\\\":\\\\\"login error\\\\\"}\" },\n  { \"type\": \"toolcallend\", \"data\": null }\n]\n[\n  { \"type\": \"toolstart\", \"callid\": \"c1\", \"toolname\": \"readfile\" },\n  { \"type\": \"toolargschunk\", \"callid\": \"c1\", \"data\": \"{\\\\\"path\\\\\":\\\\\"src/\" },\n  { \"type\": \"toolargschunk\", \"callid\": \"c1\", \"data\": \"app.ts\\\\\"}\" },\n  { \"type\": \"toolend\", \"callid\": \"c1\" }\n]",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900071,
+      "question": "复杂原题（不添油加醋）：这段模型输入数据整体合理，但还能如何优化成更适合程序和模型双向消费？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_safety_governance",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [
+        "这题是原题。",
+        "不是让候选人找 bug，而是看他能不能做更高层次的 review。"
+      ],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "{\n  \"systemrules\": [\n    \"Never delete files\",\n    \"Ask before modifying config\"\n  ],\n  \"task\": {\n    \"goal\": \"Fix login page error\",\n    \"projectpath\": \"/workspace/app\"\n  },\n  \"availabletools\": [\n    { \"name\": \"readfile\", \"description\": \"Read file content\" },\n    { \"name\": \"searchcode\", \"description\": \"Search code snippets\" },\n    { \"name\": \"runtests\", \"description\": \"Run test command\" }\n  ],\n  \"recentmessages\": [\n    { \"role\": \"user\", \"text\": \"Please fix the login issue\" },\n    { \"role\": \"assistant\", \"text\": \"I will inspect the related files first\" }\n  ]",
+      "source_section": "数据协议与模型交互题库（纯数据段）"
+    },
+    {
+      "id": 900072,
+      "question": "你做一个流式聊天界面，后端持续返回 token。为什么很多场景会选 SSE，而不是普通 HTTP 一次性返回？什么时候会改用 WebSocket？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900073,
+      "question": "你在做一个支持流式输出、工具状态回传、用户中断的 agent 产品时，通信层会怎么选？为什么？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900074,
+      "question": "如果模型接口很慢，前端超时了，但后端任务其实还在跑，你会怎么处理？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900075,
+      "question": "如果一个 agent 请求会调用多个外部服务，你怎么设计超时和重试？为什么不能简单统一重试三次？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_safety_governance",
+      "tags": [
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900076,
+      "question": "如果流式响应过程中网络断了，用户刷新页面后，你希望产品怎么表现？后端和前端分别要做什么？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900077,
+      "question": "一个 Agent 执行很长，你为什么不能只把状态放在前端内存里？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900078,
+      "question": "如果一个 Agent 同时要做日志检索、代码搜索、知识库检索，你会串行还是并行？并行会带来什么问题？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900079,
+      "question": "如果你的 agent 平台有很多长时间等待模型返回的请求，你会更倾向多线程、多进程还是异步 I/O？为什么？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_engineering_general",
+      "tags": [
+        "agent_engineering_general"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900080,
+      "question": "如果多个请求同时修改同一个会话状态，可能会有什么问题？怎么避免？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900081,
+      "question": "你会怎么设计一个 Agent 执行任务的取消机制？为什么这不是前端点个停止按钮就完了？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900082,
+      "question": "在 Agent 系统中，哪些模块适合用进程，哪些适合用线程？为什么？",
+      "difficulty": "medium",
+      "question_type": "knowledge_probe",
+      "format": "code_review",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance",
+        "agent_code_understanding",
+        "agent_protocols"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900083,
+      "question": "一个 agent 会话里，哪些信息你会放数据库，哪些只放内存或缓存？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "memory_state",
+      "tags": [
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900084,
+      "question": "为什么长任务要做 checkpoint，而不是每次失败就从头再来？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "rag_retrieval",
+        "agent_safety_governance",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900085,
+      "question": "你会怎么设计会话表和消息表？为什么不把所有内容只塞进一张大表？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900086,
+      "question": "如果工具日志很多，你会把它和用户聊天消息混在一起存吗？为什么？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900087,
+      "question": "Agent 的消息历史越来越长，你会怎么存？为什么不能每次把完整历史都原样查出来再塞给模型？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900088,
+      "question": "如果你要做一个 tool registry / session cache / prompt 模板管理，哪些场景你会优先想到哈希表？为什么？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900089,
+      "question": "什么场景下你不会优先用哈希表，而会考虑有序结构或队列？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900090,
+      "question": "如果你要做一个最近会话列表，支持快速查找、按最近访问排序、超限淘汰，你会怎么设计？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_engineering_general",
+      "tags": [
+        "agent_engineering_general"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900091,
+      "question": "对 prompt 模板和工具描述这类配置数据，你会怎么做缓存？为什么？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900092,
+      "question": "如果你要统计一个 Agent 平台里最常用的工具 Top N，你会怎么做？为什么？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900093,
+      "question": "为什么日志不能只记最终 response？你觉得 Agent 系统里最少应该记录哪些链路信息？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "memory_state",
+        "rag_retrieval",
+        "agent_platform_engineering"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900094,
+      "question": "你会怎么区分“监控”“日志”“审计”这三件事？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900095,
+      "question": "如果一个工具连续失败三次，你会让 Agent 继续试还是停下来？为什么？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_safety_governance",
+      "tags": [
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900096,
+      "question": "为什么副作用工具不能像读文件工具一样随便交给模型自由调用？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_platform_engineering",
+      "tags": [
+        "agent_platform_engineering",
+        "agent_safety_governance"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900097,
+      "question": "如果一个 Agent 的回答错了，你会怎么判断问题出在模型、检索、工具还是上下文拼装疑惑这是模型本身的问题？",
+      "difficulty": "hard",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_loop_tool_use",
+      "tags": [
+        "agent_loop_tool_use",
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900098,
+      "question": "为什么做 coding agent 时，不建议把整个仓库全文直接塞给模型？",
+      "difficulty": "easy",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900099,
+      "question": "为什么你不能只根据字符串匹配结果就让 agent 直接改代码？",
+      "difficulty": "easy",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "agent_code_understanding",
+      "tags": [
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900100,
+      "question": "如果用户让 agent 修改一个函数，为什么很多系统会先做 AST、symbol、引用关系分析，而不只靠全文检索？",
+      "difficulty": "medium",
+      "question_type": "system_design",
+      "format": "system_design",
+      "capability": "rag_retrieval",
+      "tags": [
+        "rag_retrieval",
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    },
+    {
+      "id": 900101,
+      "question": "如果一个代码搜索结果很多，你会怎么让模型更容易看懂，而不是直接把 100 个文件全丢进去？",
+      "difficulty": "hard",
+      "question_type": "knowledge_probe",
+      "format": "concept",
+      "capability": "agent_code_understanding",
+      "tags": [
+        "agent_code_understanding"
+      ],
+      "evaluation_focus": [],
+      "must_have": [],
+      "bonus": [],
+      "red_flags": [],
+      "followups": [],
+      "fixture_summary": "",
+      "source_section": "第四部分：补充内容"
+    }
+  ]
+}

@@ -1972,7 +1972,7 @@ def build_react_system_prompt(state: ChatState) -> str:
         parts.append(interview_state_prompt)
 
     # Layer 5: Skill catalog + tool guidance
-    catalog = build_skill_catalog()
+    catalog = build_skill_catalog(state=state)
     if catalog:
         parts.append(catalog)
 

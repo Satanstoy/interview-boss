@@ -18,8 +18,11 @@ ToolName = Literal[
     "select_question",
     "load_skill",
     "list_job_positions",
+    "search_agent_private_questions",
+    "draw_agent_private_questions",
+    "select_agent_private_question",
 ]
-QuestionSource = Literal["search", "draw"]
+QuestionSource = Literal["search", "draw", "agent_internal"]
 
 
 class ToolMetrics(BaseModel):
@@ -134,6 +137,38 @@ class DrawQuestionsInput(BaseModel):
         return text[:80] if text else None
 
 
+class AgentPrivateSearchInput(BaseModel):
+    """Internal-only query contract for the Agent private catalog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = Field(default_factory=list, max_length=5)
+    question_type: Literal["system_design", "knowledge_probe"] | None = None
+    interview_format: Literal["concept", "system_design", "code_review", "protocol_review"] | None = None
+    capability: str | None = Field(default=None, max_length=80)
+    limit: int = Field(default=5, ge=1, le=5)
+
+
+class AgentPrivateDrawInput(BaseModel):
+    """Internal-only draw contract for the Agent private catalog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int = Field(default=3, ge=1, le=5)
+    difficulty: Literal["easy", "medium", "hard"] | None = None
+    question_type: Literal["system_design", "knowledge_probe"] | None = None
+    interview_format: Literal["concept", "system_design", "code_review", "protocol_review"] | None = None
+    capability: str | None = Field(default=None, max_length=80)
+
+
+class AgentPrivateSelectInput(BaseModel):
+    """Only an index into the internal server-owned candidate list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_index: int = Field(default=0, ge=0, le=4)
+
+
 class LoadSkillInput(BaseModel):
     """Strict input contract for the skill-loading tool."""
 
@@ -172,6 +207,9 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "load_skill": LoadSkillInput,
     "select_question": SelectQuestionInput,
     "list_job_positions": ListJobPositionsInput,
+    "search_agent_private_questions": AgentPrivateSearchInput,
+    "draw_agent_private_questions": AgentPrivateDrawInput,
+    "select_agent_private_question": AgentPrivateSelectInput,
 }
 
 

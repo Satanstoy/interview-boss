@@ -356,7 +356,7 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             })
         metadata["coverage_events"] = [coverage_event]
 
-    if candidates:
+    if candidates and state.get("question_source") != "agent_internal":
         metadata["candidate_questions"] = [
             _public_question(q)
             for q in candidates[:PUBLIC_QUESTION_PREVIEW_LIMIT]
@@ -416,5 +416,44 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
         clean_response, state["jd_text"]
     ):
         metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
+
+    # Private Agent questions are allowed to shape the interviewer response,
+    # but their catalog references and rubric must never be returned through
+    # SSE, assistant metadata, candidate-set APIs, or the public UI.
+    if state.get("question_source") == "agent_internal":
+        # Private catalog candidates must not enter the generic candidate-set
+        # persistence path.  The model already has the authoritative private
+        # item in the in-process ReAct state; no public reference is needed.
+        state["candidate_set_id"] = None
+        metadata["active_skills"] = [
+            name for name in metadata.get("active_skills", []) if name != "agent-interview"
+        ]
+        metadata["basis_type"] = "none"
+        metadata["basis_question_ids"] = []
+        metadata["basis_confidence"] = 0.0
+        metadata["should_show_references"] = False
+        metadata["selected_question"] = None
+        metadata["question_source"] = "internal"
+        metadata["question_source_reason"] = "agent_profile_selection"
+        metadata.pop("retrieved_questions", None)
+        metadata.pop("candidate_questions", None)
+        metadata.pop("candidate_set_id", None)
+        metadata.pop("selected_basis_questions", None)
+        metadata.pop("tool_contract_trace", None)
+        if isinstance(metadata.get("question_plan"), dict):
+            metadata["question_plan"] = {
+                **metadata["question_plan"],
+                "question_id": None,
+                "source": "internal",
+            }
+        metadata["coverage_events"] = [
+            {
+                key: ("internal" if key == "source" else value)
+                for key, value in event.items()
+                if key not in {"question_text", "evidence"}
+            }
+            for event in metadata.get("coverage_events", [])
+            if isinstance(event, dict)
+        ]
 
     return metadata, clean_response

@@ -38,7 +38,7 @@ def build_skill_prompt(registry: SkillRegistry, active_skills: list[str]) -> str
     )
 
 
-def build_skill_catalog(registry: SkillRegistry) -> str:
+def build_skill_catalog(registry: SkillRegistry, state: dict | None = None) -> str:
     """Build a generic lightweight skill catalog (names + descriptions only).
 
     Shared code must stay agent-agnostic: no default registry, no tool names,
@@ -52,7 +52,9 @@ def build_skill_catalog(registry: SkillRegistry) -> str:
         return ""
 
     sorted_skills = sorted(
-        registry._skills.values(), key=lambda s: s.priority, reverse=True
+        (skill for skill in registry._skills.values() if skill.is_available_for(state)),
+        key=lambda s: s.priority,
+        reverse=True,
     )
 
     lines = [

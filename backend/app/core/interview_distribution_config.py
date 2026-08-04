@@ -8,6 +8,7 @@ import unicodedata
 
 JOB_FAMILY_BY_POSITION = {
     "Agent开发": "agent_llm",
+    "Agent 开发": "agent_llm",
     "大模型应用开发": "agent_llm",
     "大模型开发": "agent_llm",
     "Agent开发/大模型应用开发/大模型开发": "agent_llm",

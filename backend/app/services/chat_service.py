@@ -10,6 +10,7 @@ from typing import Optional
 from app.db.connection import get_db_connection
 from app.agents.chat.coverage_config import get_coverage_thresholds
 from app.agents.chat.rhythm_profile import build_rhythm_profile
+from app.agents.chat.agent_profile import is_agent_development_position
 
 logger = logging.getLogger("interview-boss")
 
@@ -813,6 +814,11 @@ def create_conversation(
         },
         "rhythm_profile": rhythm_profile or {},
         "distribution_plan": distribution_plan,
+        "interview_profile": (
+            "agent_development"
+            if is_agent_development_position(job_position)
+            else None
+        ),
     }
     metadata = {"interview_config": interview_config}
 

@@ -22,11 +22,20 @@ from app.agents.chat.question_plan import (
 logger = logging.getLogger(__name__)
 from app.agents.chat.state import ChatState
 from app.agents.chat.tool_gateway import (
+    AgentPrivateDrawInput,
+    AgentPrivateSearchInput,
+    AgentPrivateSelectInput,
     DrawQuestionsInput,
     SearchQuestionsInput,
     build_error_envelope,
     build_success_envelope,
     normalize_question_item,
+)
+from app.agents.chat.agent_profile import is_agent_development_profile
+from app.mcp_server.agent_private_catalog import (
+    draw_agent_questions,
+    get_agent_question,
+    search_agent_questions,
 )
 from app.services.job_position_service import (
     list_job_positions,
@@ -41,6 +50,36 @@ _NO_MATCH_MESSAGE = (
     "当前岗位和主题下没有可用题目，请直接向候选人说明题库为空，"
     "或等待用户调整岗位/主题。"
 )
+_PRIVATE_NO_MATCH_MESSAGE = "当前 Agent 能力维度没有可用的内部候选题。"
+
+
+def _private_access_error(tool: str, state: ChatState) -> dict | None:
+    """Keep the private catalog behind both profile and entry-point gates."""
+    if state.get("_mcp_external"):
+        return build_error_envelope(
+            tool=tool,
+            error_code="PRIVATE_TOOL_UNAVAILABLE",
+            message="Agent private interview tools are internal-only",
+            total_ms=0,
+            debug_reason="external_private_tool_blocked",
+            empty_reason="private_capability",
+        )
+    if not is_agent_development_profile(state):
+        return build_error_envelope(
+            tool=tool,
+            error_code="AGENT_PROFILE_REQUIRED",
+            message="The Agent interview profile is required for this private source",
+            total_ms=0,
+            debug_reason="profile_gate",
+            empty_reason="private_capability",
+        )
+    return None
+
+
+def _private_exclusion_ids(state: ChatState) -> set[int]:
+    excluded = _positive_int_ids(_collect_question_exclusion_ids(state))
+    excluded.update(_positive_int_ids(state.get("used_question_ids")))
+    return excluded
 
 
 def _get_default_skill_registry():
@@ -55,6 +94,25 @@ def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
     skill_name = args.get("skill_name", "")
     registry = (registry_getter or _get_default_skill_registry)()
     skill = registry.get(skill_name)
+
+    if skill_name == "agent-interview" and state.get("_mcp_external"):
+        return build_error_envelope(
+            tool="load_skill",
+            error_code="PRIVATE_SKILL_UNAVAILABLE",
+            message="This skill is available only to the internal Agent interview runtime",
+            total_ms=int((time.monotonic() - started) * 1000),
+            debug_reason="external_private_skill_blocked",
+            empty_reason="private_capability",
+        )
+    if skill is not None and not skill.is_available_for(state):
+        return build_error_envelope(
+            tool="load_skill",
+            error_code="SKILL_NOT_ALLOWED",
+            message=f"Skill is not available for the current interview profile: {skill_name}",
+            total_ms=int((time.monotonic() - started) * 1000),
+            debug_reason="profile_gate",
+            empty_reason="private_capability",
+        )
 
     if skill is None:
         total_ms = int((time.monotonic() - started) * 1000)
@@ -583,6 +641,188 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         empty_reason=None if items else "no_match",
         message=None if items else _NO_MATCH_MESSAGE,
     )
+
+
+async def search_agent_private_questions_tool(args: dict, state: ChatState) -> dict:
+    """Search the private Agent catalog; never callable from external MCP."""
+    started = time.monotonic()
+    blocked = _private_access_error("search_agent_private_questions", state)
+    if blocked:
+        return blocked
+    try:
+        parsed = AgentPrivateSearchInput(**args)
+    except ValidationError:
+        return build_error_envelope(
+            tool="search_agent_private_questions",
+            error_code="VALIDATION_ERROR",
+            message="Invalid private Agent search arguments",
+            total_ms=int((time.monotonic() - started) * 1000),
+            debug_reason="validation_failed",
+            empty_reason="invalid_arguments",
+        )
+
+    items = search_agent_questions(
+        parsed.keywords,
+        question_type=parsed.question_type,
+        interview_format=parsed.interview_format,
+        capability=parsed.capability,
+        limit=parsed.limit,
+        exclude_ids=_private_exclusion_ids(state),
+    )
+    state["candidate_questions"] = items
+    state["retrieved_questions"] = items
+    state["question_source"] = "agent_internal"
+    state["question_source_reason"] = "private_agent_search"
+    return build_success_envelope(
+        tool="search_agent_private_questions",
+        items=items,
+        total_ms=int((time.monotonic() - started) * 1000),
+        debug_reason="private_search_ok" if items else "no_match",
+        empty_reason=None if items else "no_match",
+        message=None if items else _PRIVATE_NO_MATCH_MESSAGE,
+    )
+
+
+async def draw_agent_private_questions_tool(args: dict, state: ChatState) -> dict:
+    """Draw from the private Agent catalog; never callable from external MCP."""
+    started = time.monotonic()
+    blocked = _private_access_error("draw_agent_private_questions", state)
+    if blocked:
+        return blocked
+    try:
+        parsed = AgentPrivateDrawInput(**args)
+    except ValidationError:
+        return build_error_envelope(
+            tool="draw_agent_private_questions",
+            error_code="VALIDATION_ERROR",
+            message="Invalid private Agent draw arguments",
+            total_ms=int((time.monotonic() - started) * 1000),
+            debug_reason="validation_failed",
+            empty_reason="invalid_arguments",
+        )
+
+    items = draw_agent_questions(
+        count=parsed.count,
+        difficulty=parsed.difficulty,
+        question_type=parsed.question_type,
+        interview_format=parsed.interview_format,
+        capability=parsed.capability,
+        exclude_ids=_private_exclusion_ids(state),
+    )
+    state["candidate_questions"] = items
+    state["retrieved_questions"] = items
+    state["question_source"] = "agent_internal"
+    state["question_source_reason"] = "private_agent_draw"
+    return build_success_envelope(
+        tool="draw_agent_private_questions",
+        items=items,
+        total_ms=int((time.monotonic() - started) * 1000),
+        debug_reason="private_draw_ok" if items else "no_match",
+        empty_reason=None if items else "no_match",
+        message=None if items else _PRIVATE_NO_MATCH_MESSAGE,
+    )
+
+
+def select_agent_private_question_tool(args: dict, state: ChatState) -> dict:
+    """Bind one private candidate after reloading it from the private catalog."""
+    blocked = _private_access_error("select_agent_private_question", state)
+    if blocked:
+        return blocked
+    try:
+        parsed = AgentPrivateSelectInput(**args)
+    except ValidationError:
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="VALIDATION_ERROR",
+            message="Invalid private Agent selection arguments",
+            total_ms=0,
+            debug_reason="validation_failed",
+            empty_reason="invalid_arguments",
+        )
+
+    candidates = state.get("candidate_questions") or []
+    if state.get("question_source") != "agent_internal":
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="QUESTION_SOURCE_MISMATCH",
+            message="No private Agent candidate set is active",
+            total_ms=0,
+            debug_reason="private_source_mismatch",
+            empty_reason="invalid_arguments",
+        )
+    if not candidates:
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="NO_CANDIDATES",
+            message="Search or draw private Agent questions before selecting",
+            total_ms=0,
+            debug_reason="no_candidates",
+            empty_reason="no_candidates",
+        )
+    if parsed.candidate_index >= len(candidates):
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="INDEX_OUT_OF_RANGE",
+            message=f"candidate_index {parsed.candidate_index} is out of range",
+            total_ms=0,
+            debug_reason="index_out_of_range",
+            empty_reason="index_out_of_range",
+        )
+
+    candidate = candidates[parsed.candidate_index]
+    authoritative = get_agent_question(candidate.get("id"))
+    if authoritative is None:
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="QUESTION_NOT_AVAILABLE",
+            message="Selected private Agent question is no longer available",
+            total_ms=0,
+            debug_reason="private_authoritative_reload_failed",
+            empty_reason="question_not_available",
+        )
+    if int(authoritative["id"]) in _positive_int_ids(state.get("used_question_ids")):
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="QUESTION_ALREADY_USED",
+            message="This private Agent question has already been used",
+            total_ms=0,
+            debug_reason="question_already_used",
+            empty_reason="question_not_available",
+        )
+
+    state["candidate_questions"] = [authoritative]
+    state["retrieved_questions"] = [authoritative]
+    state["question_source"] = "agent_internal"
+    state["question_source_reason"] = "private_agent_selection"
+    plan = _maybe_create_question_plan(state, force_candidate=authoritative)
+    selected = state.get("selected_question")
+    if not plan or not selected:
+        return build_error_envelope(
+            tool="select_agent_private_question",
+            error_code="NO_CANDIDATES",
+            message="The private Agent question could not be bound to a plan",
+            total_ms=0,
+            debug_reason=state.get("question_plan_reason") or "no_viable_candidate",
+            empty_reason="no_viable_candidate",
+        )
+
+    used = _positive_int_ids(state.get("used_question_ids"))
+    used.add(int(selected["id"]))
+    state["used_question_ids"] = sorted(used)
+    item = normalize_question_item(
+        selected,
+        source="agent_internal",
+        reason="private_agent_selection",
+    )
+    envelope = build_success_envelope(
+        tool="select_agent_private_question",
+        items=[item],
+        total_ms=0,
+        debug_reason="private_agent_explicit_selection",
+    )
+    envelope["selected_question"] = item
+    envelope["question_plan"] = plan
+    return envelope
 
 
 def select_question_tool(

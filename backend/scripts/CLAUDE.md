@@ -23,6 +23,7 @@
 |------|------|
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
+| `import_agent_private_catalog.py` | 将内部 Agent 面试 Markdown 编译为 MCP 内部运行时目录，不写入 question_bank |
 | `eval_interview_agent.py` | 统一 Interview Agent 评测框架（多场景、LLM 候选人、评分、JSON/MD 报告） |
 | `verify_chat_tools_real_e2e.py` | 真实后端 + 真实 LLM 的 chat tools 稳定性手动 E2E 验证 |
 | `verify_interview_agent_real_e2e.py` | 真实后端面试官 + 轻量 LLM 候选人的多轮模拟面试质量验证 |
@@ -37,6 +38,12 @@
 本目录还包含历史 `.md` 报告和 `.log/.json` 产物；不要把它们当成测试入口。新增手动验证脚本用 `verify_`，数据修复脚本用 `fix_`，健康检查用 `check_`。
 
 ## 用法
+
+```bash
+# 编译内部 Agent 题源（部署前手动执行；源文件不由应用运行时读取）
+uv run python backend/scripts/import_agent_private_catalog.py \
+  /path/to/Agent面试题库合集_完整版.md
+```
 
 ```bash
 # 健康检查

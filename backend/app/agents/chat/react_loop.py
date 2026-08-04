@@ -66,9 +66,19 @@ _SAFE_TOOL_ARG_KEYS = {
     "question_type",
     "skill_name",
     "topic",
+    "capability",
+    "interview_format",
 }
 _ALLOWED_TOOL_NAMES = frozenset(
-    {"load_skill", "search_questions", "draw_questions", "select_question"}
+    {
+        "load_skill",
+        "search_questions",
+        "draw_questions",
+        "select_question",
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    }
 )
 _PERSISTENT_SKILLS = frozenset({"interview-rhythm"})
 
@@ -227,7 +237,14 @@ def _summarize_tool_output(tool_name: str, output: str, state: ChatState) -> dic
                 )[:_TRACE_STRING_LIMIT]
         return summary
 
-    if tool_name in {"search_questions", "draw_questions", "select_question"}:
+    if tool_name in {
+        "search_questions",
+        "draw_questions",
+        "select_question",
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    }:
         if (
             isinstance(parsed, dict)
             and "ok" in parsed
@@ -328,9 +345,15 @@ def _record_tool_observability(
     message: str,
     output: str = "",
 ) -> dict:
+    private_tool = tool_name in {
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    }
+    public_tool_name = "agent_question_engine" if private_tool else tool_name
     step_data = {
-        "step": tool_name,
-        "tool_name": tool_name,
+        "step": public_tool_name,
+        "tool_name": public_tool_name,
         "message": message,
         "elapsed_ms": elapsed_ms,
         "result_count": summary.get("result_count", 0),
@@ -748,7 +771,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         try:
             result = await llm_service.llm_with_tools(
                 messages,
-                chat_tools.ALL_TOOLS,
+                chat_tools.get_tools_for_state(state),
                 user_id=state["user_id"],
                 model=state.get("model"),
             )
@@ -846,7 +869,13 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             # Emit progress
             step_event = {
                 "type": "step",
-                "step": tool_name,
+                "step": "agent_question_engine"
+                if tool_name in {
+                    "search_agent_private_questions",
+                    "draw_agent_private_questions",
+                    "select_agent_private_question",
+                }
+                else tool_name,
                 "message": chat_tools.tool_progress_message(tc),
                 "reason": STEP_REASONS.get(tool_name, ""),
             }
@@ -880,6 +909,9 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 "draw_questions",
                 "select_question",
                 "load_skill",
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+                "select_agent_private_question",
             ):
                 _record_tool_observability(
                     state,
@@ -891,7 +923,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                     output=output,
                 )
 
-            if tool_name in ("search_questions", "draw_questions"):
+            if tool_name in (
+                "search_questions",
+                "draw_questions",
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+            ):
                 search_or_draw_called = True
                 _maybe_create_question_plan(state)
 
@@ -899,7 +936,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             if tool_name in (
                 "search_questions",
                 "draw_questions",
-            ) and state.get("retrieved_questions"):
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+            ) and state.get("retrieved_questions") and tool_name not in {
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+            }:
                 _emit(
                     {
                         "type": "retrieved",
@@ -947,7 +989,12 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             # 3d: Pre-prune search/draw tool output to top 3 before appending to messages.
             # Full results remain in state["retrieved_questions"] for downstream use.
             msg_output = output
-            if tool_name in ("search_questions", "draw_questions"):
+            if tool_name in (
+                "search_questions",
+                "draw_questions",
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+            ):
                 try:
                     parsed_out = json.loads(output)
                     if isinstance(parsed_out, dict) and isinstance(
@@ -962,7 +1009,14 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             messages.append(make_tool_result_message(tc["id"], msg_output))
             plan = state.get("next_question_plan")
             if (
-                tool_name in ("search_questions", "draw_questions", "select_question")
+                tool_name in (
+                    "search_questions",
+                    "draw_questions",
+                    "select_question",
+                    "search_agent_private_questions",
+                    "draw_agent_private_questions",
+                    "select_agent_private_question",
+                )
                 and plan
                 and not state.get("question_plan_injected")
             ):

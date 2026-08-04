@@ -234,6 +234,96 @@ ALL_TOOLS = [
     SELECT_QUESTION_SCHEMA,
 ]
 
+AGENT_PRIVATE_SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_agent_private_questions",
+        "description": (
+            "仅限 Agent 开发面试内部使用：从服务端私有 Agent 能力目录检索候选题。"
+            "返回题干和面试官内部评估要点；不得向候选人透露题库、Skill 或内部评分规则。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keywords": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                "question_type": {"type": "string", "enum": ["system_design", "knowledge_probe"]},
+                "interview_format": {
+                    "type": "string",
+                    "enum": ["concept", "system_design", "code_review", "protocol_review"],
+                },
+                "capability": {"type": "string"},
+                "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 5},
+            },
+            "required": ["keywords"],
+        },
+    },
+}
+
+AGENT_PRIVATE_DRAW_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "draw_agent_private_questions",
+        "description": (
+            "仅限 Agent 开发面试内部使用：从私有 Agent 能力目录抽取新题，"
+            "用于覆盖尚未评估的 Agent 能力维度。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5},
+                "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+                "question_type": {"type": "string", "enum": ["system_design", "knowledge_probe"]},
+                "interview_format": {
+                    "type": "string",
+                    "enum": ["concept", "system_design", "code_review", "protocol_review"],
+                },
+                "capability": {"type": "string"},
+            },
+        },
+    },
+}
+
+AGENT_PRIVATE_SELECT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "select_agent_private_question",
+        "description": (
+            "仅限 Agent 开发面试内部使用：从私有 Agent 候选集中按索引绑定下一题。"
+            "候选集由服务端维护，不能提交自定义题干。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "candidate_index": {"type": "integer", "default": 0, "minimum": 0, "maximum": 4},
+            },
+        },
+    },
+}
+
+AGENT_PRIVATE_TOOLS = [
+    AGENT_PRIVATE_SEARCH_SCHEMA,
+    AGENT_PRIVATE_DRAW_SCHEMA,
+    AGENT_PRIVATE_SELECT_SCHEMA,
+]
+
+
+def get_tools_for_state(state: ChatState) -> list[dict]:
+    """Expose private schemas only to the internal Agent profile."""
+    from app.agents.chat.agent_profile import is_agent_development_profile
+
+    if not is_agent_development_profile(state) or state.get("_mcp_external"):
+        return ALL_TOOLS
+
+    private_load_schema = json.loads(json.dumps(LOAD_SKILL_SCHEMA, ensure_ascii=False))
+    private_load_schema["function"]["parameters"]["properties"]["skill_name"]["enum"] = [
+        *SKILL_NAMES,
+        "agent-interview",
+    ]
+    private_load_schema["function"]["parameters"]["properties"]["skill_name"]["description"] += (
+        "\n- agent-interview: Agent 开发岗位专属内部面试策略（仅当前 Agent profile 可用）"
+    )
+    return [private_load_schema, SEARCH_QUESTIONS_SCHEMA, DRAW_QUESTIONS_SCHEMA, SELECT_QUESTION_SCHEMA, *AGENT_PRIVATE_TOOLS]
+
 
 # ── Progress Messages ────────────────────────────────────
 
@@ -260,6 +350,9 @@ def tool_progress_message(tool_call: dict) -> str:
         "search_questions": "正在检索相关面试题...",
         "draw_questions": "正在从题库抽题...",
         "select_question": "正在绑定下一题...",
+        "search_agent_private_questions": "正在评估 Agent 专项能力...",
+        "draw_agent_private_questions": "正在抽取 Agent 专项能力题...",
+        "select_agent_private_question": "正在绑定 Agent 专项面试题...",
     }
     return messages.get(name, "正在处理...")
 
@@ -304,6 +397,12 @@ async def execute_tool(
             return await _execute_draw_questions(args, state)
         elif func_name == "select_question":
             return _execute_select_question(args, state)
+        elif func_name == "search_agent_private_questions":
+            return await _execute_search_agent_private_questions(args, state)
+        elif func_name == "draw_agent_private_questions":
+            return await _execute_draw_agent_private_questions(args, state)
+        elif func_name == "select_agent_private_question":
+            return _execute_select_agent_private_question(args, state)
         else:
             return json.dumps({"error": f"Unknown tool: {func_name}"})
     except ToolPolicyViolation as e:
@@ -459,10 +558,31 @@ async def _execute_draw_questions(args: dict, state: ChatState) -> str:
     return json.dumps(envelope, ensure_ascii=False)
 
 
+async def _execute_search_agent_private_questions(args: dict, state: ChatState) -> str:
+    from app.mcp_server.interview_tools import search_agent_private_questions_tool
+
+    envelope = await search_agent_private_questions_tool(args, state)
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+async def _execute_draw_agent_private_questions(args: dict, state: ChatState) -> str:
+    from app.mcp_server.interview_tools import draw_agent_private_questions_tool
+
+    envelope = await draw_agent_private_questions_tool(args, state)
+    return json.dumps(envelope, ensure_ascii=False)
+
+
 def _execute_select_question(args: dict, state: ChatState) -> str:
     """Select and bind one candidate as the next-question plan."""
     from app.mcp_server.interview_tools import select_question_tool
 
     candidate_index = args.get("candidate_index", 0)
     envelope = select_question_tool(args, state, candidate_index=candidate_index)
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+def _execute_select_agent_private_question(args: dict, state: ChatState) -> str:
+    from app.mcp_server.interview_tools import select_agent_private_question_tool
+
+    envelope = select_agent_private_question_tool(args, state)
     return json.dumps(envelope, ensure_ascii=False)

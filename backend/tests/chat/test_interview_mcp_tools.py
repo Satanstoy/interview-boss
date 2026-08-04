@@ -671,6 +671,16 @@ async def test_interview_mcp_app_call_tool_io_contract():
 
 
 @pytest.mark.asyncio
+async def test_external_mcp_does_not_register_private_agent_tools():
+    from app.mcp_server.app import mcp
+
+    names = {tool.name for tool in await mcp.list_tools()}
+    assert "search_agent_private_questions" not in names
+    assert "draw_agent_private_questions" not in names
+    assert "select_agent_private_question" not in names
+
+
+@pytest.mark.asyncio
 async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
     from app.mcp_server import interview_tools
     from app.mcp_server.principal import MCPPrincipal, reset_mcp_principal, set_mcp_principal

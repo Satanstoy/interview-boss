@@ -166,6 +166,7 @@ def _initial_state(
         "bank_mode": bank_mode or "all",
         "difficulty": difficulty or "mid",
         "interview_config": {},
+        "interview_profile": None,
         "rhythm_profile": {},
         "memories": [],
         "memory_summaries": [],
@@ -465,6 +466,7 @@ async def _load_interview_config(state: ChatState) -> None:
     if not isinstance(config, dict):
         config = {}
     state["interview_config"] = config
+    state["interview_profile"] = config.get("interview_profile")
     state["difficulty"] = config.get("difficulty") or state.get("difficulty") or "mid"
     distribution_plan = config.get("distribution_plan")
     state["distribution_plan"] = distribution_plan if isinstance(distribution_plan, dict) else None
@@ -490,10 +492,14 @@ def _add_interview_observability_metadata(
         ledger,
         state.get("rhythm_profile") or {},
     )
+    public_active_skills = [
+        name for name in state.get("active_skills", []) if name != "agent-interview"
+    ]
+    metadata["active_skills"] = public_active_skills
     observability = {
         "thinking_duration": metadata.get("thinking_duration", 0),
         "step_count": len(collected_steps),
-        "active_skills": state.get("active_skills", []),
+        "active_skills": public_active_skills,
         "tool_step_count": len(collected_tool_steps or state.get("tool_steps", [])),
         "tool_trace_persisted": False,
     }
@@ -547,6 +553,10 @@ def _refresh_interview_state_snapshot(state: ChatState) -> None:
 def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
     """Record asked question to DB for cross-conversation dedup."""
     assert_chat_turn_active(state)
+    if state.get("question_source") == "agent_internal":
+        # Private catalog IDs are not question_bank IDs and should not be
+        # written to the public interview history/dedup table.
+        return
     selected = metadata.get("selected_question") or state.get("selected_question")
     if not selected or not isinstance(selected, dict):
         return
@@ -835,6 +845,12 @@ async def run_chat(
                 )
                 tool_trace = state.get("tool_calls_trace", [])
                 skill_trace = state.get("skill_trace", [])
+                if state.get("question_source") == "agent_internal":
+                    skill_trace = [
+                        item
+                        for item in skill_trace
+                        if item.get("skill_name") != "agent-interview"
+                    ]
                 reasoning_trace = build_reasoning_trace(
                     collected_thinking,
                     collected_steps,

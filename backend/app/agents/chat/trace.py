@@ -19,6 +19,8 @@ SAFE_TOOL_ARG_KEYS = {
     "candidate_index",
     "question_id",
     "topic",
+    "capability",
+    "interview_format",
 }
 
 TOOL_LABELS = {
@@ -26,6 +28,9 @@ TOOL_LABELS = {
     "search_questions": "检索题库",
     "draw_questions": "抽取题目",
     "select_question": "采用面试题",
+    "search_agent_private_questions": "Agent 专项能力评估",
+    "draw_agent_private_questions": "Agent 专项能力抽题",
+    "select_agent_private_question": "采用 Agent 专项题",
 }
 
 SKILL_LABELS = {
@@ -132,6 +137,11 @@ def build_tool_trace(
         _preview_question(q)
         for q in _question_candidates(state)[:PUBLIC_QUESTION_PREVIEW_LIMIT]
     ]
+    private_source = state.get("question_source") == "agent_internal" or tool_name in {
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    }
     result_ids = summary.get("result_ids")
     if not isinstance(result_ids, list):
         result_ids = [
@@ -142,16 +152,16 @@ def build_tool_trace(
     error = summary.get("error") or ""
     ok = bool(summary.get("ok", not error))
     return {
-        "tool_name": tool_name,
+        "tool_name": "agent_question_engine" if private_source else tool_name,
         "label": TOOL_LABELS.get(tool_name, tool_name),
         "message": str(summary.get("message") or ""),
         "args_summary": safe_tool_args(tool_call),
         "elapsed_ms": max(int(elapsed_ms or 0), 0),
         "ok": ok,
         "result_count": int(summary.get("result_count") or 0),
-        "result_ids": result_ids[:PUBLIC_QUESTION_PREVIEW_LIMIT],
-        "result_preview": result_preview,
-        "selected_question_id": _selected_question_id(state),
+        "result_ids": [] if private_source else result_ids[:PUBLIC_QUESTION_PREVIEW_LIMIT],
+        "result_preview": [] if private_source else result_preview,
+        "selected_question_id": None if private_source else _selected_question_id(state),
         "fallback_used": bool(summary.get("fallback_used", False)),
         "empty_reason": str(summary.get("empty_reason") or ""),
         "debug_reason": str(summary.get("debug_reason") or ""),

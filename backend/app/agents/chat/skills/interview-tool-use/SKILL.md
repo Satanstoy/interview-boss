@@ -25,6 +25,9 @@ metadata:
 
 支持按难度、分类、主题筛选。
 
+当服务端明确提供 Agent 开发专属能力工具时，Agent 专项面试优先使用该内部能力目录；
+普通岗位和普通技术题仍使用公共题库工具。不要根据候选人的一句话自行切换岗位 profile。
+
 当 runtime harness 指出缺少手撕代码/coding、场景题/system design 或 HR/behavioral 信号时，优先使用 draw_questions 并带上对应 question_type。coding 题必须继续追问 edge cases、复杂度和 testing；场景题要追业务约束、容量、瓶颈、降级和一致性；behavioral 题要追 STAR 里的行动和结果。
 
 ### 显式选题（选题工具）
@@ -70,6 +73,7 @@ metadata:
 
 - 工具名称（搜索、抽题、选题、加载等内部调用名）
 - 技能目录名（如项目深挖、自适应难度等内部标识）
+- Agent 专项内部题源、评估 rubric、能力标签或其来源
 - 信封字段名（如 `ok`、`items`、`metadata` 等技术术语）
 - 候选题索引、调试原因等内部元数据
 

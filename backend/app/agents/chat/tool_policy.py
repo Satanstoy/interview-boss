@@ -14,11 +14,20 @@ from typing import Any
 from app.agents.chat.state import ChatState
 from app.agents.chat.tool_gateway import validate_tool_arguments
 from app.agents.chat.tool_strategy import compute_tool_strategy
+from app.agents.chat.agent_profile import is_agent_development_profile
 
 
 TOOL_POLICY_VERSION = "chat-tool-policy-v1"
 REGISTERED_TOOLS = frozenset(
-    {"load_skill", "search_questions", "draw_questions", "select_question"}
+    {
+        "load_skill",
+        "search_questions",
+        "draw_questions",
+        "select_question",
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    }
 )
 
 
@@ -62,16 +71,38 @@ def build_tool_policy(state: ChatState) -> ToolPolicy:
     if strategy.allow_load_skill:
         allowed_tools.add("load_skill")
 
+    private_enabled = is_agent_development_profile(state) and not state.get("_mcp_external")
+    if private_enabled and strategy.allow_search:
+        allowed_tools.add("search_agent_private_questions")
+    if private_enabled and strategy.allow_draw:
+        allowed_tools.add("draw_agent_private_questions")
+
     if state.get("candidate_questions") or state.get("retrieved_questions"):
         allowed_tools.add("select_question")
+        if private_enabled and state.get("question_source") == "agent_internal":
+            allowed_tools.add("select_agent_private_question")
 
     allowed_skills: frozenset[str] | None
     if not strategy.allow_load_skill:
         allowed_skills = frozenset()
     elif strategy.allowed_skills:
-        allowed_skills = frozenset(strategy.allowed_skills)
+        skills = set(strategy.allowed_skills)
+        if private_enabled:
+            skills.add("agent-interview")
+        allowed_skills = frozenset(skills)
     else:
-        allowed_skills = None
+        allowed_skills = None if not private_enabled else frozenset(
+            {
+                "interview-tool-use",
+                "adaptive-difficulty",
+                "algorithm-coding",
+                "hr-soft-skills",
+                "interview-rhythm",
+                "project-deep-dive",
+                "theory-qa",
+                "agent-interview",
+            }
+        )
 
     return ToolPolicy(
         user_id=int(state.get("user_id") or 0),
@@ -109,6 +140,16 @@ def enforce_tool_call(
     if not active_policy.allows(name):
         raise ToolPolicyViolation(
             "TOOL_NOT_ALLOWED", f"Tool is not allowed in the current policy: {name}"
+        )
+
+    if name in {
+        "search_agent_private_questions",
+        "draw_agent_private_questions",
+        "select_agent_private_question",
+    } and (state.get("_mcp_external") or not is_agent_development_profile(state)):
+        raise ToolPolicyViolation(
+            "PRIVATE_TOOL_NOT_ALLOWED",
+            "Agent private tools require the internal Agent interview profile",
         )
 
     raw_args = function.get("arguments", "{}")

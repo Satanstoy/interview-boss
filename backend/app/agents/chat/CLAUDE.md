@@ -91,6 +91,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 **工具架构**
 - 4 个工具（load_skill/search_questions/draw_questions/select_question）单轨双入口
 - Tool Gateway 统一 envelope（ok/tool/items|selected_question/metadata/error）
+- Agent profile 私有能力：仅当会话配置明确写入 `interview_profile=agent_development` 时，动态注入 Agent 专项 Skill 和私有题目工具；普通岗位的 tool schema 不包含这组能力。
 - `ToolStrategy` 只负责向模型说明当前意图；`tool_policy.py` 根据当前服务端 state 生成不可变 allowlist，并在每次 ReAct tool call 进入 executor 前强制校验
 - 所有 LLM tool arguments 经过 Pydantic strict schema，未知字段拒绝；`select_question` 只接受 candidate index，不接受模型提交的题目对象
 - `execute_tool()` 即使被 ReAct 之外的内部调用直接触发，也必须从当前 state 重新计算并执行 ToolPolicy；不能只依赖 `validate_tool_call()` 的上游检查
@@ -100,6 +101,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 **持久化**
 - coverage_events / turn_intent / writer_trace / validator_trace 写入 done metadata
 - ReAct session 结束后只有在 `turn_id + turn_fence` 仍为 running 时才允许 `save_mcp_session_async` 持久化；HTTP 入口的取消会让旧 pipeline 在 asked-question、active skills、MCP session 和后台记忆提取边界停止。没有 turn identity 的内部合成测试保持兼容。
+- 私有 Agent 题源只作为内部模型证据：题目可以影响面试官自然提问，但不能通过 SSE candidate/retrieved、public metadata 或 reasoning trace 回传题库 provenance/rubric。
 - Chat turn 使用 `client_request_id + request_fingerprint` 做幂等边界；同 ID 不同 payload 返回冲突，status endpoint 只读返回归属校验后的 assistant 内容和 metadata。regenerate 创建 revision turn，复用原 user message，不追加重复 user turn。
 - P1 durable side effect：assistant finalize 同事务写入 `chat_side_effect_jobs`；memory extraction 由 API/ARQ worker claim、重试、去重并写入 source turn/job provenance，session notes 与 conversation metadata 通过 version 字段做 optimistic concurrency。
 - P2 structured turn：CandidateSet 只保存 question reference，最终内容必须 authority reload；`EvidenceBundle` 和 `TurnContractV2` 是 typed facts/contract，`interview_events` 与 `assistant_generations` 支持生命周期、coverage 和 revision replay。

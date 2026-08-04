@@ -36,6 +36,13 @@
 - 匿名开发模式只允许 public、无 user identity 的 session；`user_id`/`bank_mode` 请求参数和 anonymous session 中残留的身份字段必须被清空/覆盖，不能借匿名模式读取个人题库或用户级 asked-question 事实。
 - 新增可执行工具时，先在本目录落工具函数，再由 agent executor 或 FastMCP app 转发调用；同时更新 `session.py` 的持久化字段白名单。
 
+## Agent 私有题源边界
+
+- `data/agent_interview_catalog.json` 是由 `backend/scripts/import_agent_private_catalog.py` 从内部 Agent 面试资料编译的运行时目录，不能导入 `question_bank`，也不能通过公共题库 API 返回。
+- `search_agent_private_questions`、`draw_agent_private_questions`、`select_agent_private_question` 只由内部 Chat ReAct 在 `interview_profile=agent_development` 时动态注册；它们不得使用 `@mcp.tool()`，因此不会出现在外部 MCP `list_tools`。
+- 私有工具仍复用本文件的统一 envelope 和 server-owned candidate/authoritative reload 约束，但外部 MCP 请求即使带有 Agent 岗位也必须得到 `PRIVATE_TOOL_UNAVAILABLE`。
+- 私有题目的 rubric 只进入内部模型工具结果；SSE retrieved/candidate/basis、前端 reasoning trace 和 assistant metadata 必须移除私有题源、题干预览、rubric、source provenance。
+
 ## 双入口 Session 持久化策略
 
 | 入口 | state 来源 | session 持久化 |

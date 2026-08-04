@@ -1003,8 +1003,8 @@ class TestSkillLoaderStrategyRules:
 class TestInterviewToolUseSkill:
     """interview-tool-use skill 的注册、元数据和 catalog 输出验证"""
 
-    def test_default_registry_has_seven_skills(self):
-        """默认注册表应包含 7 个 skill（6 existing + interview-tool-use）"""
+    def test_default_registry_has_eight_skills(self):
+        """默认注册表包含普通 skills、常驻 tool-use 和 profile-gated Agent skill。"""
         from app.agents.chat.skills.defaults import get_default_registry
 
         registry = get_default_registry()
@@ -1016,12 +1016,13 @@ class TestInterviewToolUseSkill:
             "algorithm-coding",
             "hr-soft-skills",
             "interview-tool-use",
+            "agent-interview",
         ]
         for name in expected_skills:
             assert registry.get(name) is not None, (
                 f"Skill '{name}' not found in registry"
             )
-        assert len(registry._skills) == 7
+        assert len(registry._skills) == 8
 
     def test_interview_tool_use_metadata_from_interview_boss_namespace(self):
         """interview-tool-use 应从 metadata.interview-boss.* 读取运行时字段"""
@@ -1067,7 +1068,7 @@ class TestInterviewToolUseSkill:
         expected = sorted(
             skill.name
             for skill in registry._skills.values()
-            if skill.kind != "tool-use"
+            if skill.kind != "tool-use" and not skill.job_profiles
         )
 
         assert sorted(SKILL_NAMES) == expected
