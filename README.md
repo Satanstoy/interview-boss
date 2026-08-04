@@ -346,6 +346,9 @@ npm run dev
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
 | `OPENAI_API_KEY_EMBEDDING` | Embedding API 密钥 | 回退到 LLM 密钥 |
 | `OPENAI_BASE_URL_EMBEDDING` | Embedding API 地址 | 空 |
+| `SEARCH_PROVIDER` | 全局默认联网搜索服务商（`tavily` / `brave` / `bocha`） | `none` |
+| `SEARCH_API_KEY` | 全局默认联网搜索 API 密钥 | 空 |
+| `SEARCH_BASE_URL` | 全局联网搜索服务地址（可选） | 空 |
 | `EMBEDDING_MODEL_REPO` | Embedding 模型仓库 | `Xenova/bge-small-zh-v1.5` |
 | `SIMILARITY_THRESHOLD` | 去重相似度阈值 | `0.85` |
 | `LLM_TIMEOUT` | LLM 超时（秒） | `120` |

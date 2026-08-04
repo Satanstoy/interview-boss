@@ -1,4 +1,4 @@
-"""Auth domain migrations: 003, 010, 012, 015, 052."""
+"""Auth domain migrations: 003, 010, 012, 015, 052, 060."""
 
 import os
 import logging
@@ -49,6 +49,20 @@ def _migration_003_auth_tables(conn):
             base_url TEXT NOT NULL DEFAULT '',
             model TEXT NOT NULL DEFAULT 'gpt-4o',
             timeout INTEGER NOT NULL DEFAULT 120,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+def _migration_060_search_config(conn):
+    """Create per-user web search provider configuration."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_search_config (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL DEFAULT 'none',
+            api_key TEXT NOT NULL DEFAULT '',
+            base_url TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

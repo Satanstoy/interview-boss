@@ -34,9 +34,12 @@ class TestBug010GenerateAnswerFix:
             with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
                 mock_run_db.return_value = mock_row
 
-                # 应该不抛出404错误
-                result = await generate_master_answer(100, user)
-                assert result is not None
+                with patch("app.routers.answers._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+                    mock_llm.return_value = "mock answer"
+
+                    # 应该不抛出404错误，也不能依赖真实 LLM 服务
+                    result = await generate_master_answer(100, user)
+                    assert result is not None
 
     @pytest.mark.asyncio
     async def test_generate_answer_should_reject_invisible_question(self):

@@ -127,6 +127,38 @@ def get_user_llm_config(user_id: int) -> dict | None:
     return _get_global_llm_config()
 
 
+def get_user_search_config(user_id: int | None) -> dict | None:
+    """读取用户的联网搜索配置，未配置时回退到可选的全局环境配置。"""
+    try:
+        from app.db.connection import get_db_connection
+
+        if user_id is not None:
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT provider, api_key, base_url, enabled "
+                    "FROM user_search_config WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+            if row:
+                cfg = dict(row)
+                if cfg.get("enabled") and cfg.get("provider") != "none" and cfg.get("api_key"):
+                    return cfg
+                return None
+    except Exception:
+        pass
+
+    provider = os.environ.get("SEARCH_PROVIDER", "none").strip().lower()
+    api_key = os.environ.get("SEARCH_API_KEY", "").strip()
+    if provider == "none" or not api_key:
+        return None
+    return {
+        "provider": provider,
+        "api_key": api_key,
+        "base_url": os.environ.get("SEARCH_BASE_URL", "").strip(),
+        "enabled": 1,
+    }
+
+
 def _get_global_llm_config() -> dict | None:
     """获取全局 LLM 配置（环境变量 + user_profile 表）。无配置时返回 None。"""
     api_key = (

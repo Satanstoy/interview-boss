@@ -27,10 +27,10 @@ def _get_current_position_for_user(user_id: int) -> str:
 
 async def background_generate_answer(question_id: int, question_text: str, user_id: int = None):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
-    from app.core.prompts import ANSWER_PROMPT
+    from app.services.answer_enrichment import prepare_answer_prompt
     from app.services.llm import _call_llm_with_retry
     try:
-        prompt = ANSWER_PROMPT.replace("{question}", question_text)
+        prompt, _ = await prepare_answer_prompt(question_text, user_id=user_id)
         answer = await _call_llm_with_retry(prompt, user_id=user_id)
 
         def _update():

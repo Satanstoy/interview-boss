@@ -1,10 +1,11 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { User, Target, Bot, Shield, Settings, Server, PanelLeft } from '@lucide/vue'
+import { User, Target, Bot, Shield, Settings, Server, Search, PanelLeft } from '@lucide/vue'
 import SettingsNav from './SettingsNav.vue'
 import SettingsProfile from './SettingsProfile.vue'
 import SettingsInterview from './SettingsInterview.vue'
 import SettingsAIConfig from './SettingsAIConfig.vue'
+import SettingsSearchConfig from './SettingsSearchConfig.vue'
 import SettingsSecurity from './SettingsSecurity.vue'
 import SettingsMCP from './SettingsMCP.vue'
 import SettingsAdmin from './SettingsAdmin.vue'
@@ -36,6 +37,7 @@ const sections = computed(() => {
     { id: 'profile', label: '个人信息', description: '账户、简历和题库模式', icon: User },
     { id: 'interview', label: '面试偏好', description: '岗位和分类偏好', icon: Target },
     { id: 'ai', label: 'AI 配置', description: '模型和接口参数', icon: Bot },
+    { id: 'search', label: '联网搜索', description: '用外部资料增强答案', icon: Search },
     { id: 'mcp', label: 'MCP 接入', description: '外部 agent 访问配置', icon: Server },
     { id: 'security', label: '账户安全', description: '密码和登录安全', icon: Shield },
   ]
@@ -128,6 +130,10 @@ const currentSectionLabel = computed(
 
           <div v-else-if="activeSection === 'ai'" key="ai" class="settings-section">
             <SettingsAIConfig />
+          </div>
+
+          <div v-else-if="activeSection === 'search'" key="search" class="settings-section">
+            <SettingsSearchConfig />
           </div>
 
           <div v-else-if="activeSection === 'mcp'" key="mcp" class="settings-section">

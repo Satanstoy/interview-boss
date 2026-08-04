@@ -24,6 +24,7 @@ from app.db.migrations.auth import (
     _migration_051_share_default,
     _migration_052_mcp_tokens,
     _migration_054_mcp_token_seed,
+    _migration_060_search_config,
 )
 from app.db.migrations.data_repair import (
     _migration_011_data_backfills,
@@ -160,6 +161,7 @@ _MIGRATIONS = [
     (57, "practice_default_decks", _migration_057_practice_default_decks),
     (58, "coding_playlist_order", _migration_058_coding_playlist_order),
     (59, "practice_queue_indexes", _migration_059_practice_queue_indexes),
+    (60, "search_config", _migration_060_search_config),
 ]
 
 

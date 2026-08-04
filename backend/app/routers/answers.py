@@ -5,11 +5,11 @@ import openai
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user, get_admin_user
-from app.core.prompts import ANSWER_PROMPT
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
 from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry
+from app.services.answer_enrichment import prepare_answer_prompt
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
@@ -87,7 +87,7 @@ async def generate_master_answer(question_id: int, user: dict = Depends(get_curr
         return {"status": "success", "answer": row['ai_answer']}
 
     try:
-        prompt = ANSWER_PROMPT.replace("{question}", row['question'])
+        prompt, search_sources = await prepare_answer_prompt(row['question'], user_id=user['id'])
         answer = await _call_llm_with_retry(prompt, user_id=user['id'])
 
         if is_admin:
@@ -110,7 +110,7 @@ async def generate_master_answer(question_id: int, user: dict = Depends(get_curr
                     conn.commit()
             await run_db(_upsert)
 
-        return {"status": "success", "answer": answer}
+        return {"status": "success", "answer": answer, "search_sources": search_sources}
     except openai.AuthenticationError:
         raise HTTPException(status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。")
     except openai.APIConnectionError:
@@ -167,7 +167,7 @@ async def batch_generate_answers(req: BatchGenerateAnswersRequest, user: dict = 
                 nonlocal generated, failed, done_count
                 async with semaphore:
                     try:
-                        prompt = ANSWER_PROMPT.replace("{question}", question_text)
+                        prompt, _ = await prepare_answer_prompt(question_text, user_id=user['id'])
                         answer = await _call_llm_with_retry(prompt, user_id=user['id'])
                         def _update():
                             with get_db_connection() as conn:

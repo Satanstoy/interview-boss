@@ -35,6 +35,12 @@ export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, setting
 export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 export const fetchAvailableModels = () => get(`${API}/profile/llm/models`)
 
+// ── Per-user web search config ──
+export const fetchMySearchConfig = () => get(`${API}/profile/search`, { noCache: true })
+export const updateMySearchConfig = (settings) => put(`${API}/profile/search`, settings)
+export const deleteMySearchConfig = () => del(`${API}/profile/search`)
+export const testMySearchConfig = (query) => post(`${API}/profile/search/test`, { query })
+
 // ── Per-account MCP connection ──
 export const fetchMyMCPConfig = () => get(`${API}/profile/mcp`, { noCache: true })
 export const rotateMyMCPToken = () => post(`${API}/profile/mcp/token`, null)
