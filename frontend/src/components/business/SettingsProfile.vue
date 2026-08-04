@@ -196,31 +196,31 @@
       </CardContent>
     </Card>
 
-    <!-- ═══ Card 4: 题库模式 ═══ -->
+    <!-- ═══ Card 4: 分享默认值 ═══ -->
     <Card>
       <CardHeader>
         <CardTitle class="text-base flex items-center gap-2">
           <Database class="size-4 text-muted-foreground" />
-          题库模式
+          分享默认值
         </CardTitle>
-        <CardDescription>选择题目来源方式</CardDescription>
+        <CardDescription>导入面经时默认是否分享到公共题库（每次导入可单独覆盖）</CardDescription>
       </CardHeader>
       <CardContent>
         <div class="flex flex-col gap-2">
           <button
-            v-for="opt in bankModeOptions"
+            v-for="opt in shareDefaultOptions"
             :key="opt.value"
             @click="onBankModeChange(opt.value)"
             class="flex items-start gap-3 p-3 rounded-lg border text-left transition-all duration-200"
-            :class="bankMode === opt.value
+            :class="shareDefault === opt.value
               ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
               : 'border-border hover:border-muted-foreground/50 hover:bg-muted/50'"
           >
             <span
               class="mt-0.5 size-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors"
-              :class="bankMode === opt.value ? 'border-primary' : 'border-muted-foreground/40'"
+              :class="shareDefault === opt.value ? 'border-primary' : 'border-muted-foreground/40'"
             >
-              <span v-if="bankMode === opt.value" class="size-2 rounded-full bg-primary"></span>
+              <span v-if="shareDefault === opt.value" class="size-2 rounded-full bg-primary"></span>
             </span>
             <div>
               <p class="text-sm font-medium text-foreground">{{ opt.label }}</p>
@@ -309,7 +309,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onBeforeUnmount, markRaw } from 'vue'
-import { getMyEmail, sendBindCode, bindEmail, authUpdateBankMode } from '@/services/authApi.js'
+import { getMyEmail, sendBindCode, bindEmail, authUpdateShareDefault } from '@/services/authApi.js'
 import { uploadResume, getResume, deleteResume } from '@/services/resumeApi.js'
 import { useTheme } from '@/composables/useTheme.js'
 import { useToast } from '@/composables/useNotification.js'
@@ -334,13 +334,13 @@ const { isDark, toggleDark } = useTheme()
 
 const props = defineProps({
   practiceStats: { type: Object, default: () => ({}) },
-  bankMode: { type: String, default: 'public' },
+  shareDefault: { type: String, default: 'private' },
   displayUser: { type: Object, default: null },
   activeSeason: { type: String, default: '' },
   availableSeasons: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['bank-mode-changed', 'profile-updated', 'sidebar-collapsed-changed', 'update:activeSeason'])
+const emit = defineEmits(['share-default-changed', 'profile-updated', 'sidebar-collapsed-changed', 'update:activeSeason'])
 
 // ── 邮箱绑定 ──
 const myEmail = ref('')
@@ -515,11 +515,10 @@ const scoreBadgeClass = (score) => {
   return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
 }
 
-// ── 题库模式 ──
-const bankModeOptions = [
-  { value: 'public', label: '公共题库', desc: '使用系统内置的公共面试题库' },
-  { value: 'personal', label: '个人题库', desc: '使用你自己创建和导入的面试题' },
-  { value: 'mixed', label: '混用', desc: '同时展示公共题库和个人题库的题目' }
+// ── 分享默认值 ──
+const shareDefaultOptions = [
+  { value: 'share', label: '分享到公共题库', desc: '导入的面经题目默认进入公共审核队列' },
+  { value: 'private', label: '仅自己可见', desc: '导入的面经题目默认只保存在我的题库' }
 ]
 
 // ── 招聘季 ──
@@ -531,13 +530,13 @@ const addSeason = () => {
 }
 
 const onBankModeChange = async (mode) => {
-  if (mode === props.bankMode) return
+  if (mode === props.shareDefault) return
   try {
-    await authUpdateBankMode(mode)
-    emit('bank-mode-changed', mode)
-    toast.success('题库模式已切换')
+    await authUpdateShareDefault(mode)
+    emit('share-default-changed', mode)
+    toast.success('分享默认值已更新')
   } catch (e) {
-    toast.error(`切换失败: ${e.message}`)
+    toast.error(`更新失败: ${e.message}`)
   }
 }
 
