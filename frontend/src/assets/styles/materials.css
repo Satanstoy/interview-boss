@@ -104,6 +104,59 @@ html.dark
     drop-shadow(0 0 14px rgba(255, 255, 255, 0.17));
 }
 
+/* Semantic-colour text controls keep their own colour and contrast. */
+html.dark
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"]
+  ):is(
+    [class*="text-primary"],
+    [class*="text-destructive"],
+    [class*="text-blue-"],
+    [class*="text-cyan-"],
+    [class*="text-emerald-"],
+    [class*="text-green-"],
+    [class*="text-indigo-"],
+    [class*="text-orange-"],
+    [class*="text-pink-"],
+    [class*="text-purple-"],
+    [class*="text-red-"],
+    [class*="text-rose-"],
+    [class*="text-sky-"],
+    [class*="text-violet-"],
+    [class*="text-amber-"]
+  ):is(:hover, :focus-visible, [data-state="open"], [data-active="true"]) {
+  text-shadow: none;
+}
+
+html.dark
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"]
+  ):is(
+    [class*="text-primary"],
+    [class*="text-destructive"],
+    [class*="text-blue-"],
+    [class*="text-cyan-"],
+    [class*="text-emerald-"],
+    [class*="text-green-"],
+    [class*="text-indigo-"],
+    [class*="text-orange-"],
+    [class*="text-pink-"],
+    [class*="text-purple-"],
+    [class*="text-red-"],
+    [class*="text-rose-"],
+    [class*="text-sky-"],
+    [class*="text-violet-"],
+    [class*="text-amber-"]
+  ):is(:hover, :focus-visible, [data-state="open"], [data-active="true"]) svg {
+  filter: none;
+}
+
 /* Coloured controls never receive a white backlight or glyph glow. */
 :where(
   button,
