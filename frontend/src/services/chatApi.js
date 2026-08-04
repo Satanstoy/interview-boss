@@ -14,10 +14,38 @@ export const pinConversation = (id) => put(`${API}/conversations/${id}/pin`)
 // ── 消息 ──
 export const getMessages = (conversationId) => get(`${API}/conversations/${conversationId}/messages`, { noCache: true })
 
-export const sendMessage = (conversationId, content, onEvent, model = null) => {
-  const body = { content }
+export const cancelTurn = (conversationId, turnId, reason = 'client_stop') => {
+  return post(`${API}/conversations/${conversationId}/turns/${turnId}/cancel`, { reason })
+}
+
+function createClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+export const sendMessage = (
+  conversationId,
+  content,
+  onEvent,
+  model = null,
+  {
+    clientRequestId = createClientRequestId(),
+    onController,
+    regenerateMessageId = null,
+  } = {},
+) => {
+  const body = regenerateMessageId ? {} : { content }
   if (model) body.model = model
-  return postSSE(`${API}/conversations/${conversationId}/messages`, body, onEvent)
+  body.client_request_id = clientRequestId
+  return postSSE(
+    regenerateMessageId
+      ? `${API}/conversations/${conversationId}/messages/${regenerateMessageId}/regenerate`
+      : `${API}/conversations/${conversationId}/messages`,
+    body,
+    onEvent,
+    false,
+    { onController },
+  )
 }
 
 // ── 记忆 ──

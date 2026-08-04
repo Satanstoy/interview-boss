@@ -13,8 +13,11 @@ def sample_state():
     """Minimal ChatState for testing."""
     return {
         "user_id": 1,
+        "conversation_id": "test-conversation",
+        "turn_id": "test-turn",
         "user_message": "Tell me about Java",
         "retrieved_questions": [],
+        "intent": "practice_request",
     }
 
 
@@ -28,6 +31,25 @@ def sample_skill():
         "## Theory QA Instruction\n\nAsk theory questions."
     )
     return skill
+
+
+@pytest.fixture(autouse=True)
+def mock_authoritative_question_loader(monkeypatch):
+    """Keep executor unit tests focused while modeling the DB reload boundary."""
+    from app.mcp_server import interview_tools
+
+    def load(question_id, state):
+        try:
+            question_id = int(question_id)
+        except (TypeError, ValueError):
+            return None
+        for collection_name in ("candidate_questions", "retrieved_questions"):
+            for candidate in state.get(collection_name) or []:
+                if isinstance(candidate, dict) and candidate.get("id") == question_id:
+                    return dict(candidate)
+        return None
+
+    monkeypatch.setattr(interview_tools, "_load_authoritative_question", load)
 
 
 # ── TestToolSchemas ────────────────────────────────────────
@@ -248,7 +270,7 @@ class TestExecuteToolLoadSkill:
         tool_call = {
             "function": {
                 "name": "load_skill",
-                "arguments": json.dumps({"skill_name": "nonexistent"}),
+                "arguments": json.dumps({"skill_name": "theory-qa"}),
             }
         }
 
@@ -262,7 +284,7 @@ class TestExecuteToolLoadSkill:
 
         parsed = json.loads(result)
         assert parsed["ok"] is False
-        assert "nonexistent" in parsed["error"]["message"]
+        assert "Unknown skill" in parsed["error"]["message"]
 
 
 class TestLoadSkillStateInjection:
@@ -621,7 +643,7 @@ class TestExecuteToolDrawQuestions:
     async def test_draw_missing_user_returns_user_required_envelope(self):
         from app.agents.chat.tools import execute_tool
 
-        state = {"retrieved_questions": []}
+        state = {"retrieved_questions": [], "intent": "practice_request"}
         tool_call = {
             "function": {
                 "name": "draw_questions",
@@ -654,7 +676,7 @@ class TestExecuteToolDrawQuestions:
         parsed = json.loads(result)
         assert parsed["ok"] is False
         assert parsed["tool"] == "draw_questions"
-        assert parsed["error"]["error_code"] == "VALIDATION_ERROR"
+        assert parsed["error"]["error_code"] == "INVALID_TOOL_ARGUMENTS"
         assert parsed["metadata"]["debug_reason"] == "validation_failed"
 
     async def test_unknown_tool_returns_error(self, sample_state):
@@ -832,7 +854,7 @@ class TestExecuteToolSelectQuestion:
         parsed = json.loads(result)
 
         assert parsed["ok"] is False
-        assert parsed["error"]["error_code"] == "INDEX_OUT_OF_RANGE"
+        assert parsed["error"]["error_code"] == "INVALID_TOOL_ARGUMENTS"
 
 
 class TestLoadSkillStepEvent:
@@ -852,6 +874,7 @@ class TestLoadSkillStepEvent:
                 "user_id": 1,
                 "user_message": "Tell me about the project",
                 "retrieved_questions": [],
+                "intent": "practice_request",
             }
 
             load_skill_tc = {
@@ -883,7 +906,7 @@ class TestLoadSkillStepEvent:
                 ),
                 patch(
                     "app.agents.chat.react_loop.validate_tool_call",
-                    side_effect=lambda tc: tc,
+                    side_effect=lambda tc, policy: tc,
                 ),
                 patch(
                     "app.agents.chat.react_loop.chat_tools.execute_tool",

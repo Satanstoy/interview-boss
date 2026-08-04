@@ -34,3 +34,8 @@ export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)
 export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, settings)
 export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 export const fetchAvailableModels = () => get(`${API}/profile/llm/models`)
+
+// ── Per-account MCP connection ──
+export const fetchMyMCPConfig = () => get(`${API}/profile/mcp`, { noCache: true })
+export const rotateMyMCPToken = () => post(`${API}/profile/mcp/token`, null)
+export const revokeMyMCPToken = () => del(`${API}/profile/mcp/token`)

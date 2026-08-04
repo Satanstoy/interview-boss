@@ -129,6 +129,51 @@ def _fallback_metadata(items: list[dict]) -> tuple[bool, list[str]]:
     return bool(reasons), reasons
 
 
+def _load_authoritative_question(
+    question_id: int,
+    state: ChatState,
+) -> dict | None:
+    """Reload one visible question from the database for selection.
+
+    Candidate rows are model-visible hints, not an authorization boundary.  A
+    selection must be checked again against the current user's bank mode and
+    current job position so a stale or tampered session cannot bind arbitrary
+    question text or another user's private question.
+    """
+    try:
+        question_id = int(question_id)
+        user_id = int(state.get("user_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if question_id <= 0 or user_id <= 0:
+        return None
+
+    try:
+        from app.db.connection import get_db_connection
+        from app.routers.questions import _build_bank_where_clause
+
+        user = {
+            "id": user_id,
+            "bank_mode": state.get("bank_mode", "all"),
+        }
+        from_clause, where_clause, params = _build_bank_where_clause(user, "qb")
+        sql = (
+            "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, "
+            "qb.difficulty, qb.sources, qb.owner_id, qb.status, qb.job_position "
+            f"{from_clause} {where_clause} AND qb.id = ? LIMIT 1"
+        )
+        with get_db_connection() as conn:
+            row = conn.execute(sql, [*params, question_id]).fetchone()
+        return dict(row) if row is not None else None
+    except Exception:
+        logger.exception(
+            "Failed to reload authoritative question question_id=%s user_id=%s",
+            question_id,
+            user_id,
+        )
+        return None
+
+
 async def search_questions_tool(args: dict, state: ChatState) -> dict:
     """Search questions and update chat state with a stable result envelope."""
     started = time.monotonic()
@@ -178,6 +223,12 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         from app.db.operations import get_db_connection, get_asked_question_ids
 
         with get_db_connection() as conn:
+            if state.get("conversation_id"):
+                rows = conn.execute(
+                    "SELECT question_id FROM interview_asked_questions WHERE conversation_id = ?",
+                    (state["conversation_id"],),
+                ).fetchall()
+                exclude_ids.update(_positive_int_ids(row[0] for row in rows))
             cross_conversation_ids = get_asked_question_ids(conn, state.get("user_id"))
         exclude_ids.update(cross_conversation_ids)
     except Exception as e:
@@ -248,6 +299,11 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
             debug_reason="validation_failed",
         )
 
+    control = state.get("distribution_control") or {}
+    preferred_type = control.get("preferred_type") if state.get("distribution_primary_required") else None
+    if preferred_type:
+        parsed_args = parsed_args.model_copy(update={"question_type": preferred_type})
+
     user_id = state.get("user_id")
     if not user_id:
         total_ms = int((time.monotonic() - started) * 1000)
@@ -262,11 +318,13 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
     draw_args: dict[str, object] = {
         "user": {
             "id": user_id,
-            "bank_mode": state.get("bank_mode", "public"),
+            "bank_mode": state.get("bank_mode", "all"),
         },
         "count": parsed_args.count,
         "session_notes": state.get("session_notes") or None,
     }
+    if state.get("job_position"):
+        draw_args["job_position"] = str(state["job_position"]).strip()[:100]
     for key in ("difficulty", "cat1", "cat2", "topic", "question_type"):
         value = getattr(parsed_args, key)
         if value:
@@ -276,8 +334,14 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         from app.db.operations import get_db_connection, get_asked_question_ids
 
         with get_db_connection() as conn:
-            cross_conversation_ids = get_asked_question_ids(conn, user_id)
-        exclude_ids.update(cross_conversation_ids)
+            if state.get("conversation_id"):
+                rows = conn.execute(
+                    "SELECT question_id FROM interview_asked_questions WHERE conversation_id = ?",
+                    (state["conversation_id"],),
+                ).fetchall()
+                exclude_ids.update(_positive_int_ids(row[0] for row in rows))
+            if not state.get("distribution_allow_cross_conversation_reuse"):
+                exclude_ids.update(get_asked_question_ids(conn, user_id))
     except Exception as e:
         logger.debug("Cross-conversation dedup query failed: %s", e)
     if exclude_ids:
@@ -348,12 +412,17 @@ def select_question_tool(
     instead of running the local ``viable[0]`` / ``algorithm_candidate_match``
     heuristic.
     """
-    candidates = (
-        args.get("candidates")
-        or state.get("candidate_questions")
-        or state.get("retrieved_questions")
-        or []
-    )
+    if "candidates" in args:
+        return build_error_envelope(
+            tool="select_question",
+            error_code="INVALID_TOOL_ARGUMENTS",
+            message="select_question accepts only candidate_index; candidates are server-owned",
+            total_ms=0,
+            debug_reason="client_candidates_rejected",
+            empty_reason="invalid_arguments",
+        )
+
+    candidates = state.get("candidate_questions") or state.get("retrieved_questions") or []
 
     if not candidates:
         return build_error_envelope(
@@ -368,6 +437,7 @@ def select_question_tool(
     if candidate_index is not None:
         if (
             not isinstance(candidate_index, int)
+            or isinstance(candidate_index, bool)
             or candidate_index < 0
             or candidate_index >= len(candidates)
         ):
@@ -381,10 +451,49 @@ def select_question_tool(
             )
         force_candidate = candidates[candidate_index]
 
-    args_candidates = args.get("candidates")
-    if isinstance(args_candidates, list):
-        state["candidate_questions"] = args_candidates
-        state["retrieved_questions"] = args_candidates
+    if not state.get("user_id"):
+        return build_error_envelope(
+            tool="select_question",
+            error_code="USER_REQUIRED",
+            message="user_id is required for select_question",
+            total_ms=0,
+            debug_reason="missing_user_id",
+            empty_reason="user_required",
+        )
+
+    if force_candidate is not None:
+        raw_id = force_candidate.get("id") if isinstance(force_candidate, dict) else None
+        authoritative = _load_authoritative_question(raw_id, state)
+        if authoritative is None:
+            return build_error_envelope(
+                tool="select_question",
+                error_code="QUESTION_NOT_AVAILABLE",
+                message="Selected question is no longer available",
+                total_ms=0,
+                debug_reason="authoritative_reload_failed",
+                empty_reason="question_not_available",
+            )
+        force_candidate = authoritative
+    else:
+        # No explicit index means the local planner may choose among the
+        # server-owned candidates. Rehydrate every candidate before it runs.
+        authoritative_candidates = []
+        for candidate in candidates:
+            raw_id = candidate.get("id") if isinstance(candidate, dict) else None
+            authoritative = _load_authoritative_question(raw_id, state)
+            if authoritative is not None:
+                authoritative_candidates.append(authoritative)
+        if not authoritative_candidates:
+            return build_error_envelope(
+                tool="select_question",
+                error_code="QUESTION_NOT_AVAILABLE",
+                message="No selected candidate is currently available",
+                total_ms=0,
+                debug_reason="authoritative_reload_failed",
+                empty_reason="question_not_available",
+            )
+        state["candidate_questions"] = authoritative_candidates
+        state["retrieved_questions"] = authoritative_candidates
 
     plan = _maybe_create_question_plan(state, force_candidate=force_candidate)
 

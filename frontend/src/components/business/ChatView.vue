@@ -99,7 +99,19 @@
       </div>
 
       <!-- Empty state -->
-      <div v-if="!activeConversationId" class="flex-1 flex items-center justify-center">
+      <div v-if="!activeConversationId || activeConversationId === 'pending'" class="flex-1 flex flex-col">
+        <!-- 有待创建对话时，显示简洁界面 -->
+        <template v-if="pendingNewConversation">
+          <div class="flex-1 flex items-center justify-center">
+            <div class="text-center text-muted-foreground">
+              <MessageSquare :size="48" class="mx-auto mb-4 text-primary/30" />
+              <p class="text-sm">输入你的回答开始面试</p>
+            </div>
+          </div>
+        </template>
+        
+        <!-- 没有待创建对话时，显示原始空状态 -->
+        <template v-else>
         <div
           v-motion
           :initial="{ opacity: 0, y: 16 }"
@@ -130,6 +142,7 @@
             </button>
           </div>
         </div>
+        </template>
       </div>
 
       <!-- Active chat -->
@@ -379,7 +392,6 @@
 import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
-import { cancelAllRequests } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -464,6 +476,8 @@ const sidebarCollapsed = ref(isMobileViewport())
 const isRenamingHeader = ref(false)
 const headerTitleDraft = ref('')
 const headerTitleInput = ref(null)
+const pendingNewConversation = ref(null)
+const openingMessageText = ref('')
 
 // Rename dialog state
 const showRenameDialog = ref(false)
@@ -477,6 +491,7 @@ const thinkingContent = ref('')
 const thinkingDuration = ref(0)
 const liveThinkingSeconds = ref(0)
 let thinkingTimer = null
+let activeRequestContext = null
 
 const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
@@ -505,6 +520,9 @@ const promptSuggestions = [
 ]
 
 const inputPlaceholder = computed(() => {
+  if (pendingNewConversation.value) {
+    return openingMessageText.value || '回答面试问题，或输入你想练习的内容...'
+  }
   return '回答面试问题，或输入你想练习的内容...'
 })
 
@@ -673,6 +691,9 @@ async function loadConversations() {
 
 // Select conversation
 async function selectConversation(id) {
+  if (activeRequestContext && activeRequestContext.conversationId !== id) {
+    await cancelActiveRequest('conversation_switch', false)
+  }
   activeConversationId.value = id
   messages.value = []
   if (isMobileViewport()) sidebarCollapsed.value = true
@@ -685,25 +706,62 @@ async function selectConversation(id) {
   }
 }
 
+async function reloadMessages(conversationId) {
+  try {
+    const res = await chatApi.getMessages(conversationId)
+    if (activeConversationId.value === conversationId) {
+      messages.value = res.data || []
+      await scrollToBottom(true)
+    }
+  } catch (e) {
+    console.error('刷新消息失败:', e)
+  }
+}
+
 // Create conversation
 async function handleCreateConversation(data) {
   if (creatingConversation.value) return
   creatingConversation.value = true
   try {
-    const res = await chatApi.createConversation(data)
+    if (props.preview) {
+      // In preview mode, simulate conversation creation without calling real API
+      const newConv = {
+        id: `preview-${Date.now()}`,
+        title: data.title || (data.mode === 'free_practice' ? '新对话' : 'JD定制面试'),
+        mode: data.mode || 'free_practice',
+        updated_at: new Date().toISOString(),
+      }
+      conversations.value.unshift(newConv)
+      activeConversationId.value = newConv.id
+      messages.value = []
+      showNewChat.value = false
+      pendingInitialMessage.value = ''
+      return
+    }
+
+    // 延迟创建：保存配置到前端状态，不调用API
+    pendingNewConversation.value = {
+      mode: data.mode || 'free_practice',
+      title: data.title || null,
+      jd_id: data.jd_id || null,
+      resume_text: data.resume_text || null,
+      difficulty: data.difficulty || 'mid',
+      experience_id: data.experience_id || null,
+      initial_message: data.initial_message || null,
+    }
+
+    // 生成开场白用于placeholder
+    openingMessageText.value = data.mode === 'jd_resume'
+      ? '请先简单做一下自我介绍吧。'
+      : '请先简单做一下自我介绍吧。'
+
+    // 设置临时active状态，显示空聊天界面
+    activeConversationId.value = 'pending'
+    messages.value = []
     showNewChat.value = false
     pendingInitialMessage.value = ''
-    await loadConversations()
-    if (res.data?.id) {
-      await selectConversation(res.data.id)
-      if (data.initial_message) {
-        inputText.value = data.initial_message
-        await nextTick()
-        await handleSend()
-      }
-    }
   } catch (e) {
-    console.error('创建对话失败:', e)
+    console.error('准备对话失败:', e)
   } finally {
     creatingConversation.value = false
   }
@@ -716,9 +774,91 @@ async function startWithSuggestion(text) {
 }
 
 // Send message
-async function handleSend() {
-  const text = inputText.value.trim()
-  if (!text || isSending.value || !activeConversationId.value) return
+async function handleSend({ regenerateMessageId = null } = {}) {
+  let text = inputText.value.trim()
+  if (regenerateMessageId) {
+    const targetIndex = messages.value.findIndex(m => m.id === regenerateMessageId)
+    for (let i = targetIndex - 1; i >= 0; i--) {
+      if (messages.value[i].role === 'user') {
+        text = String(messages.value[i].content || '').trim()
+        break
+      }
+    }
+  }
+  if (!text || isSending.value) return
+
+  // 如果有待创建的对话，先创建对话
+  if (pendingNewConversation.value && activeConversationId.value === 'pending') {
+    try {
+      const createData = {
+        ...pendingNewConversation.value,
+        first_message: text,
+      }
+      const res = await chatApi.createConversation(createData)
+      if (res.data?.id) {
+        // 创建成功，更新状态
+        pendingNewConversation.value = null
+        openingMessageText.value = ''
+        activeConversationId.value = res.data.id
+        
+        // 刷新对话列表
+        await loadConversations()
+        
+        // 添加用户消息到显示
+        messages.value.push({
+          id: Date.now(),
+          role: 'user',
+          content: text,
+          created_at: new Date().toISOString(),
+        })
+        inputText.value = ''
+        resetInputHeight()
+      }
+    } catch (e) {
+      console.error('创建对话失败:', e)
+      return
+    }
+  }
+
+  if (!activeConversationId.value || activeConversationId.value === 'pending') return
+
+  // In preview mode, simulate a response without calling real API
+  if (props.preview) {
+    const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
+    messages.value.push(userMsg)
+    inputText.value = ''
+    resetInputHeight()
+    await scrollToBottom()
+
+    // Simulate a mock response after a short delay
+    isSending.value = true
+    await new Promise(resolve => setTimeout(resolve, 800))
+    const mockResponse = {
+      id: Date.now() + 1,
+      role: 'assistant',
+      content: '这是一个预览模式的模拟回复。在实际使用中，AI 面试官会根据你的回答进行针对性提问。',
+      created_at: new Date().toISOString(),
+      metadata: {},
+    }
+    messages.value.push(mockResponse)
+    isSending.value = false
+    await scrollToBottom()
+    return
+  }
+
+  const conversationId = activeConversationId.value
+  const clientRequestId = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const context = {
+    conversationId,
+    clientRequestId,
+    turnId: null,
+    controller: null,
+    stopped: false,
+    serverCancelled: false,
+  }
+  activeRequestContext = context
 
   inputText.value = ''
   resetInputHeight()
@@ -745,15 +885,29 @@ async function handleSend() {
   liveThinkingSeconds.value = 0
   startThinkingTimer()
 
-  const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
-  messages.value.push(userMsg)
+  if (!regenerateMessageId) {
+    const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
+    messages.value.push(userMsg)
+  }
   await scrollToBottom()
 
   try {
     const finalEvent = await chatApi.sendMessage(
-      activeConversationId.value,
+      conversationId,
       text,
       (event) => {
+        if (activeRequestContext !== context || activeConversationId.value !== conversationId) return
+        if (context.stopped && event.type !== 'cancelled') return
+
+        if (event.type === 'turn_started') {
+          context.turnId = event.turn_id || null
+          return
+        } else if (event.type === 'cancelled') {
+          context.serverCancelled = true
+          context.stopped = true
+          return
+        }
+
         if (event.type === 'step') {
           processingSteps.value.forEach(s => { s.done = true })
           processingSteps.value.push({
@@ -822,8 +976,19 @@ async function handleSend() {
           pendingInsights.value.push({ text: event.text })
         }
       },
-      selectedModel.value || null
+      selectedModel.value || null,
+      {
+        clientRequestId,
+        regenerateMessageId,
+        onController: (controller) => {
+          if (activeRequestContext === context) context.controller = controller
+        },
+      }
     )
+
+    if (context.serverCancelled) {
+      await reloadMessages(conversationId)
+    }
 
     if (streamingContent.value) {
       const serverMetadata = finalEvent?.metadata && typeof finalEvent.metadata === 'object'
@@ -897,13 +1062,17 @@ async function handleSend() {
           metadata.selected_basis_questions ||= pendingSelectedBasisQuestions.value
         }
       }
-      messages.value.push({
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: streamingContent.value,
-        metadata,
-        created_at: new Date().toISOString(),
-      })
+      if (regenerateMessageId) {
+        await reloadMessages(conversationId)
+      } else {
+        messages.value.push({
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: streamingContent.value,
+          metadata,
+          created_at: new Date().toISOString(),
+        })
+      }
       pendingRetrievedQuestions.value = null
       pendingCandidateQuestions.value = null
       pendingSelectedQuestion.value = null
@@ -919,7 +1088,25 @@ async function handleSend() {
       pendingShouldShowReferences.value = false
       pendingSelectedBasisQuestions.value = []
     }
+    if (regenerateMessageId && !streamingContent.value) {
+      await reloadMessages(conversationId)
+    }
   } catch (e) {
+    const code = e?.code || e?.data?.detail?.code || e?.message
+    const controlMessages = {
+      TURN_IN_PROGRESS: '当前回合仍在生成，请等待完成或先点击停止。',
+      TURN_IDEMPOTENCY_CONFLICT: '这条消息已经提交，请勿重复发送。',
+      TURN_REQUEST_ALREADY_EXISTS: '这条消息已经提交，请勿重复发送。',
+      TURN_NOT_ACTIVE: '当前回合已停止，请重新发送。',
+      TURN_NOT_FOUND: '当前回合已失效，请重新发送。',
+    }
+
+    if (context.stopped || e?.name === 'AbortError') return
+    if (controlMessages[code]) {
+      toastError(controlMessages[code])
+      return
+    }
+
     console.error('发送消息失败:', e)
     messages.value.push({
       id: Date.now() + 1,
@@ -928,38 +1115,70 @@ async function handleSend() {
       created_at: new Date().toISOString(),
     })
   } finally {
-    streamingContent.value = ''
+    if (activeRequestContext !== context) return
+    activeRequestContext = null
     isSending.value = false
-    isThinking.value = false
-    stopThinkingTimer()
-    thinkingContent.value = ''
-    thinkingDuration.value = 0
-    liveThinkingSeconds.value = 0
-    pendingToolSteps.value = []
+    resetTransientStreamState()
     await scrollToBottom()
   }
 }
 
 // Regenerate message
 async function handleRegenerate(messageId) {
-  const msgIndex = messages.value.findIndex(m => m.id === messageId)
-  if (msgIndex === -1) return
-  
-  let userMessageIndex = -1
-  for (let i = msgIndex - 1; i >= 0; i--) {
-    if (messages.value[i].role === 'user') {
-      userMessageIndex = i
-      break
+  if (!messages.value.some(message => message.id === messageId)) return
+  await handleSend({ regenerateMessageId: messageId })
+}
+
+function resetTransientStreamState() {
+  streamingContent.value = ''
+  isThinking.value = false
+  stopThinkingTimer()
+  thinkingContent.value = ''
+  thinkingDuration.value = 0
+  liveThinkingSeconds.value = 0
+  pendingRetrievedQuestions.value = null
+  pendingCandidateQuestions.value = null
+  pendingSelectedQuestion.value = null
+  pendingQuestionSource.value = null
+  pendingQuestionSourceReason.value = null
+  pendingResumeRef.value = null
+  pendingJdRef.value = null
+  pendingInsights.value = []
+  pendingToolSteps.value = []
+  pendingBasisType.value = null
+  pendingBasisQuestionIds.value = []
+  pendingBasisConfidence.value = 0
+  pendingShouldShowReferences.value = false
+  pendingSelectedBasisQuestions.value = []
+  processingSteps.value = []
+}
+
+async function cancelActiveRequest(reason = 'client_stop', reload = true) {
+  const context = activeRequestContext
+  if (!context) return
+
+  context.stopped = true
+  try {
+    if (context.turnId) {
+      await chatApi.cancelTurn(context.conversationId, context.turnId, reason)
     }
+  } catch (e) {
+    // Disconnecting the SSE still triggers the backend finally block, so a
+    // failed cancel request must not prevent the local stream from stopping.
+    console.warn('取消当前回合失败，继续中断流:', e)
+  } finally {
+    context.controller?.abort()
   }
-  
-  if (userMessageIndex === -1) return
-  
-  const userMessage = messages.value[userMessageIndex]
-  messages.value = messages.value.slice(0, userMessageIndex)
-  
-  inputText.value = userMessage.content
-  await handleSend()
+
+  if (activeRequestContext === context) {
+    activeRequestContext = null
+    isSending.value = false
+    resetTransientStreamState()
+  }
+
+  if (reload && activeConversationId.value === context.conversationId) {
+    await reloadMessages(context.conversationId)
+  }
 }
 
 function handleLike({ id, liked }) {
@@ -972,6 +1191,12 @@ function handleModelSelect(modelId) {
 
 async function handlePin(id) {
   try {
+    if (props.preview) {
+      // In preview mode, toggle pin locally without calling real API
+      const conv = conversations.value.find(c => c.id === id)
+      if (conv) conv.pinned = !conv.pinned
+      return
+    }
     await chatApi.pinConversation(id)
     await loadConversations()
   } catch (e) {
@@ -1053,6 +1278,16 @@ async function saveHeaderRename() {
 async function handleDelete(id) {
   if (!await showConfirm('确定要删除这个对话吗？')) return
   try {
+    if (props.preview) {
+      // In preview mode, remove from local list without calling real API
+      conversations.value = conversations.value.filter(c => c.id !== id)
+      if (activeConversationId.value === id) {
+        activeConversationId.value = null
+        messages.value = []
+      }
+      toastSuccess('对话已删除')
+      return
+    }
     await chatApi.deleteConversation(id)
     if (activeConversationId.value === id) {
       activeConversationId.value = null
@@ -1066,22 +1301,8 @@ async function handleDelete(id) {
   }
 }
 
-function handleStop() {
-  cancelAllRequests()
-  stopThinkingTimer()
-  if (streamingContent.value) {
-    messages.value.push({
-      id: Date.now() + 1,
-      role: 'assistant',
-      content: streamingContent.value + '\n\n*[已停止生成]*',
-      metadata: {},
-      created_at: new Date().toISOString(),
-    })
-  }
-  streamingContent.value = ''
-  isSending.value = false
-  isThinking.value = false
-  liveThinkingSeconds.value = 0
+async function handleStop() {
+  await cancelActiveRequest('client_stop', true)
 }
 
 function autoResize() {

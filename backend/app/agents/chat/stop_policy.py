@@ -71,6 +71,17 @@ def evaluate_interview_stop(state: dict[str, Any]) -> dict[str, Any]:
         "closing_stage": closing_stage,
     }
 
+    # A frozen distribution plan is a stronger finite quality contract than
+    # generic transcript-length thresholds. Explicit candidate exits are
+    # handled before this flag can be set by the runtime controller.
+    if state.get("distribution_primary_required"):
+        return {
+            **base,
+            "action": "continue",
+            "mode": "distribution_control",
+            "reason": "distribution_plan_incomplete",
+        }
+
     # ── closing_stage state machine (primary path) ──
 
     # If we already asked the candidate question, this turn should close.

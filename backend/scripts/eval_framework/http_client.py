@@ -126,6 +126,22 @@ def _parse_sse_event(raw: str) -> dict:
     return parsed if isinstance(parsed, dict) else {"type": "raw", "content": parsed}
 
 
+def build_message_request_body(
+    message: str,
+    *,
+    model: str | None = None,
+    client_request_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a retry-safe chat request body with an explicit request identity."""
+    body: dict[str, Any] = {
+        "content": message,
+        "client_request_id": client_request_id or uuid4().hex,
+    }
+    if model:
+        body["model"] = model
+    return body
+
+
 def _iter_sse_events(
     base_url: str,
     token: str,
@@ -133,12 +149,15 @@ def _iter_sse_events(
     message: str,
     model: str | None = None,
     timeout: int = 120,
+    client_request_id: str | None = None,
 ) -> list[dict]:
     """Send a message and collect all SSE events."""
     url = f"{base_url}/api/chat/conversations/{conversation_id}/messages"
-    body: dict[str, Any] = {"content": message}
-    if model:
-        body["model"] = model
+    body = build_message_request_body(
+        message,
+        model=model,
+        client_request_id=client_request_id,
+    )
 
     request = urllib.request.Request(
         url,
@@ -164,6 +183,24 @@ def _iter_sse_events(
                 if raw_event.strip():
                     events.append(_parse_sse_event(raw_event))
     return events
+
+
+def _get_turn_status(
+    base_url: str,
+    token: str,
+    conversation_id: str,
+    turn_id: str,
+    timeout: int = 30,
+) -> dict[str, Any]:
+    """Fetch the durable turn snapshot used to reconcile an SSE terminal event."""
+    response = _json_request(
+        "GET",
+        f"{base_url}/api/chat/conversations/{conversation_id}/turns/{turn_id}",
+        token=token,
+        timeout=timeout,
+    )
+    data = response.get("data") if isinstance(response, dict) else None
+    return data if isinstance(data, dict) else response
 
 
 def _assistant_text_from_events(events: list[dict]) -> str:

@@ -60,10 +60,9 @@ const handleLogout = async () => {
   }
 }
 
-// ── 切换题库模式（公共/个人） ──
-const handleBankModeChanged = (user) => {
+// ── 切换分享默认值（share/private） ──
+const handleShareDefaultChanged = (user) => {
   currentUser.value = user
-  invalidateCache('master-bank')
   _onDataRefresh?.()
 }
 
@@ -88,7 +87,7 @@ export function useAuth() {
     initAuth,
     handleLoginSuccess,
     handleLogout,
-    handleBankModeChanged,
+    handleShareDefaultChanged,
     loadPendingCount,
   }
 }

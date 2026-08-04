@@ -29,6 +29,11 @@ def canonical_coverage_phase(value: Any, text: str = "") -> str:
         return "behavioral"
 
     combined = " ".join(part for part in (raw, text or "") if part)
+    from app.services.interview_distribution import QuestionType, map_question_type
+
+    mapped = map_question_type("", "", raw, combined)
+    if mapped is not QuestionType.UNCLASSIFIED:
+        return mapped.value
     if re.search(r"(行为面|协作|冲突|失败|复盘|star|影响力|稳定性|职业规划)", combined, re.I):
         return "behavioral"
     if re.search(r"(系统设计|架构设计|高可用|扩展性|scalability|限流|降级|容灾)", combined, re.I):

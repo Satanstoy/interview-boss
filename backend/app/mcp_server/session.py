@@ -74,6 +74,12 @@ def _prune_sqlite_sessions(conn) -> None:
     conn.commit()
 
 
+def _session_storage_key(session_id: str, user_id: int | None = None) -> str:
+    """Keep the same opaque session id separate for every user."""
+    namespace = str(int(user_id)) if user_id is not None else "anonymous"
+    return f"mcp:{namespace}:{session_id}"
+
+
 def _load_from_redis(pool, session_id: str) -> dict[str, Any] | None:
     try:
         raw = pool.get(session_id)
@@ -169,74 +175,84 @@ def _save_to_sqlite(session_id: str, state: dict[str, Any]) -> None:
     conn.commit()
 
 
-def load_mcp_session(session_id: str | None) -> dict[str, Any] | None:
+def load_mcp_session(
+    session_id: str | None, user_id: int | None = None
+) -> dict[str, Any] | None:
     """Load persisted MCP session state. Returns None if missing or expired."""
     if not session_id:
         return None
 
+    storage_key = _session_storage_key(session_id, user_id)
     pool = _get_redis_pool()
     if pool is not None:
-        state = _load_from_redis(pool, session_id)
+        state = _load_from_redis(pool, storage_key)
         if state is not None:
             return state
 
-    return _load_from_sqlite(session_id)
+    return _load_from_sqlite(storage_key)
 
 
-async def load_mcp_session_async(session_id: str | None) -> dict[str, Any] | None:
+async def load_mcp_session_async(
+    session_id: str | None, user_id: int | None = None
+) -> dict[str, Any] | None:
     """Async variant for ASGI/MCP paths backed by async Redis clients."""
     if not session_id:
         return None
 
+    storage_key = _session_storage_key(session_id, user_id)
     pool = _get_redis_pool()
     if pool is not None:
-        state = await _load_from_redis_async(pool, session_id)
+        state = await _load_from_redis_async(pool, storage_key)
         if state is not None:
             return state
 
-    return _load_from_sqlite(session_id)
+    return _load_from_sqlite(storage_key)
 
 
 def save_mcp_session(
     session_id: str,
     state: dict[str, Any],
     ttl_seconds: int = _MCP_SESSION_TTL_SECONDS,
+    user_id: int | None = None,
 ) -> None:
     """Persist MCP session state. Only whitelisted keys are stored."""
     persisted = {k: state.get(k) for k in _PERSISTED_STATE_KEYS if k in state}
 
+    storage_key = _session_storage_key(session_id, user_id)
     pool = _get_redis_pool()
     if pool is not None:
         try:
-            _save_to_redis(pool, session_id, persisted, ttl_seconds)
+            _save_to_redis(pool, storage_key, persisted, ttl_seconds)
             return
         except Exception:
             logger.exception(
                 "Failed to save MCP session to Redis, falling back to SQLite"
             )
 
-    _save_to_sqlite(session_id, persisted)
+    _save_to_sqlite(storage_key, persisted)
 
 
 async def save_mcp_session_async(
     session_id: str,
     state: dict[str, Any],
     ttl_seconds: int = _MCP_SESSION_TTL_SECONDS,
+    user_id: int | None = None,
 ) -> None:
     """Async variant for ASGI/MCP paths backed by async Redis clients."""
     persisted = {k: state.get(k) for k in _PERSISTED_STATE_KEYS if k in state}
 
+    storage_key = _session_storage_key(session_id, user_id)
     pool = _get_redis_pool()
     if pool is not None:
         try:
-            await _save_to_redis_async(pool, session_id, persisted, ttl_seconds)
+            await _save_to_redis_async(pool, storage_key, persisted, ttl_seconds)
             return
         except Exception:
             logger.exception(
                 "Failed to save MCP session to Redis, falling back to SQLite"
             )
 
-    _save_to_sqlite(session_id, persisted)
+    _save_to_sqlite(storage_key, persisted)
 
 
 def new_session_id() -> str:

@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .types import Scenario, CandidateLLMConfig, JudgeLLMConfig, DEFAULT_OUTPUT_DIR
 from .http_client import (
@@ -16,6 +17,7 @@ from .http_client import (
     _resolve_token,
     _iter_sse_events,
     _assistant_text_from_events,
+    _get_turn_status,
 )
 from .candidate import SmartCandidateAgent, _resolve_candidate_config, _resolve_judge_config
 from .metrics import extract_metrics
@@ -47,11 +49,18 @@ def create_conversation(
     return str(conv_id), opening
 
 
-def _delete_conversation(base_url: str, token: str, conversation_id: str) -> None:
-    try:
-        _json_request("DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token)
-    except Exception:
-        pass
+def _delete_conversation(base_url: str, token: str, conversation_id: str, max_retries: int = 3) -> None:
+    """Delete a conversation with retry logic."""
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            _json_request("DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                time.sleep(1)
+    raise RuntimeError(f"Failed to delete conversation {conversation_id} after {max_retries} attempts: {last_exc}")
 
 
 def send_message_and_collect(
@@ -61,17 +70,86 @@ def send_message_and_collect(
     message: str,
     model: str | None = None,
     timeout: int = 120,
+    client_request_id: str | None = None,
 ) -> dict[str, Any]:
-    """Send a message and collect the response."""
+    """Send a message, collect SSE, and reconcile its durable turn status."""
+    client_request_id = client_request_id or uuid4().hex
     start = time.monotonic()
-    events = _iter_sse_events(base_url, token, conversation_id, message, model=model, timeout=timeout)
+    events = _iter_sse_events(
+        base_url,
+        token,
+        conversation_id,
+        message,
+        model=model,
+        timeout=timeout,
+        client_request_id=client_request_id,
+    )
     elapsed = time.monotonic() - start
     assistant = _assistant_text_from_events(events)
+    started = next(
+        (event for event in events if event.get("type") == "turn_started" and event.get("turn_id")),
+        None,
+    )
+    turn_id = started.get("turn_id") if started else None
+    terminal = next(
+        (event for event in reversed(events) if event.get("type") in {"done", "error", "cancelled"}),
+        None,
+    )
+    terminal_event_type = terminal.get("type") if terminal else None
+    terminal_status = None
+    terminal_contract_error = None
+    expected_status = {
+        "done": "completed",
+        "error": "failed",
+        "cancelled": "cancelled",
+    }.get(terminal_event_type)
+    if not turn_id:
+        terminal_contract_error = "SSE stream did not contain turn_started with turn_id"
+    elif not expected_status:
+        terminal_contract_error = "SSE stream did not contain a terminal event"
+    else:
+        try:
+            status_snapshot = _get_turn_status(
+                base_url,
+                token,
+                conversation_id,
+                str(turn_id),
+                timeout=min(timeout, 30),
+            )
+            terminal_status = status_snapshot.get("status")
+            if terminal_status != expected_status:
+                terminal_contract_error = (
+                    f"terminal event '{terminal_event_type}' requires turn status "
+                    f"'{expected_status}', got '{terminal_status}'"
+                )
+        except Exception as exc:
+            terminal_contract_error = f"turn status reconciliation failed: {exc}"
     return {
         "assistant": assistant,
         "events": events,
         "latency_sec": round(elapsed, 2),
+        "client_request_id": client_request_id,
+        "turn_id": turn_id,
+        "terminal_event_type": terminal_event_type,
+        "terminal_status": terminal_status,
+        "terminal_contract_error": terminal_contract_error,
     }
+
+
+def apply_harness_contract(
+    scores: dict[str, Any],
+    metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Make durable turn-contract failures fail the evaluation regardless of judge score."""
+    contract_errors = list(metrics.get("harness_contract_errors", []))
+    result = dict(scores)
+    result["harness_contract_ok"] = not contract_errors
+    if contract_errors:
+        result["passed"] = False
+        critical_issues = list(result.get("critical_issues") or [])
+        critical_issues.extend(f"Harness contract: {error}" for error in contract_errors)
+        result["critical_issues"] = critical_issues
+    return result
 
 
 def run_evaluation(
@@ -100,6 +178,7 @@ def run_evaluation(
                 user_msg = candidate.respond(interviewer_response)
 
             try:
+                client_request_id = uuid4().hex
                 result = send_message_and_collect(
                     args.base_url,
                     auth_token,
@@ -107,6 +186,7 @@ def run_evaluation(
                     user_msg,
                     args.interviewer_model,
                     timeout=args.turn_timeout,
+                    client_request_id=client_request_id,
                 )
                 interviewer_response = result["assistant"]
                 events = result["events"]
@@ -115,6 +195,13 @@ def run_evaluation(
                 events = [{"type": "error", "message": str(exc)}]
                 latency_sec = 0
                 interviewer_response = ""
+                result = {
+                    "client_request_id": client_request_id,
+                    "turn_id": None,
+                    "terminal_event_type": "error",
+                    "terminal_status": None,
+                    "terminal_contract_error": f"message request failed: {exc}",
+                }
 
             turn = {
                 "turn": turn_idx,
@@ -122,6 +209,11 @@ def run_evaluation(
                 "assistant": interviewer_response,
                 "events": events,
                 "latency_sec": latency_sec,
+                "client_request_id": result.get("client_request_id"),
+                "turn_id": result.get("turn_id"),
+                "terminal_event_type": result.get("terminal_event_type"),
+                "terminal_status": result.get("terminal_status"),
+                "terminal_contract_error": result.get("terminal_contract_error"),
             }
             turns.append(turn)
             if scenario.early_exit_check and scenario.early_exit_check(turns):
@@ -132,6 +224,7 @@ def run_evaluation(
             scores = llm_score_scenario(scenario, turns, metrics, judge_config)
         else:
             scores = score_scenario(scenario, metrics)
+        scores = apply_harness_contract(scores, metrics)
         return {
             "scenario_id": scenario.scenario_id,
             "conversation_id": conversation_id,
@@ -145,8 +238,9 @@ def run_evaluation(
         else:
             try:
                 _delete_conversation(args.base_url, auth_token, conversation_id)
+                print(f"Conversation deleted: {conversation_id}")
             except Exception as exc:
-                print(f"Warning: failed to delete conversation: {exc}", file=sys.stderr)
+                print(f"ERROR: Failed to delete conversation {conversation_id}: {exc}", file=sys.stderr)
 
 
 def _build_parser() -> argparse.ArgumentParser:

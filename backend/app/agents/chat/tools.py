@@ -190,6 +190,7 @@ DRAW_QUESTIONS_SCHEMA = {
                         "project_followup",
                         "knowledge_probe",
                         "system_design",
+                        "behavioral",
                         "hr",
                     ],
                     "description": "抽题场景。algorithm_coding 必须用于手撕代码题。",
@@ -266,7 +267,11 @@ def tool_progress_message(tool_call: dict) -> str:
 # ── Executor ─────────────────────────────────────────────
 
 
-async def execute_tool(tool_call: dict, state: ChatState) -> str:
+async def execute_tool(
+    tool_call: dict,
+    state: ChatState,
+    policy=None,
+) -> str:
     """Execute a tool call and return the result as a JSON string.
 
     Args:
@@ -277,6 +282,17 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
         JSON-encoded result string
     """
     try:
+        from app.agents.chat.tool_policy import (
+            REGISTERED_TOOLS,
+            ToolPolicy,
+            ToolPolicyViolation,
+            build_tool_policy,
+            enforce_tool_call,
+        )
+
+        if not isinstance(policy, ToolPolicy):
+            policy = build_tool_policy(state)
+        tool_call = enforce_tool_call(tool_call, state, policy)
         func_name = tool_call.get("function", {}).get("name", "")
         args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
 
@@ -290,6 +306,31 @@ async def execute_tool(tool_call: dict, state: ChatState) -> str:
             return _execute_select_question(args, state)
         else:
             return json.dumps({"error": f"Unknown tool: {func_name}"})
+    except ToolPolicyViolation as e:
+        if e.code == "UNKNOWN_TOOL":
+            return json.dumps({"error": str(e)}, ensure_ascii=False)
+        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        tool_name = function.get("name")
+        if tool_name in REGISTERED_TOOLS:
+            from app.agents.chat.tool_gateway import build_error_envelope
+
+            return json.dumps(
+                build_error_envelope(
+                    tool=tool_name,
+                    error_code=e.code,
+                    message=str(e),
+                    total_ms=0,
+                    debug_reason="validation_failed"
+                    if e.code == "INVALID_TOOL_ARGUMENTS"
+                    else "policy_denied",
+                    empty_reason="invalid_arguments",
+                ),
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {"error": {"error_code": e.code, "message": str(e)}},
+            ensure_ascii=False,
+        )
     except Exception as e:
         logger.exception("Error executing tool")
         return json.dumps({"error": str(e)})

@@ -263,9 +263,9 @@ class TestIntegration:
         assert has_check, "evaluate-answer 端点应有可见性检查"
 
     def test_analytics_endpoint_uses_bank_mode_filter(self):
-        """analytics 端点应使用 bank_mode 过滤"""
+        """analytics 端点应使用统一题库过滤口径（all = 公共 + 自己的）"""
         with open(BACKEND_ROOT / 'app/routers/analytics.py', 'r') as f:
             content = f.read()
 
-        has_bank_mode = 'bank_mode' in content
-        assert has_bank_mode, "analytics 端点应使用 bank_mode 过滤数据"
+        has_filter = 'build_bank_where_clause' in content or '_build_analytics_bank_filter' in content
+        assert has_filter, "analytics 端点应使用统一题库过滤口径过滤数据"

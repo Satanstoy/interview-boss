@@ -250,6 +250,30 @@ class TestSearchToolTrace:
 class TestReactLoop:
     """Tests for the _react_loop async generator."""
 
+    def test_validate_tool_call_rejects_unknown_arguments(self):
+        from app.agents.chat.react_loop import StopRun, validate_tool_call
+        from app.agents.chat.tool_policy import ToolPolicy
+
+        policy = ToolPolicy(
+            user_id=7,
+            conversation_id="c1",
+            bank_mode="public",
+            allowed_tools=frozenset({"select_question"}),
+            allowed_skills=None,
+            policy_version="test",
+        )
+
+        with pytest.raises(StopRun, match="invalid_args:select_question"):
+            validate_tool_call(
+                {
+                    "function": {
+                        "name": "select_question",
+                        "arguments": '{"candidates": []}',
+                    }
+                },
+                policy,
+            )
+
     async def test_overlong_interview_asks_final_candidate_question(self):
         """Coverage-complete interviews should ask the candidate's question before closing."""
         from app.agents.chat.pipeline import _react_loop
@@ -678,6 +702,8 @@ class TestReactLoop:
             "user_id": 1,
             "user_message": "Give me a JVM question",
             "model": "gpt-4",
+            "intent": "practice_request",
+            "answer_complete": True,
         }
 
         tc_search = _tc("search_questions", {"keywords": ["JVM"]})
@@ -866,6 +892,8 @@ class TestReactLoop:
             "user_id": 1,
             "user_message": "Give me a JVM question",
             "model": "gpt-4",
+            "intent": "practice_request",
+            "answer_complete": True,
         }
 
         tc_search = _tc("search_questions", {"keywords": ["JVM"]})
@@ -1068,13 +1096,15 @@ class TestReactLoop:
             "user_id": 1,
             "user_message": "test",
             "model": None,
+            "intent": "practice_request",
+            "answer_complete": True,
         }
 
         tool_responses = [
             {
                 "content": None,
                 "tool_calls": [
-                    _tc("load_skill", {"skill_name": "theory-qa", "turn": i})
+                    _tc("search_questions", {"keywords": [f"topic-{i}"]})
                 ],
                 "finish_reason": "tool_calls",
             }
@@ -1084,7 +1114,7 @@ class TestReactLoop:
         mock_llm = AsyncMock(side_effect=tool_responses)
 
         async def _mock_execute_tool(tc, st):
-            return json.dumps({"instruction": "Ask theory questions."})
+            return json.dumps({"ok": True, "items": []})
 
         with (
             patch(
@@ -1136,13 +1166,14 @@ class TestReactLoop:
             "user_message": "Start algorithm interview",
             "model": None,
             "active_skills": [],
+            "intent": "practice_request",
+            "answer_complete": True,
         }
 
         tc_load = _tc(
             "load_skill",
             {
                 "skill_name": "algorithm-coding",
-                "secret_prompt": "SHOULD_NOT_BE_LOGGED",
             },
         )
 
@@ -1198,8 +1229,6 @@ class TestReactLoop:
         assert "ReAct trace: event=tool_call" in caplog.text
         assert "tool_name=load_skill" in caplog.text
         assert "algorithm-coding" in caplog.text
-        assert "<redacted>" in caplog.text
-        assert "SHOULD_NOT_BE_LOGGED" not in caplog.text
         assert "SECRET SKILL INSTRUCTION" not in caplog.text
         assert not any(e.get("type") == "react_trace" for e in all_events)
 
@@ -2535,6 +2564,8 @@ class TestReactLoopIntegration:
                             new_callable=AsyncMock,
                             return_value="mock result",
                         ):
+                            base_state["intent"] = "practice_request"
+                            base_state["answer_complete"] = True
                             async for event in _react_loop(base_state):
                                 collected.append(event)
         finally:

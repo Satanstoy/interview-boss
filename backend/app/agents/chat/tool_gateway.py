@@ -67,6 +67,8 @@ class ToolEnvelope(BaseModel):
 
 
 class SearchQuestionsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     keywords: list[str] = Field(default_factory=list, max_length=5)
     question_type: (
         Literal["project_followup", "knowledge_probe", "new_question"] | None
@@ -89,6 +91,8 @@ class SearchQuestionsInput(BaseModel):
 
 
 class DrawQuestionsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     count: int = Field(default=3, ge=1, le=5)
     difficulty: Literal["easy", "medium", "hard"] | None = None
     cat1: str | None = Field(default=None, max_length=80)
@@ -100,6 +104,7 @@ class DrawQuestionsInput(BaseModel):
             "project_followup",
             "knowledge_probe",
             "system_design",
+            "behavioral",
             "hr",
         ]
         | None
@@ -110,6 +115,58 @@ class DrawQuestionsInput(BaseModel):
     def clean_optional_text(cls, value: object) -> str | None:
         text = str(value or "").strip()
         return text[:80] if text else None
+
+
+class LoadSkillInput(BaseModel):
+    """Strict input contract for the skill-loading tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: Literal[
+        "adaptive-difficulty",
+        "algorithm-coding",
+        "hr-soft-skills",
+        "interview-rhythm",
+        "project-deep-dive",
+        "theory-qa",
+    ]
+
+
+class SelectQuestionInput(BaseModel):
+    """Only an index into the server-owned candidate list is accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_index: int = Field(default=0, ge=0, le=4)
+
+
+TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
+    "search_questions": SearchQuestionsInput,
+    "draw_questions": DrawQuestionsInput,
+    "load_skill": LoadSkillInput,
+    "select_question": SelectQuestionInput,
+}
+
+
+def validate_tool_arguments(tool_name: str, raw_args: object) -> dict:
+    """Parse and strictly validate one LLM tool argument object."""
+
+    if isinstance(raw_args, str):
+        parsed = json.loads(raw_args)
+    elif isinstance(raw_args, dict):
+        parsed = raw_args
+    else:
+        raise ValueError("tool arguments must be a JSON object")
+
+    if not isinstance(parsed, dict):
+        raise ValueError("tool arguments must be a JSON object")
+
+    model_cls = TOOL_INPUT_MODELS.get(tool_name)
+    if model_cls is None:
+        raise ValueError(f"unknown tool: {tool_name}")
+
+    model = model_cls.model_validate(parsed)
+    return model.model_dump(exclude_none=True, exclude_defaults=True)
 
 
 def _parse_sources(value: object) -> list[dict]:

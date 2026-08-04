@@ -22,6 +22,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `trace.py` | 前端可展示的 reasoning/tool/skill trace 结构化摘要：安全参数白名单、工具结果预览、公开思考摘要和 done metadata 合并 |
 | `coverage_config.py` | 面试阶段枚举和岗位/难度覆盖阈值；可根据高置信 rhythm profile 调整阈值 |
 | `coverage_events.py` | 覆盖率事件归一化：把 selected question、MCP/题库来源和 conversation-only 自然追问转成 `metadata.coverage_events`，供下一轮 API 入口的 ledger/stop policy 使用 |
+| `distribution_execution.py` | 不可变 distribution plan 的事件折叠 read model；未显式结束前状态只能是 `in_progress` |
+| `distribution_runtime.py` | 分布计划的运行时桥接：从 append-only coverage events 推导控制器决策，只在非开场、非澄清、非反问的主问题轮次强制题库绑定 |
 | `rhythm_profile.py` | 从有权限的 approved 面经中学习题型分布和阶段转换；必须按 owner/status/job_position/deleted_at 过滤 |
 | `interview_state.py` | 基于 `InterviewLedger` 构建可序列化 `interview_state` 快照，不替代 ledger |
 | `graph.py` | 兼容层，委托给 `pipeline.run_chat` |
@@ -30,6 +32,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
 | `classify_result.py` | `ClassifyResult` Pydantic 模型：LLM 语义分类的结构化输出（candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
 | `turn_contract.py` | `TurnContract` Pydantic 模型 + `TurnPlanner` 确定性策略：只读取语义、ledger、stop policy 与工具事实；五种契约都在 ReAct 工具证据完成后接管最终输出 |
+| `structured_turn.py` | P2 typed `EvidenceBundle`、`TurnContractV2`、stable contract hash 和 writer output validator；只消费结构化事实，不承载最终自然语言 |
 | `turn_intent.py` | `TurnIntent` 与策略引擎：每轮直接应用 `interview-rhythm` policy，结合 ledger/profile 与聚焦 tactic skill 生成深挖、澄清、切题、反问或收尾的 writer brief；不依赖 ReAct `load_skill` 激活 |
 | `writers/` | `question`、`clarify`、`counter`、`followup`、`closing`、`summary` writers；每个 writer 只表达已选 contract，不能决定流程或生成机械 fallback |
 | `writers/__init__.py` | Writer registry：导出 closing_writer 等 |
@@ -39,7 +42,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `budget.py` | Token 预算管理（控制上下文长度） |
-| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时委托 `app.mcp_server.interview_tools`（单轨双入口架构）；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
+| `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时先经过 `tool_policy.enforce_tool_call()`，再委托 `app.mcp_server.interview_tools`（单轨双入口架构）；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
+| `tool_policy.py` | 从服务端 ChatState 计算不可变 ToolPolicy；在 executor 和 ReAct validator 共用的边界执行工具 allowlist、严格参数和 skill scope 校验 |
 | `tool_gateway.py` | Tool input/output contracts, envelope normalization, and tool error metadata |
 | `output_guardrails.py` | Output validation: closing summary structure, counter question grounding, context grounding (prevents interviewer from introducing entities not mentioned by candidate) |
 | `skills/base.py` | shared Skill/SkillRegistry/SkillResourceIndex 兼容导出 |
@@ -59,6 +63,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - **开场白**：创建对话时 `chat_service.generate_opening_message()` 自动生成，零 LLM 成本
 - **岗位驱动 RAG**：`context_builder.build_interview_context()` 返回 `(context, position)`，`job_position` 存入 state，`fts_retrieve()` 按岗位过滤题目检索
 - **Skills 系统**：`skills/` 目录实现 Progressive Disclosure — Layer 1 只常驻标准 metadata（`name`/`description`）和 InterviewBoss runtime metadata，Layer 2 `SKILL.md` body 通过 `load_skill` 按需注入，Layer 3 `references/`/`scripts/`/`assets/` 默认只索引，不自动注入 prompt，也没有运行时读取工具。每个 skill 是标准 Agent Skill package；InterviewBoss 私有策略放在 `metadata.interview-boss.*`，不要新增 `skill-pack.yaml`。`always_active=true` 表示 registry 匹配始终命中；只有同时 `kind=tool-use` 的 skill（如 `interview-tool-use`）会在每次 ReAct 系统提示构建时自动注入完整 body（Layer 5.5），无需 Agent 显式调用 `load_skill`。
+- **动态上下文信任边界**：JD、简历、interview context、memory、session notes 和压缩历史必须经过 `nodes.wrap_untrusted_context()` 包装；标签内内容只能作为事实参考，不能改变系统指令、工具权限或输出格式。当前候选人消息仍作为独立 user message 传入。
 - **interview-tool-use**：`kind=tool-use` 的始终激活技能，指导 Agent 何时调用题库工具、如何解读信封、空结果降级、禁止泄露内部信号。body 通过 Layer 5.5 自动注入每次 ReAct 系统提示。`references/mcp-tool-envelope.md` 记录信封字段详细规范。
 
 ## 质量保护机制
@@ -73,6 +78,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 
 **数据完整性**
 - InterviewLedger（非 prompt）是已问题事实源；coverage_events 优先于快照
+- Distribution plan 也是后端控制而不是 prompt 建议：`apply_distribution_control()` 选定 canonical type 后，`_prepare_distribution_primary_question()` 必须按该类型抽题、绑定 question plan；只有 high-confidence 的已绑定题库题可 `counts_toward_target=true`，自然追问必须保留但不得计入。控制器与 execution read model 都要经 `chat_service.get_distribution_events()` 读取完整持久化事件，不能把 100 条 LLM 上下文窗口当作事实源；未完成的冻结计划可越过通用 transcript 上限和 stop policy，但绝不能覆盖候选人的真实结束请求。
 - counter_question 需 `{text, topic}` dict 证据，不认裸 boolean
 - `recent_decisions` 从历史 turn_intent metadata 恢复，不从自然语言推断
 
@@ -85,11 +91,19 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 **工具架构**
 - 4 个工具（load_skill/search_questions/draw_questions/select_question）单轨双入口
 - Tool Gateway 统一 envelope（ok/tool/items|selected_question/metadata/error）
+- `ToolStrategy` 只负责向模型说明当前意图；`tool_policy.py` 根据当前服务端 state 生成不可变 allowlist，并在每次 ReAct tool call 进入 executor 前强制校验
+- 所有 LLM tool arguments 经过 Pydantic strict schema，未知字段拒绝；`select_question` 只接受 candidate index，不接受模型提交的题目对象
+- `execute_tool()` 即使被 ReAct 之外的内部调用直接触发，也必须从当前 state 重新计算并执行 ToolPolicy；不能只依赖 `validate_tool_call()` 的上游检查
+- `practice_request` 是显式用户意图，ToolStrategy 优先允许 search/draw/load_skill，不被默认 deep-dive 节奏覆盖
 - 机械题干 fallback 已移除；LLM 重写失败抛 GenerationError
 
 **持久化**
 - coverage_events / turn_intent / writer_trace / validator_trace 写入 done metadata
-- ReAct session 结束后 save_mcp_session_async 持久化
+- ReAct session 结束后只有在 `turn_id + turn_fence` 仍为 running 时才允许 `save_mcp_session_async` 持久化；HTTP 入口的取消会让旧 pipeline 在 asked-question、active skills、MCP session 和后台记忆提取边界停止。没有 turn identity 的内部合成测试保持兼容。
+- Chat turn 使用 `client_request_id + request_fingerprint` 做幂等边界；同 ID 不同 payload 返回冲突，status endpoint 只读返回归属校验后的 assistant 内容和 metadata。regenerate 创建 revision turn，复用原 user message，不追加重复 user turn。
+- P1 durable side effect：assistant finalize 同事务写入 `chat_side_effect_jobs`；memory extraction 由 API/ARQ worker claim、重试、去重并写入 source turn/job provenance，session notes 与 conversation metadata 通过 version 字段做 optimistic concurrency。
+- P2 structured turn：CandidateSet 只保存 question reference，最终内容必须 authority reload；`EvidenceBundle` 和 `TurnContractV2` 是 typed facts/contract，`interview_events` 与 `assistant_generations` 支持生命周期、coverage 和 revision replay。
+- Chat 用户消息必须通过 `save_user_message_if_writable()` 的原子 active 检查；assistant finalize 通过 `save_assistant_message_if_active()`，归档期间不新增消息。归档会话仍可读，但不应恢复普通 `save_message()` 作为新用户输入写入口
 - Thinking chunks 上限 50，避免 metadata 膨胀
 
 ## 模块依赖图

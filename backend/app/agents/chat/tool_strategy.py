@@ -124,6 +124,22 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
             instruction="当前状态：用户要求结束面试。严格禁止调用任何工具，直接生成总结或收尾。",
         )
 
+    control = state.get("distribution_control") or {}
+    if state.get("distribution_primary_required") and control.get("preferred_type"):
+        question_type = str(control["preferred_type"])
+        return ToolStrategy(
+            requires_retrieval=True,
+            allow_search=False,
+            allow_draw=True,
+            allow_load_skill=False,
+            instruction=(
+                "当前轮次受冻结的面试分布计划约束。"
+                f"必须从题库抽取并绑定 {question_type} 类型题目；"
+                "不得以自然追问替代，也不得改用其他题型。"
+            ),
+            next_phase_hint=question_type,
+        )
+
     if (
         isinstance(turn_intent, dict)
         and turn_intent.get("strategy") == "topic_shift"
@@ -137,6 +153,17 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
             allow_load_skill=False,
             instruction="当前状态：节奏策略已决定切换评估维度。必须从目标维度抽题，不能继续当前项目搜索。",
             next_phase_hint=target_dimension,
+        )
+
+    # Practice requests are explicit user intent and must not be shadowed by
+    # the default interview-rhythm deep-dive tactic.
+    if intent == "practice_request":
+        return ToolStrategy(
+            requires_retrieval=True,
+            allow_search=True,
+            allow_draw=True,
+            allow_load_skill=True,
+            instruction="当前状态：用户请求练习。调用 search_questions 或 draw_questions 出题。",
         )
 
     if (
@@ -191,16 +218,6 @@ def compute_tool_strategy(state: "ChatState") -> ToolStrategy:
             allow_draw=False,
             allow_load_skill=True,
             instruction=instruction,
-        )
-
-    # Practice request: always retrieve.
-    if intent == "practice_request":
-        return ToolStrategy(
-            requires_retrieval=True,
-            allow_search=True,
-            allow_draw=True,
-            allow_load_skill=True,
-            instruction="当前状态：用户请求练习。调用 search_questions 或 draw_questions 出题。",
         )
 
     # Chat / follow-up: no retrieval unless we already have candidates.

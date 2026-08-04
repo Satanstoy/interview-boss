@@ -181,6 +181,11 @@ def extract_metrics(turns: list[dict[str, Any]], conv_id: str) -> dict[str, Any]
     assistant_texts = [str(turn.get("assistant") or "") for turn in turns]
     recent_turns = turns[-4:]
     errors = [event for event in all_events if event.get("type") == "error"]
+    harness_contract_errors = [
+        str(turn["terminal_contract_error"])
+        for turn in turns
+        if turn.get("terminal_contract_error")
+    ]
     thinking_events = [
         event for event in all_events if event.get("type") in {"thinking", "reasoning"}
     ]
@@ -200,6 +205,8 @@ def extract_metrics(turns: list[dict[str, Any]], conv_id: str) -> dict[str, Any]
             if any(event.get("type") in {"thinking", "reasoning"} for event in turn.get("events", []))
         ),
         "errors": errors,
+        "harness_contract_ok": not harness_contract_errors,
+        "harness_contract_errors": harness_contract_errors,
         "thinking_chars": sum(
             len(str(_event_data(event).get("text") or event.get("content") or ""))
             for event in thinking_events

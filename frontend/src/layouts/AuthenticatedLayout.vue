@@ -22,6 +22,7 @@ import {
   FileUp,
   Filter,
   History,
+  Layers,
   Library,
   LayoutDashboard,
   Network,
@@ -57,11 +58,6 @@ const AdminReview = defineAsyncComponent({
   ...asyncOptions,
   loader: () => import('@/components/business/AdminReview.vue'),
 })
-const PracticeMode = defineAsyncComponent({
-  ...asyncOptions,
-  loader: () => import('@/components/business/PracticeMode.vue'),
-})
-
 // ── Composables ──
 const route = useRoute()
 const router = useRouter()
@@ -70,8 +66,6 @@ const { confirm: showConfirm } = useConfirm()
 const { isDark, toggleDark } = useTheme()
 
 const isPreviewMode = new URLSearchParams(window.location.search).get('preview') === '1'
-const showPracticeMode = ref(false)
-
 const routeLocation = (path) => (
   isPreviewMode ? { path, query: { preview: '1' } } : path
 )
@@ -83,6 +77,7 @@ const routeToTabMap = {
   'jd': 'JD',
   'interview': 'Interview',
   'mock-interview': 'MockInterview',
+  'practice': 'Practice',
   'knowledge-graph': 'KnowledgeGraph',
   'insights-overview': 'InsightsOverview',
   'insights-readiness': 'InsightsReadiness',
@@ -98,6 +93,7 @@ const tabToRouteMap = {
   JD: '/jd',
   Interview: '/interview',
   MockInterview: '/mock-interview',
+  Practice: '/practice',
   KnowledgeGraph: '/knowledge-graph',
   InsightsOverview: '/insights/overview',
   InsightsReadiness: '/insights/readiness',
@@ -124,7 +120,7 @@ const {
   highlightInterviewId, returnTab, returnToPracticeMode,
   floatingReturnBtn, floatingBtnStyle, masterBankEverShown,
   handleReturn, detachHighlightScroll, setSavedScrollTop,
-} = useHighlightNav(activeTab, showPracticeMode)
+} = useHighlightNav(activeTab)
 
 // ── Data (题库数据 + 筛选 + 获取) ──
 let afterFetchCleanup = () => {}
@@ -138,6 +134,7 @@ const {
   selectedTag, selectedSubTags, searchQuery,
   filterDifficulty, showStarredOnly,
   filterSeason, interviewSortOrder,
+  bankFilter,
   filteredMasterBank, filteredInterviewData,
   availableSubTags, interviewSeasons, practicedQuestions,
   fetchTableData, fetchAnalytics, fetchPracticeStats,
@@ -159,7 +156,6 @@ const interviewCurrentPage = ref(1)
 const interviewPageSize = ref(20)
 const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
-const practiceModeIndex = ref(0)
 
 const sidebarGroups = computed(() => [
   {
@@ -171,6 +167,7 @@ const sidebarGroups = computed(() => [
   {
     label: '训练',
     tabs: [
+      { key: 'Practice', label: '刷题', route: '/practice' },
       { key: 'Chat', label: '模拟面试', route: '/chat' },
       { key: 'MockInterview', label: '题目抽测', route: '/mock-interview' },
       { key: 'Coding', label: '手撕代码', route: '/coding' },
@@ -200,6 +197,7 @@ const navIconMap = {
   MasterBank: BookOpen,
   Chat: BotMessageSquare,
   MockInterview: ClipboardList,
+  Practice: Layers,
   Coding: Code2,
   Import: FileUp,
   JD: Filter,
@@ -235,7 +233,7 @@ afterFetchCleanup = () => { jdSelection.clearSelection(); interviewSelection.cle
 // ── Auth（认证状态） ──
 const {
   currentUser, authCompleted, showLoginModal, pendingReviewCount,
-  initAuth, handleLoginSuccess, handleLogout, handleBankModeChanged,
+  initAuth, handleLoginSuccess, handleLogout, handleShareDefaultChanged,
 } = useAuth()
 
 // 初始化数据回调
@@ -254,7 +252,7 @@ const previewUser = {
   id: 'preview-user',
   username: 'Preview',
   is_admin: true,
-  bank_mode: 'mixed',
+  share_default: 'private',
 }
 const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))
 const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
@@ -368,10 +366,8 @@ const { jdBatchActions, interviewBatchActions, masterBatchActions } = useBatchAc
 // ── Practice mode ──
 const enterPracticeMode = () => {
   if (filteredMasterBank.value.length === 0) { toast.warning('当前筛选条件下没有题目'); return }
-  practiceModeIndex.value = 0
-  showPracticeMode.value = true
+  router.push(routeLocation('/practice'))
 }
-const handlePracticeModeClose = () => { showPracticeMode.value = false; fetchPracticeStats() }
 
 // ── Watches ──
 watch(sidebarCollapsed, (val) => {
@@ -413,7 +409,7 @@ const onNavigateToInterview = (event) => {
   const outerScroll = document.querySelector('.overflow-y-auto.custom-scrollbar')
   if (outerScroll) setSavedScrollTop(outerScroll.scrollTop)
 
-  if (showPracticeMode.value) { returnToPracticeMode.value = true; showPracticeMode.value = false }
+  if (activeTab.value === 'Practice') returnToPracticeMode.value = true
   router.push(routeLocation('/interview'))
 
   filterSeason.value = ''
@@ -475,7 +471,7 @@ provide('appData', {
   // Filters
   selectedTag, selectedSubTags, searchQuery,
   filterDifficulty, showStarredOnly,
-  filterSeason, interviewSortOrder,
+  filterSeason, interviewSortOrder, bankFilter,
   // Computed
   filteredMasterBank, filteredInterviewData,
   availableSubTags, interviewSeasons, practicedQuestions,
@@ -485,7 +481,7 @@ provide('appData', {
   // Auth
   displayUser, isAuthenticatedForUi, currentUser,
   pendingReviewCount, showLoginModal,
-  handleLoginSuccess, handleLogout, handleBankModeChanged,
+  handleLoginSuccess, handleLogout, handleShareDefaultChanged,
   // Build
   isBuilding, triggerBuildMasterBank, triggerBuildPersonalBank,
   // Selections
@@ -503,8 +499,7 @@ provide('appData', {
   mergeSearchResults, mergeSearching, startMerge, doMergeSearch,
   confirmMerge, splitAsNew,
   // Practice
-  showPracticeMode, enterPracticeMode, practiceQuestion,
-  practiceModeIndex, handlePracticeModeClose,
+  enterPracticeMode, practiceQuestion,
   // Highlight
   highlightInterviewId, returnTab, returnToPracticeMode,
   floatingReturnBtn, floatingBtnStyle, masterBankEverShown,
@@ -564,7 +559,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           @update:collapsed="sidebarCollapsed = $event"
           @go-to-question="onGoToQuestion"
           @logout="handleLogout"
-          @bank-mode-changed="handleBankModeChanged"
+          @share-default-changed="handleShareDefaultChanged"
           @show-review="showReviewPanel = true"
           @show-settings="openSettings"
         />
@@ -652,17 +647,6 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
     <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" />
-    <PracticeMode
-      v-if="showPracticeMode"
-      :questions="filteredMasterBank"
-      :start-index="practiceModeIndex"
-      :bank-mode="displayUser?.bank_mode"
-      :is-admin="displayUser?.is_admin"
-      @close="handlePracticeModeClose"
-      @toggle-star="toggleStar"
-      @navigate-to-interview="onNavigateToInterview"
-    />
-
     <MergeQuestionDialog
       :visible="mergeDialogVisible"
       :source-question="mergeSourceOriginalQ"

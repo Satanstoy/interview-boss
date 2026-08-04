@@ -149,8 +149,18 @@ def _create_conversation(base_url: str, token: str) -> str:
     return str(conversation_id)
 
 
-def _delete_conversation(base_url: str, token: str, conversation_id: str) -> None:
-    _json_request("DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token)
+def _delete_conversation(base_url: str, token: str, conversation_id: str, max_retries: int = 3) -> None:
+    """Delete a conversation with retry logic."""
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            _json_request("DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                time.sleep(1)
+    raise RuntimeError(f"Failed to delete conversation {conversation_id} after {max_retries} attempts: {last_exc}")
 
 
 def _iter_sse_events(base_url: str, token: str, conversation_id: str, content: str, model: str | None) -> list[dict[str, Any]]:
@@ -366,8 +376,9 @@ def main() -> int:
         else:
             try:
                 _delete_conversation(args.base_url, token, conversation_id)
+                print(f"\nConversation deleted: {conversation_id}")
             except Exception as exc:
-                print(f"Warning: failed to delete conversation {conversation_id}: {exc}", file=sys.stderr)
+                print(f"\nERROR: Failed to delete conversation {conversation_id}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timedelta
 
 from app.agents.chat.chat_constants import PUBLIC_QUESTION_PREVIEW_LIMIT
 from app.agents.chat.coverage_events import (
@@ -327,6 +328,32 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
         )
 
     if coverage_event:
+        distribution_plan = (state.get("interview_config") or {}).get("distribution_plan")
+        if isinstance(distribution_plan, dict):
+            control = state.get("distribution_control") or {}
+            expected_type = control.get("preferred_type")
+            is_bound_primary = bool(
+                selected_question
+                and plan.get("must_ask")
+                and coverage_event.get("confidence") == "high"
+            )
+            event_type = state.get("question_type") or coverage_event.get("phase")
+            counts_toward_target = (
+                is_bound_primary
+                and control.get("enforce_primary_question") is True
+                and expected_type in (distribution_plan.get("soft_target_counts") or {})
+                and event_type == expected_type
+            )
+            coverage_event.update({
+                "plan_id": distribution_plan.get("plan_id"),
+                "question_type": event_type,
+                "counts_toward_target": counts_toward_target,
+                "selection_reason": (
+                    state.get("question_source_reason") or "selected_question"
+                    if counts_toward_target
+                    else "unbound_conversation_followup"
+                ),
+            })
         metadata["coverage_events"] = [coverage_event]
 
     if candidates:
@@ -335,6 +362,27 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
             for q in candidates[:PUBLIC_QUESTION_PREVIEW_LIMIT]
             if _public_question(q) is not None
         ]
+        if state.get("turn_id") and state.get("conversation_id") and state.get("user_id"):
+            try:
+                from app.services import chat_service
+
+                candidate_set_id = chat_service.create_candidate_set(
+                    user_id=int(state["user_id"]),
+                    conversation_id=str(state["conversation_id"]),
+                    source=str(state.get("question_source") or "react"),
+                    source_turn_id=str(state["turn_id"]),
+                    items=[
+                        {"id": question.get("id"), "rank": index}
+                        for index, question in enumerate(candidates[:PUBLIC_QUESTION_PREVIEW_LIMIT])
+                    ],
+                    expires_at=(datetime.utcnow() + timedelta(hours=1)).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
+                )
+                state["candidate_set_id"] = candidate_set_id
+                metadata["candidate_set_id"] = candidate_set_id
+            except Exception as exc:
+                logger.debug("candidate set persistence skipped: %s", exc)
 
     if plan:
         metadata["question_plan"] = {

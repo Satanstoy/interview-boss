@@ -173,7 +173,11 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
             },
         )
 
-    if closing_stage == "candidate_question_asked" and not counter_question:
+    if (
+        closing_stage == "candidate_question_asked"
+        and not counter_question
+        and not state.get("distribution_primary_required")
+    ):
         return TurnContract(
             action=TurnContractAction.CLOSE_WITH_SUMMARY,
             priority="wrap_up",
@@ -216,7 +220,10 @@ def plan_turn(state: dict[str, Any]) -> TurnContract:
         )
 
     # Priority 2: answer_counter_question
-    if counter_question or closing_stage == "candidate_question_asked":
+    if counter_question or (
+        closing_stage == "candidate_question_asked"
+        and not state.get("distribution_primary_required")
+    ):
         return TurnContract(
             action=TurnContractAction.ANSWER_COUNTER_QUESTION,
             priority="counter_question",

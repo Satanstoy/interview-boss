@@ -275,10 +275,135 @@ def test_select_question_tool_no_candidates():
     assert "metrics" in result["metadata"]
 
 
-def test_select_question_tool_binds_algorithm_candidate():
+def test_select_question_tool_rejects_client_supplied_candidates(monkeypatch):
+    """The selection boundary must never accept a client-owned candidate list."""
     from app.mcp_server import interview_tools
 
-    state = {"question_type": "algorithm_coding"}
+    loader = MagicMock()
+    monkeypatch.setattr(interview_tools, "_load_authoritative_question", loader)
+    state = {
+        "user_id": 5,
+        "bank_mode": "public",
+        "candidate_questions": [
+            {"id": 20, "question": "server candidate", "cat1": "A", "cat2": "A1"}
+        ],
+    }
+
+    result = interview_tools.select_question_tool(
+        {"candidates": [{"id": 999, "question": "attacker controlled"}]},
+        state,
+        candidate_index=0,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["error_code"] == "INVALID_TOOL_ARGUMENTS"
+    loader.assert_not_called()
+
+
+def test_select_question_tool_reloads_authoritative_question(monkeypatch):
+    """Selection uses server-side question text instead of a tampered state row."""
+    from app.mcp_server import interview_tools
+
+    loader = MagicMock(
+        return_value={
+            "id": 20,
+            "question": "authoritative question",
+            "cat1": "A",
+            "cat2": "A1",
+            "tags": "server",
+            "difficulty": "L2-中等",
+            "sources": [],
+        }
+    )
+    monkeypatch.setattr(interview_tools, "_load_authoritative_question", loader)
+    state = {
+        "user_id": 5,
+        "bank_mode": "public",
+        "intent": "practice_request",
+        "candidate_questions": [
+            {
+                "id": 20,
+                "question": "tampered question",
+                "cat1": "attacker category",
+                "cat2": "attacker category",
+            }
+        ],
+    }
+
+    result = interview_tools.select_question_tool({}, state, candidate_index=0)
+
+    assert result["ok"] is True
+    assert result["selected_question"]["id"] == 20
+    assert result["selected_question"]["question"] == "authoritative question"
+    assert state["selected_question"]["question"] == "authoritative question"
+    loader.assert_called_once_with(20, state)
+
+
+def test_load_authoritative_question_uses_current_visibility_context(monkeypatch):
+    """The reload query is parameterized by the authenticated bank context."""
+    from app.mcp_server import interview_tools
+
+    captured = {}
+    row = {
+        "id": 20,
+        "question": "database question",
+        "cat1": "A",
+        "cat2": "A1",
+        "tags": "server",
+        "difficulty": "L2-中等",
+        "sources": "[]",
+        "owner_id": 5,
+        "status": "approved",
+        "job_position": "后端开发",
+    }
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return self
+
+        def fetchone(self):
+            return row
+
+    def fake_where(user, table_alias):
+        captured["user"] = user
+        captured["table_alias"] = table_alias
+        return (
+            "FROM question_bank qb",
+            "WHERE qb.owner_id = ? AND qb.deleted_at IS NULL",
+            [user["id"]],
+        )
+
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: FakeConnection())
+    monkeypatch.setattr("app.routers.questions._build_bank_where_clause", fake_where)
+
+    result = interview_tools._load_authoritative_question(
+        20,
+        {"user_id": 5, "bank_mode": "personal"},
+    )
+
+    assert result == row
+    assert captured["user"] == {"id": 5, "bank_mode": "personal"}
+    assert captured["table_alias"] == "qb"
+    assert captured["params"] == [5, 20]
+    assert "qb.id = ?" in captured["sql"]
+
+
+def test_select_question_tool_binds_algorithm_candidate(monkeypatch):
+    from app.mcp_server import interview_tools
+
+    state = {
+        "user_id": 5,
+        "bank_mode": "public",
+        "question_type": "algorithm_coding",
+    }
     candidates = [
         {
             "id": 20,
@@ -296,7 +421,18 @@ def test_select_question_tool_binds_algorithm_candidate():
         },
     ]
 
-    result = interview_tools.select_question_tool({"candidates": candidates}, state)
+    state["candidate_questions"] = candidates
+    monkeypatch.setattr(
+        interview_tools,
+        "_load_authoritative_question",
+        lambda question_id, current_state: next(
+            candidate
+            for candidate in candidates
+            if candidate["id"] == int(question_id)
+        ),
+    )
+
+    result = interview_tools.select_question_tool({}, state)
 
     assert result["ok"] is True
     assert result["tool"] == "select_question"
@@ -320,8 +456,14 @@ def test_mcp_endpoint_exempt_from_csrf(client):
 
 def test_mcp_endpoint_requires_api_key_when_configured(client, monkeypatch):
     from app.mcp_server import app as mcp_app_module
+    from app.mcp_server.principal import MCPPrincipal
 
     monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "test-mcp-key")
+    monkeypatch.setattr(
+        mcp_app_module,
+        "_load_mcp_principal",
+        lambda request: MCPPrincipal(user_id=1, bank_mode="public"),
+    )
     assert mcp_app_module.MCP_API_KEY == "test-mcp-key"
 
     response = client.post("/mcp/messages", headers={})
@@ -329,11 +471,147 @@ def test_mcp_endpoint_requires_api_key_when_configured(client, monkeypatch):
 
     response = client.post(
         "/mcp/messages",
-        headers={"x-mcp-api-key": "test-mcp-key"},
+        headers={
+            "x-mcp-api-key": "test-mcp-key",
+            "authorization": "Bearer test-token",
+        },
     )
     assert response.status_code != 401
 
 
+@pytest.mark.asyncio
+async def test_mcp_auth_middleware_fails_closed_when_not_configured(monkeypatch):
+    from app.mcp_server import app as mcp_app_module
+
+    monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "")
+    monkeypatch.setattr(mcp_app_module, "MCP_ALLOW_ANONYMOUS", False)
+    sent = []
+
+    async def downstream(scope, receive, send):
+        sent.append(("downstream", scope))
+
+    middleware = mcp_app_module.MCPAuthMiddleware(downstream)
+    scope = {"type": "http", "headers": [], "query_string": b""}
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, None, send)
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 503
+    assert not any(item[0] == "downstream" for item in sent if isinstance(item, tuple))
+
+
+@pytest.mark.asyncio
+async def test_mcp_state_uses_jwt_principal_not_client_identity(monkeypatch):
+    from app.mcp_server import app as mcp_app_module
+    from app.mcp_server.principal import MCPPrincipal
+
+    principal = MCPPrincipal(user_id=7, bank_mode="all")
+    monkeypatch.setattr(mcp_app_module, "get_mcp_principal", lambda: principal)
+    monkeypatch.setattr(
+        mcp_app_module,
+        "load_mcp_session_async",
+        lambda session_id, user_id=None: _resolved_state(user_id),
+    )
+
+    async def _resolved_state(user_id):
+        return {"user_id": 999, "bank_mode": "public"}
+
+    sid, state = await mcp_app_module._init_tool_state_async(
+        "same-session",
+        {"user_id": 999, "bank_mode": "public"},
+    )
+
+    assert sid == "same-session"
+    assert state["user_id"] == 7
+    assert state["bank_mode"] == "all"
+
+
+@pytest.mark.asyncio
+async def test_anonymous_mcp_state_cannot_adopt_client_identity(monkeypatch):
+    from app.mcp_server import app as mcp_app_module
+
+    monkeypatch.setattr(mcp_app_module, "get_mcp_principal", lambda: None)
+
+    async def _anonymous_state(_session_id, user_id=None):
+        assert user_id is None
+        return {"user_id": 999, "bank_mode": "personal"}
+
+    monkeypatch.setattr(mcp_app_module, "load_mcp_session_async", _anonymous_state)
+
+    sid, state = await mcp_app_module._init_tool_state_async(
+        "anonymous-session",
+        {"user_id": 999, "bank_mode": "personal"},
+    )
+
+    assert sid == "anonymous-session"
+    assert state["user_id"] is None
+    assert state["bank_mode"] == "public"
+
+
+@pytest.mark.asyncio
+async def test_mcp_auth_middleware_binds_bearer_principal(monkeypatch):
+    from app.mcp_server import app as mcp_app_module
+    from app.mcp_server.principal import MCPPrincipal
+
+    monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "test-key")
+    monkeypatch.setattr(mcp_app_module, "MCP_ALLOW_ANONYMOUS", False)
+    monkeypatch.setattr(
+        mcp_app_module,
+        "_load_mcp_principal",
+        lambda request: MCPPrincipal(user_id=8, bank_mode="mixed"),
+    )
+    observed = []
+
+    async def downstream(scope, receive, send):
+        observed.append(mcp_app_module.get_mcp_principal())
+
+    middleware = mcp_app_module.MCPAuthMiddleware(downstream)
+    scope = {
+        "type": "http",
+        "query_string": b"",
+        "headers": [
+            (b"x-mcp-api-key", b"test-key"),
+            (b"authorization", b"Bearer access-token"),
+        ],
+    }
+
+    async def send(message):
+        pass
+
+    await middleware(scope, None, send)
+
+    assert observed == [MCPPrincipal(user_id=8, bank_mode="mixed")]
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_principal_reads_user_policy_from_verified_token(monkeypatch):
+    from starlette.requests import Request
+    from app.mcp_server import app as mcp_app_module
+
+    monkeypatch.setattr(
+        "app.core.auth.decode_token",
+        lambda token, expected_type: {"user_id": 8},
+    )
+
+    async def fake_run_db(fn):
+        return {"id": 8}
+
+    monkeypatch.setattr("app.db.connection.run_db", fake_run_db)
+    request = Request(
+        {
+            "type": "http",
+            "query_string": b"",
+            "headers": [(b"authorization", b"Bearer verified-token")],
+        }
+    )
+
+    principal = await mcp_app_module._load_mcp_principal(request)
+
+    assert principal.user_id == 8
+    assert principal.bank_mode == "all"
 @pytest.mark.asyncio
 async def test_interview_mcp_app_call_tool_io_contract():
     from app.mcp_server.app import mcp
@@ -356,7 +634,7 @@ async def test_interview_mcp_app_call_tool_io_contract():
     assert missing_user["tool"] == "draw_questions"
     assert missing_user["error"]["error_code"] == "USER_REQUIRED"
 
-    selected = await _call_mcp_json(
+    rejected = await _call_mcp_json(
         "select_question",
         {
             "question_type": "algorithm_coding",
@@ -378,14 +656,16 @@ async def test_interview_mcp_app_call_tool_io_contract():
             ],
         },
     )
-    assert selected["ok"] is True
-    assert selected["selected_question"]["id"] == 21
-    assert selected["question_plan"]["question_id"] == 21
+    assert rejected["ok"] is False
+    # FastMCP drops the unknown client field before dispatch; importantly it
+    # cannot create a candidate set and therefore cannot select a question.
+    assert rejected["error"]["error_code"] == "NO_CANDIDATES"
 
 
 @pytest.mark.asyncio
 async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
     from app.mcp_server import interview_tools
+    from app.mcp_server.principal import MCPPrincipal, reset_mcp_principal, set_mcp_principal
 
     async def fake_draw(**kwargs):
         return [
@@ -402,19 +682,26 @@ async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
 
     monkeypatch.setattr(interview_tools, "_draw_questions_for_tool", fake_draw)
 
-    loaded = await _call_mcp_json("load_skill", {"skill_name": "algorithm-coding"})
-    assert loaded["ok"] is True
-    session_id = loaded["metadata"]["session_id"]
-    assert session_id
-    assert loaded["metadata"]["state"]["active_skills"] == ["algorithm-coding"]
+    principal_token = set_mcp_principal(MCPPrincipal(user_id=5, bank_mode="public"))
+    try:
+        loaded = await _call_mcp_json("load_skill", {"skill_name": "algorithm-coding"})
+        assert loaded["ok"] is True
+        session_id = loaded["metadata"]["session_id"]
+        assert session_id
+        assert loaded["metadata"]["state"]["active_skills"] == [
+            "interview-tool-use",
+            "algorithm-coding",
+        ]
 
-    drawn = await _call_mcp_json(
-        "draw_questions",
-        {"user_id": 5, "bank_mode": "public", "count": 1, "session_id": session_id},
-    )
-    assert drawn["ok"] is True
-    assert drawn["metadata"]["session_id"] == session_id
-    assert drawn["items"][0]["id"] == 101
+        drawn = await _call_mcp_json(
+            "draw_questions",
+            {"user_id": 5, "bank_mode": "public", "count": 1, "session_id": session_id},
+        )
+        assert drawn["ok"] is True
+        assert drawn["metadata"]["session_id"] == session_id
+        assert drawn["items"][0]["id"] == 101
+    finally:
+        reset_mcp_principal(principal_token)
 
 
 @pytest.mark.asyncio
@@ -532,6 +819,7 @@ async def test_draw_questions_tool_excludes_previously_exposed_candidates(monkey
 @pytest.mark.asyncio
 async def test_mcp_session_persists_across_search_and_select(monkeypatch):
     from app.mcp_server import interview_tools
+    from app.mcp_server.principal import MCPPrincipal, reset_mcp_principal, set_mcp_principal
 
     async def fake_search(**kwargs):
         return [
@@ -552,24 +840,39 @@ async def test_mcp_session_persists_across_search_and_select(monkeypatch):
         ]
 
     monkeypatch.setattr(interview_tools, "_hybrid_search_for_tool", fake_search)
-
-    searched = await _call_mcp_json(
-        "search_questions",
-        {"keywords": ["RAG"], "user_id": 5, "bank_mode": "public"},
+    monkeypatch.setattr(
+        interview_tools,
+        "_load_authoritative_question",
+        lambda question_id, state: next(
+            candidate
+            for candidate in state.get("candidate_questions", [])
+            if candidate["id"] == int(question_id)
+        ),
     )
-    assert searched["ok"] is True
-    session_id = searched["metadata"]["session_id"]
-    assert session_id
 
-    selected = await _call_mcp_json(
-        "select_question",
-        {
-            "session_id": session_id,
-            "question_type": "algorithm_coding",
-            "candidates": searched["items"],
-        },
-    )
-    assert selected["ok"] is True
-    assert selected["metadata"]["session_id"] == session_id
-    assert selected["selected_question"]["id"] == 202
-    assert selected["question_plan"]["question_id"] == 202
+    principal_token = set_mcp_principal(MCPPrincipal(user_id=5, bank_mode="public"))
+    try:
+        searched = await _call_mcp_json(
+            "search_questions",
+            {"keywords": ["RAG"], "user_id": 5, "bank_mode": "public"},
+        )
+        assert searched["ok"] is True
+        session_id = searched["metadata"]["session_id"]
+        assert session_id
+
+        selected = await _call_mcp_json(
+            "select_question",
+            {
+                "user_id": 5,
+                "bank_mode": "public",
+                "session_id": session_id,
+                "question_type": "algorithm_coding",
+                "candidate_index": 1,
+            },
+        )
+        assert selected["ok"] is True
+        assert selected["metadata"]["session_id"] == session_id
+        assert selected["selected_question"]["id"] == 202
+        assert selected["question_plan"]["question_id"] == 202
+    finally:
+        reset_mcp_principal(principal_token)

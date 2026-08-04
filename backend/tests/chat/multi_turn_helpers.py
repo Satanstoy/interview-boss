@@ -240,7 +240,12 @@ async def run_single_turn(
                     "answer_quality",
                     "complete" if answer_complete else "incomplete",
                 ),
-                "should_retrieve": bool(classify_updates.get("should_retrieve", False)),
+                "should_retrieve": bool(
+                    classify_updates.get(
+                        "should_retrieve",
+                        answer_complete or intent == "practice_request",
+                    )
+                ),
                 "needs_new_dimension": bool(
                     classify_updates.get(
                         "needs_new_dimension",
@@ -249,6 +254,17 @@ async def run_single_turn(
                 ),
                 "confidence": float(classify_updates.get("confidence", 0.9)),
             }
+        for key in (
+            "answer_quality",
+            "should_retrieve",
+            "requires_bank_question",
+            "needs_new_dimension",
+            "escalation_level",
+            "off_topic_streak",
+            "repetition_streak",
+        ):
+            if key in state["classify_result"]:
+                state[key] = state["classify_result"][key]
         return state
 
     async def mock_extract_memory(snapshot):

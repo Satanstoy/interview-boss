@@ -11,7 +11,7 @@
       @close="onClose"
       @go-to-question="onGoToQuestion"
       @logout="handleLogout"
-      @bank-mode-changed="handleBankModeChanged"
+      @share-default-changed="handleShareDefaultChanged"
       @profile-updated="handleProfileUpdated"
       @build-master-bank="triggerBuildMasterBank"
       @update:active-season="activeSeason = $event"
@@ -31,7 +31,7 @@ const {
   displayUser, practiceStats, masterBank,
   activeSeason, availableSeasons,
   isBuilding, sidebarCollapsed,
-  handleLogout, handleBankModeChanged,
+  handleLogout, handleShareDefaultChanged,
   loadAllData, triggerBuildMasterBank,
   onGoToQuestion,
 } = inject('appData')

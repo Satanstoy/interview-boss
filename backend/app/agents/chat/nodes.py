@@ -1,6 +1,7 @@
 """Chat Agent Nodes — 面试对话状态机的各节点实现"""
 
 import json
+import html
 import logging
 import os
 import re
@@ -18,6 +19,24 @@ from app.agents.chat.chat_constants import (
     PUBLIC_QUESTION_PREVIEW_LIMIT,
 )
 from app.agents.chat.decision_config import DecisionConfig
+
+
+def wrap_untrusted_context(
+    source: str,
+    value: object,
+    max_chars: int | None = None,
+) -> str:
+    """Delimit dynamic data so embedded text cannot create prompt instructions."""
+    text = str(value or "")
+    if max_chars is not None:
+        text = text[:max_chars]
+    safe_source = html.escape(str(source or "unknown"), quote=True)
+    safe_text = html.escape(text, quote=False)
+    return (
+        f'<untrusted_context source="{safe_source}">\n'
+        f"{safe_text}\n"
+        "</untrusted_context>"
+    )
 from app.agents.chat.question_plan import (
     _big_tech_next_focus,
     _build_big_tech_interview_harness_prompt,
@@ -1028,9 +1047,15 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     # 构建 system prompt
     if mode == "jd_resume":
         system_prompt = INTERVIEW_SYSTEM_PROMPT_JD.format(
-            jd_text=state.get("jd_text", "未提供 JD"),
-            resume_text=resume_summary or state.get("resume_text", "未提供简历"),
-            interview_context=interview_context or "",
+            jd_text=wrap_untrusted_context(
+                "job_description", state.get("jd_text", "未提供 JD")
+            ),
+            resume_text=wrap_untrusted_context(
+                "resume", resume_summary or state.get("resume_text", "未提供简历")
+            ),
+            interview_context=wrap_untrusted_context(
+                "interview_context", interview_context or ""
+            ),
             interview_phase=interview_phase,
             basis_guidance=BASIS_EXTRACT_GUIDANCE,
         )
@@ -1052,8 +1077,12 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
         memory_context = _truncate_to_budget(memory_context, MEMORY_BUDGET)
         system_prompt = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
-            memory_context=memory_context or "暂无用户背景信息",
-            interview_context=interview_context or "",
+            memory_context=wrap_untrusted_context(
+                "memory", memory_context or "暂无用户背景信息"
+            ),
+            interview_context=wrap_untrusted_context(
+                "interview_context", interview_context or ""
+            ),
             interview_phase=interview_phase,
             basis_guidance=BASIS_EXTRACT_GUIDANCE,
         )
@@ -1082,7 +1111,15 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
 
     if compressed:
         compressed = _truncate_to_budget(compressed, COMPRESSED_BUDGET)
-        messages.append({"role": "system", "content": f"之前的对话摘要:\n{compressed}"})
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "之前的对话摘要:\n"
+                    + wrap_untrusted_context("compressed_history", compressed)
+                ),
+            }
+        )
 
     if retrieved:
         source_label = (
@@ -1096,7 +1133,13 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
         )
         questions_text = _truncate_to_budget(questions_text, RETRIEVED_BUDGET)
         messages.append(
-            {"role": "system", "content": f"{source_label}:\n{questions_text}"}
+            {
+                "role": "system",
+                "content": (
+                    f"{source_label}:\n"
+                    + wrap_untrusted_context("retrieved_questions", questions_text)
+                ),
+            }
         )
 
     for msg in recent:
@@ -1516,6 +1559,8 @@ async def extract_memory(state: ChatState) -> dict:
     response = state.get("response", "")
 
     if not response or len(user_message) < 10:
+        if state.get("_side_effect_job_id"):
+            chat_service.complete_side_effect_job(state["_side_effect_job_id"])
         return {}
 
     # 构建对话片段（包含面试官提问上下文，提高记忆提取准确性）
@@ -1545,18 +1590,20 @@ async def extract_memory(state: ChatState) -> dict:
         else:
             memories = []
 
-        for mem in memories:
-            if isinstance(mem, dict) and mem.get("type") in (
-                "weakness",
-                "strength",
-                "preference",
-            ):
-                chat_service.save_memory(
-                    user_id=user_id,
-                    memory_type=mem["type"],
-                    content=mem["content"],
-                    source="auto_extract",
-                )
+        durable_job_id = state.get("_side_effect_job_id")
+        if not durable_job_id:
+            for mem in memories:
+                if isinstance(mem, dict) and mem.get("type") in (
+                    "weakness",
+                    "strength",
+                    "preference",
+                ):
+                    chat_service.save_memory(
+                        user_id=user_id,
+                        memory_type=mem["type"],
+                        content=mem["content"],
+                        source="auto_extract",
+                    )
 
         # 累积 session notes（增强增量记忆）
         note_parts = []
@@ -1604,7 +1651,13 @@ async def extract_memory(state: ChatState) -> dict:
                 f"[asked] {category} #{qid} [{qtype}]: {question}".strip()
             )
 
-        if note_parts:
+        if durable_job_id:
+            chat_service.commit_memory_extraction_job(
+                durable_job_id,
+                memories if isinstance(memories, list) else [],
+                note_parts,
+            )
+        elif note_parts:
             current_notes = state.get("session_notes", "")
             new_notes = "\n".join(note_parts)
             updated_notes = (
@@ -1624,6 +1677,12 @@ async def extract_memory(state: ChatState) -> dict:
             state["session_notes"] = updated_notes
 
     except Exception as e:
+        durable_job_id = state.get("_side_effect_job_id")
+        if durable_job_id:
+            try:
+                chat_service.fail_side_effect_job(durable_job_id, str(e), retry=True)
+            except Exception:
+                logger.exception("无法更新 memory side-effect job 状态: %s", durable_job_id)
         logger.debug(f"记忆提取跳过: {e}")
 
     return {}
@@ -1643,13 +1702,15 @@ def route_after_intent(state: ChatState) -> str:
 MAX_MESSAGES = 100  # 最大消息数（约 50 轮对话）
 
 
-def check_round_limit(messages: list[dict]) -> bool:
+def check_round_limit(
+    messages: list[dict], *, allow_incomplete_distribution: bool = False
+) -> bool:
     """检查消息数是否在限制内
 
     Returns:
         True 如果可以继续对话，False 如果已达上限
     """
-    return len(messages) < MAX_MESSAGES
+    return len(messages) < MAX_MESSAGES or allow_incomplete_distribution
 
 
 def route_after_classify(state: ChatState) -> str:
@@ -1832,9 +1893,11 @@ def build_react_system_prompt(state: ChatState) -> str:
     # Layer 1: Base prompt
     if mode == "jd_resume" and state.get("jd_text"):
         base = INTERVIEW_SYSTEM_PROMPT_JD.format(
-            jd_text=state.get("jd_text", ""),
-            resume_text=state.get("resume_text", ""),
-            interview_context=interview_context,
+            jd_text=wrap_untrusted_context("job_description", state.get("jd_text", "")),
+            resume_text=wrap_untrusted_context("resume", state.get("resume_text", "")),
+            interview_context=wrap_untrusted_context(
+                "interview_context", interview_context
+            ),
             interview_phase=interview_phase,
             basis_guidance="",
         )
@@ -1861,9 +1924,13 @@ def build_react_system_prompt(state: ChatState) -> str:
         )
 
         base = INTERVIEW_SYSTEM_PROMPT_PRACTICE.format(
-            interview_context=interview_context,
+            interview_context=wrap_untrusted_context(
+                "interview_context", interview_context
+            ),
             interview_phase=interview_phase,
-            memory_context=memory_context or "暂无用户背景信息",
+            memory_context=wrap_untrusted_context(
+                "memory", memory_context or "暂无用户背景信息"
+            ),
             basis_guidance="",
         )
 
@@ -1881,15 +1948,24 @@ def build_react_system_prompt(state: ChatState) -> str:
             f"- [{m.get('memory_type', '')}] {m.get('summary', '')}"
             for m in memory_summaries[:3]
         )
-        parts.append(f"## 候选人相关记忆\n{memory_text}")
+        parts.append(
+            "## 候选人相关记忆\n"
+            + wrap_untrusted_context("memory_summary", memory_text)
+        )
 
     # Layer 3: Session notes
     if session_notes:
-        parts.append(f"## 本次面试笔记\n{session_notes}")
+        parts.append(
+            "## 本次面试笔记\n"
+            + wrap_untrusted_context("session_notes", session_notes)
+        )
 
     # Layer 4: Compressed context
     if compressed:
-        parts.append(f"## 历史对话摘要\n{compressed}")
+        parts.append(
+            "## 历史对话摘要\n"
+            + wrap_untrusted_context("compressed_history", compressed)
+        )
 
     interview_state_prompt = _format_interview_state_prompt(state)
     if interview_state_prompt:

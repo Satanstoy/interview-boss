@@ -28,6 +28,14 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 | `mock_redis` | Mock Redis | `def test_xxx(mock_redis):` |
 | `client` | FastAPI TestClient | `def test_xxx(client): response = client.get("/api/...")` |
 
+### client fixture 生产库污染防护（重要）
+
+`client` fixture 会把所有 `app.*` 模块（含 routers/services/agents/mcp_server）的 `run_db`/`get_db_connection` 引用替换为 test_db 版本，并额外 patch `app.db.connection`/`operations`/`queries` 模块属性。
+
+**原因**：FastAPI TestClient 在独立线程运行请求，`app.db.connection._local.conn`（threading.local）在该线程为空，`get_db_connection()` 会打开真实 `DB_PATH` 写入生产库。历史上只 patch `app.routers.*`，导致 `chat_service.create_conversation` 等 services 层调用把对话写入生产库（表现为 sj 账户下不断出现空的"新对话"记录）。
+
+**回归保护**：`backend/tests/chat/test_chat.py::test_api_does_not_write_production_db` 断言 API 测试前后生产库 `chat_conversations` 行数不变。修改 conftest 的 patch 范围时必须跑该测试。
+
 ## 目录结构
 
 | 目录 | 测试内容 |
@@ -41,6 +49,8 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 | `security/` | 安全测试（认证、CSRF、注入） |
 | `interview/` | 面试流程测试 |
 | `infra/` | 基础设施测试（DB、migration、config） |
+
+`conftest.py` 的 `questions_detail` fixture 必须与生产写入列一致；当前包含 `diff_tag` 和 migration 042 添加的分布事实列。
 
 ## 核心规则
 

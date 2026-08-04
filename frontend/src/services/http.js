@@ -413,7 +413,11 @@ async function _consumeSSEStream(reader, onEvent, yieldForRender = false) {
         const data = JSON.parse(trimmed.slice(6))
         if (onEvent) onEvent(data)
         if (data.type === 'done') finalResult = data
-        if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+        if (data.type === 'error') {
+          const error = new Error(data.message || data.detail || '操作失败')
+          error.code = data.code
+          throw error
+        }
         if (yieldForRender) await new Promise(r => setTimeout(r, 0))
       } catch (e) {
         if (e.message && !e.message.includes('JSON')) throw e
@@ -426,7 +430,11 @@ async function _consumeSSEStream(reader, onEvent, yieldForRender = false) {
       const data = JSON.parse(buffer.trim().slice(6))
       if (onEvent) onEvent(data)
       if (data.type === 'done') finalResult = data
-      if (data.type === 'error') throw new Error(data.message || data.detail || '操作失败')
+      if (data.type === 'error') {
+        const error = new Error(data.message || data.detail || '操作失败')
+        error.code = data.code
+        throw error
+      }
     } catch (e) {
       if (e.message && !e.message.includes('JSON')) throw e
     }
@@ -438,9 +446,17 @@ async function _consumeSSEStream(reader, onEvent, yieldForRender = false) {
 /**
  * POST 请求，返回 SSE 流式响应
  */
-export async function postSSE(url, body, onEvent, _isRetry = false) {
+export async function postSSE(url, body, onEvent, _isRetry = false, options = {}) {
+  // Keep the old four-argument form while allowing the fourth argument to be
+  // an options object for callers that need controller ownership.
+  if (typeof _isRetry === 'object') {
+    options = _isRetry || {}
+    _isRetry = false
+  }
+
   const controller = new AbortController()
   pendingControllers.add(controller)
+  options.onController?.(controller)
 
   try {
     const authHeaders = {}
@@ -458,16 +474,25 @@ export async function postSSE(url, body, onEvent, _isRetry = false) {
     // 401 → 尝试刷新 token 并重试一次
     if (res.status === 401 && !_isRetry) {
       const refreshResult = await tryRefreshToken()
-      if (refreshResult) return postSSE(url, body, onEvent, true)
+      if (refreshResult) return postSSE(url, body, onEvent, true, options)
       if (onUnauthorized) onUnauthorized()
       throw new Error(getStatusMessage(401))
     }
 
     if (!res.ok) {
       const text = await res.text()
-      let detail
-      try { detail = JSON.parse(text).detail } catch { detail = text }
-      throw new Error(detail || getStatusMessage(res.status))
+      let data
+      try { data = JSON.parse(text) } catch { data = text }
+      const detail = typeof data === 'object' ? data?.detail : data
+      const code = typeof detail === 'object' ? detail?.code : null
+      const message = typeof detail === 'object'
+        ? (detail?.message || code || getStatusMessage(res.status))
+        : (detail || getStatusMessage(res.status))
+      const error = new Error(message)
+      error.status = res.status
+      error.code = code || (typeof detail === 'string' ? detail : undefined)
+      error.data = data
+      throw error
     }
 
     return await _consumeSSEStream(res.body.getReader(), onEvent)

@@ -9,6 +9,7 @@ import {
   FileUp,
   Filter,
   History,
+  Layers,
   Library,
   LayoutDashboard,
   Network,
@@ -30,7 +31,7 @@ const props = defineProps({
 const emit = defineEmits([
   'go-to-question',
   'logout',
-  'bank-mode-changed',
+  'share-default-changed',
   'show-review',
   'show-settings',
   'update:collapsed',
@@ -60,6 +61,7 @@ const iconMap = {
   JD: Filter,
   Interview: Library,
   MockInterview: ClipboardList,
+  Practice: Layers,
   KnowledgeGraph: Network,
   InsightsOverview: LayoutDashboard,
   InsightsReadiness: Target,
@@ -94,7 +96,7 @@ async function goHome() {
 
 function onGoToQuestion(q) { emit('go-to-question', q) }
 function handleLogout() { emit('logout') }
-function handleBankModeChanged(val) { emit('bank-mode-changed', val) }
+function handleShareDefaultChanged(val) { emit('share-default-changed', val) }
 function handleShowReview() { emit('show-review') }
 function handleShowSettings() { emit('show-settings') }
 </script>
@@ -164,7 +166,7 @@ function handleShowSettings() { emit('show-settings') }
       compact
       button-class="rounded-lg hover:bg-sidebar-accent transition-colors p-0"
       @logout="handleLogout"
-      @bank-mode-changed="handleBankModeChanged"
+      @share-default-changed="handleShareDefaultChanged"
       @show-review="handleShowReview"
       @show-settings="handleShowSettings"
     />
@@ -249,7 +251,7 @@ function handleShowSettings() { emit('show-settings') }
         placement="top"
         button-class="w-full justify-start rounded-lg hover:bg-sidebar-accent px-3 py-2 gap-3 transition-colors"
         @logout="handleLogout"
-        @bank-mode-changed="handleBankModeChanged"
+        @share-default-changed="handleShareDefaultChanged"
         @show-review="handleShowReview"
         @show-settings="handleShowSettings"
       />

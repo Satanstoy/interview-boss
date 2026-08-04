@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.agents.chat.tool_policy import ToolPolicy, build_tool_policy
 from app.agents.chat.tool_strategy import ToolStrategy, compute_tool_strategy
 
 
@@ -36,6 +37,22 @@ class TestComputeToolStrategy:
         assert strategy.requires_retrieval is True
         assert strategy.allow_search is True
         assert strategy.allow_draw is True
+
+    def test_practice_request_overrides_default_deep_dive_turn_intent(self):
+        state = {
+            "intent": "practice_request",
+            "turn_intent": {
+                "strategy": "deep_dive",
+                "tool_intent": {"requires_question_bank": False},
+            },
+        }
+
+        strategy = compute_tool_strategy(state)
+
+        assert strategy.requires_retrieval is True
+        assert strategy.allow_search is True
+        assert strategy.allow_draw is True
+        assert strategy.allow_load_skill is True
 
     def test_incomplete_answer_no_retrieval(self):
         state = {
@@ -118,3 +135,45 @@ class TestComputeToolStrategy:
         assert strategy.requires_retrieval is False
         assert strategy.allow_search is False
         assert strategy.allow_draw is False
+
+
+class TestToolPolicy:
+    def test_end_interview_policy_denies_all_tools(self):
+        state = {"user_id": 7, "conversation_id": "c1", "intent": "end_interview"}
+
+        policy = build_tool_policy(state)
+
+        assert policy.allowed_tools == frozenset()
+
+    def test_retrieval_policy_allows_draw_but_not_search(self):
+        state = {
+            "user_id": 7,
+            "conversation_id": "c1",
+            "intent": "interview_question",
+            "requires_bank_question": True,
+            "distribution_primary_required": True,
+            "distribution_control": {"preferred_type": "knowledge_probe"},
+        }
+
+        policy = build_tool_policy(state)
+
+        assert "draw_questions" in policy.allowed_tools
+        assert "search_questions" not in policy.allowed_tools
+
+    def test_select_question_is_not_allowed_without_server_candidates(self):
+        state = {"user_id": 7, "conversation_id": "c1", "intent": "chat"}
+
+        assert "select_question" not in build_tool_policy(state).allowed_tools
+
+    def test_policy_constructor_is_immutable(self):
+        policy = ToolPolicy(
+            user_id=7,
+            conversation_id="c1",
+            bank_mode="public",
+            allowed_tools=frozenset({"select_question"}),
+            allowed_skills=None,
+            policy_version="test",
+        )
+
+        with pytest.raises(AttributeError):
+            policy.user_id = 8

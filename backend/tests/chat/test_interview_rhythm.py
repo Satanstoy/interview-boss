@@ -166,11 +166,6 @@ class TestOpeningPhaseE2E:
 
     async def test_first_message_uses_project_deep_dive(self):
         """R2: 第一条消息 → phase="开场阶段", 从项目深挖开始"""
-        search_results = [
-            make_question(101, "Redis 缓存穿透怎么处理？", cat1="中间件", cat2="缓存"),
-        ]
-        search_mock = MagicMock(return_value=search_results)
-
         events, state, llm_mock = await run_single_turn(
             user_message="你好，我是候选人",
             classify_updates={
@@ -185,43 +180,28 @@ class TestOpeningPhaseE2E:
             },
             llm_responses=[
                 {
-                    "content": None,
-                    "tool_calls": [
-                        tool_call("search_questions", {"keywords": ["Redis"]}),
-                    ],
-                    "finish_reason": "tool_calls",
-                },
-                {
                     "content": (
-                        "好的，先从 Redis 缓存穿透开始。"
-                        '[BASIS]{"type":"interview_question","question_ids":[101],'
-                        '"confidence":0.9,"show_refs":true}[/BASIS]'
+                        "好的，先从你的项目经历开始。"
                     ),
                     "tool_calls": None,
                     "finish_reason": "stop",
                 },
             ],
-            stream_chunks=(
-                "好的，先从 Redis 缓存穿透开始。",
-                '[BASIS]{"type":"interview_question","question_ids":[101],'
-                '"confidence":0.9,"show_refs":true}[/BASIS]',
-            ),
-            tool_patches=[
-                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
-            ],
+            stream_chunks=("好的，先从你的项目经历开始。",),
         )
 
-        # Should have search + generating steps
+        # Opening deep-dive turns stay grounded in conversation evidence and
+        # do not start a new question-bank retrieval chain.
         steps = [e["step"] for e in events if e["type"] == "step"]
-        assert "search_questions" in steps
         assert "generating" in steps
+        assert "search_questions" not in steps
 
-        # Should have retrieved event
+        # No question-bank evidence is created for a conversation-only turn.
         retrieved = [e for e in events if e["type"] == "retrieved"]
-        assert len(retrieved) == 1
+        assert retrieved == []
 
-        # Opening stays a natural project follow-up even if retrieval returned
-        # candidates; it must not force a selected question before evidence.
+        # Opening stays a natural project follow-up and does not force a
+        # selected question before question-bank evidence exists.
         basis = next(e for e in events if e["type"] == "basis")
         assert basis["basis_type"] == "conversation"
         assert basis["basis_question_ids"] == []
@@ -261,13 +241,8 @@ class TestAnswerCompleteness:
         assert "search_questions" not in steps
         assert "draw_questions" not in steps
 
-    async def test_complete_answer_triggers_search(self):
-        """R1: 完整回答 → answer_complete=True → LLM 调用 search_questions"""
-        search_results = [
-            make_question(102, "Redis 持久化策略有哪些？"),
-        ]
-        search_mock = MagicMock(return_value=search_results)
-
+    async def test_complete_answer_stays_in_deep_dive(self):
+        """R1: 完整回答 → 默认沿当前项目深挖，不自动开启题库检索"""
         events, state, llm_mock = await run_single_turn(
             user_message="我用了 Redis 做缓存，通过布隆过滤器解决了穿透问题",
             classify_updates={
@@ -282,43 +257,25 @@ class TestAnswerCompleteness:
             },
             llm_responses=[
                 {
-                    "content": None,
-                    "tool_calls": [
-                        tool_call(
-                            "search_questions",
-                            {"keywords": ["Redis", "缓存"]},
-                        ),
-                    ],
-                    "finish_reason": "tool_calls",
-                },
-                {
                     "content": (
-                        "很好，那你说说 Redis 持久化策略。"
-                        '[BASIS]{"type":"interview_question","question_ids":[102],'
-                        '"confidence":0.85,"show_refs":true}[/BASIS]'
+                        "很好，你对缓存穿透的处理思路已经比较完整了，我们继续深挖设计取舍。"
                     ),
                     "tool_calls": None,
                     "finish_reason": "stop",
                 },
             ],
             stream_chunks=(
-                "很好，那你说说 Redis 持久化策略。",
-                '[BASIS]{"type":"interview_question","question_ids":[102],'
-                '"confidence":0.85,"show_refs":true}[/BASIS]',
+                "很好，你对缓存穿透的处理思路已经比较完整了，我们继续深挖设计取舍。",
             ),
-            tool_patches=[
-                patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
-            ],
         )
 
-        # LLM should be called twice (tool call + answer)
-        assert llm_mock.call_count == 2
-        # Should have search step
+        # The rhythm policy keeps a complete answer in the current deep-dive
+        # chain unless a question-bank transition is explicitly required.
+        assert llm_mock.call_count == 1
         steps = [e["step"] for e in events if e["type"] == "step"]
-        assert "search_questions" in steps
-        # Should have retrieved event
+        assert "search_questions" not in steps
         retrieved = [e for e in events if e["type"] == "retrieved"]
-        assert len(retrieved) == 1
+        assert retrieved == []
 
 
 class TestLoadSkillE2E:

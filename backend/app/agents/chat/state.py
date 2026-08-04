@@ -29,12 +29,14 @@ class ChatState(TypedDict, total=False):
     session_id: Optional[str]  # MCP session ID（通常与 conversation_id 相同）
     user_id: int  # 用户 ID
     user_message: str  # 当前用户消息
+    turn_id: Optional[str]  # 服务端回合 ID；内部合成测试可为空
+    turn_fence: Optional[int]  # 服务端回合 fence；内部合成测试可为空
     mode: str  # 'jd_resume' | 'free_practice'
     jd_id: Optional[int]  # 模式一关联的 JD ID
     jd_text: Optional[str]  # JD 文本内容
     resume_text: Optional[str]  # 简历文本
     model: Optional[str]  # 用户选择的模型（覆盖默认配置）
-    bank_mode: Optional[str]  # 题库模式 public/personal/mixed
+    bank_mode: Optional[str]  # 题库过滤口径 all/public/mine
     difficulty: Optional[str]  # 面试难度 junior/mid/senior/staff_plus
 
     # === 记忆 ===
@@ -90,12 +92,18 @@ class ChatState(TypedDict, total=False):
     question_type: Optional[
         str
     ]  # 题目类型: project_followup / knowledge_probe / new_question
+    strategy_preferred_question_type: Optional[str]  # 运行时控制器指定的题型
+    distribution_plan: dict | None  # 创建会话时冻结的分布计划
+    distribution_control: dict  # 当前轮控制器的公开决策快照
+    distribution_primary_required: bool  # 当前轮必须通过题库完成一个主问题
     retrieved_questions: list[dict]  # 兼容旧字段：最近一次检索/抽题候选
     candidate_questions: list[dict]  # 本轮工具得到的候选题（不代表实际采用）
     selected_question: Optional[dict]  # 本轮最终采用的题目（如能从候选中确认）
+    candidate_set_id: Optional[str]  # P2 server-owned candidate references
     question_source: Optional[str]  # search | draw | conversation | generated
     question_source_reason: Optional[str]  # 简短说明采用/未采用候选题的原因
     selection_confidence: float  # selected_question 的结构化选择置信度
+    coverage_events: list[dict]  # normalized facts persisted to interview_events
 
     # === 输出 ===
     response: str  # AI 面试官回复

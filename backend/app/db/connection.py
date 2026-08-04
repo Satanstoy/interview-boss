@@ -41,6 +41,7 @@ def get_db_connection():
 def init_db():
     """初始化数据库：运行所有迁移"""
     with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
         from app.db.migrations import run_migrations
         run_migrations(conn)
 

@@ -105,6 +105,37 @@ async def test_async_redis_session_roundtrip(sample_state, monkeypatch):
     assert redis.setex_awaits == 1
 
 
+@pytest.mark.asyncio
+async def test_async_sessions_are_namespaced_by_user(monkeypatch):
+    from app.mcp_server.session import (
+        load_mcp_session_async,
+        save_mcp_session_async,
+    )
+
+    class AsyncRedisLike:
+        def __init__(self):
+            self.store = {}
+
+        async def get(self, key):
+            return self.store.get(key)
+
+        async def setex(self, key, ttl, value):
+            self.store[key] = value
+
+    redis = AsyncRedisLike()
+    monkeypatch.setattr("app.mcp_server.session._get_redis_pool", lambda: redis)
+
+    await save_mcp_session_async("shared", {"candidate_questions": [{"id": 1}]}, user_id=1)
+    await save_mcp_session_async("shared", {"candidate_questions": [{"id": 2}]}, user_id=2)
+
+    user_one = await load_mcp_session_async("shared", user_id=1)
+    user_two = await load_mcp_session_async("shared", user_id=2)
+
+    assert user_one["candidate_questions"][0]["id"] == 1
+    assert user_two["candidate_questions"][0]["id"] == 2
+    assert set(redis.store) == {"mcp:1:shared", "mcp:2:shared"}
+
+
 # ── Fix 3: internal ReAct path session persistence ─────────
 
 

@@ -34,6 +34,13 @@ from app.agents.chat.question_plan import (
 )
 from app.agents.chat.state import ChatState
 from app.agents.chat.stop_policy import evaluate_interview_stop
+from app.agents.chat.tool_gateway import validate_tool_arguments
+from app.agents.chat.tool_policy import (
+    ToolPolicy,
+    ToolPolicyViolation,
+    build_tool_policy,
+    enforce_tool_call,
+)
 from app.agents.chat.summary import (
     _generate_structured_summary,
 )
@@ -124,34 +131,39 @@ STEP_REASONS = {
 # ── Tool Validation ───────────────────────────────────────
 
 
-def validate_tool_call(tool_call: dict) -> dict:
+def validate_tool_call(tool_call: dict, policy: ToolPolicy | None = None) -> dict:
     """Validate a tool call from the LLM before execution.
 
-    Enforces allowlist, required fields, and arg type safety.
+    Enforces the global allowlist, the current execution policy, and strict
+    per-tool argument schemas.  ``policy`` remains optional for legacy pure
+    callers; the live ReAct loop always supplies it.
     Returns the validated tool call dict, or raises StopRun.
     """
-    func = tool_call.get("function")
-    if not isinstance(func, dict):
-        raise StopRun("invalid_tool_call:no_function")
-
-    name = func.get("name")
-    if not isinstance(name, str) or not name:
-        raise StopRun("invalid_tool_call:missing_name")
-
-    if name not in _ALLOWED_TOOL_NAMES:
-        raise StopRun(f"tool_denied:{name}")
-
-    # Validate JSON parseability (downstream expects string format)
-    raw_args = func.get("arguments", "{}")
-    if isinstance(raw_args, str):
-        try:
-            json.loads(raw_args)
-        except (json.JSONDecodeError, TypeError):
-            raise StopRun(f"invalid_args:{name}")
-    elif not isinstance(raw_args, dict):
-        raise StopRun(f"invalid_args:{name}")
-
-    return tool_call  # return original; downstream expects string arguments
+    try:
+        # A pure caller has no state from which to derive policy. Keep its
+        # historical global/schema validation while live callers pass state.
+        if policy is None:
+            func = tool_call.get("function")
+            name = func.get("name") if isinstance(func, dict) else ""
+            if not isinstance(func, dict) or not name:
+                raise StopRun("invalid_tool_call")
+            if name not in _ALLOWED_TOOL_NAMES:
+                raise StopRun(f"tool_denied:{name}")
+            validate_tool_arguments(name, func.get("arguments", "{}"))
+            return tool_call
+        return enforce_tool_call(tool_call, {}, policy)
+    except ToolPolicyViolation as exc:
+        reason = {
+            "TOOL_NOT_ALLOWED": "tool_denied",
+            "UNKNOWN_TOOL": "tool_denied",
+            "SKILL_NOT_ALLOWED": "skill_not_allowed",
+            "INVALID_TOOL_ARGUMENTS": "invalid_args",
+        }.get(exc.code, "invalid_tool_call")
+        name = tool_call.get("function", {}).get("name", "") if isinstance(tool_call, dict) else ""
+        raise StopRun(f"{reason}:{name}") from exc
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        name = tool_call.get("function", {}).get("name", "") if isinstance(tool_call, dict) else ""
+        raise StopRun(f"invalid_args:{name}") from exc
 
 
 # ── Tracing ───────────────────────────────────────────────
@@ -435,6 +447,69 @@ def _record_retrieval_gap(state: ChatState, tool_names: list[str]) -> None:
         "question_source_reason",
         "retrieval_recommended_but_skipped",
     )
+
+
+async def _prepare_distribution_primary_question(state: ChatState) -> bool:
+    """Deterministically bind the controller-selected primary question.
+
+    A distribution plan is a product control, so it cannot depend on whether
+    the ReAct model happens to make a tool call.  The normal writer still owns
+    wording and validation after this function has supplied its bank-backed
+    question.
+    """
+
+    control = state.get("distribution_control") or {}
+    question_type = control.get("preferred_type")
+    if not state.get("distribution_primary_required") or not question_type:
+        return False
+
+    tool_call = {
+        "id": "distribution-controlled-draw",
+        "function": {
+            "name": "draw_questions",
+            "arguments": json.dumps(
+                {"count": 5, "question_type": question_type}, ensure_ascii=False
+            ),
+        },
+    }
+    _emit(
+        {
+            "type": "step",
+            "step": "draw_questions",
+            "message": "正在按面试分布从题库抽题...",
+            "reason": "distribution_plan_target_deficit",
+        }
+    )
+    output = await chat_tools.execute_tool(tool_call, state)
+    plan = _maybe_create_question_plan(state)
+    reused_cross_conversation_question = False
+    if not plan or not state.get("selected_question"):
+        # The distribution plan must remain feasible when the user has already
+        # seen every compatible question in earlier conversations.  Keep the
+        # current-conversation exclusion ledger intact, but retry once without
+        # the cross-conversation exclusion set and record that fallback.
+        state["distribution_allow_cross_conversation_reuse"] = True
+        output = await chat_tools.execute_tool(tool_call, state)
+        plan = _maybe_create_question_plan(state)
+        reused_cross_conversation_question = bool(plan and state.get("selected_question"))
+    try:
+        envelope = json.loads(output)
+    except (TypeError, json.JSONDecodeError):
+        envelope = {}
+    if plan and state.get("selected_question"):
+        control["selection_status"] = "bound"
+        control["selected_question_id"] = state["selected_question"].get("id")
+        control["cross_conversation_reuse"] = reused_cross_conversation_question
+        return True
+
+    control["selection_status"] = "pool_exhausted"
+    control["tool_error"] = (envelope.get("error") or {}).get("error_code")
+    control["selection_reason"] = state.get("question_plan_reason") or "no_viable_candidate"
+    state["question_source_reason"] = "distribution_type_pool_exhausted"
+    # Continue the interview conversationally, but metadata must not report a
+    # fabricated completed primary question for this plan.
+    state["distribution_primary_required"] = False
+    return False
     logger.info(
         "ReAct trace: event=retrieval_gap_recorded conversation_id=%s "
         "intent=%s answer_quality=%s tool_names=%s",
@@ -600,6 +675,8 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         }
         return
 
+    await _prepare_distribution_primary_question(state)
+
     # 1. Build system prompt
     system_prompt = build_react_system_prompt(state)
     state["active_skill_instructions"] = []  # consumed; skills baked into system prompt
@@ -711,7 +788,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         for tc in tool_calls:
             # Validate before execution
             try:
-                tc = validate_tool_call(tc)
+                tc = validate_tool_call(tc, build_tool_policy(state))
             except StopRun as exc:
                 stop_reason = exc.reason
                 logger.warning(

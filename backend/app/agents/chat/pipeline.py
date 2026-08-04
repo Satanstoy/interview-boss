@@ -118,6 +118,25 @@ _SENTINEL = object()
 _MAX_THINKING_CHUNKS = 50
 
 
+def assert_chat_turn_active(state: ChatState) -> None:
+    """Validate the durable turn before a pipeline-owned side effect.
+
+    Older synthetic callers do not create a persisted turn, so the guard is a
+    no-op for states without a turn identity. HTTP chat requests always carry
+    both fields from the router reservation.
+    """
+    turn_id = state.get("turn_id")
+    turn_fence = state.get("turn_fence")
+    if not turn_id or turn_fence is None:
+        return
+    chat_service.assert_chat_turn_active(
+        turn_id,
+        int(turn_fence),
+        state["conversation_id"],
+        state["user_id"],
+    )
+
+
 def _initial_state(
     conversation_id: str,
     user_id: int,
@@ -129,18 +148,22 @@ def _initial_state(
     model: str | None,
     bank_mode: str | None,
     difficulty: str | None = None,
+    turn_id: str | None = None,
+    turn_fence: int | None = None,
 ) -> ChatState:
     return {
         "conversation_id": conversation_id,
         "session_id": conversation_id,
         "user_id": user_id,
         "user_message": user_message,
+        "turn_id": turn_id,
+        "turn_fence": turn_fence,
         "mode": mode,
         "jd_id": jd_id,
         "jd_text": jd_text,
         "resume_text": resume_text,
         "model": model,
-        "bank_mode": bank_mode or "public",
+        "bank_mode": bank_mode or "all",
         "difficulty": difficulty or "mid",
         "interview_config": {},
         "rhythm_profile": {},
@@ -218,8 +241,14 @@ async def _step_load_context(state: ChatState) -> ChatState:
     result = await summarize_context(state)
     state.update(result)
 
-    # 检查轮次限制
-    if not check_round_limit(state.get("message_history", [])):
+    # An incomplete frozen distribution plan has its own finite question target
+    # and is measured from persisted events, not the 100-message LLM context.
+    from app.agents.chat.distribution_runtime import distribution_plan_is_incomplete
+
+    if not check_round_limit(
+        state.get("message_history", []),
+        allow_incomplete_distribution=distribution_plan_is_incomplete(state),
+    ):
         raise RuntimeError("对话已达最大轮次限制（50轮），请新建对话继续")
 
     return state
@@ -364,9 +393,22 @@ async def _step_classify(state: ChatState) -> ChatState:
 
 
 async def _step_extract_memory(state: ChatState) -> None:
-    """后台提取记忆（不阻塞主流程）"""
+    """Process the durable memory handoff without blocking the assistant turn."""
     try:
-        await extract_memory(state)
+        assert_chat_turn_active(state)
+        job = await asyncio.to_thread(
+            chat_service.claim_side_effect_job,
+            worker_id=f"chat-turn:{state.get('turn_id')}",
+            kind="memory_extraction",
+            source_turn_id=state.get("turn_id"),
+        )
+        if not job:
+            return
+        snapshot = dict(state)
+        snapshot["_side_effect_job_id"] = job["id"]
+        await extract_memory(snapshot)
+    except chat_service.TurnCancelled:
+        logger.info("跳过已取消回合的后台记忆提取: %s", state.get("turn_id"))
     except Exception as e:
         logger.debug(f"后台记忆提取失败（不影响主流程）: {e}")
 
@@ -381,6 +423,7 @@ async def _persist_active_skills(state: ChatState) -> None:
         conversation_id = state.get("conversation_id")
         if not conversation_id:
             return
+        assert_chat_turn_active(state)
         active_skills = [
             name
             for name in state.get("active_skills", [])
@@ -395,8 +438,20 @@ async def _persist_active_skills(state: ChatState) -> None:
                 "last_turn_skills": state.get("active_skills", []),
             },
         )
+    except chat_service.TurnCancelled:
+        raise
     except Exception:
         logger.exception("Failed to persist active_skills")
+
+
+async def _persist_mcp_session(state: ChatState) -> None:
+    """Persist MCP session state only while this turn still owns the fence."""
+    assert_chat_turn_active(state)
+    await save_mcp_session_async(
+        state.get("session_id") or state["conversation_id"],
+        state,
+        user_id=state.get("user_id"),
+    )
 
 
 async def _load_interview_config(state: ChatState) -> None:
@@ -411,6 +466,8 @@ async def _load_interview_config(state: ChatState) -> None:
         config = {}
     state["interview_config"] = config
     state["difficulty"] = config.get("difficulty") or state.get("difficulty") or "mid"
+    distribution_plan = config.get("distribution_plan")
+    state["distribution_plan"] = distribution_plan if isinstance(distribution_plan, dict) else None
     rhythm_profile = config.get("rhythm_profile")
     state["rhythm_profile"] = rhythm_profile if isinstance(rhythm_profile, dict) else {}
 
@@ -489,6 +546,7 @@ def _refresh_interview_state_snapshot(state: ChatState) -> None:
 
 def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
     """Record asked question to DB for cross-conversation dedup."""
+    assert_chat_turn_active(state)
     selected = metadata.get("selected_question") or state.get("selected_question")
     if not selected or not isinstance(selected, dict):
         return
@@ -517,6 +575,19 @@ def _attach_executed_contract_metadata(state: ChatState, metadata: dict) -> None
     contract = state.get("turn_contract")
     if isinstance(contract, dict):
         metadata["turn_contract"] = contract
+        from app.agents.chat.structured_turn import (
+            build_evidence_bundle,
+            turn_contract_v2_from_legacy,
+        )
+
+        state["coverage_events"] = metadata.get("coverage_events", [])
+        evidence = build_evidence_bundle(state)
+        metadata["evidence_bundle"] = evidence.to_dict()
+        metadata["turn_contract_v2"] = turn_contract_v2_from_legacy(
+            contract,
+            state=state,
+            evidence=evidence,
+        ).to_dict()
     if state.get("writer_trace"):
         metadata["writer_trace"] = state["writer_trace"]
     if state.get("validator_trace"):
@@ -547,6 +618,8 @@ async def run_chat(
     model: str = None,
     bank_mode: str = None,
     difficulty: str = None,
+    turn_id: str | None = None,
+    turn_fence: int | None = None,
 ) -> AsyncGenerator[dict, None]:
     """面试对话 pipeline — SSE 兼容的 async generator。
 
@@ -567,14 +640,21 @@ async def run_chat(
         model,
         bank_mode,
         difficulty,
+        turn_id,
+        turn_fence,
     )
+    assert_chat_turn_active(state)
 
     async def _run_pipeline() -> None:
         t0 = time.monotonic()
         try:
+            assert_chat_turn_active(state)
+            # Load the frozen plan before context limits are evaluated, so a
+            # long configured interview cannot be stopped by the LLM window.
+            await _load_interview_config(state)
             # 1. 加载上下文
             await _step_load_context(state)
-            await _load_interview_config(state)
+            assert_chat_turn_active(state)
             state["decision_config"] = get_decision_config(
                 state.get("interview_config")
             )
@@ -582,6 +662,10 @@ async def run_chat(
 
             # 2. 意图分类 + 关键词
             await _step_classify(state)
+            assert_chat_turn_active(state)
+            from app.agents.chat.distribution_runtime import apply_distribution_control
+
+            apply_distribution_control(state)
             from app.agents.chat.turn_intent import build_turn_intent
 
             state["turn_intent"] = build_turn_intent(state).to_metadata_dict()
@@ -672,11 +756,10 @@ async def run_chat(
 
             # Persist/clear cross-turn skills so turn-scoped modes do not stick.
             await _persist_active_skills(state)
-            await save_mcp_session_async(
-                state.get("session_id") or state["conversation_id"], state
-            )
+            await _persist_mcp_session(state)
 
             # 后台记忆提取
+            assert_chat_turn_active(state)
             asyncio.create_task(_step_extract_memory(dict(state)))
 
             elapsed = time.monotonic() - t0
@@ -685,6 +768,9 @@ async def run_chat(
                 f"intent={state.get('intent')}, "
                 f"active_skills={state.get('active_skills', [])}"
             )
+        except chat_service.TurnCancelled:
+            logger.info("Pipeline stopped after turn cancellation: %s", state.get("turn_id"))
+            queue.put_nowait({"type": "cancelled", "turn_id": state.get("turn_id")})
         except Exception as e:
             logger.exception("Pipeline 执行失败")
             queue.put_nowait({"type": "error", "message": _sanitize_error_message(e)})

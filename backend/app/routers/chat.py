@@ -3,10 +3,11 @@
 import io
 import json
 import logging
+import uuid
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from app.core.auth import get_current_user
 from app.db.connection import run_db, get_user_job_position
 from app.models.schemas import CreateConversationRequest
@@ -27,6 +28,19 @@ def _current_position_name(user_id: int) -> str:
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     model: Optional[str] = None
+    client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)
+    regenerate_message_id: Optional[int] = Field(None, gt=0)
+
+
+class RegenerateMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: Optional[str] = None
+    client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)
+
+
+class CancelTurnRequest(BaseModel):
+    reason: str = Field(default="client_stop", min_length=1, max_length=120)
 
 
 # ── 会话管理 ──
@@ -56,6 +70,10 @@ async def create_conversation(
                 job_position=_current_position_name(user["id"]),
                 difficulty=req.difficulty or "mid",
                 experience_id=req.experience_id,
+                distribution_override=req.distribution_override.model_dump()
+                if req.distribution_override
+                else None,
+                first_message=req.first_message,
             )
         )
 
@@ -65,12 +83,15 @@ async def create_conversation(
                 lambda: chat_service.save_resume_memory(user["id"], resume_text)
             )
 
-        # 自动生成面试官开场白
-        opening = chat_service.generate_opening_message(req.mode)
-        await run_db(
-            lambda: chat_service.save_message(result["id"], "assistant", opening)
-        )
-        result["opening_message"] = opening
+        # 只有没有 first_message 时才生成开场白
+        if not req.first_message:
+            opening = chat_service.generate_opening_message(req.mode)
+            await run_db(
+                lambda: chat_service.save_message(result["id"], "assistant", opening)
+            )
+            result["opening_message"] = opening
+        else:
+            result["opening_message"] = None
 
         return {"status": "success", "data": result}
     except ValueError as e:
@@ -89,7 +110,9 @@ async def list_conversations(
     """获取用户的对话列表"""
     try:
         conversations = await run_db(
-            lambda: chat_service.get_conversations(user["id"], status, _current_position_name(user["id"]))
+            lambda: chat_service.get_conversations(
+                user["id"], status, _current_position_name(user["id"])
+            )
         )
         return {"status": "success", "data": conversations}
     except Exception as e:
@@ -103,7 +126,9 @@ async def get_conversation(
 ):
     """获取对话详情"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.get_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -120,7 +145,9 @@ async def update_title(
         raise HTTPException(status_code=400, detail="标题不能为空")
 
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.get_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -135,7 +162,9 @@ async def archive_conversation(
 ):
     """归档对话"""
     success = await run_db(
-        lambda: chat_service.archive_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.archive_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -148,7 +177,9 @@ async def delete_conversation(
 ):
     """删除对话"""
     success = await run_db(
-        lambda: chat_service.delete_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.delete_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -162,38 +193,46 @@ def _metadata_events_from_done(meta: dict) -> list[dict]:
     """Split run_chat done metadata into public SSE events."""
     events: list[dict] = []
     if meta.get("candidate_questions"):
-        events.append({"type": "candidates", "questions": meta.get("candidate_questions", [])})
+        events.append(
+            {"type": "candidates", "questions": meta.get("candidate_questions", [])}
+        )
     if "selected_question" in meta:
-        events.append({
-            "type": "selected_question",
-            "question": meta.get("selected_question"),
-            "source": meta.get("question_source", ""),
-            "reason": meta.get("question_source_reason", ""),
-        })
+        events.append(
+            {
+                "type": "selected_question",
+                "question": meta.get("selected_question"),
+                "source": meta.get("question_source", ""),
+                "reason": meta.get("question_source_reason", ""),
+            }
+        )
     question_plan = meta.get("question_plan")
     if isinstance(question_plan, dict):
-        events.append({
-            "type": "question_plan",
-            "question_id": question_plan.get("question_id"),
-            "source": question_plan.get("source", ""),
-            "selection_reason": question_plan.get("selection_reason", ""),
-            "adherence": question_plan.get("adherence", {}),
-            "repaired": bool(question_plan.get("repaired", False)),
-            "fallback_used": bool(question_plan.get("fallback_used", False)),
-        })
+        events.append(
+            {
+                "type": "question_plan",
+                "question_id": question_plan.get("question_id"),
+                "source": question_plan.get("source", ""),
+                "selection_reason": question_plan.get("selection_reason", ""),
+                "adherence": question_plan.get("adherence", {}),
+                "repaired": bool(question_plan.get("repaired", False)),
+                "fallback_used": bool(question_plan.get("fallback_used", False)),
+            }
+        )
 
     basis_type = meta.get("basis_type")
     if basis_type:
-        events.append({
-            "type": "basis",
-            "basis_type": basis_type,
-            "basis_question_ids": meta.get("basis_question_ids", []),
-            "basis_confidence": meta.get("basis_confidence", 0.0),
-            "should_show_references": meta.get("should_show_references", False),
-            "selected_basis_questions": meta.get("selected_basis_questions", []),
-            "resume_ref": meta.get("resume_ref", ""),
-            "jd_ref": meta.get("jd_ref", ""),
-        })
+        events.append(
+            {
+                "type": "basis",
+                "basis_type": basis_type,
+                "basis_question_ids": meta.get("basis_question_ids", []),
+                "basis_confidence": meta.get("basis_confidence", 0.0),
+                "should_show_references": meta.get("should_show_references", False),
+                "selected_basis_questions": meta.get("selected_basis_questions", []),
+                "resume_ref": meta.get("resume_ref", ""),
+                "jd_ref": meta.get("jd_ref", ""),
+            }
+        )
     if meta.get("resume_ref"):
         events.append({"type": "resume_ref", "name": meta["resume_ref"]})
     if meta.get("jd_ref"):
@@ -201,17 +240,76 @@ def _metadata_events_from_done(meta: dict) -> list[dict]:
     return events
 
 
+async def _replay_completed_turn(turn: dict):
+    """Replay a committed assistant result without invoking the pipeline again."""
+    yield f"data: {json.dumps({'type': 'turn_started', 'turn_id': turn['id'], 'fence': turn['fence'], 'client_request_id': turn['client_request_id'], 'replay': True}, ensure_ascii=False)}\n\n"
+    if turn.get("assistant_content"):
+        yield f"data: {json.dumps({'type': 'chunk', 'content': turn['assistant_content'], 'replace': True}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'done', 'metadata': turn.get('assistant_metadata') or {}, 'replay': True}, ensure_ascii=False)}\n\n"
+
+
 @router.get("/conversations/{conversation_id}/messages")
 async def get_messages(conversation_id: str, user: dict = Depends(get_current_user)):
     """获取对话的消息历史"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.get_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
 
     messages = await run_db(lambda: chat_service.get_messages(conversation_id))
     return {"status": "success", "data": messages}
+
+
+@router.post("/conversations/{conversation_id}/turns/{turn_id}/cancel")
+async def cancel_turn(
+    conversation_id: str,
+    turn_id: str,
+    req: CancelTurnRequest = CancelTurnRequest(),
+    user: dict = Depends(get_current_user),
+):
+    """Immediately invalidate a running turn; repeated cancellation is safe."""
+    try:
+        turn = await run_db(
+            lambda: chat_service.cancel_chat_turn(
+                turn_id,
+                conversation_id,
+                user["id"],
+                req.reason,
+            )
+        )
+    except chat_service.TurnNotFound:
+        raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+
+    return {
+        "status": "success",
+        "data": {
+            "turn_id": turn.id,
+            "fence": turn.fence,
+            "status": turn.status,
+        },
+    }
+
+
+@router.get("/conversations/{conversation_id}/turns/{turn_id}")
+async def get_turn_status(
+    conversation_id: str,
+    turn_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return an owned turn snapshot for SSE retry reconciliation."""
+    turn = await run_db(
+        lambda: chat_service.get_chat_turn(
+            turn_id,
+            conversation_id=conversation_id,
+            user_id=user["id"],
+        )
+    )
+    if not turn:
+        raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+    return {"status": "success", "data": turn}
 
 
 @router.post("/conversations/{conversation_id}/messages")
@@ -222,29 +320,110 @@ async def send_message(
 ):
     """发送消息并获取 AI 流式回复（SSE）"""
     conv = await run_db(
-        lambda: chat_service.get_conversation(conversation_id, user["id"], _current_position_name(user["id"]))
+        lambda: chat_service.get_conversation(
+            conversation_id, user["id"], _current_position_name(user["id"])
+        )
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
 
-    # 保存用户消息
-    user_msg_id = await run_db(
-        lambda: chat_service.save_message(conversation_id, "user", req.content)
-    )
+    client_request_id = req.client_request_id or str(uuid.uuid4())
+    turn_content = req.content
+
+    # 回合占用和用户消息必须在同一个事务内完成，避免并发请求先后通过检查。
+    try:
+        if req.regenerate_message_id:
+            turn, turn_content = await run_db(
+                lambda: chat_service.reserve_chat_revision(
+                    conversation_id,
+                    user["id"],
+                    req.regenerate_message_id,
+                    client_request_id,
+                    model=req.model,
+                )
+            )
+        else:
+            request_fingerprint = chat_service.build_turn_request_fingerprint(
+                req.content,
+                model=req.model,
+            )
+            turn = await run_db(
+                lambda: chat_service.reserve_chat_turn(
+                    conversation_id,
+                    user["id"],
+                    client_request_id,
+                    req.content,
+                    request_fingerprint,
+                )
+            )
+    except chat_service.ConversationNotWritable:
+        raise HTTPException(status_code=409, detail="CONVERSATION_NOT_WRITABLE")
+    except chat_service.TurnInProgress:
+        raise HTTPException(status_code=409, detail="TURN_IN_PROGRESS")
+    except chat_service.TurnIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TURN_IDEMPOTENCY_CONFLICT",
+                "turn_id": exc.turn_id,
+                "status": exc.status,
+            },
+        )
+    except chat_service.ConversationNotFound:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    except chat_service.TurnNotFound:
+        raise HTTPException(status_code=404, detail="消息不可重新生成")
+
+    if not turn.created:
+        if turn.status == "completed":
+            snapshot = await run_db(
+                lambda: chat_service.get_chat_turn(
+                    turn.id,
+                    conversation_id=conversation_id,
+                    user_id=user["id"],
+                )
+            )
+            if snapshot:
+                return StreamingResponse(
+                    _replay_completed_turn(snapshot),
+                    media_type="text/event-stream",
+                )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TURN_REQUEST_ALREADY_EXISTS",
+                "turn_id": turn.id,
+                "status": turn.status,
+            },
+        )
 
     # 自动生成标题（第一条消息时，用 LLM 提取主题）
     from app.services.title_service import generate_title, should_generate_title
 
-    if should_generate_title(conv.get("title", "")):
-        title = await generate_title(req.content, user_id=user["id"])
-        await run_db(
-            lambda: chat_service.update_conversation_title(conversation_id, title)
-        )
+    if not req.regenerate_message_id and should_generate_title(conv.get("title", "")):
+        try:
+            title = await generate_title(turn_content, user_id=user["id"])
+            await run_db(
+                lambda: chat_service.update_conversation_title(conversation_id, title)
+            )
+        except Exception:
+            await run_db(
+                lambda: chat_service.fail_chat_turn(
+                    turn.id,
+                    turn.fence,
+                    conversation_id,
+                    user["id"],
+                    "TITLE_GENERATION_FAILED",
+                )
+            )
+            raise
 
     async def event_stream():
         """SSE 流式输出 AI 回复"""
         full_response = ""
         try:
+            yield f"data: {json.dumps({'type': 'turn_started', 'turn_id': turn.id, 'fence': turn.fence, 'client_request_id': turn.client_request_id}, ensure_ascii=False)}\n\n"
+
             # 导入 chat agent
             from app.agents.chat.graph import run_chat
 
@@ -263,18 +442,24 @@ async def send_message(
             async for event in run_chat(
                 conversation_id=conversation_id,
                 user_id=user["id"],
-                user_message=req.content,
+                user_message=turn_content,
                 mode=conv.get("mode", "free_practice"),
                 jd_id=conv.get("jd_id"),
                 resume_text=conv.get("resume_text"),
                 jd_text=jd_text,
                 model=req.model,
-                bank_mode=user.get("bank_mode", "public"),
+                bank_mode="all",
+                turn_id=turn.id,
+                turn_fence=turn.fence,
             ):
                 event_type = event.get("type", "chunk")
 
                 if event_type == "step":
-                    step_data: dict = {"type": "step", "step": event.get("step", ""), "message": event.get("message", "")}
+                    step_data: dict = {
+                        "type": "step",
+                        "step": event.get("step", ""),
+                        "message": event.get("message", ""),
+                    }
                     if event.get("reason"):
                         step_data["reason"] = event["reason"]
                     if event.get("insight"):
@@ -313,35 +498,46 @@ async def send_message(
                 elif event_type == "done":
                     meta = event.get("metadata", {})
 
-                    for metadata_event in _metadata_events_from_done(meta):
-                        yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
+                    import re as _re
 
-                    if full_response:
-                        import re as _re
+                    clean_for_persist = _re.sub(
+                        r"\[BASIS\].*?\[/BASIS\]",
+                        "",
+                        full_response,
+                        flags=_re.DOTALL,
+                    ).strip()
+                    clean_for_persist = _re.sub(
+                        r"\[BASIS\]\{[^}]*\}", "", clean_for_persist
+                    ).strip()
+                    clean_for_persist = _re.sub(
+                        r'"?\\?\[BASIS\\?\].*?\\?\[/BASIS\\?\]"?',
+                        "",
+                        clean_for_persist,
+                        flags=_re.DOTALL,
+                    ).strip()
 
-                        clean_for_persist = _re.sub(
-                            r"\[BASIS\].*?\[/BASIS\]",
-                            "",
-                            full_response,
-                            flags=_re.DOTALL,
-                        ).strip()
-                        clean_for_persist = _re.sub(
-                            r"\[BASIS\]\{[^}]*\}", "", clean_for_persist
-                        ).strip()
-                        clean_for_persist = _re.sub(
-                            r'"?\\?\[BASIS\\?\].*?\\?\[/BASIS\\?\]"?',
-                            "",
-                            clean_for_persist,
-                            flags=_re.DOTALL,
-                        ).strip()
+                    try:
                         await run_db(
-                            lambda: chat_service.save_message(
+                            lambda: chat_service.finalize_chat_turn(
+                                turn.id,
+                                turn.fence,
                                 conversation_id,
-                                "assistant",
+                                user["id"],
                                 clean_for_persist or full_response,
-                                metadata=meta,
+                                {
+                                    **meta,
+                                    "turn_id": turn.id,
+                                    "turn_fence": turn.fence,
+                                    "request_fingerprint": turn.request_fingerprint,
+                                },
                             )
                         )
+                    except chat_service.TurnCancelled:
+                        yield f"data: {json.dumps({'type': 'cancelled', 'turn_id': turn.id}, ensure_ascii=False)}\n\n"
+                        return
+
+                    for metadata_event in _metadata_events_from_done(meta):
+                        yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
 
                     # 附带 reasoning metadata 给前端，用于思维链/步骤/工具/skill 显示
                     done_payload: dict = {"type": "done"}
@@ -367,6 +563,15 @@ async def send_message(
                     yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "error":
+                    await run_db(
+                        lambda: chat_service.fail_chat_turn(
+                            turn.id,
+                            turn.fence,
+                            conversation_id,
+                            user["id"],
+                            event.get("code") or "PIPELINE_ERROR",
+                        )
+                    )
                     error_payload = {
                         "type": "error",
                         "message": event.get("message", "未知错误"),
@@ -375,15 +580,73 @@ async def send_message(
                         error_payload["code"] = event["code"]
                     yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
+                elif event_type == "cancelled":
+                    yield f"data: {json.dumps({'type': 'cancelled', 'turn_id': turn.id}, ensure_ascii=False)}\n\n"
+                    return
+
+        except chat_service.ConversationNotWritable:
+            logger.info(
+                "Conversation archived before assistant finalize: %s",
+                conversation_id,
+            )
+            yield f"data: {json.dumps({'type': 'error', 'code': 'CONVERSATION_NOT_WRITABLE', 'message': '会话已归档，未保存新的面试官回复。'}, ensure_ascii=False)}\n\n"
+        except chat_service.TurnCancelled:
+            yield f"data: {json.dumps({'type': 'cancelled', 'turn_id': turn.id}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"Chat 流式输出异常: {e}", exc_info=True)
+            try:
+                await run_db(
+                    lambda: chat_service.fail_chat_turn(
+                        turn.id,
+                        turn.fence,
+                        conversation_id,
+                        user["id"],
+                        "STREAM_ERROR",
+                    )
+                )
+            except (chat_service.TurnCancelled, chat_service.TurnNotFound):
+                pass
             error_msg = "抱歉，处理您的消息时出现错误，请稍后重试。"
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                await run_db(
+                    lambda: chat_service.cancel_chat_turn(
+                        turn.id,
+                        conversation_id,
+                        user["id"],
+                        "stream_closed",
+                    )
+                )
+            except (chat_service.TurnCancelled, chat_service.TurnNotFound):
+                pass
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{assistant_message_id}/regenerate"
+)
+async def regenerate_message(
+    conversation_id: str,
+    assistant_message_id: int,
+    req: RegenerateMessageRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Generate a new assistant revision without appending a user turn."""
+    return await send_message(
+        conversation_id,
+        SendMessageRequest(
+            content="regenerate",
+            model=req.model,
+            client_request_id=req.client_request_id,
+            regenerate_message_id=assistant_message_id,
+        ),
+        user,
     )
 
 

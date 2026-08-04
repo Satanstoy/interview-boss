@@ -26,6 +26,20 @@ const purifyConfig = {
   ADD_ATTR: ['target', 'rel'],
 }
 
+// 配置 marked：自定义渲染器
+const renderer = new marked.Renderer()
+
+// 为表格添加响应式包装
+renderer.table = function(header, body) {
+  return `<div class="table-wrapper"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`
+}
+
+marked.setOptions({
+  renderer: renderer,
+  breaks: true,
+  gfm: true,
+})
+
 // LRU 缓存：避免相同文本反复做 marked.parse + DOMPurify.sanitize
 const CACHE_MAX = 200
 const cache = new Map()

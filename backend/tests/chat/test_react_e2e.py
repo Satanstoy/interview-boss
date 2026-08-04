@@ -179,7 +179,12 @@ async def _run_react_case(
                     "answer_quality",
                     "complete" if answer_complete else "incomplete",
                 ),
-                "should_retrieve": bool(classify_updates.get("should_retrieve", False)),
+                "should_retrieve": bool(
+                    classify_updates.get(
+                        "should_retrieve",
+                        answer_complete or intent == "practice_request",
+                    )
+                ),
                 "needs_new_dimension": bool(
                     classify_updates.get(
                         "needs_new_dimension",
@@ -578,7 +583,18 @@ class TestReactE2E:
                 {
                     "content": None,
                     "tool_calls": [
-                        _tool_call("load_skill", {"skill_name": "theory-qa", "turn": i})
+                        _tool_call(
+                            "load_skill",
+                            {
+                                "skill_name": [
+                                    "theory-qa",
+                                    "algorithm-coding",
+                                    "project-deep-dive",
+                                    "interview-rhythm",
+                                    "adaptive-difficulty",
+                                ][i]
+                            },
+                        )
                     ],
                     "finish_reason": "tool_calls",
                 }
@@ -594,7 +610,13 @@ class TestReactE2E:
 
         assert llm_mock.call_count == MAX_REACT_STEPS
         assert registry.get.call_count == MAX_REACT_STEPS
-        assert state["active_skills"] == ["theory-qa"]
+        assert state["active_skills"] == [
+            "theory-qa",
+            "algorithm-coding",
+            "project-deep-dive",
+            "interview-rhythm",
+            "adaptive-difficulty",
+        ]
 
         step_events = [e for e in events if e["type"] == "step"]
         assert [e["step"] for e in step_events[:-1]] == ["load_skill"] * MAX_REACT_STEPS

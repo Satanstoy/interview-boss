@@ -1,11 +1,12 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { User, Target, Bot, Shield, Settings } from '@lucide/vue'
+import { User, Target, Bot, Shield, Settings, Server } from '@lucide/vue'
 import SettingsNav from './SettingsNav.vue'
 import SettingsProfile from './SettingsProfile.vue'
 import SettingsInterview from './SettingsInterview.vue'
 import SettingsAIConfig from './SettingsAIConfig.vue'
 import SettingsSecurity from './SettingsSecurity.vue'
+import SettingsMCP from './SettingsMCP.vue'
 import SettingsAdmin from './SettingsAdmin.vue'
 import { Button } from '@/components/ui/button'
 
@@ -20,7 +21,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'close', 'go-to-question', 'logout', 'bank-mode-changed',
+  'close', 'go-to-question', 'logout', 'share-default-changed',
   'profile-updated', 'build-master-bank', 'update:activeSeason',
   'sidebar-collapsed-changed',
 ])
@@ -32,6 +33,7 @@ const sections = computed(() => {
     { id: 'profile', label: '个人信息', description: '账户、简历和题库模式', icon: User },
     { id: 'interview', label: '面试偏好', description: '岗位和分类偏好', icon: Target },
     { id: 'ai', label: 'AI 配置', description: '模型和接口参数', icon: Bot },
+    { id: 'mcp', label: 'MCP 接入', description: '外部 agent 访问配置', icon: Server },
     { id: 'security', label: '账户安全', description: '密码和登录安全', icon: Shield },
   ]
   if (props.isAdmin) items.push({ id: 'admin', label: '管理员设置', description: '分类和题库操作', icon: Settings })
@@ -62,10 +64,10 @@ const sections = computed(() => {
             <SettingsProfile
               :display-user="displayUser"
               :practice-stats="practiceStats"
-              :bank-mode="displayUser?.bank_mode"
+              :share-default="displayUser?.share_default || 'private'"
               :active-season="activeSeason"
               :available-seasons="availableSeasons"
-              @bank-mode-changed="emit('bank-mode-changed', $event)"
+              @share-default-changed="emit('share-default-changed', $event)"
               @profile-updated="emit('profile-updated')"
               @sidebar-collapsed-changed="emit('sidebar-collapsed-changed', $event)"
               @update:active-season="emit('update:activeSeason', $event)"
@@ -82,6 +84,10 @@ const sections = computed(() => {
 
           <div v-else-if="activeSection === 'ai'" class="animate-fade-in">
             <SettingsAIConfig />
+          </div>
+
+          <div v-else-if="activeSection === 'mcp'" class="animate-fade-in">
+            <SettingsMCP />
           </div>
 
           <div v-else-if="activeSection === 'security'" class="animate-fade-in">

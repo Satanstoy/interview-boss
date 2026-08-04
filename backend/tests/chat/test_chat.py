@@ -8,6 +8,7 @@ TDD 测试 — 模拟面试 Chatbot 后端核心模块
 """
 
 import json
+import os
 import pytest
 from unittest.mock import patch, AsyncMock
 
@@ -183,6 +184,44 @@ class TestChatServiceConversation:
 
 class TestChatServiceMessages:
     """消息管理测试"""
+
+    def test_save_user_message_if_writable_rejects_archived_conversation(self, test_db):
+        from app.services import chat_service
+
+        conversation = chat_service.create_conversation(user_id=1, mode="free_practice")
+        chat_service.archive_conversation(conversation["id"], user_id=1)
+
+        with pytest.raises(chat_service.ConversationNotWritable):
+            chat_service.save_user_message_if_writable(
+                conversation["id"], 1, "继续回答"
+            )
+
+        assert chat_service.get_messages(conversation["id"]) == []
+
+    def test_save_assistant_message_if_active_rejects_archived_conversation(
+        self, test_db
+    ):
+        from app.services import chat_service
+
+        conversation = chat_service.create_conversation(user_id=1, mode="free_practice")
+        chat_service.archive_conversation(conversation["id"], user_id=1)
+
+        with pytest.raises(chat_service.ConversationNotWritable):
+            chat_service.save_assistant_message_if_active(
+                conversation["id"], 1, "不应保存"
+            )
+
+        assert chat_service.get_messages(conversation["id"]) == []
+
+    def test_archived_conversation_remains_readable(self, test_db):
+        from app.services import chat_service
+
+        conversation = chat_service.create_conversation(user_id=1, mode="free_practice")
+        chat_service.archive_conversation(conversation["id"], user_id=1)
+
+        loaded = chat_service.get_conversation(conversation["id"], user_id=1)
+
+        assert loaded["status"] == "archived"
 
     def test_save_and_get_messages(self, test_db):
         """T-003: 保存消息后应能按时间顺序检索"""
@@ -577,6 +616,57 @@ class TestChatRouter:
         finally:
             app.dependency_overrides.clear()
 
+    def test_api_does_not_write_production_db(self, client, test_db):
+        """回归：client fixture 下 API 请求不得写生产数据库。
+
+        历史上 client fixture 只 patch 了 app.routers.* 模块，TestClient 线程内
+        get_db_connection() 会打开真实 DB_PATH 写入生产库（如 chat_conversations）。
+        此处断言请求结束后生产库文件未被修改。
+        """
+        import app.db.connection as db_module
+
+        prod_path = db_module.DB_PATH
+        before = None
+        if os.path.exists(prod_path):
+            import sqlite3 as _sqlite3
+
+            with _sqlite3.connect(prod_path) as prod_conn:
+                before = prod_conn.execute(
+                    "SELECT COUNT(*) FROM chat_conversations"
+                ).fetchone()[0]
+
+        self._create_user(test_db)
+
+        from app.core.auth import get_current_user
+        from app.asgi import app
+
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
+
+        try:
+            response = client.post(
+                "/api/chat/conversations",
+                json={"mode": "free_practice"},
+                headers=self._auth_headers(),
+            )
+            assert response.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+        if before is not None:
+            import sqlite3 as _sqlite3
+
+            with _sqlite3.connect(prod_path) as prod_conn:
+                after = prod_conn.execute(
+                    "SELECT COUNT(*) FROM chat_conversations"
+                ).fetchone()[0]
+            assert after == before, (
+                f"API 测试污染了生产数据库: chat_conversations {before} -> {after}"
+            )
+
     def test_list_conversations_api(self, client, test_db):
         """T-008b: GET /api/chat/conversations 应返回会话列表"""
         self._create_user(test_db)
@@ -671,6 +761,43 @@ class TestChatRouter:
             assert len(data["data"]) == 1
             assert data["data"][0]["role"] == "assistant"
             assert "自我介绍" in data["data"][0]["content"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_send_message_to_archived_conversation_returns_409(self, client, test_db):
+        """Archived conversations are readable but reject new user input."""
+        self._create_user(test_db)
+
+        from app.core.auth import get_current_user
+        from app.asgi import app
+
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1,
+            "username": "testuser",
+            "is_admin": 0,
+        }
+
+        try:
+            created = client.post(
+                "/api/chat/conversations",
+                json={"mode": "free_practice"},
+                headers=self._auth_headers(),
+            )
+            conversation_id = created.json()["data"]["id"]
+            archived = client.put(
+                f"/api/chat/conversations/{conversation_id}/archive",
+                headers=self._auth_headers(),
+            )
+            assert archived.status_code == 200
+
+            response = client.post(
+                f"/api/chat/conversations/{conversation_id}/messages",
+                json={"content": "不应该写入"},
+                headers=self._auth_headers(),
+            )
+
+            assert response.status_code == 409
+            assert response.json()["detail"] == "CONVERSATION_NOT_WRITABLE"
         finally:
             app.dependency_overrides.clear()
 
@@ -1404,6 +1531,7 @@ class TestInterviewStateMetadata:
 
         # Verify functions exist and have correct signatures
         import inspect
+
         sig = inspect.signature(build_interview_state_snapshot)
         assert "state" in sig.parameters
         assert "ledger" in sig.parameters
@@ -1517,9 +1645,10 @@ class TestInterviewStateMetadata:
         metadata = done_event.get("metadata", {})
         assert metadata["interview_state"]["job_position"] == "agent_llm"
         assert metadata["interview_state"]["difficulty"] == "mid"
-        assert metadata["interview_state"]["coverage"]["project_followup"][
-            "current_count"
-        ] == 1
+        assert (
+            metadata["interview_state"]["coverage"]["project_followup"]["current_count"]
+            == 1
+        )
         assert metadata["observability"]["step_count"] == 0
         assert metadata["observability"]["tool_trace_persisted"] is False
         assert metadata["observability"]["stop_policy"] == {
@@ -1557,7 +1686,8 @@ def test_chat_tool_traces_table_exists(test_db):
 def test_chat_tool_traces_table_columns(test_db):
     """Test that chat_tool_traces has the expected columns."""
     columns = {
-        row[1] for row in test_db.execute("PRAGMA table_info('chat_tool_traces')").fetchall()
+        row[1]
+        for row in test_db.execute("PRAGMA table_info('chat_tool_traces')").fetchall()
     }
     expected = {
         "id",
@@ -1714,7 +1844,9 @@ class TestRunChatReasoningTraceMetadata:
         ]
 
         with (
-            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock
+            ),
             patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
             patch(
                 "app.agents.chat.pipeline._react_loop",
@@ -1725,8 +1857,13 @@ class TestRunChatReasoningTraceMetadata:
                 return_value=({}, "Answer"),
             ),
             patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
-            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
-            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock
+            ),
         ):
             done_event = None
             async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
@@ -1755,7 +1892,9 @@ class TestRunChatReasoningTraceMetadata:
         ]
 
         with (
-            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock
+            ),
             patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
             patch(
                 "app.agents.chat.pipeline._react_loop",
@@ -1766,8 +1905,13 @@ class TestRunChatReasoningTraceMetadata:
                 return_value=({}, "Answer"),
             ),
             patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
-            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
-            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock
+            ),
         ):
             done_event = None
             async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
@@ -1821,20 +1965,33 @@ class TestRunChatSkillTraceMetadata:
                 yield event
 
         with (
-            patch("app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._step_load_context", new_callable=AsyncMock
+            ),
             patch("app.agents.chat.pipeline._step_classify", new_callable=AsyncMock),
             patch("app.agents.chat.pipeline._react_loop", side_effect=fake_react_loop),
-            patch("app.agents.chat.pipeline._build_react_metadata", return_value=({}, "Answer")),
+            patch(
+                "app.agents.chat.pipeline._build_react_metadata",
+                return_value=({}, "Answer"),
+            ),
             patch("app.agents.chat.pipeline._basis_event_payload", return_value={}),
-            patch("app.agents.chat.pipeline._persist_active_skills", new_callable=AsyncMock),
-            patch("app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock),
+            patch(
+                "app.agents.chat.pipeline._persist_active_skills",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.agents.chat.pipeline._step_extract_memory", new_callable=AsyncMock
+            ),
         ):
             done_event = None
             async for event in run_chat("conv-1", 1, "Hello", mode="free_practice"):
                 if event.get("type") == "done":
                     done_event = event
 
-        assert done_event["metadata"]["skill_trace"][0]["skill_name"] == "project-deep-dive"
+        assert (
+            done_event["metadata"]["skill_trace"][0]["skill_name"]
+            == "project-deep-dive"
+        )
         assert done_event["metadata"]["skill_trace"][0]["label"] == "项目深挖策略"
 
 
@@ -1865,7 +2022,11 @@ def test_full_interview_flow_with_state():
     assert phase == "system_design"
 
     ledger = InterviewLedger()
-    state = {"conversation_id": "test", "job_position": "agent_llm", "difficulty": "mid"}
+    state = {
+        "conversation_id": "test",
+        "job_position": "agent_llm",
+        "difficulty": "mid",
+    }
     snapshot = build_interview_state_snapshot(state, ledger)
     assert "current_phase" in snapshot
     assert "coverage" in snapshot

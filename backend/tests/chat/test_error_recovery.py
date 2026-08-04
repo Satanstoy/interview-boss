@@ -63,8 +63,14 @@ class TestValidateToolCall:
 
     def test_all_allowed_tools_pass(self):
         """所有允许的工具名都通过验证"""
-        for name in ["load_skill", "search_questions", "draw_questions", "select_question"]:
-            tc = tool_call(name, {"test": True})
+        valid_args = {
+            "load_skill": {"skill_name": "interview-rhythm"},
+            "search_questions": {"keywords": ["Redis"]},
+            "draw_questions": {"count": 1},
+            "select_question": {"candidate_index": 0},
+        }
+        for name, args in valid_args.items():
+            tc = tool_call(name, args)
             result = validate_tool_call(tc)
             assert result["function"]["name"] == name
 
@@ -400,7 +406,7 @@ class TestLoopDetection:
         events, state, llm_mock = await run_single_turn(
             user_message="继续",
             classify_updates={
-                "intent": "interview_question",
+                "intent": "practice_request",
                 "keywords": [],
                 "search_query": "",
                 "answer_complete": True,
