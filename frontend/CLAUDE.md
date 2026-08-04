@@ -62,6 +62,7 @@ src/
 │   ├── JdView.vue
 │   ├── InterviewView.vue
 │   ├── MockInterviewView.vue
+│   ├── InsightsView.vue       ← 洞察总览/岗位准备度/面试复盘三路由共用编排视图
 │   ├── KnowledgeGraphView.vue
 │   ├── ImportView.vue
 │   ├── CodingView.vue
@@ -93,7 +94,10 @@ src/
 | JD 筛选 | `/jd` | `views/JdView.vue` | `composables/useMasterBankData.js` |
 | 面经库 | `/interview` | `views/InterviewView.vue` | `composables/useMasterBankData.js` |
 | 题目抽测 | `/mock-interview` | `views/MockInterviewView.vue` | `components/business/MockInterview.vue` |
-| 知识图谱 | `/knowledge-graph` | `views/KnowledgeGraphView.vue` | `components/business/KnowledgeGraph.vue` |
+| 洞察总览 | `/insights/overview` | `views/InsightsView.vue` | `composables/useInsightsData.js` + `services/insightsApi.js` |
+| 岗位准备度 | `/insights/readiness` | `views/InsightsView.vue` | `components/business/InsightsReadiness.vue` |
+| 面试复盘 | `/insights/reviews` | `views/InsightsView.vue` | `components/business/InsightsReviews.vue` |
+| 知识图谱（兼容入口） | `/knowledge-graph` | 重定向到 `/insights/readiness?view=graph` | `components/business/KnowledgeGraph.vue` |
 | 导入 | `/import` | `views/ImportView.vue` | `components/business/StagingPanel.vue` |
 | 手撕代码 | `/coding` | `views/CodingView.vue` | `components/business/CodingPractice.vue` |
 | 设置 | `/settings` | `views/SettingsView.vue` | `components/business/SettingsPage.vue` |

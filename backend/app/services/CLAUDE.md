@@ -36,3 +36,4 @@
 
 1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q`
 2. 更新本文件（如新增文件或改变职责）
+| `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要 | `db/queries`, `db/connection` |

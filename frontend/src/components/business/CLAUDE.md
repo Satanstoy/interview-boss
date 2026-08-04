@@ -17,6 +17,9 @@
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
+| `InsightsOverview.vue` | 洞察总览：证据状态、统计卡片和下一步行动 |
+| `InsightsReadiness.vue` | 岗位准备度能力矩阵；承载旧知识图谱的辅助视图 |
+| `InsightsReviews.vue` | 面试复盘会话列表和无数据入口 |
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |

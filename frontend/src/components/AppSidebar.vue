@@ -8,9 +8,12 @@ import {
   Code2,
   FileUp,
   Filter,
+  History,
   Library,
+  LayoutDashboard,
   Network,
   PanelLeft,
+  Target,
 } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
@@ -58,6 +61,9 @@ const iconMap = {
   Interview: Library,
   MockInterview: ClipboardList,
   KnowledgeGraph: Network,
+  InsightsOverview: LayoutDashboard,
+  InsightsReadiness: Target,
+  InsightsReviews: History,
   Import: FileUp,
   Coding: Code2,
 }

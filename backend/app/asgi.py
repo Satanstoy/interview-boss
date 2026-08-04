@@ -21,6 +21,7 @@ from app.routers import (
     bank_build,
     interview,
     analytics,
+    insights,
     profile,
     auth,
     chat,
@@ -194,6 +195,7 @@ app.include_router(admin_review.router)
 app.include_router(bank_build.router)
 app.include_router(interview.router)
 app.include_router(analytics.router)
+app.include_router(insights.router)
 app.include_router(profile.router)
 app.include_router(profile_pkg_router)
 app.include_router(chat.router)

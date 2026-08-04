@@ -54,9 +54,24 @@ const routes = [
         component: () => import('@/views/MockInterviewView.vue'),
       },
       {
+        path: 'insights/overview',
+        name: 'insights-overview',
+        component: () => import('@/views/InsightsView.vue'),
+      },
+      {
+        path: 'insights/readiness',
+        name: 'insights-readiness',
+        component: () => import('@/views/InsightsView.vue'),
+      },
+      {
+        path: 'insights/reviews',
+        name: 'insights-reviews',
+        component: () => import('@/views/InsightsView.vue'),
+      },
+      {
         path: 'knowledge-graph',
         name: 'knowledge-graph',
-        component: () => import('@/views/KnowledgeGraphView.vue'),
+        redirect: to => ({ name: 'insights-readiness', query: { ...to.query, view: 'graph' } }),
       },
       {
         path: 'import',

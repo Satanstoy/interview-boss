@@ -45,3 +45,4 @@
 1. 新增路由后在 `asgi.py` 注册
 2. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/ -q`
 3. 更新本文件
+| `insights.py` | `/api/insights` | 洞察工作台聚合快照 |

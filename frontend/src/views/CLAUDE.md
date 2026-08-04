@@ -11,6 +11,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `JdView.vue` | JD 库页 |
 | `InterviewView.vue` | 面经库页 |
 | `MockInterviewView.vue` | 题目抽测页（紧凑 padding `px-4 py-4`） |
+| `InsightsView.vue` | 洞察工作台编排：总览、岗位准备度、面试复盘三个路由共用数据快照 |
 | `KnowledgeGraphView.vue` | 知识图谱页 |
 | `ImportView.vue` | 导入工作台页 |
 | `CodingView.vue` | 手撕代码页 |

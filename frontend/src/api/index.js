@@ -87,6 +87,9 @@ export {
   fetchRandomQuestions,
 } from '../services/analyticsApi.js'
 
+// ── Insights ──
+export { fetchInsights } from '../services/insightsApi.js'
+
 // ── Profile ──
 export {
   fetchProfile,

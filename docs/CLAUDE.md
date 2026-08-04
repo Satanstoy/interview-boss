@@ -26,6 +26,7 @@ docs/
 - **开发新功能前**：先搜 `tdd-reports/` 了解相关模块的历史设计决策
 - **修 Bug 后**：在对应目录创建 `YYYY-MM-DD-描述/` 文件夹，包含 `bug.md`、`fix_bug_plan.md`、`test_report.md`
 - **新功能后**：在对应目录创建 `YYYY-MM-DD-描述/` 文件夹，包含 `tdd_plan.md`、`tdd_report.md`
+- 本次洞察工作台 TDD 记录位于 `tdd-reports/2026-08-04-insights-dashboard/`，包含 RED、GREEN、REFACTOR 和汇总报告。
 - **后端相关** → 放 `bug-reports/` 或 `tdd-reports/`
 - **前端相关** → 放 `frontend/bug-reports/` 或 `frontend/tdd-reports/`
 - **设计规格** → 放 `superpowers/specs/`

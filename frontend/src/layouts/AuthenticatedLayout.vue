@@ -21,8 +21,11 @@ import {
   Code2,
   FileUp,
   Filter,
+  History,
   Library,
+  LayoutDashboard,
   Network,
+  Target,
 } from '@lucide/vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
@@ -81,6 +84,9 @@ const routeToTabMap = {
   'interview': 'Interview',
   'mock-interview': 'MockInterview',
   'knowledge-graph': 'KnowledgeGraph',
+  'insights-overview': 'InsightsOverview',
+  'insights-readiness': 'InsightsReadiness',
+  'insights-reviews': 'InsightsReviews',
   'import': 'Import',
   'coding': 'Coding',
   'settings': 'Settings',
@@ -93,6 +99,9 @@ const tabToRouteMap = {
   Interview: '/interview',
   MockInterview: '/mock-interview',
   KnowledgeGraph: '/knowledge-graph',
+  InsightsOverview: '/insights/overview',
+  InsightsReadiness: '/insights/readiness',
+  InsightsReviews: '/insights/reviews',
   Import: '/import',
   Coding: '/coding',
   Settings: '/settings',
@@ -178,7 +187,9 @@ const sidebarGroups = computed(() => [
   {
     label: '洞察',
     tabs: [
-      { key: 'KnowledgeGraph', label: '知识图谱', route: '/knowledge-graph' },
+      { key: 'InsightsOverview', label: '总览', route: '/insights/overview' },
+      { key: 'InsightsReadiness', label: '岗位准备度', route: '/insights/readiness' },
+      { key: 'InsightsReviews', label: '面试复盘', route: '/insights/reviews' },
     ],
   },
 ])
@@ -194,6 +205,9 @@ const navIconMap = {
   JD: Filter,
   Interview: Library,
   KnowledgeGraph: Network,
+  InsightsOverview: LayoutDashboard,
+  InsightsReadiness: Target,
+  InsightsReviews: History,
 }
 
 const activeTabLabel = computed(() => {

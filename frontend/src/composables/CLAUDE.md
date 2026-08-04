@@ -11,6 +11,7 @@ Vue 3 Composition API 的可复用逻辑，`use*` 命名前缀。
 | `useBuildTrigger.js` | 题库重建/个人题库重建触发与 SSE 进度 |
 | `useHighlightNav.js` | 导航高亮 |
 | `useMasterBankData.js` | 题库/JD/面经/统计数据加载、筛选和分页 |
+| `useInsightsData.js` | 洞察快照加载、加载状态和错误状态 |
 | `useMergeDialog.js` | 合并弹窗逻辑 |
 | `useMotionPresets.js` | 动画预设 |
 | `useNotification.js` | 通知提示 |
