@@ -22,12 +22,7 @@ def _build_analytics_bank_filter(user: dict):
 
     uid = user["id"]
     from_clause, where_clause, params = build_bank_where_clause(uid, "all")
-    bank_prefix = "FROM question_bank qb"
-    join_clause = (
-        from_clause[len(bank_prefix) :].strip()
-        if from_clause.startswith(bank_prefix)
-        else from_clause
-    )
+    join_clause = from_clause.removeprefix("FROM question_bank qb ").strip()
     return join_clause, where_clause, params
 
 
@@ -133,6 +128,32 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
                     "attempt_count": r["attempt_count"],
                 }
 
+            # Flashcard reviews are the primary practice signal.  Keep legacy
+            # answer evaluations above for score history, then merge the
+            # per-question review state so a simple rating also counts as
+            # practiced.
+            for r in conn.execute(
+                "SELECT question_bank_id, MAX(last_score) AS last_score, review_count, "
+                "proficiency, state, next_review_at "
+                "FROM user_question_review WHERE user_id = ? GROUP BY question_bank_id",
+                [uid],
+            ).fetchall():
+                qid = r["question_bank_id"]
+                existing = practiced.get(qid, {})
+                practiced[qid] = {
+                    "best_score": max(
+                        int(existing.get("best_score") or 0),
+                        int(r["last_score"] or 0),
+                    ),
+                    "attempt_count": max(
+                        int(existing.get("attempt_count") or 0),
+                        int(r["review_count"] or 0),
+                    ),
+                    "proficiency": int(r["proficiency"] or 0),
+                    "review_state": r["state"] or "new",
+                    "next_review_at": r["next_review_at"],
+                }
+
             # Map practiced question_ids to their difficulty
             practiced_ids = list(practiced.keys())
             practiced_diff = {}
@@ -163,7 +184,7 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
                 day = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
                 rows = conn.execute(
                     "SELECT COUNT(*) as cnt, AVG(score) as avg_s "
-                    "FROM user_practice_history WHERE user_id = ? AND date(created_at) = ?",
+                    "FROM practice_review_events WHERE user_id = ? AND date(reviewed_at) = ?",
                     (uid, day),
                 ).fetchone()
                 daily_trend.append(
