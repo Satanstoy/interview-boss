@@ -163,9 +163,11 @@ class MCPAuthMiddleware:
             )
             return
         elif not MCP_ALLOW_ANONYMOUS:
-            status_code = 401 if MCP_API_KEY else 503
-            detail = "MCP account token required" if MCP_API_KEY else "MCP endpoint is not configured"
-            await _send_mcp_error(scope, receive, send, status_code, detail)
+            # Account-scoped MCP tokens are the primary authentication mode;
+            # the legacy global API key is optional.  Missing credentials are
+            # therefore an authentication failure, not an unconfigured
+            # endpoint, even when MCP_API_KEY is empty.
+            await _send_mcp_error(scope, receive, send, 401, "Bearer token required")
             return
 
         principal_token = set_mcp_principal(principal)

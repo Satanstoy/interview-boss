@@ -487,7 +487,7 @@ def test_mcp_endpoint_requires_api_key_when_configured(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_auth_middleware_fails_closed_when_not_configured(monkeypatch):
+async def test_mcp_auth_middleware_requires_bearer_token(monkeypatch):
     from app.mcp_server import app as mcp_app_module
 
     monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "")
@@ -506,7 +506,7 @@ async def test_mcp_auth_middleware_fails_closed_when_not_configured(monkeypatch)
     await middleware(scope, None, send)
 
     assert sent[0]["type"] == "http.response.start"
-    assert sent[0]["status"] == 503
+    assert sent[0]["status"] == 401
     assert not any(item[0] == "downstream" for item in sent if isinstance(item, tuple))
 
 
