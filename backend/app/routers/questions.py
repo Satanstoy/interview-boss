@@ -15,64 +15,18 @@ router = APIRouter()
 
 
 def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
-    """根据用户 bank_mode 和当前岗位构建查询子句
+    """根据用户 bank_mode 和当前岗位构建查询子句（兼容旧调用）。
 
-    Returns:
-        (from_clause, where_clause, params)
-        - from_clause: 含 question_position JOIN 的 FROM 子句
-        - where_clause: 含 bank_mode 过滤的 WHERE 子句
-        - params: 参数列表
+    Deprecated: 新代码使用 db.queries.build_bank_where_clause(user_id, filter)。
+    bank_mode 映射：public → 'public'，personal → 'mine'，mixed → 'all'。
     """
-    from app.db.connection import get_user_job_position
-
-    prefix = f"{table_alias}." if table_alias else ""
     mode = user.get("bank_mode", "public")
-    uid = user["id"]
-    pos_id, pos_name = get_user_job_position(uid)
+    filter_mode = {"public": "public", "personal": "mine", "mixed": "all"}.get(
+        mode, "all"
+    )
+    from app.db.queries import build_bank_where_clause
 
-    # 使用 question_position 关联表进行岗位过滤
-    from_clause = f"FROM question_bank {table_alias} JOIN question_position qp ON {prefix}id = qp.question_id AND qp.position_id = ?"
-    from_params = [pos_id] if pos_id else []
-
-    deleted_filter = f"{prefix}deleted_at IS NULL"
-
-    if not pos_id:
-        # fallback: 如果没有 position_id，用旧的 job_position 列
-        from_clause = f"FROM question_bank {table_alias}"
-        pos_fallback = pos_name
-        if mode == "personal":
-            return (
-                from_clause,
-                f"WHERE {prefix}owner_id = ? AND {deleted_filter} AND {prefix}job_position = ?",
-                [uid, pos_fallback],
-            )
-        elif mode == "mixed":
-            return (
-                from_clause,
-                f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {deleted_filter} AND {prefix}job_position = ?",
-                [uid, pos_fallback],
-            )
-        else:
-            return (
-                from_clause,
-                f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {deleted_filter} AND {prefix}job_position = ?",
-                [pos_fallback],
-            )
-
-    if mode == "personal":
-        return from_clause, f"WHERE {prefix}owner_id = ? AND {deleted_filter}", from_params + [uid]
-    elif mode == "mixed":
-        return (
-            from_clause,
-            f"WHERE (({prefix}owner_id IS NULL AND {prefix}status = 'approved') OR ({prefix}owner_id = ? AND {prefix}duplicate_of IS NULL)) AND {deleted_filter}",
-            from_params + [uid],
-        )
-    else:  # 'public'
-        return (
-            from_clause,
-            f"WHERE {prefix}owner_id IS NULL AND {prefix}status = 'approved' AND {deleted_filter}",
-            from_params,
-        )
+    return build_bank_where_clause(user["id"], filter_mode, table_alias)
 
 
 def _split_join_and_where_params(from_clause: str, params: list):
@@ -91,22 +45,31 @@ async def get_master_bank(
     compact: bool = Query(
         False, description="Return compact response without full text fields"
     ),
+    filter: str = Query(
+        "all",
+        pattern="^(all|public|mine)$",
+        description="题库过滤口径: all/public/mine",
+    ),
     user: dict = Depends(get_current_user),
 ):
-    bank_mode = user.get("bank_mode", "public")
-    dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user["id"])
+    filter_mode = filter
+    dyn_freq_sql = get_dynamic_frequency_sql(filter_mode, user["id"])
     order_clause = (
         f"ORDER BY ({dyn_freq_sql}) DESC" if sort != "recent" else "ORDER BY qb.id DESC"
     )
     offset = (page - 1) * page_size
-    from_clause, where_clause, params = _build_bank_where_clause(user)
+    from app.db.queries import build_bank_where_clause
+
+    from_clause, where_clause, params = build_bank_where_clause(user["id"], filter_mode)
 
     # Save original where_clause and params for popular_tags query (before cat1 filter)
     original_where_clause = where_clause
     original_params = list(params)
 
     if cat1 and cat1 != "全部":
-        where_clause = f"WHERE ({where_clause.removeprefix('WHERE ').strip()}) AND qb.cat1 LIKE ?"
+        where_clause = (
+            f"WHERE ({where_clause.removeprefix('WHERE ').strip()}) AND qb.cat1 LIKE ?"
+        )
         params = params + [f"%{cat1}%"]
     join_params, where_params = _split_join_and_where_params(from_clause, params)
 
@@ -117,7 +80,9 @@ async def get_master_bank(
             ).fetchone()[0]
             # 注意：JOIN 的 user_id 参数必须在 WHERE 的 params 之前
             full_sql = f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, qb.owner_id, qb.status, qb.job_position {from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?"
-            full_params = join_params + [user["id"]] + where_params + [page_size, offset]
+            full_params = (
+                join_params + [user["id"]] + where_params + [page_size, offset]
+            )
             rows = conn.execute(full_sql, full_params).fetchall()
             return total, rows
 
@@ -130,7 +95,7 @@ async def get_master_bank(
         with get_db_connection() as conn2:
             try:
                 return build_api_shapes_batch_filtered(
-                    conn2, qb_ids, bank_mode, user["id"]
+                    conn2, qb_ids, filter_mode, user["id"]
                 )
             except Exception:
                 return {}
@@ -282,7 +247,8 @@ async def search_master_bank(
     user: dict = Depends(get_current_user),
 ):
     """搜索题库（用于合并时选择目标题目）"""
-    from_clause, where_clause, params = _build_bank_where_clause(user)
+    from app.db.queries import build_bank_where_clause
+    from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
     conditions = []
     search_params = list(params)
 
@@ -299,8 +265,7 @@ async def search_master_bank(
         where_with_extra = where_clause
 
     def _query():
-        bank_mode = user.get("bank_mode", "public")
-        dyn_freq_sql = get_dynamic_frequency_sql(bank_mode, user["id"])
+        dyn_freq_sql = get_dynamic_frequency_sql("all", user["id"])
         with get_db_connection() as conn:
             rows = conn.execute(
                 f"SELECT qb.id, qb.question, ({dyn_freq_sql}) as frequency, qb.cat1, qb.cat2 {from_clause} {where_with_extra} ORDER BY ({dyn_freq_sql}) DESC LIMIT ?",
@@ -374,6 +339,17 @@ async def edit_question(
                 conn.execute(
                     "UPDATE questions_detail SET question = ? WHERE question = ?",
                     (updates["question"], row["question"]),
+                )
+
+            if {"question", "cat1", "cat2", "tags"} & set(updates):
+                from app.db.operations import _retype_distribution_details_txn
+
+                detail_rows = conn.execute(
+                    "SELECT id FROM questions_detail WHERE question IN (?, ?) AND deleted_at IS NULL",
+                    (row["question"], updates.get("question", row["question"])),
+                ).fetchall()
+                _retype_distribution_details_txn(
+                    conn.cursor(), [detail["id"] for detail in detail_rows]
                 )
 
             conn.commit()

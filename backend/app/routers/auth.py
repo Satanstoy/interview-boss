@@ -8,12 +8,22 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.core.auth import (
-    hash_password, verify_password, create_access_token, create_refresh_token,
-    create_email_bind_token, decode_email_bind_token,
-    decode_token, get_current_user, get_refresh_token,
-    store_refresh_token, get_refresh_token_jti, delete_refresh_token,
-    is_family_invalidated, invalidate_family,
-    REFRESH_TOKEN_EXPIRE_DAYS, REFRESH_TOKEN_REMEMBER_DAYS,
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    create_email_bind_token,
+    decode_email_bind_token,
+    decode_token,
+    get_current_user,
+    get_refresh_token,
+    store_refresh_token,
+    get_refresh_token_jti,
+    delete_refresh_token,
+    is_family_invalidated,
+    invalidate_family,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    REFRESH_TOKEN_REMEMBER_DAYS,
 )
 from app.db.connection import get_db_connection, run_db
 
@@ -31,7 +41,8 @@ LOCKOUT_DURATION = 900  # 15 分钟
 def _check_lockout(username: str):
     with get_db_connection() as conn:
         row = conn.execute(
-            "SELECT failure_count, locked_until FROM login_failures WHERE username = ?", (username,)
+            "SELECT failure_count, locked_until FROM login_failures WHERE username = ?",
+            (username,),
         ).fetchone()
         if not row:
             return
@@ -40,8 +51,7 @@ def _check_lockout(username: str):
     if entry.get("locked_until", 0) > now:
         remaining = int(entry["locked_until"] - now)
         raise HTTPException(
-            status_code=429,
-            detail=f"账号已被临时锁定，请 {remaining} 秒后重试"
+            status_code=429, detail=f"账号已被临时锁定，请 {remaining} 秒后重试"
         )
     # 锁定已过期，重置
     with get_db_connection() as conn:
@@ -56,19 +66,23 @@ def _record_failure(username: str):
         ).fetchone()
         if row:
             new_count = row["failure_count"] + 1
-            locked_until = time.time() + LOCKOUT_DURATION if new_count >= MAX_LOGIN_FAILURES else 0
+            locked_until = (
+                time.time() + LOCKOUT_DURATION if new_count >= MAX_LOGIN_FAILURES else 0
+            )
             conn.execute(
                 "UPDATE login_failures SET failure_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?",
-                (new_count, locked_until, username)
+                (new_count, locked_until, username),
             )
         else:
             conn.execute(
                 "INSERT INTO login_failures (username, failure_count, locked_until) VALUES (?, 1, 0)",
-                (username,)
+                (username,),
             )
         conn.commit()
     if row and row["failure_count"] + 1 >= MAX_LOGIN_FAILURES:
-        logger.warning(f"账号 '{username}' 连续失败 {row['failure_count'] + 1} 次，已锁定 {LOCKOUT_DURATION}s")
+        logger.warning(
+            f"账号 '{username}' 连续失败 {row['failure_count'] + 1} 次，已锁定 {LOCKOUT_DURATION}s"
+        )
 
 
 def _clear_failures(username: str):
@@ -90,13 +104,23 @@ def _require_custom_header(request: Request):
     raise HTTPException(status_code=403, detail="缺少必要的请求头，请通过前端发起请求")
 
 
-RESERVED_USERNAMES = {'admin', 'root', 'system', 'null', 'undefined', 'superuser', 'moderator', 'guest', 'test'}
+RESERVED_USERNAMES = {
+    "admin",
+    "root",
+    "system",
+    "null",
+    "undefined",
+    "superuser",
+    "moderator",
+    "guest",
+    "test",
+}
 
 
-_USERNAME_RE = re.compile(r'^[a-zA-Z0-9_一-鿿]{2,32}$')
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_一-鿿]{2,32}$")
 
 
-_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class RegisterRequest(BaseModel):
@@ -104,30 +128,34 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     email: str = Field(..., min_length=5, max_length=120)
 
-    @field_validator('username')
+    @field_validator("username")
     @classmethod
     def username_format(cls, v):
         if not _USERNAME_RE.match(v):
-            raise ValueError('用户名仅允许 2-32 个字母、数字、下划线或中文')
+            raise ValueError("用户名仅允许 2-32 个字母、数字、下划线或中文")
         return v
 
-    @field_validator('password')
+    @field_validator("password")
     @classmethod
     def password_complexity(cls, v):
         categories = 0
-        if any(c.isupper() for c in v): categories += 1
-        if any(c.islower() for c in v): categories += 1
-        if any(c.isdigit() for c in v): categories += 1
-        if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
+        if any(c.isupper() for c in v):
+            categories += 1
+        if any(c.islower() for c in v):
+            categories += 1
+        if any(c.isdigit() for c in v):
+            categories += 1
+        if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?/~`" for c in v):
+            categories += 1
         if categories < 2:
-            raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
+            raise ValueError("密码需包含大写字母、小写字母、数字、特殊字符中的至少两种")
         return v
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
 
@@ -137,14 +165,13 @@ class LoginRequest(BaseModel):
     remember_me: bool = False
 
 
-class BankMode(str, Enum):
-    public = "public"
-    personal = "personal"
-    mixed = "mixed"
+class ShareDefault(str, Enum):
+    share = "share"
+    private = "private"
 
 
-class BankModeRequest(BaseModel):
-    bank_mode: BankMode
+class ShareDefaultRequest(BaseModel):
+    share_default: ShareDefault
 
 
 def _is_secure(request: Request) -> bool:
@@ -155,7 +182,9 @@ def _is_secure(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
-def _set_refresh_cookie(response: Response, token: str, request: Request, remember: bool = False):
+def _set_refresh_cookie(
+    response: Response, token: str, request: Request, remember: bool = False
+):
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
     response.set_cookie(
         key="refresh_token",
@@ -169,33 +198,59 @@ def _set_refresh_cookie(response: Response, token: str, request: Request, rememb
 
 
 def _clear_refresh_cookie(response: Response, request: Request):
-    response.delete_cookie(key="refresh_token", path="/", httponly=True, secure=_is_secure(request), samesite="lax")
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        httponly=True,
+        secure=_is_secure(request),
+        samesite="lax",
+    )
 
 
-def _issue_token_pair(user: dict, response: Response, request: Request, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = "") -> dict:
+def _issue_token_pair(
+    user: dict,
+    response: Response,
+    request: Request,
+    remember: bool = False,
+    ip_address: str = "",
+    user_agent: str = "",
+    family_id: str = "",
+) -> dict:
     """签发 access + refresh token，设置 cookie，返回响应体"""
     import secrets
+
     days = REFRESH_TOKEN_REMEMBER_DAYS if remember else REFRESH_TOKEN_EXPIRE_DAYS
-    token_data = {"user_id": user['id'], "username": user['username']}
+    token_data = {"user_id": user["id"], "username": user["username"]}
     access_token = create_access_token(token_data)
     if not family_id:
         family_id = secrets.token_urlsafe(16)
-    refresh_token, jti = create_refresh_token(token_data, days=days, family_id=family_id)
-    store_refresh_token(user['id'], jti, days=days, remember=remember, ip_address=ip_address, user_agent=user_agent, family_id=family_id)
+    refresh_token, jti = create_refresh_token(
+        token_data, days=days, family_id=family_id
+    )
+    store_refresh_token(
+        user["id"],
+        jti,
+        days=days,
+        remember=remember,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        family_id=family_id,
+    )
     _set_refresh_cookie(response, refresh_token, request, remember=remember)
     # 获取用户真实当前岗位：个人岗位优先，其次 current_position_id，最后全局 fallback
     from app.db.connection import get_user_job_position
-    pos_id, pos_name = get_user_job_position(user['id'])
+
+    pos_id, pos_name = get_user_job_position(user["id"])
     return {
         "token": access_token,
         "user": {
-            "id": user['id'],
-            "username": user['username'],
-            "is_admin": bool(user.get('is_admin', False)),
-            "bank_mode": user.get('bank_mode', 'public') or 'public',
+            "id": user["id"],
+            "username": user["username"],
+            "is_admin": bool(user.get("is_admin", False)),
+            "share_default": user.get("share_default", "private") or "private",
             "current_position_id": pos_id,
-            "current_position": pos_name
-        }
+            "current_position": pos_name,
+        },
     }
 
 
@@ -207,16 +262,20 @@ async def register(request: Request, req: RegisterRequest, response: Response):
 
     def _create():
         with get_db_connection() as conn:
-            existing = conn.execute("SELECT id FROM users WHERE username = ?", (req.username,)).fetchone()
+            existing = conn.execute(
+                "SELECT id FROM users WHERE username = ?", (req.username,)
+            ).fetchone()
             if existing:
                 raise HTTPException(status_code=409, detail="用户名已存在")
-            email_taken = conn.execute("SELECT id FROM users WHERE email = ?", (req.email,)).fetchone()
+            email_taken = conn.execute(
+                "SELECT id FROM users WHERE email = ?", (req.email,)
+            ).fetchone()
             if email_taken:
                 raise HTTPException(status_code=409, detail="该邮箱已被注册")
             password_hash = hash_password(req.password)
             cursor = conn.execute(
-                "INSERT INTO users (username, password_hash, email, is_admin, bank_mode) VALUES (?, ?, ?, 0, 'public')",
-                (req.username, password_hash, req.email)
+                "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
+                (req.username, password_hash, req.email),
             )
             conn.commit()
             return cursor.lastrowid
@@ -230,10 +289,17 @@ async def register(request: Request, req: RegisterRequest, response: Response):
         raise HTTPException(status_code=500, detail="注册失败")
 
     return _issue_token_pair(
-        {"id": user_id, "username": req.username, "is_admin": False, "bank_mode": "public"},
-        response, request, remember=False,
+        {
+            "id": user_id,
+            "username": req.username,
+            "is_admin": False,
+            "share_default": "private",
+        },
+        response,
+        request,
+        remember=False,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
     )
 
 
@@ -245,42 +311,52 @@ async def login(request: Request, req: LoginRequest, response: Response):
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id, email FROM users WHERE username = ?",
-                (req.username,)
+                "SELECT id, username, password_hash, is_admin, share_default, current_position_id, email FROM users WHERE username = ?",
+                (req.username,),
             ).fetchone()
 
     user = await run_db(_query)
     if not user:
         # Dummy bcrypt to prevent timing oracle (user enumeration)
-        verify_password(req.password, "$2b$12$eiMGPX1FDYPSJnrbi.E9Ee6eXtF/sNWWAxyCmK5Al2yYy4/wj0QAm")
+        verify_password(
+            req.password, "$2b$12$eiMGPX1FDYPSJnrbi.E9Ee6eXtF/sNWWAxyCmK5Al2yYy4/wj0QAm"
+        )
         _record_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
-    if not verify_password(req.password, user['password_hash']):
+    if not verify_password(req.password, user["password_hash"]):
         _record_failure(req.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     _clear_failures(req.username)
 
     # 未绑定邮箱的老用户：返回临时 token，要求绑定邮箱
-    if not user['email']:
-        temp_token = create_email_bind_token(user['id'], user['username'])
+    if not user["email"]:
+        temp_token = create_email_bind_token(user["id"], user["username"])
         return {
             "need_email_bind": True,
             "temp_token": temp_token,
             "message": "请先绑定邮箱后再使用系统",
-            "user": {"id": user['id'], "username": user['username']}
+            "user": {"id": user["id"], "username": user["username"]},
         }
 
     return _issue_token_pair(
-        dict(user), response, request, remember=req.remember_me,
+        dict(user),
+        response,
+        request,
+        remember=req.remember_me,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
     )
 
 
 @router.post("/refresh")
 @limiter.limit("30/minute")
-async def refresh_token(request: Request, response: Response, _csrf: None = Depends(_require_custom_header), rt: str = Depends(get_refresh_token)):
+async def refresh_token(
+    request: Request,
+    response: Response,
+    _csrf: None = Depends(_require_custom_header),
+    rt: str = Depends(get_refresh_token),
+):
     """
     用 HttpOnly cookie 中的 refresh token 换取新 token pair。
     不依赖 access token（页面刷新后 access token 已在内存中丢失，但 cookie 仍有效）。
@@ -303,32 +379,37 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
         raise HTTPException(status_code=401, detail="token 已失效，请重新登录")
 
     record = get_refresh_token_jti(jti)
-    if not record or record['user_id'] != user_id:
+    if not record or record["user_id"] != user_id:
         # JTI 不在数据库中 — 可能是重放攻击
         if family_id:
             invalidate_family(family_id)
-            logger.warning(f"检测到可能的 token 重放攻击: user_id={user_id}, family_id={family_id}")
+            logger.warning(
+                f"检测到可能的 token 重放攻击: user_id={user_id}, family_id={family_id}"
+            )
         _clear_refresh_cookie(response, request)
         raise HTTPException(status_code=401, detail="refresh token 已失效，请重新登录")
 
-    remember = bool(record.get('remember', 0))
+    remember = bool(record.get("remember", 0))
     # 使用已有的 family_id（如果 DB 中有则优先用 DB 中的）
-    db_family_id = record.get('family_id', '') or family_id
+    db_family_id = record.get("family_id", "") or family_id
 
     # B2: IP/UA 异常检测 — 记录安全日志但不阻断（避免误伤移动用户）
     current_ip = request.client.host if request.client else ""
     current_ua = request.headers.get("user-agent", "")
-    stored_ip = record.get('ip_address', '')
-    stored_ua = record.get('user_agent', '')
+    stored_ip = record.get("ip_address", "")
+    stored_ua = record.get("user_agent", "")
     if stored_ip and current_ip and stored_ip != current_ip:
-        logger.warning(f"Refresh Token IP 不一致: user_id={user_id}, 存储IP={stored_ip}, 当前IP={current_ip}")
+        logger.warning(
+            f"Refresh Token IP 不一致: user_id={user_id}, 存储IP={stored_ip}, 当前IP={current_ip}"
+        )
     if stored_ua and current_ua and stored_ua != current_ua:
         logger.warning(f"Refresh Token UA 不一致: user_id={user_id}")
 
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE id = ?", (user_id,)
+                "SELECT id, username, is_admin, share_default, current_position_id FROM users WHERE id = ?",
+                (user_id,),
             ).fetchone()
 
     user = await run_db(_query)
@@ -337,15 +418,20 @@ async def refresh_token(request: Request, response: Response, _csrf: None = Depe
 
     delete_refresh_token(jti)
     return _issue_token_pair(
-        dict(user), response, request, remember=remember,
+        dict(user),
+        response,
+        request,
+        remember=remember,
         ip_address=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", ""),
-        family_id=db_family_id
+        family_id=db_family_id,
     )
 
 
 @router.post("/logout")
-async def logout(request: Request, response: Response, _csrf: None = Depends(_require_custom_header)):
+async def logout(
+    request: Request, response: Response, _csrf: None = Depends(_require_custom_header)
+):
     """注销：删除 refresh token，清除 cookie。幂等：无 cookie 也返回成功。"""
     rt = request.cookies.get("refresh_token")
     if rt:
@@ -369,15 +455,22 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
-@router.put("/bank-mode")
-async def update_bank_mode(req: BankModeRequest, current_user: dict = Depends(get_current_user)):
+@router.put("/share-default")
+async def update_share_default(
+    req: ShareDefaultRequest, current_user: dict = Depends(get_current_user)
+):
+    """更新用户导入分享默认值（share=分享到公共题库 / private=仅自己可见）"""
+
     def _update():
         with get_db_connection() as conn:
-            conn.execute("UPDATE users SET bank_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (req.bank_mode.value, current_user['id']))
+            conn.execute(
+                "UPDATE users SET share_default = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (req.share_default.value, current_user["id"]),
+            )
             conn.commit()
 
     await run_db(_update)
-    return {"status": "success", "bank_mode": req.bank_mode.value}
+    return {"status": "success", "share_default": req.share_default.value}
 
 
 @router.post("/login-form")
@@ -398,11 +491,11 @@ async def login_form(
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, username, password_hash FROM users WHERE username = ?",
-                (username,)
+                (username,),
             ).fetchone()
 
     user = await run_db(_query)
-    if not user or not verify_password(password, user['password_hash']):
+    if not user or not verify_password(password, user["password_hash"]):
         _record_failure(username)
         # 仍然返回 200 触发密码管理器，但失败计数已记录，超过阈值后 /login 会返回 429
         return HTMLResponse(content="<html><body>ok</body></html>")
@@ -418,24 +511,28 @@ from app.services.email_service import send_verification_code, verify_code
 
 def _validate_password_complexity(v: str) -> str:
     categories = 0
-    if any(c.isupper() for c in v): categories += 1
-    if any(c.islower() for c in v): categories += 1
-    if any(c.isdigit() for c in v): categories += 1
-    if any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in v): categories += 1
+    if any(c.isupper() for c in v):
+        categories += 1
+    if any(c.islower() for c in v):
+        categories += 1
+    if any(c.isdigit() for c in v):
+        categories += 1
+    if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?/~`" for c in v):
+        categories += 1
     if categories < 2:
-        raise ValueError('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种')
+        raise ValueError("密码需包含大写字母、小写字母、数字、特殊字符中的至少两种")
     return v
 
 
 class SendCodeRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
-    purpose: str = Field(..., pattern=r'^(register|login|bind|reset_password)$')
+    purpose: str = Field(..., pattern=r"^(register|login|bind|reset_password)$")
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
 
@@ -445,23 +542,23 @@ class EmailRegisterRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=32)
     password: str = Field(..., min_length=8, max_length=128)
 
-    @field_validator('username')
+    @field_validator("username")
     @classmethod
     def username_format(cls, v):
         if not _USERNAME_RE.match(v):
-            raise ValueError('用户名仅允许 2-32 个字母、数字、下划线或中文')
+            raise ValueError("用户名仅允许 2-32 个字母、数字、下划线或中文")
         return v
 
-    @field_validator('password')
+    @field_validator("password")
     @classmethod
     def password_complexity(cls, v):
         return _validate_password_complexity(v)
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
 
@@ -469,11 +566,11 @@ class EmailLoginRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
     code: str = Field(..., min_length=6, max_length=6)
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
 
@@ -482,14 +579,14 @@ class PasswordResetRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=8, max_length=128)
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
-    @field_validator('new_password')
+    @field_validator("new_password")
     @classmethod
     def password_complexity(cls, v):
         return _validate_password_complexity(v)
@@ -499,7 +596,7 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128)
     new_password: str = Field(..., min_length=8, max_length=128)
 
-    @field_validator('new_password')
+    @field_validator("new_password")
     @classmethod
     def password_complexity(cls, v):
         return _validate_password_complexity(v)
@@ -508,21 +605,29 @@ class ChangePasswordRequest(BaseModel):
 def _check_username_available(username: str) -> bool:
     """检查用户名是否可用"""
     with get_db_connection() as conn:
-        return conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone() is None
+        return (
+            conn.execute(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            ).fetchone()
+            is None
+        )
 
 
 def _check_email_exists(email: str) -> bool:
     """检查邮箱是否已被注册"""
     with get_db_connection() as conn:
-        return conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone() is not None
+        return (
+            conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+            is not None
+        )
 
 
 def _find_user_by_email(email: str):
     """通过邮箱查找用户"""
     with get_db_connection() as conn:
         return conn.execute(
-            "SELECT id, username, password_hash, is_admin, bank_mode, current_position_id FROM users WHERE email = ?",
-            (email,)
+            "SELECT id, username, password_hash, is_admin, share_default, current_position_id FROM users WHERE email = ?",
+            (email,),
         ).fetchone()
 
 
@@ -530,11 +635,16 @@ def _insert_user(username: str, password_hash: str, email: str) -> dict:
     """创建新用户"""
     with get_db_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO users (username, password_hash, email, is_admin, bank_mode) VALUES (?, ?, ?, 0, 'public')",
-            (username, password_hash, email)
+            "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
+            (username, password_hash, email),
         )
         conn.commit()
-        return {"id": cursor.lastrowid, "username": username, "is_admin": False, "bank_mode": "public"}
+        return {
+            "id": cursor.lastrowid,
+            "username": username,
+            "is_admin": False,
+            "share_default": "private",
+        }
 
 
 @router.post("/send-code")
@@ -550,7 +660,9 @@ async def send_code(request: Request, req: SendCodeRequest):
 
 @router.post("/register-with-email")
 @limiter.limit("5/minute")
-async def register_with_email(request: Request, req: EmailRegisterRequest, response: Response):
+async def register_with_email(
+    request: Request, req: EmailRegisterRequest, response: Response
+):
     """邮箱验证码注册"""
     # 校验验证码
     valid = await verify_code(req.email, req.code, "register")
@@ -572,15 +684,20 @@ async def register_with_email(request: Request, req: EmailRegisterRequest, respo
     user = _insert_user(req.username, password_hash, req.email)
 
     return _issue_token_pair(
-        user, response, request, remember=False,
+        user,
+        response,
+        request,
+        remember=False,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
     )
 
 
 @router.post("/login-with-email")
 @limiter.limit("10/minute")
-async def login_with_email(request: Request, req: EmailLoginRequest, response: Response):
+async def login_with_email(
+    request: Request, req: EmailLoginRequest, response: Response
+):
     """邮箱验证码登录"""
     # 校验验证码
     valid = await verify_code(req.email, req.code, "login")
@@ -593,9 +710,12 @@ async def login_with_email(request: Request, req: EmailLoginRequest, response: R
         raise HTTPException(status_code=404, detail="该邮箱未注册")
 
     return _issue_token_pair(
-        dict(user), response, request, remember=False,
+        dict(user),
+        response,
+        request,
+        remember=False,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
     )
 
 
@@ -617,7 +737,7 @@ async def reset_password(request: Request, req: PasswordResetRequest):
         with get_db_connection() as conn:
             conn.execute(
                 "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (password_hash, user["id"])
+                (password_hash, user["id"]),
             )
             conn.commit()
 
@@ -628,13 +748,18 @@ async def reset_password(request: Request, req: PasswordResetRequest):
 
 @router.post("/change-password")
 @limiter.limit("10/minute")
-async def change_password(request: Request, req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+async def change_password(
+    request: Request,
+    req: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """已登录用户修改密码。"""
+
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, username, password_hash FROM users WHERE id = ?",
-                (current_user["id"],)
+                (current_user["id"],),
             ).fetchone()
 
     user = await run_db(_query)
@@ -651,7 +776,7 @@ async def change_password(request: Request, req: ChangePasswordRequest, current_
         with get_db_connection() as conn:
             conn.execute(
                 "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (password_hash, user["id"])
+                (password_hash, user["id"]),
             )
             conn.commit()
 
@@ -666,17 +791,22 @@ class BindEmailWithTokenRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
     code: str = Field(..., min_length=6, max_length=6)
 
-    @field_validator('email')
+    @field_validator("email")
     @classmethod
     def email_format(cls, v):
         if not _EMAIL_RE.match(v):
-            raise ValueError('请输入有效的邮箱地址')
+            raise ValueError("请输入有效的邮箱地址")
         return v.lower().strip()
 
 
 @router.post("/bind-email-with-token")
 @limiter.limit("5/minute")
-async def bind_email_with_token(request: Request, req: BindEmailWithTokenRequest, response: Response, temp_token: str = ""):
+async def bind_email_with_token(
+    request: Request,
+    req: BindEmailWithTokenRequest,
+    response: Response,
+    temp_token: str = "",
+):
     """用临时 token + 验证码绑定邮箱，成功后返回正式 token pair"""
     # 从 header 或 query 参数获取临时 token
     if not temp_token:
@@ -699,15 +829,24 @@ async def bind_email_with_token(request: Request, req: BindEmailWithTokenRequest
 
     # 检查邮箱是否已被其他用户占用
     with get_db_connection() as conn:
-        existing = conn.execute("SELECT id FROM users WHERE email = ? AND id != ?", (req.email, user_id)).fetchone()
+        existing = conn.execute(
+            "SELECT id FROM users WHERE email = ? AND id != ?", (req.email, user_id)
+        ).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="该邮箱已被其他用户绑定")
         conn.execute("UPDATE users SET email = ? WHERE id = ?", (req.email, user_id))
         conn.commit()
 
     return _issue_token_pair(
-        {"id": user_id, "username": username, "is_admin": False, "bank_mode": "public"},
-        response, request, remember=False,
+        {
+            "id": user_id,
+            "username": username,
+            "is_admin": False,
+            "share_default": "private",
+        },
+        response,
+        request,
+        remember=False,
         ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", "")
+        user_agent=request.headers.get("user-agent", ""),
     )

@@ -222,7 +222,7 @@ class TestGetMasterBankUserAnswerFields:
                 },
             ]
 
-            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, user=user)
+            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, filter="all", user=user)
             item = result["items"][0]
             assert item["has_reference_answer"] is True
             assert item["user_answer"] == "用户的个人答案"
@@ -265,7 +265,7 @@ class TestGetMasterBankUserAnswerFields:
                 },
             ]
 
-            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, user=user)
+            result = await get_master_bank(sort="frequency_desc", page=1, page_size=50, compact=False, filter="all", user=user)
             item = result["items"][0]
             assert item["has_reference_answer"] is False
             assert item["user_answer"] == ""

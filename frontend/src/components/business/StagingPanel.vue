@@ -50,7 +50,7 @@ const submitSuccess = ref(false)
 const importConfig = reactive({
   type: 'auto',
   season: props.activeSeason || '2027届暑期实习',
-  target: 'personal',
+  target: 'private',
 })
 
 const seasonOptions = computed(() => {
@@ -187,7 +187,7 @@ async function onSubmit() {
     formData.append('url', sourceUrl.value.trim())
     formData.append('text', rawText.value.slice(0, TEXT_MAX_LENGTH))
     formData.append('season', importConfig.season || props.activeSeason || '2027届暑期实习')
-    formData.append('target', props.isAdmin ? importConfig.target : 'personal')
+    formData.append('target', importConfig.target)
 
     if (importConfig.type !== 'auto') {
       formData.append('content_type', importConfig.type)
@@ -389,15 +389,15 @@ defineExpose({ onSubmit, isSubmitting })
           </Select>
         </div>
 
-        <div v-if="props.isAdmin" class="space-y-1.5">
-          <Label class="text-xs font-medium text-muted-foreground">提交到</Label>
+        <div class="space-y-1.5">
+          <Label class="text-xs font-medium text-muted-foreground">分享设置</Label>
           <Select v-model="importConfig.target" :disabled="isSubmitting">
-            <SelectTrigger class="h-9 w-[110px] text-sm">
+            <SelectTrigger class="h-9 w-[140px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="personal">个人题库</SelectItem>
-              <SelectItem value="public">公共题库</SelectItem>
+              <SelectItem value="share">分享到公共题库</SelectItem>
+              <SelectItem value="private">仅自己可见</SelectItem>
             </SelectContent>
           </Select>
         </div>

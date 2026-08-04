@@ -6,7 +6,7 @@ const API = '/api'
 export const authRegister = (username, password, email) => post(`${API}/auth/register`, { username, password, email })
 export const authLogin = (username, password, remember_me = false) => post(`${API}/auth/login`, { username, password, remember_me })
 export const authMe = () => get(`${API}/auth/me`)
-export const authUpdateBankMode = (bank_mode) => put(`${API}/auth/bank-mode`, { bank_mode })
+export const authUpdateShareDefault = (shareDefault) => put(`${API}/auth/share-default`, { share_default: shareDefault })
 export const authRefresh = () => post(`${API}/auth/refresh`, null)
 export const authLogout = async () => {
   const controller = new AbortController()

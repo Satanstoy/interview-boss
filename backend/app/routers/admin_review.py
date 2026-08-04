@@ -1,6 +1,6 @@
 import json
 import logging
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api/master-bank")
 @router.get("/analysis-status")
 async def analysis_status(user: dict = Depends(get_admin_user)):
     """检查面经分析完整性：返回已分析和未分析的面经数量及详情。"""
+
     def _check():
         with get_db_connection() as conn:
             # 已分析：有 detail 记录的面经
@@ -26,14 +27,24 @@ async def analysis_status(user: dict = Depends(get_admin_user)):
             return {
                 "analyzed_count": len(analyzed),
                 "unanalyzed_count": len(unanalyzed),
-                "unanalyzed": [{"id": r['id'], "company": r['company'], "round": r['round'], "has_content": (r['ql_len'] or 0) > 10} for r in unanalyzed]
+                "unanalyzed": [
+                    {
+                        "id": r["id"],
+                        "company": r["company"],
+                        "round": r["round"],
+                        "has_content": (r["ql_len"] or 0) > 10,
+                    }
+                    for r in unanalyzed
+                ],
             }
+
     return await run_db(_check)
 
 
 @router.get("/pending")
 async def get_pending_questions(admin: dict = Depends(get_admin_user)):
     """获取待审核题目列表"""
+
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
@@ -47,35 +58,78 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
     return {"items": items, "total": len(items)}
 
 
+def _approve_cleanup_private_copy(conn, pending_id: int) -> None:
+    """审核批准后清理：删除分享者同题的私有副本（分享时保留的）。
+
+    匹配条件：owner_id = pending.submitted_by 且归一化文本相同。
+    """
+    pending = conn.execute(
+        "SELECT id, question, submitted_by FROM question_bank WHERE id = ?",
+        (pending_id,),
+    ).fetchone()
+    if not pending or not pending["submitted_by"]:
+        return
+    from app.routers.questions_pkg.share import _normalize_question_text
+
+    target_norm = _normalize_question_text(pending["question"])
+    if not target_norm:
+        return
+    rows = conn.execute(
+        "SELECT id, question FROM question_bank "
+        "WHERE owner_id = ? AND deleted_at IS NULL",
+        (pending["submitted_by"],),
+    ).fetchall()
+    for r in rows:
+        if _normalize_question_text(r["question"]) == target_norm:
+            conn.execute(
+                "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (r["id"],),
+            )
+            break
+
+
 @router.post("/approve/{question_id}")
-async def approve_question(question_id: int, admin: dict = Depends(get_admin_user), bg_tasks: BackgroundTasks = None):
-    """审核通过题目"""
+async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
+    """审核通过题目（批准后清理分享者的私有副本，duplicate_of 镜像机制已废除）"""
+
     def _approve():
         with get_db_connection() as conn:
-            row = conn.execute("SELECT id, status, cat2, job_position FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
+            row = conn.execute(
+                "SELECT id, status, cat2, job_position, submitted_by FROM question_bank WHERE id = ? AND owner_id IS NULL",
+                (question_id,),
+            ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该待审核题目")
-            conn.execute("UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
+            conn.execute(
+                "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (question_id,),
+            )
+            # 分享链路：批准后删除分享者保留的私有副本
+            if row["submitted_by"]:
+                _approve_cleanup_private_copy(conn, question_id)
             conn.commit()
             return dict(row)
 
     question = await run_db(_approve)
-    # 异步反向扫描：标记个人题库中的语义重复
-    if bg_tasks and question.get('cat2'):
-        from app.services.clustering import scan_personal_duplicates
-        bg_tasks.add_task(scan_personal_duplicates, question_id, question['cat2'], question.get('job_position', ''))
     return {"status": "success", "message": "已通过审核"}
 
 
 @router.post("/reject/{question_id}")
 async def reject_question(question_id: int, admin: dict = Depends(get_admin_user)):
     """拒绝题目"""
+
     def _reject():
         with get_db_connection() as conn:
-            row = conn.execute("SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL", (question_id,)).fetchone()
+            row = conn.execute(
+                "SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL",
+                (question_id,),
+            ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该待审核题目")
-            conn.execute("UPDATE question_bank SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
+            conn.execute(
+                "UPDATE question_bank SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (question_id,),
+            )
             conn.commit()
 
     await run_db(_reject)
@@ -84,13 +138,17 @@ async def reject_question(question_id: int, admin: dict = Depends(get_admin_user
 
 # ──────────────────────────── 合并历史与回滚 API ────────────────────────────
 
+
 @router.get("/merge-history")
 async def get_merge_history(
-    limit: int = 50, offset: int = 0,
-    cat2: str = None, is_rolled_back: int = None,
-    admin: dict = Depends(get_admin_user)
+    limit: int = 50,
+    offset: int = 0,
+    cat2: str = None,
+    is_rolled_back: int = None,
+    admin: dict = Depends(get_admin_user),
 ):
     """获取合并历史列表（管理员）"""
+
     def _query():
         with get_db_connection() as conn:
             where = ["1=1"]
@@ -114,25 +172,24 @@ async def get_merge_history(
                 f"LEFT JOIN users u ON mh.operator_id = u.id "
                 f"WHERE {where_clause} "
                 f"ORDER BY mh.created_at DESC LIMIT ? OFFSET ?",
-                params + [limit, offset]
+                params + [limit, offset],
             ).fetchall()
 
             total = conn.execute(
-                f"SELECT COUNT(*) FROM merge_history mh WHERE {where_clause}",
-                params
+                f"SELECT COUNT(*) FROM merge_history mh WHERE {where_clause}", params
             ).fetchone()[0]
 
             items = []
             for r in rows:
                 item = dict(r)
                 try:
-                    item['merged_ids'] = json.loads(item['merged_ids'])
+                    item["merged_ids"] = json.loads(item["merged_ids"])
                 except Exception:
-                    item['merged_ids'] = []
+                    item["merged_ids"] = []
                 try:
-                    item['merged_questions'] = json.loads(item['merged_questions'])
+                    item["merged_questions"] = json.loads(item["merged_questions"])
                 except Exception:
-                    item['merged_questions'] = []
+                    item["merged_questions"] = []
                 items.append(item)
 
             return {"items": items, "total": total}
@@ -141,8 +198,11 @@ async def get_merge_history(
 
 
 @router.get("/merge-history/{history_id}")
-async def get_merge_history_detail(history_id: int, admin: dict = Depends(get_admin_user)):
+async def get_merge_history_detail(
+    history_id: int, admin: dict = Depends(get_admin_user)
+):
     """获取单条合并历史详情（含前后快照）"""
+
     def _query():
         with get_db_connection() as conn:
             row = conn.execute(
@@ -153,14 +213,24 @@ async def get_merge_history_detail(history_id: int, admin: dict = Depends(get_ad
                 "LEFT JOIN question_bank qb ON mh.survivor_id = qb.id "
                 "LEFT JOIN users u ON mh.operator_id = u.id "
                 "LEFT JOIN users rb ON mh.rolled_back_by = rb.id "
-                "WHERE mh.id = ?", (history_id,)
+                "WHERE mh.id = ?",
+                (history_id,),
             ).fetchone()
             if not row:
                 return None
             item = dict(row)
-            for field in ['merged_ids', 'merged_questions', 'pre_snapshot', 'post_snapshot']:
+            for field in [
+                "merged_ids",
+                "merged_questions",
+                "pre_snapshot",
+                "post_snapshot",
+            ]:
                 try:
-                    item[field] = json.loads(item[field]) if item[field] else ([] if 'merged' in field else {})
+                    item[field] = (
+                        json.loads(item[field])
+                        if item[field]
+                        else ([] if "merged" in field else {})
+                    )
                 except Exception:
                     pass
             return item
@@ -177,6 +247,7 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
 
     从 pre_snapshot 恢复 survivor 题目，并重建被合并删除的题目。
     """
+
     def _rollback():
         with get_db_connection() as conn:
             # 获取合并历史
@@ -185,16 +256,18 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
             ).fetchone()
             if not mh:
                 raise HTTPException(status_code=404, detail="未找到该合并记录")
-            if mh['is_rolled_back']:
+            if mh["is_rolled_back"]:
                 raise HTTPException(status_code=400, detail="该合并已经回滚过了")
 
-            pre_snapshot = json.loads(mh['pre_snapshot']) if mh['pre_snapshot'] else {}
-            merged_ids = json.loads(mh['merged_ids']) if mh['merged_ids'] else []
-            merged_questions = json.loads(mh['merged_questions']) if mh['merged_questions'] else []
+            pre_snapshot = json.loads(mh["pre_snapshot"]) if mh["pre_snapshot"] else {}
+            merged_ids = json.loads(mh["merged_ids"]) if mh["merged_ids"] else []
+            merged_questions = (
+                json.loads(mh["merged_questions"]) if mh["merged_questions"] else []
+            )
 
             conn.execute("BEGIN")
             try:
-                survivor_id = mh['survivor_id']
+                survivor_id = mh["survivor_id"]
 
                 # 恢复 survivor 到合并前状态
                 if pre_snapshot:
@@ -207,25 +280,25 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                         "updated_at = CURRENT_TIMESTAMP "
                         "WHERE id = ?",
                         (
-                            pre_snapshot.get('question', ''),
-                            pre_snapshot.get('cat1', ''),
-                            pre_snapshot.get('cat2', ''),
-                            pre_snapshot.get('tags', ''),
-                            pre_snapshot.get('difficulty', ''),
-                            pre_snapshot.get('frequency', 1),
-                            pre_snapshot.get('ai_answer', ''),
-                            pre_snapshot.get('sources', '[]'),
-                            pre_snapshot.get('original_questions', '[]'),
-                            pre_snapshot.get('original_question_sources', '[]'),
-                            pre_snapshot.get('status', 'approved'),
-                            pre_snapshot.get('job_position', ''),
+                            pre_snapshot.get("question", ""),
+                            pre_snapshot.get("cat1", ""),
+                            pre_snapshot.get("cat2", ""),
+                            pre_snapshot.get("tags", ""),
+                            pre_snapshot.get("difficulty", ""),
+                            pre_snapshot.get("frequency", 1),
+                            pre_snapshot.get("ai_answer", ""),
+                            pre_snapshot.get("sources", "[]"),
+                            pre_snapshot.get("original_questions", "[]"),
+                            pre_snapshot.get("original_question_sources", "[]"),
+                            pre_snapshot.get("status", "approved"),
+                            pre_snapshot.get("job_position", ""),
                             survivor_id,
-                        )
+                        ),
                     )
 
                 # 重建被合并删除的题目（简化版：创建为 frequency=1 的独立题）
                 for i, mid in enumerate(merged_ids):
-                    q_text = merged_questions[i] if i < len(merged_questions) else ''
+                    q_text = merged_questions[i] if i < len(merged_questions) else ""
                     # 检查该 ID 是否已被重建
                     existing = conn.execute(
                         "SELECT id FROM question_bank WHERE id = ?", (mid,)
@@ -238,10 +311,13 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                             "job_position, created_at, updated_at) "
                             "VALUES (?, ?, ?, ?, 1, 'approved', '[]', '[]', '[]', ?, "
                             "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                            (mid, q_text,
-                             pre_snapshot.get('cat1', ''),
-                             pre_snapshot.get('cat2', ''),
-                             pre_snapshot.get('job_position', ''))
+                            (
+                                mid,
+                                q_text,
+                                pre_snapshot.get("cat1", ""),
+                                pre_snapshot.get("cat2", ""),
+                                pre_snapshot.get("job_position", ""),
+                            ),
                         )
 
                 # 标记已回滚
@@ -249,12 +325,14 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                     "UPDATE merge_history SET is_rolled_back = 1, "
                     "rolled_back_at = CURRENT_TIMESTAMP, rolled_back_by = ? "
                     "WHERE id = ?",
-                    (admin['id'], history_id)
+                    (admin["id"], history_id),
                 )
 
                 conn.execute("COMMIT")
-                logger.info(f"[回滚] merge_history#{history_id} 已回滚, "
-                            f"恢复 survivor={survivor_id}, 重建={merged_ids}")
+                logger.info(
+                    f"[回滚] merge_history#{history_id} 已回滚, "
+                    f"恢复 survivor={survivor_id}, 重建={merged_ids}"
+                )
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
@@ -286,7 +364,10 @@ async def submit_merge_feedback(
         comment: 附加说明
     """
     if feedback_type not in ("wrong_merge", "correct_merge", "other"):
-        raise HTTPException(status_code=400, detail="feedback_type 必须为 wrong_merge/correct_merge/other")
+        raise HTTPException(
+            status_code=400,
+            detail="feedback_type 必须为 wrong_merge/correct_merge/other",
+        )
 
     def _insert():
         with get_db_connection() as conn:
@@ -294,19 +375,28 @@ async def submit_merge_feedback(
                 "INSERT INTO merge_feedback "
                 "(merge_history_id, question_bank_id, feedback_type, comment, user_id) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (merge_history_id, question_bank_id, feedback_type, comment, admin['id'])
+                (
+                    merge_history_id,
+                    question_bank_id,
+                    feedback_type,
+                    comment,
+                    admin["id"],
+                ),
             )
             conn.commit()
 
     await run_db(_insert)
-    logger.info(f"[反馈] admin={admin['id']}, type={feedback_type}, "
-                f"merge_history={merge_history_id}, qb={question_bank_id}")
+    logger.info(
+        f"[反馈] admin={admin['id']}, type={feedback_type}, "
+        f"merge_history={merge_history_id}, qb={question_bank_id}"
+    )
     return {"status": "success", "message": "反馈已记录"}
 
 
 @router.get("/merge-stats")
 async def get_merge_stats(admin: dict = Depends(get_admin_user)):
     """获取合并统计信息（管理员）"""
+
     def _query():
         with get_db_connection() as conn:
             total = conn.execute("SELECT COUNT(*) FROM merge_history").fetchone()[0]
@@ -330,21 +420,35 @@ async def get_merge_stats(admin: dict = Depends(get_admin_user)):
             ).fetchall()
 
             wrong_merges = next(
-                (r['cnt'] for r in feedback_stats if r['feedback_type'] == 'wrong_merge'), 0
+                (
+                    r["cnt"]
+                    for r in feedback_stats
+                    if r["feedback_type"] == "wrong_merge"
+                ),
+                0,
             )
             correct_merges = next(
-                (r['cnt'] for r in feedback_stats if r['feedback_type'] == 'correct_merge'), 0
+                (
+                    r["cnt"]
+                    for r in feedback_stats
+                    if r["feedback_type"] == "correct_merge"
+                ),
+                0,
             )
             feedback_total = wrong_merges + correct_merges
-            wrong_rate = (wrong_merges / feedback_total * 100) if feedback_total > 0 else 0
+            wrong_rate = (
+                (wrong_merges / feedback_total * 100) if feedback_total > 0 else 0
+            )
 
             return {
                 "total_merges": total,
                 "rolled_back": rolled_back,
-                "rollback_rate": round(rolled_back / total * 100, 1) if total > 0 else 0,
-                "by_type": {r['operation_type']: r['cnt'] for r in by_type},
-                "by_phase": {r['phase']: r['cnt'] for r in by_phase},
-                "by_cat2": {r['cat2']: r['cnt'] for r in by_cat2},
+                "rollback_rate": round(rolled_back / total * 100, 1)
+                if total > 0
+                else 0,
+                "by_type": {r["operation_type"]: r["cnt"] for r in by_type},
+                "by_phase": {r["phase"]: r["cnt"] for r in by_phase},
+                "by_cat2": {r["cat2"]: r["cnt"] for r in by_cat2},
                 "feedback": {
                     "wrong_merge": wrong_merges,
                     "correct_merge": correct_merges,
@@ -409,9 +513,13 @@ async def fix_lone_islands(
                     "message": "embedding 阈值不再用于自动合并；这里只返回确定性候选",
                     "similarity_threshold_ignored": similarity_threshold,
                     "max_candidates": max_merges,
-                    "exact_duplicate_groups": audit["exact_duplicate_groups"][:max_merges],
+                    "exact_duplicate_groups": audit["exact_duplicate_groups"][
+                        :max_merges
+                    ],
                     "merged": 0,
                 }
-            return run_clustering_maintenance(conn, execute=True, merge_exact_duplicates=True)
+            return run_clustering_maintenance(
+                conn, execute=True, merge_exact_duplicates=True
+            )
 
     return await run_db(_fix)

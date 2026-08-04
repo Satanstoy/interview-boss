@@ -15,6 +15,15 @@
         <!-- Question text (primary — most prominent) -->
         <div class="flex items-start gap-2 group mb-2">
           <h3 class="text-[15px] font-semibold text-foreground leading-snug flex-1">{{ question.question }}</h3>
+          <AppTooltip v-if="canShare" text="分享到公共题库">
+            <Button
+              variant="ghost" size="sm" class="size-7 p-0 text-muted-foreground hover:text-primary"
+              aria-label="分享到公共题库"
+              @click.stop="$emit('share', question)"
+            >
+              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+            </Button>
+          </AppTooltip>
           <AppTooltip v-if="canEdit" text="编辑题目">
             <button @click.stop="startEditQuestion"
               class="opacity-0 group-hover:opacity-100 p-1 -m-1 rounded-md transition-all duration-200 hover:bg-muted text-muted-foreground hover:text-primary shrink-0">
@@ -41,14 +50,6 @@
             {{ tag }}
           </Badge>
           <span v-if="parsedTags.length > 3" class="text-caption text-muted-foreground dark:text-muted-foreground">+{{ parsedTags.length - 3 }}</span>
-
-          <!-- Ownership badge (mixed mode only) -->
-          <Badge variant="outline" v-if="showOwnership" class="text-label"
-            :class="question.is_personal
-              ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-600 dark:text-violet-400'
-              : 'bg-teal-50 dark:bg-teal-900/25 text-teal-600 dark:text-teal-400'">
-            {{ question.is_personal ? '个人' : '公共' }}
-          </Badge>
 
           <!-- Position badge -->
           <Badge variant="outline" v-if="question.job_position" class="rounded-md text-label bg-muted dark:bg-card/80 text-muted-foreground dark:text-muted-foreground">
@@ -112,6 +113,22 @@
     <!-- Answer section: always rendered in contentOnly mode; v-if for toggle in normal mode -->
     <div v-if="contentOnly || question._showAnswer" :class="contentOnly ? '' : 'border-t border-border bg-muted/30 dark:bg-muted/15 relative group answer-section'">
 
+      <!-- Ownership badge + share action (visible in all modes) -->
+      <div v-if="showOwnership || canShare" class="px-4 pt-3 flex items-center gap-2">
+        <Badge v-if="showOwnership" variant="outline" class="text-label"
+          :class="question.is_personal
+            ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-600 dark:text-violet-400'
+            : 'bg-teal-50 dark:bg-teal-900/25 text-teal-600 dark:text-teal-400'">
+          {{ showOwnership ? '私有' : '公共' }}
+        </Badge>
+        <Button v-if="canShare" variant="ghost" size="sm"
+          class="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+          aria-label="分享到公共题库"
+          @click.stop="$emit('share', question)">
+          分享到公共题库
+        </Button>
+      </div>
+
       <!-- Answer (primary content — shown first) -->
       <div class="px-4 pt-3 pb-0">
         <!-- Edit answer mode -->
@@ -138,7 +155,7 @@
             <div v-if="(fullUserAnswer || question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
               <span class="text-label text-primary bg-primary/10 dark:bg-primary/15 px-2 py-0.5 rounded">个人答案</span>
             </div>
-            <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content" v-html="cachedMarkdown"></div>
+            <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content prose prose-sm dark:prose-invert max-w-none" v-html="cachedMarkdown"></div>
           </div>
 
           <div v-else-if="isLoadingDetail" class="flex flex-col items-center justify-center py-8 text-primary gap-3">
@@ -275,7 +292,7 @@ const props = defineProps({
   question: { type: Object, required: true },
   isSelected: { type: Function, required: true },
   practiceInfo: { type: Object, default: null },
-  bankMode: { type: String, default: 'public' },
+  bankFilter: { type: String, default: 'all' },
   isAdmin: { type: Boolean, default: false },
   currentUserId: { type: [Number, String], default: null },
   contentOnly: { type: Boolean, default: false },
@@ -367,6 +384,11 @@ const parsedTags = computed(() => {
   return tags ? tags.split(',') : []
 })
 
+const canShare = computed(() => {
+  // 仅我的私有题可分享（公共题不可转私有）
+  return props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)
+})
+
 const canDelete = computed(() => {
   if (props.isAdmin) return true
   if (props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)) return true
@@ -426,7 +448,9 @@ const sourceCount = computed(() => {
 
 const isFailedAnswer = (answer) => answer && answer.includes('生成失败')
 
-const showOwnership = computed(() => props.bankMode === 'mixed')
+const showOwnership = computed(() =>
+  props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)
+)
 
 const formatPosition = (pos) => {
   if (!pos) return ''

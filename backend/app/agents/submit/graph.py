@@ -1,4 +1,5 @@
 """Submit 流程的 LangGraph StateGraph 定义"""
+
 import asyncio
 import json
 import logging
@@ -6,10 +7,19 @@ from langgraph.graph import StateGraph, START, END
 
 from app.agents.shared.state import SubmitState
 from app.agents.shared.quality import should_retry
-from app.agents.shared.events import format_sse, make_error_event, make_done_event, _event_queue_var
+from app.agents.shared.events import (
+    format_sse,
+    make_error_event,
+    make_done_event,
+    _event_queue_var,
+)
 from app.agents.submit.extract import recognize_node, extract_node, retry_extract_node
 from app.agents.submit.classify import complete_node, classify_node, retry_classify_node
-from app.agents.submit.persist_personal import match_and_persist_personal_node, jd_persist_node, error_empty_node
+from app.agents.submit.persist_personal import (
+    match_and_persist_personal_node,
+    jd_persist_node,
+    error_empty_node,
+)
 from app.agents.submit.persist_public import persist_public_node, cluster_public_node
 
 logger = logging.getLogger("interview-boss")
@@ -25,6 +35,7 @@ def _sanitize_error(e: Exception) -> str:
 
 
 # ── 条件路由函数 ──
+
 
 def after_extract(state: SubmitState) -> str:
     """提取后路由: JD 直接保存 / 空题报错 / 质量达标继续 / 否则重试"""
@@ -63,6 +74,7 @@ def after_classify(state: SubmitState) -> str:
 
 # ── Graph 构建 ──
 
+
 def _build_submit_graph() -> StateGraph:
     """构建 Submit 流程的 StateGraph"""
     workflow = StateGraph(SubmitState)
@@ -88,7 +100,12 @@ def _build_submit_graph() -> StateGraph:
     workflow.add_conditional_edges(
         "extract",
         after_extract,
-        {"jd": "jd_persist", "error_empty": "error_empty", "continue": "complete", "retry": "retry_extract"},
+        {
+            "jd": "jd_persist",
+            "error_empty": "error_empty",
+            "continue": "complete",
+            "retry": "retry_extract",
+        },
     )
     workflow.add_edge("retry_extract", "extract")
 
@@ -105,12 +122,16 @@ def _build_submit_graph() -> StateGraph:
     workflow.add_conditional_edges(
         "classify",
         after_classify,
-        {"retry": "retry_classify", "personal": "match_persist_personal", "public": "persist_public"},
+        {
+            "retry": "retry_classify",
+            "personal": "match_persist_personal",
+            "public": "persist_public",
+        },
     )
     workflow.add_edge("retry_classify", "classify")
 
-    # 个人路径结束
-    workflow.add_edge("match_persist_personal", END)
+    # 个人路径: 匹配入库 → 聚类（owner_id 隔离）→ END
+    workflow.add_edge("match_persist_personal", "cluster_public")
 
     # 公共路径: persist → cluster → END
     workflow.add_edge("persist_public", "cluster_public")
@@ -122,6 +143,7 @@ def _build_submit_graph() -> StateGraph:
 # ── 编译后的图实例 ──
 
 from langgraph.checkpoint.memory import MemorySaver
+
 submit_graph = _build_submit_graph().compile(checkpointer=MemorySaver())
 
 
@@ -138,27 +160,34 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
     """
     queue = asyncio.Queue()
     token = _event_queue_var.set(queue)
-    config = {"configurable": {"thread_id": f"submit-{input_state.get('user_id', 0)}-{__import__('time').time():.0f}"}}
+    config = {
+        "configurable": {
+            "thread_id": f"submit-{input_state.get('user_id', 0)}-{__import__('time').time():.0f}"
+        }
+    }
 
     async def _run_graph():
         """在后台运行图，完成后向队列发送终止信号"""
         import time as _t
+
         _t0 = _t.monotonic()
         try:
             logger.info("[SSE] graph task started")
             await submit_graph.ainvoke(input_state, config=config)
-            logger.info(f"[SSE] graph task completed in {_t.monotonic()-_t0:.1f}s")
+            logger.info(f"[SSE] graph task completed in {_t.monotonic() - _t0:.1f}s")
         except Exception as e:
-            logger.exception(f"[SSE] graph task failed in {_t.monotonic()-_t0:.1f}s")
+            logger.exception(f"[SSE] graph task failed in {_t.monotonic() - _t0:.1f}s")
             queue.put_nowait(make_error_event(_sanitize_error(e)))
         finally:
             queue.put_nowait(_SENTINEL)
 
     import asyncio as _aio
+
     graph_task = _aio.create_task(_run_graph())
 
     try:
         import time as _t
+
         _sse_t0 = _t.monotonic()
         _evt_count = 0
         # 实时从队列读取事件并 yield SSE
@@ -167,15 +196,19 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
             if item is _SENTINEL:
                 break
             _evt_count += 1
-            logger.info(f"[SSE] yielding event #{_evt_count} at +{_t.monotonic()-_sse_t0:.1f}s: {item.get('type')}/{item.get('step','')}")
+            logger.info(
+                f"[SSE] yielding event #{_evt_count} at +{_t.monotonic() - _sse_t0:.1f}s: {item.get('type')}/{item.get('step', '')}"
+            )
             yield format_sse(item)
             await _aio.sleep(0)  # 让出事件循环，确保网络层刷新
 
-        logger.info(f"[SSE] all {_evt_count} events yielded in {_t.monotonic()-_sse_t0:.1f}s")
+        logger.info(
+            f"[SSE] all {_evt_count} events yielded in {_t.monotonic() - _sse_t0:.1f}s"
+        )
 
         # 图执行完毕，发送 done 事件
         final_state = await submit_graph.aget_state(config)
-        state_values = final_state.values if hasattr(final_state, 'values') else {}
+        state_values = final_state.values if hasattr(final_state, "values") else {}
         if not state_values.get("error"):
             doc_type = state_values.get("doc_type", "Interview")
             doc_type = {"jd": "JD", "interview": "Interview"}.get(doc_type, doc_type)

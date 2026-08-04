@@ -48,6 +48,20 @@
           @update:filter-difficulty="filterDifficulty = $event"
         />
 
+        <!-- 题库过滤 tabs（全部 / 公共 / 我的） -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            v-for="tab in bankFilterTabs" :key="tab.value"
+            @click="onSelectBankFilter(tab.value)"
+            class="text-xs px-3 py-1.5 rounded-lg border transition-all duration-200 font-medium whitespace-nowrap"
+            :class="bankFilter === tab.value
+              ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary border-primary/30 dark:border-primary/30 shadow-sm'
+              : 'bg-background dark:bg-muted text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+
         <!-- BatchActionPanel (全选/反选 + 操作) -->
         <BatchActionPanel
           :selected-count="masterSelection.selectedCount.value"
@@ -111,7 +125,7 @@
           :selected-count="masterSelection.selectedCount.value"
           :is-selected="isMasterSelected"
           :practiced-questions="practicedQuestions"
-          :bank-mode="displayUser?.bank_mode"
+          :bank-filter="bankFilter"
           :is-admin="displayUser?.is_admin"
           :current-user-id="displayUser?.id"
           :is-loading-more="isLoadingMore"
@@ -131,6 +145,7 @@
           @edit-question="editQuestion"
           @delete-original-question="deleteOriginalQuestion"
           @update-answer="onUpdateAnswer"
+          @share="handleShare"
           @load-more="loadMoreMasterBank"
         >
           <template #scroll-header>
@@ -166,7 +181,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 const {
-  masterBank, filteredMasterBank, isDataLoading, dataLoadError,
+  masterBank, filteredMasterBank, bankFilter, isDataLoading, dataLoadError,
   jdData, interviewData,
   masterBankTotal, masterBankOverallTotal,
   categoryCounts, selectedTag, selectedSubTags, availableSubTags,
@@ -193,6 +208,33 @@ const skeletonCards = [
   { title: '50%', subtitle: '65%' },
   { title: '70%', subtitle: '40%' },
 ]
+
+const bankFilterTabs = [
+  { value: 'all', label: '全部' },
+  { value: 'public', label: '公共' },
+  { value: 'mine', label: '我的' },
+]
+
+const onSelectBankFilter = (value) => {
+  bankFilter.value = value
+  fetchTableData()
+}
+
+const handleShare = async (question) => {
+  if (!question || !question.id) return
+  try {
+    const { shareQuestionToBank } = await import('@/services/masterBankApi.js')
+    const result = await shareQuestionToBank(question.id)
+    if (result?.result === 'merged') {
+      window.$toast?.success?.('已分享：与公共题库已有题目合并')
+    } else {
+      window.$toast?.success?.('已提交审核，通过后对所有人可见')
+    }
+    fetchTableData()
+  } catch (e) {
+    window.$toast?.error?.(`分享失败: ${e.message}`)
+  }
+}
 
 const onSelectTag = (tag) => {
   selectedTag.value = tag

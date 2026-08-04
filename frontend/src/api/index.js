@@ -14,7 +14,7 @@ export {
   authRegister,
   authLogin,
   authMe,
-  authUpdateBankMode,
+  authUpdateShareDefault,
   authRefresh,
   authLogout,
   resetPassword,
@@ -131,6 +131,12 @@ export {
   getMemories,
   deleteMemory,
 } from '../services/chatApi.js'
+
+export {
+  getDistributionDefault,
+  getDistributionPreference,
+  saveDistributionPreference,
+} from '../services/interviewDistributionApi.js'
 
 // ── Resume ──
 export {

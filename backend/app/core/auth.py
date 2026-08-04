@@ -20,12 +20,15 @@ else:
     # 先尝试从 .env 文件读取（避免多进程竞态各自生成不同密钥）
     try:
         from pathlib import Path
+
         _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
         if _env_path.exists():
             with open(_env_path) as f:
                 for line in f:
                     if line.strip().startswith("JWT_SECRET="):
-                        _env_secret = line.strip().split("=", 1)[1].strip().strip('"').strip("'")
+                        _env_secret = (
+                            line.strip().split("=", 1)[1].strip().strip('"').strip("'")
+                        )
                         break
     except Exception:
         pass
@@ -36,12 +39,18 @@ else:
         SECRET_KEY = os.urandom(64).hex()
         try:
             from pathlib import Path
+
             _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
             from dotenv import set_key
+
             set_key(str(_env_path), "JWT_SECRET", SECRET_KEY)
-            logger.info("JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）")
+            logger.info(
+                "JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）"
+            )
         except Exception as e:
-            logger.warning(f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效")
+            logger.warning(
+                f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效"
+            )
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
@@ -63,23 +72,32 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def _generate_jti() -> str:
     import secrets
+
     return secrets.token_urlsafe(32)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     now = datetime.now(timezone.utc)
     to_encode = data.copy()
-    to_encode.update({
-        "exp": now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)),
-        "iss": TOKEN_ISSUER,
-        "sub": str(data.get("user_id", "")),
-        "type": "access",
-        "iat": now,
-    })
+    to_encode.update(
+        {
+            "exp": now
+            + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)),
+            "iss": TOKEN_ISSUER,
+            "sub": str(data.get("user_id", "")),
+            "type": "access",
+            "iat": now,
+        }
+    )
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict, jti: Optional[str] = None, days: int = REFRESH_TOKEN_EXPIRE_DAYS, family_id: str = "") -> tuple[str, str]:
+def create_refresh_token(
+    data: dict,
+    jti: Optional[str] = None,
+    days: int = REFRESH_TOKEN_EXPIRE_DAYS,
+    family_id: str = "",
+) -> tuple[str, str]:
     """返回 (token, jti) 二元组，方便调用方直接拿到 jti 做服务端记录"""
     now = datetime.now(timezone.utc)
     _jti = jti or _generate_jti()
@@ -119,13 +137,21 @@ def decode_email_bind_token(token: str) -> dict:
     """解码邮箱绑定临时 token，过期或无效抛 401"""
     try:
         payload = jwt.decode(
-            token, SECRET_KEY, algorithms=[ALGORITHM],
-            issuer=TOKEN_ISSUER, options={"require_sub": True}
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            issuer=TOKEN_ISSUER,
+            options={"require_sub": True},
         )
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="临时令牌已过期或无效，请重新登录")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="临时令牌已过期或无效，请重新登录",
+        )
     if payload.get("type") != "email_bind":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌类型不匹配")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌类型不匹配"
+        )
     return payload
 
 
@@ -133,36 +159,58 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
     """解码并严格校验 JWT claims"""
     try:
         payload = jwt.decode(
-            token, SECRET_KEY, algorithms=[ALGORITHM],
-            issuer=TOKEN_ISSUER, options={"require_sub": True}
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            issuer=TOKEN_ISSUER,
+            options={"require_sub": True},
         )
     except JWTError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 已过期或无效")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="token 已过期或无效"
+        )
 
     if payload.get("type") != expected_type:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 类型不匹配")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="token 类型不匹配"
+        )
 
     return payload
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
     """从 Authorization header 获取并验证 access token"""
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
     payload = decode_token(credentials.credentials, expected_type="access")
     user_id = payload.get("user_id")
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token"
+        )
+    # 防御性检查：非 access token（如 email_bind / refresh）不能通过 get_current_user
+    if payload.get("type") not in (None, "access"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="token 类型不匹配"
+        )
 
     def _query():
         with get_db_connection() as conn:
-            return conn.execute("SELECT id, username, is_admin, bank_mode, current_position_id FROM users WHERE id = ?", (user_id,)).fetchone()
+            return conn.execute(
+                "SELECT id, username, is_admin, share_default, current_position_id FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
 
     user = await run_db(_query)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在"
+        )
     result = dict(user)
     from app.db.connection import get_user_job_position
+
     pos_id, pos_name = await run_db(lambda: get_user_job_position(user_id))
     result["current_position_id"] = pos_id
     result["current_position"] = pos_name
@@ -171,7 +219,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)):
     if not current_user.get("is_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限"
+        )
     return current_user
 
 
@@ -179,32 +229,54 @@ async def get_refresh_token(request: Request) -> str:
     """从 HttpOnly cookie 提取 refresh token"""
     token = request.cookies.get("refresh_token")
     if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="refresh token 不存在，请重新登录")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="refresh token 不存在，请重新登录",
+        )
     return token
 
 
 MAX_REFRESH_TOKENS_PER_USER = 10
 
 
-def store_refresh_token(user_id: int, jti: str, days: int = REFRESH_TOKEN_EXPIRE_DAYS, remember: bool = False, ip_address: str = "", user_agent: str = "", family_id: str = ""):
+def store_refresh_token(
+    user_id: int,
+    jti: str,
+    days: int = REFRESH_TOKEN_EXPIRE_DAYS,
+    remember: bool = False,
+    ip_address: str = "",
+    user_agent: str = "",
+    family_id: str = "",
+):
     """存储 refresh token 的 jti 到数据库"""
     if not family_id:
         import secrets
+
         family_id = secrets.token_urlsafe(16)
     with get_db_connection() as conn:
         # Per-user token limit: evict oldest if exceeded
-        count = conn.execute("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", (user_id,)).fetchone()[0]
+        count = conn.execute(
+            "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
         if count >= MAX_REFRESH_TOKENS_PER_USER:
             oldest = conn.execute(
                 "SELECT jti FROM refresh_tokens WHERE user_id = ? ORDER BY created_at ASC LIMIT ?",
-                (user_id, count - MAX_REFRESH_TOKENS_PER_USER + 1)
+                (user_id, count - MAX_REFRESH_TOKENS_PER_USER + 1),
             ).fetchall()
             for row in oldest:
                 conn.execute("DELETE FROM refresh_tokens WHERE jti = ?", (row[0],))
         expires = datetime.now(timezone.utc) + timedelta(days=days)
         conn.execute(
             "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember, ip_address, user_agent, family_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, jti, expires.isoformat(), 1 if remember else 0, ip_address, user_agent, family_id)
+            (
+                user_id,
+                jti,
+                expires.isoformat(),
+                1 if remember else 0,
+                ip_address,
+                user_agent,
+                family_id,
+            ),
         )
         conn.commit()
     return family_id
@@ -215,7 +287,7 @@ def get_refresh_token_jti(jti: str) -> Optional[dict]:
     with get_db_connection() as conn:
         row = conn.execute(
             "SELECT * FROM refresh_tokens WHERE jti = ? AND expires_at > ?",
-            (jti, datetime.now(timezone.utc).isoformat())
+            (jti, datetime.now(timezone.utc).isoformat()),
         ).fetchone()
         return dict(row) if row else None
 
@@ -232,7 +304,7 @@ def cleanup_expired_refresh_tokens():
     with get_db_connection() as conn:
         conn.execute(
             "DELETE FROM refresh_tokens WHERE expires_at < ?",
-            (datetime.now(timezone.utc).isoformat(),)
+            (datetime.now(timezone.utc).isoformat(),),
         )
         conn.commit()
 
@@ -251,9 +323,7 @@ def invalidate_family(family_id: str):
     with get_db_connection() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO invalidated_families (family_id) VALUES (?)",
-            (family_id,)
+            (family_id,),
         )
-        conn.execute(
-            "DELETE FROM refresh_tokens WHERE family_id = ?", (family_id,)
-        )
+        conn.execute("DELETE FROM refresh_tokens WHERE family_id = ?", (family_id,))
         conn.commit()

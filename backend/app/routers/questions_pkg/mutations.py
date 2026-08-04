@@ -480,6 +480,12 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
                     "UPDATE questions_detail SET cat1 = ?, cat2 = ?, tags = ?, diff_tag = ?, updated_at = CURRENT_TIMESTAMP WHERE question = ?",
                     (cat1, cat2, tags, diff, question_text)
                 )
+                from app.db.operations import _retype_distribution_details_txn
+                detail_rows = conn.execute(
+                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
+                    (question_text,),
+                ).fetchall()
+                _retype_distribution_details_txn(conn.cursor(), [detail["id"] for detail in detail_rows])
                 conn.commit()
 
         await run_db(_update)

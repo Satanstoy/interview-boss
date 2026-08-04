@@ -68,7 +68,7 @@
               :question="q"
               :is-selected="isSelected"
               :practice-info="practicedQuestions[q.id] || null"
-              :bank-mode="bankMode"
+              :bank-filter="bankFilter"
               :is-admin="isAdmin"
               :current-user-id="currentUserId"
               :content-only="true"
@@ -87,6 +87,7 @@
               @edit-question="$emit('edit-question', $event)"
               @delete-original-question="$emit('delete-original-question', $event)"
               @update-answer="$emit('update-answer', $event)"
+              @share="$emit('share', $event)"
             />
           </AccordionContent>
         </AccordionItem>
@@ -118,7 +119,7 @@ const props = defineProps({
   selectedCount: { type: Number, default: 0 },
   isSelected: { type: Function, default: () => false },
   practicedQuestions: { type: Object, default: () => ({}) },
-  bankMode: { type: String, default: 'public' },
+  bankFilter: { type: String, default: 'all' },
   isAdmin: { type: Boolean, default: false },
   currentUserId: { type: [Number, String], default: null },
   isLoadingMore: { type: Boolean, default: false },
@@ -130,7 +131,7 @@ const emit = defineEmits([
   'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field',
   'toggle-item', 'practice', 'split-question',
   'start-merge', 'navigate-to-interview', 'delete', 'edit-question',
-  'delete-original-question', 'update-answer', 'load-more',
+  'delete-original-question', 'update-answer', 'load-more', 'share',
 ])
 
 const containerRef = ref(null)

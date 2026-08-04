@@ -63,6 +63,11 @@ async def delete_original_question(question_id: int, req: DeleteOriginalQuestion
                             remaining_sources.append(s)
 
                 # 删除 questions_detail 中对应的记录
+                from app.db.operations import _mark_distribution_refresh_for_detail_ids_txn
+                detail_ids = cursor.execute(
+                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL", (original_q,)
+                ).fetchall()
+                _mark_distribution_refresh_for_detail_ids_txn(cursor, [detail["id"] for detail in detail_ids])
                 cursor.execute("DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL", (original_q,))
 
                 if len(new_orig) == 0:

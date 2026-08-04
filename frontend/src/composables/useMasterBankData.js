@@ -33,6 +33,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const isLoadingMore = ref(false)
 
   // ── Filters ──
+  const bankFilter = ref('all')  // all/public/mine（题库过滤口径）
   const selectedTag = ref('全部')
   const selectedSubTags = ref([])
   const searchQuery = ref('')
@@ -65,7 +66,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     filteredTagCountsFromServer.value = []
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
+        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, filter: bankFilter.value })
       ])
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
@@ -88,7 +89,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     isLoadingMore.value = true
     try {
       const nextPage = currentPage.value + 1
-      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined })
+      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, filter: bankFilter.value })
       const newItems = (resp.items || resp).map(decorateQuestion)
       if (newItems.length > 0) {
         masterBank.value = [...masterBank.value, ...newItems]
@@ -225,7 +226,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
 
   return {
     // data
-    jdData, interviewData, masterBank,
+    jdData, interviewData, masterBank, bankFilter,
     isDataLoading, dataLoadError,
     analytics, practiceStats, popularTags, categoryCounts,
     masterBankTotal, masterBankOverallTotal,

@@ -39,3 +39,6 @@ export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-ban
 export const fetchMasterBankTrash = (page = 1, pageSize = 50) => get(`${API}/master-bank/trash?page=${page}&page_size=${pageSize}`)
 export const restoreQuestion = (id) => post(`${API}/master-bank/restore/${id}`)
 export const batchRestoreMasterBank = (ids) => post(`${API}/master-bank/batch-restore`, { ids })
+
+
+export const shareQuestionToBank = (questionId) => post(`${API}/master-bank/${questionId}/share`)
