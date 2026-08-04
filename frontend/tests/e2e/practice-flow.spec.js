@@ -509,4 +509,31 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(page.getByText('闪卡模式')).toBeVisible()
     await expect(page.getByTestId('practice-session-picker')).toBeVisible()
   })
+
+  test('刷题工作区沿用训练页滚动容器并适配视口宽度', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+
+    await expect(page.getByTestId('practice-view')).toBeVisible()
+    await expect(page.getByTestId('practice-workspace')).toBeVisible()
+    await expect(page.getByTestId('practice-view')).toHaveClass(/overflow-y-auto/)
+
+    const metrics = await page.evaluate(() => {
+      const view = document.querySelector('[data-testid="practice-view"]')
+      const workspace = document.querySelector('[data-testid="practice-workspace"]')
+      const documentWidth = document.documentElement.scrollWidth
+      const viewportWidth = document.documentElement.clientWidth
+      const viewRect = view?.getBoundingClientRect()
+      const workspaceRect = workspace?.getBoundingClientRect()
+      return {
+        documentWidth,
+        viewportWidth,
+        viewWidth: viewRect?.width || 0,
+        workspaceRight: workspaceRect?.right || 0,
+      }
+    })
+
+    expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.viewportWidth)
+    expect(metrics.viewWidth).toBeGreaterThan(0)
+    expect(metrics.workspaceRight).toBeLessThanOrEqual(metrics.viewportWidth)
+  })
 })

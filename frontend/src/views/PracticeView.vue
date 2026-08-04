@@ -1,9 +1,9 @@
 <template>
-  <div class="flex h-full min-h-0 px-4 py-4 md:px-6 md:py-6">
+  <div data-testid="practice-view" class="px-4 py-4 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
     <PracticeMode
       :questions="filteredMasterBank"
       :practiced-questions="practicedQuestions"
-      class="h-full min-h-0 w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+      class="w-full min-w-0"
       @close="closePractice"
     />
   </div>
