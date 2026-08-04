@@ -8,7 +8,35 @@ USER = {"id": 1, "username": "sj", "is_admin": 1, "bank_mode": "all"}
 POSITION = "agent开发/大模型应用开发/大模型开发"
 
 
+def _ensure_practice_tables(conn):
+    """Make the regression independent from the optional practice migration."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS user_question_review (
+            user_id INTEGER NOT NULL,
+            question_bank_id INTEGER NOT NULL,
+            state TEXT NOT NULL DEFAULT 'new',
+            proficiency INTEGER NOT NULL DEFAULT 0,
+            review_count INTEGER NOT NULL DEFAULT 0,
+            lapse_count INTEGER NOT NULL DEFAULT 0,
+            last_rating TEXT DEFAULT '',
+            last_reviewed_at TIMESTAMP,
+            next_review_at TIMESTAMP,
+            interval_days REAL NOT NULL DEFAULT 0,
+            ease_factor REAL NOT NULL DEFAULT 2.3
+        );
+        CREATE TABLE IF NOT EXISTS practice_review_events (
+            user_id INTEGER NOT NULL,
+            question_bank_id INTEGER NOT NULL,
+            score INTEGER,
+            reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+
+
 def _insert_question(conn):
+    _ensure_practice_tables(conn)
     row = conn.execute(
         "INSERT INTO question_bank "
         "(question, cat1, cat2, tags, difficulty, frequency, ai_answer, owner_id, status, job_position) "
