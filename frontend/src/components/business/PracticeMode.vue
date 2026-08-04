@@ -27,12 +27,12 @@
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <main data-testid="practice-main" class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-        <div class="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-4 px-4 pb-8 pt-6 md:px-6 md:pt-8">
+      <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
+        <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-3 overflow-hidden px-4 py-4 md:px-6 md:py-5">
 
-    <Card v-if="currentQ" data-testid="practice-card" class="mx-auto w-full overflow-hidden rounded-2xl p-0 shadow-sm">
+    <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
+      <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span class="font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
           <span>·</span>
@@ -48,15 +48,13 @@
         </div>
       </div>
 
-      <div :key="currentQ.id" class="flex min-h-0 flex-1 flex-col px-4 py-7 question-content-enter sm:px-6 md:px-12 md:py-10">
+      <div data-testid="practice-card-content" :key="currentQ.id" class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 custom-scrollbar question-content-enter sm:px-6 md:px-12 md:py-7">
         <div class="flex flex-wrap items-center gap-1.5">
           <Badge v-for="tag in questionTags(currentQ).slice(0, 4)" :key="tag" variant="secondary" class="text-[10px]">{{ tag }}</Badge>
         </div>
 
-        <div class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-10 text-center md:py-14">
-          <p class="mb-5 text-xs font-medium uppercase tracking-[0.18em] text-primary">主动回忆</p>
-          <h2 class="text-xl font-semibold leading-relaxed tracking-tight text-foreground md:text-3xl md:leading-relaxed">{{ currentQ.question }}</h2>
-          <p v-if="!answerRevealed" class="mx-auto mt-5 max-w-xl text-sm leading-relaxed text-muted-foreground">先在脑中组织答案，想清楚“是什么、为什么、怎么做”，再翻开卡片。</p>
+        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col py-6 text-center md:py-8" :class="answerRevealed ? 'justify-start' : 'justify-center'">
+          <h2 class="practice-question font-semibold leading-relaxed tracking-tight text-foreground">{{ currentQ.question }}</h2>
 
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">
             <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
@@ -125,14 +123,14 @@
       </div>
     </Card>
 
-    <div v-else class="mx-auto flex min-h-80 w-full max-w-xl flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
+    <div v-else class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
       <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><List :size="26" /></div>
       <h2 class="mt-5 text-lg font-semibold text-foreground">这个题单还没有题目</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted-foreground">先收藏几道题，或者切换到全部题开始刷题。</p>
       <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">切换到全部题</Button></div>
     </div>
 
-    <div v-if="currentQ" class="mx-auto flex w-full flex-wrap items-center justify-between gap-3 px-1">
+    <div v-if="currentQ" class="mx-auto flex shrink-0 w-full flex-wrap items-center justify-between gap-3 px-1">
       <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题<span class="hidden text-[11px] text-muted-foreground md:inline">←</span></Button>
       <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
       <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<span class="hidden text-[11px] text-muted-foreground md:inline">→</span><ChevronRight class="size-4" /></Button>
@@ -346,6 +344,8 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <style scoped>
+.practice-card { container-type: size; }
+.practice-question { font-size: clamp(1.125rem, min(2.5cqw, 4cqh), 1.75rem); }
 .question-content-enter { animation: question-enter 0.25s ease both; }
 .flashcard-answer :deep(h1), .flashcard-answer :deep(h2), .flashcard-answer :deep(h3) { margin-top: 1.25rem; margin-bottom: 0.55rem; font-weight: 650; line-height: 1.5; }
 .flashcard-answer :deep(h1:first-child), .flashcard-answer :deep(h2:first-child), .flashcard-answer :deep(h3:first-child) { margin-top: 0; }

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { AlertCircle, Clock3, Layers, Loader2, Menu, Plus, Settings, X } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 import { useToast } from '@/composables/useNotification.js'
@@ -59,6 +59,7 @@ const playlistDialogOpen = ref(false)
 const playlistName = ref('')
 const playlistDescription = ref('')
 const isCreatingPlaylist = ref(false)
+const practiceSelectOpen = ref(false)
 
 const primaryJob = computed(() => {
   if (activeJobs.value.length === 0) return null
@@ -78,6 +79,15 @@ const openCreatePlaylist = () => {
 
 const selectCodingList = (value) => {
   codingNavigation?.selectList(value)
+}
+
+const selectPracticeList = (value) => {
+  emit('practice-select-deck', value)
+}
+
+const openPracticeManager = () => {
+  practiceSelectOpen.value = false
+  emit('practice-manage-decks')
 }
 
 const createPlaylist = async () => {
@@ -144,18 +154,26 @@ const createPlaylist = async () => {
       </template>
 
       <template v-else-if="showPracticeControls">
-        <span class="text-muted-foreground">/</span>
-        <select
-          data-testid="practice-deck-select"
-          :value="practiceSelectedDeckKey"
-          :disabled="practiceDeckLoading || !practiceDecks.length"
-          class="h-8 min-w-0 max-w-[15rem] rounded-lg border border-input bg-background px-2 text-xs font-medium text-foreground outline-none transition focus:border-ring focus:ring-1 focus:ring-ring/20 disabled:cursor-wait disabled:opacity-60 sm:max-w-[18rem]"
-          @change="emit('practice-select-deck', $event.target.value)"
-        >
-          <option v-for="deck in practiceDecks" :key="deck.key" :value="deck.key">
-            {{ deck.name }} · {{ deck.total || 0 }} 题
-          </option>
-        </select>
+        <Select v-model:open="practiceSelectOpen" :model-value="practiceSelectedDeckKey" :disabled="practiceDeckLoading || !practiceDecks.length" @update:model-value="selectPracticeList">
+          <SelectTrigger data-testid="practice-deck-select" class="h-8 w-[150px] rounded-lg text-xs sm:w-[180px]">
+            <SelectValue placeholder="选择题单" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="deck in practiceDecks" :key="deck.key" :value="deck.key">
+              {{ deck.name }} · {{ deck.total || 0 }} 题
+            </SelectItem>
+            <SelectSeparator />
+            <button
+              type="button"
+              data-testid="practice-manage-decks"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground outline-none transition hover:bg-accent hover:text-accent-foreground"
+              @pointerdown.prevent
+              @click="openPracticeManager"
+            >
+              <Layers class="size-4" />管理题单
+            </button>
+          </SelectContent>
+        </Select>
       </template>
     </div>
 
@@ -220,16 +238,6 @@ const createPlaylist = async () => {
       </div>
 
       <!-- Season badge — h-8 matches settings button for visual center alignment -->
-      <Button
-        v-if="showPracticeControls"
-        data-testid="practice-manage-decks"
-        variant="ghost"
-        size="sm"
-        class="inline-flex h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-        @click="emit('practice-manage-decks')"
-      >
-        <Layers class="size-3.5" />管理题单
-      </Button>
       <span
         v-if="activeSeason"
         class="hidden h-8 items-center rounded-md border border-border bg-muted/50 px-2 text-xs font-medium leading-none text-muted-foreground md:inline-flex"

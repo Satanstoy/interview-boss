@@ -525,7 +525,9 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(page).toHaveURL(/\/practice/)
     await expect(page.getByTestId('practice-header')).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-deck-select')).toBeVisible()
+    await page.getByTestId('practice-deck-select').click()
     await expect(page.getByTestId('practice-manage-decks')).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: '返回题库' })).not.toBeVisible()
     await expect(page.getByText('刷题队列')).not.toBeVisible()
   })
@@ -543,7 +545,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
     const deckSelect = page.getByTestId('practice-deck-select')
     await expect(deckSelect).toBeVisible()
 
-    await deckSelect.selectOption('starred')
+    await deckSelect.click()
+    await page.getByRole('option', { name: /我的收藏/ }).click()
     await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
 
     await page.getByTestId('practice-show-answer').click()
@@ -566,7 +569,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
 
     await expect(page).toHaveURL(/\/practice/)
-    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).toBeVisible()
+    await expect(page.getByTestId('practice-focus-card')).toContainText('请介绍一下 Vue 的响应式原理')
+    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).not.toBeVisible()
     await expect(page.getByTestId('practice-deck-select')).toBeVisible()
   })
 
@@ -575,7 +579,10 @@ test.describe('练习完整流程 — PracticePanel', () => {
 
     await expect(page.getByTestId('practice-view')).toBeVisible()
     await expect(page.getByTestId('practice-workspace')).toBeVisible()
-    await expect(page.getByTestId('practice-main')).toHaveClass(/overflow-y-auto/)
+    await expect(page.getByTestId('practice-main')).toHaveClass(/overflow-hidden/)
+    await expect(page.getByTestId('practice-card-content')).toHaveClass(/overflow-y-auto/)
+    await expect(page.getByText('主动回忆')).not.toBeVisible()
+    await expect(page.getByText('先在脑中组织答案，想清楚“是什么、为什么、怎么做”，再翻开卡片。')).not.toBeVisible()
 
     const metrics = await page.evaluate(() => {
       const view = document.querySelector('[data-testid="practice-view"]')
@@ -614,7 +621,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
 
     const deckSelect = page.getByTestId('practice-deck-select')
     await expect(deckSelect).toContainText('全部题')
-    await deckSelect.selectOption('all')
+    await deckSelect.click()
+    await page.getByRole('option', { name: /全部题/ }).click()
     await expect(page.getByTestId('practice-card')).toContainText('请介绍一下 Vue 的响应式原理')
 
     await page.getByTestId('practice-show-answer').click()
@@ -625,7 +633,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
 
   test('题单管理页可查看自定义题单并进入题目管理', async ({ page }) => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
-    await page.getByRole('button', { name: '管理题单' }).first().click()
+    await page.getByTestId('practice-deck-select').click()
+    await page.getByTestId('practice-manage-decks').click()
 
     await expect(page).toHaveURL(/\/practice\/decks/)
     await expect(page.getByTestId('practice-deck-manager')).toBeVisible()
