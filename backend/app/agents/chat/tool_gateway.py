@@ -13,7 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 ToolName = Literal[
-    "search_questions", "draw_questions", "select_question", "load_skill"
+    "search_questions",
+    "draw_questions",
+    "select_question",
+    "load_skill",
+    "list_job_positions",
 ]
 QuestionSource = Literal["search", "draw"]
 
@@ -55,13 +59,18 @@ class ToolMetadata(BaseModel):
     fallback_steps: list[str] = Field(default_factory=list)
     empty_reason: str | None = None
     debug_reason: str = ""
+    message: str | None = None
+    suggestions: list[str] = Field(default_factory=list)
     metrics: ToolMetrics = Field(default_factory=ToolMetrics)
 
 
 class ToolEnvelope(BaseModel):
     ok: bool
     tool: ToolName
-    items: list[ToolQuestionItem] = Field(default_factory=list)
+    # Question tools return ToolQuestionItem-shaped rows; position discovery
+    # returns position rows.  The envelope deliberately keeps this boundary
+    # generic so both remain one stable JSON shape.
+    items: list[dict] = Field(default_factory=list)
     metadata: ToolMetadata = Field(default_factory=ToolMetadata)
     error: ToolError | None = None
 
@@ -74,6 +83,11 @@ class SearchQuestionsInput(BaseModel):
         Literal["project_followup", "knowledge_probe", "new_question"] | None
     ) = None
     limit: int = Field(default=5, ge=1, le=10)
+    search_query: str | None = Field(default=None, max_length=500)
+    job_position: str | None = Field(default=None, max_length=100)
+    retrieval_intent: str | None = Field(default=None, max_length=100)
+    negative_terms: list[str] = Field(default_factory=list, max_length=10)
+    session_id: str | None = None
 
     @field_validator("keywords", mode="before")
     @classmethod
@@ -109,6 +123,9 @@ class DrawQuestionsInput(BaseModel):
         ]
         | None
     ) = None
+    job_position: str | None = Field(default=None, max_length=100)
+    session_notes: str | None = Field(default=None, max_length=4000)
+    session_id: str | None = None
 
     @field_validator("cat1", "cat2", "topic", mode="before")
     @classmethod
@@ -123,6 +140,7 @@ class LoadSkillInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_name: Literal[
+        "interview-tool-use",
         "adaptive-difficulty",
         "algorithm-coding",
         "hr-soft-skills",
@@ -138,6 +156,14 @@ class SelectQuestionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_index: int = Field(default=0, ge=0, le=4)
+    question_source: QuestionSource = "draw"
+    session_id: str | None = None
+
+
+class ListJobPositionsInput(BaseModel):
+    """Position discovery has no client identity or bank-mode arguments."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
@@ -145,6 +171,7 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "draw_questions": DrawQuestionsInput,
     "load_skill": LoadSkillInput,
     "select_question": SelectQuestionInput,
+    "list_job_positions": ListJobPositionsInput,
 }
 
 
@@ -231,6 +258,8 @@ def build_success_envelope(
     fallback_used: bool = False,
     fallback_steps: list[str] | None = None,
     empty_reason: str | None = None,
+    message: str | None = None,
+    suggestions: list[str] | None = None,
 ) -> dict:
     envelope = ToolEnvelope(
         ok=True,
@@ -242,6 +271,8 @@ def build_success_envelope(
             fallback_steps=fallback_steps or [],
             empty_reason=empty_reason,
             debug_reason=debug_reason,
+            message=message,
+            suggestions=suggestions or [],
             metrics=ToolMetrics(total_ms=max(0, int(total_ms))),
         ),
         error=None,
@@ -257,6 +288,7 @@ def build_error_envelope(
     total_ms: int,
     debug_reason: str,
     empty_reason: str | None = None,
+    suggestions: list[str] | None = None,
 ) -> dict:
     envelope = ToolEnvelope(
         ok=False,
@@ -266,6 +298,7 @@ def build_error_envelope(
             result_count=0,
             empty_reason=empty_reason,
             debug_reason=debug_reason,
+            suggestions=suggestions or [],
             metrics=ToolMetrics(total_ms=max(0, int(total_ms))),
         ),
         error=ToolError(error_code=error_code, message=message),

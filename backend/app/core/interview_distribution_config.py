@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 
 JOB_FAMILY_BY_POSITION = {
     "Agent开发": "agent_llm",
@@ -12,10 +15,21 @@ JOB_FAMILY_BY_POSITION = {
 }
 
 
+def _normalize_position(value: str | None) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", text)
+    return re.sub(r"\s*/\s*", "/", text).casefold()
+
+
 def derive_job_family(job_position: str | None) -> str:
     """Return an explicit family without silently mixing unknown positions."""
-    normalized = (job_position or "").strip()
-    return JOB_FAMILY_BY_POSITION.get(normalized, f"position:{normalized or 'system'}")
+    normalized = _normalize_position(job_position)
+    for position, family in JOB_FAMILY_BY_POSITION.items():
+        if _normalize_position(position) == normalized:
+            return family
+    return JOB_FAMILY_BY_POSITION.get(
+        job_position or "", f"position:{str(job_position or '').strip() or 'system'}"
+    )
 
 
 def positions_for_family(job_family: str) -> tuple[str, ...]:

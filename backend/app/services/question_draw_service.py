@@ -53,6 +53,7 @@ def draw_questions(
     difficulty: Optional[str] = None,
     question_type: Optional[str] = None,
     job_position: Optional[str] = None,
+    job_position_id: Optional[int] = None,
     exclude_ids: Optional[set[int]] = None,
     session_notes: Optional[str] = None,
     max_per_category: int = 2,
@@ -63,23 +64,33 @@ def draw_questions(
     threadpool calls and from LangGraph nodes that already run in-process.
 
     When *difficulty* is supplied but yields zero candidates, the function
-    automatically retries without the difficulty filter so that callers like
-    ``draw_questions(question_type='algorithm_coding', difficulty='medium')``
-    still get results even if the database stores Chinese difficulty labels.
+    retries within the same position and bank scope without that presentation
+    filter.  It never drops the position join or switches to another bank.
     """
     count = max(1, min(int(count or 5), 50))
     exclude_ids = exclude_ids or set()
+    bank_mode = str(user.get("bank_mode") or "all").lower()
+    filter_mode = {
+        "public": "public",
+        "mine": "mine",
+        "personal": "mine",
+        "mixed": "all",
+        "all": "all",
+    }.get(bank_mode, "all")
     if job_position:
         from_clause, where_clause, base_params = build_bank_where_clause(
-            user["id"], "all", "qb", job_position=job_position
+            user["id"],
+            filter_mode,
+            "qb",
+            job_position=job_position,
+            job_position_id=job_position_id,
         )
     else:
         # Preserve the established call shape for internal callers and test
         # adapters that provide the legacy three-argument helper.
         from_clause, where_clause, base_params = build_bank_where_clause(
-            user["id"], "all", "qb"
+            user["id"], filter_mode, "qb"
         )
-    bank_mode = "all"
 
     def _query(extra_conditions: list[str], extra_params: list) -> list:
         where_with_extra = where_clause
@@ -143,21 +154,6 @@ def draw_questions(
             if exclude_ids:
                 fallback_params.extend(sorted(exclude_ids))
             candidates = _query(fallback_conditions, fallback_params)
-
-        if not candidates and question_type == "algorithm_coding":
-            candidates = _query_without_position_filter(
-                conn=conn,
-                user=user,
-                bank_mode=bank_mode,
-                question_type=question_type,
-                job_position=job_position,
-                cat1=cat1,
-                cat2=cat2,
-                topic=topic,
-                difficulty=difficulty,
-                exclude_ids=exclude_ids,
-                fallback_reason="position_filter_empty",
-            )
 
         if not candidates:
             return []

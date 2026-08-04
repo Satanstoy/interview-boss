@@ -72,8 +72,8 @@ async def test_draw_questions_tool_returns_envelope_and_updates_state(monkeypatc
     assert result["ok"] is True
     assert result["tool"] == "draw_questions"
     assert result["items"][0]["id"] == 10
-    assert result["metadata"]["fallback_used"] is True
-    assert result["metadata"]["fallback_steps"] == ["position_filter_empty"]
+    assert result["metadata"]["fallback_used"] is False
+    assert result["metadata"]["fallback_steps"] == []
     assert state["candidate_questions"][0]["id"] == 10
     assert state["retrieved_questions"][0]["id"] == 10
     assert state["question_source"] == "draw"
@@ -626,6 +626,7 @@ async def test_interview_mcp_app_call_tool_io_contract():
     tools = await mcp.list_tools()
     assert [tool.name for tool in tools] == [
         "load_skill",
+        "list_job_positions",
         "search_questions",
         "draw_questions",
         "select_question",
@@ -695,10 +696,8 @@ async def test_mcp_session_persists_across_load_and_draw(monkeypatch):
         assert loaded["ok"] is True
         session_id = loaded["metadata"]["session_id"]
         assert session_id
-        assert loaded["metadata"]["state"]["active_skills"] == [
-            "interview-tool-use",
-            "algorithm-coding",
-        ]
+        assert "state" not in loaded["metadata"]
+        assert "active_skill_instructions" not in loaded["metadata"]
 
         drawn = await _call_mcp_json(
             "draw_questions",

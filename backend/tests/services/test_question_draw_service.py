@@ -137,10 +137,10 @@ def test_draw_questions_returns_empty_when_no_candidates(test_db, monkeypatch):
     assert result == []
 
 
-def test_algorithm_draw_falls_back_to_default_position_when_current_position_empty(
+def test_algorithm_draw_does_not_fall_back_to_another_position_when_current_position_empty(
     test_db, monkeypatch
 ):
-    """Algorithm coding draw should not go empty just because current position has no algo bank."""
+    """An empty position remains empty instead of mixing another position."""
     from app.services import question_draw_service
 
     test_db.execute(
@@ -198,9 +198,7 @@ def test_algorithm_draw_falls_back_to_default_position_when_current_position_emp
         difficulty="medium",
     )
 
-    assert [q["id"] for q in result] == [7701]
-    assert result[0]["_fallback_used"] is True
-    assert result[0]["_fallback_reason"] == "position_filter_empty"
+    assert result == []
 
 
 def test_weighted_sampling_prefers_high_frequency(monkeypatch):

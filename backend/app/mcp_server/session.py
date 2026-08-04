@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
+import asyncio
+from contextlib import asynccontextmanager
 from inspect import isawaitable
 from typing import Any
 
@@ -29,10 +32,18 @@ _PERSISTED_STATE_KEYS = (
     "active_skill_instructions",
     "candidate_questions",
     "retrieved_questions",
+    "job_position",
     "session_notes",
     "question_source",
     "question_source_reason",
+    "canonical_job_position",
+    "job_position_id",
+    "job_position_resolution",
+    "used_question_ids",
+    "session_version",
 )
+
+_LOCAL_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _get_redis_pool():
@@ -253,6 +264,71 @@ async def save_mcp_session_async(
             )
 
     _save_to_sqlite(storage_key, persisted)
+
+
+class MCPSessionLockUnavailable(RuntimeError):
+    """Raised when a distributed session lock cannot be acquired safely."""
+
+
+@asynccontextmanager
+async def mcp_session_lock(
+    session_id: str,
+    user_id: int | None = None,
+    *,
+    timeout_seconds: int = 60,
+):
+    """Serialize one session across workers, preferring Redis.
+
+    Redis deployments use a distributed lock so two backend processes cannot
+    load the same candidate set and then overwrite each other's selection.
+    Test/fallback environments without a Redis lock use a bounded-scope local
+    lock, which still protects single-process SQLite operation.
+    """
+
+    storage_key = _session_storage_key(session_id, user_id)
+    pool = _get_redis_pool()
+    redis_lock = None
+    acquired = False
+    # Pytest creates a fresh event loop per test while the FastAPI fixture may
+    # keep one Redis client alive; redis-py locks are loop-bound. Production
+    # ASGI workers use one loop per client and take the distributed path.
+    lock_factory = (
+        getattr(pool, "lock", None)
+        if pool is not None and os.getenv("ENV", "").lower() != "test"
+        else None
+    )
+    if callable(lock_factory):
+        try:
+            redis_lock = lock_factory(
+                f"mcp-lock:{storage_key}",
+                timeout=timeout_seconds,
+                blocking_timeout=max(1, timeout_seconds - 5),
+            )
+            acquired = redis_lock.acquire()
+            if isawaitable(acquired):
+                acquired = await acquired
+        except Exception:
+            logger.exception("Failed to acquire MCP Redis session lock")
+        else:
+            if not acquired:
+                raise MCPSessionLockUnavailable("MCP session is busy")
+            try:
+                yield
+            finally:
+                released = redis_lock.release()
+                if isawaitable(released):
+                    await released
+            return
+
+    lock = _LOCAL_SESSION_LOCKS.setdefault(storage_key, asyncio.Lock())
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=timeout_seconds)
+    except asyncio.TimeoutError as exc:
+        raise MCPSessionLockUnavailable("MCP session is busy") from exc
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def new_session_id() -> str:

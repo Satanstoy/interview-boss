@@ -28,9 +28,19 @@ from app.agents.chat.tool_gateway import (
     build_success_envelope,
     normalize_question_item,
 )
+from app.services.job_position_service import (
+    list_job_positions,
+    load_active_position_rows,
+    position_suggestions,
+    resolve_job_position,
+)
 
 
 _TOOL_SERVICE_TIMEOUT = 30.0
+_NO_MATCH_MESSAGE = (
+    "当前岗位和主题下没有可用题目，请直接向候选人说明题库为空，"
+    "或等待用户调整岗位/主题。"
+)
 
 
 def _get_default_skill_registry():
@@ -67,6 +77,7 @@ def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
         )
         envelope["metadata"]["status"] = "already_active"
         envelope["metadata"]["skill"] = skill_name
+        envelope["metadata"]["skill_version"] = str(getattr(skill, "version", "1"))
         envelope["metadata"]["summary"] = f"技能「{skill.description}」已在激活状态。"
         return envelope
 
@@ -86,6 +97,7 @@ def load_skill_tool(args: dict, state: ChatState, registry_getter=None) -> dict:
     )
     envelope["metadata"]["status"] = "loaded"
     envelope["metadata"]["skill"] = skill_name
+    envelope["metadata"]["skill_version"] = str(getattr(skill, "version", "1"))
     envelope["metadata"]["summary"] = (
         f"技能「{skill.description}」已激活，将注入到当前 ReAct loop 的系统提示中。"
     )
@@ -102,6 +114,78 @@ async def _draw_questions_for_tool(**kwargs):
     from app.services.question_draw_service import draw_questions
 
     return await asyncio.to_thread(draw_questions, **kwargs)
+
+
+async def _list_job_positions_for_tool() -> list[dict]:
+    return await asyncio.to_thread(list_job_positions)
+
+
+async def _resolve_state_position(state: ChatState):
+    """Resolve and persist the canonical position used by question services."""
+
+    raw_value = state.get("job_position")
+    if raw_value is None or not str(raw_value).strip():
+        return None, None
+    rows = await asyncio.to_thread(load_active_position_rows)
+    resolution = resolve_job_position(str(raw_value), position_rows=rows)
+    if resolution is None:
+        return None, position_suggestions(rows)
+    state["job_position"] = resolution.canonical_name
+    state["canonical_job_position"] = resolution.canonical_name
+    state["job_position_id"] = resolution.position_id
+    state["job_position_resolution"] = {
+        "canonical_name": resolution.canonical_name,
+        "position_id": resolution.position_id,
+        "job_family": resolution.job_family,
+    }
+    return resolution, None
+
+
+async def list_job_positions_tool(args: dict, state: ChatState) -> dict:
+    """List active positions and exact aliases for role discovery."""
+
+    started = time.monotonic()
+    try:
+        items = await asyncio.wait_for(
+            _maybe_await(_list_job_positions_for_tool()),
+            timeout=_TOOL_SERVICE_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        total_ms = int((time.monotonic() - started) * 1000)
+        logger.warning("MCP tool=list_job_positions timeout")
+        return build_error_envelope(
+            tool="list_job_positions",
+            error_code="SERVICE_TIMEOUT",
+            message="Unable to load supported job positions in time",
+            total_ms=total_ms,
+            debug_reason="position_service_timeout",
+            empty_reason="service_unavailable",
+        )
+    except Exception:
+        total_ms = int((time.monotonic() - started) * 1000)
+        logger.exception("MCP tool=list_job_positions failed")
+        return build_error_envelope(
+            tool="list_job_positions",
+            error_code="SERVICE_ERROR",
+            message="Unable to load supported job positions",
+            total_ms=total_ms,
+            debug_reason="position_service_error",
+            empty_reason="service_unavailable",
+        )
+
+    total_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "MCP tool=list_job_positions session_id=%s result_count=%s total_ms=%s",
+        state.get("session_id"),
+        len(items or []),
+        total_ms,
+    )
+    return build_success_envelope(
+        tool="list_job_positions",
+        items=items or [],
+        total_ms=total_ms,
+        debug_reason="positions_loaded",
+    )
 
 
 async def _maybe_await(value):
@@ -156,7 +240,15 @@ def _load_authoritative_question(
             "id": user_id,
             "bank_mode": state.get("bank_mode", "all"),
         }
-        from_clause, where_clause, params = _build_bank_where_clause(user, "qb")
+        if state.get("job_position"):
+            from_clause, where_clause, params = _build_bank_where_clause(
+                user,
+                "qb",
+                job_position=state["job_position"],
+                job_position_id=state.get("job_position_id"),
+            )
+        else:
+            from_clause, where_clause, params = _build_bank_where_clause(user, "qb")
         sql = (
             "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, "
             "qb.difficulty, qb.sources, qb.owner_id, qb.status, qb.job_position "
@@ -189,6 +281,44 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
             debug_reason="validation_failed",
         )
 
+    if parsed_args.search_query and not state.get("search_query"):
+        state["search_query"] = parsed_args.search_query
+    if parsed_args.job_position and not state.get("job_position"):
+        state["job_position"] = parsed_args.job_position
+    if parsed_args.retrieval_intent and not state.get("retrieval_intent"):
+        state["retrieval_intent"] = parsed_args.retrieval_intent
+    if parsed_args.negative_terms and not state.get("search_negative_terms"):
+        state["search_negative_terms"] = parsed_args.negative_terms
+
+    try:
+        resolution, suggestions = await _resolve_state_position(state)
+    except Exception:
+        logger.exception("MCP tool=search_questions position resolution failed")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="search_questions",
+            error_code="SERVICE_ERROR",
+            message="Unable to resolve job position",
+            total_ms=total_ms,
+            debug_reason="position_resolution_error",
+            empty_reason="service_unavailable",
+        )
+    if state.get("job_position") and resolution is None:
+        state["candidate_questions"] = []
+        state["retrieved_questions"] = []
+        state["question_source"] = "search"
+        state["question_source_reason"] = "unknown_job_position"
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="search_questions",
+            error_code="UNKNOWN_JOB_POSITION",
+            message="Unsupported job position",
+            total_ms=total_ms,
+            debug_reason="unknown_job_position",
+            empty_reason="unknown_job_position",
+            suggestions=suggestions,
+        )
+
     if not parsed_args.keywords and not state.get("search_query"):
         total_ms = int((time.monotonic() - started) * 1000)
         state["candidate_questions"] = []
@@ -205,6 +335,9 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         )
 
     search_args: dict[str, object] = {"keywords": parsed_args.keywords, "limit": 15}
+    if state.get("_mcp_external"):
+        search_args["user_id"] = state.get("user_id")
+        search_args["bank_mode"] = state.get("bank_mode", "public")
     if state.get("search_query"):
         search_args["query_text"] = state["search_query"]
     if parsed_args.question_type:
@@ -213,6 +346,8 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         search_args["question_type"] = state["question_type"]
     if state.get("job_position"):
         search_args["job_position"] = state["job_position"]
+    if state.get("job_position_id"):
+        search_args["job_position_id"] = state["job_position_id"]
     if state.get("retrieval_intent"):
         search_args["retrieval_intent"] = state["retrieval_intent"]
     if state.get("search_negative_terms"):
@@ -246,7 +381,7 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         total_ms = int((time.monotonic() - started) * 1000)
         return build_error_envelope(
             tool="search_questions",
-            error_code="TIMEOUT",
+            error_code="SERVICE_TIMEOUT",
             message="search_questions service timed out",
             total_ms=total_ms,
             debug_reason="service_timeout",
@@ -275,12 +410,20 @@ async def search_questions_tool(args: dict, state: ChatState) -> dict:
         if isinstance(item, dict) and item.get("id") and item.get("question")
     ]
     total_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "MCP tool=search_questions session_id=%s job_position=%s result_count=%s total_ms=%s",
+        state.get("session_id"),
+        state.get("job_position"),
+        len(items),
+        total_ms,
+    )
     return build_success_envelope(
         tool="search_questions",
         items=items,
         total_ms=total_ms,
         debug_reason="hybrid_search_ok" if items else "no_match",
         empty_reason=None if items else "no_match",
+        message=None if items else _NO_MATCH_MESSAGE,
     )
 
 
@@ -297,6 +440,39 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
             message="Invalid draw_questions arguments",
             total_ms=total_ms,
             debug_reason="validation_failed",
+        )
+
+    if parsed_args.job_position and not state.get("job_position"):
+        state["job_position"] = parsed_args.job_position
+    if parsed_args.session_notes is not None:
+        state["session_notes"] = parsed_args.session_notes
+    try:
+        resolution, suggestions = await _resolve_state_position(state)
+    except Exception:
+        logger.exception("MCP tool=draw_questions position resolution failed")
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="draw_questions",
+            error_code="SERVICE_ERROR",
+            message="Unable to resolve job position",
+            total_ms=total_ms,
+            debug_reason="position_resolution_error",
+            empty_reason="service_unavailable",
+        )
+    if state.get("job_position") and resolution is None:
+        state["candidate_questions"] = []
+        state["retrieved_questions"] = []
+        state["question_source"] = "draw"
+        state["question_source_reason"] = "unknown_job_position"
+        total_ms = int((time.monotonic() - started) * 1000)
+        return build_error_envelope(
+            tool="draw_questions",
+            error_code="UNKNOWN_JOB_POSITION",
+            message="Unsupported job position",
+            total_ms=total_ms,
+            debug_reason="unknown_job_position",
+            empty_reason="unknown_job_position",
+            suggestions=suggestions,
         )
 
     control = state.get("distribution_control") or {}
@@ -325,6 +501,8 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
     }
     if state.get("job_position"):
         draw_args["job_position"] = str(state["job_position"]).strip()[:100]
+    if state.get("job_position_id"):
+        draw_args["job_position_id"] = state["job_position_id"]
     for key in ("difficulty", "cat1", "cat2", "topic", "question_type"):
         value = getattr(parsed_args, key)
         if value:
@@ -357,7 +535,7 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         total_ms = int((time.monotonic() - started) * 1000)
         return build_error_envelope(
             tool="draw_questions",
-            error_code="TIMEOUT",
+            error_code="SERVICE_TIMEOUT",
             message="draw_questions service timed out",
             total_ms=total_ms,
             debug_reason="service_timeout",
@@ -385,16 +563,25 @@ async def draw_questions_tool(args: dict, state: ChatState) -> dict:
         for item in results
         if isinstance(item, dict) and item.get("id") and item.get("question")
     ]
-    fallback_used, fallback_steps = _fallback_metadata(items)
     total_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "MCP tool=draw_questions session_id=%s job_position=%s result_count=%s total_ms=%s",
+        state.get("session_id"),
+        state.get("job_position"),
+        len(items),
+        total_ms,
+    )
     return build_success_envelope(
         tool="draw_questions",
         items=items,
         total_ms=total_ms,
         debug_reason="weighted_draw_ok" if items else "no_match",
-        fallback_used=fallback_used,
-        fallback_steps=fallback_steps,
+        # Position and bank scope are hard constraints.  An empty result is
+        # reported as no_match; it is never marked as a hidden fallback.
+        fallback_used=False,
+        fallback_steps=[],
         empty_reason=None if items else "no_match",
+        message=None if items else _NO_MATCH_MESSAGE,
     )
 
 
@@ -419,6 +606,27 @@ def select_question_tool(
             message="select_question accepts only candidate_index; candidates are server-owned",
             total_ms=0,
             debug_reason="client_candidates_rejected",
+            empty_reason="invalid_arguments",
+        )
+
+    requested_source = args.get("question_source")
+    actual_source = state.get("question_source")
+    if requested_source and requested_source not in {"search", "draw"}:
+        return build_error_envelope(
+            tool="select_question",
+            error_code="VALIDATION_ERROR",
+            message="question_source must be search or draw",
+            total_ms=0,
+            debug_reason="invalid_question_source",
+            empty_reason="invalid_arguments",
+        )
+    if requested_source and actual_source and requested_source != actual_source:
+        return build_error_envelope(
+            tool="select_question",
+            error_code="QUESTION_SOURCE_MISMATCH",
+            message="question_source does not match the server candidate set",
+            total_ms=0,
+            debug_reason="question_source_mismatch",
             empty_reason="invalid_arguments",
         )
 
@@ -450,6 +658,26 @@ def select_question_tool(
                 empty_reason="index_out_of_range",
             )
         force_candidate = candidates[candidate_index]
+
+    selected_candidate_id = (
+        force_candidate.get("id")
+        if isinstance(force_candidate, dict)
+        else None
+    )
+    used_question_ids = _positive_int_ids(state.get("used_question_ids"))
+    if selected_candidate_id is not None:
+        try:
+            if int(selected_candidate_id) in used_question_ids:
+                return build_error_envelope(
+                    tool="select_question",
+                    error_code="QUESTION_ALREADY_USED",
+                    message="This question has already been used in the current session",
+                    total_ms=0,
+                    debug_reason="question_already_used",
+                    empty_reason="question_not_available",
+                )
+        except (TypeError, ValueError):
+            pass
 
     if not state.get("user_id"):
         return build_error_envelope(
@@ -518,6 +746,23 @@ def select_question_tool(
             debug_reason=state.get("question_plan_reason") or "no_viable_candidate",
             empty_reason="no_viable_candidate",
         )
+
+    try:
+        selected_id = int(selected.get("id"))
+    except (TypeError, ValueError):
+        selected_id = 0
+    if selected_id in used_question_ids:
+        return build_error_envelope(
+            tool="select_question",
+            error_code="QUESTION_ALREADY_USED",
+            message="This question has already been used in the current session",
+            total_ms=0,
+            debug_reason="question_already_used",
+            empty_reason="question_not_available",
+        )
+    if selected_id > 0:
+        used_question_ids.add(selected_id)
+        state["used_question_ids"] = sorted(used_question_ids)
 
     item = normalize_question_item(
         selected,

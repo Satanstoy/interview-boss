@@ -16,8 +16,11 @@ from app.mcp_server.principal import (
     set_mcp_principal,
 )
 from app.mcp_server import interview_tools
+from app.agents.chat.tool_gateway import build_error_envelope
 from app.mcp_server.session import (
     load_mcp_session_async,
+    mcp_session_lock,
+    MCPSessionLockUnavailable,
     new_session_id,
     save_mcp_session_async,
 )
@@ -176,14 +179,18 @@ mcp = FastMCP(
     "InterviewBoss",
     instructions=(
         "InterviewBoss MCP exposes deterministic backend actions for an "
-        "interview agent: load_skill, search_questions, draw_questions, and "
-        "select_question. The client should persist the returned metadata "
+        "interview agent: list_job_positions, load_skill, search_questions, "
+        "draw_questions, and select_question. If the target role is unclear, "
+        "call list_job_positions first, then pass its canonical name to "
+        "search_questions or draw_questions. The client should persist the returned metadata "
         "session_id and reuse it across one interview. Load a relevant skill "
         "before a specialized interview. Use job_position when the user names "
         "a target role. search_questions and draw_questions return server-owned "
-        "candidates; call select_question with candidate_index before asking a "
+        "candidates; call select_question with the matching question_source and "
+        "candidate_index before asking a "
         "question. The bearer token determines the account; do not rely on "
-        "client-supplied user_id or bank_mode.\n\n"
+        "client-supplied user_id or bank_mode. Empty results are a hard no_match; "
+        "the server never falls back to another role or bank.\n\n"
         "The InterviewBoss tool-use skill is loaded automatically during MCP "
         "initialization and activated in each MCP session. Follow it before "
         "using the question tools; load additional domain skills only when "
@@ -201,13 +208,14 @@ async def _init_tool_state_async(
     """Async session loader for ASGI paths backed by async Redis clients."""
     sid = session_id or new_session_id()
     principal = get_mcp_principal()
-    state = (
-        await load_mcp_session_async(
-            sid,
-            user_id=principal.user_id if principal else None,
-        )
-        or {}
+    loaded_state = await load_mcp_session_async(
+        sid,
+        user_id=principal.user_id if principal else None,
     )
+    state = loaded_state or {}
+    state["session_id"] = sid
+    state["_mcp_external"] = True
+    state["_session_exists"] = loaded_state is not None
     state.update(overrides)
     if principal is not None:
         state["user_id"] = principal.user_id
@@ -223,6 +231,8 @@ async def _init_tool_state_async(
 
 async def _save_tool_state_async(session_id: str, state: dict[str, Any]) -> None:
     principal = get_mcp_principal()
+    state["session_version"] = int(state.get("session_version") or 0) + 1
+    state.pop("_session_exists", None)
     await save_mcp_session_async(
         session_id,
         state,
@@ -237,41 +247,72 @@ def _attach_session_metadata(result: dict[str, Any], session_id: str) -> dict[st
     return result
 
 
+def _tool_service_error(tool: str, session_id: str, message: str) -> dict[str, Any]:
+    """Keep unexpected MCP wrapper failures inside the JSON-RPC result."""
+
+    return _attach_session_metadata(
+        build_error_envelope(
+            tool=tool,
+            error_code="SERVICE_ERROR",
+            message=message,
+            total_ms=0,
+            debug_reason="mcp_wrapper_error",
+            empty_reason="service_unavailable",
+        ),
+        session_id,
+    )
+
+
 @mcp.tool()
 async def load_skill(
     skill_name: str,
     session_id: str = None,
-    active_skills: list = None,
 ) -> dict:
     """Load one interview skill instruction."""
-    skill_overrides = {}
-    if active_skills is not None:
-        skill_overrides["active_skills"] = active_skills
-    sid, state = await _init_tool_state_async(
-        session_id, skill_overrides
-    )
-    result = interview_tools.load_skill_tool({"skill_name": skill_name}, state)
-    result.setdefault("metadata", {})["state"] = {
-        "active_skills": state.get("active_skills", []),
-        "active_skill_instructions": state.get("active_skill_instructions", []),
-    }
-    await _save_tool_state_async(sid, state)
-    return _attach_session_metadata(result, sid)
+    sid = session_id or new_session_id()
+    principal = get_mcp_principal()
+    try:
+        async with mcp_session_lock(sid, principal.user_id if principal else None):
+            sid, state = await _init_tool_state_async(sid, {})
+            result = interview_tools.load_skill_tool({"skill_name": skill_name}, state)
+            await _save_tool_state_async(sid, state)
+            return _attach_session_metadata(result, sid)
+    except MCPSessionLockUnavailable:
+        return _tool_service_error("load_skill", sid, "MCP session is busy; retry the same session_id")
+    except Exception:
+        logger.exception("MCP wrapper failed for tool=load_skill session_id=%s", sid)
+        return _tool_service_error("load_skill", sid, "MCP service failed; retry the request")
+
+
+@mcp.tool()
+async def list_job_positions() -> dict:
+    """List active supported roles and aliases.
+
+    当目标岗位名称不确定时，先调用此工具，再将标准岗位名传给
+    search_questions 或 draw_questions。
+    """
+
+    return await interview_tools.list_job_positions_tool({}, {})
 
 
 @mcp.tool()
 async def search_questions(
-    keywords: list = None,
+    keywords: list[str] = None,
     question_type: str = None,
     user_id: int = None,
     bank_mode: str = "all",
     search_query: str = None,
     job_position: str = None,
     retrieval_intent: str = None,
-    negative_terms: list = None,
+    negative_terms: list[str] = None,
     session_id: str = None,
 ) -> dict:
-    """Search interview questions with a stable backend envelope."""
+    """Search questions and replace the server-owned candidate set.
+
+    Reuse the returned session_id for select_question.  job_position is
+    normalized against active roles; an empty result is no_match and never
+    falls back to another role or question bank.
+    """
     args: dict[str, Any] = {"keywords": keywords or []}
     if question_type:
         args["question_type"] = question_type
@@ -289,10 +330,19 @@ async def search_questions(
     if negative_terms:
         overrides["search_negative_terms"] = negative_terms
 
-    sid, state = await _init_tool_state_async(session_id, overrides)
-    result = await interview_tools.search_questions_tool(args, state)
-    await _save_tool_state_async(sid, state)
-    return _attach_session_metadata(result, sid)
+    sid = session_id or new_session_id()
+    principal = get_mcp_principal()
+    try:
+        async with mcp_session_lock(sid, principal.user_id if principal else None):
+            sid, state = await _init_tool_state_async(sid, overrides)
+            result = await interview_tools.search_questions_tool(args, state)
+            await _save_tool_state_async(sid, state)
+            return _attach_session_metadata(result, sid)
+    except MCPSessionLockUnavailable:
+        return _tool_service_error("search_questions", sid, "MCP session is busy; retry the same session_id")
+    except Exception:
+        logger.exception("MCP wrapper failed for tool=search_questions session_id=%s", sid)
+        return _tool_service_error("search_questions", sid, "MCP service failed; retry the request")
 
 
 @mcp.tool()
@@ -309,7 +359,11 @@ async def draw_questions(
     session_notes: str = None,
     session_id: str = None,
 ) -> dict:
-    """Draw interview questions through the backend question service."""
+    """Draw questions within the requested role, topic, and bank scope.
+
+    The candidate set is stored server-side under session_id.  Empty题库 is a
+    successful no_match result; questions from another role are never mixed in.
+    """
     args: dict[str, Any] = {"count": count}
     for key, value in {
         "difficulty": difficulty,
@@ -330,10 +384,19 @@ async def draw_questions(
     if job_position:
         overrides["job_position"] = job_position.strip()[:100]
 
-    sid, state = await _init_tool_state_async(session_id, overrides)
-    result = await interview_tools.draw_questions_tool(args, state)
-    await _save_tool_state_async(sid, state)
-    return _attach_session_metadata(result, sid)
+    sid = session_id or new_session_id()
+    principal = get_mcp_principal()
+    try:
+        async with mcp_session_lock(sid, principal.user_id if principal else None):
+            sid, state = await _init_tool_state_async(sid, overrides)
+            result = await interview_tools.draw_questions_tool(args, state)
+            await _save_tool_state_async(sid, state)
+            return _attach_session_metadata(result, sid)
+    except MCPSessionLockUnavailable:
+        return _tool_service_error("draw_questions", sid, "MCP session is busy; retry the same session_id")
+    except Exception:
+        logger.exception("MCP wrapper failed for tool=draw_questions session_id=%s", sid)
+        return _tool_service_error("draw_questions", sid, "MCP service failed; retry the request")
 
 
 @mcp.tool()
@@ -342,11 +405,15 @@ async def select_question(
     bank_mode: str = "all",
     session_id: str = None,
     question_type: str = None,
-    question_source: str = "draw",
+    question_source: str = None,
     candidate_index: int = 0,
 ) -> dict:
-    """Select one server-owned candidate by index and bind the next plan."""
-    overrides: dict[str, Any] = {"question_source": question_source}
+    """Select one server-owned candidate by index and bind the next plan.
+
+    Reuse the same session_id and question_source returned by search/draw.
+    The client cannot submit or replace the candidate list.
+    """
+    overrides: dict[str, Any] = {}
     if user_id is not None:
         overrides["user_id"] = user_id
     if bank_mode:
@@ -354,14 +421,37 @@ async def select_question(
     if question_type:
         overrides["question_type"] = question_type
 
-    sid, state = await _init_tool_state_async(session_id, overrides)
-    result = interview_tools.select_question_tool(
-        {"candidate_index": candidate_index},
-        state,
-        candidate_index=candidate_index,
-    )
-    await _save_tool_state_async(sid, state)
-    return _attach_session_metadata(result, sid)
+    sid = session_id or new_session_id()
+    principal = get_mcp_principal()
+    try:
+        async with mcp_session_lock(sid, principal.user_id if principal else None):
+            sid, state = await _init_tool_state_async(sid, overrides)
+            if session_id and not state.get("_session_exists"):
+                result = build_error_envelope(
+                    tool="select_question",
+                    error_code="SESSION_EXPIRED",
+                    message="MCP session does not exist or has expired",
+                    total_ms=0,
+                    debug_reason="session_expired",
+                    empty_reason="session_expired",
+                )
+            else:
+                result = interview_tools.select_question_tool(
+                    {
+                        "candidate_index": candidate_index,
+                        **({"question_source": question_source} if question_source else {}),
+                    },
+                    state,
+                    candidate_index=candidate_index,
+                )
+            if not (session_id and not state.get("_session_exists")):
+                await _save_tool_state_async(sid, state)
+            return _attach_session_metadata(result, sid)
+    except MCPSessionLockUnavailable:
+        return _tool_service_error("select_question", sid, "MCP session is busy; retry the same session_id")
+    except Exception:
+        logger.exception("MCP wrapper failed for tool=select_question session_id=%s", sid)
+        return _tool_service_error("select_question", sid, "MCP service failed; retry the request")
 
 
 mcp_app = MCPAuthMiddleware(mcp.streamable_http_app())

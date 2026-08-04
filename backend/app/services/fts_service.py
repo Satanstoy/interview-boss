@@ -19,6 +19,31 @@ from app.db.connection import get_db_connection
 
 logger = logging.getLogger("interview-boss")
 
+
+def _visibility_clause(
+    alias: str = "qb",
+    *,
+    user_id: int | None = None,
+    bank_mode: str = "public",
+) -> tuple[str, list]:
+    """Use the same public/all/mine visibility semantics as the bank service."""
+
+    mode = str(bank_mode or "public").lower()
+    if mode in {"all", "mixed"} and user_id:
+        return (
+            f"AND (({alias}.owner_id IS NULL AND {alias}.status = 'approved') "
+            f"OR {alias}.owner_id = ?)",
+            [user_id],
+        )
+    if mode in {"mine", "personal"} and user_id:
+        return (
+            f"AND ({alias}.owner_id = ? OR "
+            f"({alias}.owner_id IS NULL AND {alias}.status = 'pending' "
+            f"AND {alias}.submitted_by = ?))",
+            [user_id, user_id],
+        )
+    return f"AND {alias}.owner_id IS NULL AND {alias}.status = 'approved'", []
+
 RRF_K = 60  # RRF 平滑常数（行业标准值）
 HEURISTIC_RERANK_WEIGHT = 0.0001  # 只做小幅调整，不能覆盖 RRF 主排序
 
@@ -383,7 +408,10 @@ def search_questions_fts(
     keywords: list[str],
     limit: int = 10,
     job_position: str = None,
+    job_position_id: int = None,
     exclude_ids: set[int] = None,
+    user_id: int | None = None,
+    bank_mode: str = "public",
 ) -> list[dict]:
     """用 FTS5 搜索题库，返回最相关的题目列表。
 
@@ -426,60 +454,88 @@ def search_questions_fts(
         if has_cjk:
             logger.info(f"FTS 检索: 检测到 CJK 关键词，跳过 FTS5 直接用 LIKE 搜索")
             results = _fallback_like_search(
-                keywords, conn, limit, job_position, exclude_ids
+                keywords,
+                conn,
+                limit,
+                job_position,
+                exclude_ids,
+                job_position_id=job_position_id,
+                user_id=user_id,
+                bank_mode=bank_mode,
             )
             logger.info(f"FTS 检索完成(LIKE): 返回 {len(results)} 条结果")
             return results
 
-        # 英文关键词用 FTS5
-        # 优先按岗位过滤搜索（排除重复题）
-        if job_position:
+        # 英文关键词用 FTS5。岗位过滤是硬约束；岗位过滤结果不足时
+        # 只能在同一岗位内走 LIKE 补充，不能回退到其他岗位。
+        if job_position_id:
             try:
+                visibility, visibility_params = _visibility_clause(
+                    "qb", user_id=user_id, bank_mode=bank_mode
+                )
                 rows = conn.execute(
                     "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank, qb.sources "
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
-                    "WHERE question_fts MATCH ? AND qb.job_position = ? "
-                    "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
-                    "AND qb.duplicate_of IS NULL "
+                    "JOIN question_position qp ON qp.question_id = qb.id "
+                    "WHERE question_fts MATCH ? AND qp.position_id = ? "
+                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    f"{visibility} "
                     "ORDER BY f.rank LIMIT ?",
-                    (fts_query, job_position, limit),
+                    [fts_query, job_position_id, *visibility_params, limit],
                 ).fetchall()
             except Exception as e:
                 logger.warning(f"FTS5 岗位过滤查询失败: {e}")
-
-        # 岗位过滤结果不足时，回退到无过滤搜索（排除重复题）
-        if len(rows) < 3:
+        elif job_position:
             try:
+                visibility, visibility_params = _visibility_clause(
+                    "qb", user_id=user_id, bank_mode=bank_mode
+                )
                 fallback_rows = conn.execute(
                     "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank, qb.sources "
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
-                    "WHERE question_fts MATCH ? "
-                    "AND qb.deleted_at IS NULL AND qb.status = 'approved' "
-                    "AND qb.duplicate_of IS NULL "
+                    "WHERE question_fts MATCH ? AND qb.job_position = ? "
+                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    f"{visibility} "
                     "ORDER BY f.rank "
                     "LIMIT ?",
-                    (fts_query, limit),
+                    [fts_query, job_position, *visibility_params, limit],
                 ).fetchall()
-                # 合并去重
-                existing_ids = {row[0] for row in rows}
-                for row in fallback_rows:
-                    if row[0] not in existing_ids:
-                        rows.append(row)
-                        if len(rows) >= limit:
-                            break
+                rows = fallback_rows
             except Exception as e:
                 logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
-                if not rows:
-                    logger.info("FTS5 查询异常，降级到 LIKE 搜索")
-                    results = _fallback_like_search(
-                        keywords, conn, limit, job_position, exclude_ids
-                    )
-                    logger.info(
-                        f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果"
-                    )
-                    return results
+        else:
+            try:
+                visibility, visibility_params = _visibility_clause(
+                    "qb", user_id=user_id, bank_mode=bank_mode
+                )
+                rows = conn.execute(
+                    "SELECT f.rowid, f.question, f.cat1, f.cat2, f.tags, f.ai_answer, f.rank, qb.sources "
+                    "FROM question_fts f "
+                    "JOIN question_bank qb ON f.rowid = qb.id "
+                    "WHERE question_fts MATCH ? "
+                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    f"{visibility} "
+                    "ORDER BY f.rank LIMIT ?",
+                    [fts_query, *visibility_params, limit],
+                ).fetchall()
+            except Exception as e:
+                logger.warning(f"FTS5 查询失败: {e}, query={fts_query}")
+
+        if not rows:
+            results = _fallback_like_search(
+                keywords,
+                conn,
+                limit,
+                job_position,
+                exclude_ids,
+                job_position_id=job_position_id,
+                user_id=user_id,
+                bank_mode=bank_mode,
+            )
+            logger.info(f"FTS 检索完成(LIKE fallback): 返回 {len(results)} 条结果")
+            return results
 
     # 排除已展示的题目
     if exclude_ids:
@@ -513,7 +569,14 @@ def search_questions_fts(
     if len(results) < 3 and keywords:
         existing_ids = {r["id"] for r in results}
         fallback = _fallback_like_search(
-            keywords, conn, limit, job_position, exclude_ids
+            keywords,
+            conn,
+            limit,
+            job_position,
+            exclude_ids,
+            job_position_id=job_position_id,
+            user_id=user_id,
+            bank_mode=bank_mode,
         )
         for item in fallback:
             if item["id"] not in existing_ids:
@@ -531,6 +594,9 @@ def _fallback_like_search(
     limit: int,
     job_position: str = None,
     exclude_ids: set[int] = None,
+    job_position_id: int = None,
+    user_id: int | None = None,
+    bank_mode: str = "public",
 ) -> list[dict]:
     """降级搜索：当 FTS5 不可用时用 LIKE 模糊匹配
 
@@ -585,13 +651,29 @@ def _fallback_like_search(
         return []
 
     # 第一轮：用原始关键词搜索（精确匹配）
-    rows = _execute_like_search(split_keywords[:8], conn, limit, job_position)
+    rows = _execute_like_search(
+        split_keywords[:8],
+        conn,
+        limit,
+        job_position,
+        job_position_id=job_position_id,
+        user_id=user_id,
+        bank_mode=bank_mode,
+    )
 
     # 如果结果不足，用更宽泛的搜索（去掉过长的关键词）
     if len(rows) < 3:
         broad_keywords = [kw for kw in split_keywords if len(kw) <= 6][:8]
         if broad_keywords and broad_keywords != split_keywords[:8]:
-            more_rows = _execute_like_search(broad_keywords, conn, limit, job_position)
+            more_rows = _execute_like_search(
+                broad_keywords,
+                conn,
+                limit,
+                job_position,
+                job_position_id=job_position_id,
+                user_id=user_id,
+                bank_mode=bank_mode,
+            )
             existing_ids = {r[0] for r in rows}
             for r in more_rows:
                 if r[0] not in existing_ids:
@@ -616,7 +698,13 @@ def _fallback_like_search(
 
 
 def _execute_like_search(
-    keywords: list[str], conn, limit: int, job_position: str = None
+    keywords: list[str],
+    conn,
+    limit: int,
+    job_position: str = None,
+    job_position_id: int = None,
+    user_id: int | None = None,
+    bank_mode: str = "public",
 ) -> list:
     if not keywords:
         return []
@@ -634,19 +722,31 @@ def _execute_like_search(
     if not conditions:
         return []
 
+    position_from = "FROM question_bank"
     position_filter = ""
-    if job_position:
+    position_params: list = []
+    if job_position_id:
+        position_from += (
+            " JOIN question_position qp ON qp.question_id = question_bank.id "
+            "AND qp.position_id = ?"
+        )
+        position_params.append(job_position_id)
+    elif job_position:
         position_filter = "AND job_position = ? "
-        params.append(job_position)
+        position_params.append(job_position)
+
+    visibility, visibility_params = _visibility_clause(
+        "question_bank", user_id=user_id, bank_mode=bank_mode
+    )
 
     where = " OR ".join(conditions)
     return conn.execute(
         f"SELECT id, question, cat1, cat2, tags, ai_answer, sources "
-        f"FROM question_bank "
-        f"WHERE deleted_at IS NULL AND status = 'approved' AND duplicate_of IS NULL "
+        f"{position_from} "
+        f"WHERE deleted_at IS NULL AND duplicate_of IS NULL {visibility} "
         f"{position_filter}AND ({where}) "
         f"LIMIT ?",
-        params + [limit],
+        position_params + visibility_params + params + [limit],
     ).fetchall()
 
 
@@ -700,7 +800,13 @@ def reciprocal_rank_fusion(
 
 
 def _vector_search(
-    query_text: str, top_k: int = 10, exclude_ids: set[int] = None
+    query_text: str,
+    top_k: int = 10,
+    job_position: str = None,
+    job_position_id: int = None,
+    exclude_ids: set[int] = None,
+    user_id: int | None = None,
+    bank_mode: str = "public",
 ) -> list[dict]:
     """向量语义搜索 — 从数据库加载 embedding 并用 FAISS 检索。
 
@@ -727,12 +833,29 @@ def _vector_search(
         logger.warning(f"向量搜索: embedding_service 导入失败: {e}")
         return []
 
+    position_from = "FROM question_bank"
+    position_where = ""
+    position_params: list = []
+    if job_position_id:
+        position_from += (
+            " JOIN question_position qp ON qp.question_id = question_bank.id "
+            "AND qp.position_id = ?"
+        )
+        position_params.append(job_position_id)
+    elif job_position:
+        position_where = " AND question_bank.job_position = ?"
+        position_params.append(job_position)
+    visibility, visibility_params = _visibility_clause(
+        "question_bank", user_id=user_id, bank_mode=bank_mode
+    )
+
     with get_db_connection() as conn:
         rows = conn.execute(
             "SELECT id, question, cat1, cat2, tags, embedding, sources "
-            "FROM question_bank "
-            "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL "
-            "AND duplicate_of IS NULL"
+            f"{position_from} "
+            "WHERE deleted_at IS NULL AND embedding IS NOT NULL "
+            f"AND duplicate_of IS NULL {visibility}{position_where}",
+            visibility_params + position_params,
         ).fetchall()
 
     if not rows:
@@ -870,7 +993,10 @@ def hybrid_search(
     query_text: str = None,
     limit: int = 5,
     job_position: str = None,
+    job_position_id: int = None,
     exclude_ids: set[int] = None,
+    user_id: int | None = None,
+    bank_mode: str = "public",
     negative_terms: list[str] = None,
     question_type: str = None,
     retrieval_intent: str = None,
@@ -913,7 +1039,10 @@ def hybrid_search(
             keywords=fts_keywords,
             limit=oversample,
             job_position=job_position,
+            job_position_id=job_position_id,
             exclude_ids=exclude_ids,
+            user_id=user_id,
+            bank_mode=bank_mode,
         )
 
     cjk_results = []
@@ -924,7 +1053,10 @@ def hybrid_search(
                 conn,
                 oversample,
                 job_position=job_position,
+                job_position_id=job_position_id,
                 exclude_ids=exclude_ids,
+                user_id=user_id,
+                bank_mode=bank_mode,
             )
 
     vec_results = []
@@ -932,6 +1064,10 @@ def hybrid_search(
         vec_results = _vector_search(
             query_text=query_text,
             top_k=oversample,
+            job_position=job_position,
+            job_position_id=job_position_id,
+            user_id=user_id,
+            bank_mode=bank_mode,
             exclude_ids=exclude_ids,
         )
 

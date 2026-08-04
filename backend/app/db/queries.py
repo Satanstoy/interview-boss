@@ -98,6 +98,7 @@ def build_bank_where_clause(
     filter_mode: str = "all",
     table_alias: str = "qb",
     job_position: str | None = None,
+    job_position_id: int | None = None,
 ) -> tuple[str, str, list]:
     """统一题库过滤口径（替代 bank_mode 三分支，数据层唯一实现）。
 
@@ -110,7 +111,10 @@ def build_bank_where_clause(
         (from_clause, where_clause, params)
     """
     prefix = f"{table_alias}." if table_alias else ""
-    if job_position and job_position.strip():
+    if job_position_id:
+        pos_id = int(job_position_id)
+        pos_name = job_position.strip() if job_position else ""
+    elif job_position and job_position.strip():
         pos_name = job_position.strip()
         pos_id = None
         try:
@@ -146,6 +150,8 @@ def build_bank_where_clause(
         f"FROM question_bank {table_alias} "
         f"JOIN question_position qp ON {prefix}id = qp.question_id AND qp.position_id = ?"
     )
+    # When there is no position row, the legacy fallback below removes the
+    # JOIN as well, so it must not leave a dangling parameter behind.
     from_params = [pos_id] if pos_id else []
 
     deleted_filter = f"{prefix}deleted_at IS NULL"

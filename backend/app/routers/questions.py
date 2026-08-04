@@ -15,7 +15,12 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
 
-def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
+def _build_bank_where_clause(
+    user: dict,
+    table_alias: str = "qb",
+    job_position: str | None = None,
+    job_position_id: int | None = None,
+):
     """根据用户 bank_mode 和当前岗位构建查询子句（兼容旧调用）。
 
     Deprecated: 新代码使用 db.queries.build_bank_where_clause(user_id, filter)。
@@ -27,7 +32,13 @@ def _build_bank_where_clause(user: dict, table_alias: str = "qb"):
     )
     from app.db.queries import build_bank_where_clause
 
-    return build_bank_where_clause(user["id"], filter_mode, table_alias)
+    return build_bank_where_clause(
+        user["id"],
+        filter_mode,
+        table_alias,
+        job_position=job_position,
+        job_position_id=job_position_id,
+    )
 
 
 def _split_join_and_where_params(from_clause: str, params: list):
