@@ -1,14 +1,14 @@
 <template>
-  <div data-testid="practice-workspace" class="flex min-w-0 flex-col gap-4">
-    <section data-testid="practice-session-picker" class="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-5">
+  <div data-testid="practice-workspace" class="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 pb-6">
+    <section data-testid="practice-session-picker" class="rounded-xl border border-border bg-card p-2 shadow-sm md:p-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 px-2 py-1.5 md:px-1">
         <div class="flex min-w-0 items-center gap-3">
-          <div class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-brand shadow-sm">
-            <Layers class="size-5 text-white" />
+          <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Layers class="size-4" />
           </div>
           <div class="min-w-0">
-            <h3 class="text-sm font-bold text-foreground">刷题</h3>
-            <p class="text-caption text-muted-foreground">先回忆，再翻牌；用短时间重复高频八股</p>
+            <h3 class="text-sm font-bold text-foreground">刷题题单</h3>
+            <p class="text-[11px] text-muted-foreground">当前题库 {{ questions.length }} 题</p>
           </div>
           <Badge variant="outline" class="hidden text-[10px] text-muted-foreground sm:inline-flex">闪卡模式</Badge>
         </div>
@@ -34,11 +34,11 @@
         </Button>
       </div>
 
-      <div class="flex flex-col gap-4 p-4 md:p-5">
-        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p class="text-xs font-semibold text-muted-foreground">选择刷题题单</p>
-            <p class="mt-1 text-xs text-muted-foreground">当前筛选题库共 {{ questions.length }} 题，收藏题可以直接单独复习</p>
+      <div data-testid="practice-session-strip" class="flex flex-col gap-2 pt-2">
+        <div class="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-foreground">选择题单</span>
+            <span class="text-[11px] text-muted-foreground">收藏题可单独复习</span>
           </div>
           <div class="relative w-full md:max-w-xs">
             <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -46,30 +46,30 @@
           </div>
         </div>
 
-        <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid min-w-0 grid-cols-2 gap-1.5 md:grid-cols-4">
           <button
             v-for="option in recommendedSessions"
             :key="option.key"
             :data-testid="`practice-session-${option.key}`"
             :disabled="option.count === 0"
             type="button"
-            class="group flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45"
-            :class="sessionKey === option.key ? 'border-primary/40 bg-primary/5 text-foreground shadow-sm' : 'border-border bg-card text-muted-foreground hover:border-primary/25 hover:bg-muted/50 hover:text-foreground'"
+            class="group flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 sm:px-3"
+            :class="sessionKey === option.key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'"
             @click="selectSession(option.key)"
           >
-            <span class="flex size-9 shrink-0 items-center justify-center rounded-xl" :class="sessionKey === option.key ? option.iconClass : 'bg-muted text-muted-foreground'">
-              <component :is="option.icon" :size="16" />
+            <span class="flex size-8 shrink-0 items-center justify-center rounded-lg" :class="sessionKey === option.key ? option.iconClass : 'bg-muted text-muted-foreground'">
+              <component :is="option.icon" :size="15" />
             </span>
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm font-semibold">{{ option.label }}</span>
-              <span class="mt-0.5 block truncate text-[11px] text-muted-foreground">{{ option.description }}</span>
+              <span class="block truncate text-xs font-semibold sm:text-sm">{{ option.label }}</span>
+              <span class="mt-0.5 block truncate text-[10px] text-muted-foreground">{{ option.description }}</span>
             </span>
             <span class="shrink-0 text-xs tabular-nums text-muted-foreground">{{ option.count }}</span>
           </button>
         </div>
 
-        <div class="flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-center">
-          <p class="shrink-0 text-xs font-semibold text-muted-foreground">按难度</p>
+        <div class="flex flex-col gap-2 border-t border-border px-1 pt-2 sm:flex-row sm:items-center">
+          <p class="shrink-0 text-[11px] font-semibold text-muted-foreground">难度</p>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="option in difficultySessions"
@@ -88,17 +88,11 @@
           </div>
         </div>
 
-        <div class="flex items-start gap-2 rounded-xl border border-primary/15 bg-primary/5 p-3">
-          <Lightbulb class="mt-0.5 size-4 shrink-0 text-primary" />
-          <div>
-            <p class="text-xs font-medium text-foreground">背题小提示</p>
-            <p class="mt-1 text-[11px] leading-relaxed text-muted-foreground">先用自己的话说出 3 个关键词，再展开答案核对，记忆会更牢。</p>
-          </div>
-        </div>
       </div>
     </section>
 
-    <Card v-if="currentQ" data-testid="practice-card" class="mx-auto w-full max-w-6xl overflow-hidden p-0 shadow-sm">
+    <Card v-if="currentQ" data-testid="practice-card" class="mx-auto w-full overflow-hidden rounded-2xl p-0 shadow-sm">
+      <div data-testid="practice-focus-card" class="contents">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span class="font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
@@ -118,7 +112,7 @@
         </div>
 
         <div class="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-10 text-center md:py-14">
-          <p class="mb-5 text-xs font-medium uppercase tracking-[0.18em] text-primary">Interview flashcard</p>
+          <p class="mb-5 text-xs font-medium uppercase tracking-[0.18em] text-primary">主动回忆</p>
           <h2 class="text-xl font-semibold leading-relaxed tracking-tight text-foreground md:text-3xl md:leading-relaxed">{{ currentQ.question }}</h2>
           <p v-if="!answerRevealed" class="mx-auto mt-5 max-w-xl text-sm leading-relaxed text-muted-foreground">先在脑中组织答案，想清楚“是什么、为什么、怎么做”，再翻开卡片。</p>
 
@@ -151,12 +145,23 @@
           </div>
         </div>
 
-        <div v-if="answerRevealed" class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-          <div class="flex items-center gap-2">
-            <Button variant="outline" size="sm" class="gap-1.5" @click="toggleSelfCheck"><Target class="size-3.5" />{{ showSelfCheck ? '收起自测' : '自测一下' }}</Button>
-            <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="toggleHistory"><History class="size-3.5" />练习记录<span v-if="questionAttemptCount(currentQ)" class="tabular-nums">({{ questionAttemptCount(currentQ) }})</span></Button>
+        <div v-if="answerRevealed" data-testid="practice-review-actions" class="mt-6 border-t border-border pt-5">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p class="text-sm font-semibold text-foreground">记得怎么样？</p>
+              <p class="mt-1 text-[11px] text-muted-foreground">先判断记忆程度，再进入下一题</p>
+            </div>
+            <div class="grid grid-cols-3 gap-2 sm:flex">
+              <Button variant="outline" size="sm" class="gap-1.5" @click="markAndNext(false)"><RotateCcw class="size-3.5" />再复习</Button>
+              <Button variant="outline" size="sm" class="gap-1.5" @click="markAndNext(false)"><Target class="size-3.5" />有点模糊</Button>
+              <Button size="sm" class="gap-1.5" @click="markAndNext(true)"><Check class="size-3.5" />记得了</Button>
+            </div>
           </div>
-          <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="answerRevealed = false"><RotateCcw class="size-3.5" />再想一遍</Button>
+          <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+            <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="toggleSelfCheck"><Target class="size-3.5" />{{ showSelfCheck ? '收起自测' : '自测一下' }}</Button>
+            <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="toggleHistory"><History class="size-3.5" />练习记录<span v-if="questionAttemptCount(currentQ)" class="tabular-nums">({{ questionAttemptCount(currentQ) }})</span></Button>
+            <Button variant="ghost" size="sm" class="ml-auto gap-1.5 text-muted-foreground" @click="answerRevealed = false"><RotateCcw class="size-3.5" />再想一遍</Button>
+          </div>
         </div>
 
         <div v-if="showSelfCheck" class="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-4 md:p-5">
@@ -174,6 +179,7 @@
 
         <div v-if="currentQ.sources?.length" class="mt-5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground"><Link2 class="size-3.5" /><span>出处：</span><button v-for="(source, sourceIndex) in currentQ.sources" :key="sourceIndex" type="button" class="rounded-md border border-border bg-card px-2 py-1 transition hover:border-primary/30 hover:text-primary" @click="emit('navigate-to-interview', { source, questionId: currentQ.id })">{{ source.company || '未知公司' }} · {{ source.round || '未知轮次' }}</button></div>
       </div>
+      </div>
     </Card>
 
     <div v-else class="mx-auto flex min-h-80 w-full max-w-xl flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
@@ -183,9 +189,9 @@
       <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">查看全部题库</Button><Button @click="emit('close')">返回题库</Button></div>
     </div>
 
-    <div v-if="currentQ" class="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3">
+    <div v-if="currentQ" class="mx-auto flex w-full flex-wrap items-center justify-between gap-3 px-1">
       <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题<span class="hidden text-[11px] text-muted-foreground md:inline">←</span></Button>
-      <div class="flex items-center gap-2"><Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="markAndNext(false)"><RotateCcw class="size-3.5" />再复习</Button><Button size="sm" class="gap-1.5" @click="markAndNext(true)"><Check class="size-3.5" />记住了</Button></div>
+      <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
       <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<span class="hidden text-[11px] text-muted-foreground md:inline">→</span><ChevronRight class="size-4" /></Button>
     </div>
   </div>
@@ -202,7 +208,6 @@ import {
   Flame,
   History,
   Layers,
-  Lightbulb,
   Link2,
   List,
   Loader2,

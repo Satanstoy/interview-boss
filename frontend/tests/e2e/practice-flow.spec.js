@@ -536,4 +536,16 @@ test.describe('练习完整流程 — PracticePanel', () => {
     expect(metrics.viewWidth).toBeGreaterThan(0)
     expect(metrics.workspaceRight).toBeLessThanOrEqual(metrics.viewportWidth)
   })
+
+  test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+
+    await expect(page.getByTestId('practice-session-strip')).toBeVisible()
+    await expect(page.getByTestId('practice-focus-card')).toBeVisible()
+    await expect(page.getByText('主动回忆')).toBeVisible()
+
+    await page.getByTestId('practice-show-answer').click()
+    await expect(page.getByTestId('practice-review-actions')).toBeVisible()
+    await expect(page.getByRole('button', { name: '记得了' })).toBeVisible()
+  })
 })
