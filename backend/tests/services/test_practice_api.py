@@ -37,9 +37,14 @@ def test_decks_link_high_frequency_bank_and_review_state(client, test_db):
         decks = client.get("/api/practice/decks")
         assert decks.status_code == 200
         by_key = {item["key"]: item for item in decks.json()["items"]}
-        assert by_key["high-frequency"]["total"] == 1
+        assert set(by_key) == {"all", "starred"}
+        assert by_key["all"]["total"] == 2
         assert by_key["starred"]["total"] == 1
-        assert by_key["unpracticed"]["total"] == 2
+
+        queue = client.get("/api/practice/decks/all/questions")
+        assert queue.status_code == 200, queue.text
+        assert queue.json()["total"] == 2
+        assert queue.json()["items"][0]["id"] == question_id
 
         review = client.post(
             "/api/practice/review",
@@ -49,17 +54,16 @@ def test_decks_link_high_frequency_bank_and_review_state(client, test_db):
         assert review.json()["review"]["proficiency"] == 1
         assert review.json()["review"]["has_been_practiced"] is True
 
-        queue = client.get("/api/practice/decks/high-frequency/questions")
+        queue = client.get("/api/practice/decks/all/questions")
         assert queue.status_code == 200, queue.text
-        assert queue.json()["total"] == 1
-        item = queue.json()["items"][0]
+        assert queue.json()["total"] == 2
+        item = next(item for item in queue.json()["items"] if item["id"] == question_id)
         assert item["id"] == question_id
         assert item["has_been_practiced"] is True
         assert item["proficiency"] == 1
         assert item["review_state"] == "learning"
 
         all_questions = client.get("/api/practice/decks/all/questions")
-        assert all_questions.json()["total"] == 2
         assert {item["id"] for item in all_questions.json()["items"]} == {
             question_id,
             second_id,

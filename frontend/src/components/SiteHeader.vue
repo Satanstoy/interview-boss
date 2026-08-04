@@ -1,7 +1,7 @@
 <script setup>
 import { computed, inject, ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, Clock3, Loader2, Menu, Plus, Settings, X } from '@lucide/vue'
+import { AlertCircle, Clock3, Layers, Loader2, Menu, Plus, Settings, X } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -27,10 +27,26 @@ const props = defineProps({
   showCodingControls: {
     type: Boolean,
     default: false
+  },
+  showPracticeControls: {
+    type: Boolean,
+    default: false
+  },
+  practiceDecks: {
+    type: Array,
+    default: () => []
+  },
+  practiceSelectedDeckKey: {
+    type: String,
+    default: 'all'
+  },
+  practiceDeckLoading: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['show-settings', 'toggle-mobile-nav'])
+const emit = defineEmits(['show-settings', 'toggle-mobile-nav', 'practice-select-deck', 'practice-manage-decks'])
 
 // ── 全局上传任务进度 ──
 const { activeJobs } = useSubmitJobs()
@@ -87,6 +103,7 @@ const createPlaylist = async () => {
 
 <template>
   <header
+    :data-testid="showPracticeControls ? 'practice-header' : undefined"
     class="flex h-11 shrink-0 items-center gap-3 bg-background/80 px-3 lg:px-5"
   >
     <AppTooltip text="打开导航">
@@ -124,6 +141,21 @@ const createPlaylist = async () => {
             <Plus class="size-4" />
           </Button>
         </AppTooltip>
+      </template>
+
+      <template v-else-if="showPracticeControls">
+        <span class="text-muted-foreground">/</span>
+        <select
+          data-testid="practice-deck-select"
+          :value="practiceSelectedDeckKey"
+          :disabled="practiceDeckLoading || !practiceDecks.length"
+          class="h-8 min-w-0 max-w-[15rem] rounded-lg border border-input bg-background px-2 text-xs font-medium text-foreground outline-none transition focus:border-ring focus:ring-1 focus:ring-ring/20 disabled:cursor-wait disabled:opacity-60 sm:max-w-[18rem]"
+          @change="emit('practice-select-deck', $event.target.value)"
+        >
+          <option v-for="deck in practiceDecks" :key="deck.key" :value="deck.key">
+            {{ deck.name }} · {{ deck.total || 0 }} 题
+          </option>
+        </select>
       </template>
     </div>
 
@@ -188,6 +220,16 @@ const createPlaylist = async () => {
       </div>
 
       <!-- Season badge — h-8 matches settings button for visual center alignment -->
+      <Button
+        v-if="showPracticeControls"
+        data-testid="practice-manage-decks"
+        variant="ghost"
+        size="sm"
+        class="inline-flex h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+        @click="emit('practice-manage-decks')"
+      >
+        <Layers class="size-3.5" />管理题单
+      </Button>
       <span
         v-if="activeSeason"
         class="hidden h-8 items-center rounded-md border border-border bg-muted/50 px-2 text-xs font-medium leading-none text-muted-foreground md:inline-flex"

@@ -139,6 +139,12 @@ src/
 - `services/codingApi.js` 负责 `scope=favorites` / `playlist_id` 查询、收藏切换、题单以及 Prompt + Markdown 导入，组件不直接拼接 HTTP 请求。
 - 题目交互遵循 LeetCode 式工作流：题库筛选 → 查看描述 → 编写代码 → 提示/评审；个人导入题目以“我的题目”展示，收藏和题单状态来自后端持久化。
 
+### 八股刷题工作台
+
+- `AuthenticatedLayout.vue` 持有 `usePracticeDecks()` 的共享实例；刷题相关路由的全局 `SiteHeader` 显示“刷题 / 题单选择 / 管理题单”，`PracticeMode.vue` 不再重复渲染子页面顶栏。
+- 系统题单仅有“全部题”和“我的收藏”，用户创建的自定义题单通过题卡“加入题单”和 `/practice/decks` 管理；创建弹窗提供常见八股分组建议。
+- `PracticeMode.vue` 的侧栏只展示当前题单的搜索框和题目列表；题卡支持频率、熟练度、收藏、加入题单和自适应单卡布局。复习排序由后端算法完成，高频权重会参与所有题单队列排序。
+
 ## 岗位设置注意事项
 
 - `services/profileApi.js` 的岗位增删会主动失效 `/api/positions` 缓存，`fetchPositions()` 默认绕过 GET TTL，避免软删除后设置页看到旧岗位。

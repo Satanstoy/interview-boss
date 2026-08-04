@@ -38,6 +38,7 @@ import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
 import { fetchCodingPlaylists } from '@/services/codingApi.js'
+import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
 import { defineAsyncComponent } from 'vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -283,6 +284,44 @@ const previewUser = {
 const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))
 const isAuthenticatedForUi = computed(() => Boolean(displayUser.value))
 
+// 刷题题单属于应用壳状态：全局顶栏、刷题卡片和题单管理页共享同一份选择与加载状态。
+const practiceNavigation = usePracticeDecks(bankFilter)
+const {
+  decks: practiceDecks,
+  selectedDeckKey: practiceSelectedDeckKey,
+  isLoading: practiceDeckLoading,
+} = practiceNavigation
+const practiceDecksLoaded = ref(false)
+
+const loadPracticeContext = async () => {
+  if (!route.path.startsWith('/practice') || !isAuthenticatedForUi.value) return
+  if (!practiceDecksLoaded.value) {
+    await practiceNavigation.loadDecks()
+    practiceDecksLoaded.value = true
+  }
+  if (route.name !== 'practice') return
+  const requestedDeck = String(route.query.deck || '')
+  const targetDeck = requestedDeck && practiceNavigation.decks.value.some(deck => deck.key === requestedDeck)
+    ? requestedDeck
+    : practiceNavigation.selectedDeckKey.value
+  if (targetDeck && (practiceNavigation.selectedDeckKey.value !== targetDeck || !practiceNavigation.questions.value.length)) {
+    await practiceNavigation.loadQuestions(targetDeck)
+  }
+}
+
+const selectPracticeDeck = async (deckKey) => {
+  if (!deckKey || !practiceNavigation.decks.value.some(deck => deck.key === deckKey)) return
+  if (route.name === 'practice') {
+    await practiceNavigation.loadQuestions(deckKey)
+    await router.replace({ path: '/practice', query: { deck: deckKey } })
+  } else {
+    await router.push({ path: '/practice', query: { deck: deckKey } })
+  }
+}
+
+const openPracticeDeckManager = () => router.push('/practice/decks')
+provide('practiceDecks', practiceNavigation)
+
 const openSettings = () => {
   router.push(routeLocation('/settings'))
 }
@@ -525,7 +564,7 @@ provide('appData', {
   mergeSearchResults, mergeSearching, startMerge, doMergeSearch,
   confirmMerge, splitAsNew,
   // Practice
-  enterPracticeMode, practiceQuestion,
+  enterPracticeMode, practiceQuestion, practiceNavigation,
   // Highlight
   highlightInterviewId, returnTab, returnToPracticeMode,
   floatingReturnBtn, floatingBtnStyle, masterBankEverShown,
@@ -550,6 +589,8 @@ watch(authCompleted, (done) => {
     loadAllData()
   }
 }, { immediate: true })
+
+watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeContext() }, { immediate: true })
 
 onMounted(async () => {
   if (isPreviewMode) {
@@ -597,9 +638,15 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
           :show-coding-controls="activeTab === 'Coding'"
+          :show-practice-controls="activeTab === 'Practice'"
+          :practice-decks="practiceDecks"
+          :practice-selected-deck-key="practiceSelectedDeckKey"
+          :practice-deck-loading="practiceDeckLoading"
           :no-border="route.path.startsWith('/chat')"
           @show-settings="openSettings"
           @toggle-mobile-nav="mobileNavOpen = true"
+          @practice-select-deck="selectPracticeDeck"
+          @practice-manage-decks="openPracticeDeckManager"
         />
 
         <Sheet v-model:open="mobileNavOpen">

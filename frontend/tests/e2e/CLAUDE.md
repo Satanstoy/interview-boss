@@ -15,7 +15,7 @@ npx playwright test tests/e2e/login-register.spec.js  # 单文件
 - 常规 E2E 必须 mock API，禁止调用真实后端
 - 禁止截图断言（CI 环境不稳定）
 - 禁止使用真实密码
-- 刷题模式测试应覆盖单卡背题路径、标题题单下拉切换、高频题库联动和题单管理入口；优先使用 `data-testid` 断言稳定的业务入口。
+- 刷题模式测试应覆盖单卡背题路径、全局顶栏题单下拉切换、全部题与高频题库联动、无返回题库/刷题队列入口以及题单管理入口；优先使用 `data-testid` 断言稳定的业务入口。
 - 洞察工作台测试必须 mock `/api/insights`，并覆盖三 Tab 路由与旧 `/knowledge-graph` 兼容入口。
 - 测试规则见 `.claude/rules/test-files.md`（编辑测试文件时自动加载）
 

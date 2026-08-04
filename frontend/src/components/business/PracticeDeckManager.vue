@@ -1,23 +1,6 @@
 <template>
   <div data-testid="practice-deck-manager" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2 md:px-6">
-        <Button data-testid="practice-decks-back" variant="ghost" size="icon-sm" class="shrink-0" @click="emit('back')">
-          <ArrowLeft class="size-4" />
-          <span class="sr-only">返回刷题</span>
-        </Button>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 text-sm">
-            <span class="font-semibold text-foreground">刷题</span>
-            <span class="text-muted-foreground">/</span>
-            <span class="truncate text-muted-foreground">题单管理</span>
-          </div>
-        </div>
-        <Button data-testid="practice-deck-create" size="sm" class="gap-1.5" @click="openCreate">
-          <Plus class="size-3.5" />新建题单
-        </Button>
-      </header>
-
       <main class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
         <div class="mx-auto w-full max-w-5xl px-4 pb-12 pt-6 md:px-6 md:pt-8">
           <section class="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -32,7 +15,7 @@
             </div>
           </section>
 
-          <section class="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <section class="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div class="rounded-xl border border-border bg-card px-4 py-3">
               <p class="text-xs text-muted-foreground">题单总数</p>
               <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">{{ decks.length }}</p>
@@ -41,18 +24,15 @@
               <p class="text-xs text-muted-foreground">已建立记忆</p>
               <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">{{ reviewedTotal }} <span class="text-xs font-normal text-muted-foreground">道题</span></p>
             </div>
-            <div class="rounded-xl border border-border bg-card px-4 py-3">
-              <p class="text-xs text-muted-foreground">今日待复习</p>
-              <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">{{ dueTotal }} <span class="text-xs font-normal text-muted-foreground">道题</span></p>
-            </div>
           </section>
 
           <section>
             <div class="mb-3 flex items-center justify-between">
               <div>
                 <h2 class="text-sm font-semibold text-foreground">我的题单</h2>
-                <p class="mt-1 text-xs text-muted-foreground">收藏、筛选和自定义题单都可以从这里开始。</p>
+                <p class="mt-1 text-xs text-muted-foreground">系统题单只有全部题和我的收藏，其余题单由你自己组织。</p>
               </div>
+              <Button data-testid="practice-deck-create" size="sm" class="gap-1.5" @click="openCreate"><Plus class="size-3.5" />新建题单</Button>
             </div>
             <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
               <article
@@ -80,7 +60,7 @@
                     <span class="tabular-nums">{{ deck.progress || 0 }}%</span>
                   </div>
                   <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${deck.progress || 0}%` }"></div></div>
-                  <div class="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground"><span v-if="deck.due" class="text-amber-600 dark:text-amber-400">{{ deck.due }} 道待复习</span><span v-else>暂无到期题目</span><span class="ml-auto">{{ deck.kind === 'custom' ? '点击查看题目' : '点击开始复习' }}</span></div>
+                  <div class="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground"><span>{{ deck.kind === 'custom' ? '点击查看题目' : '点击开始复习' }}</span></div>
                 </button>
                 <div v-if="deck.kind === 'custom'" class="mt-3 flex justify-end gap-1 border-t border-border/70 pt-3">
                   <Button variant="ghost" size="sm" class="h-7 gap-1 text-xs text-muted-foreground" @click="openEdit(deck)"><Pencil class="size-3.5" />编辑</Button>
@@ -128,6 +108,12 @@
 
     <AppDialog :open="editorOpen" :title="editingDeck ? '编辑题单' : '新建题单'" description="给一组需要反复背诵的八股题一个清晰的复习入口。" size="md" @update:open="editorOpen = $event">
       <div class="flex flex-col gap-4 px-6 pb-2">
+        <div v-if="!editingDeck" class="rounded-lg border border-primary/15 bg-primary/5 p-3">
+          <p class="text-xs font-semibold text-foreground">不知道怎么分组？可以从这些题单开始</p>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <button v-for="recommendation in recommendedDecks" :key="recommendation.name" type="button" class="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] text-muted-foreground transition hover:border-primary/40 hover:text-primary" @click="applyRecommendation(recommendation)">{{ recommendation.name }}</button>
+          </div>
+        </div>
         <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">题单名称</label><input v-model="form.name" data-testid="practice-deck-name" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="例如：Java 并发八股" /></div>
         <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">描述（可选）</label><textarea v-model="form.description" rows="3" class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="说明这套题单适合什么阶段或岗位" /></div>
         <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">可见范围</label><select v-model="form.visibility" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20"><option value="private">仅自己可见</option><option value="public">公开题单</option></select></div>
@@ -139,7 +125,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { ArrowLeft, BookOpen, Check, ChevronRight, Globe2, Layers, List, LockKeyhole, Pencil, Plus, Search, Trash2, X } from '@lucide/vue'
+import { BookOpen, ChevronRight, Globe2, Layers, List, LockKeyhole, Pencil, Plus, Search, Trash2, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import AppDialog from '@/components/common/AppDialog.vue'
@@ -151,7 +137,7 @@ const props = defineProps({
   selectedDeckKey: { type: String, default: '' },
   loading: { type: Boolean, default: false },
 })
-const emit = defineEmits(['back', 'select-deck', 'start-deck', 'create-deck', 'update-deck', 'delete-deck', 'add-item', 'remove-item'])
+const emit = defineEmits(['select-deck', 'start-deck', 'create-deck', 'update-deck', 'delete-deck', 'add-item', 'remove-item'])
 const editorOpen = ref(false)
 const editingDeck = ref(null)
 const questionToAdd = ref('')
@@ -164,17 +150,18 @@ const addableQuestions = computed(() => {
   return props.availableQuestions.filter(question => !selected.has(Number(question.id)))
 })
 const reviewedTotal = computed(() => props.decks.reduce((sum, deck) => sum + Number(deck.reviewed || 0), 0))
-const dueTotal = computed(() => props.decks.reduce((sum, deck) => sum + Number(deck.due || 0), 0))
+const recommendedDecks = [
+  { name: 'Java 并发八股', description: '线程、锁、JMM、并发容器和线程池' },
+  { name: '项目复盘表达', description: '项目难点、性能优化、故障复盘和结果指标' },
+  { name: '前端原理冲刺', description: '浏览器、JavaScript、框架原理和工程化' },
+]
 
 function deckIcon(deck) {
   if (deck.kind === 'custom') return deck.visibility === 'public' ? Globe2 : LockKeyhole
-  if (deck.key === 'high-frequency') return Check
   return deck.key === 'all' ? BookOpen : Layers
 }
 function deckTone(deck) {
   if (deck.kind === 'custom') return 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300'
-  if (deck.key === 'due') return 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300'
-  if (deck.key === 'high-frequency') return 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300'
   return 'bg-primary/10 text-primary'
 }
 function selectDeck(deck) {
@@ -190,6 +177,9 @@ function openEdit(deck) {
   editingDeck.value = deck
   form.value = { name: deck.name || '', description: deck.description || '', visibility: deck.visibility || 'private' }
   editorOpen.value = true
+}
+function applyRecommendation(recommendation) {
+  form.value = { name: recommendation.name, description: recommendation.description, visibility: 'private' }
 }
 function saveDeck() {
   if (!form.value.name.trim()) return

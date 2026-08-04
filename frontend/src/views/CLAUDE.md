@@ -11,8 +11,8 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `JdView.vue` | JD 库页 |
 | `InterviewView.vue` | 面经库页 |
 | `MockInterviewView.vue` | 题目抽测页（紧凑 padding `px-4 py-4`） |
-| `PracticeView.vue` | 刷题页：在认证应用壳内承载 Chat 风格闪卡刷题工作台 |
-| `PracticeDecksView.vue` | 题单管理页：编排系统题单和用户自定义题单，管理题单题目关联 |
+| `PracticeView.vue` | 刷题页：消费应用壳共享题单状态，在认证应用壳内承载 Chat 风格闪卡刷题工作台 |
+| `PracticeDecksView.vue` | 题单管理页：消费应用壳共享题单状态，管理“全部题/我的收藏”和用户自定义题单及题目关联 |
 | `InsightsView.vue` | 洞察工作台编排：总览、岗位准备度、面试复盘三个路由共用数据快照 |
 | `KnowledgeGraphView.vue` | 知识图谱页 |
 | `ImportView.vue` | 导入工作台页 |

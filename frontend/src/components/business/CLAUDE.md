@@ -27,8 +27,8 @@
 | `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
 | `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
 | `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |
-| `PracticeMode.vue` | `/practice` 路由内的 Chat 风格闪卡刷题工作台：标题下拉切换系统/自定义题单，侧栏展示队列；支持单卡翻答案、收藏、AI 答案生成/编辑、可选自测与练习记录 |
-| `PracticeDeckManager.vue` | `/practice/decks` 题单管理工作台：系统题单概览、自定义题单 CRUD，以及从高频题库加入/移出题目 |
+| `PracticeMode.vue` | `/practice` 路由内的 Chat 风格闪卡刷题工作台：题单选择器由全局 `SiteHeader` 提供，侧栏只展示当前题单的搜索和题目列表；支持单卡翻答案、收藏、加入题单、AI 答案生成/编辑、可选自测与练习记录 |
+| `PracticeDeckManager.vue` | `/practice/decks` 题单管理工作台：展示“全部题/我的收藏”和用户自定义题单，支持自定义题单 CRUD、公开范围、推荐模板，以及题目关联管理 |
 | `PracticePanel.vue` | 练习面板 |
 | `QuestionCard.vue` | 题目卡片（私有题显示「私有」徽标 + 分享按钮） |
 | `SearchFilterBar.vue` | 搜索过滤栏 |
@@ -50,7 +50,7 @@
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
 - `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：题单选择器放在应用全局 `SiteHeader`，当前题单区域只展示搜索、AI 导入和题目列表，侧栏支持收起/展开，右侧固定展示题目描述与编辑器；不再使用子页面顶栏、独立题库侧栏或难度筛选区。
-- `PracticeMode.vue` 的默认路径以背八股为主：题单选择和单卡内容优先，答案评估与历史记录作为卡片内的次级操作；题单范围由当前题库筛选结果和 `practicedQuestions` 练习元数据驱动。
+- `PracticeMode.vue` 的默认路径以背八股为主：全局顶栏选择题单，侧栏只负责搜索/浏览当前题单，单卡内容优先，答案评估与历史记录作为卡片内的次级操作；高频题权重和熟练度由后端队列算法驱动。
 - `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 
 ## 修改后必做

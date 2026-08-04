@@ -10,39 +10,18 @@ from app.db.queries import build_bank_where_clause, get_dynamic_frequency_sql
 
 DECKS = (
     {
-        "key": "due",
-        "name": "今日复习",
-        "description": "先处理已经到期和还没开始的题",
-        "kind": "due",
+        "key": "all",
+        "name": "全部题",
+        "description": "按复习状态和面试频率安排顺序",
+        "kind": "all",
         "sort_order": 1,
     },
     {
-        "key": "high-frequency",
-        "name": "高频必刷",
-        "description": "从高频题库同步来的面试重点",
-        "kind": "high_frequency",
-        "sort_order": 2,
-    },
-    {
         "key": "starred",
-        "name": "收藏题单",
+        "name": "我的收藏",
         "description": "把收藏题集中起来反复背",
         "kind": "starred",
-        "sort_order": 3,
-    },
-    {
-        "key": "unpracticed",
-        "name": "还没刷过",
-        "description": "题库里尚未建立记忆记录的题",
-        "kind": "unpracticed",
-        "sort_order": 4,
-    },
-    {
-        "key": "all",
-        "name": "全部题库",
-        "description": "按复习优先级浏览全部可见题目",
-        "kind": "all",
-        "sort_order": 5,
+        "sort_order": 2,
     },
 )
 
@@ -136,9 +115,15 @@ def _base_query_parts(conn, user_id: int, filter_mode: str, deck_key: str):
 
 
 def _select_sql(from_clause: str, where_clause: str, frequency_sql: str) -> str:
+    # question_bank.frequency is the high-frequency-bank signal.  The
+    # dynamic frequency query captures the user's current bank scope; using
+    # the larger of the two keeps high-frequency interview questions visible
+    # near the front of every queue without turning them into a separate UI
+    # category.
+    frequency_score_sql = f"MAX(COALESCE(qb.frequency, 0), ({frequency_sql}))"
     return (
         "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
-        f"({frequency_sql}) AS frequency, qb.ai_answer, qb.sources, "
+        f"{frequency_score_sql} AS frequency, qb.ai_answer, qb.sources, "
         "qb.original_questions, qb.original_question_sources, qb.owner_id, "
         "COALESCE(uqv.is_starred, 0) AS is_starred, "
         "COALESCE(uqv.user_answer, '') AS user_answer, "
@@ -261,7 +246,7 @@ def list_deck_questions(
         "WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 1 ELSE 2 END, "
         "COALESCE(uqr.next_review_at, '1970-01-01') ASC, "
         f"{custom_order}"
-        f"({frequency_sql}) DESC, qb.id ASC LIMIT ? OFFSET ?"
+        f"MAX(COALESCE(qb.frequency, 0), ({frequency_sql})) DESC, qb.id ASC LIMIT ? OFFSET ?"
     )
     rows = conn.execute(
         _select_sql(from_clause, where_clause, frequency_sql) + order,

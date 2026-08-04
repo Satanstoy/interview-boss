@@ -45,6 +45,7 @@ from app.db.migrations.view import (
 )
 from app.db.migrations.practice import _migration_055_practice_review_system
 from app.db.migrations.practice_decks import _migration_056_custom_practice_decks
+from app.db.migrations.practice_defaults import _migration_057_practice_default_decks
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -154,6 +155,7 @@ _MIGRATIONS = [
     (54, "mcp_token_seed", _migration_054_mcp_token_seed),
     (55, "practice_review_system", _migration_055_practice_review_system),
     (56, "custom_practice_decks", _migration_056_custom_practice_decks),
+    (57, "practice_default_decks", _migration_057_practice_default_decks),
 ]
 
 

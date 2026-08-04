@@ -5,7 +5,6 @@
     :selected-questions="questions"
     :selected-deck-key="selectedDeckKey"
     :loading="isLoading"
-    @back="backToPractice"
     @select-deck="loadManagerDeck"
     @start-deck="startDeck"
     @create-deck="createManagerDeck"
@@ -17,10 +16,9 @@
 </template>
 
 <script setup>
-import { defineAsyncComponent, inject, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { defineAsyncComponent, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
-import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
 const PracticeDeckManager = defineAsyncComponent({
   delay: 100,
@@ -31,21 +29,17 @@ const PracticeDeckManager = defineAsyncComponent({
 })
 
 const router = useRouter()
-const route = useRoute()
-const { filteredMasterBank, bankFilter } = inject('appData')
+const { filteredMasterBank } = inject('appData')
 const {
-  decks, questions, selectedDeckKey, isLoading, loadDecks, loadQuestions,
+  decks, questions, selectedDeckKey, isLoading, loadQuestions,
   createDeck, updateDeck, deleteDeck, addItem, removeItem,
-} = usePracticeDecks(bankFilter)
+} = inject('practiceDecks')
 
 async function loadManagerDeck(deckKey) {
   await loadQuestions(deckKey)
 }
 function startDeck(deckKey) {
   router.push({ path: '/practice', query: { deck: deckKey } })
-}
-function backToPractice() {
-  router.push('/practice')
 }
 async function createManagerDeck(payload) {
   await createDeck(payload)
@@ -65,9 +59,4 @@ async function removeManagerItem({ deckKey, questionId }) {
   if (await removeItem(deckKey, questionId)) await loadQuestions(deckKey)
 }
 
-onMounted(async () => {
-  await loadDecks()
-  const initialDeck = String(route.query.deck || '')
-  if (initialDeck && decks.value.some(deck => deck.key === initialDeck)) await loadQuestions(initialDeck)
-})
 </script>

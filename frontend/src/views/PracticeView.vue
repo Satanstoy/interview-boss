@@ -9,19 +9,19 @@
       :deck-loading="isLoading"
       class="w-full min-w-0"
       @close="closePractice"
-      @select-deck="loadQuestions"
+      @select-deck="selectDeck"
       @review="submitReview"
       @toggle-star="toggleStar"
       @manage-decks="openDeckManager"
+      @add-to-deck="addQuestionToDeck"
     />
   </div>
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, inject, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
-import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
 const PracticeMode = defineAsyncComponent({
   delay: 100,
@@ -32,24 +32,22 @@ const PracticeMode = defineAsyncComponent({
 })
 
 const router = useRouter()
-const route = useRoute()
-const { filteredMasterBank, practicedQuestions, bankFilter, toggleStar } = inject('appData')
+const { filteredMasterBank, practicedQuestions, toggleStar } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, isLoading, isReviewing, serverReady,
-  loadDecks, loadQuestions, submitReview,
-} = usePracticeDecks(bankFilter)
+  loadQuestions, submitReview, addItem,
+} = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 
-onMounted(async () => {
-  await loadDecks()
-  if (serverReady.value) {
-    const requestedDeck = String(route.query.deck || '')
-    const initialDeck = requestedDeck && decks.value.some(deck => deck.key === requestedDeck)
-      ? requestedDeck
-      : selectedDeckKey.value
-    await loadQuestions(initialDeck)
-  }
-})
 const closePractice = () => router.push('/master-bank')
 const openDeckManager = () => router.push('/practice/decks')
+async function selectDeck(deckKey) {
+  await loadQuestions(deckKey)
+  await router.replace({ path: '/practice', query: { deck: deckKey } })
+}
+async function addQuestionToDeck({ deckKey, questionId }) {
+  if (await addItem(deckKey, questionId)) {
+    if (selectedDeckKey.value === deckKey) await loadQuestions(deckKey)
+  }
+}
 </script>
