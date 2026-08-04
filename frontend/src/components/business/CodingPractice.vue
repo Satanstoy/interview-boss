@@ -1,29 +1,5 @@
 <template>
   <div class="flex h-full min-h-0 flex-col bg-background">
-    <!-- LeetCode-style list selector: one current list controls the whole page -->
-    <header class="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-      <div class="flex min-w-0 flex-1 items-center gap-2">
-        <Code2 :size="17" class="shrink-0 text-primary" />
-        <span class="shrink-0 text-sm font-semibold text-foreground">手撕代码</span>
-        <Select :model-value="selectedListKey" @update:model-value="selectList">
-          <SelectTrigger class="h-8 w-[190px] rounded-lg text-xs">
-            <SelectValue placeholder="选择题单" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部题目</SelectItem>
-            <SelectItem value="favorites">我的收藏</SelectItem>
-            <SelectItem v-for="playlist in playlists" :key="playlist.id" :value="String(playlist.id)">
-              {{ playlist.name }}（{{ playlist.problem_count }}）
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Button variant="ghost" size="icon" class="size-8 shrink-0 text-muted-foreground" aria-label="新建题单" @click="openCreatePlaylist">
-          <Plus :size="15" />
-        </Button>
-      </div>
-      <span class="hidden text-xs text-muted-foreground sm:inline">{{ problemTotal }} 道题</span>
-    </header>
-
     <div class="flex min-h-0 flex-1">
       <!-- Current playlist problem list -->
       <section class="problem-list-panel flex min-w-0 w-full flex-col border-r border-border lg:w-[320px] lg:flex-none" :class="{ 'is-detail-open': activeProblem }">
@@ -36,11 +12,6 @@
             <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
           </Button>
         </div>
-        <div class="flex shrink-0 items-center justify-between border-b border-border/60 px-4 py-2">
-          <span class="truncate text-xs font-medium text-foreground">{{ selectedListLabel }}</span>
-          <Loader2 v-if="isLoading" :size="13" class="animate-spin text-primary" />
-        </div>
-
         <div class="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
           <div v-if="!problems.length && !isLoading" class="px-3 py-10 text-center text-xs text-muted-foreground">
             当前题单暂无题目
@@ -77,9 +48,9 @@
             <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground" @click="selectNextProblem">下一题 <ChevronRight :size="13" /></Button>
           </div>
 
-          <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
+          <div class="flex min-h-0 flex-1 flex-row">
             <!-- Problem statement -->
-            <section class="flex min-h-[300px] min-w-0 flex-1 flex-col overflow-hidden border-b border-border xl:w-[44%] xl:flex-none xl:border-b-0 xl:border-r">
+            <section class="flex min-h-0 min-w-0 flex-[0_0_44%] flex-col overflow-hidden border-r border-border">
               <div class="flex shrink-0 items-center gap-1 border-b border-border px-4">
                 <button class="border-b-2 px-2.5 py-3 text-xs font-medium transition-colors" :class="contentTab === 'description' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'" @click="contentTab = 'description'">题目描述</button>
                 <button class="border-b-2 px-2.5 py-3 text-xs font-medium transition-colors" :class="contentTab === 'review' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'" @click="contentTab = 'review'">AI 评审<span v-if="activeProblem._feedback || activeProblem._scores" class="ml-1 text-primary">•</span></button>
@@ -122,7 +93,7 @@
             </section>
 
             <!-- Editor -->
-            <section class="flex min-h-[420px] min-w-0 flex-1 flex-col overflow-hidden">
+            <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <div class="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
                 <div class="flex items-center gap-1">
                   <span class="mr-1 text-xs font-semibold text-foreground">代码</span>
@@ -171,38 +142,37 @@
 
     <Dialog v-model:open="playlistDialogOpen">
       <DialogContent class="max-w-md">
-        <DialogHeader><DialogTitle>{{ playlistDialogMode === 'add' ? '加入题单' : '新建题单' }}</DialogTitle><DialogDescription>{{ playlistDialogMode === 'add' ? '选择一个题单，方便下次集中复习。' : '创建题单后，它会出现在顶部选择器中。' }}</DialogDescription></DialogHeader>
-        <div v-if="playlistDialogMode === 'add' && playlists.length" class="flex max-h-48 flex-col gap-1 overflow-y-auto"><Button v-for="playlist in playlists" :key="playlist.id" variant="outline" class="h-10 justify-between" @click="addToPlaylist(playlist)"><span class="flex items-center gap-2"><ListPlus :size="14" /> {{ playlist.name }}</span><span class="text-xs text-muted-foreground">{{ playlist.problem_count }} 题</span></Button></div>
-        <div class="flex flex-col gap-3"><div class="flex flex-col gap-1.5"><label class="text-xs font-semibold">{{ playlistDialogMode === 'add' ? '新建题单' : '题单名称' }}</label><Input v-model="playlistName" placeholder="例如：字节后端高频题" @keyup.enter="createPlaylist" /></div><div v-if="playlistDialogMode !== 'add'" class="flex flex-col gap-1.5"><label class="text-xs font-semibold">描述（可选）</label><Textarea v-model="playlistDescription" :rows="2" placeholder="这个题单用于什么场景？" /></div></div>
-        <DialogFooter><Button variant="outline" @click="playlistDialogOpen = false">取消</Button><Button :disabled="isCreatingPlaylist || !playlistName.trim()" @click="createPlaylist">{{ isCreatingPlaylist ? '创建中...' : '创建题单' }}</Button></DialogFooter>
+        <DialogHeader><DialogTitle>加入题单</DialogTitle><DialogDescription>选择一个题单，方便下次集中复习。新建题单请使用全局顶栏选择器旁的 +。</DialogDescription></DialogHeader>
+        <div v-if="playlists.length" class="flex max-h-48 flex-col gap-1 overflow-y-auto"><Button v-for="playlist in playlists" :key="playlist.id" variant="outline" class="h-10 justify-between" @click="addToPlaylist(playlist)"><span class="flex items-center gap-2"><ListPlus :size="14" /> {{ playlist.name }}</span><span class="text-xs text-muted-foreground">{{ playlist.problem_count }} 题</span></Button></div>
+        <div v-else class="py-6 text-center text-sm text-muted-foreground">还没有自定义题单，请先在全局顶栏创建。</div>
+        <DialogFooter><Button variant="outline" @click="playlistDialogOpen = false">关闭</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { ArrowLeft, ChevronRight, Code2, FilePlus2, ListPlus, Loader2, Plus, Search, Sparkles, Upload, Zap } from '@lucide/vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
+import { ArrowLeft, ChevronRight, FilePlus2, ListPlus, Loader2, Search, Sparkles, Upload, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { useToast } from '@/composables/useNotification.js'
 import CodeEditor from './CodeEditor.vue'
-import { addCodingPlaylistItem, createCodingPlaylist, fetchCodingPlaylists, fetchCodingProblem, fetchCodingProblems, importCodingProblems, submitCodingCode, toggleCodingFavorite } from '@/services/codingApi.js'
+import { addCodingPlaylistItem, fetchCodingProblem, fetchCodingProblems, importCodingProblems, submitCodingCode, toggleCodingFavorite } from '@/services/codingApi.js'
 
 const { toast } = useToast()
 const languageOptions = [{ value: 'python', label: 'Python' }, { value: 'c', label: 'C' }, { value: 'java', label: 'Java' }]
 const categoryLabels = { syntax: '语法', logic: '逻辑', algorithm: '算法', complexity: '复杂度', style: '风格' }
+const codingNavigation = inject('codingNavigation')
 
 const problems = ref([])
 const activeProblem = ref(null)
 const contentTab = ref('description')
-const playlists = ref([])
-const problemTotal = ref(0)
-const selectedListKey = ref('all')
+const playlists = codingNavigation.playlists
+const selectedListKey = codingNavigation.selectedListKey
 const searchQuery = ref('')
 const currentLanguage = ref('python')
 const isLoading = ref(false)
@@ -213,10 +183,6 @@ const importPrompt = ref('')
 const importError = ref('')
 const isImporting = ref(false)
 const playlistDialogOpen = ref(false)
-const playlistDialogMode = ref('create')
-const playlistName = ref('')
-const playlistDescription = ref('')
-const isCreatingPlaylist = ref(false)
 
 const currentPlaylistId = computed(() => {
   if (!/^\d+$/.test(String(selectedListKey.value))) return null
@@ -235,13 +201,6 @@ function initProblemState(problem) {
   return { ...problem, _code: '', _isSubmitting: false, _feedback: '', _scores: null, _totalScore: 0, _referenceAnswer: '', _lastSubmission: null, _currentStep: '', _currentMode: '', _hintCount: 0 }
 }
 
-async function loadPlaylists() {
-  try {
-    playlists.value = await fetchCodingPlaylists()
-    if (currentPlaylistId.value && !playlists.value.some(item => item.id === currentPlaylistId.value)) selectedListKey.value = 'all'
-  } catch { playlists.value = [] }
-}
-
 async function loadProblems() {
   isLoading.value = true
   try {
@@ -255,12 +214,10 @@ async function loadProblems() {
       if (previous?.id === problem.id) Object.assign(next, { description: previous.description, _code: previous._code, _isSubmitting: previous._isSubmitting, _feedback: previous._feedback, _scores: previous._scores, _totalScore: previous._totalScore, _referenceAnswer: previous._referenceAnswer, _lastSubmission: previous._lastSubmission, _currentStep: previous._currentStep, _currentMode: previous._currentMode, _hintCount: previous._hintCount })
       return next
     })
-    problemTotal.value = result.total || 0
     if (activeProblem.value) activeProblem.value = problems.value.find(item => item.id === activeProblem.value.id) || null
   } catch (error) {
     toast.error(error.message || '加载题目失败')
     problems.value = []
-    problemTotal.value = 0
   } finally { isLoading.value = false }
 }
 
@@ -269,12 +226,15 @@ async function refreshProblems(openFirst = false) {
   if (openFirst && problems.value[0]) await selectProblem(problems.value[0])
 }
 
-async function selectList(value) {
-  selectedListKey.value = value
+async function refreshForSelectedList() {
   activeProblem.value = null
   contentTab.value = 'description'
   await refreshProblems(true)
 }
+
+watch(selectedListKey, (value, previousValue) => {
+  if (value !== previousValue) refreshForSelectedList()
+})
 
 async function selectProblem(problem) {
   activeProblem.value = problem
@@ -301,34 +261,8 @@ async function toggleFavorite(problem) {
   } catch (error) { toast.error(error.message || '收藏操作失败') }
 }
 
-function openCreatePlaylist() {
-  playlistDialogMode.value = 'create'
-  playlistName.value = ''
-  playlistDescription.value = ''
-  playlistDialogOpen.value = true
-}
-
 function openAddToPlaylist() {
-  playlistDialogMode.value = 'add'
-  playlistName.value = ''
-  playlistDescription.value = ''
   playlistDialogOpen.value = true
-}
-
-async function createPlaylist() {
-  if (!playlistName.value.trim()) return
-  isCreatingPlaylist.value = true
-  try {
-    const playlist = await createCodingPlaylist({ name: playlistName.value.trim(), description: playlistDescription.value.trim() })
-    playlists.value.unshift(playlist)
-    playlistName.value = ''
-    playlistDescription.value = ''
-    if (playlistDialogMode.value === 'create') {
-      playlistDialogOpen.value = false
-      await selectList(String(playlist.id))
-    }
-    toast.success('题单已创建')
-  } catch (error) { toast.error(error.message || '创建题单失败') } finally { isCreatingPlaylist.value = false }
 }
 
 async function addToPlaylist(playlist) {
@@ -360,7 +294,7 @@ async function importProblems() {
     importMarkdown.value = ''
     importFilename.value = ''
     importPrompt.value = ''
-    await loadPlaylists()
+    await codingNavigation.loadPlaylists()
     await refreshProblems(true)
     toast.success(`已导入 ${result.created?.length || 0} 道题目${result.duplicates?.length ? `，跳过 ${result.duplicates.length} 道重复题目` : ''}`)
   } catch (error) { importError.value = error.message || '导入失败，请稍后重试' } finally { isImporting.value = false }
@@ -403,7 +337,7 @@ async function submitCode(problem, mode) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadPlaylists(), loadProblems()])
+  await Promise.all([codingNavigation.loadPlaylists(), loadProblems()])
   if (problems.value[0]) await selectProblem(problems.value[0])
 })
 </script>

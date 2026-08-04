@@ -135,7 +135,7 @@ src/
 
 ### 手撕代码工作台
 
-- `CodingView.vue` 与 `/chat` 模拟面试页面统一使用全屏工作台和主区约束；`CodingPractice.vue` 采用 LeetCode 式“顶栏题单选择器 + 当前题单列表 + 右侧题目/编辑器”布局，描述、AI 评审、参考答案通过页签切换。
+- `CodingView.vue` 与 `/chat` 模拟面试页面统一使用全屏工作台和主区约束；全局 `SiteHeader` 承载 LeetCode 式题单选择器，`CodingPractice.vue` 只负责“当前题单列表 + 右侧题目/编辑器”布局，描述、AI 评审、参考答案通过页签切换。
 - `services/codingApi.js` 负责 `scope=favorites` / `playlist_id` 查询、收藏切换、题单以及 Prompt + Markdown 导入，组件不直接拼接 HTTP 请求。
 - 题目交互遵循 LeetCode 式工作流：题库筛选 → 查看描述 → 编写代码 → 提示/评审；个人导入题目以“我的题目”展示，收藏和题单状态来自后端持久化。
 

@@ -37,6 +37,7 @@ import { useAuth, initAuthSingleton } from '@/composables/useAuth.js'
 import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
+import { fetchCodingPlaylists } from '@/services/codingApi.js'
 
 import { defineAsyncComponent } from 'vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -157,6 +158,30 @@ const interviewCurrentPage = ref(1)
 const interviewPageSize = ref(20)
 const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
+
+// 手撕代码题单由应用壳统一持有，让全局顶栏和题目工作区使用同一份选择状态。
+const codingPlaylists = ref([])
+const codingSelectedListKey = ref('all')
+
+const loadCodingPlaylists = async () => {
+  try {
+    codingPlaylists.value = await fetchCodingPlaylists()
+    if (/^\d+$/.test(String(codingSelectedListKey.value)) && !codingPlaylists.value.some(item => item.id === Number(codingSelectedListKey.value))) {
+      codingSelectedListKey.value = 'all'
+    }
+  } catch {
+    codingPlaylists.value = []
+  }
+}
+
+const codingNavigation = {
+  playlists: codingPlaylists,
+  selectedListKey: codingSelectedListKey,
+  loadPlaylists: loadCodingPlaylists,
+  selectList: (value) => { codingSelectedListKey.value = value },
+}
+
+provide('codingNavigation', codingNavigation)
 
 const sidebarGroups = computed(() => [
   {
@@ -571,6 +596,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         <SiteHeader
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
+          :show-coding-controls="activeTab === 'Coding'"
           :no-border="route.path.startsWith('/chat')"
           @show-settings="openSettings"
           @toggle-mobile-nav="mobileNavOpen = true"

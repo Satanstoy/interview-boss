@@ -1,8 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, Clock3, Loader2, Menu, Settings, X } from '@lucide/vue'
+import { AlertCircle, Clock3, Loader2, Menu, Plus, Settings, X } from '@lucide/vue'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
+import { useToast } from '@/composables/useNotification.js'
+import { createCodingPlaylist } from '@/services/codingApi.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
@@ -17,6 +23,10 @@ const props = defineProps({
   noBorder: {
     type: Boolean,
     default: false
+  },
+  showCodingControls: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -25,6 +35,14 @@ const emit = defineEmits(['show-settings', 'toggle-mobile-nav'])
 // ── 全局上传任务进度 ──
 const { activeJobs } = useSubmitJobs()
 const showJobPanel = ref(false)
+const { success, error } = useToast()
+const codingNavigation = inject('codingNavigation', null)
+const codingPlaylists = computed(() => codingNavigation?.playlists?.value || [])
+const codingSelectedListKey = computed(() => codingNavigation?.selectedListKey?.value || 'all')
+const playlistDialogOpen = ref(false)
+const playlistName = ref('')
+const playlistDescription = ref('')
+const isCreatingPlaylist = ref(false)
 
 const primaryJob = computed(() => {
   if (activeJobs.value.length === 0) return null
@@ -34,6 +52,36 @@ const primaryJob = computed(() => {
 
 const onCloseJob = (jobId) => {
   removeJob(jobId)
+}
+
+const openCreatePlaylist = () => {
+  playlistName.value = ''
+  playlistDescription.value = ''
+  playlistDialogOpen.value = true
+}
+
+const selectCodingList = (value) => {
+  codingNavigation?.selectList(value)
+}
+
+const createPlaylist = async () => {
+  if (!playlistName.value.trim() || !codingNavigation) return
+  isCreatingPlaylist.value = true
+  try {
+    if (!codingPlaylists.value.length) await codingNavigation.loadPlaylists()
+    const playlist = await createCodingPlaylist({
+      name: playlistName.value.trim(),
+      description: playlistDescription.value.trim(),
+    })
+    codingNavigation.playlists.value.unshift(playlist)
+    codingNavigation.selectList(String(playlist.id))
+    playlistDialogOpen.value = false
+    success('题单已创建')
+  } catch (err) {
+    error(err.message || '创建题单失败')
+  } finally {
+    isCreatingPlaylist.value = false
+  }
 }
 </script>
 
@@ -53,10 +101,30 @@ const onCloseJob = (jobId) => {
       </Button>
     </AppTooltip>
 
-    <div class="flex h-8 min-w-0 items-center">
+    <div class="flex h-8 min-w-0 items-center gap-2">
       <h1 class="truncate text-[13px] font-medium leading-5 text-foreground">
         {{ activeTabLabel }}
       </h1>
+
+      <template v-if="showCodingControls">
+        <Select :model-value="codingSelectedListKey" @update:model-value="selectCodingList">
+          <SelectTrigger class="h-8 w-[150px] rounded-lg text-xs">
+            <SelectValue placeholder="选择题单" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部题目</SelectItem>
+            <SelectItem value="favorites">我的收藏</SelectItem>
+            <SelectItem v-for="playlist in codingPlaylists" :key="playlist.id" :value="String(playlist.id)">
+              {{ playlist.name }}（{{ playlist.problem_count }}）
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <AppTooltip text="新建题单">
+          <Button variant="ghost" size="icon" class="size-8 shrink-0 text-muted-foreground" aria-label="新建题单" @click="openCreatePlaylist">
+            <Plus class="size-4" />
+          </Button>
+        </AppTooltip>
+      </template>
     </div>
 
     <div class="flex h-8 flex-1 items-center justify-end gap-1.5">
@@ -141,6 +209,31 @@ const onCloseJob = (jobId) => {
       </AppTooltip>
     </div>
   </header>
+
+  <Dialog v-model:open="playlistDialogOpen">
+    <DialogContent class="max-w-md">
+      <DialogHeader>
+        <DialogTitle>新建题单</DialogTitle>
+        <DialogDescription>创建后会出现在“手撕代码”全局顶栏的题单选择器中。</DialogDescription>
+      </DialogHeader>
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-semibold">题单名称</label>
+          <Input v-model="playlistName" placeholder="例如：字节后端高频题" @keyup.enter="createPlaylist" />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-semibold">描述（可选）</label>
+          <Textarea v-model="playlistDescription" :rows="2" placeholder="这个题单用于什么场景？" />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" @click="playlistDialogOpen = false">取消</Button>
+        <Button :disabled="isCreatingPlaylist || !playlistName.trim()" @click="createPlaylist">
+          {{ isCreatingPlaylist ? '创建中...' : '创建题单' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <style scoped>
