@@ -96,6 +96,7 @@ src/
 | 面经库 | `/interview` | `views/InterviewView.vue` | `composables/useMasterBankData.js` |
 | 题目抽测 | `/mock-interview` | `views/MockInterviewView.vue` | `components/business/MockInterview.vue` |
 | 刷题 | `/practice` | `views/PracticeView.vue` | `components/business/PracticeMode.vue` |
+| 题单管理 | `/practice/decks` | `views/PracticeDecksView.vue` | `components/business/PracticeDeckManager.vue` |
 | 洞察总览 | `/insights/overview` | `views/InsightsView.vue` | `composables/useInsightsData.js` + `services/insightsApi.js` |
 | 岗位准备度 | `/insights/readiness` | `views/InsightsView.vue` | `components/business/InsightsReadiness.vue` |
 | 面试复盘 | `/insights/reviews` | `views/InsightsView.vue` | `components/business/InsightsReviews.vue` |
@@ -116,7 +117,7 @@ src/
 | 题目操作 | `composables/useQuestionOps.js` + `services/masterBankApi.js` |
 | 批量操作 | `composables/useBatchActions.js` |
 | 合并弹窗 | `composables/useMergeDialog.js` |
-| 练习/面试 | `composables/usePractice.js` + `services/practiceApi.js` + `views/PracticeView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticePanel.vue` |
+| 练习/面试 | `composables/usePractice.js` + `composables/usePracticeDecks.js` + `services/practiceApi.js` + `views/PracticeView.vue` + `views/PracticeDecksView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticeDeckManager.vue` + `components/business/PracticePanel.vue` |
 | 导入任务 | `composables/useSubmitJobs.js` + `services/dataApi.js` |
 | 数据分析 | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `services/profileApi.js` + `components/business/SettingsPage.vue` |

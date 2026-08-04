@@ -110,7 +110,7 @@ const MOCK_RECOMMENDATIONS = [
 ]
 
 // ── Helper: 注册所有必要的 API mock ──
-async function mockAllAPIs(page) {
+async function mockAllAPIs(page, { studyPlans = true } = {}) {
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
@@ -145,8 +145,60 @@ async function mockAllAPIs(page) {
   })
 
   // Practice stats
-  await page.route('**/api/practice/stats**', async (route) => {
+  await page.route('**/api/practice-stats**', async (route) => {
     await route.fulfill({ json: MOCK_PRACTICE_STATS })
+  })
+  await page.route('**/api/practice/decks**', async (route) => {
+    if (!studyPlans) {
+      await route.fulfill({ status: 404, json: { detail: 'study plans not mocked' } })
+      return
+    }
+    const url = new URL(route.request().url())
+    const method = route.request().method()
+    const parts = url.pathname.split('/').filter(Boolean)
+    const deckKey = parts[3]
+    const isQuestions = parts[4] === 'questions'
+    const isItems = parts[4] === 'items'
+
+    if (method === 'POST' && !deckKey) {
+      await route.fulfill({ json: { key: 'custom-999-java', name: '我的 Java 题单', description: 'Java 面试冲刺', visibility: 'private', kind: 'custom', total: 0, reviewed: 0, due: 0, progress: 0 } })
+      return
+    }
+    if (method === 'PUT' || (method === 'DELETE' && !isItems)) {
+      await route.fulfill({ json: { status: 'success', key: deckKey, name: '我的 Java 题单', kind: 'custom' } })
+      return
+    }
+    if (isItems) {
+      await route.fulfill({ json: { status: 'success', question_id: Number(url.pathname.split('/').at(-1)) || 1 } })
+      return
+    }
+    if (!isQuestions) {
+      await route.fulfill({
+        json: {
+          algorithm: 'sm2_lite',
+          items: [
+            { key: 'due', name: '今日复习', description: '到期复习', total: 1, reviewed: 0, due: 1, progress: 0 },
+            { key: 'high-frequency', name: '高频必刷', description: '来自高频题库', total: 2, reviewed: 0, due: 2, progress: 0 },
+            { key: 'starred', name: '收藏题单', description: '收藏题', total: 1, reviewed: 0, due: 1, progress: 0 },
+            { key: 'unpracticed', name: '还没刷过', description: '尚未刷过', total: 3, reviewed: 0, due: 3, progress: 0 },
+            { key: 'all', name: '全部题库', description: '全部', total: 3, reviewed: 0, due: 3, progress: 0 },
+            { key: 'custom-999-java', name: '我的 Java 题单', description: 'Java 面试冲刺', visibility: 'private', kind: 'custom', total: 1, reviewed: 0, due: 1, progress: 0 },
+          ],
+        },
+      })
+      return
+    }
+    const items = deckKey === 'custom-999-java'
+      ? [MOCK_MASTER_BANK[0]]
+      : deckKey === 'high-frequency'
+      ? MOCK_MASTER_BANK.slice(0, 2)
+      : deckKey === 'starred'
+        ? MOCK_MASTER_BANK.filter(item => item.is_starred)
+        : MOCK_MASTER_BANK
+    await route.fulfill({ json: { deck: { key: deckKey, name: deckKey === 'high-frequency' ? '高频必刷' : deckKey, total: items.length }, items, total: items.length, page_size: 100, offset: 0 } })
+  })
+  await page.route('**/api/practice/review', async (route) => {
+    await route.fulfill({ json: { question_id: 1, review: { state: 'learning', proficiency: 1, review_count: 1, has_been_practiced: true, next_review_at: '2026-08-07 09:00:00' } } })
   })
   await page.route('**/api/practice/history**', async (route) => {
     await route.fulfill({ json: [] })
@@ -257,8 +309,8 @@ async function mockAllAPIs(page) {
 }
 
 // ── Helper: 以已登录状态进入主页 ──
-async function gotoLoggedIn(page) {
-  await mockAllAPIs(page)
+async function gotoLoggedIn(page, options) {
+  await mockAllAPIs(page, options)
   await page.goto('/')
   await page.waitForSelector('main', { timeout: 15000 })
   await page.waitForTimeout(1000)
@@ -475,9 +527,9 @@ test.describe('练习完整流程 — PracticePanel', () => {
   test('独立刷题工作台可退出并返回题库', async ({ page }) => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
     await expect(page).toHaveURL(/\/practice/)
-    await expect(page.getByText('闪卡模式')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-header')).toBeVisible({ timeout: 5000 })
 
-    await page.getByRole('button', { name: '退出刷题' }).click()
+    await page.getByRole('button', { name: '返回题库' }).click()
     await expect(page).toHaveURL(/\/master-bank/)
   })
 
@@ -490,12 +542,12 @@ test.describe('练习完整流程 — PracticePanel', () => {
   test('刷题模式支持收藏题单和单卡查看答案', async ({ page }) => {
     await page.getByRole('button', { name: '刷题模式' }).click()
 
-    await expect(page.getByTestId('practice-session-picker')).toBeVisible({ timeout: 5000 })
-    await expect(page.getByTestId('practice-session-quick')).toBeVisible()
+    await expect(page.getByTestId('practice-header')).toBeVisible({ timeout: 5000 })
+    const deckSelect = page.getByTestId('practice-deck-select')
+    await expect(deckSelect).toBeVisible()
 
-    await page.getByTestId('practice-session-starred').click()
+    await deckSelect.selectOption('starred')
     await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
-    await expect(page.getByText('1 道收藏题').first()).toBeVisible()
 
     await page.getByTestId('practice-show-answer').click()
     await expect(page.getByText('AI 参考答案')).toBeVisible()
@@ -506,8 +558,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
 
     await expect(page).toHaveURL(/\/practice/)
-    await expect(page.getByText('闪卡模式')).toBeVisible()
-    await expect(page.getByTestId('practice-session-picker')).toBeVisible()
+    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).toBeVisible()
+    await expect(page.getByTestId('practice-deck-select')).toBeVisible()
   })
 
   test('刷题工作区沿用训练页滚动容器并适配视口宽度', async ({ page }) => {
@@ -515,7 +567,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
 
     await expect(page.getByTestId('practice-view')).toBeVisible()
     await expect(page.getByTestId('practice-workspace')).toBeVisible()
-    await expect(page.getByTestId('practice-view')).toHaveClass(/overflow-y-auto/)
+    await expect(page.getByTestId('practice-main')).toHaveClass(/overflow-y-auto/)
 
     const metrics = await page.evaluate(() => {
       const view = document.querySelector('[data-testid="practice-view"]')
@@ -540,12 +592,39 @@ test.describe('练习完整流程 — PracticePanel', () => {
   test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
 
-    await expect(page.getByTestId('practice-session-strip')).toBeVisible()
+    await expect(page.getByTestId('practice-header')).toBeVisible()
     await expect(page.getByTestId('practice-focus-card')).toBeVisible()
-    await expect(page.getByText('主动回忆')).toBeVisible()
+    await expect(page.getByTestId('practice-focus-card').getByText('主动回忆')).toBeVisible()
 
     await page.getByTestId('practice-show-answer').click()
     await expect(page.getByTestId('practice-review-actions')).toBeVisible()
     await expect(page.getByRole('button', { name: '记得了' })).toBeVisible()
+  })
+
+  test('刷题题单与高频题库联动并保存熟练度', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+
+    const deckSelect = page.getByTestId('practice-deck-select')
+    await expect(deckSelect).toContainText('高频必刷')
+    await deckSelect.selectOption('high-frequency')
+    await expect(page.getByTestId('practice-card')).toContainText('请介绍一下 Vue 的响应式原理')
+
+    await page.getByTestId('practice-show-answer').click()
+    await expect(page.getByTestId('practice-review-actions')).toBeVisible()
+    await page.getByTestId('practice-review-good').click()
+    await expect(deckSelect).toBeVisible()
+  })
+
+  test('题单管理页可查看自定义题单并进入题目管理', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '管理题单' }).first().click()
+
+    await expect(page).toHaveURL(/\/practice\/decks/)
+    await expect(page.getByTestId('practice-deck-manager')).toBeVisible()
+    const customCard = page.getByTestId('practice-deck-card').filter({ hasText: '我的 Java 题单' })
+    await expect(customCard).toBeVisible()
+    await customCard.getByRole('button').first().click()
+    await expect(page.getByText('请介绍一下 Vue 的响应式原理').last()).toBeVisible()
+    await expect(page.getByTestId('practice-deck-question-select')).toBeVisible()
   })
 })

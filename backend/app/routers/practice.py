@@ -6,8 +6,24 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.auth import get_current_user
 from app.core.prompts import EVAL_PROMPT
 from app.db.connection import get_db_connection, run_db
-from app.models.schemas import EvaluateAnswerRequest
+from app.models.schemas import (
+    EvaluateAnswerRequest,
+    PracticeDeckCreateRequest,
+    PracticeDeckItemRequest,
+    PracticeDeckUpdateRequest,
+    PracticeReviewRequest,
+)
 from app.routers.questions import _build_bank_where_clause
+from app.services.practice_deck_service import (
+    add_deck_item,
+    create_custom_deck,
+    delete_custom_deck,
+    list_deck_questions,
+    list_decks,
+    remove_deck_item,
+    update_custom_deck,
+)
+from app.services.practice_review_service import record_review
 from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
 
@@ -15,6 +31,166 @@ logger = logging.getLogger("interview-boss")
 router = (
     APIRouter()
 )  # NO prefix - paths are mixed (/api/master-bank/... and /api/evaluate-answer)
+
+
+def _assert_question_visible(conn, user: dict, question_id: int):
+    from_clause, where_clause, params = _build_bank_where_clause(user)
+    row = conn.execute(
+        f"SELECT qb.id {from_clause} {where_clause} AND qb.id = ?",
+        params + [question_id],
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在或无权访问")
+
+
+@router.get("/api/practice/decks")
+async def get_practice_decks(
+    filter: str = Query(
+        "all", pattern="^(all|public|mine)$", description="题库可见范围"
+    ),
+    user: dict = Depends(get_current_user),
+):
+    """Return live LeetCode-style study plans linked to the high-frequency bank."""
+
+    def _query():
+        with get_db_connection() as conn:
+            return list_decks(conn, user["id"], filter)
+
+    return {"items": await run_db(_query), "algorithm": "sm2_lite"}
+
+
+@router.post("/api/practice/decks")
+async def create_practice_deck(
+    req: PracticeDeckCreateRequest, user: dict = Depends(get_current_user)
+):
+    def _create():
+        with get_db_connection() as conn:
+            deck = create_custom_deck(
+                conn,
+                user["id"],
+                name=req.name,
+                description=req.description,
+                visibility=req.visibility,
+            )
+            conn.commit()
+            return deck
+
+    return await run_db(_create)
+
+
+@router.put("/api/practice/decks/{deck_key}")
+async def update_practice_deck(
+    deck_key: str,
+    req: PracticeDeckUpdateRequest,
+    user: dict = Depends(get_current_user),
+):
+    def _update():
+        with get_db_connection() as conn:
+            try:
+                deck = update_custom_deck(
+                    conn,
+                    user["id"],
+                    deck_key,
+                    req.model_dump(exclude_unset=True),
+                )
+            except KeyError:
+                raise HTTPException(status_code=404, detail="题单不存在或无权操作")
+            conn.commit()
+            return deck
+
+    return await run_db(_update)
+
+
+@router.delete("/api/practice/decks/{deck_key}")
+async def delete_practice_deck(deck_key: str, user: dict = Depends(get_current_user)):
+    def _delete():
+        with get_db_connection() as conn:
+            try:
+                delete_custom_deck(conn, user["id"], deck_key)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="题单不存在或系统题单不可删除")
+            conn.commit()
+
+    await run_db(_delete)
+    return {"status": "success", "deck_key": deck_key}
+
+
+@router.post("/api/practice/decks/{deck_key}/items")
+async def add_practice_deck_item(
+    deck_key: str,
+    req: PracticeDeckItemRequest,
+    user: dict = Depends(get_current_user),
+):
+    def _add():
+        with get_db_connection() as conn:
+            _assert_question_visible(conn, user, req.question_id)
+            try:
+                item = add_deck_item(conn, user["id"], deck_key, req.question_id)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="自定义题单不存在")
+            conn.commit()
+            return item
+
+    return await run_db(_add)
+
+
+@router.delete("/api/practice/decks/{deck_key}/items/{question_id}")
+async def remove_practice_deck_item(
+    deck_key: str, question_id: int, user: dict = Depends(get_current_user)
+):
+    def _remove():
+        with get_db_connection() as conn:
+            try:
+                remove_deck_item(conn, user["id"], deck_key, question_id)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="自定义题单不存在")
+            conn.commit()
+
+    await run_db(_remove)
+    return {"status": "success", "question_id": question_id}
+
+
+@router.get("/api/practice/decks/{deck_key}/questions")
+async def get_practice_deck_questions(
+    deck_key: str,
+    filter: str = Query("all", pattern="^(all|public|mine)$"),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_user),
+):
+    """Load one named deck as an ordered review queue."""
+
+    def _query():
+        with get_db_connection() as conn:
+            try:
+                return list_deck_questions(conn, user["id"], deck_key, filter_mode=filter, limit=limit, offset=offset)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="题单不存在")
+
+    deck, items, total = await run_db(_query)
+    return {"deck": deck, "items": items, "total": total, "page_size": limit, "offset": offset}
+
+
+@router.post("/api/practice/review")
+async def review_practice_question(
+    req: PracticeReviewRequest, user: dict = Depends(get_current_user)
+):
+    """Persist the flashcard rating and calculate the next due time."""
+
+    def _review():
+        with get_db_connection() as conn:
+            _assert_question_visible(conn, user, req.question_id)
+            result = record_review(
+                conn,
+                user_id=user["id"],
+                question_id=req.question_id,
+                rating=req.rating,
+                score=req.score,
+            )
+            conn.commit()
+            return result
+
+    return {"question_id": req.question_id, "review": await run_db(_review)}
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
@@ -140,6 +316,21 @@ async def evaluate_answer(
                             json.dumps(result, ensure_ascii=False),
                             result["overall_score"],
                         ),
+                    )
+                    rating = (
+                        "easy"
+                        if result["overall_score"] >= 85
+                        else "good"
+                        if result["overall_score"] >= 65
+                        else "again"
+                    )
+                    record_review(
+                        conn,
+                        user_id=user["id"],
+                        question_id=req.question_id,
+                        rating=rating,
+                        score=result["overall_score"],
+                        source="self_check",
                     )
                     conn.commit()
 

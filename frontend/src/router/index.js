@@ -59,6 +59,11 @@ const routes = [
         component: () => import('@/views/PracticeView.vue'),
       },
       {
+        path: 'practice/decks',
+        name: 'practice-decks',
+        component: () => import('@/views/PracticeDecksView.vue'),
+      },
+      {
         path: 'insights/overview',
         name: 'insights-overview',
         component: () => import('@/views/InsightsView.vue'),

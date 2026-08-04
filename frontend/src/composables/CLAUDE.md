@@ -16,6 +16,7 @@ Vue 3 Composition API 的可复用逻辑，`use*` 命名前缀。
 | `useMotionPresets.js` | 动画预设 |
 | `useNotification.js` | 通知提示 |
 | `usePractice.js` | 练习流程逻辑 |
+| `usePracticeDecks.js` | 系统/自定义题单加载、题单题目队列、创建编辑删除和题目关联 |
 | `useQuestionOps.js` | 题目操作（编辑、拆分、删除） |
 | `useSelection.js` | 多选逻辑 |
 | `useSidebar.js` | 侧边栏状态 |

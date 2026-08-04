@@ -12,7 +12,7 @@
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新 |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |
 | `answers.py` | `/api/answers/*` | AI 答案生成 |
-| `practice.py` | `/api/practice/*` | 练习模式 |
+| `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习 |
 | `interview.py` | `/api/interview/*` | 模拟面试 |
 | `analytics.py` | `/api/analytics/*` | 数据分析 |
 | `insights.py` | `/api/insights` | 洞察工作台聚合快照 |

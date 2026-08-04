@@ -22,6 +22,8 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `utils.py` | DB 层工具函数（migration 辅助、SQL helpers） |
 | `migrations/interview_distribution.py` | 面经题目关联/题型事实、分布统计与用户偏好表的 migration 042 |
 | `migrations/chat.py` | Chat 会话、消息、工具 trace、asked question、turn fence、durable side effects 和 structured turn 的 migrations 024-046 |
+| `migrations/practice.py` | 刷题题单、用户题目复习状态和复习事件的 migration 055 |
+| `migrations/practice_decks.py` | 自定义题单所有者、可见性与题单题目关联的 migration 056 |
 
 ## 关键模式
 
@@ -31,6 +33,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **模拟面试历史**：`chat_conversations.job_position` 记录会话所属岗位，列表和详情必须按用户当前岗位过滤。
 - **模拟面试回合**：`chat_turns` 是进行中请求的唯一 fence；同一 conversation 只能有一个 `running` turn，旧 turn 不能绕过 `turn_id + fence` finalize。
 - **手撕代码**：`coding_problems`（题库，50 道 seed 数据）+ `coding_submissions`（提交记录 + AI 评审结果），migration 030
+- **刷题记忆**：`user_question_review` 记录每个用户每道题的熟练度、复习间隔和下次复习时间；`practice_review_events` 保留复习事件；`practice_deck_items` 连接自定义题单与高频题库题目。
 
 ## 修改后必做
 

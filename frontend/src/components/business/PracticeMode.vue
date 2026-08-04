@@ -1,95 +1,66 @@
 <template>
-  <div data-testid="practice-workspace" class="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 pb-6">
-    <section data-testid="practice-session-picker" class="rounded-xl border border-border bg-card p-2 shadow-sm md:p-3">
-      <div class="flex flex-wrap items-center justify-between gap-3 px-2 py-1.5 md:px-1">
-        <div class="flex min-w-0 items-center gap-3">
-          <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Layers class="size-4" />
-          </div>
-          <div class="min-w-0">
-            <h3 class="text-sm font-bold text-foreground">刷题题单</h3>
-            <p class="text-[11px] text-muted-foreground">当前题库 {{ questions.length }} 题</p>
-          </div>
-          <Badge variant="outline" class="hidden text-[10px] text-muted-foreground sm:inline-flex">闪卡模式</Badge>
+  <div data-testid="practice-workspace" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
+    <aside data-testid="practice-queue-sidebar" class="hidden w-64 shrink-0 flex-col border-r border-border bg-background md:flex">
+      <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
+        <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Layers class="size-4" /></div>
+        <div class="min-w-0">
+          <p class="truncate text-sm font-semibold text-foreground">刷题队列</p>
+          <p class="truncate text-[11px] text-muted-foreground">{{ selectedSession?.label || '当前题单' }}</p>
         </div>
+      </div>
+      <div class="border-b border-border p-2">
+        <div class="relative">
+          <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
+        </div>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar">
+        <button
+          v-for="(question, questionIndex) in sessionQuestions"
+          :key="question.id"
+          type="button"
+          class="group mb-1 flex w-full items-start gap-2 rounded-md p-2 text-left transition-colors"
+          :class="questionIndex === currentIndex ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/65 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+          @click="currentIndex = questionIndex; resetState()"
+        >
+          <span class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[10px] tabular-nums" :class="questionIndex === currentIndex ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'">{{ questionIndex + 1 }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="line-clamp-2 text-xs leading-5">{{ question.question }}</span>
+            <span v-if="question.has_been_practiced" class="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground"><Check class="size-3" />熟练度 {{ question.proficiency || 0 }}/5</span>
+          </span>
+        </button>
+        <p v-if="!sessionQuestions.length" class="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">这个题单还没有可复习的题</p>
+      </div>
+      <div class="shrink-0 border-t border-border p-2">
+        <Button variant="ghost" size="sm" class="w-full justify-start gap-2 text-xs text-muted-foreground" @click="emit('manage-decks')"><Layers class="size-3.5" />管理题单</Button>
+      </div>
+    </aside>
 
-        <div v-if="currentQ" class="flex min-w-0 flex-wrap items-center justify-end gap-2 md:gap-3">
-          <div class="hidden text-right sm:block">
-            <div class="text-[11px] font-medium text-muted-foreground">{{ selectedSession?.label }}</div>
-            <div class="text-xs tabular-nums text-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</div>
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header data-testid="practice-header" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 md:px-6 md:py-1.5">
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 items-center gap-2">
+            <h1 class="shrink-0 text-sm font-semibold text-foreground">刷题</h1>
+            <span class="text-muted-foreground">/</span>
+            <select data-testid="practice-deck-select" v-model="sessionKey" class="h-8 min-w-0 max-w-[16rem] rounded-md border border-input bg-background px-2 text-sm font-medium text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" @change="selectSession(sessionKey)">
+              <option v-for="option in sessionOptions" :key="option.key" :value="option.key" :disabled="option.count === 0">{{ option.label }} · {{ option.count }} 题</option>
+            </select>
+            <Badge variant="outline" class="hidden text-[10px] text-muted-foreground sm:inline-flex">主动回忆</Badge>
           </div>
-          <div class="h-1.5 w-20 overflow-hidden rounded-full bg-muted md:w-32">
+        </div>
+        <div class="flex min-w-0 items-center gap-1.5">
+          <span v-if="currentQ" class="hidden text-xs tabular-nums text-muted-foreground sm:inline">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
+          <div v-if="currentQ" class="hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted lg:block">
             <div class="h-full rounded-full bg-primary transition-all duration-300" :style="{ width: `${progressPercentage}%` }"></div>
           </div>
-          <Button variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" @click="toggleStar">
-            <Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" />
-            <span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span>
-          </Button>
-          <Button variant="outline" size="sm" class="gap-1.5" @click="emit('close')">
-            <X class="size-3.5" />返回题库
-          </Button>
+          <Button variant="ghost" size="sm" class="hidden gap-1.5 text-xs text-muted-foreground lg:inline-flex" @click="emit('manage-decks')"><Layers class="size-3.5" />管理题单</Button>
+          <Button v-if="currentQ" variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+          <Button variant="outline" size="sm" class="gap-1.5" @click="emit('close')"><X class="size-3.5" />返回题库</Button>
         </div>
-        <Button v-else variant="outline" size="sm" class="gap-1.5" @click="emit('close')">
-          <X class="size-3.5" />返回题库
-        </Button>
-      </div>
+      </header>
 
-      <div data-testid="practice-session-strip" class="flex flex-col gap-2 pt-2">
-        <div class="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold text-foreground">选择题单</span>
-            <span class="text-[11px] text-muted-foreground">收藏题可单独复习</span>
-          </div>
-          <div class="relative w-full md:max-w-xs">
-            <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input v-model="deckQuery" type="search" class="h-9 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20" placeholder="搜索当前题单..." />
-          </div>
-        </div>
-
-        <div class="grid min-w-0 grid-cols-2 gap-1.5 md:grid-cols-4">
-          <button
-            v-for="option in recommendedSessions"
-            :key="option.key"
-            :data-testid="`practice-session-${option.key}`"
-            :disabled="option.count === 0"
-            type="button"
-            class="group flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 sm:px-3"
-            :class="sessionKey === option.key ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'"
-            @click="selectSession(option.key)"
-          >
-            <span class="flex size-8 shrink-0 items-center justify-center rounded-lg" :class="sessionKey === option.key ? option.iconClass : 'bg-muted text-muted-foreground'">
-              <component :is="option.icon" :size="15" />
-            </span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate text-xs font-semibold sm:text-sm">{{ option.label }}</span>
-              <span class="mt-0.5 block truncate text-[10px] text-muted-foreground">{{ option.description }}</span>
-            </span>
-            <span class="shrink-0 text-xs tabular-nums text-muted-foreground">{{ option.count }}</span>
-          </button>
-        </div>
-
-        <div class="flex flex-col gap-2 border-t border-border px-1 pt-2 sm:flex-row sm:items-center">
-          <p class="shrink-0 text-[11px] font-semibold text-muted-foreground">难度</p>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="option in difficultySessions"
-              :key="option.key"
-              :data-testid="`practice-session-${option.key}`"
-              :disabled="option.count === 0"
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45"
-              :class="sessionKey === option.key ? 'border-primary/40 bg-primary/5 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'"
-              @click="selectSession(option.key)"
-            >
-              <span class="size-2 rounded-full" :class="option.dotClass"></span>
-              {{ option.label }}
-              <span class="tabular-nums text-muted-foreground">{{ option.count }}</span>
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </section>
+      <main data-testid="practice-main" class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+        <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 pb-8 pt-6 md:px-6 md:pt-8">
 
     <Card v-if="currentQ" data-testid="practice-card" class="mx-auto w-full overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
@@ -99,6 +70,7 @@
           <span>·</span>
           <span>高频 {{ currentQ.frequency || 0 }} 次</span>
           <span v-if="questionAttemptCount(currentQ)" class="hidden items-center gap-1 sm:inline-flex"><History class="size-3.5" />已练习 {{ questionAttemptCount(currentQ) }} 次</span>
+          <span v-if="currentQ.has_been_practiced" class="hidden items-center gap-1 sm:inline-flex"><Target class="size-3.5" />熟练度 {{ currentQ.proficiency || 0 }}/5</span>
         </div>
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           <Badge v-if="currentQ.difficulty" variant="outline" class="text-[10px]" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
@@ -151,10 +123,11 @@
               <p class="text-sm font-semibold text-foreground">记得怎么样？</p>
               <p class="mt-1 text-[11px] text-muted-foreground">先判断记忆程度，再进入下一题</p>
             </div>
-            <div class="grid grid-cols-3 gap-2 sm:flex">
-              <Button variant="outline" size="sm" class="gap-1.5" @click="markAndNext(false)"><RotateCcw class="size-3.5" />再复习</Button>
-              <Button variant="outline" size="sm" class="gap-1.5" @click="markAndNext(false)"><Target class="size-3.5" />有点模糊</Button>
-              <Button size="sm" class="gap-1.5" @click="markAndNext(true)"><Check class="size-3.5" />记得了</Button>
+            <div class="grid grid-cols-2 gap-2 sm:flex">
+              <Button data-testid="practice-review-again" variant="outline" size="sm" class="gap-1.5" :disabled="reviewLoading" @click="markAndNext('again')"><RotateCcw class="size-3.5" />再复习 <span class="hidden text-[10px] text-muted-foreground md:inline">29 分钟</span></Button>
+              <Button data-testid="practice-review-hard" variant="outline" size="sm" class="gap-1.5" :disabled="reviewLoading" @click="markAndNext('hard')"><Target class="size-3.5" />有点模糊 <span class="hidden text-[10px] text-muted-foreground md:inline">保守</span></Button>
+              <Button data-testid="practice-review-good" size="sm" class="gap-1.5" :disabled="reviewLoading" @click="markAndNext('good')"><Check class="size-3.5" />记得了 <span class="hidden text-[10px] opacity-70 md:inline">继续</span></Button>
+              <Button data-testid="practice-review-easy" variant="secondary" size="sm" class="gap-1.5" :disabled="reviewLoading" @click="markAndNext('easy')"><Zap class="size-3.5" />很熟 <span class="hidden text-[10px] text-muted-foreground md:inline">拉长</span></Button>
             </div>
           </div>
           <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
@@ -193,6 +166,9 @@
       <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题<span class="hidden text-[11px] text-muted-foreground md:inline">←</span></Button>
       <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
       <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<span class="hidden text-[11px] text-muted-foreground md:inline">→</span><ChevronRight class="size-4" /></Button>
+    </div>
+        </div>
+      </main>
     </div>
   </div>
 </template>
@@ -240,14 +216,18 @@ import {
 
 const props = defineProps({
   questions: { type: Array, default: () => [] },
+  decks: { type: Array, default: () => [] },
+  selectedDeckKey: { type: String, default: '' },
+  reviewLoading: { type: Boolean, default: false },
+  deckLoading: { type: Boolean, default: false },
   startIndex: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
   practicedQuestions: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview'])
+const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'review'])
 const toast = useToast()
-const sessionKey = ref('quick')
+const sessionKey = ref(props.selectedDeckKey || 'quick')
 const deckQuery = ref('')
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
@@ -258,7 +238,7 @@ const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: fal
 
 function questionAttemptCount(question) {
   const info = props.practicedQuestions?.[question?.id] || {}
-  return Number(question?.attempt_count || info.attempt_count || info.count || 0)
+  return Number(question?.review_count || question?.attempt_count || info.attempt_count || info.count || 0)
 }
 
 function questionTags(question) {
@@ -279,12 +259,32 @@ const recommendedSessions = computed(() => [
   { key: 'unpracticed', label: '待复习', description: `${unpracticedQuestions.value.length} 道还没练过`, count: unpracticedQuestions.value.length, icon: Flame, iconClass: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' },
   { key: 'all', label: '全部题库', description: '按当前筛选结果刷题', count: props.questions.length, icon: Layers, iconClass: 'bg-primary/10 text-primary' },
 ])
+const sessionIcons = { due: Flame, 'high-frequency': Zap, starred: Star, unpracticed: Layers, all: Layers }
+const sessionIconClasses = {
+  due: 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400',
+  'high-frequency': 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
+  starred: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
+  unpracticed: 'bg-primary/10 text-primary',
+  all: 'bg-primary/10 text-primary',
+}
+const serverSessions = computed(() => props.decks.map(deck => ({
+  key: deck.key,
+  label: deck.name,
+  description: `${deck.reviewed || 0}/${deck.total || 0} 已建立记忆 · ${deck.due || 0} 到期`,
+  count: Number(deck.total || 0),
+  icon: sessionIcons[deck.key] || Layers,
+  iconClass: sessionIconClasses[deck.key] || 'bg-primary/10 text-primary',
+  progress: deck.progress || 0,
+})))
+const serverDeckMode = computed(() => props.decks.length > 0)
+const sessionOptions = computed(() => serverDeckMode.value ? serverSessions.value : recommendedSessions.value)
 const difficultySessions = computed(() => [
   { key: 'l1', label: 'L1 基础', count: props.questions.filter(question => String(question.difficulty || '').includes('L1')).length, dotClass: 'bg-emerald-500' },
   { key: 'l2', label: 'L2 进阶', count: props.questions.filter(question => String(question.difficulty || '').includes('L2')).length, dotClass: 'bg-amber-500' },
   { key: 'l3', label: 'L3 挑战', count: props.questions.filter(question => String(question.difficulty || '').includes('L3')).length, dotClass: 'bg-rose-500' },
 ])
 const sessionSource = computed(() => {
+  if (serverDeckMode.value) return props.deckLoading ? [] : props.questions
   if (sessionKey.value === 'quick') return quickQuestions.value
   if (sessionKey.value === 'starred') return starredQuestions.value
   if (sessionKey.value === 'unpracticed') return unpracticedQuestions.value
@@ -299,7 +299,7 @@ const sessionQuestions = computed(() => {
   return sessionSource.value.filter(question => [question.question, question.cat1, question.cat2, question.tags].some(value => String(value || '').toLowerCase().includes(query)))
 })
 const currentQ = computed(() => sessionQuestions.value[currentIndex.value] || null)
-const selectedSession = computed(() => [...recommendedSessions.value, ...difficultySessions.value].find(item => item.key === sessionKey.value))
+const selectedSession = computed(() => [...sessionOptions.value, ...difficultySessions.value].find(item => item.key === sessionKey.value))
 const isLastQuestion = computed(() => currentIndex.value >= sessionQuestions.value.length - 1)
 const progressPercentage = computed(() => sessionQuestions.value.length ? Math.round(((currentIndex.value + 1) / sessionQuestions.value.length) * 100) : 0)
 
@@ -312,12 +312,13 @@ const difficultyClass = (difficulty) => {
 
 function resetState() { resetQState(qState); answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false }
 function selectSession(key) {
-  const option = [...recommendedSessions.value, ...difficultySessions.value].find(item => item.key === key)
+  const option = [...sessionOptions.value, ...difficultySessions.value].find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
   sessionKey.value = key
   currentIndex.value = 0
   deckQuery.value = ''
   resetState()
+  if (serverDeckMode.value) emit('select-deck', key)
 }
 function goPrev() { if (currentIndex.value > 0) { currentIndex.value -= 1; resetState() } }
 function goNext() {
@@ -326,7 +327,12 @@ function goNext() {
   currentIndex.value += 1
   resetState()
 }
-function markAndNext(remembered) { if (currentQ.value?.id && remembered) rememberedIds.value = new Set([...rememberedIds.value, currentQ.value.id]); goNext() }
+function markAndNext(rating) {
+  if (!currentQ.value?.id) return
+  if (rating === 'good' || rating === 'easy') rememberedIds.value = new Set([...rememberedIds.value, currentQ.value.id])
+  if (serverDeckMode.value) emit('review', { questionId: currentQ.value.id, rating })
+  goNext()
+}
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
 function toggleSelfCheck() { showSelfCheck.value = !showSelfCheck.value; if (!showSelfCheck.value) { qState._evaluation = null; qState._userAnswer = '' } }
 async function toggleHistory() { showHistory.value = !showHistory.value; if (showHistory.value && !qState._history && currentQ.value) await loadHistory(currentQ.value.id, qState) }
@@ -348,6 +354,7 @@ function onGlobalKeydown(event) {
 
 watch(sessionQuestions, (questions) => { if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1) })
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
+watch(() => props.selectedDeckKey, (key) => { if (key) { sessionKey.value = key; currentIndex.value = 0; resetState() } })
 onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 </script>

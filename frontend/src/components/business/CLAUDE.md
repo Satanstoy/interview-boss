@@ -27,7 +27,8 @@
 | `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
 | `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
 | `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |
-| `PracticeMode.vue` | `/practice` 路由内的闪卡刷题工作台：今日速成、收藏题、待复习和难度题单；支持单卡翻答案、收藏、AI 答案生成/编辑、可选自测与练习记录 |
+| `PracticeMode.vue` | `/practice` 路由内的 Chat 风格闪卡刷题工作台：标题下拉切换系统/自定义题单，侧栏展示队列；支持单卡翻答案、收藏、AI 答案生成/编辑、可选自测与练习记录 |
+| `PracticeDeckManager.vue` | `/practice/decks` 题单管理工作台：系统题单概览、自定义题单 CRUD，以及从高频题库加入/移出题目 |
 | `PracticePanel.vue` | 练习面板 |
 | `QuestionCard.vue` | 题目卡片（私有题显示「私有」徽标 + 分享按钮） |
 | `SearchFilterBar.vue` | 搜索过滤栏 |

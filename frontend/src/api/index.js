@@ -116,6 +116,14 @@ export {
 export {
   fetchPracticeHistory,
   evaluateAnswer,
+  fetchPracticeDecks,
+  fetchPracticeDeckQuestions,
+  submitPracticeReview,
+  createPracticeDeck,
+  updatePracticeDeck,
+  deletePracticeDeck,
+  addPracticeDeckItem,
+  removePracticeDeckItem,
 } from '../services/practiceApi.js'
 
 // ── Chat ──

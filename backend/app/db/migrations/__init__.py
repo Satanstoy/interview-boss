@@ -44,6 +44,7 @@ from app.db.migrations.view import (
     _migration_013_user_question_view_user_answer,
 )
 from app.db.migrations.practice import _migration_055_practice_review_system
+from app.db.migrations.practice_decks import _migration_056_custom_practice_decks
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -152,6 +153,7 @@ _MIGRATIONS = [
     (53, "coding_library", _migration_053_coding_library),
     (54, "mcp_token_seed", _migration_054_mcp_token_seed),
     (55, "practice_review_system", _migration_055_practice_review_system),
+    (56, "custom_practice_decks", _migration_056_custom_practice_decks),
 ]
 
 

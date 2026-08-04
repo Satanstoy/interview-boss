@@ -29,6 +29,29 @@ class EvaluateAnswerRequest(BaseModel):
     model: Optional[str] = Field(None, max_length=100)
 
 
+class PracticeReviewRequest(BaseModel):
+    question_id: int = Field(..., gt=0)
+    rating: Literal["again", "hard", "good", "easy"]
+    score: Optional[int] = Field(None, ge=0, le=100)
+    answer_revealed: bool = True
+
+
+class PracticeDeckCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = Field("", max_length=500)
+    visibility: Literal["private", "public"] = "private"
+
+
+class PracticeDeckUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=80)
+    description: Optional[str] = Field(None, max_length=500)
+    visibility: Optional[Literal["private", "public"]] = None
+
+
+class PracticeDeckItemRequest(BaseModel):
+    question_id: int = Field(..., gt=0)
+
+
 class ProfileUpdateRequest(BaseModel):
     settings: Dict[str, str]
 

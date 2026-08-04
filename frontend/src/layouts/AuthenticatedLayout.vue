@@ -78,6 +78,7 @@ const routeToTabMap = {
   'interview': 'Interview',
   'mock-interview': 'MockInterview',
   'practice': 'Practice',
+  'practice-decks': 'Practice',
   'knowledge-graph': 'KnowledgeGraph',
   'insights-overview': 'InsightsOverview',
   'insights-readiness': 'InsightsReadiness',

@@ -122,7 +122,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 数据管理（JD/面经 CRUD） | `routers/data.py` | `services/dataApi.js` |
 | 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` + `routers/bank_build.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
-| 练习/抽测 | `routers/practice.py` + `services/question_draw_service.py` | `views/PracticeView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticePanel.vue` + `components/business/MockInterview.vue` |
+| 练习/抽测 | `routers/practice.py` + `services/practice_deck_service.py` + `services/practice_review_service.py` + `services/practice_scheduler.py` | `views/PracticeView.vue` + `views/PracticeDecksView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticeDeckManager.vue` + `components/business/PracticePanel.vue` + `components/business/MockInterview.vue` |
 | 模拟面试（Chat） | `routers/chat.py` + `routers/interview.py` + `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `views/ChatView.vue` + `components/business/ChatView.vue` + `services/chatApi.js` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 洞察工作台 | `routers/insights.py` + `services/insights.py` | `views/InsightsView.vue` + `services/insightsApi.js` + `components/business/Insights*.vue` |

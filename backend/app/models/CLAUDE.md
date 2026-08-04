@@ -26,6 +26,9 @@
 | `CodingSubmitRequest` | 手撕代码提交 |
 | `CodingProblemCreateRequest` | 创建代码题目 |
 | `DistributionPreferenceRequest` | 五类题型比例、题数与风格来源的保存/单场覆盖 schema |
+| `PracticeReviewRequest` | 闪卡复习评级与可选自测分数 |
+| `PracticeDeckCreateRequest` / `PracticeDeckUpdateRequest` | 自定义题单名称、描述和可见范围 |
+| `PracticeDeckItemRequest` | 将题库题目加入自定义题单 |
 
 ## 核心规则
 

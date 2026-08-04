@@ -12,7 +12,7 @@
 | `chatApi.js` | 对话 CRUD + 带 request ID 的 SSE 消息、assistant regenerate | `/api/chat/*` |
 | `dataApi.js` | JD/面经提交、数据管理；当前页面主路径使用后台 Job | `/api/submit-jobs*`, `/api/submit-stream-v2`, `/api/data/*` |
 | `masterBankApi.js` | 题库 CRUD | `/api/master-bank/*` |
-| `practiceApi.js` | 练习/答案生成 | `/api/practice/*`, `/api/answers/*` |
+| `practiceApi.js` | 刷题题单、题单题目关联、闪卡复习/答案生成 | `/api/practice/*`, `/api/answers/*` |
 | `interviewApi.js` | 模拟面试 | `/api/interview/*` |
 | `analyticsApi.js` | 数据分析 | `/api/analytics/*` |
 | `insightsApi.js` | 洞察工作台聚合快照 | `/api/insights` |
