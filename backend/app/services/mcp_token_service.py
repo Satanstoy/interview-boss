@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import secrets
 from typing import Any
 
+from app.core.auth import SECRET_KEY
 from app.db.connection import get_db_connection
 
 
@@ -13,9 +16,18 @@ MCP_TOKEN_PREFIX = "ib_mcp_"
 MCP_TOKEN_BYTES = 32
 
 
-def generate_mcp_token() -> str:
-    """Generate an opaque bearer token suitable for an external MCP client."""
-    return f"{MCP_TOKEN_PREFIX}{secrets.token_urlsafe(MCP_TOKEN_BYTES)}"
+def _derive_mcp_token(user_id: int, token_seed: str) -> str:
+    """Derive a stable opaque token from a non-secret seed and server secret."""
+    message = f"interview-boss:mcp:{int(user_id)}:{token_seed}".encode("utf-8")
+    digest = hmac.new(SECRET_KEY.encode("utf-8"), message, hashlib.sha256).digest()
+    encoded = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"{MCP_TOKEN_PREFIX}{encoded}"
+
+
+def generate_mcp_token(user_id: int, token_seed: str | None = None) -> tuple[str, str]:
+    """Return ``(raw_token, seed)`` without persisting the raw token."""
+    seed = token_seed or secrets.token_urlsafe(MCP_TOKEN_BYTES)
+    return _derive_mcp_token(user_id, seed), seed
 
 
 def hash_mcp_token(token: str) -> str:
@@ -30,22 +42,23 @@ def _token_hint(token: str) -> str:
 
 def issue_mcp_token(user_id: int) -> dict[str, Any]:
     """Create or rotate the single MCP token belonging to ``user_id``."""
-    token = generate_mcp_token()
+    token, token_seed = generate_mcp_token(user_id)
     token_hash = hash_mcp_token(token)
     hint = _token_hint(token)
 
     with get_db_connection() as conn:
         conn.execute(
             """
-            INSERT INTO mcp_tokens (user_id, token_hash, token_hint)
-            VALUES (?, ?, ?)
+            INSERT INTO mcp_tokens (user_id, token_hash, token_hint, token_seed)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 token_hash = excluded.token_hash,
                 token_hint = excluded.token_hint,
+                token_seed = excluded.token_seed,
                 rotated_at = CURRENT_TIMESTAMP,
                 last_used_at = NULL
             """,
-            (int(user_id), token_hash, hint),
+            (int(user_id), token_hash, hint, token_seed),
         )
         conn.commit()
         row = conn.execute(
@@ -78,6 +91,42 @@ def get_mcp_token_metadata(user_id: int) -> dict[str, Any] | None:
             (int(user_id),),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_mcp_token_connection(user_id: int) -> dict[str, Any] | None:
+    """Return metadata and reconstruct the active raw token when possible."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT token_hash, token_hint, token_seed,
+                   created_at, rotated_at, last_used_at
+            FROM mcp_tokens
+            WHERE user_id = ?
+            """,
+            (int(user_id),),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    result = {
+        "token_hint": row["token_hint"],
+        "created_at": row["created_at"],
+        "rotated_at": row["rotated_at"],
+        "last_used_at": row["last_used_at"],
+        "token_available": False,
+    }
+    token_seed = row["token_seed"]
+    if not token_seed:
+        return result
+
+    token = _derive_mcp_token(user_id, token_seed)
+    if not hmac.compare_digest(hash_mcp_token(token), row["token_hash"]):
+        return result
+
+    result["token"] = token
+    result["token_available"] = True
+    return result
 
 
 def revoke_mcp_token(user_id: int) -> bool:

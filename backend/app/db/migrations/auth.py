@@ -240,3 +240,17 @@ def _migration_052_mcp_tokens(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_mcp_tokens_hash ON mcp_tokens(token_hash)"
     )
+
+
+def _migration_054_mcp_token_seed(conn):
+    """Add a non-secret seed so active MCP tokens can be reconstructed.
+
+    The raw bearer token remains absent from the database.  New tokens are
+    derived from this random seed and the server-side JWT secret.  Existing
+    rows keep a NULL seed and must be rotated once before they are copyable.
+    """
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info('mcp_tokens')").fetchall()
+    }
+    if "token_seed" not in cols:
+        conn.execute("ALTER TABLE mcp_tokens ADD COLUMN token_seed TEXT")

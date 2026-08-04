@@ -34,6 +34,7 @@ def _insert_user(conn, user_id=7):
 def test_mcp_token_is_hashed_and_rotation_is_one_per_user(test_db):
     from app.services.mcp_token_service import (
         authenticate_mcp_token,
+        get_mcp_token_connection,
         get_mcp_token_metadata,
         hash_mcp_token,
         issue_mcp_token,
@@ -45,10 +46,12 @@ def test_mcp_token_is_hashed_and_rotation_is_one_per_user(test_db):
     assert authenticate_mcp_token(first["token"]) == {"user_id": 7, "bank_mode": "all"}
 
     stored = test_db.execute(
-        "SELECT token_hash FROM mcp_tokens WHERE user_id = 7"
-    ).fetchone()[0]
-    assert stored == hash_mcp_token(first["token"])
-    assert first["token"] not in stored
+        "SELECT token_hash, token_seed FROM mcp_tokens WHERE user_id = 7"
+    ).fetchone()
+    assert stored["token_hash"] == hash_mcp_token(first["token"])
+    assert stored["token_seed"]
+    assert first["token"] not in stored["token_hash"]
+    assert first["token"] not in stored["token_seed"]
 
     second = issue_mcp_token(7)
     assert authenticate_mcp_token(first["token"]) is None
@@ -61,6 +64,33 @@ def test_mcp_token_is_hashed_and_rotation_is_one_per_user(test_db):
     assert metadata["token_hint"] == second["token_hint"]
     assert "token" not in metadata
     assert metadata["last_used_at"] is not None
+
+    connection = get_mcp_token_connection(7)
+    assert connection["token_available"] is True
+    assert connection["token"] == second["token"]
+
+
+def test_legacy_mcp_token_requires_one_rotation_before_copy(test_db):
+    from app.services.mcp_token_service import (
+        generate_mcp_token,
+        get_mcp_token_connection,
+        hash_mcp_token,
+    )
+
+    _insert_user(test_db, user_id=17)
+    legacy_token, _ = generate_mcp_token(17)
+    test_db.execute(
+        """
+        INSERT INTO mcp_tokens (user_id, token_hash, token_hint, token_seed)
+        VALUES (?, ?, ?, NULL)
+        """,
+        (17, hash_mcp_token(legacy_token), f"…{legacy_token[-8:]}"),
+    )
+    test_db.commit()
+
+    connection = get_mcp_token_connection(17)
+    assert connection["token_available"] is False
+    assert "token" not in connection
 
 
 def test_mcp_token_revoke_invalidates_access(test_db):
@@ -77,7 +107,7 @@ def test_mcp_token_revoke_invalidates_access(test_db):
     assert authenticate_mcp_token(issued["token"]) is None
 
 
-def test_mcp_profile_config_returns_raw_token_only_when_issued(test_db, client):
+def test_mcp_profile_config_returns_copyable_active_token(test_db, client):
     from app.routers.profile_pkg.mcp import (
         get_my_mcp_config,
         rotate_my_mcp_token,
@@ -88,24 +118,38 @@ def test_mcp_profile_config_returns_raw_token_only_when_issued(test_db, client):
 
     before = __import__("asyncio").run(get_my_mcp_config(request, {"id": 9}))
     assert before["configured"] is False
+    assert before["token_available"] is False
     assert "token" not in before
 
     issued = __import__("asyncio").run(rotate_my_mcp_token(request, {"id": 9}))
     assert issued["configured"] is True
     assert issued["token"].startswith("ib_mcp_")
     assert issued["config"]["mcpServers"]["interview-boss"]["url"] == "http://interview.test/mcp"
-    assert issued["config"]["mcpServers"]["interview-boss"]["headers"]["Authorization"] == f"Bearer {issued['token']}"
+    assert (
+        issued["config"]["mcpServers"]["interview-boss"]["headers"]["Authorization"]
+        == f"Bearer {issued['token']}"
+    )
     stdio = issued["stdio_config"]["mcpServers"]["interview-boss"]
     assert stdio["command"] == "npx"
-    assert stdio["args"][:5] == ["-y", "mcp-remote", "http://interview.test/mcp", "--transport", "http-only"]
+    assert stdio["args"][:5] == [
+        "-y",
+        "mcp-remote",
+        "http://interview.test/mcp",
+        "--transport",
+        "http-only",
+    ]
     assert "--allow-http" in stdio["args"]
     assert stdio["env"]["INTERVIEW_BOSS_MCP_AUTH"] == f"Bearer {issued['token']}"
     assert "mcp-remote" in issued["stdio_config_json"]
 
     after = __import__("asyncio").run(get_my_mcp_config(request, {"id": 9}))
     assert after["configured"] is True
-    assert "token" not in after
-    assert issued["token"] not in str(after)
+    assert after["token_available"] is True
+    assert after["token"] == issued["token"]
+    assert (
+        after["config"]["mcpServers"]["interview-boss"]["headers"]["Authorization"]
+        == f"Bearer {issued['token']}"
+    )
 
 
 def test_mcp_principal_comes_from_account_token(test_db, client):

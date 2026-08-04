@@ -23,6 +23,7 @@ from app.db.migrations.auth import (
     _migration_015_refresh_tokens_extra,
     _migration_051_share_default,
     _migration_052_mcp_tokens,
+    _migration_054_mcp_token_seed,
 )
 from app.db.migrations.data_repair import (
     _migration_011_data_backfills,
@@ -42,6 +43,7 @@ from app.db.migrations.view import (
     _migration_008_user_question_view,
     _migration_013_user_question_view_user_answer,
 )
+from app.db.migrations.practice import _migration_055_practice_review_system
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -148,6 +150,8 @@ _MIGRATIONS = [
     (51, "share_default", _migration_051_share_default),
     (52, "mcp_tokens", _migration_052_mcp_tokens),
     (53, "coding_library", _migration_053_coding_library),
+    (54, "mcp_token_seed", _migration_054_mcp_token_seed),
+    (55, "practice_review_system", _migration_055_practice_review_system),
 ]
 
 

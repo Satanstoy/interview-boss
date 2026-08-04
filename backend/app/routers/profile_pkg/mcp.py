@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from app.core.auth import get_current_user
 from app.db.connection import run_db
 from app.services.mcp_token_service import (
-    get_mcp_token_metadata,
+    get_mcp_token_connection,
     issue_mcp_token,
     revoke_mcp_token,
 )
@@ -74,6 +74,7 @@ def _response_metadata(metadata: dict | None, endpoint: str) -> dict:
         "endpoint": endpoint,
         "transport": "streamable-http",
         "configured": metadata is not None,
+        "token_available": bool(metadata and metadata.get("token_available", True)),
         "token_hint": metadata.get("token_hint") if metadata else None,
         "created_at": metadata.get("created_at") if metadata else None,
         "rotated_at": metadata.get("rotated_at") if metadata else None,
@@ -86,11 +87,38 @@ def _response_metadata(metadata: dict | None, endpoint: str) -> dict:
     }
 
 
+def _response_with_token(metadata: dict | None, endpoint: str) -> dict:
+    """Attach copy-ready credentials when the active token is reconstructable."""
+    response = _response_metadata(metadata, endpoint)
+    token = metadata.get("token") if metadata else None
+    if not token:
+        return response
+
+    response.update(
+        {
+            "token": token,
+            "config": _client_config(endpoint, token),
+            "stdio_config": _stdio_client_config(endpoint, token),
+            "config_json": json.dumps(
+                _client_config(endpoint, token),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "stdio_config_json": json.dumps(
+                _stdio_client_config(endpoint, token),
+                ensure_ascii=False,
+                indent=2,
+            ),
+        }
+    )
+    return response
+
+
 @router.get("/api/profile/mcp")
 async def get_my_mcp_config(request: Request, user: dict = Depends(get_current_user)):
-    """Return MCP endpoint and token metadata, never the raw token."""
-    metadata = await run_db(lambda: get_mcp_token_metadata(user["id"]))
-    return _response_metadata(metadata, _mcp_endpoint(request))
+    """Return the authenticated account's copy-ready MCP connection."""
+    connection = await run_db(lambda: get_mcp_token_connection(user["id"]))
+    return _response_with_token(connection, _mcp_endpoint(request))
 
 
 @router.post("/api/profile/mcp/token")
@@ -98,25 +126,8 @@ async def rotate_my_mcp_token(request: Request, user: dict = Depends(get_current
     """Issue the account's only MCP token; issuing again rotates it."""
     issued = await run_db(lambda: issue_mcp_token(user["id"]))
     endpoint = _mcp_endpoint(request)
-    response = _response_metadata(issued, endpoint)
-    response.update(
-        {
-            "token": issued["token"],
-            "config": _client_config(endpoint, issued["token"]),
-            "stdio_config": _stdio_client_config(endpoint, issued["token"]),
-            "config_json": json.dumps(
-                _client_config(endpoint, issued["token"]),
-                ensure_ascii=False,
-                indent=2,
-            ),
-            "stdio_config_json": json.dumps(
-                _stdio_client_config(endpoint, issued["token"]),
-                ensure_ascii=False,
-                indent=2,
-            ),
-        }
-    )
-    return response
+    issued["token_available"] = True
+    return _response_with_token(issued, endpoint)
 
 
 @router.delete("/api/profile/mcp/token")

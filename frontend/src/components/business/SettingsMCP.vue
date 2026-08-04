@@ -81,11 +81,22 @@ const restoreSessionCredentials = (config) => {
   }
 }
 
+const applyIssuedCredentials = (result) => {
+  issuedToken.value = result?.token || ''
+  issuedConfig.value = result?.config_json || ''
+  issuedStdioConfig.value = result?.stdio_config_json || ''
+  if (issuedToken.value) persistSessionCredentials(result)
+}
+
 const loadConfig = async () => {
   loading.value = true
   try {
     settings.value = await fetchMyMCPConfig()
-    restoreSessionCredentials(settings.value)
+    if (settings.value?.token) {
+      applyIssuedCredentials(settings.value)
+    } else {
+      restoreSessionCredentials(settings.value)
+    }
   } catch (error) {
     toastError(`加载 MCP 配置失败：${error.message}`)
   } finally {
@@ -107,10 +118,7 @@ const issueToken = async () => {
   try {
     const result = await rotateMyMCPToken()
     settings.value = result
-    issuedToken.value = result.token || ''
-    issuedConfig.value = result.config_json || ''
-    issuedStdioConfig.value = result.stdio_config_json || ''
-    persistSessionCredentials(result)
+    applyIssuedCredentials(result)
     toastSuccess(hadToken ? 'MCP Token 已重置，请立即复制保存' : 'MCP Token 已生成，请立即复制保存')
   } catch (error) {
     toastError(`生成 MCP Token 失败：${error.message}`)
@@ -242,8 +250,11 @@ onMounted(loadConfig)
           <code class="block min-h-10 break-all rounded-md bg-muted px-3 py-2 text-xs leading-5 text-foreground">
             {{ settings?.configured ? settings.token_hint : '尚未生成 Token' }}
           </code>
-          <p class="text-xs leading-5 text-muted-foreground">
-            完整 Token 不会直接显示；本标签页会临时保留最近生成的 Token，刷新后仍可复制。关闭标签页或重置后旧 Token 会失效。
+          <p v-if="settings?.configured && !issuedToken" class="text-xs leading-5 text-amber-700 dark:text-amber-300">
+            此 Token 创建于可复制功能升级前，服务器无法恢复明文。请点击“重置 Token”一次；之后重新进入页面也能直接复制。
+          </p>
+          <p v-else class="text-xs leading-5 text-muted-foreground">
+            完整 Token 默认不会直接显示；点击“复制 Token”即可获取，重新进入设置页仍可复制。重置后旧 Token 会立即失效。
           </p>
         </div>
 
