@@ -101,7 +101,7 @@ src/
 | 面试复盘 | `/insights/reviews` | `views/InsightsView.vue` | `components/business/InsightsReviews.vue` |
 | 知识图谱（兼容入口） | `/knowledge-graph` | 重定向到 `/insights/readiness?view=graph` | `components/business/KnowledgeGraph.vue` |
 | 导入 | `/import` | `views/ImportView.vue` | `components/business/StagingPanel.vue` |
-| 手撕代码 | `/coding` | `views/CodingView.vue` | `components/business/CodingPractice.vue` |
+| 手撕代码 | `/coding` | `views/CodingView.vue` | `components/business/CodingPractice.vue` + `services/codingApi.js` |
 | 设置 | `/settings` | `views/SettingsView.vue` | `components/business/SettingsPage.vue` |
 | 登录 | `/login` | `views/LoginView.vue` | `composables/useAuth.js` |
 
@@ -131,6 +131,12 @@ src/
 | 通知 | `composables/useNotification.js` |
 | 动画 | `composables/useMotionPresets.js` |
 | HTTP 客户端 | `services/http.js`（`api/index.js` 是 re-export 兼容层） |
+
+### 手撕代码工作台
+
+- `CodingView.vue` 与模拟面试页面统一使用页面留白和卡片外壳；`CodingPractice.vue` 内部管理题库侧栏、题目描述、编辑器和 AI 评审区域。
+- `services/codingApi.js` 负责 `scope=favorites` / `playlist_id` 查询、收藏切换、题单以及 Prompt + Markdown 导入，组件不直接拼接 HTTP 请求。
+- 题目交互遵循 LeetCode 式工作流：题库筛选 → 查看描述 → 编写代码 → 提示/评审；个人导入题目以“我的题目”展示，收藏和题单状态来自后端持久化。
 
 ## 岗位设置注意事项
 

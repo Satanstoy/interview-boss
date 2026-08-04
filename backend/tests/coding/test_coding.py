@@ -96,6 +96,93 @@ class TestCodingProblems:
         resp = client.get("/api/coding/problems/999")
         assert resp.status_code == 404
 
+    def test_problem_list_exposes_personal_state_and_favorite_scope(self, auth_client, test_db):
+        """列表返回收藏/刷题状态，并支持只看收藏。"""
+        client, user_id = auth_client
+        pid = _create_problem(test_db, "收藏题", "easy")
+        _create_problem(test_db, "未收藏题", "medium")
+        test_db.execute(
+            "INSERT INTO coding_submissions (user_id, problem_id, language, code, mode, is_passed) "
+            "VALUES (?, ?, 'python', 'pass', 'full_review', 1)",
+            (user_id, pid),
+        )
+        test_db.commit()
+
+        toggle = client.post(f"/api/coding/problems/{pid}/favorite", json={})
+        assert toggle.status_code == 200
+        assert toggle.json()["is_favorite"] is True
+
+        data = client.get("/api/coding/problems?scope=favorites").json()
+        assert data["total"] == 1
+        assert data["problems"][0]["id"] == pid
+        assert data["problems"][0]["is_favorite"] is True
+        assert data["problems"][0]["attempt_count"] == 1
+        assert data["problems"][0]["is_solved"] is True
+
+    def test_playlist_crud_and_problem_filter(self, auth_client, test_db):
+        """用户可以创建题单、加入题目并按题单浏览。"""
+        client, _ = auth_client
+        pid = _create_problem(test_db, "题单题目", "medium")
+
+        playlist = client.post(
+            "/api/coding/playlists",
+            json={"name": "二叉树面试高频", "description": "面试前集中复习"},
+        )
+        assert playlist.status_code == 200
+        playlist_id = playlist.json()["id"]
+
+        added = client.post(
+            f"/api/coding/playlists/{playlist_id}/items",
+            json={"problem_id": pid},
+        )
+        assert added.status_code == 200
+        assert added.json()["added"] is True
+
+        data = client.get(f"/api/coding/problems?playlist_id={playlist_id}").json()
+        assert data["total"] == 1
+        assert data["problems"][0]["id"] == pid
+        assert client.get("/api/coding/playlists").json()[0]["problem_count"] == 1
+
+    def test_import_markdown_with_prompt_uses_llm_and_persists_owned_problems(self, auth_client, test_db, mock_llm):
+        """Prompt + Markdown 导入会调用统一 LLM 基建并落为当前用户题目。"""
+        client, user_id = auth_client
+        llm_result = json.dumps(
+            {
+                "problems": [
+                    {
+                        "title": "LRU 缓存",
+                        "description": "请实现一个固定容量的 LRU Cache。",
+                        "difficulty": "hard",
+                        "tags": ["哈希表", "双向链表"],
+                        "expected_complexity": "O(1)",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+        call = AsyncMock(return_value=llm_result)
+        with patch("app.routers.coding.raw_llm_call", call):
+            resp = client.post(
+                "/api/coding/import",
+                json={
+                    "prompt": "提取算法题，补全缺失的输入输出和复杂度要求",
+                    "markdown": "# LRU Cache\n\n实现一个 LRU 缓存。",
+                    "filename": "我的面试题.md",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["created"][0]["title"] == "LRU 缓存"
+        assert call.call_count == 1
+        row = test_db.execute(
+            "SELECT owner_id, source_type, source FROM coding_problems WHERE title = ?",
+            ("LRU 缓存",),
+        ).fetchone()
+        assert row["owner_id"] == user_id
+        assert row["source_type"] == "imported"
+        assert row["source"] == "我的面试题.md"
+
 
 # ── 代码提交 ──
 
@@ -247,3 +334,15 @@ class TestCodingMigration:
         assert "ai_feedback" in columns
         assert "error_categories" in columns
         assert "is_passed" in columns
+
+    def test_coding_ux_tables_and_problem_ownership_exist(self, test_db):
+        """收藏、题单和个人导入题目的迁移存在。"""
+        problem_columns = {row["name"] for row in test_db.execute("PRAGMA table_info(coding_problems)")}
+        assert {"owner_id", "source_type"}.issubset(problem_columns)
+        tables = {
+            row["name"]
+            for row in test_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'coding_%'"
+            )
+        }
+        assert {"coding_problem_favorites", "coding_playlists", "coding_playlist_items"}.issubset(tables)

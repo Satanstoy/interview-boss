@@ -83,6 +83,21 @@ class CodingProblemCreateRequest(BaseModel):
     supported_languages: str = Field('["python","c","java"]', max_length=500)
 
 
+class CodingImportRequest(BaseModel):
+    prompt: str = Field("", max_length=5000)
+    markdown: str = Field(..., min_length=1, max_length=100000)
+    filename: str = Field("导入题目.md", max_length=255)
+
+
+class CodingPlaylistCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str = Field("", max_length=500)
+
+
+class CodingPlaylistItemRequest(BaseModel):
+    problem_id: int
+
+
 class DistributionPreferenceRequest(BaseModel):
     mode: Literal["system_default", "selected_experience", "custom"] = "system_default"
     target_question_count: Optional[int] = Field(None, ge=1, le=50)

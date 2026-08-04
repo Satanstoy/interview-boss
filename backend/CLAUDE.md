@@ -119,7 +119,7 @@ Routers → Services → Core/DB → (external)
 | 模拟面试（Chat） | `routers/chat.py` | `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `db/queries.py` |
 | 分析 | `routers/analytics.py` | — | `db/queries.py` |
 | 配置 | `routers/profile.py` + `profile_pkg/` | `core/config.py` + `services/email_service.py` + `services/resume_service.py` | `db/operations.py` |
-| 手撕代码 | `routers/coding.py` | — | `db/queries.py` |
+| 手撕代码 | `routers/coding.py` | — | `db/migrations/coding.py` |
 | 音频转写 | `routers/audio.py` | `services/deepgram_service.py` | — |
 | 面试分布 | `routers/interview_distribution.py` | `services/interview_distribution.py` + `core/interview_distribution_config.py` | `db/queries.py` |
 | 健康检查 | `routers/health.py` | — | — |
@@ -145,6 +145,12 @@ Routers → Services → Core/DB → (external)
 - 管理员：`users.is_admin`；审核上传题目流程
 - DB 自动备份：破坏性操作前自动备份
 - 配置热更新：`/api/profile` → DB + `.env`
+
+### 手撕代码题库
+
+- `coding_problems.owner_id IS NULL` 的种子题目对所有用户可见，Prompt + Markdown 导入题目只对创建者可见，并标记 `source_type=imported`。
+- `coding_problem_favorites` 保存用户收藏，`coding_playlists` / `coding_playlist_items` 保存个人题单；列表接口统一返回 `is_favorite`、`attempt_count`、`is_solved`，并支持 `scope=favorites`、`playlist_id`、搜索和筛选。
+- `POST /api/coding/import` 通过 `raw_llm_call` 使用用户的 AI 配置，Markdown 和 Prompt 都按不可信内容传给模型，模型只返回结构化题目 JSON；单次最多导入 50 道，按当前用户和标题去重。
 
 ## 面试 Agent 质量保护
 

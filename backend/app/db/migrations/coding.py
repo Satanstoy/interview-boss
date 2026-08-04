@@ -1,4 +1,4 @@
-"""Coding domain migrations: 029, 030, 031."""
+"""Coding domain migrations: 029, 030, 031, 053."""
 
 import logging
 
@@ -166,3 +166,63 @@ def _migration_031_coding_scores(conn):
         conn.execute("ALTER TABLE coding_submissions ADD COLUMN total_score REAL DEFAULT 0")
 
     logger.info("已为 coding_submissions 添加 scores/reference_answer/total_score 列")
+
+
+def _migration_053_coding_library(conn):
+    """Add personal coding library state: ownership, favorites and playlists."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(coding_problems)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if "owner_id" not in columns:
+        conn.execute("ALTER TABLE coding_problems ADD COLUMN owner_id INTEGER")
+    if "source_type" not in columns:
+        conn.execute(
+            "ALTER TABLE coding_problems ADD COLUMN source_type TEXT DEFAULT 'seed'"
+        )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coding_problem_favorites (
+            user_id INTEGER NOT NULL,
+            problem_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, problem_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (problem_id) REFERENCES coding_problems(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coding_playlists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coding_playlist_items (
+            playlist_id INTEGER NOT NULL,
+            problem_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (playlist_id, problem_id),
+            FOREIGN KEY (playlist_id) REFERENCES coding_playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY (problem_id) REFERENCES coding_problems(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_problem_owner ON coding_problems(owner_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_coding_playlist_user ON coding_playlists(user_id)"
+    )
+    logger.info("已创建手撕代码个人题库、收藏和题单表")

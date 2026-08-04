@@ -61,6 +61,7 @@ from app.db.migrations.coding import (
     _migration_029_user_resumes,
     _migration_030_coding_module,
     _migration_031_coding_scores,
+    _migration_053_coding_library,
 )
 from app.db.migrations.clustering import (
     _migration_032_embedding_column,
@@ -146,6 +147,7 @@ _MIGRATIONS = [
     (50, "pipeline_metrics", _migration_050_pipeline_metrics),
     (51, "share_default", _migration_051_share_default),
     (52, "mcp_tokens", _migration_052_mcp_tokens),
+    (53, "coding_library", _migration_053_coding_library),
 ]
 
 
