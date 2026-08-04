@@ -25,6 +25,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `migrations/practice.py` | 刷题题单、用户题目复习状态和复习事件的 migration 055 |
 | `migrations/practice_decks.py` | 自定义题单所有者、可见性与题单题目关联的 migration 056 |
 | `migrations/practice_defaults.py` | 清理旧的今日复习/高频/未刷分类，仅保留全部题和我的收藏系统题单的 migration 057 |
+| `migrations/practice_performance.py` | 刷题队列切换查询的覆盖索引 migration 059 |
 
 ## 关键模式
 

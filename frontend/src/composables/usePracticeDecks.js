@@ -14,6 +14,8 @@ export function usePracticeDecks(filter = 'all') {
   const isReviewing = ref(false)
   const serverReady = ref(false)
   const error = ref(null)
+  const loadedDeckKey = ref(null)
+  const questionCache = new Map()
 
   const selectedDeckSummary = computed(() => selectedDeck.value || decks.value.find(deck => deck.key === selectedDeckKey.value) || null)
 
@@ -33,15 +35,27 @@ export function usePracticeDecks(filter = 'all') {
     selectedDeckKey.value = deckKey
     isLoading.value = true
     error.value = null
+    const cacheKey = `${unref(filter)}:${deckKey}`
+    const cached = questionCache.get(cacheKey)
+    if (cached) {
+      questions.value = cached.items || []
+      selectedDeck.value = cached.deck || decks.value.find(deck => deck.key === deckKey) || null
+      loadedDeckKey.value = deckKey
+      isLoading.value = false
+      return cached
+    }
     try {
       const response = await api.fetchPracticeDeckQuestions(deckKey, { filter: unref(filter), limit: 100 })
+      questionCache.set(cacheKey, response)
       questions.value = response.items || []
       selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
+      loadedDeckKey.value = deckKey
       return response
     } catch (err) {
       error.value = getFriendlyError(err, '题单加载失败')
       toast.error(error.value)
       questions.value = []
+      loadedDeckKey.value = null
       return null
     } finally { isLoading.value = false }
   }
@@ -68,6 +82,7 @@ export function usePracticeDecks(filter = 'all') {
   async function createDeck(payload) {
     try {
       const deck = await api.createPracticeDeck(payload)
+      questionCache.clear()
       await loadDecks()
       return deck
     } catch (err) {
@@ -79,6 +94,7 @@ export function usePracticeDecks(filter = 'all') {
   async function updateDeck(deckKey, payload) {
     try {
       const deck = await api.updatePracticeDeck(deckKey, payload)
+      questionCache.delete(`${unref(filter)}:${deckKey}`)
       await loadDecks()
       return deck
     } catch (err) {
@@ -90,6 +106,7 @@ export function usePracticeDecks(filter = 'all') {
   async function deleteDeck(deckKey) {
     try {
       await api.deletePracticeDeck(deckKey)
+      questionCache.delete(`${unref(filter)}:${deckKey}`)
       if (selectedDeckKey.value === deckKey) {
         selectedDeckKey.value = decks.value.find(deck => deck.key !== deckKey)?.key || 'all'
         await loadQuestions(selectedDeckKey.value)
@@ -105,6 +122,7 @@ export function usePracticeDecks(filter = 'all') {
   async function addItem(deckKey, questionId) {
     try {
       await api.addPracticeDeckItem(deckKey, questionId)
+      questionCache.delete(`${unref(filter)}:${deckKey}`)
       return true
     } catch (err) {
       toast.error(getFriendlyError(err, '加入题单失败'))
@@ -115,6 +133,7 @@ export function usePracticeDecks(filter = 'all') {
   async function removeItem(deckKey, questionId) {
     try {
       await api.removePracticeDeckItem(deckKey, questionId)
+      questionCache.delete(`${unref(filter)}:${deckKey}`)
       return true
     } catch (err) {
       toast.error(getFriendlyError(err, '移出题单失败'))
@@ -127,6 +146,7 @@ export function usePracticeDecks(filter = 'all') {
     questions,
     selectedDeckKey,
     selectedDeck: selectedDeckSummary,
+    loadedDeckKey,
     isLoading,
     isReviewing,
     serverReady,

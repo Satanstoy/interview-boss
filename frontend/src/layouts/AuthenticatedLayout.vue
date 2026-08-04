@@ -290,6 +290,7 @@ const {
   decks: practiceDecks,
   selectedDeckKey: practiceSelectedDeckKey,
   isLoading: practiceDeckLoading,
+  loadedDeckKey: practiceLoadedDeckKey,
 } = practiceNavigation
 const practiceDecksLoaded = ref(false)
 
@@ -304,7 +305,7 @@ const loadPracticeContext = async () => {
   const targetDeck = requestedDeck && practiceNavigation.decks.value.some(deck => deck.key === requestedDeck)
     ? requestedDeck
     : practiceNavigation.selectedDeckKey.value
-  if (targetDeck && (practiceNavigation.selectedDeckKey.value !== targetDeck || !practiceNavigation.questions.value.length)) {
+  if (targetDeck && practiceLoadedDeckKey.value !== targetDeck) {
     await practiceNavigation.loadQuestions(targetDeck)
   }
 }

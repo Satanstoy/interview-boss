@@ -246,7 +246,9 @@ def list_deck_questions(
         "WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 1 ELSE 2 END, "
         "COALESCE(uqr.next_review_at, '1970-01-01') ASC, "
         f"{custom_order}"
-        f"MAX(COALESCE(qb.frequency, 0), ({frequency_sql})) DESC, qb.id ASC LIMIT ? OFFSET ?"
+        # Reuse the SELECT alias instead of evaluating the correlated
+        # dynamic-frequency subquery a second time for every row.
+        "frequency DESC, qb.id ASC LIMIT ? OFFSET ?"
     )
     rows = conn.execute(
         _select_sql(from_clause, where_clause, frequency_sql) + order,

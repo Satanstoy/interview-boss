@@ -638,6 +638,34 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(deckSelect).toBeVisible()
   })
 
+  test('切换已加载题单时复用缓存且不会重复请求', async ({ page }) => {
+    const questionRequests = []
+    page.on('request', request => {
+      const url = new URL(request.url())
+      if (url.pathname.endsWith('/questions')) questionRequests.push(url.pathname)
+    })
+
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    const deckSelect = page.getByTestId('practice-deck-select')
+    await expect(deckSelect).toContainText('全部题')
+
+    await deckSelect.click()
+    await page.getByRole('option', { name: /我的收藏/ }).click()
+    await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
+    await deckSelect.click()
+    await page.getByRole('option', { name: /全部题/ }).click()
+    await expect(page.getByTestId('practice-card')).toContainText('请介绍一下 Vue 的响应式原理')
+    await deckSelect.click()
+    await page.getByRole('option', { name: /我的收藏/ }).click()
+    await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
+
+    expect(questionRequests).toHaveLength(2)
+    expect(questionRequests).toEqual([
+      '/api/practice/decks/all/questions',
+      '/api/practice/decks/starred/questions',
+    ])
+  })
+
   test('题单管理页可查看自定义题单并进入题目管理', async ({ page }) => {
     await page.getByRole('button', { name: '刷题', exact: true }).click()
     await page.getByTestId('practice-deck-select').click()

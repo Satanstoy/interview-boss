@@ -46,6 +46,7 @@ from app.db.migrations.view import (
 from app.db.migrations.practice import _migration_055_practice_review_system
 from app.db.migrations.practice_decks import _migration_056_custom_practice_decks
 from app.db.migrations.practice_defaults import _migration_057_practice_default_decks
+from app.db.migrations.practice_performance import _migration_059_practice_queue_indexes
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -158,6 +159,7 @@ _MIGRATIONS = [
     (56, "custom_practice_decks", _migration_056_custom_practice_decks),
     (57, "practice_default_decks", _migration_057_practice_default_decks),
     (58, "coding_playlist_order", _migration_058_coding_playlist_order),
+    (59, "practice_queue_indexes", _migration_059_practice_queue_indexes),
 ]
 
 
