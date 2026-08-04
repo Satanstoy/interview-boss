@@ -356,7 +356,7 @@ onMounted(loadConfig)
 
       <div class="rounded-xl border bg-card p-6 space-y-5">
         <div class="flex items-start gap-3">
-          <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+          <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <BotMessageSquare class="size-5" />
           </div>
           <div class="min-w-0 flex-1">
