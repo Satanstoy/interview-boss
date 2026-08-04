@@ -84,7 +84,7 @@
                     <Button @click="handleGenerate" :disabled="qState._isLoadingAnswer" variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5">重新生成</Button>
                   </div>
                 </div>
-                <div class="text-sm text-foreground leading-relaxed answer-content" v-html="renderMarkdown(question.ai_answer)"></div>
+                <div class="text-sm text-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(question.ai_answer)"></div>
               </div>
 
               <div v-else-if="qState._isLoadingAnswer" class="flex flex-col items-center justify-center py-12 text-primary-600 dark:text-primary-400 gap-3">
@@ -226,7 +226,7 @@
             <!-- Suggestions -->
             <div v-if="qState._evaluation.suggestions" class="bg-card rounded-xl p-3 border border-border">
               <p class="text-[10px] font-semibold text-foreground mb-1">改进建议</p>
-              <div class="text-xs text-muted-foreground leading-relaxed answer-content" v-html="renderMarkdown(qState._evaluation.suggestions)"></div>
+              <div class="text-xs text-muted-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(qState._evaluation.suggestions)"></div>
             </div>
           </div>
         </div>

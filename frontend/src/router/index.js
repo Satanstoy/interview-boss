@@ -54,6 +54,11 @@ const routes = [
         component: () => import('@/views/MockInterviewView.vue'),
       },
       {
+        path: 'practice',
+        name: 'practice',
+        component: () => import('@/views/PracticeView.vue'),
+      },
+      {
         path: 'insights/overview',
         name: 'insights-overview',
         component: () => import('@/views/InsightsView.vue'),

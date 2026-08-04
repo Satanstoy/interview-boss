@@ -1,7 +1,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { useTabScroll } from './useTabScroll.js'
 
-export function useHighlightNav(activeTab, showPracticeMode) {
+export function useHighlightNav(activeTab) {
   const highlightInterviewId = ref(null)
   const returnTab = ref(null)
   const returnToPracticeMode = ref(false)
@@ -113,14 +113,11 @@ export function useHighlightNav(activeTab, showPracticeMode) {
   const handleReturn = async () => {
     floatingBtnStyle.value = { display: 'none' }
     const target = returnTab.value
-    const practice = returnToPracticeMode.value
     returnTab.value = null
     returnToPracticeMode.value = false
     highlightInterviewId.value = null
 
     activeTab.value = target
-    if (practice) showPracticeMode.value = true
-
     await nextTick()
     restoreOuterScroll()
   }

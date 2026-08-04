@@ -44,6 +44,7 @@ const MOCK_MASTER_BANK = [
     ai_answer: 'CSRF 跨站请求伪造...',
     key_points: ['Token', 'SameSite Cookie', 'Referer 检查'],
     frequency: 3,
+    is_starred: true,
     created_at: '2026-01-16T10:00:00',
     _showAnswer: false,
   },
@@ -471,42 +472,41 @@ test.describe('练习完整流程 — PracticePanel', () => {
     }
   })
 
-  test('练习面板可关闭', async ({ page }) => {
-    // 打开练习面板
-    const practiceBtn = page.locator('button').filter({ hasText: '做题' }).first()
-    if (await practiceBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await practiceBtn.click()
-    } else {
-      await page.getByText('请介绍一下 Vue 的响应式原理').first().click()
-      await page.waitForTimeout(500)
-      const altBtn = page.locator('button').filter({ hasText: '做题' }).first()
-      if (await altBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await altBtn.click()
-      }
-    }
-    await page.waitForTimeout(500)
+  test('独立刷题工作台可退出并返回题库', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await expect(page).toHaveURL(/\/practice/)
+    await expect(page.getByText('闪卡模式')).toBeVisible({ timeout: 5000 })
 
-    // 验证面板打开
-    await expect(page.getByText('我的回答').first()).toBeVisible({ timeout: 5000 })
-
-    // 点击关闭按钮 — PracticePanel 的 close button (SVG X icon)
-    const closeBtn = page.locator('button').filter({ has: page.locator('svg path[d*="M6 18L18 6M6 6l12 12"]') }).first()
-    if (await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await closeBtn.click()
-      await page.waitForTimeout(500)
-
-      // 面板应关闭 — "我的回答" 不再可见
-      await expect(page.getByText('我的回答')).not.toBeVisible({ timeout: 5000 })
-    } else {
-      // 退化：按 Escape 关闭
-      await page.keyboard.press('Escape')
-      await page.waitForTimeout(500)
-    }
+    await page.getByRole('button', { name: '退出刷题' }).click()
+    await expect(page).toHaveURL(/\/master-bank/)
   })
 
   test('无题目时面板属性正确处理', async ({ page }) => {
     // PracticePanel 的 visible 取决于 practiceQuestion
     // 验证默认状态下面板不可见
     await expect(page.getByText('我的回答')).not.toBeVisible({ timeout: 3000 })
+  })
+
+  test('刷题模式支持收藏题单和单卡查看答案', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题模式' }).click()
+
+    await expect(page.getByTestId('practice-session-picker')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-session-quick')).toBeVisible()
+
+    await page.getByTestId('practice-session-starred').click()
+    await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
+    await expect(page.getByText('1 道收藏题').first()).toBeVisible()
+
+    await page.getByTestId('practice-show-answer').click()
+    await expect(page.getByText('AI 参考答案')).toBeVisible()
+    await expect(page.getByText('CSRF 跨站请求伪造')).toBeVisible()
+  })
+
+  test('刷题作为训练区独立 Tab 展示', async ({ page }) => {
+    await page.getByRole('button', { name: '刷题', exact: true }).click()
+
+    await expect(page).toHaveURL(/\/practice/)
+    await expect(page.getByText('闪卡模式')).toBeVisible()
+    await expect(page.getByTestId('practice-session-picker')).toBeVisible()
   })
 })

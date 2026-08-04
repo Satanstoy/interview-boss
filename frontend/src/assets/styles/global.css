@@ -93,6 +93,130 @@
   .dark .prose-chat code {
     background: rgba(255,255,255,0.08);
   }
+
+  /* 表格样式 */
+  .prose-chat table,
+  .answer-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75em 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .prose-chat thead,
+  .answer-content thead {
+    border-bottom: 2px solid rgba(0,0,0,0.1);
+  }
+  .dark .prose-chat thead,
+  .dark .answer-content thead {
+    border-bottom-color: rgba(255,255,255,0.15);
+  }
+  .prose-chat th,
+  .answer-content th {
+    text-align: left;
+    padding: 0.5em 0.75em;
+    font-weight: 600;
+    color: rgba(0,0,0,0.8);
+  }
+  .dark .prose-chat th,
+  .dark .answer-content th {
+    color: rgba(255,255,255,0.9);
+  }
+  .prose-chat td,
+  .answer-content td {
+    padding: 0.5em 0.75em;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+  .dark .prose-chat td,
+  .dark .answer-content td {
+    border-bottom-color: rgba(255,255,255,0.08);
+  }
+  .prose-chat tbody tr:hover,
+  .answer-content tbody tr:hover {
+    background: rgba(0,0,0,0.03);
+  }
+  .dark .prose-chat tbody tr:hover,
+  .dark .answer-content tbody tr:hover {
+    background: rgba(255,255,255,0.05);
+  }
+
+  /* 答案内容样式优化 */
+  .answer-content {
+    line-height: 1.7;
+  }
+  .answer-content p {
+    margin: 0 0 0.6em;
+  }
+  .answer-content p:last-child {
+    margin-bottom: 0;
+  }
+  .answer-content strong {
+    font-weight: 600;
+    color: inherit;
+  }
+  .answer-content ul,
+  .answer-content ol {
+    padding-left: 1.5em;
+    margin: 0.4em 0;
+  }
+  .answer-content li {
+    margin: 0.2em 0;
+  }
+  .answer-content li::marker {
+    color: rgba(0,0,0,0.4);
+  }
+  .dark .answer-content li::marker {
+    color: rgba(255,255,255,0.4);
+  }
+  .answer-content code {
+    background: rgba(0,0,0,0.06);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-sm);
+    font-size: 0.85em;
+  }
+  .dark .answer-content code {
+    background: rgba(255,255,255,0.08);
+  }
+  .answer-content pre {
+    background: #18181b;
+    color: #fafafa;
+    padding: 0.75em;
+    border-radius: var(--radius-lg);
+    overflow-x: auto;
+    margin: 0.5em 0;
+  }
+  .answer-content pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  .answer-content blockquote {
+    border-left: 3px solid rgba(0,0,0,0.15);
+    padding-left: 0.8em;
+    margin: 0.5em 0;
+    color: rgba(0,0,0,0.6);
+  }
+  .dark .answer-content blockquote {
+    border-left-color: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.5);
+  }
+
+  /* 表格响应式包装 */
+  .table-wrapper {
+    overflow-x: auto;
+    margin: 0.75em 0;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .dark .table-wrapper {
+    border-color: rgba(255,255,255,0.08);
+  }
+  .table-wrapper table {
+    margin: 0;
+    border: none;
+  }
 }
 
 @layer utilities {

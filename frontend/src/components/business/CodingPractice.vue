@@ -166,7 +166,7 @@
                 <svg :class="['size-3.5 transition-transform', activeProblem._showDesc ? 'rotate-90' : '']" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                 查看题目描述
               </button>
-              <div v-if="activeProblem._showDesc" class="mt-2 text-sm text-muted-foreground leading-relaxed answer-content" v-html="renderMarkdown(activeProblem.description)"></div>
+              <div v-if="activeProblem._showDesc" class="mt-2 text-sm text-muted-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(activeProblem.description)"></div>
             </div>
 
             <!-- 代码编辑器 -->
@@ -223,7 +223,7 @@
                 查看详细评审
               </button>
               <div v-if="activeProblem._showFeedback" class="mt-2 rounded-xl border border-border bg-card p-4">
-                <div class="text-sm text-muted-foreground leading-relaxed answer-content" v-html="renderMarkdown(activeProblem._feedback)"></div>
+                <div class="text-sm text-muted-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(activeProblem._feedback)"></div>
                 <span v-if="activeProblem._isSubmitting" class="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 mt-1 rounded-sm"></span>
               </div>
             </div>

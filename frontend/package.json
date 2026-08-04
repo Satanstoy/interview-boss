@@ -18,6 +18,7 @@
     "@lucide/vue": "1.17.0",
     "@monaco-editor/loader": "^1.7.0",
     "@tabler/icons-vue": "3.44.0",
+    "@tailwindcss/typography": "0.5.20",
     "@tanstack/vue-table": "8.21.3",
     "@unovis/ts": "1.6.5",
     "@unovis/vue": "1.6.5",

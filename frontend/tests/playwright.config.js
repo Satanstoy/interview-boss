@@ -8,13 +8,13 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1 --strictPort',
     url: 'http://127.0.0.1:3000',
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 120000,
   },
   use: {
     baseURL: 'http://127.0.0.1:3000',
     headless: true,
-    channel: 'chrome',
+    channel: 'chromium',  // 使用 playwright 自带 chromium（环境无系统 Chrome）
     // 禁止截图 — 部分 AI 模型无法处理图片，用文本断言代替
     screenshot: 'off',
     trace: 'off',
