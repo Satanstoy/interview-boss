@@ -225,3 +225,86 @@ async def test_redis_session_lock_serializes_same_session(monkeypatch):
         ["a:enter", "a:exit", "b:enter", "b:exit"],
         ["b:enter", "b:exit", "a:enter", "a:exit"],
     )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_draws_keep_one_serialized_candidate_set(monkeypatch):
+    """A concurrent same-session draw must load the previous committed state."""
+
+    from app.agents.chat.tool_gateway import build_success_envelope
+    from app.mcp_server import app as mcp_app_module
+    from app.mcp_server.principal import MCPPrincipal
+
+    session_id = "concurrent-draw-contract"
+    persisted = {}
+    observed_before: dict[str, list[int]] = {}
+
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setattr(
+        mcp_app_module,
+        "get_mcp_principal",
+        lambda: MCPPrincipal(user_id=7, bank_mode="all"),
+    )
+    monkeypatch.setattr(mcp_app_module, "_activate_mcp_usage_skill", lambda state: None)
+
+    async def load_state(sid, user_id=None):
+        value = persisted.get((user_id, sid))
+        return dict(value) if value is not None else None
+
+    async def save_state(sid, state, user_id=None):
+        persisted[(user_id, sid)] = dict(state)
+
+    monkeypatch.setattr(mcp_app_module, "load_mcp_session_async", load_state)
+    monkeypatch.setattr(mcp_app_module, "save_mcp_session_async", save_state)
+
+    async def fake_draw(args, state):
+        topic = args.get("topic") or "unknown"
+        observed_before[topic] = [item["id"] for item in state.get("candidate_questions", [])]
+        await asyncio.sleep(0.01 if topic == "slow" else 0)
+        question_id = 101 if topic == "slow" else 202
+        item = {
+            "id": question_id,
+            "question": f"{topic} question",
+            "cat1": "Agent",
+            "cat2": "架构",
+            "tags": "agent",
+        }
+        state["candidate_questions"] = [item]
+        state["retrieved_questions"] = [item]
+        state["question_source"] = "draw"
+        return build_success_envelope(
+            tool="draw_questions",
+            items=[item],
+            total_ms=1,
+            debug_reason="test_draw",
+            fallback_used=False,
+        )
+
+    def fake_select(args, state, candidate_index=0):
+        item = state["candidate_questions"][candidate_index]
+        return build_success_envelope(
+            tool="select_question",
+            items=[item],
+            total_ms=1,
+            debug_reason="test_select",
+        )
+
+    monkeypatch.setattr(mcp_app_module.interview_tools, "draw_questions_tool", fake_draw)
+    monkeypatch.setattr(mcp_app_module.interview_tools, "select_question_tool", fake_select)
+
+    results = await asyncio.gather(
+        mcp_app_module.draw_questions(topic="slow", session_id=session_id),
+        mcp_app_module.draw_questions(topic="fast", session_id=session_id),
+    )
+
+    assert all(result["ok"] for result in results)
+    assert sorted(len(value) for value in observed_before.values()) == [0, 1]
+    final_state = persisted[(7, session_id)]
+    assert len(final_state["candidate_questions"]) == 1
+
+    selected = await mcp_app_module.select_question(
+        session_id=session_id,
+        candidate_index=0,
+    )
+    assert selected["ok"] is True
+    assert selected["items"][0]["id"] == final_state["candidate_questions"][0]["id"]

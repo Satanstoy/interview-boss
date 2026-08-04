@@ -37,19 +37,13 @@ MCP_USAGE_SKILL_NAME = "interview-tool-use"
 
 
 def _load_mcp_usage_skill_instructions() -> str:
-    """Read the canonical tool-use skill for MCP initialize instructions."""
-    try:
-        from app.agents.chat.skills import get_default_registry
-
-        skill = get_default_registry().get(MCP_USAGE_SKILL_NAME)
-        if skill is not None:
-            return skill.get_instruction()
-    except Exception:
-        logger.exception("Failed to load the MCP usage skill")
+    """Return only a compact initialize summary; full skill stays server-side."""
     return (
-        "Use session_id consistently across one interview. Load a relevant "
-        "skill before specialized questions, pass job_position when known, "
-        "and call select_question using only a server-returned candidate_index."
+        "InterviewBoss tool-use skill summary（完整指令保存在服务端 session）："
+        "何时调用哪个工具：岗位不确定先调用 list_job_positions；"
+        "使用同一个 session_id；search_questions/draw_questions 会更新服务端候选集；"
+        "空结果表示当前岗位题库为空，不跨岗位 fallback；"
+        "select_question 只能使用服务端返回的 question_source 和 candidate_index。"
     )
 
 

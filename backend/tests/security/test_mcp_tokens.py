@@ -228,6 +228,7 @@ async def test_mcp_auto_loads_tool_use_skill_for_authenticated_session(client):
     assert "何时调用哪个工具" in usage_instructions
     assert "search_questions" in mcp_app_module.mcp.instructions
     assert "select_question" in mcp_app_module.mcp.instructions
+    assert len(mcp_app_module.mcp.instructions) < 1800
 
     token = set_mcp_principal(MCPPrincipal(user_id=17, bank_mode="all"))
     try:
