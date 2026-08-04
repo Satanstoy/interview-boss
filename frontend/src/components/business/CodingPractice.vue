@@ -1,268 +1,365 @@
 <template>
-  <div class="flex flex-col gap-4">
-    <!-- 题库配置态：结构与 MockInterview 的配置卡片保持一致 -->
-    <div v-if="!activeProblem" class="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div class="border-b border-border px-4 py-3">
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="size-9 rounded-xl bg-gradient-brand flex items-center justify-center shadow-sm">
-              <Code2 :size="19" class="text-white" />
-            </div>
-            <div>
-              <h3 class="text-sm font-bold text-foreground">手撕代码</h3>
-              <p class="text-caption text-muted-foreground">选择题目和难度，开始代码练习</p>
-            </div>
+  <div class="relative flex h-full overflow-hidden bg-background">
+    <div
+      v-if="!sidebarCollapsed"
+      class="fixed inset-0 z-20 bg-background/70 backdrop-blur-sm md:hidden"
+      @click="sidebarCollapsed = true"
+    />
+
+    <!-- Coding library sidebar: same shell as ChatView's conversation list -->
+    <div
+      class="sidebar-container z-30 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden md:z-auto"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+      :style="{ width: sidebarCollapsed ? '0px' : '16rem' }"
+    >
+      <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
+        <Button class="flex-1 gap-1.5" size="sm" @click="activeProblem = null">
+          <Code2 :size="16" />
+          手撕代码
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-7 shrink-0 text-muted-foreground"
+          aria-label="收起题库侧栏"
+          @click="sidebarCollapsed = true"
+        >
+          <PanelLeftClose :size="14" />
+        </Button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-2 sidebar-content">
+        <div class="flex items-center justify-between px-2 py-2">
+          <div>
+            <div class="text-sm font-semibold text-foreground">题库</div>
+            <div class="mt-0.5 text-[11px] text-muted-foreground">{{ problemTotal }} 道手撕题</div>
           </div>
-          <Button size="sm" class="gap-1.5" @click="importDialogOpen = true">
-            <Sparkles :size="14" /> AI 导入题目
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-7 text-muted-foreground"
+            aria-label="AI 导入题目"
+            @click="importDialogOpen = true"
+          >
+            <Sparkles :size="14" />
           </Button>
         </div>
-      </div>
 
-      <div class="p-4 flex flex-col gap-4">
-        <!-- Library scope -->
-        <div>
-          <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-            <BookOpen :size="14" /> 题库范围
-          </label>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="item in libraryViews"
-              :key="item.value"
-              @click="selectLibraryView(item.value)"
-              class="text-xs px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5"
-              :class="libraryView === item.value && !selectedPlaylistId
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold'
-                : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
-            >
-              <component :is="item.icon" :size="13" />
-              {{ item.label }}
-            </button>
-            <button
-              v-for="playlist in playlists"
-              :key="`playlist-${playlist.id}`"
-              @click="selectPlaylist(playlist.id)"
-              class="text-xs px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5"
-              :class="selectedPlaylistId === playlist.id
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold'
-                : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
-            >
-              <ListPlus :size="13" /> {{ playlist.name }} <span class="opacity-50">{{ playlist.problem_count }}</span>
-            </button>
-            <button
+        <div class="relative px-1">
+          <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            v-model="searchQuery"
+            class="h-8 rounded-lg border-0 bg-muted pl-8 text-xs shadow-none"
+            placeholder="搜索题目"
+            @keyup.enter="loadProblems"
+          />
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-1.5 px-1">
+          <button
+            v-for="option in difficultyOptions"
+            :key="option.value || 'all'"
+            class="rounded-full px-2.5 py-1 text-[11px] transition-colors"
+            :class="filterDifficulty === option.value
+              ? 'bg-primary/10 font-medium text-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            @click="filterDifficulty = option.value; loadProblems()"
+          >{{ option.label }}</button>
+        </div>
+
+        <div class="mt-3 flex flex-col gap-0.5">
+          <button
+            v-for="item in libraryViews"
+            :key="item.value"
+            class="group relative flex w-full items-center gap-2 rounded-md p-2 text-left text-sm transition-colors"
+            :class="libraryView === item.value && !selectedPlaylistId
+              ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+            @click="selectLibraryView(item.value)"
+          >
+            <component :is="item.icon" :size="14" class="shrink-0" />
+            <span class="truncate">{{ item.label }}</span>
+            <span v-if="item.value === 'favorites'" class="ml-auto text-[11px] text-muted-foreground">{{ favoriteCount }}</span>
+          </button>
+        </div>
+
+        <div class="mt-4 border-t border-border/60 pt-3">
+          <div class="flex items-center justify-between px-2 pb-1">
+            <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">题单</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-6 text-muted-foreground"
+              aria-label="新建题单"
               @click="playlistDialogOpen = true"
-              class="text-xs px-3 py-1.5 rounded-full border border-dashed border-border text-muted-foreground hover:bg-muted transition-colors inline-flex items-center gap-1.5"
-            ><Plus :size="13" /> 新建题单</button>
+            >
+              <Plus :size="13" />
+            </Button>
           </div>
+          <button
+            v-for="playlist in playlists"
+            :key="`playlist-${playlist.id}`"
+            class="flex w-full items-center gap-2 rounded-md p-2 text-left text-sm transition-colors"
+            :class="selectedPlaylistId === playlist.id
+              ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+            @click="selectPlaylist(playlist.id)"
+          >
+            <ListPlus :size="14" class="shrink-0" />
+            <span class="min-w-0 flex-1 truncate">{{ playlist.name }}</span>
+            <span class="text-[11px] text-muted-foreground">{{ playlist.problem_count }}</span>
+          </button>
+          <div v-if="!playlists.length" class="px-2 py-2 text-[11px] text-muted-foreground">还没有题单</div>
         </div>
 
-        <!-- Search + difficulty -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-              <Search :size="14" /> 搜索题目
-            </label>
-            <div class="relative">
-              <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input v-model="searchQuery" class="h-9 pl-8 text-xs" placeholder="按题目或描述搜索" @keyup.enter="loadProblems" />
+        <div class="mt-4 border-t border-border/60 pt-3">
+          <div class="flex items-center justify-between px-2 pb-1">
+            <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">题目</span>
+            <Loader2 v-if="isLoading" :size="13" class="animate-spin text-primary" />
+          </div>
+          <div v-if="!problems.length && !isLoading" class="px-2 py-3 text-xs text-muted-foreground">暂无符合条件的题目</div>
+          <button
+            v-for="problem in problems"
+            :key="problem.id"
+            class="group flex w-full items-center gap-2 rounded-md p-2 text-left text-sm transition-colors"
+            :class="activeProblem?.id === problem.id
+              ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
+            @click="selectProblem(problem)"
+          >
+            <div class="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Code2 :size="13" />
             </div>
-          </div>
-          <div>
-            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-              <Zap :size="14" /> 难度
-            </label>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="opt in difficultyOptions"
-                :key="opt.value || 'all'"
-                @click="filterDifficulty = opt.value; loadProblems()"
-                class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-                :class="filterDifficulty === opt.value
-                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold'
-                  : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
-              >{{ opt.label }}</button>
+            <div class="min-w-0 flex-1">
+              <div class="truncate">{{ problem.title }}</div>
+              <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {{ difficultyLabel(problem.difficulty) }} · {{ problem.attempt_count || 0 }} 次练习
+              </div>
             </div>
-          </div>
-        </div>
-
-        <!-- Stats -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5">
-            <div class="text-caption text-muted-foreground">当前题目</div>
-            <div class="mt-0.5 text-lg font-bold text-foreground">{{ problemTotal }}</div>
-          </div>
-          <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5">
-            <div class="text-caption text-muted-foreground">已收藏</div>
-            <div class="mt-0.5 text-lg font-bold text-amber-600">{{ favoriteCount }}</div>
-          </div>
-          <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5">
-            <div class="text-caption text-muted-foreground">已通过</div>
-            <div class="mt-0.5 text-lg font-bold text-emerald-600">{{ errorStats?.passed_submissions || 0 }}</div>
-          </div>
-          <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5">
-            <div class="text-caption text-muted-foreground">总提交</div>
-            <div class="mt-0.5 text-lg font-bold text-foreground">{{ errorStats?.total_submissions || 0 }}</div>
-          </div>
+            <span v-if="problem.is_favorite" class="shrink-0 text-amber-500">★</span>
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- 题库列表：复用模拟面试的题目卡片语言 -->
-    <div v-if="!activeProblem">
-      <div v-if="isLoading" class="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-sm">
-        <Loader2 :size="24" class="mx-auto mb-3 animate-spin text-primary" /> 正在加载题目...
-      </div>
-      <div v-else-if="!problems.length" class="rounded-xl border-2 border-dashed border-border py-10 text-center text-muted-foreground">
-        <Code2 :size="28" class="mx-auto mb-3 opacity-60" />
-        <p class="text-base">暂无符合条件的题目</p>
-        <p class="mt-1 text-xs">请调整筛选条件，或使用 AI 导入 Markdown 题目。</p>
-        <Button variant="outline" size="sm" class="mt-4 gap-1.5" @click="importDialogOpen = true"><Sparkles :size="14" /> AI 导入题目</Button>
-      </div>
-      <div v-else class="flex flex-col gap-4">
-        <div v-for="(problem, index) in problems" :key="problem.id" class="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
-          <div class="p-4 border-b border-border">
-            <div class="flex items-start gap-3">
-              <div class="flex flex-col items-center justify-center bg-primary-100/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 font-bold rounded-lg p-2 min-w-[44px]">
-                <span class="text-caption text-primary-400 dark:text-primary-500">第</span>
-                <span class="text-xl leading-none">{{ index + 1 }}</span>
-                <span class="text-caption text-primary-400 dark:text-primary-500">题</span>
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex gap-2 mb-2 items-center flex-wrap">
-                  <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded font-semibold">{{ problem.source_type === 'imported' ? '我的题目' : '高频手撕' }}</span>
-                  <span class="text-xs font-medium px-2 py-0.5 rounded" :class="difficultyClass(problem.difficulty)">{{ difficultyLabel(problem.difficulty) }}</span>
-                  <span v-if="problem.attempt_count > 0" class="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs px-2 py-0.5 rounded font-medium">已刷 {{ problem.attempt_count }} 次</span>
-                  <span v-else class="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs px-2 py-0.5 rounded font-medium">新题</span>
-                  <button
-                    :aria-label="problem.is_favorite ? '取消收藏' : '收藏题目'"
-                    class="ml-1 text-lg leading-none transition-transform hover:scale-125"
-                    :class="problem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'"
-                    @click.stop="toggleFavorite(problem)"
-                  >{{ problem.is_favorite ? '★' : '☆' }}</button>
-                  <span class="text-xs text-muted-foreground ml-auto">{{ problem.expected_complexity || '复杂度待补充' }}</span>
-                </div>
-                <h3 class="text-base lg:text-lg font-bold text-foreground leading-snug">{{ problem.title }}</h3>
-                <div v-if="problem.tags?.length" class="mt-2 flex flex-wrap gap-1.5">
-                  <span v-for="tag in problem.tags.slice(0, 4)" :key="tag" class="text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{{ tag }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="px-4 py-3 border-t border-border bg-card flex items-center justify-between gap-3">
-            <span class="text-xs text-muted-foreground">{{ problem.is_solved ? '已通过，可以继续巩固' : '先独立完成，再查看 AI 评审' }}</span>
-            <Button size="sm" class="gap-1.5 px-4" @click="selectProblem(problem)"><Code2 :size="14" /> 开始练习</Button>
-          </div>
-        </div>
-      </div>
+    <!-- Sidebar collapsed: same affordance as ChatView -->
+    <div v-if="sidebarCollapsed" class="hidden flex-col items-center gap-1 px-2 py-2 shrink-0 sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" class="size-7" aria-label="展开题库侧栏" @click="sidebarCollapsed = false">
+        <PanelLeft :size="14" />
+      </Button>
+      <Button variant="ghost" size="icon" class="size-7" aria-label="AI 导入题目" @click="importDialogOpen = true">
+        <Sparkles :size="14" />
+      </Button>
     </div>
 
-    <!-- 练习态：结构与模拟面试的 summary + question card 对齐 -->
-    <div v-else>
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4 bg-primary-50/60 dark:bg-primary-900/15 border border-border rounded-xl px-4 py-3">
-        <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="text-muted-foreground">当前：</span>
-          <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ activeProblem.source_type === 'imported' ? '我的题目' : '高频手撕' }}</Badge>
-          <Badge variant="outline" class="bg-primary-50/80 dark:bg-primary-900/25 text-primary-700 dark:text-primary-400 text-label">{{ difficultyLabel(activeProblem.difficulty) }}</Badge>
-          <span class="text-muted-foreground/50">|</span>
-          <span class="text-muted-foreground truncate max-w-[240px]">{{ activeProblem.title }}</span>
-          <template v-if="activeProblem.attempt_count">
-            <span class="text-muted-foreground/50">|</span>
-            <span class="text-muted-foreground">已刷 {{ activeProblem.attempt_count }} 次</span>
-          </template>
-        </div>
-        <div class="flex gap-2">
-          <Button variant="default" size="sm" class="gap-1.5 px-4" @click="selectNextProblem"><ChevronRight :size="14" /> 换一道</Button>
-          <Button variant="outline" size="sm" class="gap-1.5 px-4" @click="activeProblem = null"><BookOpen :size="14" /> 返回题库</Button>
-        </div>
+    <div class="flex min-w-0 flex-1 flex-col">
+      <!-- Mobile header mirrors ChatView's session switcher -->
+      <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+          aria-label="切换题库"
+          @click="sidebarCollapsed = false"
+        >
+          <PanelLeft :size="14" />
+          <span>切换题库</span>
+        </Button>
+        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">{{ activeProblem?.title || '手撕代码' }}</span>
       </div>
 
-      <div class="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
-        <div class="p-4 border-b border-border">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-2 py-0.5 rounded font-semibold">题目 {{ activeProblem.id }}</span>
-                <span class="text-xs font-medium px-2 py-0.5 rounded" :class="difficultyClass(activeProblem.difficulty)">{{ difficultyLabel(activeProblem.difficulty) }}</span>
-                <span v-if="activeProblem.expected_complexity" class="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono">{{ activeProblem.expected_complexity }}</span>
-              </div>
-              <h2 class="text-lg font-bold text-foreground leading-snug">{{ activeProblem.title }}</h2>
-            </div>
+      <!-- Empty state mirrors ChatView's centered start screen -->
+      <div v-if="!activeProblem" class="flex min-h-0 flex-1 flex-col overflow-y-auto custom-scrollbar">
+        <div class="flex min-h-full w-full max-w-2xl flex-col items-center px-6 pb-8 pt-16 mx-auto">
+          <div class="mx-auto mb-6 flex size-20 items-center justify-center rounded-xl bg-primary/10">
+            <Code2 :size="40" class="text-primary" />
+          </div>
+          <h2 class="mb-3 text-center text-3xl font-bold text-foreground">开始手撕代码</h2>
+          <p class="mb-8 text-center text-lg text-muted-foreground">从左侧题库选择一道题，开始你的代码面试练习</p>
+
+          <div class="grid w-full max-w-lg grid-cols-2 gap-4">
             <button
-              :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'"
-              class="text-xl transition-transform hover:scale-110"
-              :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'"
-              @click="toggleFavorite(activeProblem)"
-            >{{ activeProblem.is_favorite ? '★' : '☆' }}</button>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
-          <div class="rounded-xl border border-border overflow-hidden">
-            <div class="border-b border-border px-4 py-3 flex items-center justify-between">
+              class="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-accent/50"
+              @click="selectLibraryView('all'); sidebarCollapsed = false"
+            >
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
+                <BookOpen :size="20" class="text-primary" />
+              </div>
               <div>
-                <div class="text-xs font-semibold text-foreground">题目描述</div>
-                <div class="text-caption text-muted-foreground mt-0.5">先讲思路，再写代码</div>
+                <div class="text-sm font-semibold text-foreground">全部题目</div>
+                <div class="mt-1 text-xs text-muted-foreground">浏览 {{ problemTotal }} 道手撕题</div>
               </div>
-              <ListPlus :size="15" class="text-muted-foreground" />
-            </div>
-            <div class="px-4 py-3 max-h-[520px] overflow-y-auto custom-scrollbar">
-              <div class="answer-content prose prose-sm max-w-none dark:prose-invert" v-html="renderMarkdown(activeProblem.description)" />
-              <div v-if="activeProblem.tags?.length" class="mt-5 flex flex-wrap gap-1.5 border-t border-border pt-3">
-                <span v-for="tag in activeProblem.tags" :key="tag" class="text-xs px-2.5 py-1 rounded-full bg-muted text-muted-foreground">{{ tag }}</span>
+            </button>
+            <button
+              class="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-accent/50"
+              @click="selectLibraryView('favorites'); sidebarCollapsed = false"
+            >
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 transition-colors group-hover:bg-amber-500/20">
+                <Star :size="20" class="text-amber-500" />
               </div>
-            </div>
+              <div>
+                <div class="text-sm font-semibold text-foreground">我的收藏</div>
+                <div class="mt-1 text-xs text-muted-foreground">{{ favoriteCount }} 道待复习</div>
+              </div>
+            </button>
+            <button
+              class="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-accent/50"
+              @click="playlistDialogOpen = true"
+            >
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 transition-colors group-hover:bg-sky-500/20">
+                <ListPlus :size="20" class="text-sky-500" />
+              </div>
+              <div>
+                <div class="text-sm font-semibold text-foreground">专项题单</div>
+                <div class="mt-1 text-xs text-muted-foreground">按目标组织复习路径</div>
+              </div>
+            </button>
+            <button
+              class="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-accent/50"
+              @click="importDialogOpen = true"
+            >
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 transition-colors group-hover:bg-violet-500/20">
+                <Sparkles :size="20" class="text-violet-500" />
+              </div>
+              <div>
+                <div class="text-sm font-semibold text-foreground">AI 导入题目</div>
+                <div class="mt-1 text-xs text-muted-foreground">Prompt + Markdown 整理面经</div>
+              </div>
+            </button>
           </div>
 
-          <div class="rounded-xl border border-border overflow-hidden">
-            <div class="border-b border-border px-4 py-2.5 flex items-center justify-between gap-2">
-              <div class="flex items-center gap-1">
-                <span class="text-xs font-semibold text-foreground mr-1">你的代码</span>
-                <button
-                  v-for="language in languageOptions"
-                  :key="language.value"
-                  @click="currentLanguage = language.value"
-                  class="text-xs px-2.5 py-1 rounded-full border transition-colors"
-                  :class="currentLanguage === language.value ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted'"
-                >{{ language.label }}</button>
-              </div>
-              <span v-if="activeProblem._isSubmitting" class="flex items-center gap-1 text-caption text-primary"><Loader2 :size="12" class="animate-spin" /> {{ activeProblem._currentStep || '分析中' }}</span>
+          <div class="mt-8 grid w-full max-w-lg grid-cols-3 gap-3">
+            <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-center">
+              <div class="text-lg font-bold text-foreground">{{ problemTotal }}</div>
+              <div class="text-[11px] text-muted-foreground">题目</div>
             </div>
-            <div class="h-[390px] p-2">
-              <CodeEditor v-model="activeProblem._code" :language="currentLanguage" :read-only="activeProblem._isSubmitting" />
+            <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-center">
+              <div class="text-lg font-bold text-amber-600">{{ favoriteCount }}</div>
+              <div class="text-[11px] text-muted-foreground">收藏</div>
             </div>
-            <div class="border-t border-border bg-card px-3 py-3 flex flex-wrap items-center justify-between gap-2">
-              <Button variant="ghost" size="sm" class="text-xs text-muted-foreground" @click="clearProblem(activeProblem)">清空代码</Button>
-              <div class="flex gap-2">
-                <Button variant="outline" size="sm" class="gap-1.5" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim() || activeProblem._hintCount >= 3" @click="submitCode(activeProblem, 'hint')"><Zap :size="14" /> 提示 {{ activeProblem._hintCount }}/3</Button>
-                <Button size="sm" class="gap-1.5" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim()" @click="submitCode(activeProblem, 'full_review')"><Sparkles :size="14" /> 提交评审</Button>
-              </div>
+            <div class="rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-center">
+              <div class="text-lg font-bold text-emerald-600">{{ errorStats?.passed_submissions || 0 }}</div>
+              <div class="text-[11px] text-muted-foreground">已通过</div>
             </div>
-          </div>
-        </div>
-
-        <!-- Evaluation result -->
-        <div v-if="activeProblem._feedback || activeProblem._scores" class="px-5 py-4 border-t border-border bg-primary-50/40 dark:bg-primary-900/10">
-          <div class="flex items-center justify-between gap-3 mb-3">
-            <h4 class="text-sm font-bold text-foreground flex items-center gap-1.5"><Sparkles :size="15" class="text-primary" /> AI 评估结果</h4>
-            <div v-if="activeProblem._scores" class="flex items-baseline gap-1"><span class="text-3xl font-extrabold" :class="scoreTextColor(activeProblem._totalScore)">{{ activeProblem._totalScore }}</span><span class="text-xs text-muted-foreground">/ 100</span></div>
-          </div>
-          <div v-if="activeProblem._scores" class="flex flex-col gap-2 mb-4">
-            <div v-for="(score, key) in activeProblem._scores" :key="key" class="flex items-center gap-2">
-              <span class="text-xs text-muted-foreground w-14 shrink-0">{{ categoryLabels[key] || key }}</span>
-              <div class="bg-muted rounded-full h-2 flex-1 overflow-hidden"><div class="h-full rounded-full transition-all" :class="scoreColor(score * 20)" :style="{ width: `${score / 5 * 100}%` }" /></div>
-              <span class="text-xs font-bold w-8 text-right" :class="scoreTextColor(score * 20)">{{ score }}/5</span>
-            </div>
-          </div>
-          <div v-if="activeProblem._feedback" class="answer-content prose prose-sm max-w-none dark:prose-invert" v-html="renderMarkdown(activeProblem._feedback)" />
-          <div v-if="activeProblem._referenceAnswer" class="mt-4 border-t border-border pt-3">
-            <div class="text-xs font-semibold text-primary mb-2">参考答案（基于你的代码最小修改）</div>
-            <div class="h-56 rounded-lg overflow-hidden border border-border"><CodeEditor :model-value="cleanCode(activeProblem._referenceAnswer)" :language="currentLanguage" :read-only="true" /></div>
           </div>
         </div>
       </div>
+
+      <!-- Active problem: same header / message stream / composer rhythm as ChatView -->
+      <template v-else>
+        <div class="hidden items-center justify-between px-6 py-1.5 shrink-0 md:flex">
+          <div class="min-w-0 flex-1">
+            <div class="flex max-w-full items-center gap-2 px-1 py-0.5 text-left">
+              <Code2 :size="14" class="shrink-0 text-primary" />
+              <span class="truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</span>
+              <button
+                :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'"
+                class="shrink-0 text-base leading-none transition-transform hover:scale-110"
+                :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'"
+                @click="toggleFavorite(activeProblem)"
+              >{{ activeProblem.is_favorite ? '★' : '☆' }}</button>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <Badge variant="outline" class="rounded-full bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground">{{ difficultyLabel(activeProblem.difficulty) }}</Badge>
+            <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs text-muted-foreground" @click="activeProblem = null">
+              <BookOpen :size="13" /> 返回题库
+            </Button>
+            <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs text-muted-foreground" @click="selectNextProblem">
+              换一道 <ChevronRight :size="13" />
+            </Button>
+          </div>
+        </div>
+
+        <div class="flex min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+          <div class="mx-auto w-full max-w-3xl px-6 pb-8 pt-8">
+            <div class="mb-8 group">
+              <div class="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+                <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Code2 :size="16" />
+                </div>
+                <span class="font-medium">手撕代码题目</span>
+                <span class="text-muted-foreground/50">·</span>
+                <span>{{ activeProblem.source_type === 'imported' ? '我的题目' : '高频手撕' }}</span>
+                <span v-if="activeProblem.attempt_count" class="text-muted-foreground/60">· 已练习 {{ activeProblem.attempt_count }} 次</span>
+              </div>
+              <div class="prose-chat text-sm leading-relaxed">
+                <h1 class="mb-3 text-2xl font-bold text-foreground">{{ activeProblem.title }}</h1>
+                <div v-html="renderMarkdown(activeProblem.description)" />
+              </div>
+              <div v-if="activeProblem.tags?.length" class="mt-4 flex flex-wrap gap-1.5">
+                <span v-for="tag in activeProblem.tags" :key="tag" class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ tag }}</span>
+              </div>
+              <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span v-if="activeProblem.expected_complexity" class="rounded-full bg-muted/60 px-2.5 py-1 font-mono">复杂度 {{ activeProblem.expected_complexity }}</span>
+                <button class="rounded-full px-2.5 py-1 text-primary hover:bg-primary/10" @click="playlistDialogOpen = true">+ 加入题单</button>
+              </div>
+            </div>
+
+            <!-- AI evaluation is rendered like an assistant response, without a heavy IDE card -->
+            <div v-if="activeProblem._feedback || activeProblem._scores" class="mb-8">
+              <div class="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Sparkles :size="15" />
+                </div>
+                <span class="font-medium">AI 评审</span>
+                <span v-if="activeProblem._totalScore" class="ml-auto text-sm font-bold" :class="scoreTextColor(activeProblem._totalScore)">{{ activeProblem._totalScore }}/100</span>
+              </div>
+              <div v-if="activeProblem._scores" class="mb-4 flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/30 p-3">
+                <div v-for="(score, key) in activeProblem._scores" :key="key" class="flex items-center gap-2">
+                  <span class="w-14 shrink-0 text-xs text-muted-foreground">{{ categoryLabels[key] || key }}</span>
+                  <div class="h-2 flex-1 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full transition-all" :class="scoreColor(score * 20)" :style="{ width: `${score / 5 * 100}%` }" /></div>
+                  <span class="w-8 text-right text-xs font-bold" :class="scoreTextColor(score * 20)">{{ score }}/5</span>
+                </div>
+              </div>
+              <div v-if="activeProblem._feedback" class="prose-chat text-sm leading-relaxed" v-html="renderMarkdown(activeProblem._feedback)" />
+              <div v-if="activeProblem._referenceAnswer" class="mt-5 border-t border-border/50 pt-4">
+                <div class="mb-2 text-xs font-medium text-muted-foreground">参考答案（基于你的代码最小修改）</div>
+                <div class="h-56 overflow-hidden rounded-lg border border-border/50 bg-muted/30"><CodeEditor :model-value="cleanCode(activeProblem._referenceAnswer)" :language="currentLanguage" :read-only="true" /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer-like fixed coding area mirrors ChatView's input composer -->
+        <div class="shrink-0">
+          <div class="mx-auto w-full max-w-3xl px-6 pb-4">
+            <div class="chat-input-area flex flex-col gap-2 rounded-xl bg-muted p-2">
+              <div class="flex items-center justify-between gap-2 px-1">
+                <div class="flex items-center gap-1">
+                  <span class="mr-1 text-xs font-medium text-foreground">你的代码</span>
+                  <button
+                    v-for="language in languageOptions"
+                    :key="language.value"
+                    class="rounded-full px-2.5 py-1 text-[11px] transition-colors"
+                    :class="currentLanguage === language.value ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'"
+                    @click="currentLanguage = language.value"
+                  >{{ language.label }}</button>
+                </div>
+                <span v-if="activeProblem._isSubmitting" class="flex items-center gap-1 text-[11px] text-primary"><Loader2 :size="12" class="animate-spin" /> {{ activeProblem._currentStep || '分析中' }}</span>
+                <button v-else class="rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:bg-background hover:text-foreground" @click="clearProblem(activeProblem)">清空</button>
+              </div>
+              <div class="h-[280px] overflow-hidden rounded-lg border border-border/50 bg-background">
+                <CodeEditor v-model="activeProblem._code" :language="currentLanguage" :read-only="activeProblem._isSubmitting" />
+              </div>
+              <div class="flex items-center justify-between gap-2 px-1">
+                <span class="text-[11px] text-muted-foreground">先独立完成，再让 AI 给出提示或评审</span>
+                <div class="flex gap-2">
+                  <Button variant="outline" size="sm" class="h-8 gap-1.5 rounded-lg text-xs" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim() || activeProblem._hintCount >= 3" @click="submitCode(activeProblem, 'hint')"><Zap :size="13" /> 提示 {{ activeProblem._hintCount }}/3</Button>
+                  <Button size="sm" class="h-8 gap-1.5 rounded-lg text-xs" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim()" @click="submitCode(activeProblem, 'full_review')"><Sparkles :size="13" /> 提交评审</Button>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2 flex items-center justify-between px-1">
+              <span class="text-[11px] text-muted-foreground">代码会保存在当前题目中</span>
+              <span class="text-[11px] text-muted-foreground">支持 Python / C / Java</span>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
-    <!-- AI 导入 -->
+    <!-- AI import dialog -->
     <Dialog v-model:open="importDialogOpen">
       <DialogContent class="max-w-2xl">
         <DialogHeader>
@@ -284,7 +381,7 @@
       </DialogContent>
     </Dialog>
 
-    <!-- 题单 -->
+    <!-- Playlist dialog -->
     <Dialog v-model:open="playlistDialogOpen">
       <DialogContent class="max-w-md">
         <DialogHeader><DialogTitle>{{ activeProblem ? '加入题单' : '新建题单' }}</DialogTitle><DialogDescription>{{ activeProblem ? '选择一个题单，方便下次集中复习。' : '为你的专项训练建立一个清晰的复习路径。' }}</DialogDescription></DialogHeader>
@@ -298,7 +395,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { BookOpen, ChevronRight, Code2, FilePlus2, ListPlus, Loader2, Plus, Search, Sparkles, Star, Upload, Zap } from '@lucide/vue'
+import { BookOpen, ChevronRight, Code2, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Plus, Search, Sparkles, Star, Upload, Zap } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -336,6 +433,8 @@ const playlistDialogOpen = ref(false)
 const playlistName = ref('')
 const playlistDescription = ref('')
 const isCreatingPlaylist = ref(false)
+const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
+const sidebarCollapsed = ref(isMobileViewport())
 
 const favoriteCount = computed(() => problems.value.filter(problem => problem.is_favorite).length)
 const difficultyLabel = (value) => ({ easy: '简单', medium: '中等', hard: '困难' }[value] || '中等')
@@ -377,6 +476,7 @@ async function loadProblems() {
 
 async function selectProblem(problem) {
   activeProblem.value = problem
+  if (isMobileViewport()) sidebarCollapsed.value = true
   try { Object.assign(problem, await fetchCodingProblem(problem.id)) } catch (error) { toast.error(error.message || '获取题目详情失败') }
 }
 
@@ -482,3 +582,56 @@ async function submitCode(problem, mode) {
 async function loadErrorStats() { try { errorStats.value = await fetchCodingErrorStats() } catch { /* optional */ } }
 onMounted(() => { loadPlaylists(); loadProblems(); loadErrorStats() })
 </script>
+
+<style scoped>
+/* Keep the coding workbench motion and collapse behavior in lockstep with ChatView. */
+.sidebar-container {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 767px) {
+  .sidebar-container {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(82vw, 256px) !important;
+    max-width: calc(100vw - 24px);
+    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }
+
+  .sidebar-container.sidebar-collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+}
+
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.chat-input-area textarea {
+  background-color: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  font-family: inherit;
+  color: var(--foreground);
+}
+</style>

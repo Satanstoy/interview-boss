@@ -134,7 +134,7 @@ src/
 
 ### 手撕代码工作台
 
-- `CodingView.vue` 与模拟面试页面统一使用页面留白、滚动行为和卡片外壳；`CodingPractice.vue` 采用“题库配置态 → 练习态”的两态结构，进入题目后展示题目描述、编辑器和 AI 评审区域，不常驻内部侧栏。
+- `CodingView.vue` 与 `/chat` 模拟面试页面统一使用全屏工作台、会话侧栏、移动端 overlay、主区滚动和 composer 节奏；`CodingPractice.vue` 将题库/题单作为侧栏导航，进入题目后在主区展示题目描述、编辑器和 AI 评审区域。
 - `services/codingApi.js` 负责 `scope=favorites` / `playlist_id` 查询、收藏切换、题单以及 Prompt + Markdown 导入，组件不直接拼接 HTTP 请求。
 - 题目交互遵循 LeetCode 式工作流：题库筛选 → 查看描述 → 编写代码 → 提示/评审；个人导入题目以“我的题目”展示，收藏和题单状态来自后端持久化。
 
