@@ -9,6 +9,7 @@ import SettingsSecurity from './SettingsSecurity.vue'
 import SettingsMCP from './SettingsMCP.vue'
 import SettingsAdmin from './SettingsAdmin.vue'
 import { Button } from '@/components/ui/button'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   displayUser: { type: Object, default: null },
@@ -75,9 +76,11 @@ const currentSectionLabel = computed(
 
     <!-- Sidebar collapsed: show expand button (desktop) -->
     <div v-if="navCollapsed" class="hidden flex-col items-center py-2 px-2 gap-1 shrink-0 sidebar-expand-buttons md:flex">
-      <Button variant="ghost" size="icon" class="size-7" aria-label="展开设置菜单" @click="navCollapsed = false">
-        <PanelLeft :size="14" />
-      </Button>
+      <AppTooltip text="展开设置菜单" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="展开设置菜单" @click="navCollapsed = false">
+          <PanelLeft :size="14" />
+        </Button>
+      </AppTooltip>
     </div>
 
     <div class="flex min-w-0 flex-1 flex-col">
@@ -100,7 +103,8 @@ const currentSectionLabel = computed(
 
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex w-full max-w-4xl flex-col px-6 py-6">
-          <div v-if="activeSection === 'profile'" class="animate-fade-in">
+          <Transition name="settings-section" mode="out-in">
+          <div v-if="activeSection === 'profile'" key="profile" class="settings-section">
             <SettingsProfile
               :display-user="displayUser"
               :practice-stats="practiceStats"
@@ -114,7 +118,7 @@ const currentSectionLabel = computed(
             />
           </div>
 
-          <div v-else-if="activeSection === 'interview'" class="animate-fade-in">
+          <div v-else-if="activeSection === 'interview'" key="interview" class="settings-section">
             <SettingsInterview
               :master-bank="masterBank"
               @go-to-question="emit('go-to-question', $event)"
@@ -122,19 +126,19 @@ const currentSectionLabel = computed(
             />
           </div>
 
-          <div v-else-if="activeSection === 'ai'" class="animate-fade-in">
+          <div v-else-if="activeSection === 'ai'" key="ai" class="settings-section">
             <SettingsAIConfig />
           </div>
 
-          <div v-else-if="activeSection === 'mcp'" class="animate-fade-in">
+          <div v-else-if="activeSection === 'mcp'" key="mcp" class="settings-section">
             <SettingsMCP />
           </div>
 
-          <div v-else-if="activeSection === 'security'" class="animate-fade-in">
+          <div v-else-if="activeSection === 'security'" key="security" class="settings-section">
             <SettingsSecurity @logout="emit('logout')" />
           </div>
 
-          <div v-else-if="activeSection === 'admin'" class="animate-fade-in">
+          <div v-else-if="activeSection === 'admin'" key="admin" class="settings-section">
             <SettingsAdmin
               :is-building="isBuilding"
               :is-admin="isAdmin"
@@ -142,6 +146,7 @@ const currentSectionLabel = computed(
               @taxonomy-updated="emit('profile-updated')"
             />
           </div>
+          </Transition>
         </div>
       </div>
     </div>

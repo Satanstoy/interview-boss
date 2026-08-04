@@ -264,14 +264,15 @@ const createPlaylist = async () => {
                     {{ job.status === 'completed' ? '处理完成' : job.status === 'failed' ? '处理失败' : job.message || '处理中...' }}
                   </span>
                 </div>
-                <button
-                  v-if="job.status === 'completed' || job.status === 'failed'"
-                  @click="onCloseJob(job.id)"
-                  aria-label="移除任务"
-                  class="text-muted-foreground hover:text-foreground transition p-0.5"
-                >
-                  <X class="size-3.5" />
-                </button>
+                <AppTooltip v-if="job.status === 'completed' || job.status === 'failed'" text="移除任务">
+                  <button
+                    @click="onCloseJob(job.id)"
+                    aria-label="移除任务"
+                    class="text-muted-foreground hover:text-foreground transition p-0.5"
+                  >
+                    <X class="size-3.5" />
+                  </button>
+                </AppTooltip>
               </div>
               <!-- 进度条 -->
               <div v-if="job.status === 'running' || job.status === 'pending'" class="w-full bg-muted rounded-full h-1 overflow-hidden">

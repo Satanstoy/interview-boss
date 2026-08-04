@@ -44,6 +44,7 @@ import {
 } from "@tanstack/vue-table"
 import { DragDropProvider } from "dnd-kit-vue"
 import { Badge } from '@/components/ui/badge'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -203,14 +204,17 @@ const columns: ColumnDef<TableData>[] = [
     cell: () => h(DropdownMenu, {}, {
       default: () => [
         h(DropdownMenuTrigger, { asChild: true }, {
-          default: () => h(Button, {
-            variant: "ghost",
-            class: "h-8 w-8 p-0",
-          }, {
-            default: () => [
-              h("span", { class: "sr-only" }, "Open menu"),
-              h(IconDotsVertical, { class: "h-4 w-4" }),
-            ],
+          default: () => h(AppTooltip, { text: "更多操作" }, {
+            default: () => h(Button, {
+              variant: "ghost",
+              class: "h-8 w-8 p-0",
+              "aria-label": "更多操作",
+            }, {
+              default: () => [
+                h("span", { class: "sr-only" }, "Open menu"),
+                h(IconDotsVertical, { class: "h-4 w-4" }),
+              ],
+            }),
           }),
         }),
         h(DropdownMenuContent, { align: "end" }, {
@@ -415,45 +419,57 @@ const table = useVueTable({
             {{ table.getPageCount() }}
           </div>
           <div class="ml-auto flex items-center gap-2 lg:ml-0">
-            <Button
-              variant="outline"
-              class="hidden h-8 w-8 p-0 lg:flex"
-              :disabled="!table.getCanPreviousPage()"
-              @click="table.setPageIndex(0)"
-            >
-              <span class="sr-only">Go to first page</span>
-              <IconChevronsLeft />
-            </Button>
-            <Button
-              variant="outline"
-              class="size-8"
-              size="icon"
-              :disabled="!table.getCanPreviousPage()"
-              @click="table.previousPage()"
-            >
-              <span class="sr-only">Go to previous page</span>
-              <IconChevronLeft />
-            </Button>
-            <Button
-              variant="outline"
-              class="size-8"
-              size="icon"
-              :disabled="!table.getCanNextPage()"
-              @click="table.nextPage()"
-            >
-              <span class="sr-only">Go to next page</span>
-              <IconChevronRight />
-            </Button>
-            <Button
-              variant="outline"
-              class="hidden size-8 lg:flex"
-              size="icon"
-              :disabled="!table.getCanNextPage()"
-              @click="table.setPageIndex(table.getPageCount() - 1)"
-            >
-              <span class="sr-only">Go to last page</span>
-              <IconChevronsRight />
-            </Button>
+            <AppTooltip text="第一页">
+              <Button
+                variant="outline"
+                class="hidden h-8 w-8 p-0 lg:flex"
+                aria-label="第一页"
+                :disabled="!table.getCanPreviousPage()"
+                @click="table.setPageIndex(0)"
+              >
+                <span class="sr-only">Go to first page</span>
+                <IconChevronsLeft />
+              </Button>
+            </AppTooltip>
+            <AppTooltip text="上一页">
+              <Button
+                variant="outline"
+                class="size-8"
+                size="icon"
+                aria-label="上一页"
+                :disabled="!table.getCanPreviousPage()"
+                @click="table.previousPage()"
+              >
+                <span class="sr-only">Go to previous page</span>
+                <IconChevronLeft />
+              </Button>
+            </AppTooltip>
+            <AppTooltip text="下一页">
+              <Button
+                variant="outline"
+                class="size-8"
+                size="icon"
+                aria-label="下一页"
+                :disabled="!table.getCanNextPage()"
+                @click="table.nextPage()"
+              >
+                <span class="sr-only">Go to next page</span>
+                <IconChevronRight />
+              </Button>
+            </AppTooltip>
+            <AppTooltip text="最后一页">
+              <Button
+                variant="outline"
+                class="hidden size-8 lg:flex"
+                size="icon"
+                aria-label="最后一页"
+                :disabled="!table.getCanNextPage()"
+                @click="table.setPageIndex(table.getPageCount() - 1)"
+              >
+                <span class="sr-only">Go to last page</span>
+                <IconChevronsRight />
+              </Button>
+            </AppTooltip>
           </div>
         </div>
       </div>

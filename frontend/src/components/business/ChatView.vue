@@ -17,9 +17,11 @@
           <Plus :size="16" />
           新建面试
         </Button>
-        <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" @click="sidebarCollapsed = true">
-          <PanelLeftClose :size="14" />
-        </Button>
+        <AppTooltip text="收起面试会话列表" side="right">
+          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起面试会话列表" @click="sidebarCollapsed = true">
+            <PanelLeftClose :size="14" />
+          </Button>
+        </AppTooltip>
       </div>
       <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-2 sidebar-content">
         <div v-if="conversations.length === 0" class="p-4 text-center text-sm text-muted-foreground">
@@ -39,16 +41,19 @@
               </div>
             </div>
             <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                  @click.stop
-                >
-                  <MoreHorizontal :size="14" />
-                </Button>
-              </DropdownMenuTrigger>
+              <AppTooltip text="更多操作">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    aria-label="更多操作"
+                    @click.stop
+                  >
+                    <MoreHorizontal :size="14" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </AppTooltip>
               <DropdownMenuContent align="end" class="w-40">
                 <DropdownMenuItem @click.stop="handlePin(conv.id)">
                   <Pin :size="14" class="mr-2" />
@@ -72,12 +77,16 @@
 
     <!-- Sidebar collapsed: show expand button -->
     <div v-if="sidebarCollapsed" class="hidden flex-col items-center py-2 px-2 gap-1 shrink-0 sidebar-expand-buttons md:flex">
-      <Button variant="ghost" size="icon" class="size-7" aria-label="展开面试会话列表" @click="sidebarCollapsed = false">
-        <PanelLeft :size="14" />
-      </Button>
-      <Button variant="ghost" size="icon" class="size-7" aria-label="新建面试" @click="showNewChat = true">
-        <Plus :size="14" />
-      </Button>
+      <AppTooltip text="展开面试会话列表" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="展开面试会话列表" @click="sidebarCollapsed = false">
+          <PanelLeft :size="14" />
+        </Button>
+      </AppTooltip>
+      <AppTooltip text="新建面试" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="新建面试" @click="showNewChat = true">
+          <Plus :size="14" />
+        </Button>
+      </AppTooltip>
     </div>
 
     <!-- Main content area -->
@@ -325,25 +334,29 @@
                   />
                 </div>
                 <!-- Send button -->
-                <Button
-                  v-if="isSending"
-                  type="button"
-                  @click="handleStop"
-                  variant="destructive"
-                  size="icon"
-                  class="rounded-lg size-8 shrink-0"
-                >
-                  <Square :size="14" />
-                </Button>
-                <Button
-                  v-else
-                  type="submit"
-                  :disabled="!inputText.trim()"
-                  size="icon"
-                  class="rounded-lg size-8 shrink-0"
-                >
-                  <ArrowUp :size="16" />
-                </Button>
+                <AppTooltip v-if="isSending" text="停止生成">
+                  <Button
+                    type="button"
+                    aria-label="停止生成"
+                    @click="handleStop"
+                    variant="destructive"
+                    size="icon"
+                    class="rounded-lg size-8 shrink-0"
+                  >
+                    <Square :size="14" />
+                  </Button>
+                </AppTooltip>
+                <AppTooltip v-else text="发送消息">
+                  <Button
+                    type="submit"
+                    aria-label="发送消息"
+                    :disabled="!inputText.trim()"
+                    size="icon"
+                    class="rounded-lg size-8 shrink-0"
+                  >
+                    <ArrowUp :size="16" />
+                  </Button>
+                </AppTooltip>
               </div>
             </div>
             <div class="mt-2 flex items-center justify-between px-1">

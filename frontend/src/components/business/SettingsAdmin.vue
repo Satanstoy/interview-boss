@@ -160,18 +160,22 @@ const onRebuild = () => {
           class="rounded-xl border border-border bg-background overflow-hidden">
           <!-- Cat1 header -->
           <div class="flex items-center gap-2 px-3 py-2.5 bg-muted dark:bg-card border-b border-border">
-            <Button variant="ghost" size="icon-sm" @click="cat._open = !cat._open"
-              class="text-muted-foreground hover:text-foreground h-6 w-6 transition-colors duration-200">
-              <ChevronRight :class="['size-4 transition-transform', { 'rotate-90': cat._open }]" />
-            </Button>
+            <AppTooltip :text="cat._open ? '收起分类' : '展开分类'">
+              <Button variant="ghost" size="icon-sm" :aria-label="cat._open ? '收起分类' : '展开分类'" @click="cat._open = !cat._open"
+                class="text-muted-foreground hover:text-foreground h-6 w-6 transition-colors duration-200">
+                <ChevronRight :class="['size-4 transition-transform', { 'rotate-90': cat._open }]" />
+              </Button>
+            </AppTooltip>
             <input v-model="cat.cat1"
               class="flex-1 text-sm font-semibold bg-transparent border-none outline-none text-foreground placeholder-muted-foreground"
               placeholder="如 A.项目经验与设计" />
             <span class="text-xs text-muted-foreground">{{ (cat.children || []).length }} 个子类</span>
-            <Button variant="ghost" size="icon-sm" @click="removeCat1(ci)"
-              class="text-muted-foreground/50 hover:text-red-500 dark:hover:text-red-400 h-6 w-6 transition-colors duration-200">
-              <Trash2 class="size-4" />
-            </Button>
+            <AppTooltip text="删除大类">
+              <Button variant="ghost" size="icon-sm" aria-label="删除大类" @click="removeCat1(ci)"
+                class="text-muted-foreground/50 hover:text-red-500 dark:hover:text-red-400 h-6 w-6 transition-colors duration-200">
+                <Trash2 class="size-4" />
+              </Button>
+            </AppTooltip>
           </div>
 
           <!-- Children -->
@@ -181,10 +185,12 @@ const onRebuild = () => {
               <input v-model="cat.children[ci2]"
                 class="flex-1 text-sm bg-transparent border-none outline-none text-foreground placeholder-muted-foreground"
                 placeholder="如 A1.系统设计" />
-              <Button variant="ghost" size="icon-sm" @click="removeChild(cat, ci2)"
-                class="text-muted-foreground/50 hover:text-red-500 dark:hover:text-red-400 h-5 w-5 transition-colors duration-200">
-                <Trash2 class="size-3.5" />
-              </Button>
+              <AppTooltip text="删除子类">
+                <Button variant="ghost" size="icon-sm" aria-label="删除子类" @click="removeChild(cat, ci2)"
+                  class="text-muted-foreground/50 hover:text-red-500 dark:hover:text-red-400 h-5 w-5 transition-colors duration-200">
+                  <Trash2 class="size-3.5" />
+                </Button>
+              </AppTooltip>
             </div>
             <Button variant="link" size="sm" @click="addChild(cat)"
               class="text-xs text-accent-600 dark:text-accent-400 h-auto p-0 mt-1">

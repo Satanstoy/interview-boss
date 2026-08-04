@@ -6,7 +6,11 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 <template>
   <TooltipProvider :delay-duration="120" :skip-delay-duration="80">
-    <router-view />
+    <router-view v-slot="{ Component }">
+      <Transition name="app-route" mode="out-in">
+        <component :is="Component" />
+      </Transition>
+    </router-view>
     <Toaster position="top-right" richColors closeButton />
   </TooltipProvider>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
 import { PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
   activeSection: { type: String, required: true },
@@ -23,9 +24,11 @@ function selectSection(id) {
         <h2 class="text-sm font-semibold tracking-tight text-foreground">设置</h2>
         <p class="mt-0.5 truncate text-xs text-muted-foreground">管理你的账户和偏好</p>
       </div>
-      <Button variant="ghost" size="icon" class="shrink-0" @click="emit('collapse')">
-        <PanelLeftClose :size="16" />
-      </Button>
+      <AppTooltip text="收起设置菜单" side="right">
+        <Button variant="ghost" size="icon" class="shrink-0" aria-label="收起设置菜单" @click="emit('collapse')">
+          <PanelLeftClose :size="16" />
+        </Button>
+      </AppTooltip>
     </div>
 
     <!-- Navigation items -->

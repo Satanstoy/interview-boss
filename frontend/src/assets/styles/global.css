@@ -253,6 +253,46 @@
   backface-visibility: hidden;
 }
 
+/* ── Route and workspace transitions ── */
+.app-route-enter-active,
+.app-route-leave-active,
+.page-route-enter-active,
+.page-route-leave-active,
+.settings-section-enter-active,
+.settings-section-leave-active {
+  will-change: opacity, transform;
+}
+
+.app-route-enter-active,
+.app-route-leave-active {
+  transition:
+    opacity var(--motion-medium-2) var(--ease-standard),
+    transform var(--motion-medium-2) var(--ease-standard);
+}
+
+.app-route-enter-from { opacity: 0; transform: scale(0.99); }
+.app-route-leave-to { opacity: 0; transform: scale(1.01); }
+
+.page-route-enter-active,
+.page-route-leave-active {
+  transition:
+    opacity var(--motion-medium-2) var(--ease-standard),
+    transform var(--motion-medium-2) var(--ease-standard);
+}
+
+.page-route-enter-from { opacity: 0; transform: translateY(6px); }
+.page-route-leave-to { opacity: 0; transform: translateY(-3px); }
+
+.settings-section-enter-active,
+.settings-section-leave-active {
+  transition:
+    opacity var(--motion-short-3) var(--ease-standard),
+    transform var(--motion-short-3) var(--ease-standard);
+}
+
+.settings-section-enter-from { opacity: 0; transform: translateX(8px); }
+.settings-section-leave-to { opacity: 0; transform: translateX(-5px); }
+
 /* ── Reduced motion: disable animations for accessibility ── */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -430,6 +470,5 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     cursor: pointer;
   }
 }
-
 
 

@@ -42,7 +42,9 @@
         </div>
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
-          <Button v-if="currentQ" variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+          <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
+            <Button variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+          </AppTooltip>
           <Badge v-if="currentQ.difficulty" variant="outline" class="text-[10px]" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
           <Badge variant="outline" class="max-w-32 truncate text-[10px]">{{ currentQ.cat1 || '未分类' }}</Badge>
         </div>
@@ -195,6 +197,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import AppDialog from '@/components/common/AppDialog.vue'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 import { useToast } from '@/composables/useNotification.js'
 import {
   dimLabel,

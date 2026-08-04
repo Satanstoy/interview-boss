@@ -710,7 +710,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         <!-- h-full 确保 ChatView 的 h-full 能正确解析（CSS 百分比高度需要父链每一层都有明确高度） -->
         <div class="flex-1 min-h-0 h-full overflow-hidden">
           <router-view v-slot="{ Component }">
-            <Transition name="tab-fade" mode="out-in">
+            <Transition name="page-route" mode="out-in">
               <component :is="Component" class="h-full min-h-0" />
             </Transition>
           </router-view>

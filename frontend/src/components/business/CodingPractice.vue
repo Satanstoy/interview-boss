@@ -20,9 +20,11 @@
         <Button size="sm" variant="outline" class="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs" @click="importDialogOpen = true">
           <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
         </Button>
-        <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题目列表" @click="sidebarCollapsed = true">
-          <PanelLeftClose :size="14" />
-        </Button>
+        <AppTooltip text="收起题目列表" side="right">
+          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题目列表" @click="sidebarCollapsed = true">
+            <PanelLeftClose :size="14" />
+          </Button>
+        </AppTooltip>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar sidebar-content">
@@ -50,15 +52,17 @@
           </span>
           <Star v-if="problem.is_favorite" :size="14" :stroke-width="1.8" class="mt-0.5 shrink-0 fill-amber-400 text-amber-500" />
           <div v-if="canManageProblems" class="relative shrink-0">
-            <button
-              type="button"
-              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
-              :class="openProblemMenuId === problem.id ? 'bg-muted opacity-100' : ''"
-              :aria-label="`管理题目 ${problem.title}`"
-              @click.stop="toggleProblemMenu(problem.id)"
-            >
-              <Ellipsis class="size-4" />
-            </button>
+            <AppTooltip text="管理题目">
+              <button
+                type="button"
+                class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                :class="openProblemMenuId === problem.id ? 'bg-muted opacity-100' : ''"
+                :aria-label="`管理题目 ${problem.title}`"
+                @click.stop="toggleProblemMenu(problem.id)"
+              >
+                <Ellipsis class="size-4" />
+              </button>
+            </AppTooltip>
             <div v-if="openProblemMenuId === problem.id" class="absolute right-0 top-8 z-30 min-w-36 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
               <button type="button" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10" @click.stop="removeProblemFromCurrentList(problem)">
                 <Trash2 class="size-3.5" />{{ selectedListKey === 'favorites' ? '取消收藏' : '移出当前题单' }}
@@ -70,9 +74,11 @@
     </section>
 
     <div v-if="sidebarCollapsed" class="hidden shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons md:flex">
-      <Button variant="ghost" size="icon" class="size-7" aria-label="展开题目列表" @click="sidebarCollapsed = false">
-        <PanelLeft :size="14" />
-      </Button>
+      <AppTooltip text="展开题目列表" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="展开题目列表" @click="sidebarCollapsed = false">
+          <PanelLeft :size="14" />
+        </Button>
+      </AppTooltip>
     </div>
 
     <div class="flex min-h-0 flex-1">
@@ -82,9 +88,11 @@
           <div class="flex h-11 shrink-0 items-center gap-2 px-3">
             <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground md:hidden" @click="activeProblem = null; sidebarCollapsed = false"><ArrowLeft :size="13" /> 题目列表</Button>
             <div class="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</div>
-            <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">
-              <Star :size="16" :stroke-width="1.8" :fill="activeProblem.is_favorite ? 'currentColor' : 'none'" />
-            </button>
+            <AppTooltip :text="activeProblem.is_favorite ? '取消收藏' : '收藏题目'">
+              <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">
+                <Star :size="16" :stroke-width="1.8" :fill="activeProblem.is_favorite ? 'currentColor' : 'none'" />
+              </button>
+            </AppTooltip>
             <Button variant="ghost" size="sm" class="hidden h-7 gap-1 px-2 text-xs text-muted-foreground sm:flex" @click="openAddToPlaylist"><ListPlus :size="13" /> 加入题单</Button>
             <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground" @click="selectNextProblem">下一题 <ChevronRight :size="13" /></Button>
           </div>
@@ -215,6 +223,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import AppTooltip from '@/components/common/AppTooltip.vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { useToast } from '@/composables/useNotification.js'
 import CodeEditor from './CodeEditor.vue'
