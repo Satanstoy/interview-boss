@@ -11,9 +11,16 @@ from app.db.question_bank_sources import insert_source, insert_original_item
 logger = logging.getLogger("interview-boss")
 
 
+async def _run_db(func):
+    """Resolve run_db at call time so the test database stays in this thread."""
+    import app.db.connection as db_module
+
+    return await db_module.run_db(func)
+
+
 async def tag_and_write_details(
     url: str, company: str, round_: str, questions_list: str,
-    job_position: str = "", user_id: int = None
+    job_position: str = "", user_id: int = None, *, interview_id: int | None = None
 ) -> List[List[str]]:
     """阶段1：调用 LLM 打标签并写入 questions_detail"""
     import re as _re
@@ -33,19 +40,30 @@ async def tag_and_write_details(
         conn = get_db_connection()
         conn.execute("BEGIN")
         try:
-            conn.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
-            for tr in tagged_rows:
-                conn.execute(
-                    "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (*tr, job_position)
-                )
+            from app.db.operations import _replace_details_txn
+            resolved_interview_id = interview_id
+            if resolved_interview_id is None:
+                matches = conn.execute(
+                    "SELECT id FROM interview WHERE url = ? AND deleted_at IS NULL",
+                    (url,),
+                ).fetchall()
+                if len(matches) == 1:
+                    resolved_interview_id = matches[0]["id"]
+            if resolved_interview_id is None:
+                # Compatibility-only utility use.  An unlinked detail cannot enter
+                # distribution statistics, so it cannot contaminate their default.
+                conn.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+                from app.db.operations import _insert_details_txn
+                _insert_details_txn(conn.cursor(), tagged_rows, job_position)
+            else:
+                _replace_details_txn(cursor=conn.cursor(), interview_id=resolved_interview_id, url=url,
+                                 tagged_rows=tagged_rows, job_position=job_position)
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
 
-    await run_db(_write_details)
+    await _run_db(_write_details)
     return tagged_rows
 
 

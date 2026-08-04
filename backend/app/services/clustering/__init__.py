@@ -3,7 +3,7 @@
 原 clustering.py 拆分为：
   - prompts.py      — 提示词常量与置信度阈值
   - clusterer.py    — 聚类引擎（_cluster_unmatched, cluster_three_stage_v2）
-  - matcher.py      — 增量匹配（process_incremental_batch, match_new_questions, scan_personal_duplicates）
+  - matcher.py      — 增量匹配（process_incremental_batch, match_new_questions）
   - full_recluster.py — 全量重聚类（full_recluster_hybrid）
 """
 import asyncio  # noqa: F401 — kept for backward-compat (tests patch app.services.clustering.asyncio)
@@ -31,7 +31,6 @@ from app.services.clustering.clusterer import (
 from app.services.clustering.matcher import (
     process_incremental_batch,
     match_new_questions,
-    scan_personal_duplicates,
     generate_unified_question,
     calculate_dynamic_recent_days,
     _match_and_cluster_cat2,
@@ -75,7 +74,6 @@ __all__ = [
     # matcher
     "process_incremental_batch",
     "match_new_questions",
-    "scan_personal_duplicates",
     "generate_unified_question",
     "calculate_dynamic_recent_days",
     "_match_and_cluster_cat2",

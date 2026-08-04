@@ -4,6 +4,7 @@ Production uses a local ONNX export of ``Xenova/bge-small-zh-v1.5`` so the
 Docker image does not need sentence-transformers, torch, triton, or CUDA/NVIDIA
 wheels. FAISS remains CPU-only and is used only for nearest-neighbor search.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -20,10 +21,24 @@ _SESSION = None
 _TOKENIZER = None
 _MODEL_REPO = os.environ.get("EMBEDDING_MODEL_REPO", "Xenova/bge-small-zh-v1.5")
 _ONNX_FILE = os.environ.get("EMBEDDING_ONNX_FILE", "onnx/model_quantized.onnx")
-_MODEL_DIR = Path(os.environ.get("EMBEDDING_MODEL_DIR", "/app/models/bge-small-zh-v1.5"))
+_MODEL_DIR = Path(
+    os.environ.get("EMBEDDING_MODEL_DIR", "/app/models/bge-small-zh-v1.5")
+)
 _BACKEND = os.environ.get("EMBEDDING_BACKEND", "auto").lower()
 _DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", "512"))
 _MAX_LENGTH = int(os.environ.get("EMBEDDING_MAX_LENGTH", "512"))
+
+# SiliconFlow API backend (BAAI/bge-m3, 1024-dim, OpenAI-compatible)
+_SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+_SILICONFLOW_BASE_URL = os.environ.get(
+    "SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"
+)
+_EMBEDDING_API_MODEL = os.environ.get("EMBEDDING_API_MODEL", "BAAI/bge-m3")
+_EMBEDDING_API_BATCH = int(os.environ.get("EMBEDDING_API_BATCH", "32"))
+_SILICONFLOW_DIMENSION = 1024  # bge-m3 fixed; does not support `dimensions` param
+_SILICONFLOW_CLIENTS: Dict[
+    Tuple[str, str, str], object
+] = {}  # (api_key, base_url, model) -> sync OpenAI client
 
 
 def _fix_proxy_for_httpx():
@@ -41,7 +56,9 @@ def _download_model_if_needed() -> None:
         return
 
     if os.environ.get("EMBEDDING_OFFLINE", "0") == "1":
-        raise FileNotFoundError(f"Embedding model is missing in offline mode: {_MODEL_DIR}")
+        raise FileNotFoundError(
+            f"Embedding model is missing in offline mode: {_MODEL_DIR}"
+        )
 
     _fix_proxy_for_httpx()
     endpoint = os.environ.get("HF_ENDPOINT") or "https://hf-mirror.com"
@@ -53,7 +70,14 @@ def _download_model_if_needed() -> None:
     snapshot_download(
         repo_id=_MODEL_REPO,
         local_dir=str(_MODEL_DIR),
-        allow_patterns=[_ONNX_FILE, "tokenizer.json", "vocab.txt", "config.json", "tokenizer_config.json", "special_tokens_map.json"],
+        allow_patterns=[
+            _ONNX_FILE,
+            "tokenizer.json",
+            "vocab.txt",
+            "config.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+        ],
         local_dir_use_symlinks=False,
     )
 
@@ -71,15 +95,68 @@ def _get_onnx_runtime():
     onnx_path = _MODEL_DIR / _ONNX_FILE
     tokenizer_path = _MODEL_DIR / "tokenizer.json"
     if not onnx_path.exists() or not tokenizer_path.exists():
-        raise FileNotFoundError(f"Missing ONNX embedding model files under {_MODEL_DIR}")
+        raise FileNotFoundError(
+            f"Missing ONNX embedding model files under {_MODEL_DIR}"
+        )
 
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = int(os.environ.get("EMBEDDING_ORT_THREADS", "1"))
     opts.inter_op_num_threads = 1
-    _SESSION = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=["CPUExecutionProvider"])
+    _SESSION = ort.InferenceSession(
+        str(onnx_path), sess_options=opts, providers=["CPUExecutionProvider"]
+    )
     _TOKENIZER = Tokenizer.from_file(str(tokenizer_path))
     logger.info("Loaded ONNX embedding model: %s", onnx_path)
     return _SESSION, _TOKENIZER
+
+
+def _get_siliconflow_client():
+    """Lazily build (and cache) a sync OpenAI client pointed at SiliconFlow.
+
+    Cache key is (api_key, base_url, model) so config changes rebuild the
+    client instead of reusing a stale one.
+    """
+    from openai import OpenAI
+
+    if not _SILICONFLOW_API_KEY:
+        raise ValueError(
+            "SILICONFLOW_API_KEY is not set; cannot use siliconflow embedding backend"
+        )
+    key = (_SILICONFLOW_API_KEY, _SILICONFLOW_BASE_URL, _EMBEDDING_API_MODEL)
+    cached = _SILICONFLOW_CLIENTS.get(key)
+    if cached is not None:
+        return cached
+    client = OpenAI(
+        api_key=_SILICONFLOW_API_KEY,
+        base_url=_SILICONFLOW_BASE_URL,
+        timeout=float(os.environ.get("EMBEDDING_API_TIMEOUT", "60")),
+    )
+    _SILICONFLOW_CLIENTS[key] = client
+    return client
+
+
+def _encode_texts_siliconflow(texts: List[str]) -> np.ndarray:
+    """Call SiliconFlow /embeddings (bge-m3) in chunks of EMBEDDING_API_BATCH."""
+    if not texts:
+        return np.array([], dtype=np.float32).reshape(0, _SILICONFLOW_DIMENSION)
+
+    client = _get_siliconflow_client()
+    all_vecs: List[List[float]] = []
+    for start in range(0, len(texts), _EMBEDDING_API_BATCH):
+        chunk = texts[start : start + _EMBEDDING_API_BATCH]
+        resp = client.embeddings.create(model=_EMBEDDING_API_MODEL, input=chunk)
+        for item in resp.data:
+            all_vecs.append(item.embedding)
+
+    vectors = np.asarray(all_vecs, dtype=np.float32)
+    return _normalize(vectors)
+
+
+def get_embedding_dimension() -> int:
+    """Return the vector dimension for the active embedding backend."""
+    if _BACKEND == "siliconflow":
+        return _SILICONFLOW_DIMENSION
+    return _DIMENSION
 
 
 def _normalize(vectors: np.ndarray) -> np.ndarray:
@@ -106,9 +183,9 @@ def _encode_texts_onnx(texts: List[str]) -> np.ndarray:
         ids = enc.ids[:max_len]
         mask = enc.attention_mask[:max_len] if enc.attention_mask else [1] * len(ids)
         types = enc.type_ids[:max_len] if enc.type_ids else [0] * len(ids)
-        input_ids[i, :len(ids)] = ids
-        attention_mask[i, :len(mask)] = mask
-        token_type_ids[i, :len(types)] = types
+        input_ids[i, : len(ids)] = ids
+        attention_mask[i, : len(mask)] = mask
+        token_type_ids[i, : len(types)] = types
 
     available_inputs = {inp.name for inp in session.get_inputs()}
     feeds = {"input_ids": input_ids, "attention_mask": attention_mask}
@@ -145,18 +222,35 @@ def _encode_texts_hash(texts: List[str]) -> np.ndarray:
 
 
 def encode_texts(texts: List[str]) -> np.ndarray:
-    """Encode texts as normalized float32 embeddings with shape ``(N, 512)``."""
+    """Encode texts as normalized float32 embeddings.
+
+    Backend selected by ``EMBEDDING_BACKEND``: ``onnx`` | ``hash`` |
+    ``siliconflow`` | ``auto`` (default). ``auto`` tries onnx, then siliconflow
+    (if a key is configured), then hash as last resort.
+    """
+    dim = get_embedding_dimension()
     if not texts:
-        return np.array([], dtype=np.float32).reshape(0, _DIMENSION)
+        return np.array([], dtype=np.float32).reshape(0, dim)
 
     backend = _BACKEND
+    if backend == "siliconflow":
+        return _encode_texts_siliconflow(texts)
     if backend in {"onnx", "auto"}:
         try:
             return _encode_texts_onnx(texts)
         except Exception as exc:
             if backend == "onnx":
                 raise
-            logger.warning("ONNX embedding unavailable, falling back to hash embeddings: %s", exc)
+            logger.warning(
+                "ONNX embedding unavailable, trying fallback backends: %s", exc
+            )
+    if backend in {"auto"} and _SILICONFLOW_API_KEY:
+        try:
+            return _encode_texts_siliconflow(texts)
+        except Exception as exc:
+            logger.warning(
+                "SiliconFlow embedding unavailable, falling back to hash: %s", exc
+            )
     if backend in {"hash", "auto"}:
         return _encode_texts_hash(texts)
     raise ValueError(f"Unsupported EMBEDDING_BACKEND={_BACKEND!r}")
@@ -167,14 +261,16 @@ def build_index(vectors: np.ndarray):
     import faiss
 
     if vectors.shape[0] == 0:
-        return faiss.IndexFlatIP(_DIMENSION)
+        return faiss.IndexFlatIP(get_embedding_dimension())
 
     index = faiss.IndexFlatIP(vectors.shape[1])
     index.add(vectors.astype(np.float32, copy=False))
     return index
 
 
-def search_index(index, query: np.ndarray, top_k: int = 10) -> Tuple[List[int], List[float]]:
+def search_index(
+    index, query: np.ndarray, top_k: int = 10
+) -> Tuple[List[int], List[float]]:
     if index.ntotal == 0:
         return [], []
 
@@ -196,7 +292,9 @@ def compute_confidence_from_embeddings(emb1, emb2) -> float:
     return 0.60
 
 
-def prefilter_centroids(query_text: str, centroids: List[Dict], top_k: int = 10) -> List[Dict]:
+def prefilter_centroids(
+    query_text: str, centroids: List[Dict], top_k: int = 10
+) -> List[Dict]:
     with_emb = [c for c in centroids if c.get("embedding") is not None]
     if not with_emb:
         return centroids
@@ -206,10 +304,15 @@ def prefilter_centroids(query_text: str, centroids: List[Dict], top_k: int = 10)
     query_emb = encode_texts([query_text])
     indices, scores = search_index(index, query_emb, top_k=top_k)
 
-    return [{**with_emb[idx], "_similarity_score": score} for idx, score in zip(indices, scores)]
+    return [
+        {**with_emb[idx], "_similarity_score": score}
+        for idx, score in zip(indices, scores)
+    ]
 
 
-def prefilter_centroids_batch(query_texts: List[str], centroids: List[Dict], top_k: int = 10) -> Dict[int, List[Dict]]:
+def prefilter_centroids_batch(
+    query_texts: List[str], centroids: List[Dict], top_k: int = 10
+) -> Dict[int, List[Dict]]:
     with_emb = [c for c in centroids if c.get("embedding") is not None]
     if not with_emb:
         return {i: centroids for i in range(len(query_texts))}

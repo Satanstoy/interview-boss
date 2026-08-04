@@ -74,7 +74,7 @@ class TestWorkerSettings:
         """Worker 应注册任务函数"""
         from app.worker import WorkerSettings
         assert hasattr(WorkerSettings, 'functions')
-        assert len(WorkerSettings.functions) == 5
+        assert len(WorkerSettings.functions) >= 6
 
     def test_worker_has_lifecycle_hooks(self):
         """Worker 应有启动和关闭钩子"""

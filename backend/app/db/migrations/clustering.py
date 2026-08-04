@@ -22,8 +22,12 @@ def _migration_033_cluster_id(conn):
     cursor.execute("PRAGMA table_info('question_bank')")
     columns = [info[1] for info in cursor.fetchall()]
     if "cluster_id" not in columns:
-        conn.execute("ALTER TABLE question_bank ADD COLUMN cluster_id INTEGER DEFAULT NULL")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_qb_cluster_id ON question_bank(cluster_id)")
+        conn.execute(
+            "ALTER TABLE question_bank ADD COLUMN cluster_id INTEGER DEFAULT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_qb_cluster_id ON question_bank(cluster_id)"
+        )
     # 回填: 每条存活记录的 cluster_id = 自身 id（即自己就是聚类代表）
     conn.execute(
         "UPDATE question_bank SET cluster_id = id "
@@ -42,8 +46,13 @@ def _migration_034_backfill_confidence(conn):
     import numpy as np
 
     # 检查 merge_history 表是否存在
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    if 'merge_history' not in tables:
+    tables = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "merge_history" not in tables:
         logger.info("migration_034: merge_history 表不存在，跳过回填")
         return
 
@@ -60,7 +69,7 @@ def _migration_034_backfill_confidence(conn):
     for row in zero_rows:
         history_id = row[0]
         survivor_id = row[1]
-        merged_q_text = row[2] or '[]'
+        merged_q_text = row[2] or "[]"
 
         try:
             merged_qs = json.loads(merged_q_text)
@@ -71,7 +80,7 @@ def _migration_034_backfill_confidence(conn):
         survivor_emb = None
         survivor_row = conn.execute(
             "SELECT embedding, question, original_questions FROM question_bank WHERE id = ?",
-            (survivor_id,)
+            (survivor_id,),
         ).fetchone()
 
         new_confidence = 0.0
@@ -80,7 +89,11 @@ def _migration_034_backfill_confidence(conn):
             survivor_emb = np.frombuffer(survivor_row[0], dtype=np.float32)
             # 对每个 merged question 编码并计算相似度
             try:
-                from app.services.embedding_service import encode_texts, compute_confidence_from_embeddings
+                from app.services.embedding_service import (
+                    encode_texts,
+                    compute_confidence_from_embeddings,
+                )
+
                 if merged_qs:
                     merged_embs = encode_texts(merged_qs)
                     confidences = [
@@ -89,12 +102,14 @@ def _migration_034_backfill_confidence(conn):
                     ]
                     new_confidence = max(confidences) if confidences else 0.0
             except Exception as e:
-                logger.warning(f"migration_034: embedding 计算失败 (id={history_id}): {e}")
+                logger.warning(
+                    f"migration_034: embedding 计算失败 (id={history_id}): {e}"
+                )
                 new_confidence = 0.0
 
         # Fallback: 如果 embedding 不可用，用文本匹配估算
         if new_confidence == 0.0 and survivor_row:
-            survivor_q = survivor_row[1] or ''
+            survivor_q = survivor_row[1] or ""
             survivor_oqs = []
             try:
                 survivor_oqs = json.loads(survivor_row[2]) if survivor_row[2] else []
@@ -116,26 +131,66 @@ def _migration_034_backfill_confidence(conn):
         if new_confidence > 0:
             conn.execute(
                 "UPDATE merge_history SET confidence = ? WHERE id = ?",
-                (new_confidence, history_id)
+                (new_confidence, history_id),
             )
             updated += 1
 
-    logger.info(f"migration_034: 回填了 {updated}/{len(zero_rows)} 条 confidence=0 的记录")
+    logger.info(
+        f"migration_034: 回填了 {updated}/{len(zero_rows)} 条 confidence=0 的记录"
+    )
 
 
 # E2.算法手撕 关键词（匹配到这些词的归入 E2）
 _E2_KEYWORDS = [
-    '算法', '手撕', '手写', '排序', '动态规划', '贪心', '回溯', '二分',
-    '滑动窗口', '双指针', 'BFS', 'DFS', '遍历', '递归', '拓扑',
-    '股票', '背包', '子序列', '子数组', '字符串匹配', '合并', '搜索',
-    '解题', '思路', '口述', '环',
+    "算法",
+    "手撕",
+    "手写",
+    "排序",
+    "动态规划",
+    "贪心",
+    "回溯",
+    "二分",
+    "滑动窗口",
+    "双指针",
+    "BFS",
+    "DFS",
+    "遍历",
+    "递归",
+    "拓扑",
+    "股票",
+    "背包",
+    "子序列",
+    "子数组",
+    "字符串匹配",
+    "合并",
+    "搜索",
+    "解题",
+    "思路",
+    "口述",
+    "环",
 ]
 
 # E1.数据结构 关键词（匹配到这些词的归入 E1）
 _E1_KEYWORDS = [
-    '数据结构', 'LRU', 'LFU', '链表', '二叉树', '红黑树', 'B+树', 'B树',
-    '堆', '栈', '队列', '哈希', '跳表', '并查集',
-    'Trie', '前缀树', '线段树', '设计一个支持', '设计一个',
+    "数据结构",
+    "LRU",
+    "LFU",
+    "链表",
+    "二叉树",
+    "红黑树",
+    "B+树",
+    "B树",
+    "堆",
+    "栈",
+    "队列",
+    "哈希",
+    "跳表",
+    "并查集",
+    "Trie",
+    "前缀树",
+    "线段树",
+    "设计一个支持",
+    "设计一个",
 ]
 
 
@@ -171,7 +226,7 @@ def _migration_035_split_e_category(conn):
         if new_cat2 != old_cat2:
             conn.execute(
                 "UPDATE question_bank SET cat2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (new_cat2, qb_id)
+                (new_cat2, qb_id),
             )
         if new_cat2 == "E1.数据结构":
             e1_count += 1
@@ -184,10 +239,14 @@ def _migration_035_split_e_category(conn):
         "WHERE cat2 IN ('E1.算法手撕与数据结构', 'E1.算法手撕')"
     ).fetchall()
     for dr in detail_rows:
-        new_cat2 = _classify_e_question(dr[1] or '')
-        conn.execute("UPDATE questions_detail SET cat2 = ? WHERE id = ?", (new_cat2, dr[0]))
+        new_cat2 = _classify_e_question(dr[1] or "")
+        conn.execute(
+            "UPDATE questions_detail SET cat2 = ? WHERE id = ?", (new_cat2, dr[0])
+        )
 
-    logger.info(f"migration_035: 拆分 E 分类完成 — E1.数据结构={e1_count}, E2.算法手撕={e2_count}")
+    logger.info(
+        f"migration_035: 拆分 E 分类完成 — E1.数据结构={e1_count}, E2.算法手撕={e2_count}"
+    )
 
 
 def _migration_037_backfill_embeddings(conn):
@@ -201,7 +260,9 @@ def _migration_037_backfill_embeddings(conn):
 
 
 def _ensure_column(conn, table_name: str, column_name: str, column_sql: str) -> None:
-    columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()}
+    columns = {
+        row[1] for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    }
     if column_name not in columns:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
@@ -263,7 +324,34 @@ def _migration_039_merge_review_tables(conn):
         )
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_history_survivor ON merge_history(survivor_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_history_cat2 ON merge_history(cat2)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_merge_feedback_history ON merge_feedback(merge_history_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_merge_history_survivor ON merge_history(survivor_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_merge_history_cat2 ON merge_history(cat2)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_merge_feedback_history ON merge_feedback(merge_history_id)"
+    )
     logger.info("migration_039: merge_history/merge_feedback 表已就绪")
+
+
+def _migration_048_embedding_metadata(conn):
+    """Add embedding_model/embedding_dim columns to question_bank.
+
+    Lets us tell apart 512-dim ONNX vectors from 1024-dim bge-m3 API vectors so
+    mixed-dimension data can be detected and rebuilt instead of silently fed
+    to a mismatched FAISS index.
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+    }
+    if "embedding_model" not in columns:
+        conn.execute(
+            "ALTER TABLE question_bank ADD COLUMN embedding_model TEXT DEFAULT NULL"
+        )
+    if "embedding_dim" not in columns:
+        conn.execute(
+            "ALTER TABLE question_bank ADD COLUMN embedding_dim INTEGER DEFAULT NULL"
+        )
+    logger.info("migration_048: question_bank.embedding_model/embedding_dim 列已就绪")

@@ -62,6 +62,15 @@ async def enqueue_submit_import_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_interview_distribution_refresh(scope: str, job_position: str):
+    """Queue a durable materialized-statistics refresh."""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("refresh_interview_distribution_task", scope, job_position)
+    finally:
+        await pool.close()
+
+
 async def startup(ctx):
     """Worker 启动时初始化"""
     from app.db.connection import init_db
@@ -94,6 +103,73 @@ async def cluster_questions_task(ctx, interview_id: int, user_id: int = None):
         queue_ids = [item['queue_id'] for item in batch]
         mark_batch_failed(queue_ids)
         raise
+
+
+async def refresh_interview_distribution_task(ctx, scope: str, job_position: str):
+    """Recompute one distribution hierarchy after its facts were marked stale."""
+    from app.db.connection import get_db_connection
+    from app.services.interview_distribution import refresh_distribution_scope
+
+    conn = get_db_connection()
+    try:
+        result = refresh_distribution_scope(conn, scope, job_position)
+        conn.commit()
+        return {"status": "completed", **result}
+    except Exception:
+        conn.rollback()
+        raise
+
+
+async def process_chat_side_effects_task(ctx, limit: int = 10):
+    """Drain durable chat memory handoffs left by cancelled/restarted API workers."""
+    from app.services import chat_service
+    from app.agents.chat.nodes import MEMORY_EXTRACT_PROMPT, _call_llm_with_retry, _extract_json
+
+    processed = 0
+    for _ in range(max(1, min(int(limit), 50))):
+        job = await asyncio.to_thread(
+            chat_service.claim_side_effect_job,
+            worker_id="arq-chat-side-effects",
+            kind="memory_extraction",
+        )
+        if not job:
+            break
+        payload = job.get("payload") or {}
+        history = (
+            f"面试官提问: {str(payload.get('prior_question') or '')[:400]}\n"
+            f"候选人回答: {str(payload.get('user_message') or '')[:4000]}\n"
+            f"面试官追问: {str(payload.get('assistant_response') or '')[:4000]}"
+        )
+        try:
+            result = await _call_llm_with_retry(
+                MEMORY_EXTRACT_PROMPT.format(message_history=history),
+                user_id=int(job["user_id"]),
+                response_format={"type": "json_object"},
+            )
+            parsed = _extract_json(result)
+            memories = parsed if isinstance(parsed, list) else (
+                parsed.get("memories", parsed.get("items", []))
+                if isinstance(parsed, dict) else []
+            )
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            note_parts = []
+            for memory in memories if isinstance(memories, list) else []:
+                if isinstance(memory, dict) and memory.get("type") in {"weakness", "strength", "preference"}:
+                    note_parts.append(f"[{memory['type']}] {memory.get('content', '')}")
+            selected = metadata.get("selected_question")
+            if isinstance(selected, dict) and selected.get("question"):
+                note_parts.append(f"[asked] #{selected.get('id')}: {str(selected['question'])[:80]}")
+            await asyncio.to_thread(
+                chat_service.commit_memory_extraction_job,
+                job["id"],
+                memories if isinstance(memories, list) else [],
+                note_parts,
+            )
+            processed += 1
+        except Exception as exc:
+            await asyncio.to_thread(chat_service.fail_side_effect_job, job["id"], str(exc), retry=True)
+            logger.warning("chat side-effect job failed: %s (%s)", job["id"], exc)
+    return {"status": "completed", "processed": processed}
 
 
 async def force_cluster_all_task(ctx, user_id: int = None):
@@ -525,6 +601,8 @@ async def scheduled_compaction_task(ctx):
 class WorkerSettings:
     functions = [
         cluster_questions_task,
+        refresh_interview_distribution_task,
+        process_chat_side_effects_task,
         force_cluster_all_task,
         build_master_bank_task,
         submit_import_task,
@@ -540,5 +618,6 @@ class WorkerSettings:
 
     # 定时任务：每天凌晨 3 点运行 compaction
     cron_jobs = [
-        cron(scheduled_compaction_task, hour={3}, minute={0})
+        cron(scheduled_compaction_task, hour={3}, minute={0}),
+        cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
     ]

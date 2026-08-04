@@ -6,10 +6,13 @@
 
 修复：在加载 existing_rows 之前先清理当前批次 URL 的旧 QB 贡献。
 """
+
 import json
 import sqlite3
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+
+from app.services.faiss_index_manager import FAISSIndexManager
 import asyncio
 
 
@@ -130,33 +133,65 @@ def create_test_db():
             interview_id INTEGER NOT NULL,
             question_detail_id INTEGER,
             status TEXT DEFAULT 'pending',
+            owner_id INTEGER DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
             UNIQUE(question_detail_id),
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
     """)
-    conn.execute("INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'testuser', 'hash', 1)")
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'testuser', 'hash', 1)"
+    )
     conn.execute("INSERT INTO job_positions (id, name) VALUES (1, 'agent开发')")
     conn.commit()
     return conn
 
 
-def make_question_bank_row(conn, qb_id, question, cat2="B1.Agent架构与范式",
-                           frequency=1, sources=None, oqs=None, oqs_sources=None,
-                           owner_id=None, job_position="agent开发", ai_answer=None):
+def make_question_bank_row(
+    conn,
+    qb_id,
+    question,
+    cat2="B1.Agent架构与范式",
+    frequency=1,
+    sources=None,
+    oqs=None,
+    oqs_sources=None,
+    owner_id=None,
+    job_position="agent开发",
+    ai_answer=None,
+):
     if sources is None:
-        sources = json.dumps([{"url": "http://example.com/1", "company": "测试公司", "round": "一面"}], ensure_ascii=False)
+        sources = json.dumps(
+            [{"url": "http://example.com/1", "company": "测试公司", "round": "一面"}],
+            ensure_ascii=False,
+        )
     if oqs is None:
         oqs = json.dumps([question], ensure_ascii=False)
     if oqs_sources is None:
-        oqs_sources = json.dumps([{"question": question, "sources": [{"url": "http://example.com/1"}]}], ensure_ascii=False)
+        oqs_sources = json.dumps(
+            [{"question": question, "sources": [{"url": "http://example.com/1"}]}],
+            ensure_ascii=False,
+        )
     conn.execute(
         "INSERT INTO question_bank (id, question, cat1, cat2, tags, difficulty, frequency, sources, "
         "original_questions, original_question_sources, owner_id, job_position, ai_answer) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (qb_id, question, "B.Agent与LLM应用", cat2, "Agent架构设计", "L2-中等",
-         frequency, sources, oqs, oqs_sources, owner_id, job_position, ai_answer)
+        (
+            qb_id,
+            question,
+            "B.Agent与LLM应用",
+            cat2,
+            "Agent架构设计",
+            "L2-中等",
+            frequency,
+            sources,
+            oqs,
+            oqs_sources,
+            owner_id,
+            job_position,
+            ai_answer,
+        ),
     )
     conn.commit()
 
@@ -165,7 +200,7 @@ def make_interview(conn, interview_id, url, questions_list, job_position="agent�
     conn.execute(
         "INSERT INTO interview (id, url, company, round, questions_list, job_position, owner_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (interview_id, url, "测试公司", "一面", questions_list, job_position, 1)
+        (interview_id, url, "测试公司", "一面", questions_list, job_position, 1),
     )
     conn.commit()
 
@@ -175,7 +210,17 @@ def make_questions_detail(conn, url, questions, job_position="agent开发"):
         conn.execute(
             "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (url, "测试公司", "一面", q, "B.Agent与LLM应用", "B1.Agent架构与范式", "Agent架构设计", "L2-中等", job_position)
+            (
+                url,
+                "测试公司",
+                "一面",
+                q,
+                "B.Agent与LLM应用",
+                "B1.Agent架构与范式",
+                "Agent架构设计",
+                "L2-中等",
+                job_position,
+            ),
         )
     conn.commit()
 
@@ -208,11 +253,24 @@ class TestCleanupBeforeClustering:
         make_interview(conn, 1, "http://url-x.com", "什么是RAG")
 
         # 旧 QB 条目：独占 URL_X
-        sources_x = json.dumps([{"url": "http://url-x.com", "company": "公司X", "round": "一面"}], ensure_ascii=False)
+        sources_x = json.dumps(
+            [{"url": "http://url-x.com", "company": "公司X", "round": "一面"}],
+            ensure_ascii=False,
+        )
         oqs_x = json.dumps(["什么是RAG"], ensure_ascii=False)
-        oqs_src_x = json.dumps([{"question": "什么是RAG", "sources": [{"url": "http://url-x.com"}]}], ensure_ascii=False)
-        make_question_bank_row(conn, 1, "什么是RAG", frequency=1,
-                               sources=sources_x, oqs=oqs_x, oqs_sources=oqs_src_x)
+        oqs_src_x = json.dumps(
+            [{"question": "什么是RAG", "sources": [{"url": "http://url-x.com"}]}],
+            ensure_ascii=False,
+        )
+        make_question_bank_row(
+            conn,
+            1,
+            "什么是RAG",
+            frequency=1,
+            sources=sources_x,
+            oqs=oqs_x,
+            oqs_sources=oqs_src_x,
+        )
 
         # 新 tagged 数据
         make_questions_detail(conn, "http://url-x.com", ["请解释RAG架构"])
@@ -225,23 +283,44 @@ class TestCleanupBeforeClustering:
             captured_existing.update(existing_by_cat2)
             return {"matched_to_existing": [], "new_clusters": []}
 
-        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.batch.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.writer.get_db_connection", return_value=conn), \
-             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.batch.process_incremental_batch", side_effect=mock_process_incremental), \
-             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
+        with (
+            patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
+            patch("app.db.connection.run_db", side_effect=mock_run_db_sync),
+            patch(
+                "app.services.pipeline.batch.process_incremental_batch",
+                side_effect=mock_process_incremental,
+            ),
+            patch(
+                "app.services.clustering.generate_unified_question",
+                new_callable=AsyncMock,
+                return_value="mock unified",
+            ),
+            patch(
+                "app.services.pipeline.batch.get_index_manager",
+                return_value=FAISSIndexManager(),
+            ),
+        ):
+            from app.services.pipeline import (
+                cluster_batch,
+                enqueue_questions,
+                dequeue_batch,
+            )
 
-            from app.services.pipeline import cluster_batch, enqueue_questions, dequeue_batch
             enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
 
         # 关键断言：聚类上下文中不应包含旧的 QB 条目
-        assert captured_existing == {}, f"旧 QB 条目不应出现在聚类上下文中，但发现: {captured_existing}"
+        assert captured_existing == {}, (
+            f"旧 QB 条目不应出现在聚类上下文中，但发现: {captured_existing}"
+        )
 
         # 新题应存在
-        assert len(captured_new_rows) == 1, f"应有 1 个新题，实际: {len(captured_new_rows)}"
+        assert len(captured_new_rows) == 1, (
+            f"应有 1 个新题，实际: {len(captured_new_rows)}"
+        )
 
         conn.close()
 
@@ -263,16 +342,35 @@ class TestCleanupBeforeClustering:
         make_interview(conn, 2, "http://url-y.com", "什么是RAG")
 
         # QB 条目：有两个来源
-        sources_xy = json.dumps([
-            {"url": "http://url-x.com", "company": "公司X", "round": "一面"},
-            {"url": "http://url-y.com", "company": "公司Y", "round": "二面"},
-        ], ensure_ascii=False)
+        sources_xy = json.dumps(
+            [
+                {"url": "http://url-x.com", "company": "公司X", "round": "一面"},
+                {"url": "http://url-y.com", "company": "公司Y", "round": "二面"},
+            ],
+            ensure_ascii=False,
+        )
         oqs = json.dumps(["什么是RAG"], ensure_ascii=False)
-        oqs_src = json.dumps([
-            {"question": "什么是RAG", "sources": [{"url": "http://url-x.com"}, {"url": "http://url-y.com"}]},
-        ], ensure_ascii=False)
-        make_question_bank_row(conn, 1, "什么是RAG", frequency=2,
-                               sources=sources_xy, oqs=oqs, oqs_sources=oqs_src)
+        oqs_src = json.dumps(
+            [
+                {
+                    "question": "什么是RAG",
+                    "sources": [
+                        {"url": "http://url-x.com"},
+                        {"url": "http://url-y.com"},
+                    ],
+                },
+            ],
+            ensure_ascii=False,
+        )
+        make_question_bank_row(
+            conn,
+            1,
+            "什么是RAG",
+            frequency=2,
+            sources=sources_xy,
+            oqs=oqs,
+            oqs_sources=oqs_src,
+        )
 
         make_questions_detail(conn, "http://url-x.com", ["请解释RAG架构"])
 
@@ -282,27 +380,48 @@ class TestCleanupBeforeClustering:
             captured_existing.update(existing_by_cat2)
             return {"matched_to_existing": [], "new_clusters": []}
 
-        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.batch.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.writer.get_db_connection", return_value=conn), \
-             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.batch.process_incremental_batch", side_effect=mock_process_incremental), \
-             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="mock unified"):
+        with (
+            patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
+            patch("app.db.connection.run_db", side_effect=mock_run_db_sync),
+            patch(
+                "app.services.pipeline.batch.process_incremental_batch",
+                side_effect=mock_process_incremental,
+            ),
+            patch(
+                "app.services.clustering.generate_unified_question",
+                new_callable=AsyncMock,
+                return_value="mock unified",
+            ),
+            patch(
+                "app.services.pipeline.batch.get_index_manager",
+                return_value=FAISSIndexManager(),
+            ),
+        ):
+            from app.services.pipeline import (
+                cluster_batch,
+                enqueue_questions,
+                dequeue_batch,
+            )
 
-            from app.services.pipeline import cluster_batch, enqueue_questions, dequeue_batch
             enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
 
         # QB条目1 应仍在聚类上下文中（因为 URL_Y 还在）
         existing_items = [item for rows in captured_existing.values() for item in rows]
-        assert len(existing_items) == 1, f"共享条目应保留在聚类上下文中，实际: {len(existing_items)}"
+        assert len(existing_items) == 1, (
+            f"共享条目应保留在聚类上下文中，实际: {len(existing_items)}"
+        )
 
         # sources 中应只剩 URL_Y
-        qb_after = conn.execute("SELECT sources FROM question_bank WHERE id = 1").fetchone()
+        qb_after = conn.execute(
+            "SELECT sources FROM question_bank WHERE id = 1"
+        ).fetchone()
         if qb_after:
-            remaining_sources = json.loads(qb_after['sources'])
-            urls = [s['url'] for s in remaining_sources]
+            remaining_sources = json.loads(qb_after["sources"])
+            urls = [s["url"] for s in remaining_sources]
             assert "http://url-x.com" not in urls, "URL_X 应被移除"
             assert "http://url-y.com" in urls, "URL_Y 应保留"
 
@@ -318,46 +437,84 @@ class TestCleanupBeforeClustering:
         make_interview(conn, 2, "http://url-y.com", "什么是RAG")
 
         # QB 条目：有两个来源，有 AI 答案
-        sources_xy = json.dumps([
-            {"url": "http://url-x.com", "company": "公司X", "round": "一面"},
-            {"url": "http://url-y.com", "company": "公司Y", "round": "二面"},
-        ], ensure_ascii=False)
-        make_question_bank_row(conn, 1, "什么是RAG", frequency=2,
-                               sources=sources_xy,
-                               oqs=json.dumps(["什么是RAG"], ensure_ascii=False),
-                               oqs_sources=json.dumps([
-                                   {"question": "什么是RAG", "sources": [{"url": "http://url-x.com"}, {"url": "http://url-y.com"}]},
-                               ], ensure_ascii=False),
-                               ai_answer="RAG是检索增强生成的缩写...")
+        sources_xy = json.dumps(
+            [
+                {"url": "http://url-x.com", "company": "公司X", "round": "一面"},
+                {"url": "http://url-y.com", "company": "公司Y", "round": "二面"},
+            ],
+            ensure_ascii=False,
+        )
+        make_question_bank_row(
+            conn,
+            1,
+            "什么是RAG",
+            frequency=2,
+            sources=sources_xy,
+            oqs=json.dumps(["什么是RAG"], ensure_ascii=False),
+            oqs_sources=json.dumps(
+                [
+                    {
+                        "question": "什么是RAG",
+                        "sources": [
+                            {"url": "http://url-x.com"},
+                            {"url": "http://url-y.com"},
+                        ],
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            ai_answer="RAG是检索增强生成的缩写...",
+        )
 
         make_questions_detail(conn, "http://url-x.com", ["请解释RAG架构"])
 
         async def mock_process_incremental(new_rows, existing_by_cat2, user_id=None):
             return {
                 "matched_to_existing": [],
-                "new_clusters": [{
-                    "representative": "什么是RAG",
-                    "items": [{
-                        "question": "什么是RAG",
-                        "cat1": "B.Agent与LLM应用",
-                        "cat2": "B1.Agent架构与范式",
-                        "tags": "Agent架构设计",
-                        "diff_tag": "L2-中等",
-                        "url": "http://url-x.com",
-                        "company": "公司X",
-                        "round": "一面",
-                    }],
-                }],
+                "new_clusters": [
+                    {
+                        "representative": "什么是RAG",
+                        "items": [
+                            {
+                                "question": "什么是RAG",
+                                "cat1": "B.Agent与LLM应用",
+                                "cat2": "B1.Agent架构与范式",
+                                "tags": "Agent架构设计",
+                                "diff_tag": "L2-中等",
+                                "url": "http://url-x.com",
+                                "company": "公司X",
+                                "round": "一面",
+                            }
+                        ],
+                    }
+                ],
             }
 
-        with patch("app.services.pipeline.queue.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.batch.get_db_connection", return_value=conn), \
-             patch("app.services.pipeline.writer.get_db_connection", return_value=conn), \
-             patch("app.db.connection.run_db", side_effect=mock_run_db_sync), \
-             patch("app.services.pipeline.batch.process_incremental_batch", side_effect=mock_process_incremental), \
-             patch("app.services.clustering.generate_unified_question", new_callable=AsyncMock, return_value="什么是RAG"):
+        with (
+            patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
+            patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
+            patch("app.db.connection.run_db", side_effect=mock_run_db_sync),
+            patch(
+                "app.services.pipeline.batch.process_incremental_batch",
+                side_effect=mock_process_incremental,
+            ),
+            patch(
+                "app.services.clustering.generate_unified_question",
+                new_callable=AsyncMock,
+                return_value="什么是RAG",
+            ),
+            patch(
+                "app.services.pipeline.batch.get_index_manager",
+                return_value=FAISSIndexManager(),
+            ),
+        ):
+            from app.services.pipeline import (
+                cluster_batch,
+                enqueue_questions,
+                dequeue_batch,
+            )
 
-            from app.services.pipeline import cluster_batch, enqueue_questions, dequeue_batch
             enqueue_questions(1)
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
@@ -367,7 +524,7 @@ class TestCleanupBeforeClustering:
             "SELECT * FROM question_bank WHERE id > 1 AND ai_answer IS NOT NULL AND ai_answer != ''"
         ).fetchone()
         assert new_qb is not None, "新聚类应继承 AI 答案"
-        assert "RAG是检索增强生成" in new_qb['ai_answer'], (
+        assert "RAG是检索增强生成" in new_qb["ai_answer"], (
             f"AI 答案内容不正确: {new_qb['ai_answer']}"
         )
 

@@ -2,12 +2,14 @@
 自动化测试 — 针对 BUG-001 ~ BUG-007
 使用 pytest + unittest.mock，所有外部依赖均已 mock
 """
+
 import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 
 
 # ─────────────── BUG-001: Phase 1.5 验证 ID 空间不匹配 ───────────────
+
 
 class TestBug001Phase15Validation:
     """BUG-001: Phase 1.5 匹配无验证保护，LLM 结果直接使用"""
@@ -16,13 +18,17 @@ class TestBug001Phase15Validation:
         """修复后：Phase 1.5 应包含 _validate_merges 调用"""
         import inspect
         from app.services.clustering import _match_and_cluster_cat2
+
         source = inspect.getsource(_match_and_cluster_cat2)
 
         assert "candidate_pool" in source
-        assert "_validate_merges" in source, "修复后：候选池匹配应有 _validate_merges 验证"
+        assert "_validate_merges" in source, (
+            "修复后：候选池匹配应有 _validate_merges 验证"
+        )
 
 
 # ─────────────── BUG-002: LLM 重复匹配无去重 ───────────────
+
 
 class TestBug002DuplicateNewId:
     """BUG-002: LLM 返回重复 new_id 时无去重保护"""
@@ -65,7 +71,11 @@ class TestBug002DuplicateNewId:
         for m in matches:
             nid = str(m.get("new_id", ""))
             cid = m.get("cluster_id")
-            if nid in unmatched_ids and nid not in processed_new_ids and cid is not None:
+            if (
+                nid in unmatched_ids
+                and nid not in processed_new_ids
+                and cid is not None
+            ):
                 processed_new_ids.add(nid)
                 matched.append((cid, nid))
 
@@ -74,6 +84,7 @@ class TestBug002DuplicateNewId:
 
 # ─────────────── BUG-003: v2 compaction 无验证 ───────────────
 
+
 class TestBug003V2NoValidation:
     """BUG-003: v2 compaction 跳过 _validate_merges"""
 
@@ -81,6 +92,7 @@ class TestBug003V2NoValidation:
         """确认 v1 有验证步骤"""
         import inspect
         from app.services.pipeline.compact import compact_singletons_in_db
+
         source = inspect.getsource(compact_singletons_in_db)
         assert "_validate_merges" in source, "v1 应该有 _validate_merges 调用"
 
@@ -88,6 +100,7 @@ class TestBug003V2NoValidation:
         """确认 v2 缺少验证步骤（bug 存在）"""
         import inspect
         from app.services.pipeline.batch_v2 import compact_singletons_in_db_v2
+
         source = inspect.getsource(compact_singletons_in_db_v2)
         # BUG: v2 没有调用 _validate_merges
         has_validation = "_validate_merges" in source
@@ -96,6 +109,7 @@ class TestBug003V2NoValidation:
 
 # ─────────────── BUG-004: v2 compaction 无合并历史 ───────────────
 
+
 class TestBug004V2NoMergeHistory:
     """BUG-004: v2 compaction 不记录 merge_history"""
 
@@ -103,12 +117,14 @@ class TestBug004V2NoMergeHistory:
         """确认 v2 不记录合并历史"""
         import inspect
         from app.services.pipeline.batch_v2 import compact_singletons_in_db_v2
+
         source = inspect.getsource(compact_singletons_in_db_v2)
         has_history = "_record_merge_history" in source
         assert not has_history, "BUG-004: v2 compaction 不记录 merge_history"
 
 
 # ─────────────── BUG-005: _build_new_entry 未去重 ───────────────
+
 
 class TestBug005BuildNewEntryDedup:
     """BUG-005: _build_new_entry 的 original_questions 未去重"""
@@ -121,19 +137,36 @@ class TestBug005BuildNewEntryDedup:
             "representative": "什么是 RAG",
             "ids": ["1", "2"],
             "items": [
-                {"question": "什么是 RAG", "url": "http://a.com", "company": "A", "round": "1", "cat1": "B", "cat2": "B2"},
-                {"question": "什么是 RAG", "url": "http://b.com", "company": "B", "round": "2", "cat1": "B", "cat2": "B2"},
-            ]
+                {
+                    "question": "什么是 RAG",
+                    "url": "http://a.com",
+                    "company": "A",
+                    "round": "1",
+                    "cat1": "B",
+                    "cat2": "B2",
+                },
+                {
+                    "question": "什么是 RAG",
+                    "url": "http://b.com",
+                    "company": "B",
+                    "round": "2",
+                    "cat1": "B",
+                    "cat2": "B2",
+                },
+            ],
         }
 
         entry = _build_new_entry(cluster, job_position="")
 
         # 修复后：frequency=1（去重后只有一个不同题目）
-        assert entry['frequency'] == 1, "修复后：重复题目应被去重"
-        assert len(entry['original_questions']) == 1, "修复后：original_questions 不含重复"
+        assert entry["frequency"] == 1, "修复后：重复题目应被去重"
+        assert len(entry["original_questions"]) == 1, (
+            "修复后：original_questions 不含重复"
+        )
 
 
 # ─────────────── BUG-006: O(N*M) 性能问题 ───────────────
+
 
 class TestBug006Performance:
     """BUG-006: full_recluster_hybrid 中的 O(N*M) 线性扫描"""
@@ -142,12 +175,14 @@ class TestBug006Performance:
         """修复后：应使用预构建的 question_lookup 字典"""
         import inspect
         from app.services.clustering import full_recluster_hybrid
+
         source = inspect.getsource(full_recluster_hybrid)
         has_lookup = "question_lookup" in source
         assert has_lookup, "修复后：应使用 question_lookup 预构建字典"
 
 
 # ─────────────── BUG-007: frequency 计算不一致 ───────────────
+
 
 class TestBug007FrequencyInconsistency:
     """BUG-007: 不同合并路径的 frequency 计算方式不一致"""
@@ -156,8 +191,11 @@ class TestBug007FrequencyInconsistency:
         """修复后：batch_v2 应使用 len(original_questions) 计算 frequency"""
         import inspect
         from app.services.pipeline.batch_v2 import compact_singletons_in_db_v2
+
         source = inspect.getsource(compact_singletons_in_db_v2)
         has_increment = "frequency'] + 1" in source or "frequency'] +1" in source
-        has_len = "len(t_oqs)" in source
         assert not has_increment, "修复后：不应使用 frequency + 1"
-        assert has_len, "修复后：应使用 len(t_oqs)"
+        # 频率计算委托给 _do_merge_to_existing（已在 compact.py 中验证）
+        assert "_do_merge_to_existing" in source, (
+            "应委托给 _do_merge_to_existing 计算频率"
+        )

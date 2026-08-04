@@ -7,6 +7,7 @@ BUG-002: 切换界面不支持后台继续分析
 BUG-003: 分析中不显示详细内容
 BUG-004: 软删除记录污染聚类质量
 """
+
 import json
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class TestBug004DeletedBankExcluded:
         """修复后：出队加载 questions_detail 时必须包含 deleted_at IS NULL"""
         import inspect
         from app.services.pipeline.queue import dequeue_batch
+
         source = inspect.getsource(dequeue_batch)
         assert "deleted_at IS NULL" in source, (
             "BUG-004: dequeue_batch 中加载 questions_detail 的查询"
@@ -36,10 +38,11 @@ class TestBug004DeletedBankExcluded:
     def test_bug004_pipeline_qb_query_filters_deleted(self):
         """修复后：加载已有 question_bank 聚类时必须过滤 deleted_at"""
         import inspect
-        from app.services.pipeline.batch import _load_existing_clusters_by_cat2
-        source = inspect.getsource(_load_existing_clusters_by_cat2)
+        from app.services.faiss_index_manager import FAISSIndexManager
+
+        source = inspect.getsource(FAISSIndexManager._load_all)
         assert "deleted_at IS NULL" in source, (
-            "BUG-004: _load_existing_clusters_by_cat2 加载 question_bank 时应过滤 deleted_at"
+            "BUG-004: FAISSIndexManager._load_all 加载 question_bank 时应过滤 deleted_at"
         )
 
 
@@ -50,8 +53,11 @@ class TestBug004QueryBehavior:
         """修复后：聚类输入和已有 QB 查询必须包含所有必要过滤条件"""
         import inspect
         from app.services.pipeline.queue import dequeue_batch
-        from app.services.pipeline.batch import _load_existing_clusters_by_cat2
-        src = inspect.getsource(dequeue_batch) + inspect.getsource(_load_existing_clusters_by_cat2)
+        from app.services.faiss_index_manager import FAISSIndexManager
+
+        src = inspect.getsource(dequeue_batch) + inspect.getsource(
+            FAISSIndexManager._load_all
+        )
 
         # 验证 questions_detail 查询
         assert "deleted_at IS NULL" in src
@@ -74,6 +80,7 @@ class TestBug003SSEEventsIncludeDetails:
         """修复后：标注完成事件应包含 details 字段"""
         import inspect
         from app.routers.interview import reprocess_interview_stream
+
         source = inspect.getsource(reprocess_interview_stream)
 
         # 检查标注完成事件包含 details
@@ -86,6 +93,7 @@ class TestBug003SSEEventsIncludeDetails:
         """修复后：标注完成事件应包含 details 字段（新架构保留了此特性）"""
         import inspect
         from app.routers.interview import reprocess_interview_stream
+
         source = inspect.getsource(reprocess_interview_stream)
 
         # 检查标注完成事件包含 details
@@ -102,13 +110,37 @@ class TestBug003EventStructure:
         """标注详情应包含 question/cat1/cat2/tags/difficulty 字段"""
         # 模拟 tag_questions_batch 返回的 tagged_rows
         tagged_rows = [
-            ["url1", "腾讯", "一面", "Redis 持久化方式？", "数据库", "Redis", "Redis,持久化", "中等"],
-            ["url1", "腾讯", "一面", "TCP 三次握手？", "计算机网络", "TCP", "TCP,网络", "简单"],
+            [
+                "url1",
+                "腾讯",
+                "一面",
+                "Redis 持久化方式？",
+                "数据库",
+                "Redis",
+                "Redis,持久化",
+                "中等",
+            ],
+            [
+                "url1",
+                "腾讯",
+                "一面",
+                "TCP 三次握手？",
+                "计算机网络",
+                "TCP",
+                "TCP,网络",
+                "简单",
+            ],
         ]
 
         # 构造期望的 details 结构
         expected_details = [
-            {"question": r[3], "cat1": r[4], "cat2": r[5], "tags": r[6], "difficulty": r[7]}
+            {
+                "question": r[3],
+                "cat1": r[4],
+                "cat2": r[5],
+                "tags": r[6],
+                "difficulty": r[7],
+            }
             for r in tagged_rows
         ]
 
@@ -129,7 +161,11 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_app_vue_has_active_reprocessing_computed(self):
         """修复后：全局问题操作 composable 应有 activeReprocessing computed 属性"""
-        with open(BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
+        with open(
+            BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js",
+            "r",
+            encoding="utf-8",
+        ) as f:
             content = f.read()
 
         assert "activeReprocessing" in content, (
@@ -139,10 +175,14 @@ class TestBug002GlobalProgressComputed:
 
     def test_bug002_global_progress_indicator_in_template(self):
         """修复后：模板中应有全局进度指示器（fixed 定位）"""
-        with open(BACKEND_ROOT.parent / "frontend/src/layouts/AuthenticatedLayout.vue", "r", encoding="utf-8") as f:
+        with open(
+            BACKEND_ROOT.parent / "frontend/src/layouts/AuthenticatedLayout.vue",
+            "r",
+            encoding="utf-8",
+        ) as f:
             content = f.read()
 
-        has_fixed_indicator = ("fixed" in content and "activeReprocessing" in content)
+        has_fixed_indicator = "fixed" in content and "activeReprocessing" in content
         assert has_fixed_indicator, (
             "BUG-002: App.vue 模板中缺少全局进度指示器（应为 fixed 定位，"
             "在任意 Tab 都可见）"
@@ -154,7 +194,11 @@ class TestBug002ProgressStateLifecycle:
 
     def test_bug002_reprocessing_state_is_top_level_ref(self):
         """reprocessingIds 应在全局 composable 顶级声明，不绑定在 v-if 组件内"""
-        with open(BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js", "r", encoding="utf-8") as f:
+        with open(
+            BACKEND_ROOT.parent / "frontend/src/composables/useQuestionOps.js",
+            "r",
+            encoding="utf-8",
+        ) as f:
             content = f.read()
 
         assert "const reprocessingIds" in content, (
@@ -172,9 +216,9 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_status_column(self):
         """修复后：interview 表应有 analysis_status 列"""
-        content = ''
-        for _p in sorted(BACKEND_ROOT.joinpath('app/db/migrations').glob('*.py')):
-            content += _p.read_text(encoding='utf-8') + '\n'
+        content = ""
+        for _p in sorted(BACKEND_ROOT.joinpath("app/db/migrations").glob("*.py")):
+            content += _p.read_text(encoding="utf-8") + "\n"
 
         assert "analysis_status" in content, (
             "BUG-001: interview 表缺少 analysis_status 列，"
@@ -183,9 +227,9 @@ class TestBug001StatePersistence:
 
     def test_bug001_interview_table_has_analysis_result_column(self):
         """修复后：interview 表应有 analysis_result 列用于存储中间结果"""
-        content = ''
-        for _p in sorted(BACKEND_ROOT.joinpath('app/db/migrations').glob('*.py')):
-            content += _p.read_text(encoding='utf-8') + '\n'
+        content = ""
+        for _p in sorted(BACKEND_ROOT.joinpath("app/db/migrations").glob("*.py")):
+            content += _p.read_text(encoding="utf-8") + "\n"
 
         assert "analysis_result" in content, (
             "BUG-001: interview 表缺少 analysis_result 列，"
@@ -200,10 +244,15 @@ class TestBug001ResumeLogic:
         """修复后：SSE 端点应检查是否有未完成的分析状态"""
         import inspect
         from app.routers.interview import reprocess_interview_stream
+
         source = inspect.getsource(reprocess_interview_stream)
 
-        has_resume = ("analysis_status" in source or "analysis_stage" in source
-                      or "恢复" in source or "resume" in source.lower())
+        has_resume = (
+            "analysis_status" in source
+            or "analysis_stage" in source
+            or "恢复" in source
+            or "resume" in source.lower()
+        )
         assert has_resume, (
             "BUG-001: reprocess_interview_stream 中没有检查已有分析状态的逻辑，"
             "无法实现断点续传"
@@ -214,12 +263,15 @@ class TestBug001ResumeLogic:
         """修复后：标注完成后应保存中间状态"""
         import inspect
         from app.routers.interview import reprocess_interview_stream
+
         source = inspect.getsource(reprocess_interview_stream)
 
         # 标注完成后应有保存状态的操作
-        has_state_save = ("analysis_result" in source or "analysis_status" in source
-                          or "tagged_rows" in source)
+        has_state_save = (
+            "analysis_result" in source
+            or "analysis_status" in source
+            or "tagged_rows" in source
+        )
         assert has_state_save, (
-            "BUG-001: 标注阶段完成后没有保存中间状态，"
-            "中断后需要重新进行 LLM 标注"
+            "BUG-001: 标注阶段完成后没有保存中间状态，中断后需要重新进行 LLM 标注"
         )

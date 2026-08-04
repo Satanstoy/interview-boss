@@ -1,15 +1,22 @@
 """聚类引擎：内部聚类 + 三阶段聚类 V2"""
+
 import asyncio
 import logging
 import re
 from typing import List, Dict, Any
 
+from app.core.config import (
+    CLUSTER_MAX_CONCURRENCY,
+    CLUSTER_MIN_SIMILARITY,
+    CLUSTER_V2_SIM_THRESHOLD,
+    CLUSTER_V2_FAISS_TOP_K,
+)
 from app.services.llm import _call_llm_with_retry, _extract_json
 from app.services.clustering.prompts import CLUSTER_NEW_PROMPT
 
 logger = logging.getLogger("interview-boss")
 
-MAX_CONCURRENCY = 8  # 增加并发
+MAX_CONCURRENCY = CLUSTER_MAX_CONCURRENCY
 
 
 def _normalize_question_text(text: str) -> str:
@@ -76,8 +83,8 @@ _V2_GROUP_PROMPT = """你是面试题去重专家。以下是一个分类（{cat
 {{"groups": [{{"ids": ["题号1", "题号2"], "representative": "表述最清晰的代表题"}}]}}
 只返回 JSON。没有可合并的就返回 {{"groups": []}}"""
 
-_V2_SIMILARITY_THRESHOLD = 0.60  # V2 embedding 粗筛阈值
-_V2_FAISS_TOP_K = 10  # V2 FAISS 最近邻数
+_V2_SIMILARITY_THRESHOLD = CLUSTER_V2_SIM_THRESHOLD
+_V2_FAISS_TOP_K = CLUSTER_V2_FAISS_TOP_K
 
 
 def _union_find(parent: dict, x):
@@ -102,11 +109,13 @@ def _union_merge(parent: dict, rank: dict, a, b):
 
 async def _cluster_unmatched(unmatched_questions, user_id):
     """将未匹配的新题进行内部聚类（带 embedding 门控）"""
-    _MIN_CLUSTER_SIMILARITY = 0.6  # 聚类内最低平均相似度阈值
+    _min_cluster_sim = CLUSTER_MIN_SIMILARITY
 
     if len(unmatched_questions) < 2:
-        return [{"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
-                for q in unmatched_questions]
+        return [
+            {"ids": [str(q["id"])], "representative": q["question"], "items": [q]}
+            for q in unmatched_questions
+        ]
 
     exact_groups = {}
     for q in unmatched_questions:
@@ -121,21 +130,22 @@ async def _cluster_unmatched(unmatched_questions, user_id):
             continue
         ids = [str(q["id"]) for q in group]
         exact_clustered_ids.update(ids)
-        exact_clusters.append({
-            "ids": ids,
-            "representative": max((q["question"] for q in group), key=len),
-            "items": group,
-        })
+        exact_clusters.append(
+            {
+                "ids": ids,
+                "representative": max((q["question"] for q in group), key=len),
+                "items": group,
+            }
+        )
 
     if exact_clusters:
         unmatched_questions = [
-            q for q in unmatched_questions
-            if str(q["id"]) not in exact_clustered_ids
+            q for q in unmatched_questions if str(q["id"]) not in exact_clustered_ids
         ]
         logger.info(f"    内部聚类精确文本命中: {len(exact_clusters)} 个聚类")
         if len(unmatched_questions) < 2:
             singles = [
-                {"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
+                {"ids": [str(q["id"])], "representative": q["question"], "items": [q]}
                 for q in unmatched_questions
             ]
             return exact_clusters + singles
@@ -155,13 +165,17 @@ async def _cluster_unmatched(unmatched_questions, user_id):
         try:
             from app.services import embedding_service
             import numpy as np
-            texts = [q['question'] for q in unmatched_questions]
+
+            texts = [q["question"] for q in unmatched_questions]
             embeddings = embedding_service.encode_texts(texts)
             # hash fallback 只适合测试/降级检索，不能否决 LLM 的语义聚类。
             if getattr(embedding_service, "_SESSION", None) is None:
                 emb_map = {}
             else:
-                emb_map = {str(q['id']): embeddings[i] for i, q in enumerate(unmatched_questions)}
+                emb_map = {
+                    str(q["id"]): embeddings[i]
+                    for i, q in enumerate(unmatched_questions)
+                }
         except Exception:
             emb_map = {}
 
@@ -179,34 +193,40 @@ async def _cluster_unmatched(unmatched_questions, user_id):
                             sim = float(np.dot(emb_map[ids[i]], emb_map[ids[j]]))
                             sims.append(sim)
                     avg_sim = sum(sims) / len(sims) if sims else 0
-                    if avg_sim < _MIN_CLUSTER_SIMILARITY:
-                        logger.info(f"    embedding 门控拒绝: avg_sim={avg_sim:.3f} < {_MIN_CLUSTER_SIMILARITY}, "
-                                    f"拆散聚类 {ids}")
+                    if avg_sim < _min_cluster_sim:
+                        logger.info(
+                            f"    embedding 门控拒绝: avg_sim={avg_sim:.3f} < {_min_cluster_sim}, "
+                            f"拆散聚类 {ids}"
+                        )
                         continue
 
                 clustered_ids.update(ids)
-                items = [q for q in unmatched_questions if str(q['id']) in ids]
+                items = [q for q in unmatched_questions if str(q["id"]) in ids]
                 rep = c.get("representative", "")
                 if not rep or len(rep) < 3:
-                    rep = max((q['question'] for q in items), key=len)
+                    rep = max((q["question"] for q in items), key=len)
                 clusters.append({"ids": ids, "representative": rep, "items": items})
 
         # 未被聚类的题目各自独立
         for q in unmatched_questions:
-            if str(q['id']) not in clustered_ids:
-                clusters.append({
-                    "ids": [str(q['id'])],
-                    "representative": q['question'],
-                    "items": [q],
-                })
+            if str(q["id"]) not in clustered_ids:
+                clusters.append(
+                    {
+                        "ids": [str(q["id"])],
+                        "representative": q["question"],
+                        "items": [q],
+                    }
+                )
 
         logger.info(f"    内部聚类: {len(clusters)} 个结果（含独立题）")
         return clusters
 
     except Exception as e:
         logger.warning(f"    内部聚类失败: {e}")
-        return [{"ids": [str(q['id'])], "representative": q['question'], "items": [q]}
-                for q in unmatched_questions]
+        return [
+            {"ids": [str(q["id"])], "representative": q["question"], "items": [q]}
+            for q in unmatched_questions
+        ]
 
 
 async def cluster_three_stage_v2(
@@ -242,15 +262,15 @@ async def cluster_three_stage_v2(
     # ═══════════════════════════════════════════════════════════
     text_map = {}
     for q in questions:
-        text = (q.get('question') or '').strip()
+        text = (q.get("question") or "").strip()
         if text:
-            text_map.setdefault(text, []).append(q['id'])
+            text_map.setdefault(text, []).append(q["id"])
 
     stage1_count = 0
     for text, ids in text_map.items():
         if len(ids) < 2:
             continue
-        survivors = [(q['frequency'], q['id']) for q in questions if q['id'] in ids]
+        survivors = [(q["frequency"], q["id"]) for q in questions if q["id"] in ids]
         survivors.sort(reverse=True)
         survivor_id = survivors[0][1]
         for _, mid in survivors[1:]:
@@ -264,12 +284,12 @@ async def cluster_three_stage_v2(
     # ═══════════════════════════════════════════════════════════
     # Stage 2: Embedding 粗筛 + 按 cat2 分组
     # ═══════════════════════════════════════════════════════════
-    remaining = [q for q in questions if q['id'] not in merged_ids]
+    remaining = [q for q in questions if q["id"] not in merged_ids]
     if len(remaining) < 2:
-        return {"merged": merged_pairs, "unmatched": [q['id'] for q in remaining]}
+        return {"merged": merged_pairs, "unmatched": [q["id"] for q in remaining]}
 
     # 编码所有剩余题目
-    texts = [q.get('question', '') for q in remaining]
+    texts = [q.get("question", "") for q in remaining]
     embeddings = encode_texts(texts)
 
     # 构建 FAISS 索引
@@ -280,7 +300,7 @@ async def cluster_three_stage_v2(
     seen_pairs = set()
 
     for i in range(len(remaining)):
-        q_emb = embeddings[i:i+1]
+        q_emb = embeddings[i : i + 1]
         k = min(_V2_FAISS_TOP_K, len(remaining))
         scores, indices = index.search(q_emb, k)
 
@@ -298,17 +318,19 @@ async def cluster_three_stage_v2(
 
     candidate_pairs.sort(key=lambda x: x[2], reverse=True)
 
-    logger.info(f"[V2] Stage 2 Embedding 粗筛: {len(candidate_pairs)} 候选对 (阈值={similarity_threshold})")
+    logger.info(
+        f"[V2] Stage 2 Embedding 粗筛: {len(candidate_pairs)} 候选对 (阈值={similarity_threshold})"
+    )
 
     if not candidate_pairs:
-        unmatched = [q['id'] for q in remaining]
+        unmatched = [q["id"] for q in remaining]
         return {"merged": merged_pairs, "unmatched": unmatched}
 
     # 按 cat2 分组候选对
     cat2_candidates = {}  # cat2 -> set of question indices
     for i1, i2, sim in candidate_pairs:
-        cat2_1 = remaining[i1].get('cat2', '') or ''
-        cat2_2 = remaining[i2].get('cat2', '') or ''
+        cat2_1 = remaining[i1].get("cat2", "") or ""
+        cat2_2 = remaining[i2].get("cat2", "") or ""
         # 同 cat2 的对归入该 cat2
         if cat2_1 == cat2_2:
             cat2 = cat2_1
@@ -335,8 +357,10 @@ async def cluster_three_stage_v2(
             return []
 
         # "其他"分类跳过（是兜底分类，容易误合并）
-        if cat2 in ('其他', ''):
-            logger.info(f"[V2] Stage 3 [{cat2 or '未分类'}] 跳过（兜底分类，避免误合并）")
+        if cat2 in ("其他", ""):
+            logger.info(
+                f"[V2] Stage 3 [{cat2 or '未分类'}] 跳过（兜底分类，避免误合并）"
+            )
             return []
 
         # 初始化 union-find
@@ -354,7 +378,7 @@ async def cluster_three_stage_v2(
         questions_text = "\n".join(q_list)
 
         prompt = _V2_GROUP_PROMPT.format(
-            cat2=cat2 or '未分类',
+            cat2=cat2 or "未分类",
             count=len(idx_list),
             questions=questions_text,
         )
@@ -371,7 +395,7 @@ async def cluster_three_stage_v2(
                     if len(ids) < 2:
                         continue
                     # 找到对应的 remaining index
-                    id_to_idx = {str(remaining[idx]['id']): idx for idx in idx_list}
+                    id_to_idx = {str(remaining[idx]["id"]): idx for idx in idx_list}
                     group_indices = [id_to_idx[sid] for sid in ids if sid in id_to_idx]
                     if len(group_indices) < 2:
                         continue
@@ -393,13 +417,19 @@ async def cluster_three_stage_v2(
 
     # 并发执行所有 cat2 组
     grouped_clusters = await asyncio.gather(
-        *[_process_cat2_group(cat2, idx_set) for cat2, idx_set in cat2_candidates.items()]
+        *[
+            _process_cat2_group(cat2, idx_set)
+            for cat2, idx_set in cat2_candidates.items()
+        ]
     )
 
     # 从每个 cat2 的局部 union-find 结果提取合并结果
     for members in [members for group in grouped_clusters for members in group]:
         # 选 frequency 最高的作为 survivor
-        member_qs = [(remaining[idx].get('frequency', 1), remaining[idx]['id'], idx) for idx in members]
+        member_qs = [
+            (remaining[idx].get("frequency", 1), remaining[idx]["id"], idx)
+            for idx in members
+        ]
         member_qs.sort(reverse=True)
         survivor_id = member_qs[0][1]
         for _, mid, mid_idx in member_qs[1:]:
@@ -407,7 +437,9 @@ async def cluster_three_stage_v2(
                 merged_pairs.append((survivor_id, mid, 0.9))
                 merged_ids.add(mid)
 
-    logger.info(f"[V2] Stage 3 总合并: {len(merged_pairs) - stage1_count} 对 (传递性合并后)")
+    logger.info(
+        f"[V2] Stage 3 总合并: {len(merged_pairs) - stage1_count} 对 (传递性合并后)"
+    )
 
-    unmatched = [q['id'] for q in remaining if q['id'] not in merged_ids]
+    unmatched = [q["id"] for q in remaining if q["id"] not in merged_ids]
     return {"merged": merged_pairs, "unmatched": unmatched}

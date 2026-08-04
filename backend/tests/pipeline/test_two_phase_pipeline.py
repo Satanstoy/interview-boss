@@ -9,6 +9,7 @@
 5. 原子写入（聚类失败则回滚）
 6. 孤儿清理（重建时清理 practice_history）
 """
+
 import json
 import sqlite3
 import pytest
@@ -135,34 +136,64 @@ def create_test_db():
             interview_id INTEGER NOT NULL,
             question_detail_id INTEGER,
             status TEXT DEFAULT 'pending',
+            owner_id INTEGER DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
     """)
     # 插入测试用户和岗位
-    conn.execute("INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'testuser', 'hash', 1)")
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'testuser', 'hash', 1)"
+    )
     conn.execute("INSERT INTO job_positions (id, name) VALUES (1, 'agent开发')")
     conn.commit()
     return conn
 
 
-def make_question_bank_row(conn, qb_id, question, cat2="B1.Agent架构与范式",
-                           frequency=1, sources=None, oqs=None, oqs_sources=None,
-                           owner_id=None, job_position="agent开发"):
+def make_question_bank_row(
+    conn,
+    qb_id,
+    question,
+    cat2="B1.Agent架构与范式",
+    frequency=1,
+    sources=None,
+    oqs=None,
+    oqs_sources=None,
+    owner_id=None,
+    job_position="agent开发",
+):
     """Helper: 插入一条 question_bank 记录"""
     if sources is None:
-        sources = json.dumps([{"url": "http://example.com/1", "company": "测试公司", "round": "一面"}], ensure_ascii=False)
+        sources = json.dumps(
+            [{"url": "http://example.com/1", "company": "测试公司", "round": "一面"}],
+            ensure_ascii=False,
+        )
     if oqs is None:
         oqs = json.dumps([question], ensure_ascii=False)
     if oqs_sources is None:
-        oqs_sources = json.dumps([{"question": question, "sources": [{"url": "http://example.com/1"}]}], ensure_ascii=False)
+        oqs_sources = json.dumps(
+            [{"question": question, "sources": [{"url": "http://example.com/1"}]}],
+            ensure_ascii=False,
+        )
     conn.execute(
         "INSERT INTO question_bank (id, question, cat1, cat2, tags, difficulty, frequency, sources, "
         "original_questions, original_question_sources, owner_id, job_position) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (qb_id, question, "B.Agent与LLM应用", cat2, "Agent架构设计", "L2-中等",
-         frequency, sources, oqs, oqs_sources, owner_id, job_position)
+        (
+            qb_id,
+            question,
+            "B.Agent与LLM应用",
+            cat2,
+            "Agent架构设计",
+            "L2-中等",
+            frequency,
+            sources,
+            oqs,
+            oqs_sources,
+            owner_id,
+            job_position,
+        ),
     )
     conn.commit()
 
@@ -172,7 +203,7 @@ def make_interview(conn, interview_id, url, questions_list, job_position="agent�
     conn.execute(
         "INSERT INTO interview (id, url, company, round, questions_list, job_position, owner_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (interview_id, url, "测试公司", "一面", questions_list, job_position, 1)
+        (interview_id, url, "测试公司", "一面", questions_list, job_position, 1),
     )
     conn.commit()
 
@@ -183,7 +214,17 @@ def make_questions_detail(conn, url, questions, job_position="agent开发"):
         conn.execute(
             "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (url, "测试公司", "一面", q, "B.Agent与LLM应用", "B1.Agent架构与范式", "Agent架构设计", "L2-中等", job_position)
+            (
+                url,
+                "测试公司",
+                "一面",
+                q,
+                "B.Agent与LLM应用",
+                "B1.Agent架构与范式",
+                "Agent架构设计",
+                "L2-中等",
+                job_position,
+            ),
         )
     conn.commit()
 
@@ -200,20 +241,27 @@ class TestQueueBasicOperations:
         make_interview(conn, 1, "http://test.com/1", '["题目1"]')
 
         # 入队
-        conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (1,))
+        conn.execute(
+            "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
+            (1,),
+        )
         conn.commit()
 
         # 验证
-        row = conn.execute("SELECT * FROM analysis_queue WHERE interview_id = 1").fetchone()
+        row = conn.execute(
+            "SELECT * FROM analysis_queue WHERE interview_id = 1"
+        ).fetchone()
         assert row is not None
-        assert row['status'] == 'pending'
+        assert row["status"] == "pending"
         conn.close()
 
     def test_dequeue_marks_as_processing(self):
         """出队时应将状态改为 processing"""
         conn = create_test_db()
         make_interview(conn, 1, "http://test.com/1", '["题目1"]')
-        conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')")
+        conn.execute(
+            "INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')"
+        )
         conn.commit()
 
         # 出队：获取最早的 pending 项并标记为 processing
@@ -225,14 +273,16 @@ class TestQueueBasicOperations:
         conn.commit()
 
         assert row is not None
-        assert row['status'] == 'processing'
+        assert row["status"] == "processing"
         conn.close()
 
     def test_complete_marks_as_done(self):
         """完成后应将状态改为 done"""
         conn = create_test_db()
         make_interview(conn, 1, "http://test.com/1", '["题目1"]')
-        conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')")
+        conn.execute(
+            "INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')"
+        )
         conn.commit()
 
         conn.execute(
@@ -241,8 +291,10 @@ class TestQueueBasicOperations:
         )
         conn.commit()
 
-        row = conn.execute("SELECT status FROM analysis_queue WHERE interview_id = 1").fetchone()
-        assert row['status'] == 'done'
+        row = conn.execute(
+            "SELECT status FROM analysis_queue WHERE interview_id = 1"
+        ).fetchone()
+        assert row["status"] == "done"
         conn.close()
 
     def test_pending_count(self):
@@ -250,11 +302,16 @@ class TestQueueBasicOperations:
         conn = create_test_db()
         for i in range(1, 6):
             make_interview(conn, i, f"http://test.com/{i}", '["题目"]')
-            conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (i,))
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
+                (i,),
+            )
         conn.execute("UPDATE analysis_queue SET status = 'done' WHERE interview_id = 1")
         conn.commit()
 
-        count = conn.execute("SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'pending'").fetchone()['c']
+        count = conn.execute(
+            "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'pending'"
+        ).fetchone()["c"]
         assert count == 4
         conn.close()
 
@@ -279,20 +336,31 @@ class TestQueuePersistence:
                     questions_list TEXT, job_position TEXT DEFAULT '', owner_id INTEGER);
                 CREATE TABLE analysis_queue (id INTEGER PRIMARY KEY AUTOINCREMENT,
                     interview_id INTEGER, status TEXT DEFAULT 'pending',
+                    owner_id INTEGER DEFAULT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, processed_at TIMESTAMP);
             """)
             conn1.execute("INSERT INTO users VALUES (1, 'test', 'hash')")
-            conn1.execute("INSERT INTO interview VALUES (1, 'http://test.com/1', '公司', '一面', '[]', '', 1)")
-            conn1.execute("INSERT INTO interview VALUES (2, 'http://test.com/2', '公司', '二面', '[]', '', 1)")
-            conn1.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')")
-            conn1.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (2, 'pending')")
+            conn1.execute(
+                "INSERT INTO interview VALUES (1, 'http://test.com/1', '公司', '一面', '[]', '', 1)"
+            )
+            conn1.execute(
+                "INSERT INTO interview VALUES (2, 'http://test.com/2', '公司', '二面', '[]', '', 1)"
+            )
+            conn1.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (1, 'pending')"
+            )
+            conn1.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (2, 'pending')"
+            )
             conn1.commit()
             conn1.close()
 
             # 第二次打开：模拟重启
             conn2 = sqlite3.connect(db_path)
             conn2.row_factory = sqlite3.Row
-            pending = conn2.execute("SELECT * FROM analysis_queue WHERE status = 'pending'").fetchall()
+            pending = conn2.execute(
+                "SELECT * FROM analysis_queue WHERE status = 'pending'"
+            ).fetchall()
             assert len(pending) == 2
             conn2.close()
         finally:
@@ -311,14 +379,22 @@ class TestTaggingIsolation:
 
         # 预置一些 question_bank 数据
         make_question_bank_row(conn, 1, "什么是RAG？")
-        qb_count_before = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()['c']
+        qb_count_before = conn.execute(
+            "SELECT COUNT(*) as c FROM question_bank"
+        ).fetchone()["c"]
 
         # 模拟打标签：只写 questions_detail
-        make_questions_detail(conn, "http://test.com/1", ["什么是Agent？", "MCP协议是什么？"])
+        make_questions_detail(
+            conn, "http://test.com/1", ["什么是Agent？", "MCP协议是什么？"]
+        )
 
         # 验证
-        qd_count = conn.execute("SELECT COUNT(*) as c FROM questions_detail WHERE url = 'http://test.com/1'").fetchone()['c']
-        qb_count_after = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()['c']
+        qd_count = conn.execute(
+            "SELECT COUNT(*) as c FROM questions_detail WHERE url = 'http://test.com/1'"
+        ).fetchone()["c"]
+        qb_count_after = conn.execute(
+            "SELECT COUNT(*) as c FROM question_bank"
+        ).fetchone()["c"]
 
         assert qd_count == 2  # questions_detail 有记录
         assert qb_count_after == qb_count_before  # question_bank 无变化
@@ -334,8 +410,8 @@ class TestTaggingIsolation:
 
         # 验证 question_bank 未变
         qb = conn.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
-        assert qb['frequency'] == 5
-        assert qb['question'] == "什么是RAG？"
+        assert qb["frequency"] == 5
+        assert qb["question"] == "什么是RAG？"
         conn.close()
 
 
@@ -350,33 +426,49 @@ class TestThoroughCleanup:
         conn = create_test_db()
 
         # 预置 question_bank，original_questions 包含来自两个 URL 的题目
-        oqs = json.dumps(["题目A来自URL1", "题目B来自URL2", "题目C来自URL1"], ensure_ascii=False)
-        oqs_sources = json.dumps([
-            {"question": "题目A来自URL1", "sources": [{"url": "http://url1.com"}]},
-            {"question": "题目B来自URL2", "sources": [{"url": "http://url2.com"}]},
-            {"question": "题目C来自URL1", "sources": [{"url": "http://url1.com"}]},
-        ], ensure_ascii=False)
-        sources = json.dumps([
-            {"url": "http://url1.com", "company": "公司1", "round": "一面"},
-            {"url": "http://url2.com", "company": "公司2", "round": "二面"},
-        ], ensure_ascii=False)
-        make_question_bank_row(conn, 1, "代表题", frequency=3,
-                               sources=sources, oqs=oqs, oqs_sources=oqs_sources)
+        oqs = json.dumps(
+            ["题目A来自URL1", "题目B来自URL2", "题目C来自URL1"], ensure_ascii=False
+        )
+        oqs_sources = json.dumps(
+            [
+                {"question": "题目A来自URL1", "sources": [{"url": "http://url1.com"}]},
+                {"question": "题目B来自URL2", "sources": [{"url": "http://url2.com"}]},
+                {"question": "题目C来自URL1", "sources": [{"url": "http://url1.com"}]},
+            ],
+            ensure_ascii=False,
+        )
+        sources = json.dumps(
+            [
+                {"url": "http://url1.com", "company": "公司1", "round": "一面"},
+                {"url": "http://url2.com", "company": "公司2", "round": "二面"},
+            ],
+            ensure_ascii=False,
+        )
+        make_question_bank_row(
+            conn,
+            1,
+            "代表题",
+            frequency=3,
+            sources=sources,
+            oqs=oqs,
+            oqs_sources=oqs_sources,
+        )
 
         # 清理 URL1 的贡献
         from app.db.operations import _cleanup_old_sources_txn_v2
+
         with conn:
             _cleanup_old_sources_txn_v2(conn.cursor(), "http://url1.com", "agent开发")
 
         # 验证
         qb = conn.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
-        remaining_sources = json.loads(qb['sources'])
-        remaining_oqs = json.loads(qb['original_questions'])
-        remaining_oqs_sources = json.loads(qb['original_question_sources'])
+        remaining_sources = json.loads(qb["sources"])
+        remaining_oqs = json.loads(qb["original_questions"])
+        remaining_oqs_sources = json.loads(qb["original_question_sources"])
 
         # sources 中 URL1 应被移除
         assert len(remaining_sources) == 1
-        assert remaining_sources[0]['url'] == "http://url2.com"
+        assert remaining_sources[0]["url"] == "http://url2.com"
 
         # original_questions 中属于 URL1 的应被移除
         assert len(remaining_oqs) == 1
@@ -384,21 +476,27 @@ class TestThoroughCleanup:
 
         # original_question_sources 中属于 URL1 的应被移除
         assert len(remaining_oqs_sources) == 1
-        assert remaining_oqs_sources[0]['sources'][0]['url'] == "http://url2.com"
+        assert remaining_oqs_sources[0]["sources"][0]["url"] == "http://url2.com"
 
         # frequency 应更新为 1
-        assert qb['frequency'] == 1
+        assert qb["frequency"] == 1
         conn.close()
 
     def test_cleanup_deletes_qb_when_frequency_zero(self):
         """当所有来源都被移除后，QB 记录应被删除"""
         conn = create_test_db()
-        sources = json.dumps([{"url": "http://only-url.com", "company": "公司", "round": "一面"}], ensure_ascii=False)
+        sources = json.dumps(
+            [{"url": "http://only-url.com", "company": "公司", "round": "一面"}],
+            ensure_ascii=False,
+        )
         make_question_bank_row(conn, 1, "孤立项", frequency=1, sources=sources)
 
         from app.db.operations import _cleanup_old_sources_txn_v2
+
         with conn:
-            _cleanup_old_sources_txn_v2(conn.cursor(), "http://only-url.com", "agent开发")
+            _cleanup_old_sources_txn_v2(
+                conn.cursor(), "http://only-url.com", "agent开发"
+            )
 
         qb = conn.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
         assert qb is None  # 已被删除
@@ -407,16 +505,24 @@ class TestThoroughCleanup:
     def test_cleanup_removes_question_position_for_deleted_qb(self):
         """删除 QB 记录时，应同步清理 question_position"""
         conn = create_test_db()
-        sources = json.dumps([{"url": "http://url.com", "company": "公司", "round": "一面"}], ensure_ascii=False)
+        sources = json.dumps(
+            [{"url": "http://url.com", "company": "公司", "round": "一面"}],
+            ensure_ascii=False,
+        )
         make_question_bank_row(conn, 1, "题目", frequency=1, sources=sources)
-        conn.execute("INSERT INTO question_position (question_id, position_id) VALUES (1, 1)")
+        conn.execute(
+            "INSERT INTO question_position (question_id, position_id) VALUES (1, 1)"
+        )
         conn.commit()
 
         from app.db.operations import _cleanup_old_sources_txn_v2
+
         with conn:
             _cleanup_old_sources_txn_v2(conn.cursor(), "http://url.com", "agent开发")
 
-        qp = conn.execute("SELECT * FROM question_position WHERE question_id = 1").fetchone()
+        qp = conn.execute(
+            "SELECT * FROM question_position WHERE question_id = 1"
+        ).fetchone()
         assert qp is None  # 已被清理
         conn.close()
 
@@ -426,8 +532,11 @@ class TestThoroughCleanup:
         make_question_bank_row(conn, 1, "题目")
 
         from app.db.operations import _cleanup_old_sources_txn_v2
+
         with conn:
-            _cleanup_old_sources_txn_v2(conn.cursor(), "http://nonexistent.com", "agent开发")
+            _cleanup_old_sources_txn_v2(
+                conn.cursor(), "http://nonexistent.com", "agent开发"
+            )
 
         # 不应崩溃，QB 记录仍在
         qb = conn.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
@@ -449,12 +558,15 @@ class TestClusterTriggerConditions:
         # 入队 3 条（等于 batch_size）
         for i in range(1, 4):
             make_interview(conn, i, f"http://test.com/{i}", '["题目"]')
-            conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (i,))
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
+                (i,),
+            )
         conn.commit()
 
         pending_count = conn.execute(
             "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'pending'"
-        ).fetchone()['c']
+        ).fetchone()["c"]
 
         should_trigger = pending_count >= batch_size
         assert should_trigger is True
@@ -467,15 +579,18 @@ class TestClusterTriggerConditions:
         # 模拟：所有面经都已 tag 完成（没有 processing），队列有 pending
         for i in range(1, 4):
             make_interview(conn, i, f"http://test.com/{i}", '["题目"]')
-            conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (i,))
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
+                (i,),
+            )
         conn.commit()
 
         processing_count = conn.execute(
             "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'processing'"
-        ).fetchone()['c']
+        ).fetchone()["c"]
         pending_count = conn.execute(
             "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'pending'"
-        ).fetchone()['c']
+        ).fetchone()["c"]
 
         should_trigger = processing_count == 0 and pending_count > 0
         assert should_trigger is True
@@ -488,21 +603,28 @@ class TestClusterTriggerConditions:
 
         for i in range(1, 4):
             make_interview(conn, i, f"http://test.com/{i}", '["题目"]')
-            conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')", (i,))
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, status) VALUES (?, 'pending')",
+                (i,),
+            )
         # 还有一条正在处理
         make_interview(conn, 4, "http://test.com/4", '["题目"]')
-        conn.execute("INSERT INTO analysis_queue (interview_id, status) VALUES (4, 'processing')")
+        conn.execute(
+            "INSERT INTO analysis_queue (interview_id, status) VALUES (4, 'processing')"
+        )
         conn.commit()
 
         processing_count = conn.execute(
             "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'processing'"
-        ).fetchone()['c']
+        ).fetchone()["c"]
         pending_count = conn.execute(
             "SELECT COUNT(*) as c FROM analysis_queue WHERE status = 'pending'"
-        ).fetchone()['c']
+        ).fetchone()["c"]
 
         # pending < batch_size 且有 processing，不应触发
-        should_trigger = (pending_count >= batch_size) or (processing_count == 0 and pending_count > 0)
+        should_trigger = (pending_count >= batch_size) or (
+            processing_count == 0 and pending_count > 0
+        )
         assert should_trigger is False
         conn.close()
 
@@ -517,21 +639,32 @@ class TestClusteringContext:
         """聚类输入应包含已有聚类的摘要和新题"""
         # 这个测试验证聚类函数接收的参数包含已有聚类信息
         existing_clusters = [
-            {"id": 1, "question": "什么是RAG？", "cat2": "B2.RAG系统设计",
-             "original_questions": ["什么是RAG？", "介绍一下RAG技术"]},
+            {
+                "id": 1,
+                "question": "什么是RAG？",
+                "cat2": "B2.RAG系统设计",
+                "original_questions": ["什么是RAG？", "介绍一下RAG技术"],
+            },
         ]
         new_questions = [
             {"id": 100, "question": "RAG是什么？", "cat2": "B2.RAG系统设计"},
-            {"id": 101, "question": "Redis持久化方式有哪些？", "cat2": "D1.缓存设计与优化"},
+            {
+                "id": 101,
+                "question": "Redis持久化方式有哪些？",
+                "cat2": "D1.缓存设计与优化",
+            },
         ]
 
         # 验证：输入格式应包含两者
         all_input = existing_clusters + new_questions
         assert len(all_input) == 3
         # 已有聚类有 original_questions 字段
-        assert 'original_questions' in all_input[0]
+        assert "original_questions" in all_input[0]
         # 新题没有 original_questions（或为空）
-        assert 'original_questions' not in all_input[1] or all_input[1].get('original_questions') is None
+        assert (
+            "original_questions" not in all_input[1]
+            or all_input[1].get("original_questions") is None
+        )
 
 
 # ============================================================
@@ -544,20 +677,28 @@ class TestAtomicClusterWrite:
         """聚类写入失败时，question_bank 不应有任何变化"""
         conn = create_test_db()
         make_question_bank_row(conn, 1, "已有题目")
-        qb_before = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()['c']
+        qb_before = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()[
+            "c"
+        ]
 
         # 模拟原子写入失败
         try:
             conn.execute("BEGIN")
-            conn.execute("DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'")
-            conn.execute("INSERT INTO question_bank (question, cat1, cat2) VALUES ('新题目', 'A', 'B')")
+            conn.execute(
+                "DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'"
+            )
+            conn.execute(
+                "INSERT INTO question_bank (question, cat1, cat2) VALUES ('新题目', 'A', 'B')"
+            )
             # 模拟失败
             raise Exception("模拟写入失败")
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
 
-        qb_after = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()['c']
+        qb_after = conn.execute("SELECT COUNT(*) as c FROM question_bank").fetchone()[
+            "c"
+        ]
         assert qb_after == qb_before  # 回滚后数量不变
         conn.close()
 
@@ -566,21 +707,30 @@ class TestAtomicClusterWrite:
         conn = create_test_db()
 
         conn.execute("BEGIN")
-        conn.execute("DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'")
+        conn.execute(
+            "DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'"
+        )
         conn.execute(
             "INSERT INTO question_bank (question, cat1, cat2, job_position, sources, original_questions, original_question_sources) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("新聚类题", "B", "B1", "agent开发", "[]", "[]", "[]")
+            ("新聚类题", "B", "B1", "agent开发", "[]", "[]", "[]"),
         )
         new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        conn.execute("INSERT INTO question_position (question_id, position_id) VALUES (?, 1)", (new_id,))
+        conn.execute(
+            "INSERT INTO question_position (question_id, position_id) VALUES (?, 1)",
+            (new_id,),
+        )
         conn.execute("COMMIT")
 
-        qb = conn.execute("SELECT * FROM question_bank WHERE id = ?", (new_id,)).fetchone()
+        qb = conn.execute(
+            "SELECT * FROM question_bank WHERE id = ?", (new_id,)
+        ).fetchone()
         assert qb is not None
-        assert qb['question'] == "新聚类题"
+        assert qb["question"] == "新聚类题"
 
-        qp = conn.execute("SELECT * FROM question_position WHERE question_id = ?", (new_id,)).fetchone()
+        qp = conn.execute(
+            "SELECT * FROM question_position WHERE question_id = ?", (new_id,)
+        ).fetchone()
         assert qp is not None
         conn.close()
 
@@ -604,12 +754,18 @@ class TestPracticeHistoryCleanup:
         conn.commit()
 
         # 重建：删除旧 QB
-        conn.execute("DELETE FROM user_practice_history WHERE question_bank_id IN "
-                     "(SELECT id FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发')")
-        conn.execute("DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'")
+        conn.execute(
+            "DELETE FROM user_practice_history WHERE question_bank_id IN "
+            "(SELECT id FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发')"
+        )
+        conn.execute(
+            "DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'"
+        )
         conn.commit()
 
-        ph = conn.execute("SELECT * FROM user_practice_history WHERE question_bank_id = 1").fetchone()
+        ph = conn.execute(
+            "SELECT * FROM user_practice_history WHERE question_bank_id = 1"
+        ).fetchone()
         assert ph is None  # 孤儿记录已清理
         conn.close()
 
@@ -622,12 +778,18 @@ class TestPracticeHistoryCleanup:
         )
         conn.commit()
 
-        conn.execute("DELETE FROM user_question_view WHERE question_bank_id IN "
-                     "(SELECT id FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发')")
-        conn.execute("DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'")
+        conn.execute(
+            "DELETE FROM user_question_view WHERE question_bank_id IN "
+            "(SELECT id FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发')"
+        )
+        conn.execute(
+            "DELETE FROM question_bank WHERE owner_id IS NULL AND job_position = 'agent开发'"
+        )
         conn.commit()
 
-        uqv = conn.execute("SELECT * FROM user_question_view WHERE question_bank_id = 1").fetchone()
+        uqv = conn.execute(
+            "SELECT * FROM user_question_view WHERE question_bank_id = 1"
+        ).fetchone()
         assert uqv is None
         conn.close()
 

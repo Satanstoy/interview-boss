@@ -10,7 +10,7 @@ def _migration_009_analysis_queue(conn):
     cursor = conn.cursor()
 
     # ── 两阶段流水线队列表（基本单位：单个问题） ──
-    conn.execute('''
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS analysis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             interview_id INTEGER NOT NULL,
@@ -20,9 +20,12 @@ def _migration_009_analysis_queue(conn):
             processed_at TIMESTAMP,
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         )
-    ''')
+    """)
     # 迁移：为旧表添加 question_detail_id 列（必须在创建索引之前）
-    aq_col_set = {row[1] for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()}
+    aq_col_set = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
     if "question_detail_id" not in aq_col_set:
         conn.execute("ALTER TABLE analysis_queue ADD COLUMN question_detail_id INTEGER")
     cursor.execute("PRAGMA index_list('analysis_queue')")
@@ -32,12 +35,14 @@ def _migration_009_analysis_queue(conn):
     if "idx_aq_interview" not in aq_indexes:
         conn.execute("CREATE INDEX idx_aq_interview ON analysis_queue(interview_id)")
     if "idx_aq_question_detail" not in aq_indexes:
-        conn.execute("CREATE INDEX idx_aq_question_detail ON analysis_queue(question_detail_id)")
+        conn.execute(
+            "CREATE INDEX idx_aq_question_detail ON analysis_queue(question_detail_id)"
+        )
 
 
 def _migration_022_jobs_table(conn):
     """Add jobs table for tracking async background tasks."""
-    conn.execute('''
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_type TEXT NOT NULL,
@@ -53,20 +58,69 @@ def _migration_022_jobs_table(conn):
             completed_at TIMESTAMP,
             FOREIGN KEY (created_by) REFERENCES users(id)
         )
-    ''')
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
 
 
 def _migration_036_job_payloads(conn):
     """Create job_payloads table for storing submit import task payloads.
     Add composite index on jobs for active submit job queries."""
-    conn.execute('''
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS job_payloads (
             job_id INTEGER PRIMARY KEY,
             payload TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
         )
-    ''')
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_creator_type_status ON jobs(created_by, job_type, status)")
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_creator_type_status ON jobs(created_by, job_type, status)"
+    )
     logger.info("已创建 job_payloads 表和 jobs 复合索引")
+
+
+def _migration_049_analysis_queue_owner(conn):
+    """Add owner_id to analysis_queue for personal/public path unification.
+
+    owner_id IS NULL → public queue (processed by cluster_batch as before).
+    owner_id = user_id → personal queue (cluster_batch matches only within
+    that user's existing clusters, never mixing with public or other users).
+    """
+    aq_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
+    if "owner_id" not in aq_cols:
+        conn.execute(
+            "ALTER TABLE analysis_queue ADD COLUMN owner_id INTEGER DEFAULT NULL"
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_aq_owner ON analysis_queue(owner_id)")
+    logger.info("migration_049: analysis_queue.owner_id 列已就绪")
+
+
+def _migration_050_pipeline_metrics(conn):
+    """Create pipeline_metrics table for observability.
+
+    Records every cluster_batch / compaction / extract run with timing,
+    counts, and LLM call stats so we can analyse bottlenecks offline.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation TEXT NOT NULL,
+            job_position TEXT DEFAULT '',
+            owner_id INTEGER,
+            questions_in INTEGER DEFAULT 0,
+            matched INTEGER DEFAULT 0,
+            new_clusters INTEGER DEFAULT 0,
+            merged INTEGER DEFAULT 0,
+            llm_calls INTEGER DEFAULT 0,
+            elapsed_seconds REAL DEFAULT 0,
+            error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pm_op ON pipeline_metrics(operation)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pm_created ON pipeline_metrics(created_at)"
+    )
+    logger.info("migration_050: pipeline_metrics 表已就绪")
