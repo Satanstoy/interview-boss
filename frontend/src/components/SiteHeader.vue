@@ -175,12 +175,12 @@ const createPlaylist = async () => {
             <SelectItem value="all">全部题目</SelectItem>
             <SelectItem value="favorites">我的收藏</SelectItem>
             <div v-for="playlist in codingPlaylists" :key="playlist.id" class="relative">
-              <SelectItem :value="String(playlist.id)" class="pr-9">
+              <SelectItem :value="String(playlist.id)" class="pr-16">
                 {{ playlist.name }}（{{ playlist.problem_count }}）
               </SelectItem>
               <button
                 type="button"
-                class="absolute right-1 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                class="absolute right-8 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 :aria-label="`管理题单 ${playlist.name}`"
                 @pointerdown.prevent.stop
                 @click.prevent.stop="toggleCodingPlaylistMenu(playlist.id)"
