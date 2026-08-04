@@ -8,7 +8,6 @@
       :active-season="activeSeason"
       :available-seasons="availableSeasons"
       :is-building="isBuilding"
-      @close="onClose"
       @go-to-question="onGoToQuestion"
       @logout="handleLogout"
       @share-default-changed="handleShareDefaultChanged"
@@ -22,10 +21,7 @@
 
 <script setup>
 import { inject } from 'vue'
-import { useRouter } from 'vue-router'
 import SettingsPage from '@/components/business/SettingsPage.vue'
-
-const router = useRouter()
 
 const {
   displayUser, practiceStats, masterBank,
@@ -38,13 +34,5 @@ const {
 
 const handleProfileUpdated = () => {
   loadAllData()
-}
-
-const onClose = () => {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.push('/master-bank')
-  }
 }
 </script>

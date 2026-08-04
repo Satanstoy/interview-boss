@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowLeft, PanelLeftClose } from '@lucide/vue'
+import { PanelLeftClose } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 
 const props = defineProps({
@@ -8,7 +8,7 @@ const props = defineProps({
   isAdmin: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:activeSection', 'close', 'collapse'])
+const emit = defineEmits(['update:activeSection', 'collapse'])
 
 function selectSection(id) {
   emit('update:activeSection', id)
@@ -16,7 +16,7 @@ function selectSection(id) {
 </script>
 
 <template>
-  <nav class="flex h-full w-[288px] shrink-0 flex-col overflow-hidden bg-background">
+  <nav class="flex h-full w-full shrink-0 flex-col overflow-hidden bg-background">
     <!-- Header -->
     <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
       <div class="min-w-0 flex-1">
@@ -53,16 +53,6 @@ function selectSection(id) {
             {{ item.description }}
           </div>
         </div>
-      </button>
-    </div>
-
-    <div class="shrink-0 border-t border-border p-2">
-      <button
-        class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-        @click="emit('close')"
-      >
-        <ArrowLeft :size="14" />
-        返回工作台
       </button>
     </div>
   </nav>

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { User, Target, Bot, Shield, Settings, Server } from '@lucide/vue'
+import { User, Target, Bot, Shield, Settings, Server, PanelLeft } from '@lucide/vue'
 import SettingsNav from './SettingsNav.vue'
 import SettingsProfile from './SettingsProfile.vue'
 import SettingsInterview from './SettingsInterview.vue'
@@ -21,12 +21,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'close', 'go-to-question', 'logout', 'share-default-changed',
+  'go-to-question', 'logout', 'share-default-changed',
   'profile-updated', 'build-master-bank', 'update:activeSeason',
   'sidebar-collapsed-changed',
 ])
 
 const activeSection = ref('profile')
+const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
+const navCollapsed = ref(isMobileViewport())
 
 const sections = computed(() => {
   const items = [
@@ -39,12 +41,26 @@ const sections = computed(() => {
   if (props.isAdmin) items.push({ id: 'admin', label: '管理员设置', description: '分类和题库操作', icon: Settings })
   return items
 })
+
+const currentSectionLabel = computed(
+  () => sections.value.find(s => s.id === activeSection.value)?.label || '设置',
+)
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 bg-background">
+  <div class="relative flex h-full min-h-0 overflow-hidden bg-background">
+    <!-- Mobile overlay -->
     <div
-      class="flex w-64 shrink-0 flex-col overflow-hidden border-r border-border"
+      v-if="!navCollapsed"
+      class="fixed inset-0 z-20 bg-background/70 backdrop-blur-sm md:hidden"
+      @click="navCollapsed = true"
+    />
+
+    <!-- Settings sidebar -->
+    <div
+      class="settings-sidebar z-30 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden md:z-auto"
+      :class="{ 'settings-sidebar-collapsed': navCollapsed }"
+      :style="{ width: navCollapsed ? '0px' : '16rem' }"
     >
       <div class="sidebar-content h-full">
         <SettingsNav
@@ -52,12 +68,36 @@ const sections = computed(() => {
           :sections="sections"
           :is-admin="isAdmin"
           @update:active-section="activeSection = $event"
-          @close="emit('close')"
+          @collapse="navCollapsed = true"
         />
       </div>
     </div>
 
+    <!-- Sidebar collapsed: show expand button (desktop) -->
+    <div v-if="navCollapsed" class="hidden flex-col items-center py-2 px-2 gap-1 shrink-0 sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" class="size-7" aria-label="展开设置菜单" @click="navCollapsed = false">
+        <PanelLeft :size="14" />
+      </Button>
+    </div>
+
     <div class="flex min-w-0 flex-1 flex-col">
+      <!-- Mobile header: toggle settings menu -->
+      <div class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+          aria-label="切换设置菜单"
+          @click="navCollapsed = false"
+        >
+          <PanelLeft :size="14" />
+          <span>设置菜单</span>
+        </Button>
+        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {{ currentSectionLabel }}
+        </span>
+      </div>
+
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <div class="mx-auto flex w-full max-w-4xl flex-col px-6 py-6">
           <div v-if="activeSection === 'profile'" class="animate-fade-in">
@@ -109,6 +149,45 @@ const sections = computed(() => {
 </template>
 
 <style scoped>
+.settings-sidebar {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 767px) {
+  .settings-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(82vw, 256px) !important;
+    max-width: calc(100vw - 24px);
+    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }
+
+  .settings-sidebar.settings-sidebar-collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+}
+
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.settings-sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 .animate-fade-in {
   animation: fadeIn var(--motion-short-3) var(--ease-decelerate);
 }
