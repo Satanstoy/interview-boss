@@ -377,6 +377,12 @@ async def import_coding_problems(
 
     def _save():
         with get_db_connection() as conn:
+            if req.playlist_id and not conn.execute(
+                "SELECT id FROM coding_playlists WHERE id = ? AND user_id = ?",
+                (req.playlist_id, user["id"]),
+            ).fetchone():
+                raise HTTPException(status_code=404, detail="题单不存在")
+
             for item in candidates[:50]:
                 if not isinstance(item, dict):
                     continue
@@ -397,6 +403,11 @@ async def import_coding_problems(
                 ).fetchone()
                 if exists:
                     duplicates.append({"id": exists["id"], "title": title})
+                    if req.playlist_id:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO coding_playlist_items (playlist_id, problem_id) VALUES (?, ?)",
+                            (req.playlist_id, exists["id"]),
+                        )
                     continue
                 cursor = conn.execute(
                     """
@@ -425,12 +436,27 @@ async def import_coding_problems(
                         "source_type": "imported",
                     }
                 )
+                if req.playlist_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO coding_playlist_items (playlist_id, problem_id) VALUES (?, ?)",
+                        (req.playlist_id, cursor.lastrowid),
+                    )
+            if req.playlist_id:
+                conn.execute(
+                    "UPDATE coding_playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (req.playlist_id,),
+                )
             conn.commit()
 
     await run_db(_save)
     if not created and not duplicates:
         raise HTTPException(status_code=422, detail="没有识别到有效题目，请调整 Prompt 或 Markdown 内容")
-    return {"created": created, "duplicates": duplicates, "filename": req.filename}
+    return {
+        "created": created,
+        "duplicates": duplicates,
+        "filename": req.filename,
+        "playlist_id": req.playlist_id,
+    }
 
 
 @router.post("/api/coding/submit")

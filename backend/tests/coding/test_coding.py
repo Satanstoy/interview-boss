@@ -183,6 +183,48 @@ class TestCodingProblems:
         assert row["source_type"] == "imported"
         assert row["source"] == "我的面试题.md"
 
+    def test_import_markdown_adds_created_problems_to_selected_playlist(self, auth_client, test_db):
+        """导入题目时指定当前题单，新增题目应立即归入该题单。"""
+        client, _ = auth_client
+        playlist = client.post(
+            "/api/coding/playlists",
+            json={"name": "当前练习题单", "description": "导入归档"},
+        )
+        assert playlist.status_code == 200
+        playlist_id = playlist.json()["id"]
+        llm_result = json.dumps(
+            {
+                "problems": [
+                    {
+                        "title": "二叉树层序遍历",
+                        "description": "给定一棵二叉树，返回其层序遍历结果。",
+                        "difficulty": "medium",
+                        "tags": ["树"],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+        with patch("app.routers.coding.raw_llm_call", AsyncMock(return_value=llm_result)):
+            resp = client.post(
+                "/api/coding/import",
+                json={
+                    "prompt": "提取树相关手撕题",
+                    "markdown": "# 二叉树层序遍历",
+                    "filename": "树题.md",
+                    "playlist_id": playlist_id,
+                },
+            )
+
+        assert resp.status_code == 200
+        playlist_problems = client.get(
+            f"/api/coding/problems?scope=playlist&playlist_id={playlist_id}"
+        ).json()
+        assert playlist_problems["total"] == 1
+        assert playlist_problems["problems"][0]["title"] == "二叉树层序遍历"
+        assert client.get("/api/coding/playlists").json()[0]["problem_count"] == 1
+
 
 # ── 代码提交 ──
 

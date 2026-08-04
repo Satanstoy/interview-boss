@@ -24,6 +24,7 @@
 | `UploadToBankRequest` | 上传题目到题库 |
 | `UpdateQuestionRequest` | 更新题目信息（分类/标签/难度） |
 | `CodingSubmitRequest` | 手撕代码提交 |
+| `CodingImportRequest` | Prompt + Markdown 导入手撕题，可绑定当前题单 |
 | `CodingProblemCreateRequest` | 创建代码题目 |
 | `DistributionPreferenceRequest` | 五类题型比例、题数与风格来源的保存/单场覆盖 schema |
 | `PracticeReviewRequest` | 闪卡复习评级与可选自测分数 |

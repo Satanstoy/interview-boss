@@ -20,7 +20,7 @@
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
-| `coding.py` | `/api/coding/*` | 手撕代码练习（题目/提交/错误统计） |
+| `coding.py` | `/api/coding/*` | 手撕代码练习（题目/题单/导入/提交/错误统计） |
 | `audio.py` | `/api/audio/*` | 语音转文字（Deepgram） |
 | `error_report.py` | `/api/error-report` | 前端错误上报 |
 | `interview_distribution.py` | `/api/interview/distribution/*` | 模拟面试题型的系统默认分布与用户岗位偏好 |

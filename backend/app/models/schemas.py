@@ -110,6 +110,7 @@ class CodingImportRequest(BaseModel):
     prompt: str = Field("", max_length=5000)
     markdown: str = Field(..., min_length=1, max_length=100000)
     filename: str = Field("导入题目.md", max_length=255)
+    playlist_id: Optional[int] = Field(None, ge=1)
 
 
 class CodingPlaylistCreateRequest(BaseModel):

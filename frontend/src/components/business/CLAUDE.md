@@ -49,7 +49,7 @@
 - API 调用通过 `services/` 层或兼容层 `api/index.js`，禁止在组件中直接 `fetch`
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
-- `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：侧栏负责搜索/筛选/题单，左栏只展示题目描述与页签，右栏只负责语言、代码编辑和提交动作，AI 评审与参考答案通过页签查看。
+- `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：顶栏选择当前题单，当前题单区域只展示搜索、AI 导入和题目列表，右侧展示题目描述、编辑器与页签；不再使用独立题库侧栏或难度筛选区。
 - `PracticeMode.vue` 的默认路径以背八股为主：题单选择和单卡内容优先，答案评估与历史记录作为卡片内的次级操作；题单范围由当前题库筛选结果和 `practicedQuestions` 练习元数据驱动。
 - `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 
