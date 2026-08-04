@@ -5,6 +5,7 @@ import { AlertCircle, ArrowDown, ArrowUp, Clock3, Ellipsis, Layers, Loader2, Men
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 import { useToast } from '@/composables/useNotification.js'
@@ -60,7 +61,6 @@ const playlistName = ref('')
 const playlistDescription = ref('')
 const isCreatingPlaylist = ref(false)
 const practiceSelectOpen = ref(false)
-const codingPlaylistMenuId = ref(null)
 
 const primaryJob = computed(() => {
   if (activeJobs.value.length === 0) return null
@@ -79,12 +79,7 @@ const openCreatePlaylist = () => {
 }
 
 const selectCodingList = (value) => {
-  codingPlaylistMenuId.value = null
   codingNavigation?.selectList(value)
-}
-
-const toggleCodingPlaylistMenu = (playlistId) => {
-  codingPlaylistMenuId.value = codingPlaylistMenuId.value === playlistId ? null : playlistId
 }
 
 const refreshCodingPlaylists = async () => {
@@ -93,7 +88,6 @@ const refreshCodingPlaylists = async () => {
 
 const movePlaylist = async (playlist, direction) => {
   try {
-    codingPlaylistMenuId.value = null
     await moveCodingPlaylist(playlist.id, direction)
     await refreshCodingPlaylists()
   } catch (err) {
@@ -104,7 +98,6 @@ const movePlaylist = async (playlist, direction) => {
 const removePlaylist = async (playlist) => {
   if (!window.confirm(`确定删除题单「${playlist.name}」吗？题目本身不会被删除。`)) return
   try {
-    codingPlaylistMenuId.value = null
     await deleteCodingPlaylist(playlist.id)
     if (codingSelectedListKey.value === String(playlist.id)) codingNavigation?.selectList('all')
     await refreshCodingPlaylists()
@@ -178,20 +171,24 @@ const createPlaylist = async () => {
               <SelectItem :value="String(playlist.id)" class="pr-16">
                 {{ playlist.name }}（{{ playlist.problem_count }}）
               </SelectItem>
-              <button
-                type="button"
-                class="absolute right-8 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                :aria-label="`管理题单 ${playlist.name}`"
-                @pointerdown.prevent.stop
-                @click.prevent.stop="toggleCodingPlaylistMenu(playlist.id)"
-              >
-                <Ellipsis class="size-4" />
-              </button>
-              <div v-if="codingPlaylistMenuId === playlist.id" class="absolute right-2 top-[calc(100%-2px)] z-30 flex min-w-36 flex-col rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
-                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted" @click.stop="movePlaylist(playlist, 'up')"><ArrowUp class="size-3.5" />上移</button>
-                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted" @click.stop="movePlaylist(playlist, 'down')"><ArrowDown class="size-3.5" />下移</button>
-                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10" @click.stop="removePlaylist(playlist)"><Trash2 class="size-3.5" />删除题单</button>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <button
+                    type="button"
+                    class="absolute right-8 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                    :aria-label="`管理题单 ${playlist.name}`"
+                    @pointerdown.stop
+                    @click.stop
+                  >
+                    <Ellipsis class="size-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="z-[100] min-w-36">
+                  <DropdownMenuItem @select="movePlaylist(playlist, 'up')"><ArrowUp class="size-3.5" />上移</DropdownMenuItem>
+                  <DropdownMenuItem @select="movePlaylist(playlist, 'down')"><ArrowDown class="size-3.5" />下移</DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive" @select="removePlaylist(playlist)"><Trash2 class="size-3.5" />删除题单</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <SelectSeparator />
             <button
