@@ -91,6 +91,7 @@ class UpdateQuestionRequest(BaseModel):
 class CodingSubmitRequest(BaseModel):
     problem_id: int
     language: str = Field(..., max_length=20)
+    coding_mode: str = Field("leetcode", max_length=20)
     code: str = Field(..., max_length=50000)
     mode: str = Field("full_review", max_length=20)
     parent_submission_id: int = None
@@ -120,6 +121,10 @@ class CodingPlaylistCreateRequest(BaseModel):
 
 class CodingPlaylistItemRequest(BaseModel):
     problem_id: int
+
+
+class CodingPlaylistMoveRequest(BaseModel):
+    direction: Literal["up", "down"]
 
 
 class DistributionPreferenceRequest(BaseModel):

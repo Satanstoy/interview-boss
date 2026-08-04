@@ -1,14 +1,14 @@
 <script setup>
 import { computed, inject, ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, Clock3, Layers, Loader2, Menu, Plus, Settings, X } from '@lucide/vue'
+import { AlertCircle, ArrowDown, ArrowUp, Clock3, Ellipsis, Layers, Loader2, Menu, Plus, Settings, Trash2, X } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
 import { useToast } from '@/composables/useNotification.js'
-import { createCodingPlaylist } from '@/services/codingApi.js'
+import { createCodingPlaylist, deleteCodingPlaylist, moveCodingPlaylist } from '@/services/codingApi.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const props = defineProps({
@@ -60,6 +60,7 @@ const playlistName = ref('')
 const playlistDescription = ref('')
 const isCreatingPlaylist = ref(false)
 const practiceSelectOpen = ref(false)
+const codingPlaylistMenuId = ref(null)
 
 const primaryJob = computed(() => {
   if (activeJobs.value.length === 0) return null
@@ -78,7 +79,39 @@ const openCreatePlaylist = () => {
 }
 
 const selectCodingList = (value) => {
+  codingPlaylistMenuId.value = null
   codingNavigation?.selectList(value)
+}
+
+const toggleCodingPlaylistMenu = (playlistId) => {
+  codingPlaylistMenuId.value = codingPlaylistMenuId.value === playlistId ? null : playlistId
+}
+
+const refreshCodingPlaylists = async () => {
+  await codingNavigation?.loadPlaylists()
+}
+
+const movePlaylist = async (playlist, direction) => {
+  try {
+    codingPlaylistMenuId.value = null
+    await moveCodingPlaylist(playlist.id, direction)
+    await refreshCodingPlaylists()
+  } catch (err) {
+    error(err.message || '调整题单顺序失败')
+  }
+}
+
+const removePlaylist = async (playlist) => {
+  if (!window.confirm(`确定删除题单「${playlist.name}」吗？题目本身不会被删除。`)) return
+  try {
+    codingPlaylistMenuId.value = null
+    await deleteCodingPlaylist(playlist.id)
+    if (codingSelectedListKey.value === String(playlist.id)) codingNavigation?.selectList('all')
+    await refreshCodingPlaylists()
+    success('题单已删除')
+  } catch (err) {
+    error(err.message || '删除题单失败')
+  }
 }
 
 const selectPracticeList = (value) => {
@@ -99,7 +132,7 @@ const createPlaylist = async () => {
       name: playlistName.value.trim(),
       description: playlistDescription.value.trim(),
     })
-    codingNavigation.playlists.value.unshift(playlist)
+    await codingNavigation.loadPlaylists()
     codingNavigation.selectList(String(playlist.id))
     playlistDialogOpen.value = false
     success('题单已创建')
@@ -141,16 +174,36 @@ const createPlaylist = async () => {
           <SelectContent>
             <SelectItem value="all">全部题目</SelectItem>
             <SelectItem value="favorites">我的收藏</SelectItem>
-            <SelectItem v-for="playlist in codingPlaylists" :key="playlist.id" :value="String(playlist.id)">
-              {{ playlist.name }}（{{ playlist.problem_count }}）
-            </SelectItem>
+            <div v-for="playlist in codingPlaylists" :key="playlist.id" class="relative">
+              <SelectItem :value="String(playlist.id)" class="pr-9">
+                {{ playlist.name }}（{{ playlist.problem_count }}）
+              </SelectItem>
+              <button
+                type="button"
+                class="absolute right-1 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                :aria-label="`管理题单 ${playlist.name}`"
+                @pointerdown.prevent.stop
+                @click.prevent.stop="toggleCodingPlaylistMenu(playlist.id)"
+              >
+                <Ellipsis class="size-4" />
+              </button>
+              <div v-if="codingPlaylistMenuId === playlist.id" class="absolute right-2 top-[calc(100%-2px)] z-30 flex min-w-36 flex-col rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted" @click.stop="movePlaylist(playlist, 'up')"><ArrowUp class="size-3.5" />上移</button>
+                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted" @click.stop="movePlaylist(playlist, 'down')"><ArrowDown class="size-3.5" />下移</button>
+                <button type="button" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10" @click.stop="removePlaylist(playlist)"><Trash2 class="size-3.5" />删除题单</button>
+              </div>
+            </div>
+            <SelectSeparator />
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground outline-none transition hover:bg-accent hover:text-accent-foreground"
+              @pointerdown.prevent
+              @click="openCreatePlaylist"
+            >
+              <Plus class="size-4" />新建题单
+            </button>
           </SelectContent>
         </Select>
-        <AppTooltip text="新建题单">
-          <Button variant="ghost" size="icon" class="size-8 shrink-0 text-muted-foreground" aria-label="新建题单" @click="openCreatePlaylist">
-            <Plus class="size-4" />
-          </Button>
-        </AppTooltip>
       </template>
 
       <template v-else-if="showPracticeControls">

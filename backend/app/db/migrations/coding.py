@@ -226,3 +226,35 @@ def _migration_053_coding_library(conn):
         "CREATE INDEX IF NOT EXISTS idx_coding_playlist_user ON coding_playlists(user_id)"
     )
     logger.info("已创建手撕代码个人题库、收藏和题单表")
+
+
+def _migration_058_coding_playlist_order(conn):
+    """Add a stable user-controlled order to coding playlists."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(coding_playlists)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if "position" not in columns:
+        conn.execute(
+            "ALTER TABLE coding_playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+        )
+
+    users = conn.execute(
+        "SELECT DISTINCT user_id FROM coding_playlists"
+    ).fetchall()
+    for user in users:
+        rows = conn.execute(
+            """
+            SELECT id FROM coding_playlists
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (user[0],),
+        ).fetchall()
+        for position, row in enumerate(rows):
+            conn.execute(
+                "UPDATE coding_playlists SET position = ? WHERE id = ?",
+                (position, row[0]),
+            )
+
+    logger.info("已为手撕代码题单添加可调整顺序字段")

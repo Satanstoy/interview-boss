@@ -143,6 +143,39 @@ class TestCodingProblems:
         assert data["problems"][0]["id"] == pid
         assert client.get("/api/coding/playlists").json()[0]["problem_count"] == 1
 
+    def test_playlist_order_and_delete(self, auth_client):
+        """个人题单可以调整顺序，删除题单不会影响题目本身。"""
+        client, _ = auth_client
+        playlist_ids = []
+        for name in ("题单 A", "题单 B", "题单 C"):
+            response = client.post("/api/coding/playlists", json={"name": name})
+            assert response.status_code == 200
+            playlist_ids.append(response.json()["id"])
+
+        assert [item["name"] for item in client.get("/api/coding/playlists").json()] == [
+            "题单 A", "题单 B", "题单 C"
+        ]
+
+        moved = client.post(
+            f"/api/coding/playlists/{playlist_ids[2]}/move",
+            json={"direction": "up"},
+        )
+        assert moved.status_code == 200
+        assert moved.json()["moved"] is True
+        assert [item["name"] for item in client.get("/api/coding/playlists").json()] == [
+            "题单 A", "题单 C", "题单 B"
+        ]
+
+        deleted = client.delete(
+            f"/api/coding/playlists/{playlist_ids[2]}",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert [item["name"] for item in client.get("/api/coding/playlists").json()] == [
+            "题单 A", "题单 B"
+        ]
+
     def test_import_markdown_with_prompt_uses_llm_and_persists_owned_problems(self, auth_client, test_db, mock_llm):
         """Prompt + Markdown 导入会调用统一 LLM 基建并落为当前用户题目。"""
         client, user_id = auth_client
@@ -243,7 +276,10 @@ class TestCodingSubmit:
             "complexity_analysis": "O(n)，符合预期"
         })
 
+        captured_messages = []
+
         async def fake_stream(*args, **kwargs):
+            captured_messages.extend(args[0])
             for chunk in [review_json[:50], review_json[50:]]:
                 yield chunk
 
@@ -255,6 +291,7 @@ class TestCodingSubmit:
             resp = client.post("/api/coding/submit", json={
                 "problem_id": pid,
                 "language": "python",
+                "coding_mode": "acm",
                 "code": "def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        if target - n in seen:\n            return [seen[target-n], i]\n        seen[n] = i",
                 "mode": "full_review"
             })
@@ -271,6 +308,7 @@ class TestCodingSubmit:
             assert done['total_score'] == 96  # (5+5+5+5+4) * 4
             assert 'syntax' in done['scores']
             assert done['scores']['syntax'] == 5
+            assert "ACM 标准输入输出模式" in captured_messages[-1]["content"]
         finally:
             coding_mod.stream_llm_messages = original_stream
 
@@ -281,7 +319,7 @@ class TestCodingSubmit:
 
         resp = client.post("/api/coding/submit", json={
             "problem_id": pid,
-            "language": "javascript",
+            "language": "brainfuck",
             "code": "console.log('hi')",
             "mode": "full_review"
         })
@@ -388,3 +426,5 @@ class TestCodingMigration:
             )
         }
         assert {"coding_problem_favorites", "coding_playlists", "coding_playlist_items"}.issubset(tables)
+        playlist_columns = {row["name"] for row in test_db.execute("PRAGMA table_info(coding_playlists)")}
+        assert "position" in playlist_columns

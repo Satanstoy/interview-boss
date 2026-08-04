@@ -1,11 +1,31 @@
 <template>
-  <div ref="containerRef" class="w-full h-full min-h-[300px]"></div>
+  <div class="light-code-editor" :class="{ 'is-readonly': readOnly }">
+    <div ref="gutterRef" class="editor-gutter" aria-hidden="true">
+      <div class="editor-gutter-lines" :style="{ transform: `translateY(-${scrollTop}px)` }">
+        <span v-for="line in lineCount" :key="line">{{ line }}</span>
+      </div>
+    </div>
+
+    <textarea
+      v-if="!readOnly"
+      ref="textareaRef"
+      :value="modelValue"
+      class="editor-input"
+      :aria-label="`${language} 代码编辑器`"
+      spellcheck="false"
+      autocapitalize="off"
+      autocomplete="off"
+      autocorrect="off"
+      @input="handleInput"
+      @keydown="handleKeydown"
+      @scroll="handleScroll"
+    />
+    <pre v-else class="editor-input editor-output" :aria-label="`${language} 参考代码`">{{ modelValue }}</pre>
+  </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, shallowRef } from 'vue'
-import { useTheme } from '@/composables/useTheme'
-import loader from '@monaco-editor/loader'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -15,78 +35,106 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-const containerRef = ref(null)
-const { isDark } = useTheme()
+const textareaRef = ref(null)
+const gutterRef = ref(null)
+const scrollTop = ref(0)
+const lineCount = computed(() => Math.max(1, (props.modelValue || '').split('\n').length))
 
-const editor = shallowRef(null)
-const model = shallowRef(null)
-let monacoInstance = null
-
-const LANGUAGE_MAP = {
-  python: 'python',
-  c: 'c',
-  java: 'java',
+function handleInput(event) {
+  emit('update:modelValue', event.target.value)
 }
 
-onMounted(async () => {
-  monacoInstance = await loader.init()
+function handleScroll(event) {
+  scrollTop.value = event.target.scrollTop
+  if (gutterRef.value) gutterRef.value.scrollTop = event.target.scrollTop
+}
 
-  model.value = monacoInstance.editor.createModel(
-    props.modelValue,
-    LANGUAGE_MAP[props.language] || 'python'
-  )
+function handleKeydown(event) {
+  if (event.key !== 'Tab') return
 
-  editor.value = monacoInstance.editor.create(containerRef.value, {
-    model: model.value,
-    theme: isDark.value ? 'vs-dark' : 'vs',
-    fontSize: 14,
-    tabSize: 4,
-    minimap: { enabled: false },
-    lineNumbers: 'on',
-    bracketPairColorization: { enabled: true },
-    autoClosingBrackets: 'always',
-    scrollBeyondLastLine: false,
-    wordWrap: 'on',
-    automaticLayout: true,
-    readOnly: props.readOnly,
-    padding: { top: 8, bottom: 8 },
+  event.preventDefault()
+  const target = event.currentTarget
+  const start = target.selectionStart
+  const end = target.selectionEnd
+  const nextValue = `${props.modelValue.slice(0, start)}    ${props.modelValue.slice(end)}`
+  emit('update:modelValue', nextValue)
+
+  requestAnimationFrame(() => {
+    if (textareaRef.value) {
+      textareaRef.value.selectionStart = start + 4
+      textareaRef.value.selectionEnd = start + 4
+    }
   })
-
-  model.value.onDidChangeContent(() => {
-    emit('update:modelValue', model.value.getValue())
-  })
-})
-
-onBeforeUnmount(() => {
-  if (editor.value) {
-    editor.value.dispose()
-  }
-  if (model.value) {
-    model.value.dispose()
-  }
-})
-
-watch(() => props.modelValue, (val) => {
-  if (model.value && val !== model.value.getValue()) {
-    model.value.setValue(val)
-  }
-})
-
-watch(() => props.language, (lang) => {
-  if (model.value && monacoInstance) {
-    monacoInstance.editor.setModelLanguage(model.value, LANGUAGE_MAP[lang] || 'python')
-  }
-})
-
-watch(isDark, (dark) => {
-  if (monacoInstance) {
-    monacoInstance.editor.setTheme(dark ? 'vs-dark' : 'vs')
-  }
-})
-
-watch(() => props.readOnly, (ro) => {
-  if (editor.value) {
-    editor.value.updateOptions({ readOnly: ro })
-  }
-})
+}
 </script>
+
+<style scoped>
+.light-code-editor {
+  --editor-background: #1e1e1e;
+  --editor-foreground: #d4d4d4;
+  display: flex;
+  height: 100%;
+  min-height: 300px;
+  overflow: hidden;
+  background: var(--editor-background);
+  color: var(--editor-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.editor-gutter {
+  width: 52px;
+  flex: 0 0 52px;
+  overflow: hidden;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  color: #858585;
+  text-align: right;
+  user-select: none;
+}
+
+.editor-gutter-lines {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  padding: 12px 12px 12px 0;
+  will-change: transform;
+}
+
+.editor-gutter-lines span {
+  height: 21px;
+  flex: 0 0 21px;
+}
+
+.editor-input {
+  min-width: 0;
+  width: 0;
+  flex: 1;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  padding: 12px 16px;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  tab-size: 4;
+  white-space: pre;
+  word-wrap: normal;
+}
+
+.editor-input::selection {
+  background: rgba(38, 130, 210, 0.45);
+}
+
+.editor-output {
+  display: block;
+}
+
+.is-readonly .editor-input {
+  cursor: default;
+}
+</style>

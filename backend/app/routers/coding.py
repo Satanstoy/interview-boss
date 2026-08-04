@@ -8,6 +8,7 @@ from app.core.prompts import CODING_REVIEW_PROMPT, CODING_HINT_PROMPT
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import (
     CodingImportRequest,
+    CodingPlaylistMoveRequest,
     CodingPlaylistCreateRequest,
     CodingPlaylistItemRequest,
     CodingSubmitRequest,
@@ -17,8 +18,12 @@ from app.services.llm import _extract_json, raw_llm_call, stream_llm_messages
 logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
-VALID_LANGUAGES = {"python", "c", "java"}
+VALID_LANGUAGES = {
+    "python", "javascript", "typescript", "java", "cpp", "c", "go",
+    "rust", "kotlin", "swift", "csharp", "php", "ruby", "sql",
+}
 VALID_MODES = {"full_review", "hint"}
+VALID_CODING_MODES = {"leetcode", "acm"}
 VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 
 
@@ -208,13 +213,13 @@ async def get_coding_playlists(user: dict = Depends(get_current_user)):
         with get_db_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT pl.id, pl.name, pl.description, pl.created_at, pl.updated_at,
+                SELECT pl.id, pl.name, pl.description, pl.position, pl.created_at, pl.updated_at,
                        COUNT(pi.problem_id) AS problem_count
                 FROM coding_playlists pl
                 LEFT JOIN coding_playlist_items pi ON pi.playlist_id = pl.id
                 WHERE pl.user_id = ?
                 GROUP BY pl.id
-                ORDER BY pl.updated_at DESC, pl.id DESC
+                ORDER BY pl.position ASC, pl.id ASC
                 """,
                 (user["id"],),
             ).fetchall()
@@ -236,9 +241,13 @@ async def create_coding_playlist(
     def _create():
         with get_db_connection() as conn:
             try:
+                position = conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM coding_playlists WHERE user_id = ?",
+                    (user["id"],),
+                ).fetchone()[0]
                 cursor = conn.execute(
-                    "INSERT INTO coding_playlists (user_id, name, description) VALUES (?, ?, ?)",
-                    (user["id"], name, req.description.strip()),
+                    "INSERT INTO coding_playlists (user_id, name, description, position) VALUES (?, ?, ?, ?)",
+                    (user["id"], name, req.description.strip(), position),
                 )
                 conn.commit()
             except Exception as exc:
@@ -250,9 +259,82 @@ async def create_coding_playlist(
                 "name": name,
                 "description": req.description.strip(),
                 "problem_count": 0,
+                "position": position,
             }
 
     return await run_db(_create)
+
+
+@router.delete("/api/coding/playlists/{playlist_id}")
+async def delete_coding_playlist(
+    playlist_id: int,
+    user: dict = Depends(get_current_user),
+):
+    """删除个人题单，但不删除题单中的题目。"""
+    def _delete():
+        with get_db_connection() as conn:
+            playlist = conn.execute(
+                "SELECT id FROM coding_playlists WHERE id = ? AND user_id = ?",
+                (playlist_id, user["id"]),
+            ).fetchone()
+            if not playlist:
+                raise HTTPException(status_code=404, detail="题单不存在")
+            conn.execute(
+                "DELETE FROM coding_playlist_items WHERE playlist_id = ?",
+                (playlist_id,),
+            )
+            conn.execute(
+                "DELETE FROM coding_playlists WHERE id = ? AND user_id = ?",
+                (playlist_id, user["id"]),
+            )
+            conn.commit()
+            return {"deleted": True, "playlist_id": playlist_id}
+
+    return await run_db(_delete)
+
+
+@router.post("/api/coding/playlists/{playlist_id}/move")
+async def move_coding_playlist(
+    playlist_id: int,
+    req: CodingPlaylistMoveRequest,
+    user: dict = Depends(get_current_user),
+):
+    """在当前用户的题单列表中向上或向下移动一个题单。"""
+    def _move():
+        with get_db_connection() as conn:
+            current = conn.execute(
+                "SELECT id, position FROM coding_playlists WHERE id = ? AND user_id = ?",
+                (playlist_id, user["id"]),
+            ).fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail="题单不存在")
+
+            operator = "<" if req.direction == "up" else ">"
+            ordering = "DESC" if req.direction == "up" else "ASC"
+            target = conn.execute(
+                f"""
+                SELECT id, position FROM coding_playlists
+                WHERE user_id = ? AND position {operator} ?
+                ORDER BY position {ordering}, id {ordering}
+                LIMIT 1
+                """,
+                (user["id"], current["position"]),
+            ).fetchone()
+            if not target:
+                return {"moved": False, "playlist_id": playlist_id}
+
+            conn.execute(
+                "UPDATE coding_playlists SET position = ? WHERE id = ?",
+                (target["position"], current["id"]),
+            )
+            conn.execute(
+                "UPDATE coding_playlists SET position = ? WHERE id = ?",
+                (current["position"], target["id"]),
+            )
+            conn.commit()
+            return {"moved": True, "playlist_id": playlist_id}
+
+    return await run_db(_move)
 
 
 @router.post("/api/coding/playlists/{playlist_id}/items")
@@ -465,6 +547,8 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
     # 校验
     if req.language not in VALID_LANGUAGES:
         raise HTTPException(status_code=400, detail=f"不支持的语言: {req.language}，支持: {', '.join(VALID_LANGUAGES)}")
+    if req.coding_mode not in VALID_CODING_MODES:
+        raise HTTPException(status_code=400, detail=f"无效编程模式: {req.coding_mode}，支持: LeetCode、ACM")
     if req.mode not in VALID_MODES:
         raise HTTPException(status_code=400, detail=f"无效模式: {req.mode}，支持: {', '.join(VALID_MODES)}")
     if not req.code.strip():
@@ -565,6 +649,18 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
             user_code=req.code[:10000],
             hint_history_section=hint_history_section,
         )
+
+    coding_mode_context = {
+        "leetcode": (
+            "LeetCode 函数模式：候选人通常只需实现题目要求的函数或方法，"
+            "重点关注函数签名、返回值、边界条件和复杂度。"
+        ),
+        "acm": (
+            "ACM 标准输入输出模式：候选人需要自行解析标准输入并向标准输出打印结果，"
+            "重点关注输入解析、输出格式、多个测试用例和整体复杂度。"
+        ),
+    }[req.coding_mode]
+    prompt += f"\n\n## 编程模式\n{coding_mode_context}\n请严格按照当前编程模式评审候选人的代码。"
 
     messages = [
         {"role": "system", "content": "你是一位资深的技术面试官，专注于算法和数据结构面试。"},

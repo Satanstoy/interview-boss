@@ -149,7 +149,7 @@ Routers → Services → Core/DB → (external)
 ### 手撕代码题库
 
 - `coding_problems.owner_id IS NULL` 的种子题目对所有用户可见，Prompt + Markdown 导入题目只对创建者可见，并标记 `source_type=imported`。
-- `coding_problem_favorites` 保存用户收藏，`coding_playlists` / `coding_playlist_items` 保存个人题单；列表接口统一返回 `is_favorite`、`attempt_count`、`is_solved`，并支持 `scope=favorites`、`playlist_id`、搜索和筛选。
+- `coding_problem_favorites` 保存用户收藏，`coding_playlists` / `coding_playlist_items` 保存个人题单；题单有稳定的用户自定义顺序，支持创建、上下移动、删除和从当前题单移除题目；列表接口统一返回 `is_favorite`、`attempt_count`、`is_solved`，并支持 `scope=favorites`、`playlist_id`、搜索和筛选。
 - `POST /api/coding/import` 通过 `raw_llm_call` 使用用户的 AI 配置，Markdown 和 Prompt 都按不可信内容传给模型，模型只返回结构化题目 JSON；单次最多导入 50 道，按当前用户和标题去重。
 
 ## 面试 Agent 质量保护

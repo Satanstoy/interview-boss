@@ -8,7 +8,7 @@
 |------|------|
 | `AdminReview.vue` | 管理员审核面板 |
 | `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
-| `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
+| `CodeEditor.vue` | 轻量 LeetCode 风格代码编辑器封装（原生 textarea + 行号栏，避免 Monaco 的运行时开销） |
 | `CodingPractice.vue` | 手撕代码练习主页面（ChatView 式全屏工作台 + 可收起题目侧栏 + LeetCode 式题目列表/描述/编辑器分栏 + AI 评审）；题单选择器位于全局 `SiteHeader`，保留收藏、题单和 Prompt + Markdown 导入 |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
 | `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正；regenerate 通过 assistant revision 重新加载消息，不删除或重复插入 user turn |

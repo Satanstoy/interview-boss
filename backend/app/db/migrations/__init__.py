@@ -66,6 +66,7 @@ from app.db.migrations.coding import (
     _migration_030_coding_module,
     _migration_031_coding_scores,
     _migration_053_coding_library,
+    _migration_058_coding_playlist_order,
 )
 from app.db.migrations.clustering import (
     _migration_032_embedding_column,
@@ -156,6 +157,7 @@ _MIGRATIONS = [
     (55, "practice_review_system", _migration_055_practice_review_system),
     (56, "custom_practice_decks", _migration_056_custom_practice_decks),
     (57, "practice_default_decks", _migration_057_practice_default_decks),
+    (58, "coding_playlist_order", _migration_058_coding_playlist_order),
 ]
 
 

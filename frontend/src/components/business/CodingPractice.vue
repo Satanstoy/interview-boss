@@ -29,12 +29,15 @@
         <div v-if="!problems.length && !isLoading" class="px-3 py-10 text-center text-xs text-muted-foreground">
           当前题单暂无题目
         </div>
-        <button
+        <div
           v-for="(problem, index) in problems"
           :key="problem.id"
-          class="group flex w-full items-start gap-2 rounded-lg p-2.5 text-left transition-colors"
+          role="button"
+          tabindex="0"
+          class="group relative flex w-full items-start gap-2 rounded-lg p-2.5 text-left transition-colors"
           :class="activeProblem?.id === problem.id ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'"
           @click="selectProblem(problem)"
+          @keydown.enter="selectProblem(problem)"
         >
           <span class="mt-0.5 w-6 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{{ index + 1 }}</span>
           <span class="min-w-0 flex-1">
@@ -46,7 +49,23 @@
             </span>
           </span>
           <Star v-if="problem.is_favorite" :size="14" :stroke-width="1.8" class="mt-0.5 shrink-0 fill-amber-400 text-amber-500" />
-        </button>
+          <div v-if="canManageProblems" class="relative shrink-0">
+            <button
+              type="button"
+              class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+              :class="openProblemMenuId === problem.id ? 'bg-muted opacity-100' : ''"
+              :aria-label="`管理题目 ${problem.title}`"
+              @click.stop="toggleProblemMenu(problem.id)"
+            >
+              <Ellipsis class="size-4" />
+            </button>
+            <div v-if="openProblemMenuId === problem.id" class="absolute right-0 top-8 z-30 min-w-36 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10" @click.stop="removeProblemFromCurrentList(problem)">
+                <Trash2 class="size-3.5" />{{ selectedListKey === 'favorites' ? '取消收藏' : '移出当前题单' }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -117,9 +136,24 @@
             <!-- Editor -->
             <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <div class="flex h-11 shrink-0 items-center justify-between gap-2 px-3">
-                <div class="flex items-center gap-1">
-                  <span class="mr-1 text-xs font-semibold text-foreground">代码</span>
-                  <button v-for="language in languageOptions" :key="language.value" class="rounded-full px-2.5 py-1 text-[11px] transition-colors" :class="currentLanguage === language.value ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="currentLanguage = language.value">{{ language.label }}</button>
+                <div class="flex min-w-0 items-center gap-2">
+                  <span class="mr-1 shrink-0 text-xs font-semibold text-foreground">代码</span>
+                  <Select v-model="codingMode">
+                    <SelectTrigger class="h-8 w-[126px] shrink-0 rounded-lg border-0 bg-muted/70 px-2.5 text-xs shadow-none">
+                      <SelectValue placeholder="选择模式" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="mode in codingModeOptions" :key="mode.value" :value="mode.value">{{ mode.label }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select v-model="currentLanguage">
+                    <SelectTrigger class="h-8 w-[124px] shrink-0 rounded-lg border-0 bg-muted/70 px-2.5 text-xs shadow-none">
+                      <SelectValue placeholder="选择语言" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="language in languageOptions" :key="language.value" :value="language.value">{{ language.label }}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <span v-if="activeProblem._isSubmitting" class="flex items-center gap-1 text-[11px] text-primary"><Loader2 :size="12" class="animate-spin" /> {{ activeProblem._currentStep || '分析中' }}</span>
                 <button v-else class="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" @click="clearProblem(activeProblem)">重置代码</button>
@@ -164,9 +198,9 @@
 
     <Dialog v-model:open="playlistDialogOpen">
       <DialogContent class="max-w-md">
-        <DialogHeader><DialogTitle>加入题单</DialogTitle><DialogDescription>选择一个题单，方便下次集中复习。新建题单请使用全局顶栏选择器旁的 +。</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>加入题单</DialogTitle><DialogDescription>选择一个题单，方便下次集中复习。新建题单请使用全局题单选择器底部的入口。</DialogDescription></DialogHeader>
         <div v-if="playlists.length" class="flex max-h-48 flex-col gap-1 overflow-y-auto"><Button v-for="playlist in playlists" :key="playlist.id" variant="outline" class="h-10 justify-between" @click="addToPlaylist(playlist)"><span class="flex items-center gap-2"><ListPlus :size="14" /> {{ playlist.name }}</span><span class="text-xs text-muted-foreground">{{ playlist.problem_count }} 题</span></Button></div>
-        <div v-else class="py-6 text-center text-sm text-muted-foreground">还没有自定义题单，请先在全局顶栏创建。</div>
+        <div v-else class="py-6 text-center text-sm text-muted-foreground">还没有自定义题单，请先在全局题单选择器底部创建。</div>
         <DialogFooter><Button variant="outline" @click="playlistDialogOpen = false">关闭</Button></DialogFooter>
       </DialogContent>
     </Dialog>
@@ -175,18 +209,38 @@
 
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ChevronRight, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Search, Sparkles, Star, Upload, Zap } from '@lucide/vue'
+import { ArrowLeft, ChevronRight, Ellipsis, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Search, Sparkles, Star, Trash2, Upload, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { useToast } from '@/composables/useNotification.js'
 import CodeEditor from './CodeEditor.vue'
-import { addCodingPlaylistItem, fetchCodingProblem, fetchCodingProblems, importCodingProblems, submitCodingCode, toggleCodingFavorite } from '@/services/codingApi.js'
+import { addCodingPlaylistItem, fetchCodingProblem, fetchCodingProblems, importCodingProblems, removeCodingPlaylistItem, submitCodingCode, toggleCodingFavorite } from '@/services/codingApi.js'
 
 const { toast } = useToast()
-const languageOptions = [{ value: 'python', label: 'Python' }, { value: 'c', label: 'C' }, { value: 'java', label: 'Java' }]
+const languageOptions = [
+  { value: 'python', label: 'Python' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'java', label: 'Java' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'c', label: 'C' },
+  { value: 'go', label: 'Go' },
+  { value: 'rust', label: 'Rust' },
+  { value: 'kotlin', label: 'Kotlin' },
+  { value: 'swift', label: 'Swift' },
+  { value: 'csharp', label: 'C#' },
+  { value: 'php', label: 'PHP' },
+  { value: 'ruby', label: 'Ruby' },
+  { value: 'sql', label: 'SQL' },
+]
+const codingModeOptions = [
+  { value: 'leetcode', label: 'LeetCode 模式' },
+  { value: 'acm', label: 'ACM 模式' },
+]
 const categoryLabels = { syntax: '语法', logic: '逻辑', algorithm: '算法', complexity: '复杂度', style: '风格' }
 const codingNavigation = inject('codingNavigation')
 
@@ -199,6 +253,7 @@ const playlists = codingNavigation.playlists
 const selectedListKey = codingNavigation.selectedListKey
 const searchQuery = ref('')
 const currentLanguage = ref('python')
+const codingMode = ref('leetcode')
 const isLoading = ref(false)
 const importDialogOpen = ref(false)
 const importMarkdown = ref('')
@@ -207,11 +262,13 @@ const importPrompt = ref('')
 const importError = ref('')
 const isImporting = ref(false)
 const playlistDialogOpen = ref(false)
+const openProblemMenuId = ref(null)
 
 const currentPlaylistId = computed(() => {
   if (!/^\d+$/.test(String(selectedListKey.value))) return null
   return Number(selectedListKey.value)
 })
+const canManageProblems = computed(() => selectedListKey.value !== 'all')
 const selectedPlaylist = computed(() => playlists.value.find(item => item.id === currentPlaylistId.value) || null)
 const selectedListLabel = computed(() => selectedPlaylist.value?.name || (selectedListKey.value === 'favorites' ? '我的收藏' : '全部题目'))
 const difficultyLabel = (value) => ({ easy: '简单', medium: '中等', hard: '困难' }[value] || '中等')
@@ -261,10 +318,15 @@ watch(selectedListKey, (value, previousValue) => {
 })
 
 async function selectProblem(problem) {
+  openProblemMenuId.value = null
   activeProblem.value = problem
   contentTab.value = 'description'
   if (isMobileViewport()) sidebarCollapsed.value = true
   try { Object.assign(problem, await fetchCodingProblem(problem.id)) } catch (error) { toast.error(error.message || '获取题目详情失败') }
+}
+
+function toggleProblemMenu(problemId) {
+  openProblemMenuId.value = openProblemMenuId.value === problemId ? null : problemId
 }
 
 function selectNextProblem() {
@@ -284,6 +346,28 @@ async function toggleFavorite(problem) {
       activeProblem.value = problems.value[0] || null
     }
   } catch (error) { toast.error(error.message || '收藏操作失败') }
+}
+
+async function removeProblemFromCurrentList(problem) {
+  openProblemMenuId.value = null
+  try {
+    if (selectedListKey.value === 'favorites') {
+      await toggleCodingFavorite(problem.id)
+      problems.value = problems.value.filter(item => item.id !== problem.id)
+      if (activeProblem.value?.id === problem.id) activeProblem.value = problems.value[0] || null
+      toast.success('已取消收藏')
+      return
+    }
+
+    if (currentPlaylistId.value) {
+      await removeCodingPlaylistItem(currentPlaylistId.value, problem.id)
+      problems.value = problems.value.filter(item => item.id !== problem.id)
+      const playlist = playlists.value.find(item => item.id === currentPlaylistId.value)
+      if (playlist) playlist.problem_count = Math.max(0, playlist.problem_count - 1)
+      if (activeProblem.value?.id === problem.id) activeProblem.value = problems.value[0] || null
+      toast.success('已移出当前题单')
+    }
+  } catch (error) { toast.error(error.message || '管理题目失败') }
 }
 
 function openAddToPlaylist() {
@@ -344,7 +428,7 @@ async function submitCode(problem, mode) {
   problem._currentStep = ''
   if (mode === 'full_review') { problem._feedback = ''; problem._scores = null; problem._totalScore = 0; problem._referenceAnswer = '' }
   const separator = mode === 'hint' && problem._feedback ? '\n\n---\n\n' : ''
-  const data = { problem_id: problem.id, language: currentLanguage.value, code: problem._code, mode }
+  const data = { problem_id: problem.id, language: currentLanguage.value, coding_mode: codingMode.value, code: problem._code, mode }
   if (mode === 'hint' && problem._lastSubmission) data.parent_submission_id = problem._lastSubmission.submission_id
   try {
     await submitCodingCode(data, (event) => {

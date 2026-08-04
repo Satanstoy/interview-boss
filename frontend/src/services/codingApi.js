@@ -23,6 +23,12 @@ export const fetchCodingPlaylists = () => get(`${API}/playlists`, { noCache: tru
 
 export const createCodingPlaylist = (data) => post(`${API}/playlists`, data)
 
+export const deleteCodingPlaylist = (playlistId) =>
+  del(`${API}/playlists/${playlistId}`)
+
+export const moveCodingPlaylist = (playlistId, direction) =>
+  post(`${API}/playlists/${playlistId}/move`, { direction })
+
 export const addCodingPlaylistItem = (playlistId, problemId) =>
   post(`${API}/playlists/${playlistId}/items`, { problem_id: problemId })
 
