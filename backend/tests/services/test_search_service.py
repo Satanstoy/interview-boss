@@ -72,6 +72,43 @@ async def test_search_provider_http_error_is_safe():
 
 
 @pytest.mark.asyncio
+async def test_exa_results_are_normalized_and_use_api_key_header():
+    from app.services.search_service import search_web
+
+    response = httpx.Response(
+        200,
+        json={
+            "results": [
+                {
+                    "title": "Exa docs",
+                    "url": "https://exa.ai/docs/reference/search",
+                    "highlights": ["Semantic web search for AI applications."],
+                    "publishedDate": "2026-08-01T00:00:00Z",
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.exa.ai/search"),
+    )
+    mock_client = AsyncMock()
+    mock_client.post.return_value = response
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+
+    with patch("app.services.search_service.httpx.AsyncClient", return_value=mock_client):
+        result = await search_web(
+            "AI 搜索",
+            config={"provider": "exa", "api_key": "exa-test-key", "base_url": ""},
+        )
+
+    assert result["provider"] == "exa"
+    assert result["results"][0]["snippet"] == "Semantic web search for AI applications."
+    request = mock_client.post.call_args
+    assert request.kwargs["headers"]["x-api-key"] == "exa-test-key"
+    assert request.kwargs["json"]["numResults"] == 5
+    assert request.kwargs["json"]["contents"]["highlights"] is True
+
+
+@pytest.mark.asyncio
 async def test_answer_prompt_falls_back_when_search_is_unavailable():
     from app.services.answer_enrichment import prepare_answer_prompt
     from app.services.search_service import SearchProviderError

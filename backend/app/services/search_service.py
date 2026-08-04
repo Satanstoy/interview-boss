@@ -27,6 +27,11 @@ SUPPORTED_SEARCH_PROVIDERS = {
         "description": "中文搜索体验较好，适合中文技术资料和面经。",
         "default_base_url": "https://api.bochaai.com/v1/web-search",
     },
+    "exa": {
+        "label": "Exa",
+        "description": "面向 AI 检索的语义搜索，适合查找技术文档、论文和高质量参考资料。",
+        "default_base_url": "https://api.exa.ai/search",
+    },
 }
 
 
@@ -56,6 +61,8 @@ def _endpoint(provider: str, base_url: str | None) -> str:
         return value.rstrip("/") + "/res/v1/web/search"
     if provider == "bocha" and not value.rstrip("/").endswith("web-search"):
         return value.rstrip("/") + "/v1/web-search"
+    if provider == "exa" and not value.rstrip("/").endswith("/search"):
+        return value.rstrip("/") + "/search"
     return value
 
 
@@ -72,11 +79,13 @@ def _normalize_results(provider: str, payload: dict, limit: int) -> list[dict[st
         raw_items = payload.get("results") or []
     elif provider == "brave":
         raw_items = (payload.get("web") or {}).get("results") or []
-    else:
+    elif provider == "bocha":
         data = payload.get("data") or payload
         web_pages = data.get("webPages") if isinstance(data, dict) else None
         raw_items = (web_pages or {}).get("value") if isinstance(web_pages, dict) else None
         raw_items = raw_items or (data.get("results") if isinstance(data, dict) else []) or []
+    else:
+        raw_items = payload.get("results") or []
 
     results: list[dict[str, str]] = []
     seen_urls: set[str] = set()
@@ -92,6 +101,8 @@ def _normalize_results(provider: str, payload: dict, limit: int) -> list[dict[st
             or item.get("snippet")
             or item.get("description")
             or item.get("summary")
+            or item.get("text")
+            or " ".join(item.get("highlights") or [])
         )
         if not title and not snippet:
             continue
@@ -105,6 +116,7 @@ def _normalize_results(provider: str, payload: dict, limit: int) -> list[dict[st
                     item.get("published_at")
                     or item.get("date")
                     or item.get("dateLastCrawled")
+                    or item.get("publishedDate")
                 )[:80],
             }
         )
@@ -168,7 +180,7 @@ async def search_web(
                     },
                     headers=headers,
                 )
-            else:
+            elif provider == "bocha":
                 headers["Authorization"] = f"Bearer {cfg['api_key']}"
                 headers["Content-Type"] = "application/json"
                 response = await client.post(
@@ -179,6 +191,19 @@ async def search_web(
                         "summary": True,
                         "count": max_results,
                         "page": 1,
+                    },
+                    headers=headers,
+                )
+            else:
+                headers["x-api-key"] = cfg["api_key"]
+                headers["Content-Type"] = "application/json"
+                response = await client.post(
+                    endpoint,
+                    json={
+                        "query": query,
+                        "type": "auto",
+                        "numResults": max_results,
+                        "contents": {"highlights": True},
                     },
                     headers=headers,
                 )

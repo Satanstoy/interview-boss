@@ -44,6 +44,7 @@ const baseUrlPlaceholder = computed(() => {
   if (form.provider === 'tavily') return '可选，例如 https://api.tavily.com/search'
   if (form.provider === 'brave') return '可选，例如 https://api.search.brave.com/res/v1/web/search'
   if (form.provider === 'bocha') return '可选，例如 https://api.bochaai.com/v1/web-search'
+  if (form.provider === 'exa') return '可选，例如 https://api.exa.ai/search'
   return '留空使用系统默认地址'
 })
 
