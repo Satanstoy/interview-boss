@@ -1,49 +1,71 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-background">
-    <div class="flex min-h-0 flex-1">
-      <!-- Current playlist problem list -->
-      <section class="problem-list-panel flex min-w-0 w-full flex-col border-r border-border lg:w-[320px] lg:flex-none" :class="{ 'is-detail-open': activeProblem }">
-        <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
-          <div class="relative min-w-0 flex-1">
-            <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input v-model="searchQuery" class="h-8 rounded-lg border-0 bg-muted pl-8 text-xs shadow-none" placeholder="搜索当前题单" @keyup.enter="refreshProblems" />
-          </div>
-          <Button size="sm" variant="outline" class="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs" @click="importDialogOpen = true">
-            <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
-          </Button>
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
-          <div v-if="!problems.length && !isLoading" class="px-3 py-10 text-center text-xs text-muted-foreground">
-            当前题单暂无题目
-          </div>
-          <button
-            v-for="(problem, index) in problems"
-            :key="problem.id"
-            class="group flex w-full items-start gap-2 rounded-lg p-2.5 text-left transition-colors"
-            :class="activeProblem?.id === problem.id ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'"
-            @click="selectProblem(problem)"
-          >
-            <span class="mt-0.5 w-6 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{{ index + 1 }}</span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm" :class="activeProblem?.id === problem.id ? 'font-medium' : ''">{{ problem.title }}</span>
-              <span class="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span>{{ difficultyLabel(problem.difficulty) }}</span>
-                <span v-if="problem.attempt_count">· {{ problem.attempt_count }} 次</span>
-                <span v-if="problem.is_solved" class="text-emerald-600 dark:text-emerald-400">· 已通过</span>
-              </span>
-            </span>
-            <span v-if="problem.is_favorite" class="shrink-0 text-amber-500">★</span>
-          </button>
-        </div>
-      </section>
+  <div class="relative flex h-full min-h-0 overflow-hidden bg-background">
+    <div
+      v-if="!sidebarCollapsed"
+      class="fixed inset-0 z-20 bg-background/70 backdrop-blur-sm md:hidden"
+      @click="sidebarCollapsed = true"
+    />
 
+    <!-- 题目列表侧栏：交互与 ChatView 的会话侧栏保持一致 -->
+    <section
+      class="problem-list-panel sidebar-container z-30 flex shrink-0 flex-col overflow-hidden border-r border-border bg-background md:z-auto"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+      :style="{ width: sidebarCollapsed ? '0px' : '320px' }"
+    >
+      <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
+        <div class="relative min-w-0 flex-1">
+          <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="searchQuery" class="h-8 rounded-lg border-0 bg-muted pl-8 text-xs shadow-none" placeholder="搜索当前题单" @keyup.enter="refreshProblems" />
+        </div>
+        <Button size="sm" variant="outline" class="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs" @click="importDialogOpen = true">
+          <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
+        </Button>
+        <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题目列表" @click="sidebarCollapsed = true">
+          <PanelLeftClose :size="14" />
+        </Button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar sidebar-content">
+        <div v-if="!problems.length && !isLoading" class="px-3 py-10 text-center text-xs text-muted-foreground">
+          当前题单暂无题目
+        </div>
+        <button
+          v-for="(problem, index) in problems"
+          :key="problem.id"
+          class="group flex w-full items-start gap-2 rounded-lg p-2.5 text-left transition-colors"
+          :class="activeProblem?.id === problem.id ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'"
+          @click="selectProblem(problem)"
+        >
+          <span class="mt-0.5 w-6 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{{ index + 1 }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-sm" :class="activeProblem?.id === problem.id ? 'font-medium' : ''">{{ problem.title }}</span>
+            <span class="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>{{ difficultyLabel(problem.difficulty) }}</span>
+              <span v-if="problem.attempt_count">· {{ problem.attempt_count }} 次</span>
+              <span v-if="problem.is_solved" class="text-emerald-600 dark:text-emerald-400">· 已通过</span>
+            </span>
+          </span>
+          <Star v-if="problem.is_favorite" :size="14" :stroke-width="1.8" class="mt-0.5 shrink-0 fill-amber-400 text-amber-500" />
+        </button>
+      </div>
+    </section>
+
+    <div v-if="sidebarCollapsed" class="hidden shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons md:flex">
+      <Button variant="ghost" size="icon" class="size-7" aria-label="展开题目列表" @click="sidebarCollapsed = false">
+        <PanelLeft :size="14" />
+      </Button>
+    </div>
+
+    <div class="flex min-h-0 flex-1">
       <!-- Current problem opens on the right; on mobile it replaces the list -->
       <section class="problem-detail-panel flex min-w-0 flex-1 flex-col" :class="{ 'is-detail-open': activeProblem }">
         <template v-if="activeProblem">
-          <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
-            <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground lg:hidden" @click="activeProblem = null"><ArrowLeft :size="13" /> 题目列表</Button>
+          <div class="flex h-11 shrink-0 items-center gap-2 px-3">
+            <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground md:hidden" @click="activeProblem = null; sidebarCollapsed = false"><ArrowLeft :size="13" /> 题目列表</Button>
             <div class="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</div>
-            <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="shrink-0 text-lg leading-none transition-transform hover:scale-110" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">{{ activeProblem.is_favorite ? '★' : '☆' }}</button>
+            <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">
+              <Star :size="16" :stroke-width="1.8" :fill="activeProblem.is_favorite ? 'currentColor' : 'none'" />
+            </button>
             <Button variant="ghost" size="sm" class="hidden h-7 gap-1 px-2 text-xs text-muted-foreground sm:flex" @click="openAddToPlaylist"><ListPlus :size="13" /> 加入题单</Button>
             <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground" @click="selectNextProblem">下一题 <ChevronRight :size="13" /></Button>
           </div>
@@ -51,10 +73,10 @@
           <div class="flex min-h-0 flex-1 flex-row">
             <!-- Problem statement -->
             <section class="flex min-h-0 min-w-0 flex-[0_0_44%] flex-col overflow-hidden border-r border-border">
-              <div class="flex shrink-0 items-center gap-1 border-b border-border px-4">
-                <button class="border-b-2 px-2.5 py-3 text-xs font-medium transition-colors" :class="contentTab === 'description' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'" @click="contentTab = 'description'">题目描述</button>
-                <button class="border-b-2 px-2.5 py-3 text-xs font-medium transition-colors" :class="contentTab === 'review' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'" @click="contentTab = 'review'">AI 评审<span v-if="activeProblem._feedback || activeProblem._scores" class="ml-1 text-primary">•</span></button>
-                <button v-if="activeProblem._referenceAnswer" class="border-b-2 px-2.5 py-3 text-xs font-medium transition-colors" :class="contentTab === 'answer' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'" @click="contentTab = 'answer'">参考答案</button>
+              <div class="flex shrink-0 items-center gap-1 px-4">
+                <button class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'description' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'description'">题目描述</button>
+                <button class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'review' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'review'">AI 评审<span v-if="activeProblem._feedback || activeProblem._scores" class="ml-1 text-primary">•</span></button>
+                <button v-if="activeProblem._referenceAnswer" class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'answer' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'answer'">参考答案</button>
               </div>
               <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 custom-scrollbar">
                 <div v-if="contentTab === 'description'">
@@ -65,7 +87,7 @@
                   </div>
                   <h1 class="mb-4 text-xl font-bold leading-snug text-foreground">{{ activeProblem.title }}</h1>
                   <div class="answer-content prose prose-sm max-w-none dark:prose-invert" v-html="renderMarkdown(activeProblem.description)" />
-                  <div v-if="activeProblem.tags?.length" class="mt-6 flex flex-wrap gap-1.5 border-t border-border pt-4">
+                  <div v-if="activeProblem.tags?.length" class="mt-6 flex flex-wrap gap-1.5 pt-4">
                     <span v-for="tag in activeProblem.tags" :key="tag" class="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{{ tag }}</span>
                   </div>
                   <div class="mt-5 flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -94,7 +116,7 @@
 
             <!-- Editor -->
             <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <div class="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+              <div class="flex h-11 shrink-0 items-center justify-between gap-2 px-3">
                 <div class="flex items-center gap-1">
                   <span class="mr-1 text-xs font-semibold text-foreground">代码</span>
                   <button v-for="language in languageOptions" :key="language.value" class="rounded-full px-2.5 py-1 text-[11px] transition-colors" :class="currentLanguage === language.value ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="currentLanguage = language.value">{{ language.label }}</button>
@@ -103,7 +125,7 @@
                 <button v-else class="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" @click="clearProblem(activeProblem)">重置代码</button>
               </div>
               <div class="min-h-0 flex-1 bg-muted/20 p-2"><div class="h-full min-h-[300px] overflow-hidden rounded-md border border-border/60 bg-background"><CodeEditor v-model="activeProblem._code" :language="currentLanguage" :read-only="activeProblem._isSubmitting" /></div></div>
-              <div class="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2.5">
+              <div class="flex shrink-0 items-center justify-between gap-3 px-3 py-2.5">
                 <span class="hidden text-[11px] text-muted-foreground sm:inline">先独立完成，再查看 AI 提示</span>
                 <div class="ml-auto flex gap-2">
                   <Button variant="outline" size="sm" class="h-8 gap-1.5 rounded-lg text-xs" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim() || activeProblem._hintCount >= 3" @click="submitCode(activeProblem, 'hint')"><Zap :size="13" /> 提示 {{ activeProblem._hintCount }}/3</Button>
@@ -153,7 +175,7 @@
 
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ChevronRight, FilePlus2, ListPlus, Loader2, Search, Sparkles, Upload, Zap } from '@lucide/vue'
+import { ArrowLeft, ChevronRight, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Search, Sparkles, Star, Upload, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -171,6 +193,8 @@ const codingNavigation = inject('codingNavigation')
 const problems = ref([])
 const activeProblem = ref(null)
 const contentTab = ref('description')
+const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
+const sidebarCollapsed = ref(isMobileViewport())
 const playlists = codingNavigation.playlists
 const selectedListKey = codingNavigation.selectedListKey
 const searchQuery = ref('')
@@ -239,6 +263,7 @@ watch(selectedListKey, (value, previousValue) => {
 async function selectProblem(problem) {
   activeProblem.value = problem
   contentTab.value = 'description'
+  if (isMobileViewport()) sidebarCollapsed.value = true
   try { Object.assign(problem, await fetchCodingProblem(problem.id)) } catch (error) { toast.error(error.message || '获取题目详情失败') }
 }
 
@@ -341,3 +366,44 @@ onMounted(async () => {
   if (problems.value[0]) await selectProblem(problems.value[0])
 })
 </script>
+
+<style scoped>
+.sidebar-container {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 767px) {
+  .sidebar-container {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(86vw, 320px) !important;
+    max-width: calc(100vw - 24px);
+    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
+    transform: translateX(0);
+    transition: transform 220ms ease-out;
+  }
+
+  .sidebar-container.sidebar-collapsed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+}
+</style>

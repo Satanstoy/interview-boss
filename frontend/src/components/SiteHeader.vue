@@ -101,8 +101,8 @@ const createPlaylist = async () => {
       </Button>
     </AppTooltip>
 
-    <div class="flex h-8 min-w-0 items-center gap-2">
-      <h1 class="truncate text-[13px] font-medium leading-5 text-foreground">
+    <div class="flex h-8 min-w-0 shrink-0 items-center gap-2">
+      <h1 class="flex h-8 items-center truncate text-[13px] font-medium leading-none text-foreground">
         {{ activeTabLabel }}
       </h1>
 

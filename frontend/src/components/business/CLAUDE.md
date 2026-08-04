@@ -9,7 +9,7 @@
 | `AdminReview.vue` | 管理员审核面板 |
 | `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
-| `CodingPractice.vue` | 手撕代码练习主页面（ChatView 式全屏工作台 + LeetCode 式题目列表/描述/编辑器分栏 + AI 评审）；题单选择器位于全局 `SiteHeader`，保留收藏、题单和 Prompt + Markdown 导入 |
+| `CodingPractice.vue` | 手撕代码练习主页面（ChatView 式全屏工作台 + 可收起题目侧栏 + LeetCode 式题目列表/描述/编辑器分栏 + AI 评审）；题单选择器位于全局 `SiteHeader`，保留收藏、题单和 Prompt + Markdown 导入 |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
 | `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正；regenerate 通过 assistant revision 重新加载消息，不删除或重复插入 user turn |
 | `ReasoningTimeline.vue` | 面试官推理展示组件（可展开/折叠）；过滤 loading/context 等基础设施 step，把推理步骤、技能加载、工具调用串成左侧连线 timeline，连线需穿过圆点中心；展示 MiMo/DeepSeek reasoning_content、公开摘要 fallback、工具耗时、白名单参数和结果预览 |
@@ -49,7 +49,7 @@
 - API 调用通过 `services/` 层或兼容层 `api/index.js`，禁止在组件中直接 `fetch`
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
-- `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：题单选择器放在应用全局 `SiteHeader`，当前题单区域只展示搜索、AI 导入和题目列表，右侧固定展示题目描述与编辑器；不再使用子页面顶栏、独立题库侧栏或难度筛选区。
+- `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：题单选择器放在应用全局 `SiteHeader`，当前题单区域只展示搜索、AI 导入和题目列表，侧栏支持收起/展开，右侧固定展示题目描述与编辑器；不再使用子页面顶栏、独立题库侧栏或难度筛选区。
 - `PracticeMode.vue` 的默认路径以背八股为主：题单选择和单卡内容优先，答案评估与历史记录作为卡片内的次级操作；题单范围由当前题库筛选结果和 `practicedQuestions` 练习元数据驱动。
 - `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 
