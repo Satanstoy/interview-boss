@@ -76,9 +76,8 @@ def test_draw_questions_filters_and_adds_practice_stats(test_db, monkeypatch):
 
     _seed_draw_questions(test_db)
     monkeypatch.setattr(
-        question_draw_service,
-        "_build_bank_where_clause",
-        lambda user, table_alias="qb": (
+        "app.services.question_draw_service.build_bank_where_clause",
+        lambda user_id, filter_mode="all", table_alias="qb": (
             f"FROM question_bank {table_alias}",
             f"WHERE {table_alias}.status = 'approved'",
             [],
@@ -116,9 +115,8 @@ def test_draw_questions_returns_empty_when_no_candidates(test_db, monkeypatch):
 
     _seed_draw_questions(test_db)
     monkeypatch.setattr(
-        question_draw_service,
-        "_build_bank_where_clause",
-        lambda user, table_alias="qb": (
+        "app.services.question_draw_service.build_bank_where_clause",
+        lambda user_id, filter_mode="all", table_alias="qb": (
             f"FROM question_bank {table_alias}",
             f"WHERE {table_alias}.status = 'approved'",
             [],
@@ -293,9 +291,8 @@ def _patch_draw_helpers(monkeypatch):
     from app.services import question_draw_service
 
     monkeypatch.setattr(
-        question_draw_service,
-        "_build_bank_where_clause",
-        lambda user, table_alias="qb": (
+        "app.services.question_draw_service.build_bank_where_clause",
+        lambda user_id, filter_mode="all", table_alias="qb": (
             f"FROM question_bank {table_alias}",
             f"WHERE {table_alias}.status = 'approved'",
             [],

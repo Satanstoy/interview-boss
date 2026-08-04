@@ -141,8 +141,8 @@ async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get
             yield f"data: {json.dumps({'step': 'tag', 'message': f'正在标注 {len(q_list)} 道题目...', 'type': 'progress'}, ensure_ascii=False)}\n\n"
 
             tagged_rows = await tag_interview(
-                interview_id, url, company, round_, questions_str,
-                job_position=job_position, user_id=user['id']
+                url, company, round_, questions_str,
+                job_position=job_position, user_id=user['id'], interview_id=interview_id,
             )
 
             tag_details = [
@@ -229,9 +229,9 @@ async def batch_reprocess_stream(user: dict = Depends(get_admin_user)):
             url = iv['url'] or f"internal://{iv['id']}"
             try:
                 tagged_rows = await tag_interview(
-                    iv['id'], url, iv['company'] or '未提供', iv['round'] or '未提供',
+                    url, iv['company'] or '未提供', iv['round'] or '未提供',
                     iv['questions_list'], job_position=iv.get('job_position', ''),
-                    user_id=user['id']
+                    user_id=user['id'], interview_id=iv['id'],
                 )
                 enqueue_questions(iv['id'])
                 tagged_total += len(tagged_rows)

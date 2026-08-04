@@ -20,6 +20,7 @@ from app.routers import (
     admin_review,
     bank_build,
     interview,
+    interview_distribution,
     analytics,
     insights,
     profile,
@@ -194,6 +195,7 @@ app.include_router(practice.router)
 app.include_router(admin_review.router)
 app.include_router(bank_build.router)
 app.include_router(interview.router)
+app.include_router(interview_distribution.router)
 app.include_router(analytics.router)
 app.include_router(insights.router)
 app.include_router(profile.router)

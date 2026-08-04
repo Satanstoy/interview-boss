@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import AppTooltip from '@/components/common/AppTooltip.vue'
+import InterviewDistributionSettings from '@/components/business/InterviewDistributionSettings.vue'
 
 const props = defineProps({
   masterBank: { type: Array, default: () => [] },
@@ -228,6 +229,8 @@ const handleGoToQuestion = (question) => {
         {{ taxonomyLoading ? 'AI 生成中...' : 'AI 推荐分类体系' }}
       </Button>
     </div>
+
+    <InterviewDistributionSettings :job-position="currentPosition" @saved="() => toastSuccess('面试分布已保存')" />
 
     <!-- Card 2: 收藏夹 -->
     <div class="rounded-xl border bg-card p-6 space-y-4">

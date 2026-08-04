@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from app.agents.chat.coverage_events import question_from_coverage_event
+from app.agents.chat.coverage_events import canonical_coverage_phase
 from app.agents.chat.coverage_config import get_coverage_thresholds
 from app.agents.chat.decision_config import DecisionConfig
 from app.agents.chat.state import ChatState
@@ -250,6 +251,29 @@ def _big_tech_next_focus(state: ChatState) -> dict:
         if thresholds.get(phase, 0) > 0
     )
 
+    distribution_plan = state.get("distribution_plan")
+    if isinstance(distribution_plan, dict) and distribution_plan.get("soft_target_counts"):
+        events = []
+        for message in state.get("message_history", []) or []:
+            if message.get("role") != "assistant":
+                continue
+            for event in (message.get("metadata") or {}).get("coverage_events", []) or []:
+                if event.get("plan_id") == distribution_plan.get("plan_id"):
+                    events.append(event)
+        from app.agents.chat.distribution_controller import decide_next_question_type
+        decision = decide_next_question_type(distribution_plan, events, {})
+        if decision.preferred_type:
+            return {
+                "asked_count": len(events), "message_count": message_count,
+                "phase_counts": {phase: phase_counts.get(phase, 0) for phase in _BIG_TECH_PHASES},
+                "next_focus": {
+                    "phase": decision.preferred_type,
+                    "tool": "draw_questions" if decision.preferred_type in {"algorithm_coding", "system_design", "behavioral"} else "search_questions",
+                    "question_type": decision.preferred_type,
+                    "reason": "distribution_plan_target_deficit",
+                },
+            }
+
     # Opening phase: no tools, just greet and ask for self-introduction.
     if message_count < _MIN_MESSAGES_BEFORE_DEFAULT_BANK_QUESTION:
         focus = {
@@ -352,6 +376,8 @@ def _build_big_tech_interview_harness_prompt(state: ChatState) -> str:
 
 def _should_create_question_plan(state: ChatState) -> bool:
     """Return True when this turn is expected to ask a new bank-backed question."""
+    if state.get("distribution_primary_required"):
+        return True
     intent = state.get("intent")
     if intent == "practice_request":
         return True
@@ -446,6 +472,31 @@ def _select_question_for_plan(
     ]
     if not viable:
         return None, "no_viable_candidate"
+
+    required_type = (
+        state.get("strategy_preferred_question_type") or state.get("question_type")
+        if state.get("distribution_primary_required")
+        else None
+    )
+    if required_type in _BIG_TECH_PHASES:
+        compatible = [
+            candidate
+            for candidate in viable
+            if canonical_coverage_phase(
+                "",
+                " ".join(
+                    str(candidate.get(field) or "")
+                    for field in ("question", "cat1", "cat2", "tags")
+                ),
+            )
+            == required_type
+        ]
+        if not compatible:
+            return None, "distribution_type_pool_exhausted"
+        viable = compatible
+        # The writer fallback must never substitute an incompatible candidate.
+        state["candidate_questions"] = compatible
+        state["retrieved_questions"] = compatible
 
     asked_ids, asked_texts = _previously_asked_question_keys(state)
     asked_ids = asked_ids | ledger.asked_question_ids

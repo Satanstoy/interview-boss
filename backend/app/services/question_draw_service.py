@@ -11,7 +11,11 @@ from typing import Optional
 
 from app.db import connection as db_connection
 from app.db.question_bank_sources import get_sources
-from app.routers.questions import _build_bank_where_clause
+from app.db.queries import build_bank_where_clause
+from app.services.interview_distribution import (
+    BEHAVIORAL_ACRONYM_TERMS,
+    BEHAVIORAL_SIGNAL_TERMS,
+)
 
 
 def get_db_connection():
@@ -48,6 +52,7 @@ def draw_questions(
     topic: Optional[str] = None,
     difficulty: Optional[str] = None,
     question_type: Optional[str] = None,
+    job_position: Optional[str] = None,
     exclude_ids: Optional[set[int]] = None,
     session_notes: Optional[str] = None,
     max_per_category: int = 2,
@@ -64,8 +69,17 @@ def draw_questions(
     """
     count = max(1, min(int(count or 5), 50))
     exclude_ids = exclude_ids or set()
-    from_clause, where_clause, base_params = _build_bank_where_clause(user, "qb")
-    bank_mode = user.get("bank_mode", "public")
+    if job_position:
+        from_clause, where_clause, base_params = build_bank_where_clause(
+            user["id"], "all", "qb", job_position=job_position
+        )
+    else:
+        # Preserve the established call shape for internal callers and test
+        # adapters that provide the legacy three-argument helper.
+        from_clause, where_clause, base_params = build_bank_where_clause(
+            user["id"], "all", "qb"
+        )
+    bank_mode = "all"
 
     def _query(extra_conditions: list[str], extra_params: list) -> list:
         where_with_extra = where_clause
@@ -136,6 +150,7 @@ def draw_questions(
                 user=user,
                 bank_mode=bank_mode,
                 question_type=question_type,
+                job_position=job_position,
                 cat1=cat1,
                 cat2=cat2,
                 topic=topic,
@@ -209,6 +224,7 @@ def _query_without_position_filter(
     user: dict,
     bank_mode: str,
     question_type: str,
+    job_position: Optional[str],
     cat1: Optional[str],
     cat2: Optional[str],
     topic: Optional[str],
@@ -226,16 +242,12 @@ def _query_without_position_filter(
     def _build_conditions(include_difficulty: bool) -> tuple[list[str], list]:
         conditions: list[str] = []
         params: list = []
-        if bank_mode == "personal":
-            conditions.append("qb.owner_id = ?")
-            params.append(user["id"])
-        elif bank_mode == "mixed":
+        if bank_mode in ("all", "mine", "personal", "mixed"):
             conditions.append(
-                "((qb.owner_id IS NULL AND qb.status = 'approved') "
-                "OR (qb.owner_id = ? AND qb.duplicate_of IS NULL))"
+                "((qb.owner_id IS NULL AND qb.status = 'approved') OR qb.owner_id = ?)"
             )
             params.append(user["id"])
-        else:
+        else:  # public
             conditions.append("qb.owner_id IS NULL")
             conditions.append("qb.status = 'approved'")
 
@@ -259,6 +271,9 @@ def _query_without_position_filter(
         if type_conditions:
             conditions.append(type_conditions)
             params.extend(type_params)
+        if job_position:
+            conditions.append("qb.job_position = ?")
+            params.append(job_position)
         if exclude_ids:
             placeholders = ",".join("?" * len(exclude_ids))
             conditions.append(f"qb.id NOT IN ({placeholders})")
@@ -313,10 +328,38 @@ def _question_type_filter(question_type: str) -> tuple[str, list[str]]:
             "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
             ["%系统设计%", "%系统设计%", "%架构%"],
         )
-    if question_type == "hr":
+    if question_type in {"hr", "behavioral"}:
+        combined = (
+            "(COALESCE(qb.cat1, '') || ' ' || COALESCE(qb.cat2, '') || ' ' "
+            "|| COALESCE(qb.tags, '') || ' ' || COALESCE(qb.question, ''))"
+        )
+        lower_combined = f"LOWER({combined})"
+        acronym_conditions: list[str] = []
+        acronym_params: list[str] = []
+        for acronym in BEHAVIORAL_ACRONYM_TERMS:
+            acronym_conditions.extend(
+                [
+                    f"{lower_combined} = ?",
+                    f"{lower_combined} GLOB ?",
+                    f"{lower_combined} GLOB ?",
+                    f"{lower_combined} GLOB ?",
+                ]
+            )
+            acronym_params.extend(
+                [
+                    acronym,
+                    f"{acronym}[^a-z]*",
+                    f"*[^a-z]{acronym}",
+                    f"*[^a-z]{acronym}[^a-z]*",
+                ]
+            )
         return (
-            "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",
-            ["%HR%", "%行为%", "%软技能%"],
+            "("
+            + " OR ".join(f"{lower_combined} LIKE ?" for _ in BEHAVIORAL_SIGNAL_TERMS)
+            + " OR "
+            + " OR ".join(acronym_conditions)
+            + ")",
+            [f"%{term}%" for term in BEHAVIORAL_SIGNAL_TERMS] + acronym_params,
         )
     return (
         "(qb.cat1 LIKE ? OR qb.cat2 LIKE ? OR qb.tags LIKE ?)",

@@ -278,7 +278,7 @@
           <!-- Suggestions -->
           <div v-if="q._evaluation.suggestions">
             <p class="text-xs font-semibold text-foreground mb-1">改进建议</p>
-            <div class="text-sm text-muted-foreground leading-relaxed answer-content" v-html="renderMarkdown(q._evaluation.suggestions)"></div>
+            <div class="text-sm text-muted-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(q._evaluation.suggestions)"></div>
           </div>
         </div>
 
@@ -364,7 +364,7 @@
                   @click="q._isEditingAnswer = true; q._editAnswer = q.ai_answer"
                   class="absolute top-0 right-0 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-2.5 py-1 rounded-md transition border border-blue-200 dark:border-blue-800"
                 >编辑答案</button>
-                <div class="text-foreground text-sm leading-relaxed answer-content" v-html="renderMarkdown(q.ai_answer)"></div>
+                <div class="text-foreground text-sm leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(q.ai_answer)"></div>
               </div>
               <div v-else class="text-center py-4">
                 <p class="text-muted-foreground mb-3 text-sm">暂无 AI 答案。</p>
