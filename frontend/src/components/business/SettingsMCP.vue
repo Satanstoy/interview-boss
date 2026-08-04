@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { AlertTriangle, Check, Copy, KeyRound, RefreshCw, Server, Trash2 } from '@lucide/vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { fetchMyMCPConfig, rotateMyMCPToken, revokeMyMCPToken } from '@/services/profileApi.js'
@@ -15,6 +15,21 @@ const issuedToken = ref('')
 const issuedConfig = ref('')
 const issuedStdioConfig = ref('')
 const copied = ref('')
+
+const agentConfigPrompt = computed(() => {
+  const endpoint = settings.value?.endpoint
+  const token = issuedToken.value
+  if (!endpoint || !token) return ''
+
+  return [
+    '请帮我配置 InterviewBoss MCP，并完成一次连接测试。',
+    '服务名称：interview-boss',
+    '传输协议：Streamable HTTP',
+    `MCP 地址：${endpoint}`,
+    `Authorization：Bearer ${token}`,
+    '连接后请加载 InterviewBoss 的 interview-tool-use skill，按岗位使用题库搜索、抽题和选题工具。',
+  ].join('\n')
+})
 
 const loadConfig = async () => {
   loading.value = true
@@ -127,15 +142,45 @@ onMounted(loadConfig)
             <Button variant="ghost" size="sm" class="h-7 gap-1.5" @click="copyText(settings?.endpoint, 'endpoint')">
               <Check v-if="copied === 'endpoint'" class="size-3.5 text-emerald-500" />
               <Copy v-else class="size-3.5" />
-              {{ copied === 'endpoint' ? '已复制' : '复制 MCP 地址' }}
+              {{ copied === 'endpoint' ? '已复制地址' : '复制 MCP 地址' }}
             </Button>
           </div>
           <code class="block break-all rounded-md bg-muted px-3 py-2 text-xs text-foreground">{{ settings?.endpoint }}</code>
         </div>
 
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs font-semibold text-muted-foreground">访问 Token</span>
+            <div class="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-7 gap-1.5"
+                :disabled="!issuedToken || working"
+                title="完整 Token 只在生成或重置后可复制"
+                @click="copyText(issuedToken, 'token')"
+              >
+                <Check v-if="copied === 'token'" class="size-3.5 text-emerald-500" />
+                <Copy v-else class="size-3.5" />
+                {{ copied === 'token' ? '已复制 Token' : '复制 Token' }}
+              </Button>
+              <Button variant="outline" size="sm" class="h-7 gap-1.5" :disabled="working" @click="issueToken">
+                <RefreshCw class="size-3.5" :class="working ? 'animate-spin' : ''" />
+                {{ settings?.configured ? '重置 Token' : '生成 Token' }}
+              </Button>
+            </div>
+          </div>
+          <code class="block min-h-10 break-all rounded-md bg-muted px-3 py-2 text-xs leading-5 text-foreground">
+            {{ settings?.configured ? settings.token_hint : '尚未生成 Token' }}
+          </code>
+          <p class="text-xs leading-5 text-muted-foreground">
+            完整 Token 不会直接显示；生成或重置后，点击右侧“复制 Token”即可复制。刷新页面后如需再次获取，请重置 Token。
+          </p>
+        </div>
+
         <div v-if="settings?.configured" class="grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
-          <div>当前 Token：<code class="text-foreground">{{ settings.token_hint }}</code></div>
           <div>最近轮换：<code class="text-foreground">{{ formatDate(settings.rotated_at) }}</code></div>
+          <div>服务状态：<code class="text-foreground">已启用</code></div>
         </div>
 
         <div v-if="settings?.warning" class="flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50 p-3 text-xs leading-5 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-300">
@@ -143,12 +188,8 @@ onMounted(loadConfig)
           <span>{{ settings.warning }}</span>
         </div>
 
-        <div class="flex flex-wrap gap-2">
-          <Button class="gap-2" :disabled="working" @click="issueToken">
-            <RefreshCw class="size-4" :class="working ? 'animate-spin' : ''" />
-            {{ settings?.configured ? '重置 Token' : '生成 Token' }}
-          </Button>
-          <Button v-if="settings?.configured" variant="outline" class="gap-2 text-destructive hover:text-destructive" :disabled="working" @click="revokeToken">
+        <div v-if="settings?.configured" class="flex flex-wrap gap-2">
+          <Button variant="outline" class="gap-2 text-destructive hover:text-destructive" :disabled="working" @click="revokeToken">
             <Trash2 class="size-4" />
             撤销访问
           </Button>
@@ -159,34 +200,8 @@ onMounted(loadConfig)
         <div class="flex items-start gap-3">
           <KeyRound class="mt-0.5 size-5 shrink-0 text-primary" />
           <div>
-            <h4 class="text-sm font-semibold text-foreground">连接信息（请立即复制）</h4>
-            <p class="mt-1 text-xs leading-5 text-muted-foreground">完整 Token 只在生成或重置后显示一次；刷新页面后不会再次显示。</p>
-          </div>
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-xs font-semibold text-muted-foreground">MCP 地址</span>
-              <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(settings?.endpoint, 'issued-endpoint')">
-                <Check v-if="copied === 'issued-endpoint'" class="size-3.5 text-emerald-500" />
-                <Copy v-else class="size-3.5" />
-                {{ copied === 'issued-endpoint' ? '已复制' : '复制地址' }}
-              </Button>
-            </div>
-            <code class="block min-h-10 break-all rounded-md border bg-background px-3 py-2 text-xs leading-5 text-foreground">{{ settings?.endpoint }}</code>
-          </div>
-
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-xs font-semibold text-muted-foreground">访问 Token</span>
-              <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(issuedToken, 'token')">
-                <Check v-if="copied === 'token'" class="size-3.5 text-emerald-500" />
-                <Copy v-else class="size-3.5" />
-                {{ copied === 'token' ? '已复制' : '复制 Token' }}
-              </Button>
-            </div>
-            <code class="block min-h-10 break-all rounded-md border bg-background px-3 py-2 text-xs leading-5 text-foreground">{{ issuedToken }}</code>
+            <h4 class="text-sm font-semibold text-foreground">可选配置格式</h4>
+            <p class="mt-1 text-xs leading-5 text-muted-foreground">需要 JSON 的 agent 可以直接复制配置；配置内容包含 Token，请只粘贴到可信的 agent 设置中。</p>
           </div>
         </div>
 
@@ -196,10 +211,9 @@ onMounted(loadConfig)
             <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(issuedConfig, 'config')">
               <Check v-if="copied === 'config'" class="size-3.5 text-emerald-500" />
               <Copy v-else class="size-3.5" />
-              {{ copied === 'config' ? '已复制' : '复制配置' }}
+              {{ copied === 'config' ? '已复制配置' : '复制配置' }}
             </Button>
           </div>
-          <pre class="max-h-64 overflow-auto rounded-md border bg-background p-3 text-xs leading-5 text-foreground">{{ issuedConfig }}</pre>
         </div>
 
         <div v-if="issuedStdioConfig" class="space-y-1.5">
@@ -208,11 +222,10 @@ onMounted(loadConfig)
             <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="copyText(issuedStdioConfig, 'stdio-config')">
               <Check v-if="copied === 'stdio-config'" class="size-3.5 text-emerald-500" />
               <Copy v-else class="size-3.5" />
-              {{ copied === 'stdio-config' ? '已复制' : '复制配置' }}
+              {{ copied === 'stdio-config' ? '已复制配置' : '复制配置' }}
             </Button>
           </div>
           <p class="text-xs leading-5 text-muted-foreground">需要本机安装 Node.js 18+。npx 本身不需要申请证书；HTTP 仅建议用于内网、VPN 或安全隧道。</p>
-          <pre class="max-h-64 overflow-auto rounded-md border bg-background p-3 text-xs leading-5 text-foreground">{{ issuedStdioConfig }}</pre>
         </div>
       </div>
 
@@ -225,6 +238,20 @@ onMounted(loadConfig)
           <li>连接初始化时会自动加载 InterviewBoss 的 MCP 工具使用 skill，无需另行安装；领域技能会按需加载。</li>
           <li>连接后，agent 可以按岗位传入 <code class="text-foreground">job_position</code>，再调用搜索、抽题和选题工具。</li>
         </ol>
+        <div class="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            class="gap-2"
+            :disabled="!agentConfigPrompt || working"
+            title="生成或重置 Token 后可复制完整配置 Prompt"
+            @click="copyText(agentConfigPrompt, 'prompt')"
+          >
+            <Check v-if="copied === 'prompt'" class="size-4 text-emerald-500" />
+            <Copy v-else class="size-4" />
+            {{ copied === 'prompt' ? '已复制配置 Prompt' : '复制给 Agent 的配置 Prompt' }}
+          </Button>
+          <span v-if="!issuedToken" class="text-xs text-muted-foreground">请先生成或重置 Token，才能复制包含认证信息的 Prompt。</span>
+        </div>
       </div>
     </template>
   </div>
