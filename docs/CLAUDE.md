@@ -30,6 +30,9 @@ docs/
 - **后端相关** → 放 `bug-reports/` 或 `tdd-reports/`
 - **前端相关** → 放 `frontend/bug-reports/` 或 `frontend/tdd-reports/`
 - **设计规格** → 放 `superpowers/specs/`
+- 模拟面试 harness 分阶段设计见 `superpowers/specs/2026-07-14-interview-harness-p0-boundary-hardening-design.md`、`superpowers/specs/2026-07-14-interview-harness-p1-durable-side-effects-design.md` 和 `superpowers/specs/2026-07-14-interview-harness-p2-structured-turn-design.md`；P0 实施计划见 `superpowers/plans/2026-07-14-interview-harness-p0-implementation.md`。P0 只落执行边界、幂等/revision、prompt trust boundary 和 evaluator 对账，不提前实现 P1/P2。
+- 模拟面试的题型分布、默认题量和运行时质量控制，以 `superpowers/specs/2026-07-11-interview-dimension-distribution.md` 为准；实现前需保持统计事实、会话快照与 Agent 约束控制的一致性。
+- 对应的任务拆解与从确定性测试到真实 SSE E2E 的验证门槛，见 `superpowers/plans/2026-07-11-interview-distribution-quality-control.md`。
 - `docs/specs/` 也存放项目内临时/产品 spec；修改这类 spec 时要先对齐当前代码事实，避免把已存在的 pipeline、metadata 或 ledger 能力写成“尚不存在”。
 - **实施计划** → 放 `superpowers/plans/`
 - MiMo/DeepSeek reasoning 相关实施计划需明确区分 `reasoning_content` 原始模型推理、公开摘要 fallback、以及前端“面试官推理”展示语义。

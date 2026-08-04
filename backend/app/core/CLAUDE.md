@@ -10,6 +10,7 @@
 | `auth.py` | JWT Access Token (15min) + Refresh Token (HttpOnly Cookie, JTI 跟踪, 轮转) |
 | `prompts.py` | LLM 提示词模板（SYSTEM_PROMPT、TAGGING_PROMPT、ANSWER_PROMPT、CODING_REVIEW_PROMPT、CODING_HINT_PROMPT） |
 | `logging_config.py` | 日志配置（structlog 双模式：生产 JSON / 开发彩色） |
+| `interview_distribution_config.py` | 模拟面试统计的岗位族映射；未知岗位只映射到自身，禁止跨岗位混合 |
 
 ## 关键模式
 

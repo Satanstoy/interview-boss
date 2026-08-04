@@ -15,5 +15,38 @@ npx playwright test tests/e2e/login-register.spec.js  # 单文件
 - 常规 E2E 必须 mock API，禁止调用真实后端
 - 禁止截图断言（CI 环境不稳定）
 - 禁止使用真实密码
+- 刷题模式测试应覆盖单卡背题路径，以及收藏题单/速成题单等核心范围切换；优先使用 `data-testid` 断言稳定的业务入口。
 - 洞察工作台测试必须 mock `/api/insights`，并覆盖三 Tab 路由与旧 `/knowledge-graph` 兼容入口。
 - 测试规则见 `.claude/rules/test-files.md`（编辑测试文件时自动加载）
+
+## Chat API Mock 规则
+
+**重要：** 所有访问 `/chat` 路径或涉及 chat 功能的测试，必须使用通配符 `**/api/chat**` mock 所有 chat API请求，防止请求泄露到真实后端。
+
+**正确示例：**
+```javascript
+await page.route('**/api/chat**', async route => {
+  const url = route.request().url()
+  const method = route.request().method()
+
+  if (url.includes('/conversations') && url.includes('status=active') && method === 'GET') {
+    // 返回对话列表
+  } else if (url.includes('/messages') && method === 'GET') {
+    // 返回消息
+  } else if (url.includes('/conversations') && method === 'POST') {
+    // 创建对话
+  } else if (url.includes('/messages') && method === 'POST') {
+    // 发送消息 (SSE)
+  } else {
+    // 默认返回
+    await route.fulfill({ json: { status: 'success', data: [] } })
+  }
+})
+```
+
+**错误示例：**
+```javascript
+// ❌ 只 mock 特定路径，可能泄露其他请求
+await page.route('**/api/chat/conversations?status=active', ...)
+await page.route('**/api/chat/conversations/conv-1/messages', ...)
+```

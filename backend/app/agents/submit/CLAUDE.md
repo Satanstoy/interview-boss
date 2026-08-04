@@ -9,9 +9,15 @@ START → recognize → extract
   ├─ doc_type=jd → jd_persist → END
   ├─ 空题重试失败 → error_empty → END
   └─ complete → classify
-       ├─ personal → match_persist_personal → END
+       ├─ personal → match_persist_personal → cluster_public → END
        └─ public → persist_public → cluster_public → END
 ```
+
+> 个人路径与公共路径统一：`match_and_persist_personal_node` 落库后调用
+> `enqueue_questions(interview_id, owner_id=user_id)`，与公共路径共用
+> `cluster_public_node` 完成聚类；`dequeue_batch` 按 owner_id 分桶保证
+> 个人批与公共批不混，`cluster_batch` 通过 FAISSIndexManager
+> `(job_position, owner_id)` 双层 key 严格隔离题库。
 
 ## 节点说明
 

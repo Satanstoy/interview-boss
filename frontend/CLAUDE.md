@@ -40,6 +40,7 @@ Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue (reka-
 - 侧栏展开态的品牌 logo/InterviewBoss 文案始终导航回 `/master-bank`；侧栏折叠/展开动作必须使用独立图标按钮，不要把品牌入口改成折叠开关。
 - Chat/Coding 这类带内部侧栏的工作台在移动端使用 overlay/toggle，不要让侧栏常驻挤压主内容。
 - Chat 流式回复的思考区使用 `ReasoningTimeline.vue`：发送开始即用前端本地计时器显示“思考中 N 秒”，收到后端 `thinking_done.duration` 后显示“思考了 N 秒”。不要只等最终 SSE duration 才展示时间。
+- Chat 流式发送必须为每个请求保存独立的 `client_request_id`、`turn_id` 和 AbortController；停止时先调用当前 turn 的 cancel API，再只 abort 当前 SSE，不得在 ChatView 中调用全局 `cancelAllRequests()`，取消/冲突/AbortError 也不得追加伪造 assistant 消息。
 - 普通按钮、输入框、Select、Dialog、Badge 优先使用 shadcn 默认组件圆角，不额外覆盖圆角；确需覆盖时同一组件组内保持一致。
 - reka-ui `SelectItem` 不允许空字符串 value；“全部/未提供/不选择”等空业务值必须用 `__all__`/`__empty__`/`__none__` 等内部哨兵，emit 或保存时再转回空字符串/null。
 - 交互行/列表项使用 `rounded-lg`，内容内嵌块使用 `rounded-md`，进度条和开关保留 `rounded-full`。
@@ -63,7 +64,7 @@ src/
 │   ├── InterviewView.vue
 │   ├── MockInterviewView.vue
 │   ├── InsightsView.vue       ← 洞察总览/岗位准备度/面试复盘三路由共用编排视图
-│   ├── KnowledgeGraphView.vue
+│   ├── KnowledgeGraphView.vue ← 旧入口兼容保留
 │   ├── ImportView.vue
 │   ├── CodingView.vue
 │   ├── SettingsView.vue
@@ -94,6 +95,7 @@ src/
 | JD 筛选 | `/jd` | `views/JdView.vue` | `composables/useMasterBankData.js` |
 | 面经库 | `/interview` | `views/InterviewView.vue` | `composables/useMasterBankData.js` |
 | 题目抽测 | `/mock-interview` | `views/MockInterviewView.vue` | `components/business/MockInterview.vue` |
+| 刷题 | `/practice` | `views/PracticeView.vue` | `components/business/PracticeMode.vue` |
 | 洞察总览 | `/insights/overview` | `views/InsightsView.vue` | `composables/useInsightsData.js` + `services/insightsApi.js` |
 | 岗位准备度 | `/insights/readiness` | `views/InsightsView.vue` | `components/business/InsightsReadiness.vue` |
 | 面试复盘 | `/insights/reviews` | `views/InsightsView.vue` | `components/business/InsightsReviews.vue` |
@@ -109,12 +111,25 @@ src/
 |------|------|
 | 路由配置 + 守卫 | `router/index.js` |
 | 认证状态（单例） | `composables/useAuth.js`（`currentUser` 模块级 ref） |
-| 题库数据 + 筛选 | `composables/useMasterBankData.js` |
+| 题库数据 + 筛选 | `composables/useMasterBankData.js`（`bankFilter`: all/public/mine 三口径） |
 | 题库重建 | `composables/useBuildTrigger.js` |
 | 题目操作 | `composables/useQuestionOps.js` + `services/masterBankApi.js` |
-| 练习/面试 | `services/practiceApi.js` + `components/business/PracticePanel.vue` |
+| 批量操作 | `composables/useBatchActions.js` |
+| 合并弹窗 | `composables/useMergeDialog.js` |
+| 练习/面试 | `composables/usePractice.js` + `services/practiceApi.js` + `views/PracticeView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticePanel.vue` |
+| 导入任务 | `composables/useSubmitJobs.js` + `services/dataApi.js` |
 | 数据分析 | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `services/profileApi.js` + `components/business/SettingsPage.vue` |
+| 模拟面试 | `services/interviewApi.js` + `components/business/MockInterview.vue` |
+| 面试分布 | `services/interviewDistributionApi.js` + `components/business/InterviewDistributionSettings.vue` |
+| 简历管理 | `services/resumeApi.js` |
+| 多选 | `composables/useSelection.js` |
+| 侧边栏 | `composables/useSidebar.js` |
+| 导航高亮 | `composables/useHighlightNav.js` |
+| Tab 滚动 | `composables/useTabScroll.js` |
+| 主题切换 | `composables/useTheme.js` |
+| 通知 | `composables/useNotification.js` |
+| 动画 | `composables/useMotionPresets.js` |
 | HTTP 客户端 | `services/http.js`（`api/index.js` 是 re-export 兼容层） |
 
 ## 岗位设置注意事项

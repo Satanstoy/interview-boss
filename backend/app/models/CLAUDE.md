@@ -25,6 +25,7 @@
 | `UpdateQuestionRequest` | 更新题目信息（分类/标签/难度） |
 | `CodingSubmitRequest` | 手撕代码提交 |
 | `CodingProblemCreateRequest` | 创建代码题目 |
+| `DistributionPreferenceRequest` | 五类题型比例、题数与风格来源的保存/单场覆盖 schema |
 
 ## 核心规则
 

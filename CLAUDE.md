@@ -6,7 +6,7 @@
 
 - **Backend**: Python 3.10 (uv, root `pyproject.toml`) / FastAPI / SQLite (WAL) / LangGraph
 - **Frontend**: Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue
-- **Deploy**: Docker Compose → nginx 镜像内置前端 (port 80) → backend (8000) + redis (6379)，worker 通过 profile 按需启用
+- **Deploy**: Docker Compose → nginx 镜像内置前端 (port 8081，仅绑 127.0.0.1) → backend (8000) + redis (6379)，worker 通过 profile 按需启用。公网入口由宿主机 nginx (port 80) 按域名+路径分发：`satanstoy.site/civil6/` → 本地静态页；其余（含 `interviewboss.online` 全部、`satanstoy.site` 非 civil6 路径）→ 反代到 `127.0.0.1:8081`
 - **LLM**: OpenAI-compatible API (AsyncOpenAI + tenacity)
 - **Embedding**: Xenova/bge-small-zh-v1.5 ONNX export (本地 HuggingFace 缓存，离线模式) + FAISS CPU
 
@@ -67,9 +67,9 @@ docker compose --profile test run --rm test uv run pytest backend/tests/infra/ -
 ```
 backend/
 ├── app/routers/       ← API 路由（HTTP 感知层，禁止业务逻辑）
-├── app/services/      ← 业务逻辑（LLM 调用、聚类、pipeline）
-├── app/core/          ← 配置、认证、提示词模板
-├── app/db/            ← SQLite 连接、CRUD、查询、迁移
+├── app/services/      ← 业务逻辑（LLM、聚类、pipeline、Chat、FTS、简历、邮件、面试分布等）
+├── app/core/          ← 配置、认证、提示词模板、日志、面试分布配置
+├── app/db/            ← SQLite 连接、CRUD、查询、迁移、工具函数
 ├── app/agents/        ← LangGraph 状态机（submit/build/batch_generate/chat + candidate 评测 skills + shared 共享模块）
 ├── app/models/        ← Pydantic schemas
 ├── app/middleware/    ← ASGI 中间件（请求日志、安全头、CSRF）
@@ -89,7 +89,7 @@ backend/
 frontend/
 ├── src/api/           ← 兼容层 re-export（新代码直接 import services/）
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
-├── src/composables/   ← 领域逻辑复用（use* 前缀）
+├── src/composables/   ← 领域逻辑复用（use* 前缀，共 15 个）
 ├── src/router/        ← Vue Router 4 配置（路由表 + 认证守卫）
 ├── src/stores/        ← Pinia 状态层（当前为空，状态走 composables）
 ├── src/layouts/       ← AuthenticatedLayout / BlankLayout / DefaultLayout
@@ -122,15 +122,19 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 数据管理（JD/面经 CRUD） | `routers/data.py` | `services/dataApi.js` |
 | 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` + `routers/bank_build.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
-| 练习/抽测 | `routers/practice.py` + `services/question_draw_service.py` | `components/business/PracticePanel.vue` + `components/business/MockInterview.vue` |
+| 练习/抽测 | `routers/practice.py` + `services/question_draw_service.py` | `views/PracticeView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticePanel.vue` + `components/business/MockInterview.vue` |
 | 模拟面试（Chat） | `routers/chat.py` + `routers/interview.py` + `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `views/ChatView.vue` + `components/business/ChatView.vue` + `services/chatApi.js` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 洞察工作台 | `routers/insights.py` + `services/insights.py` | `views/InsightsView.vue` + `services/insightsApi.js` + `components/business/Insights*.vue` |
 | 用户配置 | `routers/profile.py` + `routers/profile_pkg/` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
 | 手撕代码 | `routers/coding.py` | `services/codingApi.js` + `components/business/CodingPractice.vue` |
 | 音频转写 | `routers/audio.py` + `services/deepgram_service.py` | — |
+| 面试题型分布 | `routers/interview_distribution.py` + `services/interview_distribution.py` + `core/interview_distribution_config.py` | `services/interviewDistributionApi.js` + `components/business/InterviewDistributionSettings.vue` |
 | 题目去重 | `services/clustering/` + `services/clustering_maintenance.py` | — |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |
+| 全文搜索 | `services/fts_service.py` | — |
+| 简历管理 | `services/resume_service.py` | `services/resumeApi.js` |
+| 邮箱验证 | `services/email_service.py` | — |
 | 认证中间件 | `core/auth.py` + `middleware/` | `services/http.js` |
 | 数据库操作 | `db/operations.py` + `queries.py` + `question_bank_sources.py` | — |
 | 健康检查 | `routers/health.py` | — |
@@ -150,7 +154,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
 - Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
-- Docker 磁盘保护：部署必须走 `./deploy/docker-deploy.sh update/all/worker-up`，脚本会在构建前检查根分区至少 4GB 可用，构建后低于 5GB 时自动收缩 BuildKit cache（默认保留 2GB）。不要绕过脚本直接长期执行 `docker compose build`。
+- Docker 磁盘保护：部署必须走 `./deploy/docker-deploy.sh update/all/worker-up`，脚本会在构建前检查根分区至少 2GB 可用，构建后低于 5GB 时自动收缩 BuildKit cache（默认保留 2GB）。不要绕过脚本直接长期执行 `docker compose build`。
 - Docker 镜像源策略：`update/build/test/worker-up` 默认复用版本化缓存/稳定默认源，只做短健康检查；健康检查失败才刷新 npm/PyPI/apt 源，避免每次部署改 build args 导致依赖层缓存失效，也避免旧脚本缓存的坏源污染后续 update。只有镜像源整体失效或首次配置机器时运行 `./deploy/docker-deploy.sh mirrors`，它会清缓存、完整测速并更新 Docker Hub registry mirror。
 - Docker 部署预检：`update/build/test/worker-up` 在真正 build 前会检查生产依赖仍是 `uv export + pip install -i $PYPI_MIRROR`，compose build 仍保留 `network: host`。不要把生产依赖改回 `uv sync --frozen --no-dev --no-install-project`，否则 `uv.lock` 里的 `files.pythonhosted.org` 直链会绕过 PyPI 镜像并造成 update 卡住。
 - Docker 构建 DNS：`docker-compose.yml` 的 build 使用 `network: host`，避免 systemd-resolved 的 `127.0.0.53` stub 让 BuildKit fallback 到不可控外部 DNS。`mirrors` 命令还会持久化 Docker daemon DNS，默认 `223.5.5.5,119.29.29.29`。
@@ -164,13 +168,18 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 ## 生产环境
 
 ```
-nginx (port 80, 内置前端 dist) → backend (port 8000)
-                                redis (port 6379)
+[公网] 宿主机 nginx (port 80, 按域名+路径分发)
+  ├─ satanstoy.site/civil6/      → /var/www/html/civil6/ (静态教程页)
+  └─ 其余路径 / interviewboss.online → proxy 127.0.0.1:8081 (Docker nginx)
+
+[Docker] nginx (port 8081, 仅绑 127.0.0.1, 内置前端 dist) → backend (port 8000)
+                                                          redis (port 6379)
 worker (--profile worker, 按需启动) → redis/backend data
 ```
 
 - Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
-- 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=4096`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
+- 宿主机 nginx 站点配置：`/etc/nginx/sites-available/{satanstoy,interviewboss}`（symlink 到 `sites-enabled/`），不是本项目仓库文件，改公网入口要直接编辑这两个
+- 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=2048`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
 - 镜像源构建保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`。不要在普通 `update` 中强制完整测速，除非正在排查镜像源故障。镜像缓存目录由 `MIRROR_CACHE_VERSION` 控制，默认写入 `/tmp/interview-boss-mirrors-v2`。
 - Docker daemon DNS 可通过 `DEPLOY_DOCKER_DNS=223.5.5.5,119.29.29.29` 覆盖，普通 update 不应频繁改 daemon；只在 `mirrors` 维护命令中持久化。
 - Nginx 反代 `/api/` → backend:8000（read timeout 600s，SSE 禁用 buffering/cache/gzip），其余 → `/usr/share/nginx/html` 静态文件

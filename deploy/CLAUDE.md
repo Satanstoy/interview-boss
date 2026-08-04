@@ -22,10 +22,10 @@
 - 部署预检：普通构建会先运行 `preflight_update_contract`，确认生产依赖仍是 `uv export + pip install -i $PYPI_MIRROR`，compose build 仍保留 `network: host`。不要把生产依赖阶段改回 `uv sync --frozen --no-dev --no-install-project`，否则 `uv.lock` 里的 `files.pythonhosted.org` 直链会绕过 PyPI 镜像并造成 update 卡住。
 - BuildKit DNS 策略：compose build 必须使用 `network: host`，避免 Docker 从 systemd-resolved stub resolv.conf fallback 到不可控外部 DNS。`mirrors` 命令会持久化 Docker daemon DNS，默认 `DEPLOY_DOCKER_DNS=223.5.5.5,119.29.29.29`。
 - Nginx 镜像内置前端 dist，生产不再挂载宿主机 `frontend/dist`
-- 当前生产 Nginx 配置在 `nginx/nginx.conf`：静态文件根目录 `/usr/share/nginx/html`，`/api/` 反代到 `backend:8000`，SSE 路径关闭 proxy buffering/cache/gzip
+- 当前生产 Nginx 配置在 `nginx/nginx.conf`：静态文件根目录 `/usr/share/nginx/html`，`/api/` 和 `/mcp` 反代到 `backend:8000`，SSE/MCP 路径关闭 proxy buffering/cache/gzip
 - Nginx 静态资源权限必须可被 worker 读取：Dockerfile 的 nginx-runtime 阶段在复制 dist 后执行 `chmod -R a+rX /usr/share/nginx/html`；`frontend` 快速部署也必须在 `docker cp` 后执行同样 chmod，避免宿主机 `0600` 图片进入容器后变成 403
 - `./deploy/docker-deploy.sh frontend` 用于 Docker 已运行时快速发布前端；脚本在 `docker cp frontend/dist/.` 后必须修正 `/usr/share/nginx/html` 权限为 `a+rX`，避免 Nginx 因宿主构建产物权限导致 403
-- 磁盘保护阈值：构建前根分区至少 `DEPLOY_MIN_FREE_MB=4096` MB；构建后低于 `DEPLOY_TARGET_FREE_MB=5120` MB 时自动执行 `docker builder prune`，默认 `BUILDKIT_RESERVED_SPACE=2GB`
+- 磁盘保护阈值：构建前根分区至少 `DEPLOY_MIN_FREE_MB=2048` MB；构建后低于 `DEPLOY_TARGET_FREE_MB=5120` MB 时自动执行 `docker builder prune`，默认 `BUILDKIT_RESERVED_SPACE=2GB`
 - `cleanup_after_build` 绝不在构建成功后执行 `docker compose down --rmi local`；低于目标时只 prune build cache 并提示手动 cleanup
 - `prune_unused_docker` 为安全清理：BuildKit cache、dangling images、项目 stopped/orphan 资源；宿主机 `node_modules`/`.venv` 只报告，除非 `DEPLOY_PRUNE_HOST_ARTIFACTS=1` 或 `cleanup --aggressive`
 - `diagnose`：输出根分区、docker system df、frontend/node_modules、.venv、frontend/dist 大小等诊断信息

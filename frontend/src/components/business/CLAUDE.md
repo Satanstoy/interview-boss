@@ -11,7 +11,7 @@
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
 | `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审）；内部侧栏折叠/展开动画对齐 ChatView |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
-| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正 |
+| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正；regenerate 通过 assistant revision 重新加载消息，不删除或重复插入 user turn |
 | `ReasoningTimeline.vue` | 面试官推理展示组件（可展开/折叠）；过滤 loading/context 等基础设施 step，把推理步骤、技能加载、工具调用串成左侧连线 timeline，连线需穿过圆点中心；展示 MiMo/DeepSeek reasoning_content、公开摘要 fallback、工具耗时、白名单参数和结果预览 |
 | `ThinkingBlock.vue` | 旧版 AI 思维链展示组件（可展开/折叠） |
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
@@ -27,18 +27,19 @@
 | `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
 | `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
 | `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |
-| `PracticeMode.vue` | 练习模式选择 |
+| `PracticeMode.vue` | `/practice` 路由内的闪卡刷题工作台：今日速成、收藏题、待复习和难度题单；支持单卡翻答案、收藏、AI 答案生成/编辑、可选自测与练习记录 |
 | `PracticePanel.vue` | 练习面板 |
-| `QuestionCard.vue` | 题目卡片 |
+| `QuestionCard.vue` | 题目卡片（私有题显示「私有」徽标 + 分享按钮） |
 | `SearchFilterBar.vue` | 搜索过滤栏 |
 | `SettingsPage.vue` | 统一设置页面（左侧工作区导航 + 右侧内容面板；个人信息、面试偏好、AI 配置、账户安全、管理员设置）；侧栏折叠/展开动画对齐 ChatView |
 | `SettingsNav.vue` | 设置页左侧导航栏，风格对齐模拟面试/手撕代码的内部侧栏 |
-| `SettingsProfile.vue` | 设置 - 个人信息（邮箱、简历、进度、题库模式、外观） |
+| `SettingsProfile.vue` | 设置 - 个人信息（邮箱、简历、进度、分享默认值、外观） |
 | `SettingsInterview.vue` | 设置 - 面试偏好（岗位、收藏夹、AI 分类） |
+| `InterviewDistributionSettings.vue` | 五类模拟面试题型比例与主问题数；系统默认或用户自定义保存 |
 | `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数） |
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
 | `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作） |
-| `StagingPanel.vue` | 暂存面板 |
+| `StagingPanel.vue` | 暂存面板（导入时分享设置：分享到公共题库 / 仅自己可见，所有用户可见） |
 | `UserMenu.vue` | 用户菜单 |
 
 ## 核心规则
@@ -47,6 +48,7 @@
 - API 调用通过 `services/` 层或兼容层 `api/index.js`，禁止在组件中直接 `fetch`
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
+- `PracticeMode.vue` 的默认路径以背八股为主：题单选择和单卡内容优先，答案评估与历史记录作为卡片内的次级操作；题单范围由当前题库筛选结果和 `practicedQuestions` 练习元数据驱动。
 - `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 
 ## 修改后必做

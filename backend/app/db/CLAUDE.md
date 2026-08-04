@@ -16,10 +16,12 @@ SQLite 数据库层，线程安全，WAL 模式。
 |------|------|
 | `connection.py` | 线程级连接管理、`run_db()`、岗位查询、动态频率 SQL |
 | `migrations/` | Schema 迁移包；领域文件保存 `_migration_NNN_*`，`__init__.py` 维护 `_MIGRATIONS` 并提供 `run_migrations()` |
-| `operations.py` | 可复用 CRUD（提交、去重、软删除） |
+| `operations.py` | 可复用 CRUD（提交、去重、软删除）；面经写入时同步 `interview_id/question_type/dimension` 并标记公共统计过期 |
 | `queries.py` | 跨领域查询（岗位、频率、分类体系） |
 | `question_bank_sources.py` | 题库来源表 CRUD + dual-write 工具 |
 | `utils.py` | DB 层工具函数（migration 辅助、SQL helpers） |
+| `migrations/interview_distribution.py` | 面经题目关联/题型事实、分布统计与用户偏好表的 migration 042 |
+| `migrations/chat.py` | Chat 会话、消息、工具 trace、asked question、turn fence、durable side effects 和 structured turn 的 migrations 024-046 |
 
 ## 关键模式
 
@@ -27,6 +29,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **软删除**：`deleted_at` 列，查询时加 `WHERE deleted_at IS NULL`
 - **岗位过滤**：通过 `question_position` 关联表，fallback 到 `job_position` 列
 - **模拟面试历史**：`chat_conversations.job_position` 记录会话所属岗位，列表和详情必须按用户当前岗位过滤。
+- **模拟面试回合**：`chat_turns` 是进行中请求的唯一 fence；同一 conversation 只能有一个 `running` turn，旧 turn 不能绕过 `turn_id + fence` finalize。
 - **手撕代码**：`coding_problems`（题库，50 道 seed 数据）+ `coding_submissions`（提交记录 + AI 评审结果），migration 030
 
 ## 修改后必做

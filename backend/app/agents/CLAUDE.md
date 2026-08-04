@@ -10,7 +10,7 @@ agents/
 ├── submit/         ← JD/面经提交流程（识别→提取→分类→入库）
 ├── build/          ← 题库构建流程（备份→加载→聚类→生成答案→写入）
 ├── batch_generate/ ← 批量答案生成
-├── chat/           ← 面试 chatbot（记忆召回→上下文构建→LLM 回复）
+├── chat/           ← 面试 chatbot（纯 async harness：记忆召回 → 上下文构建 → LLM 语义分类 → ReAct 工具证据循环 → TurnPlanner → contract writer/validator → 记忆提取；40+ 文件）
 ├── candidate/      ← 评测框架候选人 Skill 包（供 scripts/eval_interview_agent.py 加载）
 └── shared/         ← submit/build/batch_generate 共享模块（state.py, events.py, quality.py）
 ```

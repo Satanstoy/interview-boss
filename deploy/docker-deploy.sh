@@ -16,9 +16,9 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前至少保留 4GB；构建后尽量恢复到 5GB。
+# 磁盘保护阈值（单位：MB）。构建前至少保留 2GB；构建后尽量恢复到 5GB。
 # 多项目安全：只用 docker builder prune 收缩缓存，不用全局 prune。
-DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-4096}"
+DEPLOY_MIN_FREE_MB="${DEPLOY_MIN_FREE_MB:-2048}"
 DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-5120}"
 BUILDKIT_RESERVED_SPACE="${BUILDKIT_RESERVED_SPACE:-2GB}"
 
@@ -443,7 +443,7 @@ do_diagnose() {
   docker builder du 2>/dev/null || true
   echo ""
   log "阈值设置（当前值 / 默认值）："
-  log "  DEPLOY_MIN_FREE_MB:     $DEPLOY_MIN_FREE_MB / 4096"
+  log "  DEPLOY_MIN_FREE_MB:     $DEPLOY_MIN_FREE_MB / 2048"
   log "  DEPLOY_TARGET_FREE_MB:  $DEPLOY_TARGET_FREE_MB / 5120"
   log "  BUILDKIT_RESERVED_SPACE: $BUILDKIT_RESERVED_SPACE / 2GB"
   echo ""

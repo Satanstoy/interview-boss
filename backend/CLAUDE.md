@@ -62,31 +62,45 @@ Routers → Services → Core/DB → (external)
 现有代码有少量兼容性反向/交叉导入（例如 `core.config` 热更新后刷新 LLM client，`db.operations` 复用 `services.utils`）。改架构边界前先查真实 import 链，不要只按理想分层移动代码。
 
 ### Routers (`app/routers/`) — 路由层
-`asgi.py` 中有 17 次 `include_router` 注册（含 `profile_pkg`、`questions_pkg` 子路由包）。**路由函数必须精简，禁止包含业务逻辑。**
+`asgi.py` 中有 18 次 `include_router` 注册（含 `profile_pkg`、`questions_pkg` 子路由包）。**路由函数必须精简，禁止包含业务逻辑。**
 
 ### Services (`app/services/`) — 业务逻辑层
 - `llm.py` — AsyncOpenAI + tenacity 重试
 - `clustering/` — LLM 聚类去重（matcher/clusterer/full_recluster/prompts）
+- `clustering_maintenance.py` — 聚类元数据审计/确定性修复
 - `pipeline/` — 批处理流水线（batch.py）、单例压缩（compact.py）、队列、清洗、写库
 - `submit_service.py` — 提交业务逻辑（标签、答案生成、增量更新）
 - `embedding_service.py` — ONNX Runtime 向量编码 + FAISS 预筛选 + hash fallback
-- `chat_service.py` — 对话管理、记忆提取
-- `memory_recall_service.py` — LLM 语义记忆召回 + 意图分类（`classify_and_recall()` 并行执行意图分类和控制事实解析）
+- `chat_service.py` — 对话管理、消息存储、durable side-effect jobs、memory provenance/version guard
+- `memory_recall_service.py` — LLM 语义记忆召回 + 意图分类
+- `deepgram_service.py` — 音频转写（Deepgram API）
+- `email_service.py` — 邮箱验证码发送/验证
+- `fts_service.py` — FTS5 全文搜索
+- `interview_distribution.py` — 模拟面试题型的枚举、分类、统计物化与分层默认值
+- `resume_service.py` — 简历 PDF 解析、存储、查询
+- `title_service.py` — 对话标题自动生成
+- `taxonomy_suggest.py` — 分类建议
+- `question_draw_service.py` — 加权随机抽题（difficulty 映射、fallback 降级）
+- `utils.py` — 图片编码、URL 签名、分类规范化
 
 ### Core (`app/core/`) — 配置层
 - `config.py` — 数据库热加载配置，同步回 `.env`
 - `auth.py` — JWT Access (15min) + Refresh (HttpOnly Cookie, JTI 跟踪, 轮转)
 - `prompts.py` — LLM 提示词模板
+- `logging_config.py` — 日志配置（structlog 双模式：生产 JSON / 开发彩色）
+- `interview_distribution_config.py` — 模拟面试统计的岗位族映射
 
 ### DB (`app/db/`) — 数据库层
 - `connection.py` — 线程级 SQLite（WAL），`run_db()` 用 `asyncio.to_thread()` 包装
 - `operations.py` — 可复用 CRUD | `queries.py` — 查询函数
-- `migrations/` — Schema 迁移（按功能域分组：question_bank/auth/data_repair/sources/view/chat/coding/clustering/jobs），`run_migrations()` 在 `__init__.py`
+- `question_bank_sources.py` — 题库来源表 CRUD + dual-write
+- `utils.py` — DB 层工具函数
+- `migrations/` — Schema 迁移（按功能域分组：question_bank/auth/data_repair/sources/view/chat/coding/clustering/jobs/interview_distribution），`run_migrations()` 在 `__init__.py`
 
 **数据库：** SQLite `backend/data/interview-boss.db`
 
 ### Agents (`app/agents/`) — LangGraph 状态机
-`submit/`, `build/`, `batch_generate/`, `chat/` 四个 LangGraph agent + `candidate/` 评测用 skills 包；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 有自己的 `state.py` 和 ReAct pipeline（拆分为 pipeline/react_loop/answer/question_plan/summary/metadata），`candidate/` 只承载评测用 `skills/` 不是生产 agent。
+`submit/`, `build/`, `batch_generate/`, `chat/` 四个 LangGraph agent + `candidate/` 评测用 skills 包；前三个共享 `shared/` 状态/事件/质量模块，`chat/` 是纯 async harness（替代 LangGraph StateGraph）：记忆召回 → 上下文构建 → LLM 语义分类 → ReAct 工具证据循环 → TurnPlanner → contract writer/validator → 记忆提取。拆分为 40+ 个文件（pipeline/react_loop/answer/question_plan/summary/metadata/stop_policy/coverage/distribution/turn_contract/structured_turn/turn_intent/writers/validators/tools/tool_policy/output_guardrails 等）。`candidate/` 只承载评测用 `skills/` 不是生产 agent。
 
 ### Scripts (`scripts/`) — 运维脚本
 一次性运维脚本、数据修复工具。前缀：`fix_*.py`（修复）、`verify_*.py`（验证）、`check_*.py`（检查）。详见 `scripts/CLAUDE.md`。
@@ -107,6 +121,7 @@ Routers → Services → Core/DB → (external)
 | 配置 | `routers/profile.py` + `profile_pkg/` | `core/config.py` + `services/email_service.py` + `services/resume_service.py` | `db/operations.py` |
 | 手撕代码 | `routers/coding.py` | — | `db/queries.py` |
 | 音频转写 | `routers/audio.py` | `services/deepgram_service.py` | — |
+| 面试分布 | `routers/interview_distribution.py` | `services/interview_distribution.py` + `core/interview_distribution_config.py` | `db/queries.py` |
 | 健康检查 | `routers/health.py` | — | — |
 | 错误上报 | `routers/error_report.py` | — | — |
 | Agent | `routers/submit.py` / `bank_build.py` / `answers.py` / `chat.py` | `agents/submit/` `agents/build/` `agents/batch_generate/` `agents/chat/` `agents/candidate/`（skills） `agents/shared/` | — |

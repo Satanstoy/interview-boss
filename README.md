@@ -90,7 +90,7 @@ cat2 预分组 + 两遍聚类 + 验证步骤，语义相近的题目自动合并
 <details>
 <summary><strong>模拟面试 + 答题评估</strong> — 实战练习闭环</summary>
 
-加权随机抽题（减少近期重复），支持分类和难度筛选。AI 从完整性、深度、准确性、逻辑性 4 个维度评分并给出改进建议。配置面板和设置页均内置可搜索的模型选择器，支持从当前 LLM 提供商自动拉取可用模型列表，模拟面试时留空则沿用全局默认模型，选择后只对本次抽测生效。
+加权随机抽题（减少近期重复），支持分类和难度筛选。系统会从已审核的真实面经物化五类题型比例和主问题数中位数，用户可在设置页选择系统默认值或按岗位调整项目深挖、知识探测、算法编程、系统设计、行为协作的比例。每个对话会冻结所用统计版本与计划，后续以事件记录实际覆盖。AI 从完整性、深度、准确性、逻辑性 4 个维度评分并给出改进建议。配置面板和设置页均内置可搜索的模型选择器，支持从当前 LLM 提供商自动拉取可用模型列表，模拟面试时留空则沿用全局默认模型，选择后只对本次抽测生效。
 
 </details>
 
@@ -104,7 +104,7 @@ ECharts 6 知识点关联网络、技术栈热度趋势、考点分布、难度�
 <details>
 <summary><strong>AI 对话</strong> — 多轮对话 + PDF 解析 + Skills 技能系统</summary>
 
-独立的对话模块，支持多轮对话、SSE 流式响应、对话归档/重命名/删除。内置记忆系统，AI 可跨对话记住关键信息。支持 PDF 文件上传提取内容。
+独立的对话模块，支持多轮对话、带 turn 幂等标识的 SSE 流式响应、对话归档/重命名/删除，以及 assistant 回复 regenerate（保留原 user turn 和历史 assistant revision）。内置记忆系统，AI 可跨对话记住关键信息。支持 PDF 文件上传提取内容。
 
 **Skills 技能系统（Progressive Disclosure）**：面试官 AI 内置 6 种专业技能模式，根据对话内容自动激活：
 - **自适应难度** — 基于答题表现动态调整题目深度，好答案升级追问，差答案降级换题
@@ -428,7 +428,7 @@ sudo ./deploy/docker-deploy.sh all
 
 首次构建会生成两个本地镜像：`interview-boss-app:local`（backend/worker 共用）和 `interview-boss-nginx:local`（内置前端 dist）。后续代码更新只需执行 `sudo ./deploy/docker-deploy.sh update`；脚本会自动备份数据库、构建镜像、等待健康检查，依赖未变时复用 BuildKit 缓存层、inline cache 和 npm/pip/uv cache mounts，不重新下载。
 
-部署脚本内置磁盘保护：构建前根分区至少保留 4GB，构建后低于 5GB 会自动收缩 BuildKit cache（默认保留 2GB），避免 Docker 部署过程中把磁盘写满。
+部署脚本内置磁盘保护：构建前根分区至少保留 2GB，构建后低于 5GB 会自动收缩 BuildKit cache（默认保留 2GB），避免 Docker 部署过程中把磁盘写满。
 
 部署脚本默认复用缓存/稳定默认镜像源，只做短健康检查；健康检查失败才刷新 npm/PyPI/apt 源，避免每次 `update` 都改变 build args 导致依赖层缓存失效。镜像源缓存使用版本化目录，旧脚本留下的坏源不会污染后续 `update`。镜像源整体失效或首次配置机器时，执行 `sudo ./deploy/docker-deploy.sh mirrors` 强制清缓存、完整测速并更新 Docker Hub registry mirror。
 
@@ -480,6 +480,31 @@ sudo ss -tlnp | grep ':80 '
 ```
 
 ## API 概览
+
+### 外部 MCP 接入
+
+系统内置了可被外部 agent 调用的 Streamable HTTP MCP 服务，当前提供 `load_skill`、`search_questions`、`draw_questions` 和 `select_question` 工具。连接初始化时会自动加载 InterviewBoss 的 MCP 工具使用 skill，领域面试 skill 再通过 `load_skill` 按需加载。用户在“设置 → MCP 接入”中生成自己的账户级 Token；同一账户始终只有一枚 Token，重置后旧 Token 立即失效。外部 agent 的配置、自动 skill 加载和工具调用流程见 [InterviewBoss MCP 外部 Agent 使用说明](docs/agents/interview-boss-mcp.md)。
+
+设置页会生成可直接复制的配置，核心格式如下：
+
+```json
+{
+  "mcpServers": {
+    "interview-boss": {
+      "url": "http://your-host.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ib_mcp_..."
+      }
+    }
+  }
+}
+```
+
+如果外部 agent 只支持 stdio，设置页还会生成基于 `npx mcp-remote` 的兼容配置；它不需要额外申请证书，但本机需要 Node.js 18+。原生支持远程 Streamable HTTP 的客户端应优先使用直接 URL 配置。
+
+如果站点位于反向代理、端口映射或安全隧道后，请在 `backend/.env` 设置 `MCP_PUBLIC_URL`，它只影响设置页展示的 endpoint。当前服务器如果只能提供 HTTP，MCP 仍可在可达网络中工作，但 Bearer Token 会以明文传输，公网使用应优先通过 HTTPS、VPN/内网或 Cloudflare Tunnel、Tailscale 等安全隧道暴露；不要把 Token 放进 URL 查询参数。
+
+管理端点：`GET /api/profile/mcp` 读取 endpoint 和脱敏元数据，`POST /api/profile/mcp/token` 创建/重置 Token，`DELETE /api/profile/mcp/token` 撤销 Token。题目检索和选题仍由后端现有业务层执行，外部 agent 传入的 `user_id`、`bank_mode` 不会覆盖 Token 对应账户。
 
 <details>
 <summary><strong>认证接口</strong></summary>
@@ -556,6 +581,8 @@ sudo ss -tlnp | grep ':80 '
 | DELETE | `/api/chat/conversations/{id}` | 删除对话 |
 | GET | `/api/chat/conversations/{id}/messages` | 获取消息列表 |
 | POST | `/api/chat/conversations/{id}/messages` | 发送消息（SSE 流式） |
+| GET | `/api/chat/conversations/{id}/turns/{turn_id}` | 查询 turn 状态与可恢复的 assistant 内容 |
+| POST | `/api/chat/conversations/{id}/messages/{assistant_message_id}/regenerate` | 重新生成 assistant revision（SSE 流式） |
 | GET | `/api/chat/memories` | 获取记忆列表 |
 | DELETE | `/api/chat/memories/{id}` | 删除记忆 |
 | POST | `/api/chat/extract-pdf` | PDF 文件内容提取 |

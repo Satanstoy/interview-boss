@@ -297,9 +297,9 @@ class TestDockerDeployScript:
         assert "cleanup_after_build" in content
 
     def test_default_thresholds_match_docs(self):
-        """默认阈值应与文档一致：4096 / 5120 / 2GB"""
+        """默认阈值应与文档一致：2048 / 5120 / 2GB"""
         content = self._read()
-        assert "DEPLOY_MIN_FREE_MB:-4096" in content
+        assert "DEPLOY_MIN_FREE_MB:-2048" in content
         assert "DEPLOY_TARGET_FREE_MB:-5120" in content
         assert "BUILDKIT_RESERVED_SPACE:-2GB" in content
 

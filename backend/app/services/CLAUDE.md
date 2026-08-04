@@ -12,8 +12,10 @@
 | `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容 | `llm`, `embedding_service` |
 | `clustering_maintenance.py` | 聚类元数据审计/确定性修复（frequency、cluster_id、normalized tables、精确重复） | `db/question_bank_sources`, `pipeline/batch` |
 | `submit_service.py` | 提交业务逻辑：题目标注、答案生成、增量更新题库 | `llm`, `db`, `pipeline` |
-| `embedding_service.py` | ONNX Runtime 向量编码 + FAISS 预筛选（Xenova/bge-small-zh-v1.5，本地/离线）+ hash fallback | `onnxruntime`, `tokenizers`, `faiss-cpu` |
-| `chat_service.py` | 对话管理、消息存储、记忆提取、面试开场白生成 | `llm`, `memory_recall_service` |
+| `embedding_service.py` | 向量编码（双后端：SiliconFlow bge-m3 1024维 + 本地 ONNX bge-small-zh 512维）+ FAISS 预筛选 + hash fallback | `openai`, `onnxruntime`, `tokenizers`, `faiss-cpu` |
+| `faiss_index_manager.py` | Per-cat2 centroid 缓存 + FAISS 索引管理器，消除 cluster_batch 全表扫描；singleton 实例通过 `get_index_manager()` 访问 | `embedding_service`, `faiss-cpu` |
+| `backpressure.py` | 自适应并发限制器（RateLimitError 自动降并发、成功后恢复）；matcher/compact 共享 singleton | — |
+| `chat_service.py` | 对话管理、消息存储、durable side-effect jobs、memory provenance/version guard、CandidateSet、interview event/generation read model | `llm`, `memory_recall_service` |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |
@@ -21,7 +23,9 @@
 | `email_service.py` | 邮箱验证码发送/验证（注册、登录、绑定邮箱、重置密码） | `core/config` |
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
-| `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级） | `db/connection`, `routers/questions` |
+| `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级）；`behavioral` 过滤必须复用分布统计的统一信号词表（HR、人力资源、行为面、软技能、冲突、协作、失败、复盘、STAR、职业规划、影响力）；英语缩写 HR 必须按独立 token 匹配，不能误命中 `thread` 等技术词 | `db/connection`, `routers/questions` |
+| `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
+| `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要 | `db/queries`, `db/connection` |
 
 ## 核心规则
 
@@ -31,9 +35,12 @@
 - 错误处理：捕获异常后记录日志，向上抛出业务异常
 - 聚类维护禁止用 embedding 阈值自动合并；embedding 最多作为候选排序/预筛信号
 - 模拟面试会话必须写入并按 `job_position` 过滤，跨会话召回也只召回同岗位历史。
+- Chat 消息写入必须在 SQL 内校验会话归属与 `status = 'active'`；归档会话保留只读，不允许新增 user 或 assistant 消息。
+- Chat turn 必须先通过 `reserve_chat_turn()` 原子获取 conversation fence；assistant finalize、取消和 turn-owned 副作用必须校验 `turn_id + fence + user_id + status = 'running'`，不能只按 conversation 写入。
+- Durable side effects 必须从 `chat_side_effect_jobs` claim；memory extraction 按 source turn/job 与 content hash 去重，metadata/session notes 更新必须支持 expected version conflict。
+- CandidateSet 只保存题目引用；消费后必须从权威 `question_bank` reload，不能信任客户端或候选集中的自然语言题面。
 
 ## 修改后必做
 
 1. 运行 `docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q`
 2. 更新本文件（如新增文件或改变职责）
-| `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要 | `db/queries`, `db/connection` |

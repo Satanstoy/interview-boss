@@ -7,12 +7,12 @@
 
 | 文件 | 职责 |
 |------|------|
-| `batch.py` | 增量聚类、完整流水线（主入口），共享写库辅助函数 |
-| `batch_v2.py` | v2 版本，新增"孤岛匹配已有聚类"步骤 |
+| `batch.py` | 增量聚类、完整流水线（主入口），共享写库辅助函数；写入后自动失效 FAISS 缓存 + 记录 pipeline_metrics |
+| `batch_v2.py` | v2 版本（死代码已清理，仅保留源码级回归测试参考） |
 | `compact.py` | 孤岛碎片整理（frequency=1 题目合并），共享 `batch.py` 辅助函数 |
-| `queue.py` | 队列操作：enqueue / dequeue / mark_done / mark_failed / trigger 判断 |
-| `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE = 40`） |
-| `writer.py` | 数据库写入：将聚类结果写入 question_bank 及关联表 |
+| `queue.py` | 队列操作：enqueue（支持 owner_id）/ dequeue（按 owner_id 分桶）/ mark_done / mark_failed / trigger 判断 |
+| `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE` 由 `core/config.CLUSTER_BATCH_SIZE` 控制） |
+| `writer.py` | 数据库写入：将聚类结果写入 question_bank；面经打标必须传已知 `interview_id`，以替换同一场面试的 typed details |
 
 ## 核心规则
 
@@ -21,6 +21,7 @@
 - 数据清洗规则在 `sanitize.py` 的 `_BLACKLIST_PHRASES` 中维护
 - 合并写库统一走 `batch.py` 的 helper，`frequency` 必须等于去重后的 `original_questions` 数量且最低为 1
 - compaction 的 LLM 匹配必须二次验证；embedding 阈值不得作为自动合并依据
+- 真实面经的 `tag_interview` 调用必须提供 `interview_id`；无关联 ID 的兼容写入不进入分布统计，不能用来生成系统默认值
 
 ## 修改后必做
 

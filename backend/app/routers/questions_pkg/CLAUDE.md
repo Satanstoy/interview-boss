@@ -9,6 +9,8 @@
 | `mutations.py` | 聚类变异操作：拆分（split）、合并（merge）、重新打标（retag） |
 | `bulk.py` | 批量操作：删除原始题目、删除聚类、批量删除、上传到题库 |
 
+删除原始题目会删除对应 `questions_detail`，必须在删除前标记受影响公共面经的 distribution stats 为 stale；重新打标也必须重新映射其 canonical question type。
+
 ## 保留在 `questions.py` 的端点
 
 - `_build_bank_where_clause` — 查询子句构造（被 `practice.py` 导入）
