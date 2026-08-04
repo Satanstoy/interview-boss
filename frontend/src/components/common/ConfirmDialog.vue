@@ -11,7 +11,7 @@
         <AlertDialogCancel @click="handleCancel">
           {{ confirmState.cancelLabel || '取消' }}
         </AlertDialogCancel>
-        <AlertDialogAction :class="confirmBtnClass" @click="handleConfirm">
+        <AlertDialogAction :class="confirmBtnClass" @click.capture="handleConfirm">
           {{ confirmState.confirmLabel || '确定' }}
         </AlertDialogAction>
       </AlertDialogFooter>
