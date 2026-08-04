@@ -422,11 +422,11 @@ header[class~="h-11"] {
 
 /* Tooltip arrows are part of the glass surface, not an opaque popover diamond. */
 [data-material="glass-arrow"] {
-  background: var(--ib-material-overlay) !important;
-  border: 1px solid var(--ib-material-hairline);
-  -webkit-backdrop-filter: blur(24px) saturate(1.35);
-  backdrop-filter: blur(24px) saturate(1.35);
+  background: transparent !important;
+  border: 0;
   fill: var(--ib-material-overlay) !important;
+  stroke: var(--ib-material-hairline);
+  stroke-width: 0.75px;
 }
 
 @media (prefers-reduced-motion: reduce) {

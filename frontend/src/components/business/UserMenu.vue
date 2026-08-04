@@ -48,41 +48,35 @@
         <button
           v-if="user?.is_admin"
           @click="$emit('show-review'); showMenu = false"
-          class="group w-full text-left px-4 py-2.5 text-sm text-muted-foreground hover:bg-primary/10 dark:hover:bg-primary/15 hover:text-primary dark:hover:text-primary flex items-center gap-2.5 transition-colors"
+          class="group w-full text-left px-4 py-2.5 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground flex items-center gap-3 transition-colors"
         >
-          <div class="size-7 rounded-lg bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors">
-            <svg class="size-4 text-muted-foreground group-hover:text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="size-4 shrink-0 text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-          </div>
+          </svg>
           审核题库
-          <span v-if="pendingCount > 0" class="ml-auto bg-muted text-muted-foreground text-xs px-2 py-0.5 rounded-full font-bold">{{ pendingCount }}</span>
+          <span v-if="pendingCount > 0" class="ml-auto text-[11px] font-medium text-sidebar-foreground/50">{{ pendingCount }}</span>
         </button>
 
         <!-- Settings -->
         <button
           @click="$emit('show-settings'); showMenu = false"
-          class="group w-full text-left px-4 py-2.5 text-sm text-muted-foreground hover:bg-primary/10 dark:hover:bg-primary/15 hover:text-primary dark:hover:text-primary flex items-center gap-2.5 transition-colors"
+          class="group w-full text-left px-4 py-2.5 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground flex items-center gap-3 transition-colors"
         >
-          <div class="size-7 rounded-lg bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors">
-            <svg class="size-4 text-muted-foreground group-hover:text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="size-4 shrink-0 text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
+          </svg>
           设置
         </button>
 
         <!-- Logout -->
         <button
           @click="handleLogout"
-          class="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-3 transition-colors"
         >
-          <div class="size-7 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-            <svg class="size-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="size-4 shrink-0 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-            </svg>
-          </div>
+          </svg>
           退出登录
         </button>
       </div>
