@@ -15,6 +15,7 @@ const issuedToken = ref('')
 const issuedConfig = ref('')
 const issuedStdioConfig = ref('')
 const copied = ref('')
+const MCP_SESSION_STORAGE_KEY = 'interview-boss:mcp-connection'
 
 const agentConfigPrompt = computed(() => {
   const endpoint = settings.value?.endpoint
@@ -31,10 +32,60 @@ const agentConfigPrompt = computed(() => {
   ].join('\n')
 })
 
+const clearSessionCredentials = () => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(MCP_SESSION_STORAGE_KEY)
+  } catch {
+    // Ignore storage restrictions; copying still works until the page is refreshed.
+  }
+}
+
+const persistSessionCredentials = (result) => {
+  if (typeof window === 'undefined' || !result?.token) return
+  try {
+    window.sessionStorage.setItem(MCP_SESSION_STORAGE_KEY, JSON.stringify({
+      endpoint: result.endpoint,
+      rotated_at: result.rotated_at,
+      token: result.token,
+      config_json: result.config_json || '',
+      stdio_config_json: result.stdio_config_json || '',
+    }))
+  } catch {
+    // Ignore storage restrictions; copying still works until the page is refreshed.
+  }
+}
+
+const restoreSessionCredentials = (config) => {
+  if (typeof window === 'undefined' || !config?.configured) {
+    clearSessionCredentials()
+    return
+  }
+
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(MCP_SESSION_STORAGE_KEY) || 'null')
+    const isCurrentToken = stored?.token
+      && stored.endpoint === config.endpoint
+      && stored.rotated_at === config.rotated_at
+
+    if (!isCurrentToken) {
+      clearSessionCredentials()
+      return
+    }
+
+    issuedToken.value = stored.token
+    issuedConfig.value = stored.config_json || ''
+    issuedStdioConfig.value = stored.stdio_config_json || ''
+  } catch {
+    clearSessionCredentials()
+  }
+}
+
 const loadConfig = async () => {
   loading.value = true
   try {
     settings.value = await fetchMyMCPConfig()
+    restoreSessionCredentials(settings.value)
   } catch (error) {
     toastError(`加载 MCP 配置失败：${error.message}`)
   } finally {
@@ -59,6 +110,7 @@ const issueToken = async () => {
     issuedToken.value = result.token || ''
     issuedConfig.value = result.config_json || ''
     issuedStdioConfig.value = result.stdio_config_json || ''
+    persistSessionCredentials(result)
     toastSuccess(hadToken ? 'MCP Token 已重置，请立即复制保存' : 'MCP Token 已生成，请立即复制保存')
   } catch (error) {
     toastError(`生成 MCP Token 失败：${error.message}`)
@@ -80,6 +132,7 @@ const revokeToken = async () => {
     issuedToken.value = ''
     issuedConfig.value = ''
     issuedStdioConfig.value = ''
+    clearSessionCredentials()
     await loadConfig()
     toastSuccess('MCP Token 已撤销')
   } catch (error) {
@@ -92,7 +145,23 @@ const revokeToken = async () => {
 const copyText = async (value, name) => {
   if (!value) return
   try {
-    await navigator.clipboard.writeText(value)
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard API unavailable')
+      await navigator.clipboard.writeText(value)
+    } catch {
+      // navigator.clipboard usually requires HTTPS; support the current HTTP deployment.
+      const textArea = document.createElement('textarea')
+      textArea.value = value
+      textArea.setAttribute('readonly', '')
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.select()
+      textArea.setSelectionRange(0, textArea.value.length)
+      const copiedSuccessfully = document.execCommand('copy')
+      textArea.remove()
+      if (!copiedSuccessfully) throw new Error('fallback copy failed')
+    }
     copied.value = name
     window.setTimeout(() => { if (copied.value === name) copied.value = '' }, 1800)
   } catch {
@@ -174,7 +243,7 @@ onMounted(loadConfig)
             {{ settings?.configured ? settings.token_hint : '尚未生成 Token' }}
           </code>
           <p class="text-xs leading-5 text-muted-foreground">
-            完整 Token 不会直接显示；生成或重置后，点击右侧“复制 Token”即可复制。刷新页面后如需再次获取，请重置 Token。
+            完整 Token 不会直接显示；本标签页会临时保留最近生成的 Token，刷新后仍可复制。关闭标签页或重置后旧 Token 会失效。
           </p>
         </div>
 
