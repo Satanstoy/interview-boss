@@ -420,6 +420,13 @@ header[class~="h-11"] {
   isolation: isolate;
 }
 
+/* A collapsed nested sidebar must not leave a one-pixel edge beside the app sidebar. */
+:where(.sidebar-container.sidebar-collapsed, .settings-sidebar.settings-sidebar-collapsed) {
+  border-right-width: 0 !important;
+  border-left-width: 0 !important;
+  box-shadow: none !important;
+}
+
 /* Tooltip arrows are part of the glass surface, not an opaque popover diamond. */
 [data-material="glass-arrow"] {
   background: transparent !important;

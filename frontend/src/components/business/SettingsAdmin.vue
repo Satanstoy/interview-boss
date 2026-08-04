@@ -148,7 +148,7 @@ const onRebuild = () => {
           <FolderTree class="size-4" />
           分类体系管理
         </h3>
-        <Button variant="link" size="sm" @click="addCat1" class="text-xs text-primary h-auto p-0">
+        <Button variant="link" size="sm" @click="addCat1" class="text-xs text-primary h-auto p-0 no-underline hover:no-underline">
           <Plus class="size-3.5 mr-1" />
           添加大类
         </Button>
@@ -193,7 +193,7 @@ const onRebuild = () => {
               </AppTooltip>
             </div>
             <Button variant="link" size="sm" @click="addChild(cat)"
-              class="text-xs text-primary h-auto p-0 mt-1">
+              class="text-xs text-primary h-auto p-0 mt-1 no-underline hover:no-underline">
               <Plus class="size-3 mr-1" />
               添加子类
             </Button>
