@@ -9,7 +9,7 @@
 | `AdminReview.vue` | 管理员审核面板 |
 | `AnalyticsSidebar.vue` | 数据分析侧边栏（分类目录、热门技术栈） |
 | `CodeEditor.vue` | Monaco 代码编辑器封装（Python/C/Java） |
-| `CodingPractice.vue` | 手撕代码练习主页面（题目列表 + 编辑器 + AI 评审）；内部侧栏折叠/展开动画对齐 ChatView |
+| `CodingPractice.vue` | 手撕代码练习主页面（模拟面试式题库配置/练习两态 + 题目列表 + 编辑器 + AI 评审）；保留收藏、题单和 Prompt + Markdown 导入 |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
 | `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正；regenerate 通过 assistant revision 重新加载消息，不删除或重复插入 user turn |
 | `ReasoningTimeline.vue` | 面试官推理展示组件（可展开/折叠）；过滤 loading/context 等基础设施 step，把推理步骤、技能加载、工具调用串成左侧连线 timeline，连线需穿过圆点中心；展示 MiMo/DeepSeek reasoning_content、公开摘要 fallback、工具耗时、白名单参数和结果预览 |
@@ -48,6 +48,7 @@
 - API 调用通过 `services/` 层或兼容层 `api/index.js`，禁止在组件中直接 `fetch`
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
+- `CodingPractice.vue` 的题库配置态和练习态与 `MockInterview.vue` 对齐：复用页面留白、卡片外壳、标题区、筛选胶囊、summary bar 和题目卡片层级；进入题目后才展示编辑器与 AI 评审区。
 - `PracticeMode.vue` 的默认路径以背八股为主：题单选择和单卡内容优先，答案评估与历史记录作为卡片内的次级操作；题单范围由当前题库筛选结果和 `practicedQuestions` 练习元数据驱动。
 - `LoginPage.vue` 是无 header 的全屏登录壳，品牌 logo + InterviewBoss 名称固定在左上角；中间登录卡片使用简短文案：标题“欢迎回来”、入口“免登录体验”，不要副标题标语、功能标签、营销卖点或复杂 dashboard preview。必须视口高度自适应（如 `h-dvh`/`h-full min-h-0`），不要使用 `calc(100vh-56px)`。
 

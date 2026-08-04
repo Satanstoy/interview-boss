@@ -15,7 +15,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `InsightsView.vue` | 洞察工作台编排：总览、岗位准备度、面试复盘三个路由共用数据快照 |
 | `KnowledgeGraphView.vue` | 知识图谱页 |
 | `ImportView.vue` | 导入工作台页 |
-| `CodingView.vue` | 手撕代码页 |
+| `CodingView.vue` | 手撕代码页；页面外层与 `MockInterviewView.vue` 保持一致的留白、滚动和内容间距 |
 | `SettingsView.vue` | 设置页：在主工作区外壳内承载 `SettingsPage.vue` |
 | `LoginView.vue` | 登录页 |
 
