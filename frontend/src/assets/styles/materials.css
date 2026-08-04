@@ -318,7 +318,7 @@ html.dark .ib-question-accordion-trigger:is(
   :focus-visible,
   [data-state="open"],
   [data-active="true"]
-),
+) svg,
 html:not(.dark) .ib-question-accordion-trigger:is(
   :hover,
   :focus-visible,
@@ -427,6 +427,42 @@ header[class~="h-11"] {
   fill: var(--ib-material-overlay) !important;
   stroke: var(--ib-material-hairline);
   stroke-width: 0.75px;
+}
+
+/* Settings sub-navigation already has its sidebar hover treatment; keep it free of glyph blocks. */
+.settings-sidebar button::before {
+  opacity: 0 !important;
+}
+
+html.dark .settings-sidebar button:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+),
+html:not(.dark) .settings-sidebar button:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+) {
+  box-shadow: none;
+  text-shadow: none;
+}
+
+html.dark .settings-sidebar button:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+) svg,
+html:not(.dark) .settings-sidebar button:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+) svg {
+  filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

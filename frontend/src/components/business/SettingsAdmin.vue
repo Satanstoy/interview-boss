@@ -144,11 +144,11 @@ const onRebuild = () => {
     <!-- Card 1: 分类体系管理 -->
     <div class="rounded-xl border bg-card p-6 space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-xs font-bold text-accent-600 dark:text-accent-400 uppercase tracking-wider flex items-center gap-2">
+        <h3 class="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
           <FolderTree class="size-4" />
           分类体系管理
         </h3>
-        <Button variant="link" size="sm" @click="addCat1" class="text-xs text-accent-600 dark:text-accent-400 h-auto p-0">
+        <Button variant="link" size="sm" @click="addCat1" class="text-xs text-primary h-auto p-0">
           <Plus class="size-3.5 mr-1" />
           添加大类
         </Button>
@@ -193,7 +193,7 @@ const onRebuild = () => {
               </AppTooltip>
             </div>
             <Button variant="link" size="sm" @click="addChild(cat)"
-              class="text-xs text-accent-600 dark:text-accent-400 h-auto p-0 mt-1">
+              class="text-xs text-primary h-auto p-0 mt-1">
               <Plus class="size-3 mr-1" />
               添加子类
             </Button>
@@ -213,7 +213,7 @@ const onRebuild = () => {
           保存为个人分类
         </Button>
         <Button variant="outline" size="sm" @click="onShare"
-          class="flex-1 border-accent-200 dark:border-accent-800 text-accent-700 dark:text-accent-400">
+          class="flex-1 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400">
           <Share2 class="size-3.5 mr-1.5" />
           分享分类
         </Button>
@@ -244,7 +244,7 @@ const onRebuild = () => {
             </div>
             <div v-else class="flex flex-col gap-3">
               <div v-for="tax in publicTaxonomies" :key="tax.id"
-                class="rounded-xl border border-border p-4 hover:border-accent-300 dark:hover:border-accent-700 transition cursor-pointer"
+                class="rounded-xl border border-border p-4 hover:border-primary/40 dark:hover:border-primary/50 transition cursor-pointer"
                 @click="onUsePublic(tax)">
                 <div class="flex items-center justify-between mb-2">
                   <h4 class="text-sm font-semibold text-foreground">{{ tax.position_name }}</h4>

@@ -762,8 +762,14 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 :deep(ul) { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(ol) { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
 :deep(strong) { font-weight: 700; @apply text-foreground; }
-:deep(h1), :deep(h2), :deep(h3) { font-weight: 700; @apply text-foreground; margin-top: 1.5rem; margin-bottom: 0.5rem; }
-:deep(h3) { font-size: 1.125rem; }
+:deep(.answer-content h1), :deep(.answer-content h2), :deep(.answer-content h3),
+:deep(.prose-chat h1), :deep(.prose-chat h2), :deep(.prose-chat h3) {
+  font-weight: 700;
+  @apply text-foreground;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+:deep(.answer-content h3), :deep(.prose-chat h3) { font-size: 1.125rem; }
 
 /* ── Tab transition ── */
 .tab-fade-enter-active,

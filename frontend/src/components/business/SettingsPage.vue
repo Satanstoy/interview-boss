@@ -190,6 +190,10 @@ const currentSectionLabel = computed(
   pointer-events: none;
 }
 
+.settings-sidebar.settings-sidebar-collapsed {
+  border-right-width: 0;
+}
+
 .sidebar-expand-buttons {
   animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
 }

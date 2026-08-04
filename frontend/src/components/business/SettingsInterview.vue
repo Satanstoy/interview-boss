@@ -267,7 +267,7 @@ const handleGoToQuestion = (question) => {
         </DialogHeader>
         <div class="flex-1 overflow-y-auto flex flex-col gap-3">
           <div v-for="(cat, i) in (taxonomyPreview?.categories || [])" :key="i" class="rounded-xl border border-border overflow-hidden">
-            <div class="px-4 py-2.5 bg-accent-50 dark:bg-accent-900/20 font-semibold text-sm text-accent-700 dark:text-accent-300">
+            <div class="px-4 py-2.5 bg-primary/10 dark:bg-primary/20 font-semibold text-sm text-primary">
               {{ cat.cat1 }}
             </div>
             <div class="px-4 py-2 flex flex-col gap-1">

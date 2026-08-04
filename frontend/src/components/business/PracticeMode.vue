@@ -1,11 +1,16 @@
 <template>
   <div data-testid="practice-workspace" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
-    <aside data-testid="practice-queue-sidebar" class="hidden w-64 shrink-0 flex-col border-r border-border bg-background md:flex">
-      <div class="border-b border-border p-2">
-        <div class="relative">
+    <aside v-if="!queueCollapsed" data-testid="practice-queue-sidebar" class="hidden w-64 shrink-0 flex-col border-r border-border bg-background md:flex">
+      <div class="flex shrink-0 items-center gap-2 p-2">
+        <div class="relative min-w-0 flex-1">
           <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
         </div>
+        <AppTooltip text="收起题单侧栏" side="right">
+          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题单侧栏" @click="queueCollapsed = true">
+            <PanelLeftClose :size="14" />
+          </Button>
+        </AppTooltip>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar">
         <button
@@ -29,6 +34,14 @@
     <div class="flex min-w-0 flex-1 flex-col">
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
         <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-3 overflow-hidden px-4 py-4 md:px-6 md:py-5">
+
+          <div v-if="queueCollapsed" class="hidden shrink-0 items-center md:flex">
+            <AppTooltip text="展开题单侧栏" side="right">
+              <Button variant="ghost" size="icon" class="size-7" aria-label="展开题单侧栏" @click="queueCollapsed = false">
+                <PanelLeft :size="14" />
+              </Button>
+            </AppTooltip>
+          </div>
 
     <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
@@ -183,6 +196,8 @@ import {
   Link2,
   List,
   Loader2,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -227,6 +242,7 @@ const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
+const queueCollapsed = ref(false)
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
 const showSelfCheck = ref(false)

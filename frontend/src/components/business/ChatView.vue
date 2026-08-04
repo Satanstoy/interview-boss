@@ -443,6 +443,7 @@ import NewChatModal from './NewChatModal.vue'
 import ModelSelector from './ModelSelector.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import * as chatApi from '@/services/chatApi.js'
+import { fetchMyLLMConfig } from '@/services/profileApi.js'
 
 const props = defineProps({
   jdList: { type: Array, default: () => [] },
@@ -699,6 +700,21 @@ async function loadConversations() {
     }
   } catch (e) {
     console.error('加载对话列表失败:', e)
+  }
+}
+
+async function loadDefaultModel() {
+  if (props.preview) {
+    selectedModel.value = 'gpt-4o'
+    return
+  }
+  if (selectedModel.value) return
+  try {
+    const res = await fetchMyLLMConfig()
+    const model = String(res?.settings?.llm_model || '').trim()
+    if (model && !selectedModel.value) selectedModel.value = model
+  } catch (e) {
+    console.warn('加载默认模型失败:', e)
   }
 }
 
@@ -1371,6 +1387,7 @@ if (!props.modelValue && savedId) {
 
 // Load conversations on mount
 onMounted(async () => {
+  await loadDefaultModel()
   await loadConversations()
 
   // Determine which conversation to load: modelValue (URL) takes precedence

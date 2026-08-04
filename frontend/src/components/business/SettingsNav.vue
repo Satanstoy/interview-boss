@@ -19,11 +19,7 @@ function selectSection(id) {
 <template>
   <nav data-material="glass" class="flex h-full w-full shrink-0 flex-col overflow-hidden">
     <!-- Header -->
-    <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
-      <div class="min-w-0 flex-1">
-        <h2 class="text-sm font-semibold tracking-tight text-foreground">设置</h2>
-        <p class="mt-0.5 truncate text-xs text-muted-foreground">管理你的账户和偏好</p>
-      </div>
+    <div class="flex shrink-0 justify-end p-3">
       <AppTooltip text="收起设置菜单" side="right">
         <Button variant="ghost" size="icon" class="shrink-0" aria-label="收起设置菜单" @click="emit('collapse')">
           <PanelLeftClose :size="16" />
