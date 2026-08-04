@@ -133,9 +133,9 @@
     </div>
 
     <div v-if="currentQ" class="mx-auto flex shrink-0 w-full flex-wrap items-center justify-between gap-3 px-1">
-      <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题<span class="hidden text-[11px] text-muted-foreground md:inline">←</span></Button>
+      <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
       <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
-      <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<span class="hidden text-[11px] text-muted-foreground md:inline">→</span><ChevronRight class="size-4" /></Button>
+      <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
     </div>
         </div>
       </main>

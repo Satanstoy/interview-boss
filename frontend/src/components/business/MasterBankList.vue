@@ -33,9 +33,9 @@
           v-for="q in items"
           :key="q.id"
           :value="String(q.id)"
-          class="min-w-0 max-w-full border border-border rounded-xl overflow-hidden bg-card shadow-sm data-[state=open]:border-primary/30"
+          class="min-w-0 max-w-full border border-border rounded-xl overflow-hidden bg-card shadow-sm"
         >
-          <AccordionTrigger class="w-full min-w-0 max-w-full px-3 py-2 hover:no-underline sm:px-4">
+          <AccordionTrigger class="ib-question-accordion-trigger w-full min-w-0 max-w-full px-3 py-2 hover:no-underline sm:px-4">
             <div class="flex min-w-0 flex-1 items-center gap-2 text-left pr-1 sm:gap-3 sm:pr-2">
               <!-- Checkbox -->
               <input

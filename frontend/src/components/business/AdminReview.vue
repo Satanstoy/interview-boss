@@ -2,12 +2,12 @@
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="$emit('close')">
-        <div class="rounded-xl border border-border bg-card shadow-lg w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-slide-up overflow-hidden">
+        <div data-material="glass" class="rounded-xl border border-border shadow-lg w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col animate-slide-up overflow-hidden">
           <!-- Header -->
           <div class="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/40">
             <div class="flex items-center gap-3">
-              <div class="size-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
-                <svg class="size-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <div class="size-9 rounded-xl bg-muted flex items-center justify-center">
+                <svg class="size-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
               </div>

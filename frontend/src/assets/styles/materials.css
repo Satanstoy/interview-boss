@@ -153,8 +153,14 @@ html.dark
     [class*="text-sky-"],
     [class*="text-violet-"],
     [class*="text-amber-"]
-  ):is(:hover, :focus-visible, [data-state="open"], [data-active="true"]) svg {
-  filter: none;
+  ):not([class*="text-primary-foreground"]):not([class*="text-destructive-foreground"]):is(
+    :hover,
+    :focus-visible,
+    [data-state="open"],
+    [data-active="true"]
+  ) svg {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 55%, transparent))
+    drop-shadow(0 0 13px color-mix(in srgb, currentColor 30%, transparent));
 }
 
 /* Coloured controls never receive a white backlight or glyph glow. */
@@ -258,6 +264,70 @@ html:not(.dark)
   filter: none;
 }
 
+/* Icons with their own semantic colour emit that colour instead of white light. */
+:where(
+  button,
+  a[data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+):is(:hover, :focus-visible, [data-state="open"], [data-active="true"])
+  svg:is(
+    [class*="text-primary"],
+    [class*="text-destructive"],
+    [class*="text-blue-"],
+    [class*="text-cyan-"],
+    [class*="text-emerald-"],
+    [class*="text-green-"],
+    [class*="text-indigo-"],
+    [class*="text-orange-"],
+    [class*="text-pink-"],
+    [class*="text-purple-"],
+    [class*="text-red-"],
+    [class*="text-rose-"],
+    [class*="text-sky-"],
+    [class*="text-violet-"],
+    [class*="text-amber-"]
+  ):not([class*="text-primary-foreground"]):not([class*="text-destructive-foreground"]) {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 55%, transparent))
+    drop-shadow(0 0 13px color-mix(in srgb, currentColor 30%, transparent));
+}
+
+/* Expanded question cards remain a plain surface, even while their trigger is open. */
+.ib-question-accordion-trigger::before {
+  opacity: 0 !important;
+}
+
+html.dark .ib-question-accordion-trigger:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+),
+html:not(.dark) .ib-question-accordion-trigger:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+) {
+  box-shadow: none;
+  text-shadow: none;
+}
+
+html.dark .ib-question-accordion-trigger:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+),
+html:not(.dark) .ib-question-accordion-trigger:is(
+  :hover,
+  :focus-visible,
+  [data-state="open"],
+  [data-active="true"]
+) svg {
+  filter: none;
+}
+
 /* Any other hover surface gets the same material language at a lower intensity. */
 :where(
   [class*="hover:bg-"],
@@ -315,12 +385,13 @@ html:not(.dark)
 :where(
   aside,
   header[class~="h-11"],
-  [data-sidebar="sidebar"]
+  [data-sidebar="sidebar"],
+  [data-material="glass"]
 ) {
   background: var(--ib-material-chrome) !important;
   border-color: var(--ib-material-hairline) !important;
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5) !important;
   isolation: isolate;
 }
 
@@ -347,6 +418,15 @@ header[class~="h-11"] {
   -webkit-backdrop-filter: blur(24px) saturate(1.35);
   backdrop-filter: blur(24px) saturate(1.35);
   isolation: isolate;
+}
+
+/* Tooltip arrows are part of the glass surface, not an opaque popover diamond. */
+[data-material="glass-arrow"] {
+  background: var(--ib-material-overlay) !important;
+  border: 1px solid var(--ib-material-hairline);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  backdrop-filter: blur(24px) saturate(1.35);
+  fill: var(--ib-material-overlay) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

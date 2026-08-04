@@ -18,6 +18,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 <template>
   <SelectTrigger
     data-slot="select-trigger"
+    data-material="glass"
     :data-size="size"
     v-bind="forwardedProps"
     :class="cn(

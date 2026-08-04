@@ -17,7 +17,7 @@ function selectSection(id) {
 </script>
 
 <template>
-  <nav class="flex h-full w-full shrink-0 flex-col overflow-hidden bg-background">
+  <nav data-material="glass" class="flex h-full w-full shrink-0 flex-col overflow-hidden">
     <!-- Header -->
     <div class="flex shrink-0 items-center gap-2 border-b border-border p-3">
       <div class="min-w-0 flex-1">
