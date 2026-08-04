@@ -33,7 +33,7 @@ from app.routers.profile_pkg import router as profile_pkg_router
 from app.routers.questions_pkg import router as questions_pkg_router
 from app.core.config import _reload_from_db
 from app.core.auth import cleanup_expired_refresh_tokens
-from app.mcp_server.app import mcp_app
+from app.mcp_server.app import mcp, mcp_app
 
 init_db()
 _reload_from_db()
@@ -209,6 +209,12 @@ app.mount("/mcp", mcp_app)
 @app.on_event("startup")
 async def startup_cleanup():
     """启动时清理过期的 refresh token"""
+    # Mounted ASGI applications do not receive lifespan events from FastAPI.
+    # FastMCP's Streamable HTTP transport requires its session manager to run
+    # for the full lifetime of this worker, even in stateless HTTP mode.
+    app.state.mcp_session_manager = mcp.session_manager.run()
+    await app.state.mcp_session_manager.__aenter__()
+
     try:
         cleanup_expired_refresh_tokens()
         logger.info("已清理过期的 refresh token")
@@ -230,6 +236,10 @@ async def startup_cleanup():
 @app.on_event("shutdown")
 async def shutdown_cleanup():
     """关闭时清理数据库连接"""
+    mcp_session_manager = getattr(app.state, "mcp_session_manager", None)
+    if mcp_session_manager is not None:
+        await mcp_session_manager.__aexit__(None, None, None)
+
     from app.db.connection import _local
 
     conn = getattr(_local, "conn", None)

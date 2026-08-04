@@ -449,6 +449,13 @@ def test_interview_mcp_app_exports_streamable_http_app():
     assert hasattr(inner, "routes")
 
 
+def test_mcp_session_manager_runs_during_parent_app_lifespan(client):
+    from app.mcp_server.app import mcp
+
+    with client:
+        assert mcp.session_manager._task_group is not None
+
+
 def test_mcp_endpoint_exempt_from_csrf(client):
     response = client.post("/mcp/messages", headers={})
     assert response.status_code != 403
