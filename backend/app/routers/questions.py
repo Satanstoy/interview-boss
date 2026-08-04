@@ -80,9 +80,9 @@ async def get_master_bank(
                 f"SELECT COUNT(*) {from_clause} {where_clause}", params
             ).fetchone()[0]
             # 注意：JOIN 的 user_id 参数必须在 WHERE 的 params 之前
-            full_sql = f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, qb.owner_id, qb.status, qb.job_position {from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?"
+            full_sql = f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, COALESCE(uqr.state, 'new') as review_state, COALESCE(uqr.proficiency, 0) as proficiency, COALESCE(uqr.review_count, 0) as review_count, uqr.last_rating, uqr.last_reviewed_at, uqr.next_review_at, COALESCE(uqr.interval_days, 0) as interval_days, COALESCE(uqr.ease_factor, 2.3) as ease_factor, qb.owner_id, qb.status, qb.job_position {from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? LEFT JOIN user_question_review uqr ON uqr.question_bank_id = qb.id AND uqr.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?"
             full_params = (
-                join_params + [user["id"]] + where_params + [page_size, offset]
+                join_params + [user["id"], user["id"]] + where_params + [page_size, offset]
             )
             rows = conn.execute(full_sql, full_params).fetchall()
             return total, rows

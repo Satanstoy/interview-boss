@@ -22,7 +22,12 @@ def _build_analytics_bank_filter(user: dict):
 
     uid = user["id"]
     from_clause, where_clause, params = build_bank_where_clause(uid, "all")
-    join_clause = from_clause.removeprefix("FROM question_bank qb ").strip()
+    bank_prefix = "FROM question_bank qb"
+    join_clause = (
+        from_clause[len(bank_prefix) :].strip()
+        if from_clause.startswith(bank_prefix)
+        else from_clause
+    )
     return join_clause, where_clause, params
 
 
