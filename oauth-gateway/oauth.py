@@ -1,0 +1,331 @@
+"""OAuth 2.1 endpoints: discovery, registration, authorization, token."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+import time
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+import auth
+import db
+
+router = APIRouter()
+templates = Jinja2Templates(directory="/app/templates")
+
+_BASE_URL = ""
+
+
+def _base_url() -> str:
+    global _BASE_URL
+    if not _BASE_URL:
+        import os
+
+        _BASE_URL = os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
+    return _BASE_URL
+
+
+# ── Discovery ──
+
+
+@router.get("/.well-known/oauth-protected-resource")
+async def protected_resource_metadata():
+    base = _base_url()
+    return JSONResponse(
+        {
+            "resource": f"{base}/mcp",
+            "authorization_servers": [base],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": ["mcp:read", "mcp:write"],
+        }
+    )
+
+
+@router.get("/.well-known/oauth-authorization-server")
+async def authorization_server_metadata():
+    base = _base_url()
+    return JSONResponse(
+        {
+            "issuer": base,
+            "authorization_endpoint": f"{base}/oauth/authorize",
+            "token_endpoint": f"{base}/oauth/token",
+            "registration_endpoint": f"{base}/oauth/register",
+            "code_challenge_methods_supported": ["S256"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "response_types_supported": ["code"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
+            "scopes_supported": ["mcp:read", "mcp:write"],
+        }
+    )
+
+
+# ── Dynamic Client Registration ──
+
+
+@router.post("/oauth/register")
+async def register_client(request: Request):
+    body = await request.json()
+    client_name = body.get("client_name", "Unnamed Client")
+    redirect_uris = body.get("redirect_uris", [])
+    auth_method = body.get("token_endpoint_auth_method", "none")
+
+    if not redirect_uris:
+        raise HTTPException(400, "redirect_uris required")
+
+    client_id = f"chatgpt_{secrets.token_hex(16)}"
+    client_secret_hash = None
+    raw_secret = None
+
+    if auth_method != "none":
+        raw_secret = secrets.token_urlsafe(32)
+        client_secret_hash = auth.hash_token(raw_secret)
+
+    db.create_client(
+        client_id, client_secret_hash, client_name, redirect_uris, auth_method
+    )
+
+    resp = {
+        "client_id": client_id,
+        "client_name": client_name,
+        "redirect_uris": redirect_uris,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": auth_method,
+        "client_id_issued_at": int(time.time()),
+    }
+    if auth_method != "none":
+        resp["client_secret"] = raw_secret
+
+    return JSONResponse(resp, status_code=201)
+
+
+# ── Authorization ──
+
+
+@router.get("/oauth/authorize")
+async def authorize(
+    request: Request,
+    response_type: str = Query(...),
+    client_id: str = Query(...),
+    redirect_uri: str = Query(...),
+    code_challenge: str = Query(...),
+    code_challenge_method: str = Query("S256"),
+    state: str = Query(""),
+    resource: str = Query(""),
+    scope: str = Query("mcp:read mcp:write"),
+):
+    if response_type != "code":
+        raise HTTPException(400, "unsupported response_type")
+
+    client = db.get_client(client_id)
+    if not client:
+        raise HTTPException(400, "unknown client_id")
+
+    if redirect_uri not in client["redirect_uris"]:
+        raise HTTPException(400, "invalid redirect_uri")
+
+    if code_challenge_method != "S256":
+        raise HTTPException(400, "only S256 code_challenge_method supported")
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "client_name": client["client_name"],
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "code_challenge": code_challenge,
+            "code_challenge_method": code_challenge_method,
+            "state": state,
+            "resource": resource,
+            "scope": scope,
+            "error": None,
+        },
+    )
+
+
+@router.post("/oauth/authorize")
+async def authorize_post(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    client_id: str = Form(...),
+    redirect_uri: str = Form(...),
+    code_challenge: str = Form(...),
+    code_challenge_method: str = Form(...),
+    state: str = Form(""),
+    resource: str = Form(""),
+    scope: str = Form(""),
+):
+    user_id = db.verify_interviewboss_user(username, password)
+    if user_id is None:
+        client = db.get_client(client_id)
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "client_name": client["client_name"] if client else "Unknown",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+                "state": state,
+                "resource": resource,
+                "scope": scope,
+                "error": "用户名或密码错误",
+            },
+        )
+
+    # Generate authorization code
+    code = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+
+    db.save_code(code, client_id, user_id, code_challenge, scope, resource, expires_at)
+
+    # Redirect back to client
+    params = {"code": code}
+    if state:
+        params["state"] = state
+
+    separator = "&" if "?" in redirect_uri else "?"
+    return RedirectResponse(
+        url=f"{redirect_uri}{separator}{urlencode(params)}",
+        status_code=302,
+    )
+
+
+# ── Token ──
+
+
+@router.post("/oauth/token")
+async def token_endpoint(request: Request):
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+    else:
+        form = await request.form()
+        body = dict(form)
+
+    grant_type = body.get("grant_type")
+
+    if grant_type == "authorization_code":
+        return await _handle_authorization_code(body)
+    elif grant_type == "refresh_token":
+        return await _handle_refresh_token(body)
+    else:
+        raise HTTPException(400, "unsupported grant_type")
+
+
+async def _handle_authorization_code(body: dict) -> JSONResponse:
+    code = body.get("code")
+    redirect_uri = body.get("redirect_uri")
+    client_id = body.get("client_id")
+    code_verifier = body.get("code_verifier")
+
+    if not all([code, redirect_uri, client_id, code_verifier]):
+        raise HTTPException(400, "missing required parameters")
+
+    # Verify and consume the code
+    code_data = db.get_and_use_code(code)
+    if not code_data:
+        raise HTTPException(400, "invalid or expired code")
+
+    if code_data["client_id"] != client_id:
+        raise HTTPException(400, "client_id mismatch")
+
+    # Verify PKCE
+    challenge = hashlib.sha256(code_verifier.encode()).digest()
+    import base64
+
+    computed_challenge = base64.urlsafe_b64encode(challenge).rstrip(b"=").decode()
+    if not secrets.compare_digest(computed_challenge, code_data["code_challenge"]):
+        raise HTTPException(400, "PKCE verification failed")
+
+    # Issue tokens
+    user_id = code_data["user_id"]
+    scopes = code_data["scopes"] or "mcp:read mcp:write"
+
+    access_token = auth.create_access_token(user_id, client_id, scopes)
+    refresh_token = auth.create_refresh_token(user_id, client_id, scopes)
+
+    now = datetime.now(timezone.utc)
+    db.save_access_token(
+        auth.hash_token(access_token),
+        user_id,
+        client_id,
+        scopes,
+        (now + timedelta(seconds=auth._ACCESS_TTL)).isoformat(),
+    )
+    db.save_refresh_token(
+        auth.hash_token(refresh_token),
+        user_id,
+        client_id,
+        scopes,
+        (now + timedelta(seconds=auth._REFRESH_TTL)).isoformat(),
+    )
+
+    return JSONResponse(
+        {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": auth._ACCESS_TTL,
+            "refresh_token": refresh_token,
+            "scope": scopes,
+        }
+    )
+
+
+async def _handle_refresh_token(body: dict) -> JSONResponse:
+    refresh_token = body.get("refresh_token")
+    client_id = body.get("client_id")
+
+    if not all([refresh_token, client_id]):
+        raise HTTPException(400, "missing required parameters")
+
+    token_hash = auth.hash_token(refresh_token)
+    token_data = db.get_refresh_token(token_hash)
+    if not token_data:
+        raise HTTPException(400, "invalid or expired refresh_token")
+
+    if token_data["client_id"] != client_id:
+        raise HTTPException(400, "client_id mismatch")
+
+    # Rotate refresh token
+    db.delete_refresh_token(token_hash)
+
+    user_id = token_data["user_id"]
+    scopes = token_data["scopes"] or "mcp:read mcp:write"
+
+    new_access_token = auth.create_access_token(user_id, client_id, scopes)
+    new_refresh_token = auth.create_refresh_token(user_id, client_id, scopes)
+
+    now = datetime.now(timezone.utc)
+    db.save_access_token(
+        auth.hash_token(new_access_token),
+        user_id,
+        client_id,
+        scopes,
+        (now + timedelta(seconds=auth._ACCESS_TTL)).isoformat(),
+    )
+    db.save_refresh_token(
+        auth.hash_token(new_refresh_token),
+        user_id,
+        client_id,
+        scopes,
+        (now + timedelta(seconds=auth._REFRESH_TTL)).isoformat(),
+    )
+
+    return JSONResponse(
+        {
+            "access_token": new_access_token,
+            "token_type": "Bearer",
+            "expires_in": auth._ACCESS_TTL,
+            "refresh_token": new_refresh_token,
+            "scope": scopes,
+        }
+    )
