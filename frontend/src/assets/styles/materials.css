@@ -1,0 +1,312 @@
+/*
+ * InterviewBoss material layer
+ *
+ * The effect is intentionally restrained: glass is reserved for chrome and
+ * transient surfaces; content cards keep their normal shadcn surface. Neutral
+ * controls receive a soft dark-mode backlight, while solid colour controls
+ * use elevation only so white light never muddies a brand colour.
+ */
+
+:root {
+  --ib-material-backlight: rgba(255, 255, 255, 0.14);
+  --ib-material-backlight-soft: rgba(255, 255, 255, 0.09);
+  --ib-material-overlay: rgba(18, 18, 22, 0.75);
+  --ib-material-chrome: rgba(16, 16, 20, 0.55);
+  --ib-material-hairline: rgba(255, 255, 255, 0.08);
+  --ib-material-hover: rgba(255, 255, 255, 0.07);
+  --ib-material-hover-soft: rgba(255, 255, 255, 0.03);
+}
+
+html:not(.dark) {
+  --ib-material-backlight: transparent;
+  --ib-material-backlight-soft: transparent;
+  --ib-material-overlay: rgba(255, 255, 255, 0.82);
+  --ib-material-chrome: rgba(255, 255, 255, 0.65);
+  --ib-material-hairline: rgba(0, 0, 0, 0.08);
+  --ib-material-hover: rgba(0, 0, 0, 0.025);
+  --ib-material-hover-soft: rgba(0, 0, 0, 0.012);
+}
+
+/* Keep blend effects inside the control that owns them. */
+:where(
+  button,
+  a[data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+) {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Neutral control backlight: flat, even, and clipped to the control bounds. */
+:where(
+  button,
+  a[data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    100% 130% at 50% 45%,
+    var(--ib-material-backlight) 0%,
+    var(--ib-material-backlight-soft) 55%,
+    transparent 90%
+  );
+  mix-blend-mode: plus-lighter;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 500ms var(--ease-standard);
+  z-index: 0;
+}
+
+:where(
+  button,
+  a[data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+):is(:hover, :focus-visible, [data-state="open"], [data-active="true"])::before {
+  opacity: 1;
+}
+
+/* Preserve the content layer above the material pseudo-element. */
+:where(
+  button,
+  a[data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+) > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Subtle glyph edge light, only in dark mode and only on neutral controls. */
+html.dark
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"]
+  ):is(:hover, :focus-visible, [data-state="open"], [data-active="true"]) {
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.3), 0 0 18px rgba(255, 255, 255, 0.14);
+}
+
+html.dark
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"]
+  ):is(:hover, :focus-visible, [data-state="open"], [data-active="true"]) svg {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 14px rgba(255, 255, 255, 0.17));
+}
+
+/* Coloured controls never receive a white backlight or glyph glow. */
+:where(
+  button,
+  a[data-slot="button"]
+):is(
+  [data-variant="default"],
+  [data-variant="destructive"],
+  [class*="bg-primary"],
+  [class*="bg-destructive"],
+  [class*="bg-blue-"],
+  [class*="bg-red-"],
+  [class*="bg-emerald-"],
+  [class*="bg-green-"],
+  [class*="bg-amber-"]
+) {
+  --ib-material-backlight: transparent;
+  --ib-material-backlight-soft: transparent;
+}
+
+:where(
+  button,
+  a[data-slot="button"]
+):is(
+  [data-variant="default"],
+  [data-variant="destructive"],
+  [class*="bg-primary"],
+  [class*="bg-destructive"],
+  [class*="bg-blue-"],
+  [class*="bg-red-"],
+  [class*="bg-emerald-"],
+  [class*="bg-green-"],
+  [class*="bg-amber-"]
+):is(:hover, :focus-visible, [data-state="open"]) {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22),
+    0 16px 36px -8px rgba(0, 0, 0, 0.38);
+  text-shadow: none;
+}
+
+:where(
+  button,
+  a[data-slot="button"]
+):is(
+  [data-variant="default"],
+  [data-variant="destructive"],
+  [class*="bg-primary"],
+  [class*="bg-destructive"],
+  [class*="bg-blue-"],
+  [class*="bg-red-"],
+  [class*="bg-emerald-"],
+  [class*="bg-green-"],
+  [class*="bg-amber-"]
+):is(:hover, :focus-visible, [data-state="open"]) svg {
+  filter: none;
+}
+
+/* Keep neutral variants quieter than the default dark-mode token. */
+:where(
+  [data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+)[data-variant="secondary"],
+:where(
+  [data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+)[data-variant="outline"] {
+  --ib-material-backlight: rgba(255, 255, 255, 0.08);
+  --ib-material-backlight-soft: rgba(255, 255, 255, 0.05);
+}
+
+:where(
+  [data-slot="button"],
+  [data-slot="sidebar-menu-button"],
+  [data-sidebar="menu-button"]
+)[data-variant="ghost"] {
+  --ib-material-backlight: rgba(255, 255, 255, 0.06);
+  --ib-material-backlight-soft: rgba(255, 255, 255, 0.04);
+}
+
+html:not(.dark)
+  :where(button, a[data-slot="button"], [data-slot="sidebar-menu-button"], [data-sidebar="menu-button"]):is(
+    :hover,
+    :focus-visible,
+    [data-state="open"],
+    [data-active="true"]
+  ) {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08),
+    0 14px 32px -8px rgba(0, 0, 0, 0.16);
+  text-shadow: none;
+}
+
+html:not(.dark)
+  :where(button, a[data-slot="button"], [data-slot="sidebar-menu-button"], [data-sidebar="menu-button"]):is(
+    :hover,
+    :focus-visible,
+    [data-state="open"],
+    [data-active="true"]
+  ) svg {
+  filter: none;
+}
+
+/* Any other hover surface gets the same material language at a lower intensity. */
+:where(
+  [class*="hover:bg-"],
+  [class*="hover:border-"],
+  [class*="hover:text-"],
+  [class*="hover:shadow-"]
+):not(button):not(a[data-slot="button"]):not(tr):not(input):not(textarea):not(select) {
+  position: relative;
+  isolation: isolate;
+}
+
+:where(
+  [class*="hover:bg-"],
+  [class*="hover:border-"],
+  [class*="hover:text-"],
+  [class*="hover:shadow-"]
+):not(button):not(a[data-slot="button"]):not(tr):not(input):not(textarea):not(select)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 160% at 50% 35%,
+    var(--ib-material-hover) 0%,
+    var(--ib-material-hover-soft) 55%,
+    transparent 90%
+  );
+  mix-blend-mode: plus-lighter;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease-standard);
+  z-index: 0;
+}
+
+:where(
+  [class*="hover:bg-"],
+  [class*="hover:border-"],
+  [class*="hover:text-"],
+  [class*="hover:shadow-"]
+):not(button):not(a[data-slot="button"]):not(tr):not(input):not(textarea):not(select):hover::before {
+  opacity: 1;
+}
+
+:where(
+  [class*="hover:bg-"],
+  [class*="hover:border-"],
+  [class*="hover:text-"],
+  [class*="hover:shadow-"]
+):not(button):not(a[data-slot="button"]):not(tr):not(input):not(textarea):not(select) > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Glass is limited to chrome and transient surfaces, never ordinary cards. */
+:where(
+  aside,
+  header[class~="h-11"],
+  [data-sidebar="sidebar"]
+) {
+  background: var(--ib-material-chrome) !important;
+  border-color: var(--ib-material-hairline) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  isolation: isolate;
+}
+
+header[class~="h-11"] {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+}
+
+:where(
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="sheet-content"],
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="select-content"],
+  [data-slot="tooltip-content"],
+  [data-sonner-toast]
+) {
+  background: var(--ib-material-overlay) !important;
+  border: 1px solid var(--ib-material-hairline) !important;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  backdrop-filter: blur(24px) saturate(1.35);
+  isolation: isolate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"],
+    [class*="hover:bg-"],
+    [class*="hover:border-"],
+    [class*="hover:text-"],
+    [class*="hover:shadow-"]
+  )::before {
+    transition: none;
+  }
+}
