@@ -1,7 +1,12 @@
 <template>
   <div data-testid="practice-workspace" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
-    <aside v-if="!queueCollapsed" data-testid="practice-queue-sidebar" class="hidden w-64 shrink-0 flex-col border-r border-border bg-background md:flex">
-      <div class="flex shrink-0 items-center gap-2 p-2">
+    <aside
+      data-testid="practice-queue-sidebar"
+      class="sidebar-container z-30 hidden shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
+      :class="{ 'sidebar-collapsed': queueCollapsed }"
+      :style="{ width: queueCollapsed ? '0px' : '16rem' }"
+    >
+      <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
         <div class="relative min-w-0 flex-1">
           <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
@@ -12,7 +17,7 @@
           </Button>
         </AppTooltip>
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar">
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar sidebar-content">
         <button
           v-for="(question, questionIndex) in sessionQuestions"
           :key="question.id"
@@ -31,17 +36,17 @@
       </div>
     </aside>
 
+    <div v-if="queueCollapsed" class="hidden shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons md:flex">
+      <AppTooltip text="展开题单侧栏" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="展开题单侧栏" @click="queueCollapsed = false">
+          <PanelLeft :size="14" />
+        </Button>
+      </AppTooltip>
+    </div>
+
     <div class="flex min-w-0 flex-1 flex-col">
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
         <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-3 overflow-hidden px-4 py-4 md:px-6 md:py-5">
-
-          <div v-if="queueCollapsed" class="hidden shrink-0 items-center md:flex">
-            <AppTooltip text="展开题单侧栏" side="right">
-              <Button variant="ghost" size="icon" class="size-7" aria-label="展开题单侧栏" @click="queueCollapsed = false">
-                <PanelLeft :size="14" />
-              </Button>
-            </AppTooltip>
-          </div>
 
     <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
@@ -363,6 +368,28 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <style scoped>
+.sidebar-container {
+  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-content {
+  transition: opacity 200ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-expand-buttons {
+  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
+}
+
+@keyframes sidebarExpandButtons {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
 .practice-card { container-type: size; }
 .practice-question { font-size: clamp(1.125rem, min(2.5cqw, 4cqh), 1.75rem); }
 .question-content-enter { animation: question-enter 0.25s ease both; }
