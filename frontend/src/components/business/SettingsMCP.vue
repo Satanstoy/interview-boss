@@ -23,12 +23,12 @@ const agentConfigPrompt = computed(() => {
   if (!endpoint || !token) return ''
 
   return [
-    '请帮我配置 InterviewBoss MCP，并完成一次连接测试。',
+    '请指导我配置 InterviewBoss MCP，并完成一次连接测试。',
     '服务名称：interview-boss',
     '传输协议：Streamable HTTP',
     `MCP 地址：${endpoint}`,
     `Authorization：Bearer ${token}`,
-    '连接后请加载 InterviewBoss 的 interview-tool-use skill，按岗位使用题库搜索、抽题和选题工具。',
+    '连接初始化后直接使用 InterviewBoss MCP 工具；不要重复加载 interview-tool-use，领域技能按需加载。',
   ].join('\n')
 })
 
@@ -44,11 +44,13 @@ const baseUrl = computed(() => {
 const chatgptPrompt = computed(() => {
   const endpoint = settings.value?.endpoint || `${baseUrl.value}/mcp`
   return [
-    '请帮我配置 ChatGPT MCP 连接器接入 InterviewBoss。',
+    '请指导我手动配置 ChatGPT Developer Mode 的远程 MCP App；你不能代替我操作 ChatGPT 设置页面。',
+    '服务名称：InterviewBoss',
     `MCP 地址：${endpoint}`,
-    '认证方式：OAuth（ChatGPT 自动发现端点）',
-    `OAuth 发现：${baseUrl.value}/.well-known/oauth-protected-resource`,
-    '连接后 ChatGPT 会跳转登录页，用 InterviewBoss 账号授权即可。',
+    '认证方式：OAuth（支持 PKCE S256，ChatGPT 自动发现授权端点）',
+    '操作步骤：在 ChatGPT 设置 → Security and login 中开启 Developer mode；再从 Plugins/Apps 的“+”创建开发者模式 App，填入上面的 MCP 地址并选择 OAuth。',
+    '完成后会跳转 InterviewBoss 登录页；请用 InterviewBoss 账号登录并授权。',
+    '授权完成后，仅使用 InterviewBoss MCP 做一次只读连接测试。',
   ].join('\n')
 })
 
@@ -362,7 +364,7 @@ onMounted(loadConfig)
           <div class="min-w-0 flex-1">
             <h4 class="text-sm font-semibold text-foreground">ChatGPT 接入</h4>
             <p class="mt-1 text-xs leading-5 text-muted-foreground">
-              通过 OAuth 2.1 + PKCE 让 ChatGPT 连接 InterviewBoss。ChatGPT 会自动发现 OAuth 端点并引导你登录授权。
+              通过 OAuth 2.1（支持 PKCE S256）让 ChatGPT 连接 InterviewBoss。你需要手动创建开发者模式 App；ChatGPT 会自动发现 OAuth 端点并引导你登录授权。
             </p>
           </div>
         </div>
@@ -389,15 +391,19 @@ onMounted(loadConfig)
               <code class="block break-all rounded-md bg-muted px-2.5 py-1.5 text-foreground">{{ baseUrl }}/.well-known/oauth-authorization-server</code>
             </div>
           </div>
+          <p class="text-xs leading-5 text-muted-foreground">
+            当前部署使用公网 IP 入口。请使用上方显示的 <code class="text-foreground">https://81.71.140.248/mcp</code>，不要替换为未配置的域名。
+          </p>
         </div>
 
         <div class="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
           <h5 class="text-xs font-semibold text-foreground">配置步骤</h5>
           <ol class="list-decimal space-y-1.5 pl-4 text-xs leading-5 text-muted-foreground">
-            <li>在 ChatGPT 设置中添加 MCP 连接器，URL 填上方 <strong class="font-semibold text-foreground">MCP 地址</strong>。</li>
-            <li>认证方式选择 <strong class="font-semibold text-foreground">OAuth</strong>（ChatGPT 会自动发现端点）。</li>
-            <li>点击连接后会跳转到 InterviewBoss 登录页，用你的账号登录并授权。</li>
-            <li>授权完成后 ChatGPT 自动获取 Token，即可使用题库搜索、抽题和选题能力。</li>
+            <li>在 ChatGPT 设置 → <strong class="font-semibold text-foreground">Security and login</strong> 中开启 <strong class="font-semibold text-foreground">Developer mode</strong>。</li>
+            <li>打开 Plugins/Apps 的“<strong class="font-semibold text-foreground">+</strong>”，创建开发者模式 App，并填入上方 <strong class="font-semibold text-foreground">MCP 地址</strong>。</li>
+            <li>认证方式选择 <strong class="font-semibold text-foreground">OAuth</strong>；ChatGPT 会自动发现授权端点。</li>
+            <li>点击连接后跳转 InterviewBoss 登录页，用你的账号登录并授权。</li>
+            <li>授权完成后 ChatGPT 自动获取访问令牌，即可使用题库搜索、抽题和选题能力。</li>
           </ol>
         </div>
 
