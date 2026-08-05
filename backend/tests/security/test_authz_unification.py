@@ -10,12 +10,12 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import HTTPException
 
 
-def _mock_user(user_id=2, is_admin=False):
+def _mock_user(user_id=2, is_admin=False, bank_mode="public"):
     return {
         "id": user_id,
         "username": "test",
         "is_admin": is_admin,
-        "bank_mode": "public",
+        "bank_mode": bank_mode,
     }
 
 
@@ -414,6 +414,63 @@ class TestTrashScope:
 
         assert len(result["items"]) == 1
         assert result["items"][0]["owner_id"] == 2
+
+
+class TestPracticeActionsVisibility:
+    """L3 遗留：practice 域动作（收藏/复习/加题单）必须与列表口径一致（all）"""
+
+    @pytest.mark.asyncio
+    async def test_toggle_star_own_private_question_ok(self, client, test_db):
+        from app.routers.practice import toggle_star
+
+        qid = _insert_private_question(test_db, owner_id=2)
+        user = _mock_user(user_id=2, is_admin=False, bank_mode="public")
+
+        result = await toggle_star(qid, user)
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_toggle_star_other_user_private_question_404(self, client, test_db):
+        from app.routers.practice import toggle_star
+        from fastapi import HTTPException
+
+        qid = _insert_private_question(test_db, owner_id=999)
+        user = _mock_user(user_id=2, is_admin=False, bank_mode="public")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await toggle_star(qid, user)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_review_own_private_question_ok(self, client, test_db):
+        from app.routers.practice import review_practice_question
+        from app.models.schemas import PracticeReviewRequest
+
+        qid = _insert_private_question(test_db, owner_id=2)
+        user = _mock_user(user_id=2, is_admin=False, bank_mode="public")
+        req = PracticeReviewRequest(question_id=qid, rating="good")
+
+        result = await review_practice_question(req, user)
+        assert result["question_id"] == qid
+
+    @pytest.mark.asyncio
+    async def test_add_deck_item_own_private_question_ok(self, client, test_db):
+        from app.routers.practice import add_practice_deck_item
+        from app.models.schemas import PracticeDeckItemRequest
+
+        qid = _insert_private_question(test_db, owner_id=2)
+        _ensure_user(test_db, 2)
+        test_db.execute(
+            "INSERT INTO practice_decks (deck_key, name, deck_type, owner_id, visibility) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("my-deck", "我的题单", "custom", 2, "private"),
+        )
+        test_db.commit()
+        user = _mock_user(user_id=2, is_admin=False, bank_mode="public")
+        req = PracticeDeckItemRequest(question_id=qid)
+
+        result = await add_practice_deck_item("my-deck", req, user)
+        assert result["question_id"] == qid
 
 
 class TestSaveUserAnswerVisibility:

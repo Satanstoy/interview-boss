@@ -13,7 +13,7 @@ from app.models.schemas import (
     PracticeDeckUpdateRequest,
     PracticeReviewRequest,
 )
-from app.routers.questions import _build_bank_where_clause
+from app.db.queries import build_bank_where_clause
 from app.services.practice_deck_service import (
     add_deck_item,
     create_custom_deck,
@@ -34,7 +34,10 @@ router = (
 
 
 def _assert_question_visible(conn, user: dict, question_id: int):
-    from_clause, where_clause, params = _build_bank_where_clause(user)
+    # all 口径：公共题 + 自己的题（与列表可见范围一致）
+    from app.db.queries import build_bank_where_clause
+
+    from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
     row = conn.execute(
         f"SELECT qb.id {from_clause} {where_clause} AND qb.id = ?",
         params + [question_id],
@@ -199,8 +202,12 @@ async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
 
     def _toggle():
         with get_db_connection() as conn:
-            # 检查题目是否在用户可见范围内
-            from_clause, where_clause, params = _build_bank_where_clause(user)
+            # 检查题目是否在用户可见范围内（all 口径：公共题 + 自己的题）
+            from app.db.queries import build_bank_where_clause
+
+            from_clause, where_clause, params = build_bank_where_clause(
+                user["id"], "all"
+            )
             row = conn.execute(
                 f"SELECT qb.id {from_clause} {where_clause} AND qb.id = ?",
                 params + [question_id],
@@ -300,7 +307,11 @@ async def evaluate_answer(
 
             def _record():
                 with get_db_connection() as conn:
-                    from_clause, where_clause, params = _build_bank_where_clause(user)
+                    from app.db.queries import build_bank_where_clause
+
+                    from_clause, where_clause, params = build_bank_where_clause(
+                        user["id"], "all"
+                    )
                     visible = conn.execute(
                         f"SELECT qb.id {from_clause} {where_clause} AND qb.id = ?",
                         params + [req.question_id],

@@ -122,9 +122,9 @@ class TestBug008EvaluateAnswerVisibility:
 
         # 应该在记录练习历史前检查题目是否可见
         has_visibility_check = (
-            '_build_bank_where_clause' in func_content or
-            'owner_id' in func_content or
-            'bank_mode' in func_content
+            'build_bank_where_clause' in func_content
+            or 'owner_id' in func_content
+            or 'bank_mode' in func_content
         )
         assert has_visibility_check, "evaluate_answer 应在记录练习前校验题目可见性"
 
@@ -259,7 +259,7 @@ class TestIntegration:
         assert route_match, "应存在 evaluate-answer 路由"
         route_content = route_match.group(0)
 
-        has_check = '_build_bank_where_clause' in route_content or 'owner_id' in route_content
+        has_check = 'build_bank_where_clause' in route_content or 'owner_id' in route_content
         assert has_check, "evaluate-answer 端点应有可见性检查"
 
     def test_analytics_endpoint_uses_bank_mode_filter(self):
