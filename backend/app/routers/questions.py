@@ -261,7 +261,6 @@ async def get_question_detail(question_id: int, user: dict = Depends(get_current
             if not row:
                 return None
             d = dict(row)
-            d["answer_sources"] = _parse_answer_sources(d.get("answer_sources"))
             # Build original_question_sources from normalized tables
             try:
                 from app.db.question_bank_sources import get_original_question_sources
