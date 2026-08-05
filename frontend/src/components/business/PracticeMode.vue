@@ -180,8 +180,8 @@
 
     <div v-else class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
       <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><List :size="26" /></div>
-      <h2 class="mt-5 text-lg font-semibold text-foreground">这个题单还没有题目</h2>
-      <p class="mt-2 text-sm leading-relaxed text-muted-foreground">先收藏几道题，或者切换到全部题开始刷题。</p>
+      <h2 class="mt-5 text-lg font-semibold text-foreground">{{ sessionKey === 'due' ? '今日复习已经完成' : '这个题单还没有题目' }}</h2>
+      <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ sessionKey === 'due' ? '明天再来看看新的到期复习题，或者切换到全部题继续刷。' : '先收藏几道题，或者切换到全部题开始刷题。' }}</p>
       <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">切换到全部题</Button></div>
     </div>
 

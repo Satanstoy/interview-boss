@@ -9,7 +9,7 @@ export function usePracticeDecks(filter = 'all') {
   const { confirm: showConfirm } = useConfirm()
   const decks = ref([])
   const questions = ref([])
-  const selectedDeckKey = ref('all')
+  const selectedDeckKey = ref('due')
   const selectedDeck = ref(null)
   const isLoading = ref(false)
   const isReviewing = ref(false)
@@ -25,7 +25,10 @@ export function usePracticeDecks(filter = 'all') {
       const response = await api.fetchPracticeDecks({ filter: unref(filter) })
       serverReady.value = true
       decks.value = response.items || []
-      if (!decks.value.some(deck => deck.key === selectedDeckKey.value)) selectedDeckKey.value = decks.value[0]?.key || 'all'
+      if (!decks.value.some(deck => deck.key === selectedDeckKey.value)) {
+        const dueDeck = decks.value.find(deck => deck.key === 'due')
+        selectedDeckKey.value = dueDeck ? 'due' : (decks.value[0]?.key || 'all')
+      }
     } catch (err) {
       error.value = getFriendlyError(err, '题单加载失败')
       toast.error(error.value)
@@ -66,6 +69,14 @@ export function usePracticeDecks(filter = 'all') {
     try {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
+      if (selectedDeckKey.value === 'due' && nextState.next_review_at) {
+        const todayStr = new Date().toISOString().slice(0, 10)
+        const nextDateStr = String(nextState.next_review_at).slice(0, 10)
+        if (nextDateStr > todayStr) {
+          const idx = questions.value.findIndex(question => question.id === questionId)
+          if (idx !== -1) questions.value.splice(idx, 1)
+        }
+      }
       const item = questions.value.find(question => question.id === questionId)
       if (item) Object.assign(item, nextState)
       const deck = decks.value.find(candidate => candidate.key === selectedDeckKey.value)
