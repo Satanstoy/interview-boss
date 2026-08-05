@@ -273,15 +273,15 @@ guarded_compose_build() {
 
 # ── 构建镜像 ──
 do_build() {
-  log "构建 app/nginx 镜像（启用 BuildKit 本地缓存）..."
-  guarded_compose_build backend nginx
-  log "镜像构建完成（backend/worker 共用 app 镜像，nginx 内置前端 dist）"
+  log "构建 app/nginx/oauth-gateway 镜像（启用 BuildKit 本地缓存）..."
+  guarded_compose_build backend nginx oauth-gateway
+  log "镜像构建完成（backend/worker 共用 app 镜像，nginx 内置前端 dist，OAuth gateway 独立构建）"
 }
 
 # ── 启动核心服务 ──
 do_up() {
-  log "启动核心服务（redis/backend/nginx，不默认启动 worker）..."
-  docker compose up -d --wait --wait-timeout 60 redis backend nginx
+  log "启动核心服务（redis/backend/nginx/oauth-gateway，不默认启动 worker）..."
+  docker compose up -d --wait --wait-timeout 60 redis backend nginx oauth-gateway
   do_status
 }
 
@@ -295,7 +295,7 @@ do_down() {
 # ── 重启核心服务 ──
 do_restart() {
   log "重启核心服务..."
-  docker compose restart --wait --wait-timeout 30 redis backend nginx
+  docker compose restart --wait --wait-timeout 30 redis backend nginx oauth-gateway
   do_status
 }
 
@@ -339,7 +339,7 @@ do_update() {
 
   # 4. 启动服务（等待健康检查）
   log "启动更新后的服务（等待健康检查）..."
-  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis backend nginx; then
+  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis backend nginx oauth-gateway; then
     err "服务在 60s 内未通过健康检查"
     do_status
     rollback_backend

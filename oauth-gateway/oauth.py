@@ -75,13 +75,40 @@ async def authorization_server_metadata(request: Request):
             "authorization_endpoint": f"{base}/oauth/authorize",
             "token_endpoint": f"{base}/oauth/token",
             "registration_endpoint": f"{base}/oauth/register",
+            "client_id_metadata_document_supported": False,
             "code_challenge_methods_supported": ["S256"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "response_types_supported": ["code"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
-            "scopes_supported": ["mcp:read", "mcp:write"],
+            "scopes_supported": ["mcp:read", "mcp:write", "offline_access"],
         }
     )
+
+
+@router.get("/.well-known/oauth-authorization-server/{resource_path:path}")
+async def authorization_server_metadata_for_path(
+    request: Request, resource_path: str
+):
+    """Compatibility alias for clients that append the MCP path to discovery."""
+    return await authorization_server_metadata(request)
+
+
+@router.get("/.well-known/openid-configuration")
+async def openid_configuration(request: Request):
+    """Return OAuth metadata for clients that probe the OIDC discovery URL."""
+    return await authorization_server_metadata(request)
+
+
+@router.get("/.well-known/openid-configuration/{resource_path:path}")
+async def openid_configuration_for_path(request: Request, resource_path: str):
+    """Compatibility alias for path-aware OIDC discovery probes."""
+    return await authorization_server_metadata(request)
+
+
+@router.get("/oauth/token/.well-known/openid-configuration")
+async def token_openid_configuration(request: Request):
+    """Compatibility alias used by some OAuth discovery clients."""
+    return await authorization_server_metadata(request)
 
 
 # ── Dynamic Client Registration ──
