@@ -49,6 +49,15 @@ async def get_my_llm_config(user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/api/profile/llm/status")
+async def get_llm_status(probe: int = 0, user: dict = Depends(get_current_user)):
+    """检查用户 LLM 模型是否已配置且可连通（探测结果带 120s 缓存）"""
+
+    from app.services.llm import check_llm_status
+
+    return await check_llm_status(user["id"], force_probe=bool(probe))
+
+
 @router.put("/api/profile/llm")
 async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)):
     """更新当前用户的 LLM 配置"""
@@ -99,9 +108,10 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
 
     await run_db(_upsert)
 
-    from app.services.llm import clear_user_client_cache
+    from app.services.llm import clear_user_client_cache, clear_llm_status_cache
 
     clear_user_client_cache(user["id"])
+    clear_llm_status_cache(user["id"])
 
     return {"status": "success", "message": "LLM 配置已保存"}
 
@@ -117,9 +127,10 @@ async def delete_my_llm_config(user: dict = Depends(get_current_user)):
 
     await run_db(_delete)
 
-    from app.services.llm import clear_user_client_cache
+    from app.services.llm import clear_user_client_cache, clear_llm_status_cache
 
     clear_user_client_cache(user["id"])
+    clear_llm_status_cache(user["id"])
 
     return {"status": "success", "message": "LLM 配置已清除"}
 

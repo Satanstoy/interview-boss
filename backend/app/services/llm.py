@@ -1,9 +1,16 @@
 import os
 import re
 import json
+import time
 import asyncio
 import logging
-from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APITimeoutError
+from openai import (
+    AsyncOpenAI,
+    APIConnectionError,
+    RateLimitError,
+    APITimeoutError,
+    AuthenticationError,
+)
 from anthropic import AsyncAnthropic
 import anthropic as anthropic_mod
 from tenacity import (
@@ -151,6 +158,121 @@ def clear_user_client_cache(user_id: int = None):
         _user_client_cache.pop(user_id, None)
     else:
         _user_client_cache.clear()
+
+
+# --------------- 模型可用性状态探测 ---------------
+
+_LLM_STATUS_CACHE_TTL = 120  # 探测结果缓存秒数
+_llm_status_cache: dict[
+    int, tuple
+] = {}  # user_id -> (配置指纹, connected, error, 探测时间戳)
+
+_PROBE_TIMEOUT = 15  # 单次探测最大秒数
+
+
+def clear_llm_status_cache(user_id: int = None):
+    """清除用户模型状态探测缓存（配置更新后调用）"""
+    if user_id is not None:
+        _llm_status_cache.pop(user_id, None)
+    else:
+        _llm_status_cache.clear()
+
+
+def _classify_probe_error(exc: Exception) -> str:
+    """把探测异常归类为用户可读的错误信息"""
+    if isinstance(exc, AuthenticationError) or isinstance(
+        exc, anthropic_mod.AuthenticationError
+    ):
+        return "认证失败：请检查 API Key 是否正确"
+    if isinstance(exc, RateLimitError) or isinstance(exc, anthropic_mod.RateLimitError):
+        return "请求过于频繁：请稍后重试"
+    if (
+        isinstance(exc, APITimeoutError)
+        or isinstance(exc, anthropic_mod.APITimeoutError)
+        or isinstance(exc, asyncio.TimeoutError)
+    ):
+        return "模型服务响应超时：请稍后重试"
+    if isinstance(exc, APIConnectionError) or isinstance(
+        exc, anthropic_mod.APIConnectionError
+    ):
+        return "无法连接模型服务：请检查 Base URL"
+    return f"模型服务异常：{type(exc).__name__}: {str(exc)[:200]}"
+
+
+async def _probe_llm(user_id: int) -> tuple:
+    """向用户配置的模型发最小请求验证可用性，返回 (connected, error)。"""
+    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(
+        user_id
+    )
+    wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
+    try:
+        if provider == "anthropic":
+            await asyncio.wait_for(
+                resolved_client.messages.create(
+                    model=model,
+                    max_tokens=1,
+                    messages=[{"role": "user", "content": "ping"}],
+                ),
+                timeout=wait_for,
+            )
+        else:
+            await asyncio.wait_for(
+                resolved_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=1,
+                ),
+                timeout=wait_for,
+            )
+        return True, None
+    except Exception as exc:
+        return False, _classify_probe_error(exc)
+
+
+async def check_llm_status(user_id: int, force_probe: bool = False) -> dict:
+    """检查用户的 LLM 模型是否可提供服务。
+
+    返回 dict：
+    - configured: 是否已配置（用户配置或全局默认）
+    - connected: 最小请求探测是否成功（未配置时为 False）
+    - error: 探测失败的用户可读原因（成功或未配置时为 None）
+    - model: 当前生效的模型名（未配置时为 None）
+    """
+    from app.core.config import get_user_llm_config
+
+    cfg = get_user_llm_config(user_id)
+    if not cfg or not cfg.get("api_key"):
+        return {
+            "configured": False,
+            "connected": False,
+            "error": None,
+            "model": None,
+        }
+
+    fingerprint = (cfg.get("api_key"), cfg.get("base_url"), cfg.get("model"))
+    now = time.time()
+    cached = _llm_status_cache.get(user_id)
+    if (
+        not force_probe
+        and cached
+        and cached[0] == fingerprint
+        and (now - cached[3]) < _LLM_STATUS_CACHE_TTL
+    ):
+        return {
+            "configured": True,
+            "connected": cached[1],
+            "error": cached[2],
+            "model": fingerprint[2],
+        }
+
+    connected, error = await _probe_llm(user_id)
+    _llm_status_cache[user_id] = (fingerprint, connected, error, now)
+    return {
+        "configured": True,
+        "connected": connected,
+        "error": error,
+        "model": fingerprint[2],
+    }
 
 
 def _resolve_client_and_model(user_id: int = None):
