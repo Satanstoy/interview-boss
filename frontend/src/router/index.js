@@ -98,6 +98,11 @@ const routes = [
         name: 'settings',
         component: () => import('@/views/SettingsView.vue'),
       },
+      {
+        path: 'resume',
+        name: 'resume',
+        component: () => import('@/views/ResumeView.vue'),
+      },
     ],
   },
   {

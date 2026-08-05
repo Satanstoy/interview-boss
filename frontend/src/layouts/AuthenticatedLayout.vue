@@ -19,6 +19,7 @@ import {
   BotMessageSquare,
   ClipboardList,
   Code2,
+  FileText,
   FileUp,
   Filter,
   History,
@@ -89,6 +90,7 @@ const routeToTabMap = {
   'import': 'Import',
   'coding': 'Coding',
   'settings': 'Settings',
+  'resume': 'Resume',
 }
 
 const tabToRouteMap = {
@@ -105,6 +107,7 @@ const tabToRouteMap = {
   Import: '/import',
   Coding: '/coding',
   Settings: '/settings',
+  Resume: '/resume',
 }
 
 // Computed reactive "activeTab" derived from route for useHighlightNav compatibility.
@@ -207,6 +210,7 @@ const sidebarGroups = computed(() => [
       { key: 'Import', label: '导入', route: '/import' },
       { key: 'JD', label: 'JD 筛选', route: '/jd', count: jdData.value.length },
       { key: 'Interview', label: '面经库', route: '/interview', count: interviewData.value.length },
+      { key: 'Resume', label: '简历', route: '/resume' },
     ],
   },
   {
@@ -230,6 +234,7 @@ const navIconMap = {
   Import: FileUp,
   JD: Filter,
   Interview: Library,
+  Resume: FileText,
   KnowledgeGraph: Network,
   InsightsOverview: LayoutDashboard,
   InsightsReadiness: Target,
