@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user
 from app.db.connection import run_db
-from app.services.llm import raw_llm_call, stream_llm_messages
+from app.services.llm import raw_llm_call, stream_llm_messages, _extract_json
 from app.core.prompts import (
     build_resume_optimize_points_prompt,
     build_resume_optimize_text_prompt,
@@ -127,7 +127,7 @@ async def optimize_resume_event_stream(user: dict, position: str):
                 max_tokens=1024,
                 response_format={"type": "json_object"},
             )
-            points_data = json.loads(points_raw)
+            points_data = _extract_json(points_raw)
             points = points_data if isinstance(points_data, list) else points_data.get("points", [])
             if not isinstance(points, list):
                 points = []
@@ -147,8 +147,6 @@ async def optimize_resume_event_stream(user: dict, position: str):
             user_id=user["id"],
             temperature=0.4,
         ):
-            if isinstance(chunk, dict):
-                continue  # thinking 事件跳过
             text_chunks.append(chunk)
             yield f"data: {json.dumps({'type': 'delta', 'content': chunk}, ensure_ascii=False)}\n\n"
 

@@ -1,7 +1,6 @@
 """TDD 测试 — 简历优化 SSE 端点"""
 import json
 from unittest.mock import patch
-import pytest
 
 
 class TestResumeOptimizeEndpoint:
