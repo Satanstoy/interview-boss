@@ -70,8 +70,9 @@ run_backend() {
   run_blocking "backend collect" \
     docker compose --profile test run --rm test uv run pytest --collect-only -q
 
+  # PYTHONPYCACHEPREFIX: test 容器源码挂载为 :ro，把 pyc 写到 /tmp 避免 read-only 报错
   run_blocking "backend compile" \
-    docker compose --profile test run --rm test uv run python -m compileall -q backend/app
+    docker compose --profile test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run python -m compileall -q backend/app
 
   run_blocking "backend structure tests" \
     docker compose --profile test run --rm test uv run pytest \

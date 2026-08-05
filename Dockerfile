@@ -52,12 +52,16 @@ ENV UV_CONCURRENT_DOWNLOADS=4
 ENV UV_CONCURRENT_INSTALLS=2
 ENV UV_CONCURRENT_BUILDS=1
 ENV UV_LINK_MODE=copy
-# --mount=type=cache: 保留 uv 下载缓存，依赖不变时零网络请求
+# --mount=type=cache: 保留 pip 下载缓存，依赖不变时零网络请求
 # --no-install-project: 只装第三方依赖，不装项目本身（项目代码变化不触发重装）
-RUN --mount=type=cache,id=interview-boss-uv-cache-v2,sharing=locked,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project && \
+# 生产依赖必须 uv export + pip 镜像安装：uv sync 会走 uv.lock 的 files.pythonhosted.org 直链绕过 PyPI 镜像，update 可能卡住
+RUN --mount=type=cache,id=interview-boss-pip-cache-v1,sharing=locked,target=/root/.cache/pip \
+    uv export --frozen --no-dev --no-hashes --format requirements-txt > /tmp/requirements.txt && \
+    python -m venv /app/.venv && \
+    /app/.venv/bin/pip install --timeout 20 --retries 1 -i ${PYPI_MIRROR} --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') -r /tmp/requirements.txt && \
     find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null; \
     find /app/.venv -name '*.pyc' -delete 2>/dev/null; \
+    rm -f /tmp/requirements.txt; \
     true
 
 # ── 阶段 3b：Python 依赖安装（含 dev 依赖，用于测试）──
