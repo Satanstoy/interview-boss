@@ -14,12 +14,14 @@ from app.services.llm import _call_llm_with_retry
 from app.services.clustering.experiments.prompts import (
     CLUSTER_LABEL_PROMPT,
     SINGLETON_ASSIGN_PROMPT,
+    VERIFY_MERGE_PROMPT,
 )
 
 logger = logging.getLogger("interview-boss")
 
 LABELS_PER_BATCH = 20
 ASSIGN_BATCH_SIZE = 20
+VERIFY_SIM_THRESHOLD = 0.7
 
 
 def load_cluster_data(conn) -> tuple[list[dict], list[dict]]:
@@ -234,3 +236,67 @@ def _extract_json_object(raw: str) -> dict:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+
+async def verify_assignments(
+    results: dict[int, dict],
+    singletons: list[dict],
+    clusters: list[dict],
+    labels: dict[int, str],
+    user_id: int | None,
+    sim_threshold: float = VERIFY_SIM_THRESHOLD,
+) -> dict[int, dict]:
+    """对判定合并的条目做独立二次验证（fail-closed）。
+
+    验证通过（same=True 且 similarity >= sim_threshold）→ 保留 match；
+    否则降级为 match=None，reason 前缀标注"验证未通过"。
+    未合并的条目不验证，原样返回。
+    """
+    verified: dict[int, dict] = {}
+    for qid, r in results.items():
+        if r["match"] is None:
+            verified[qid] = dict(r)
+            continue
+        s = next((x for x in singletons if x["qb_id"] == qid), None)
+        target = next((c for c in clusters if c["qb_id"] == r["match"]), None)
+        if s is None or target is None:
+            downgraded = dict(r)
+            downgraded["match"] = None
+            downgraded["reason"] = f"验证未通过: 找不到题目上下文 {r['reason']}"[:200]
+            verified[qid] = downgraded
+            continue
+        oq = " | ".join(target["oq"][:3]) or target["question"][:40]
+        prompt = VERIFY_MERGE_PROMPT.format(
+            question_a=s["question"],
+            label=labels.get(target["qb_id"], target["question"][:40]),
+            question_b=target["question"],
+            oq=oq,
+        )
+        try:
+            raw = await _call_llm_with_retry(
+                prompt,
+                system_msg="你是一个面试题去重专家。",
+                response_format={"type": "json_object"},
+                user_id=user_id,
+                model=None,
+            )
+            data = _extract_json_object(raw)
+            same = bool(data.get("same"))
+            try:
+                sim = float(data.get("similarity", 0.0))
+            except (TypeError, ValueError):
+                sim = 0.0
+            if same and sim >= sim_threshold:
+                verified[qid] = dict(r)
+            else:
+                downgraded = dict(r)
+                downgraded["match"] = None
+                downgraded["reason"] = f"验证未通过(sim={sim:.2f}): {r['reason']}"[:200]
+                verified[qid] = downgraded
+        except Exception as e:
+            logger.warning(f"[experiment] 验证调用失败 qb_id={qid}: {e}")
+            downgraded = dict(r)
+            downgraded["match"] = None
+            downgraded["reason"] = f"LLM 调用失败(验证): {e}"[:200]
+            verified[qid] = downgraded
+    return verified

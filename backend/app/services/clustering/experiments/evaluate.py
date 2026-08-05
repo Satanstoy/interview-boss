@@ -25,7 +25,7 @@ SAMPLE_LABELS = 10
 _SAMPLE_SEED = 42
 
 
-async def main(round_no: int, user_id: int | None = 1):
+async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = True):
     os.makedirs(REPORT_DIR, exist_ok=True)
     conn = get_db_connection()
     t0 = time.monotonic()
@@ -53,6 +53,20 @@ async def main(round_no: int, user_id: int | None = 1):
 
     # 3) LLM 增量分配（跳过已被文本预筛命中的）
     results = await assign_singletons(singletons, clusters, labels, user_id=user_id)
+    pre_verify: dict[int, dict] = {}
+
+    # 3.5) 验证层：对判定合并的条目二次验证（两轮一致才采纳）
+    verify_downgraded: dict[int, dict] = {}
+    if verify_enabled:
+        from app.services.clustering.experiments.memory_labels import verify_assignments
+        pre_verify = dict(results)
+        results = await verify_assignments(results, singletons, clusters, labels, user_id=user_id)
+        verify_downgraded = {
+            qid: r for qid, r in results.items()
+            if qid not in pre_matches
+            and r["match"] is None
+            and pre_verify.get(qid, {}).get("match") is not None
+        }
 
     llm_assign = {
         qid: r for qid, r in results.items()
@@ -71,7 +85,8 @@ async def main(round_no: int, user_id: int | None = 1):
     elapsed = time.monotonic() - t0
     _persist_results(round_no, stats, pre_matches, labels, results)
     _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
-                  llm_failed, new_island, cluster_oq, label_failback, elapsed)
+                  llm_failed, new_island, cluster_oq, label_failback, elapsed,
+                  verify_downgraded, pre_verify)
     print(f"[experiment] 完成: 已知cluster={stats['known_clusters']} 孤岛={stats['singletons']} "
           f"确定性合并={len(pre_matches)} LLM合并={len(llm_assign)} 维持孤岛={len(new_island)} "
           f"耗时={elapsed:.1f}s -> {REPORT_DIR}/round{round_no}.md")
@@ -92,7 +107,10 @@ def _persist_results(round_no: int, stats: dict, pre_matches: dict, labels: dict
 
 
 def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
-                  llm_failed, new_island, cluster_oq, label_failback, elapsed):
+                  llm_failed, new_island, cluster_oq, label_failback, elapsed,
+                  verify_downgraded=None, pre_verify=None):
+    verify_downgraded = verify_downgraded or {}
+    pre_verify = pre_verify or {}
     lines = [
         f"# 聚类实验报告 round {round_no}",
         "",
@@ -110,6 +128,7 @@ def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assig
         f"- LLM 判断合并到已有聚类: **{len(llm_assign)}**",
         f"- 维持独立新题: **{len(new_island)}**",
         f"- LLM 调用失败: **{len(llm_failed)}** 条（未计入维持孤岛）",
+        f"- 验证层降级合并: **{len(verify_downgraded)}** 条（原判合并，二次验证未通过）",
         f"- 孤岛率变化: {stats['singletons']} → {len(new_island)}（-{(1 - len(new_island) / max(stats['singletons'], 1)) * 100:.1f}%）",
         "",
         f"## 抽样核验（LLM 合并前 {SAMPLE_LLM_ASSIGNS} 条）",
@@ -133,6 +152,17 @@ def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assig
         lines += [
             f"- 孤岛题 {qid}: {src}",
             f"  - 原因: {r['reason']}",
+            "",
+        ]
+    lines += [f"## 验证层降级样本（前 {SAMPLE_ISLANDS} 条）", ""]
+    for qid, r in _seeded_sample(verify_downgraded.items(), SAMPLE_ISLANDS):
+        src = _q_by_id(conn, qid)
+        orig_match = pre_verify.get(qid, {}).get("match")
+        orig_target = _q_by_id(conn, orig_match) if orig_match else "(未知)"
+        lines += [
+            f"- 孤岛题 {qid}: {src}",
+            f"  - 原判目标聚类 {orig_match}: {orig_target}",
+            f"  - 验证后原因: {r['reason']}",
             "",
         ]
     lines += [f"## 标签摘要样本（前 {SAMPLE_LABELS} 个聚类）", ""]
@@ -168,5 +198,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--round", type=int, default=1)
     parser.add_argument("--user-id", type=int, default=1, help="实验使用的 LLM 配置用户（user_llm_config 表，默认 1=主账号）")
+    parser.add_argument("--no-verify", action="store_true", help="关闭验证层")
     args = parser.parse_args()
-    asyncio.run(main(args.round, args.user_id))
+    asyncio.run(main(args.round, args.user_id, verify_enabled=not args.no_verify))

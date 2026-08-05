@@ -243,3 +243,80 @@ async def test_assign_singletons_respects_no_match(monkeypatch, test_db):
     assert results[3]["match"] is None
     assert results[3]["reason"] == "新主题"  # 区分 fallback（"LLM 调用失败..."前缀）
     assert calls["n"] == 1  # 确认真实走了一次 LLM 调用
+
+
+async def test_verify_assignments_keeps_high_confidence(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, verify_assignments,
+    )
+
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        calls["n"] += 1
+        return json.dumps({"same": True, "similarity": 0.92, "reason": "考察点一致"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        fake_llm,
+    )
+    clusters, singletons = load_cluster_data(test_db)
+    labels = {1: "高并发限流", 2: "Java 线程池"}
+    results = {3: {"match": 1, "reason": "同一道限流题"}}
+    verified = await verify_assignments(results, singletons, clusters, labels, user_id=None)
+
+    # 验证通过，保留 match
+    assert verified[3]["match"] == 1
+    assert calls["n"] == 1
+
+
+async def test_verify_assignments_downgrades_low_confidence(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, verify_assignments,
+    )
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        return json.dumps({"same": False, "similarity": 0.4, "reason": "考察点不同"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        fake_llm,
+    )
+    clusters, singletons = load_cluster_data(test_db)
+    labels = {1: "高并发限流", 2: "Java 线程池"}
+    results = {3: {"match": 1, "reason": "同一道限流题"}}
+    verified = await verify_assignments(results, singletons, clusters, labels, user_id=None)
+
+    # 验证不通过，降级为独立新题，reason 保留原原因
+    assert verified[3]["match"] is None
+    assert "验证未通过" in verified[3]["reason"]
+
+
+async def test_verify_assignments_skips_non_merged_and_handles_llm_error(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, verify_assignments,
+    )
+
+    async def broken_llm(prompt, system_msg, response_format, user_id, model):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        broken_llm,
+    )
+    clusters, singletons = load_cluster_data(test_db)
+    labels = {1: "高并发限流", 2: "Java 线程池"}
+    results = {
+        3: {"match": None, "reason": "独立新题"},  # 未合并的条目不验证，原样保留
+        4: {"match": 2, "reason": "线程池题"},
+    }
+    singletons.append({"qb_id": 4, "question": "Java线程池原理", "cat1": "", "cat2": "", "freq": 1, "oq": []})
+    verified = await verify_assignments(results, singletons, clusters, labels, user_id=None)
+
+    assert verified[3]["match"] is None  # 原样保留
+    assert verified[3]["reason"] == "独立新题"
+    assert verified[4]["match"] is None  # LLM 失败 → 降级（fail-closed）
+    assert "LLM 调用失败" in verified[4]["reason"]
