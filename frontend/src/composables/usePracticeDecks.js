@@ -73,11 +73,13 @@ export function usePracticeDecks(filter = 'all') {
       if (selectedDeckKey.value === 'due' && nextState.next_review_at) {
         // next_review_at 是服务器 UTC naive 时间（YYYY-MM-DD HH:MM:SS）→ 按 UTC 解析后取本地日期比较
         const nextDate = new Date(String(nextState.next_review_at).replace(' ', 'T') + 'Z')
-        const todayStr = new Date().toLocaleDateString('en-CA')
-        const nextDateStr = nextDate.toLocaleDateString('en-CA')
-        if (nextDateStr > todayStr) {
-          const idx = questions.value.findIndex(question => question.id === questionId)
-          if (idx !== -1) questions.value.splice(idx, 1)
+        if (!Number.isNaN(nextDate.getTime())) {
+          const todayStr = new Date().toLocaleDateString('en-CA')
+          const nextDateStr = nextDate.toLocaleDateString('en-CA')
+          if (nextDateStr > todayStr) {
+            const idx = questions.value.findIndex(question => question.id === questionId)
+            if (idx !== -1) questions.value.splice(idx, 1)
+          }
         }
       }
       if (item) Object.assign(item, nextState)

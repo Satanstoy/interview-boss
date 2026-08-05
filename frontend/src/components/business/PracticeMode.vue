@@ -291,6 +291,7 @@ const answerRevealed = ref(false)
 const showSelfCheck = ref(false)
 const showHistory = ref(false)
 const rememberedIds = ref(new Set())
+const pendingReviewedId = ref(null)
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
@@ -354,10 +355,11 @@ function selectSession(key) {
   sessionKey.value = key
   currentIndex.value = 0
   deckQuery.value = ''
+  pendingReviewedId.value = null
   resetState()
   if (serverDeckMode.value) emit('select-deck', key)
 }
-function goPrev() { if (currentIndex.value > 0) { currentIndex.value -= 1; resetState() } }
+function goPrev() { if (currentIndex.value > 0) { currentIndex.value -= 1; pendingReviewedId.value = null; resetState() } }
 function goNext() {
   if (!sessionQuestions.value.length) return
   if (isLastQuestion.value) { currentIndex.value = 0; resetState(); toast.info('这一轮完成了，已回到第 1 题'); return }
@@ -367,6 +369,7 @@ function goNext() {
 function markAndNext(rating) {
   if (!currentQ.value?.id) return
   if (rating === 'good' || rating === 'easy') rememberedIds.value = new Set([...rememberedIds.value, currentQ.value.id])
+  pendingReviewedId.value = currentQ.value.id
   if (serverDeckMode.value) emit('review', { questionId: currentQ.value.id, rating })
   goNext()
 }
@@ -402,19 +405,19 @@ function onGlobalKeydown(event) {
 }
 
 watch(sessionQuestions, (questions) => {
-  // 复习移除题卡导致队列缩短时，按当前题目 id 重新定位，避免跳过下一题
-  const currentId = currentQ.value?.id
-  if (currentId) {
-    const idx = questions.findIndex(q => q.id === currentId)
-    if (idx !== -1) {
-      currentIndex.value = idx
+  const reviewedId = pendingReviewedId.value
+  if (reviewedId && !questions.some(q => q.id === reviewedId)) {
+    // 复习的卡已被移出队列（排到未来）：goNext 已 +1，这里补偿回来，避免跳过下一张
+    pendingReviewedId.value = null
+    if (currentIndex.value > 0) {
+      currentIndex.value = Math.min(currentIndex.value - 1, questions.length - 1)
       return
     }
   }
   if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1)
 })
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
-watch(() => props.selectedDeckKey, (key) => { if (key) { sessionKey.value = key; currentIndex.value = 0; resetState() } })
+watch(() => props.selectedDeckKey, (key) => { if (key) { sessionKey.value = key; currentIndex.value = 0; pendingReviewedId.value = null; resetState() } })
 onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 </script>
