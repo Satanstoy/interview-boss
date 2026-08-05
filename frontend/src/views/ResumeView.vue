@@ -90,6 +90,8 @@ async function handleUpload(event) {
     rawText.value = ''
     showRaw.value = false
     savedOptimization.value = null
+    points.value = []
+    optimizedText.value = ''
   } catch (e) {
     toast.error(`上传失败：${e.message || '请稍后重试'}`)
   } finally {
@@ -150,9 +152,15 @@ async function handleOptimize() {
   }
 }
 
-function copyText(text) {
-  navigator.clipboard?.writeText(text || optimizedText.value)
-  toast.success('已复制到剪贴板')
+async function copyText() {
+  const content = optimizedText.value || savedOptimization.value?.optimized_text || ''
+  if (!content) return
+  try {
+    await navigator.clipboard.writeText(content)
+    toast.success('已复制到剪贴板')
+  } catch {
+    toast.error('复制失败，请手动选择文本复制')
+  }
 }
 
 function downloadMarkdown() {
