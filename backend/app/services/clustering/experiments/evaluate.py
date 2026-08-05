@@ -1,6 +1,6 @@
 """聚类实验评估入口：生产数据全流程 + Markdown 报告。
 
-运行：docker compose run --rm backend python -m app.services.clustering.experiments.evaluate [--round N]
+运行：docker compose run --rm backend python -m app.services.clustering.experiments.evaluate [--round N] [--user-id 1]
 输出：backend/experiment_reports/round<N>.md
 """
 import argparse
@@ -24,7 +24,7 @@ SAMPLE_LABELS = 10
 _SAMPLE_SEED = 42
 
 
-async def main(round_no: int):
+async def main(round_no: int, user_id: int | None = 1):
     os.makedirs(REPORT_DIR, exist_ok=True)
     conn = get_db_connection()
     t0 = time.monotonic()
@@ -47,11 +47,11 @@ async def main(round_no: int):
     pre_matches = text_prefilter(singletons, clusters)
 
     # 2) 标签摘要生成
-    labels = await generate_cluster_labels(clusters, user_id=None)
+    labels = await generate_cluster_labels(clusters, user_id=user_id)
     label_failback = sum(1 for c in clusters if labels.get(c["qb_id"]) == c["question"][:40])
 
     # 3) LLM 增量分配（跳过已被文本预筛命中的）
-    results = await assign_singletons(singletons, clusters, labels, user_id=None)
+    results = await assign_singletons(singletons, clusters, labels, user_id=user_id)
 
     llm_assign = {
         qid: r for qid, r in results.items()
@@ -151,5 +151,6 @@ def _q_by_id(conn, qid: int) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--round", type=int, default=1)
+    parser.add_argument("--user-id", type=int, default=1, help="实验使用的 LLM 配置用户（user_llm_config 表，默认 1=主账号）")
     args = parser.parse_args()
-    asyncio.run(main(args.round))
+    asyncio.run(main(args.round, args.user_id))
