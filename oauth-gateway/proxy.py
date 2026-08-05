@@ -23,8 +23,20 @@ def _backend_url() -> str:
     return _BACKEND_URL
 
 
-def _mcp_error(status: int, detail: str) -> JSONResponse:
-    public = os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
+def _public_base_url(request: Request) -> str:
+    """Build public URLs from the reverse-proxy request host when available."""
+    forwarded_host = request.headers.get("x-forwarded-host")
+    host = (forwarded_host or request.headers.get("host", "")).split(",", 1)[0].strip()
+
+    if host and not host.startswith(("127.0.0.1", "localhost")):
+        proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
+        return f"{proto}://{host}".rstrip("/")
+
+    return os.getenv("GATEWAY_BASE_URL", "https://interviewboss.online").rstrip("/")
+
+
+def _mcp_error(request: Request, status: int, detail: str) -> JSONResponse:
+    public = _public_base_url(request)
     return JSONResponse(
         {"detail": detail},
         status_code=status,
@@ -39,10 +51,10 @@ async def proxy_mcp(request: Request) -> Response:
     auth_header = request.headers.get("authorization", "")
 
     if not auth_header:
-        return _mcp_error(401, "Bearer token required")
+        return _mcp_error(request, 401, "Bearer token required")
 
     if not auth_header.lower().startswith("bearer "):
-        return _mcp_error(401, "Bearer token required")
+        return _mcp_error(request, 401, "Bearer token required")
 
     token = auth_header[7:].strip()
 
@@ -51,18 +63,19 @@ async def proxy_mcp(request: Request) -> Response:
         # OAuth JWT token — verify and extract user_id
         claims = auth.verify_access_token(token)
         if not claims:
-            return _mcp_error(401, "Invalid or expired OAuth token")
+            return _mcp_error(request, 401, "Invalid or expired OAuth token")
         user_id = int(claims["sub"])
     elif token.startswith("ib_mcp_"):
         # Static MCP token — forward directly (pass-through)
         return await _forward_to_backend(request, token)
     else:
-        return _mcp_error(401, "Unknown token format")
+        return _mcp_error(request, 401, "Unknown token format")
 
     # Get the user's InterviewBoss MCP token
     mcp_token = db.get_user_mcp_token(user_id)
     if not mcp_token:
         return _mcp_error(
+            request,
             403, "User has no MCP token. Generate one in InterviewBoss settings."
         )
 
