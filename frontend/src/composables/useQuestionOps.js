@@ -142,7 +142,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
       } else {
         question.user_answer = data.answer
       }
-      question.answer_sources = data.search_sources || null
+      if (Array.isArray(data.search_sources)) question.answer_sources = data.search_sources
       toast.success('答案生成成功')
     } catch (e) { toast.error('生成失败：' + getFriendlyError(e)) }
     finally { question._isLoadingAnswer = false }
