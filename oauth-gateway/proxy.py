@@ -37,11 +37,18 @@ def _public_base_url(request: Request) -> str:
 
 def _mcp_error(request: Request, status: int, detail: str) -> JSONResponse:
     public = _public_base_url(request)
+    # The protected resource is the canonical /mcp endpoint.  Point clients
+    # at the path-aware RFC 9728 metadata URL so they do not have to guess
+    # which MCP resource the challenge belongs to.
     return JSONResponse(
         {"detail": detail},
         status_code=status,
         headers={
-            "WWW-Authenticate": f'Bearer resource_metadata="{public}/.well-known/oauth-protected-resource"'
+            "WWW-Authenticate": (
+                'Bearer '
+                f'resource_metadata="{public}/.well-known/oauth-protected-resource/mcp", '
+                'scope="mcp:read mcp:write"'
+            )
         },
     )
 
