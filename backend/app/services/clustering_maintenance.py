@@ -217,7 +217,7 @@ def _merge_exact_duplicate_pair(conn, survivor_id: int, merged_id: int) -> Dict:
 
     row = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, "
-        "original_questions, original_question_sources, ai_answer "
+        "original_questions, original_question_sources, ai_answer, answer_sources "
         "FROM question_bank WHERE id = ? AND deleted_at IS NULL",
         (merged_id,),
     ).fetchone()

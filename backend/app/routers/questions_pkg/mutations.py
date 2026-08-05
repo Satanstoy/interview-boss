@@ -195,11 +195,11 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             cursor.execute("BEGIN")
             try:
                 source = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources FROM question_bank WHERE id = ?",
                     (question_id,)
                 ).fetchone()
                 target = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources FROM question_bank WHERE id = ?",
                     (req.target_id,)
                 ).fetchone()
                 if not source:
@@ -269,7 +269,10 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
 
                 # 转移 ai_answer（目标没有答案时才转移）
                 if source['ai_answer'] and not target['ai_answer']:
-                    conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (source['ai_answer'], req.target_id))
+                    conn.execute(
+                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
+                        (source['ai_answer'], source['answer_sources'], req.target_id)
+                    )
 
                 # 转移收藏记录（跳过用户已在目标题目上的记录）
                 conn.execute(

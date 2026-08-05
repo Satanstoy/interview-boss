@@ -131,9 +131,9 @@ def share_private_question(conn, question_id: int, user_id: int) -> dict:
     cur = conn.execute(
         "INSERT INTO question_bank "
         "(question, cat1, cat2, tags, difficulty, frequency, sources, "
-        "original_questions, original_question_sources, ai_answer, owner_id, "
+        "original_questions, original_question_sources, ai_answer, answer_sources, owner_id, "
         "submitted_by, status, job_position) "
-        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL, ?, 'pending', ?)",
+        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, ?, 'pending', ?)",
         (
             row["question"],
             row["cat1"],
@@ -144,6 +144,7 @@ def share_private_question(conn, question_id: int, user_id: int) -> dict:
             row["original_questions"],
             row["original_question_sources"],
             row["ai_answer"],
+            row["answer_sources"],
             user_id,
             row["job_position"],
         ),

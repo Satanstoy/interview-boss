@@ -251,10 +251,13 @@ async def build_master_bank_task(ctx, job_id: int):
                     (current_pos,)
                 ).fetchall()
                 existing = conn.execute(
-                    "SELECT question, ai_answer FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
+                    "SELECT question, ai_answer, answer_sources FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
                     (current_pos,)
                 ).fetchall()
-                return raw, {r['question']: r['ai_answer'] for r in existing}
+                return raw, {
+                    r['question']: {"answer": r['ai_answer'], "sources": r['answer_sources']}
+                    for r in existing
+                }
 
         raw_questions, existing_answers_map = await asyncio.to_thread(_load)
         if not raw_questions:
@@ -355,19 +358,26 @@ async def build_master_bank_task(ctx, job_id: int):
                     (current_pos,)
                 ).fetchall()
                 for r in rows:
-                    ai_answer = existing_answers_map.get(r['question'])
+                    saved = existing_answers_map.get(r['question'])
+                    ai_answer = saved['answer'] if saved else None
+                    answer_sources = saved['sources'] if saved else None
                     if not ai_answer:
                         try:
                             import json
                             oqs = json.loads(r['original_questions'] or '[]')
                             for oq in oqs:
-                                ai_answer = existing_answers_map.get(oq)
-                                if ai_answer:
+                                saved = existing_answers_map.get(oq)
+                                if saved and saved['answer']:
+                                    ai_answer = saved['answer']
+                                    answer_sources = saved['sources']
                                     break
                         except Exception:
                             pass
                     if ai_answer:
-                        conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (ai_answer, r['id']))
+                        conn.execute(
+                            "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
+                            (ai_answer, answer_sources, r['id'])
+                        )
                         restored += 1
                 conn.commit()
                 return restored
