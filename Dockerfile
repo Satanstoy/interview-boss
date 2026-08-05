@@ -54,7 +54,7 @@ ENV UV_CONCURRENT_BUILDS=1
 ENV UV_LINK_MODE=copy
 # --mount=type=cache: 保留 pip 下载缓存，依赖不变时零网络请求
 # --no-install-project: 只装第三方依赖，不装项目本身（项目代码变化不触发重装）
-# 生产依赖必须 uv export + pip 镜像安装：uv sync 会走 uv.lock 的 files.pythonhosted.org 直链绕过 PyPI 镜像，update 可能卡住
+# 生产依赖必须 uv export + pip 镜像安装：uv sync 会走 uv.lock 的官方源直链绕过 PyPI 镜像，update 可能卡住
 RUN --mount=type=cache,id=interview-boss-pip-cache-v1,sharing=locked,target=/root/.cache/pip \
     uv export --frozen --no-dev --no-hashes --format requirements-txt > /tmp/requirements.txt && \
     python -m venv /app/.venv && \

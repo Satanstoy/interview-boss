@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const { success: toastSuccess, error: toastError } = useToast()
 const { confirm: showConfirm } = useConfirm()
@@ -151,14 +152,16 @@ onMounted(loadConfig)
       <template v-else>
         <div class="space-y-2">
           <Label class="text-xs font-semibold text-muted-foreground">搜索服务商</Label>
-          <select
-            v-model="form.provider"
-            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-          >
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">
-              {{ provider.label }}
-            </option>
-          </select>
+          <Select v-model="form.provider">
+            <SelectTrigger class="w-full h-10 text-sm">
+              <SelectValue placeholder="选择搜索服务商" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                {{ provider.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <p v-if="selectedProvider" class="text-xs text-muted-foreground">
             {{ selectedProvider.description }}
           </p>
