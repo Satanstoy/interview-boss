@@ -4,7 +4,10 @@ TDD 测试 — 用户简历上传与管理服务
 红灯阶段：resume_service 模块尚不存在，测试应 FAIL
 """
 import pytest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class TestResumeService:
@@ -95,19 +98,11 @@ class TestPDFExtraction:
         """T-006: 从 PDF 字节流提取文本"""
         from app.services.resume_service import extract_pdf_text
 
-        # 创建一个简单的 PDF 字节流用于测试
-        # pypdf 可以创建简单的 PDF
-        from pypdf import PdfWriter
-        from io import BytesIO
+        # 使用真实中文简历 PDF fixture 验证
+        fixture = FIXTURES_DIR / "chinese_resume.pdf"
+        assert fixture.exists()
 
-        writer = PdfWriter()
-        writer.add_blank_page(width=612, height=792)
-        buf = BytesIO()
-        writer.write(buf)
-        pdf_bytes = buf.getvalue()
-
-        # 空白页应该返回空字符串但不抛异常
-        result = extract_pdf_text(pdf_bytes)
+        result = extract_pdf_text(fixture.read_bytes())
         assert isinstance(result, str)
 
     def test_extract_pdf_text_rejects_non_pdf(self):
@@ -116,6 +111,26 @@ class TestPDFExtraction:
 
         with pytest.raises(ValueError, match="PDF"):
             extract_pdf_text(b"this is not a pdf file")
+
+    def test_extract_chinese_resume_pdf(self):
+        """T-008: 真实中文简历 PDF 应正确提取关键字段，无乱码无重复行
+
+        回归：pypdf 对 CID 字体的中文简历（WPS/LaTeX 导出）会输出乱码或
+        每行重复两次；pdfplumber 应提取出可读的中文文本。
+        """
+        from app.services.resume_service import extract_pdf_text
+
+        fixture = FIXTURES_DIR / "chinese_resume.pdf"
+        assert fixture.exists(), f"缺少测试夹具: {fixture}"
+
+        result = extract_pdf_text(fixture.read_bytes())
+
+        # 应包含可读的中文关键字段
+        assert "教育背景" in result
+        assert "项目" in result
+        # 不应出现乱码字形（pypdf 对该 PDF 的典型乱码输出）
+        assert "ཛ" not in result
+        assert "ࣛ" not in result
 
 
 class TestResumeOptimizationStorage:

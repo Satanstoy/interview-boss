@@ -1,6 +1,5 @@
 """对话 API — 会话管理 + 消息流式输出"""
 
-import io
 import json
 import logging
 import uuid
@@ -11,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.auth import get_current_user
 from app.db.connection import run_db, get_user_job_position
 from app.models.schemas import CreateConversationRequest
-from app.services import chat_service
+from app.services import chat_service, resume_service
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/chat")
@@ -687,15 +686,7 @@ async def extract_pdf(
 
     try:
         content = await file.read()
-        reader = __import__("pypdf").PdfReader(io.BytesIO(content))
-
-        text_parts = []
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(page_text.strip())
-
-        full_text = "\n\n".join(text_parts)
+        full_text = resume_service.extract_pdf_text(content)
 
         if not full_text.strip():
             raise HTTPException(

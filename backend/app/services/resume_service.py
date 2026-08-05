@@ -1,6 +1,6 @@
 """用户简历管理服务 — PDF 解析 + CRUD
 
-使用 pypdf 提取 PDF 文本，存储到 user_resumes 表。
+使用 pdfplumber 提取 PDF 文本，存储到 user_resumes 表。
 每个用户仅保留一份最新简历（重复上传覆盖旧的）。
 """
 import json
@@ -15,6 +15,11 @@ logger = logging.getLogger("interview-boss")
 def extract_pdf_text(pdf_bytes: bytes) -> str:
     """从 PDF 字节流中提取纯文本
 
+    使用 pdfplumber（基于 pdfminer.six）替代 pypdf：
+    pypdf 对 CID 字体的中文简历（WPS/LaTeX 导出）存在已知 bug——
+    同一文本对象被重复提取两次、字符间距被误判为空格导致乱码，
+    且对多栏布局无感知。pdfplumber 布局感知更强、无重复 bug。
+
     Args:
         pdf_bytes: PDF 文件的字节内容
 
@@ -24,20 +29,18 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     Raises:
         ValueError: 如果不是有效的 PDF 文件
     """
-    from pypdf import PdfReader
+    import pdfplumber
 
     try:
-        reader = PdfReader(BytesIO(pdf_bytes))
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            text_parts = []
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text.strip())
+            return "\n\n".join(text_parts)
     except Exception:
         raise ValueError("无效的 PDF 文件，无法解析")
-
-    text_parts = []
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text_parts.append(page_text.strip())
-
-    return "\n\n".join(text_parts)
 
 
 def save_resume(user_id: int, filename: str, raw_text: str) -> int:

@@ -1,6 +1,9 @@
 """TDD 测试 — 简历优化 SSE 端点"""
 import json
+from pathlib import Path
 from unittest.mock import patch
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class TestResumeOptimizeEndpoint:
@@ -158,5 +161,68 @@ class TestResumeOptimizeEndpoint:
             opt = resume_service.get_optimization(1)
             assert opt is not None
             assert opt["points"] == []
+        finally:
+            app.dependency_overrides.clear()
+
+
+class TestChatExtractPdf:
+    """POST /api/chat/extract-pdf 复用 resume_service 提取逻辑"""
+
+    def _auth(self):
+        from app.asgi import app
+        from app.core.auth import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1, "username": "opt_user", "bank_mode": "public"
+        }
+        return app
+
+    def test_extract_pdf_uses_resume_service(self, client, test_db):
+        """T-301: /api/chat/extract-pdf 使用 resume_service.extract_pdf_text（pdfplumber）"""
+        app = self._auth()
+        try:
+            fixture = FIXTURES_DIR / "chinese_resume.pdf"
+            assert fixture.exists()
+            with patch("app.routers.chat.resume_service.extract_pdf_text") as mock_extract:
+                mock_extract.return_value = "教育背景\n项目"
+                with open(fixture, "rb") as f:
+                    response = client.post(
+                        "/api/chat/extract-pdf",
+                        files={"file": ("resume.pdf", f.read(), "application/pdf")},
+                        headers={"X-Requested-With": "XMLHttpRequest"},
+                    )
+
+            assert response.status_code == 200
+            assert response.json() == {"status": "success", "text": "教育背景\n项目"}
+            mock_extract.assert_called_once()
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_extract_pdf_rejects_non_pdf(self, client, test_db):
+        """T-302: 非 PDF 文件 400"""
+        app = self._auth()
+        try:
+            response = client.post(
+                "/api/chat/extract-pdf",
+                files={"file": ("resume.txt", b"hello", "text/plain")},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+            assert response.status_code == 400
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_extract_pdf_empty_text_400(self, client, test_db):
+        """T-303: 提取为空（扫描件）400"""
+        app = self._auth()
+        try:
+            fixture = FIXTURES_DIR / "chinese_resume.pdf"
+            with patch("app.routers.chat.resume_service.extract_pdf_text") as mock_extract:
+                mock_extract.return_value = ""
+                with open(fixture, "rb") as f:
+                    response = client.post(
+                        "/api/chat/extract-pdf",
+                        files={"file": ("resume.pdf", f.read(), "application/pdf")},
+                        headers={"X-Requested-With": "XMLHttpRequest"},
+                    )
+            assert response.status_code == 400
         finally:
             app.dependency_overrides.clear()
