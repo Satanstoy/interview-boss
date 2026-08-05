@@ -1042,7 +1042,6 @@ async def get_public_shared_taxonomies(user: dict) -> list:
             "position_name": row[1],
             "categories": json.loads(row[2]) if row[2] else [],
             "source": row[3] or "system",
-            "owner_id": row[4],
             "is_public": row[5] or 0,
             "owner_name": row[6] or "匿名",
         }
