@@ -43,6 +43,38 @@ const insightsSnapshot = {
   },
 }
 
+const practiceActivity = {
+  version: 1,
+  heatmap: Array.from({ length: 90 }, (_, i) => ({
+    date: `2026-05-${String((i % 28) + 1).padStart(2, '0')}`,
+    count: i % 7 === 0 ? 3 : 0,
+    avg_score: i % 7 === 0 ? 78 : 0,
+  })),
+  streak: { current: 3, longest: 5 },
+  trend: Array.from({ length: 30 }, (_, i) => ({
+    date: `2026-07-${String((i % 28) + 1).padStart(2, '0')}`,
+    count: i % 3 === 0 ? 2 : 0,
+    avg_score: i % 3 === 0 ? 80 : 0,
+  })),
+  radar: [{ topic: 'RAG系统设计', proficiency: 80 }],
+  difficulty: [
+    { difficulty: '简单', count: 6, correct_rate: 83 },
+    { difficulty: '中等', count: 3, correct_rate: 67 },
+  ],
+  recent: [
+    {
+      id: 1,
+      type: 'answer',
+      question: 'RAG 的检索阶段如何减少幻觉？',
+      difficulty: '中等',
+      topic: 'RAG系统设计',
+      score: 85,
+      rating: null,
+      created_at: '2026-08-05 09:30:00',
+    },
+  ],
+}
+
 async function mockInsightsApis(page) {
   await page.route('**/api/**', async (route) => {
     const url = route.request().url()
@@ -53,6 +85,10 @@ async function mockInsightsApis(page) {
     }
     if (pathname === '/api/insights') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(insightsSnapshot) })
+      return
+    }
+    if (pathname === '/api/insights/practice-activity') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(practiceActivity) })
       return
     }
     if (pathname === '/api/auth/me') {
@@ -80,8 +116,15 @@ test.describe('洞察工作台', () => {
     await page.goto('/insights/overview?preview=1')
 
     await expect(page.getByRole('heading', { name: '洞察总览' })).toBeVisible()
-    await expect(page.getByText('RAG系统设计')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'RAG系统设计' })).toBeVisible()
     await expect(page.getByText('尚未形成个人能力分数')).toBeVisible()
+
+    await expect(page.getByRole('heading', { name: '我的练习足迹' })).toBeVisible()
+    await expect(page.getByText('打卡热力图')).toBeVisible()
+    await expect(page.getByText('历史最长 5 天')).toBeVisible()
+    await expect(page.getByText('今天还没打卡，再刷一题连击 +1')).toBeVisible()
+    await expect(page.getByText('最近刷题')).toBeVisible()
+    await expect(page.getByText('RAG 的检索阶段如何减少幻觉？')).toBeVisible()
 
     await page.getByRole('button', { name: '岗位准备度' }).click()
     await expect(page).toHaveURL(/\/insights\/readiness\?preview=1$/)
