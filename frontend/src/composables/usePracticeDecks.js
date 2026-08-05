@@ -77,8 +77,9 @@ export function usePracticeDecks(filter = 'all') {
           const todayStr = new Date().toLocaleDateString('en-CA')
           const nextDateStr = nextDate.toLocaleDateString('en-CA')
           if (nextDateStr > todayStr) {
-            const idx = questions.value.findIndex(question => question.id === questionId)
-            if (idx !== -1) questions.value.splice(idx, 1)
+            // 替换数组而非 splice：原地变更不会让 deckQuestions → practiceQuestions → sessionQuestions
+            // 计算链失效，PracticeMode 的索引补偿 watch 将不会触发，导致复习后跳过下一张卡
+            questions.value = questions.value.filter(question => question.id !== questionId)
           }
         }
       }
