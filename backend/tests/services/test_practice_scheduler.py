@@ -58,3 +58,42 @@ def test_easy_grows_faster_than_hard_and_can_reach_mastered_state():
 def test_invalid_rating_is_rejected():
     with pytest.raises(ValueError, match="rating"):
         schedule_review(ReviewState(), "forgotten", now=BASE_TIME)
+
+
+def test_urgency_zero_keeps_existing_behavior():
+    result = schedule_review(ReviewState(), "good", now=BASE_TIME, urgency=0.0)
+    assert result.interval_days == pytest.approx(3)
+    assert result.next_review_at == BASE_TIME + timedelta(days=3)
+
+
+def test_high_urgency_shortens_intervals():
+    plain = schedule_review(ReviewState(), "good", now=BASE_TIME)
+    urgent = schedule_review(ReviewState(), "good", now=BASE_TIME, urgency=1.0)
+    assert urgent.interval_days < plain.interval_days
+
+
+def test_urgency_scaling_is_proportional():
+    half = schedule_review(ReviewState(), "good", now=BASE_TIME, urgency=0.5)
+    full = schedule_review(ReviewState(), "good", now=BASE_TIME, urgency=1.0)
+    assert full.interval_days < half.interval_days < 3.0
+
+
+def test_interval_beyond_deadline_is_pulled_back():
+    deadline = BASE_TIME + timedelta(days=10)
+    result = schedule_review(
+        ReviewState(), "easy", now=BASE_TIME, deadline=deadline
+    )
+    assert result.next_review_at <= deadline
+    assert result.next_review_at > BASE_TIME + timedelta(days=1)
+
+
+def test_interval_within_deadline_untouched():
+    deadline = BASE_TIME + timedelta(days=60)
+    result = schedule_review(ReviewState(), "easy", now=BASE_TIME, deadline=deadline)
+    assert result.next_review_at == BASE_TIME + timedelta(days=7)
+
+
+def test_again_relearning_step_ignores_deadline():
+    deadline = BASE_TIME + timedelta(days=1)
+    result = schedule_review(ReviewState(), "again", now=BASE_TIME, deadline=deadline)
+    assert result.next_review_at == BASE_TIME + timedelta(minutes=28.8)

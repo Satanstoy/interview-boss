@@ -46,6 +46,8 @@ def schedule_review(
     rating: str,
     *,
     now: datetime | None = None,
+    urgency: float = 0.0,
+    deadline: datetime | None = None,
 ) -> ScheduledReview:
     """Calculate the next interval from a flashcard review rating.
 
@@ -60,6 +62,7 @@ def schedule_review(
     if rating not in VALID_RATINGS:
         raise ValueError(f"rating must be one of {sorted(VALID_RATINGS)}")
     now = now or datetime.utcnow()
+    urgency = _clamp(float(urgency or 0.0), 0.0, 1.0)
     prior_interval = max(0.0, float(current.interval_days or 0))
     prior_ease = _clamp(float(current.ease_factor or 2.3), 1.3, 2.8)
     proficiency = max(0, min(5, int(current.proficiency or 0)))
@@ -96,6 +99,14 @@ def schedule_review(
             ease_factor = _clamp(prior_ease + 0.15, 1.3, 2.8)
         state = "mastered" if proficiency >= 5 else "review"
 
+    # 招聘季调制层：urgency 越高间隔越短；deadline 前保证至少一次复习
+    if rating != "again":
+        interval_days = interval_days * (1.0 - 0.4 * urgency)
+    next_review_at = now + timedelta(days=interval_days)
+    if deadline and rating != "again" and next_review_at > deadline:
+        days_until = max(1, (deadline - now).days - 1)
+        if days_until >= 1:
+            next_review_at = deadline - timedelta(days=max(1, round(days_until * 0.8)))
     interval_days = round(interval_days, 4)
     return ScheduledReview(
         state=state,
@@ -104,7 +115,7 @@ def schedule_review(
         lapse_count=lapse_count,
         interval_days=interval_days,
         ease_factor=round(ease_factor, 4),
-        next_review_at=now + timedelta(days=interval_days),
+        next_review_at=next_review_at,
         last_rating=rating,
     )
 
