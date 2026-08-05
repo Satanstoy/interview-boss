@@ -133,7 +133,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 题目去重 | `services/clustering/` + `services/clustering_maintenance.py` | — |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |
 | 全文搜索 | `services/fts_service.py` | — |
-| 简历管理 | `services/resume_service.py` | `services/resumeApi.js` |
+| 简历管理/优化 | `services/resume_service.py` + `core/prompts.py`（build_resume_optimize_*） | `services/resumeApi.js` + `views/ResumeView.vue` |
 | 邮箱验证 | `services/email_service.py` | — |
 | 认证中间件 | `core/auth.py` + `middleware/` | `services/http.js` |
 | 数据库操作 | `db/operations.py` + `queries.py` + `question_bank_sources.py` | — |
