@@ -13,9 +13,13 @@ logger = logging.getLogger("interview-boss")
 # ── Secret Key: 优先读环境变量，否则自动生成并持久化到 .env ──
 _env_secret = os.getenv("JWT_SECRET")
 if _env_secret:
-    SECRET_KEY = _env_secret
     if len(_env_secret) < 32:
-        logger.warning("JWT_SECRET 长度不足 32 字节，建议使用 64 字节以上的随机字符串")
+        raise RuntimeError(
+            "JWT_SECRET 长度不足 32 字节（当前 "
+            f"{len(_env_secret)}）。生产环境禁止弱密钥，请使用 64 字节以上的"
+            "随机字符串，或删除 .env 中的 JWT_SECRET 让系统自动生成。"
+        )
+    SECRET_KEY = _env_secret
 else:
     # 先尝试从 .env 文件读取（避免多进程竞态各自生成不同密钥）
     try:
@@ -199,7 +203,7 @@ async def get_current_user(
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, username, is_admin, share_default, current_position_id FROM users WHERE id = ?",
+                "SELECT id, username, is_admin, share_default, current_position_id, bank_mode FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
 

@@ -10,15 +10,15 @@
 | `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie |
 | `submit.py` | `/api/submit-stream-v2`, `/api/submit-jobs*` | JD/面经提交（LangGraph SSE + 后台 Job），并 re-export submit service 兼容旧内部导入 |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新 |
-| `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |
-| `answers.py` | `/api/master-bank/*` | AI 答案生成。公共参考答案（`ai_answer`）仅管理员可生成（单题/批量均 403 拦截普通用户）；`generate-recitation` 为用户定制个人背诵稿（公共参考答案为基座 + 岗位/简历上下文 + 用户搜索配置），写入 `user_question_view.user_answer`；`use-reference-answer` 已废弃 |
+| `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索。detail 用 all 口径可见性过滤（公共 approved OR 自己的）；编辑权限唯一矩阵 `can_edit_question`（公共题仅 admin，个人题仅本人，admin 也不能改他人个人题） |
+| `answers.py` | `/api/master-bank/*` | AI 答案生成。公共参考答案（`ai_answer`）仅管理员可生成（单题/批量均 403 拦截普通用户）；`generate-recitation` 为用户定制个人背诵稿（公共参考答案为基座 + 岗位/简历上下文 + 用户搜索配置），写入 `user_question_view.user_answer`；`save-user-answer` 仅允许对用户可见的题写入（all 口径可见性断言）；`use-reference-answer` 已删除 |
 | `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习 |
 | `interview.py` | `/api/interview/*` | 模拟面试 |
 | `analytics.py` | `/api/analytics/*` | 数据分析 |
 | `insights.py` | `/api/insights` | 洞察工作台聚合快照 |
 | `profile.py` | `/api/profile/*` | 用户配置（公共+管理员） |
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
-| `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent） |
+| `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent）。`build-personal` 合并：管理员可并入公共题（现有行为），非管理员只落个人题（个人题吸收公共题来源，公共题数据绝不改动，防审核旁路） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
 | `coding.py` | `/api/coding/*` | 手撕代码练习（题目/题单/导入/提交/语言与 LeetCode/ACM 模式/错误统计） |
 | `audio.py` | `/api/audio/*` | 语音转文字（Deepgram） |
@@ -31,7 +31,7 @@
 | 包 | 端点前缀 | 说明 |
 |------|---------|------|
 | `profile_pkg/` | `/api/profile/*` | 配置子路由（llm/taxonomy/position/email/resume） |
-| `questions_pkg/` | `/api/master-bank/*` | 题库操作子路由（mutations/bulk/share：share 私有题→公共 pending、pending/mine 我的待审） |
+| `questions_pkg/` | `/api/master-bank/*` | 题库操作子路由（mutations/bulk/share：share 私有题→公共 pending、pending/mine 我的待审）。trash 回收站：admin 仅见公共题（`owner_id IS NULL`），个人题仅本人 |
 
 ## 核心规则
 

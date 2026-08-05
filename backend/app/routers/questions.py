@@ -93,7 +93,10 @@ async def get_master_bank(
             # 注意：JOIN 的 user_id 参数必须在 WHERE 的 params 之前
             full_sql = f"SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, ({dyn_freq_sql}) as dyn_frequency, qb.ai_answer, qb.sources, qb.original_questions, qb.original_question_sources, COALESCE(uqv.is_starred, 0) as is_starred, COALESCE(uqv.user_answer, '') as user_answer, COALESCE(uqr.state, 'new') as review_state, COALESCE(uqr.proficiency, 0) as proficiency, COALESCE(uqr.review_count, 0) as review_count, uqr.last_rating, uqr.last_reviewed_at, uqr.next_review_at, COALESCE(uqr.interval_days, 0) as interval_days, COALESCE(uqr.ease_factor, 2.3) as ease_factor, qb.owner_id, qb.status, qb.job_position {from_clause} LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? LEFT JOIN user_question_review uqr ON uqr.question_bank_id = qb.id AND uqr.user_id = ? {where_clause} {order_clause} LIMIT ? OFFSET ?"
             full_params = (
-                join_params + [user["id"], user["id"]] + where_params + [page_size, offset]
+                join_params
+                + [user["id"], user["id"]]
+                + where_params
+                + [page_size, offset]
             )
             rows = conn.execute(full_sql, full_params).fetchall()
             return total, rows
@@ -131,7 +134,9 @@ async def get_master_bank(
         d["review_count"] = int(d.get("review_count") or 0)
         d["proficiency"] = int(d.get("proficiency") or 0)
         d["has_been_practiced"] = d["review_count"] > 0
-        d["is_due"] = not d.get("next_review_at") or d.get("next_review_at") <= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        d["is_due"] = not d.get("next_review_at") or d.get(
+            "next_review_at"
+        ) <= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         d.pop("status", None)  # Frontend doesn't use this
         if compact:
             d["ai_answer"] = None
@@ -221,13 +226,22 @@ async def get_question_detail(question_id: int, user: dict = Depends(get_current
 
     def _query():
         with get_db_connection() as conn:
+            # detail 用 all 口径：公共题 + 自己的题（与列表可见范围一致）
+            from app.db.queries import build_bank_where_clause
+
+            from_clause, where_clause, params = build_bank_where_clause(
+                user["id"], "all"
+            )
+            join_params, where_params = _split_join_and_where_params(
+                from_clause, params
+            )
             row = conn.execute(
-                "SELECT qb.id, qb.ai_answer, COALESCE(uqv.user_answer, '') as user_answer, "
+                f"SELECT qb.id, qb.ai_answer, COALESCE(uqv.user_answer, '') as user_answer, "
                 "qb.original_question_sources "
-                "FROM question_bank qb "
+                f"{from_clause} "
                 "LEFT JOIN user_question_view uqv ON uqv.question_bank_id = qb.id AND uqv.user_id = ? "
-                "WHERE qb.id = ?",
-                (user["id"], question_id),
+                f"{where_clause} AND qb.id = ?",
+                join_params + [user["id"]] + where_params + [question_id],
             ).fetchone()
             if not row:
                 return None
@@ -264,6 +278,7 @@ async def search_master_bank(
 ):
     """搜索题库（用于合并时选择目标题目）"""
     from app.db.queries import build_bank_where_clause
+
     from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
     conditions = []
     search_params = list(params)
@@ -309,16 +324,13 @@ async def edit_question(
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该题目")
 
-            # 权限校验
-            is_admin = user.get("is_admin", 0)
-            if row["owner_id"] is None and not is_admin:
-                raise HTTPException(status_code=403, detail="无权编辑公共题目")
-            if (
-                row["owner_id"] is not None
-                and row["owner_id"] != user["id"]
-                and not is_admin
+            # 权限校验（唯一矩阵：公共题仅 admin；个人题仅本人，admin 也不能改）
+            from app.db.queries import can_edit_question
+
+            if not can_edit_question(
+                row["owner_id"], user["id"], bool(user.get("is_admin", 0))
             ):
-                raise HTTPException(status_code=403, detail="无权编辑他人的个人题目")
+                raise HTTPException(status_code=403, detail="无权编辑该题目")
 
             # 构建更新字段（只更新非 None 的字段）
             updates = {}

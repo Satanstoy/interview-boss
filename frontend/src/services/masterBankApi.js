@@ -9,7 +9,6 @@ export const streamJobProgress = (jobId, onEvent) => getSSE(`${API}/jobs/${jobId
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
 export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`, null, { timeout: 180_000 })
-export const useReferenceAnswer = (id) => post(`${API}/master-bank/use-reference-answer/${id}`, null, { timeout: 30_000 })
 export const saveUserAnswer = (id, answer) => put(`${API}/master-bank/save-user-answer/${id}`, { answer })
 export const generateRecitation = (id) => post(`${API}/master-bank/generate-recitation/${id}`, null, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)

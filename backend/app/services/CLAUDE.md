@@ -26,7 +26,7 @@
 | `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级）；`behavioral` 过滤必须复用分布统计的统一信号词表（HR、人力资源、行为面、软技能、冲突、协作、失败、复盘、STAR、职业规划、影响力）；英语缩写 HR 必须按独立 token 匹配，不能误命中 `thread` 等技术词 | `db/connection`, `routers/questions` |
 | `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间 | — |
 | `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件 | `practice_scheduler`, `db/connection` |
-| `practice_deck_service.py` | 系统/难度/收藏/高频题单查询，以及用户自定义题单和题目关联管理 | `db/queries` |
+| `practice_deck_service.py` | 系统/难度/收藏/高频题单查询，以及用户自定义题单和题目关联管理。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要 | `db/queries`, `db/connection` |
 

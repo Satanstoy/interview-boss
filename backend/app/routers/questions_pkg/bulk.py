@@ -1,11 +1,21 @@
 """批量删除与上传操作"""
+
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.db.question_bank_sources import delete_original_item
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_user_job_position
-from app.models.schemas import BatchDeleteRequest, DeleteOriginalQuestionRequest, UploadToBankRequest
+from app.db.connection import (
+    get_db_connection,
+    run_db,
+    get_current_job_position,
+    get_user_job_position,
+)
+from app.models.schemas import (
+    BatchDeleteRequest,
+    DeleteOriginalQuestionRequest,
+    UploadToBankRequest,
+)
 from app.services.clustering import generate_unified_question
 
 logger = logging.getLogger("interview-boss")
@@ -14,14 +24,18 @@ router = APIRouter()
 
 
 @router.post("/api/master-bank/delete-original-question/{question_id}")
-async def delete_original_question(question_id: int, req: DeleteOriginalQuestionRequest, user: dict = Depends(get_current_user)):
+async def delete_original_question(
+    question_id: int,
+    req: DeleteOriginalQuestionRequest,
+    user: dict = Depends(get_current_user),
+):
     """从聚类中删除指定的原始题目（不创建独立题目），并清理相关数据"""
     original_q = req.original_question.strip()
     if not original_q:
         raise HTTPException(status_code=400, detail="original_question 不能为空")
 
-    is_admin = user.get('is_admin', 0)
-    uid = user['id']
+    is_admin = user.get("is_admin", 0)
+    uid = user["id"]
 
     def _delete():
         with get_db_connection() as conn:
@@ -30,63 +44,112 @@ async def delete_original_question(question_id: int, req: DeleteOriginalQuestion
             try:
                 row = cursor.execute(
                     "SELECT id, owner_id, original_questions, original_question_sources, sources FROM question_bank WHERE id = ?",
-                    (question_id,)
+                    (question_id,),
                 ).fetchone()
                 if not row:
                     raise HTTPException(status_code=404, detail="未找到该题目")
 
                 # 权限检查：管理员可删任何，普通用户只能删自己的
                 if not is_admin:
-                    if row['owner_id'] is None:
-                        raise HTTPException(status_code=403, detail="无权删除公共题目中的问题")
-                    if str(row['owner_id']) != str(uid):
-                        raise HTTPException(status_code=403, detail="无权删除他人题目中的问题")
+                    if row["owner_id"] is None:
+                        raise HTTPException(
+                            status_code=403, detail="无权删除公共题目中的问题"
+                        )
+                    if str(row["owner_id"]) != str(uid):
+                        raise HTTPException(
+                            status_code=403, detail="无权删除他人题目中的问题"
+                        )
 
-                orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
-                orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
+                orig_qs = (
+                    json.loads(row["original_questions"])
+                    if row["original_questions"]
+                    else []
+                )
+                orig_qs_src = (
+                    json.loads(row["original_question_sources"])
+                    if row["original_question_sources"]
+                    else []
+                )
 
                 if original_q not in orig_qs:
-                    raise HTTPException(status_code=400, detail="该原始题目不在此聚类中")
+                    raise HTTPException(
+                        status_code=400, detail="该原始题目不在此聚类中"
+                    )
 
                 # 从聚类中移除
                 new_orig = [q for q in orig_qs if q != original_q]
-                new_orig_src = [item for item in orig_qs_src if item.get('question') != original_q]
+                new_orig_src = [
+                    item for item in orig_qs_src if item.get("question") != original_q
+                ]
 
                 # 重新计算 sources
                 remaining_sources = []
                 seen = set()
                 for item in new_orig_src:
-                    for s in item.get('sources', []):
-                        key = (s.get('url', ''), s.get('company', ''), s.get('round', ''))
+                    for s in item.get("sources", []):
+                        key = (
+                            s.get("url", ""),
+                            s.get("company", ""),
+                            s.get("round", ""),
+                        )
                         if key not in seen:
                             seen.add(key)
                             remaining_sources.append(s)
 
                 # 删除 questions_detail 中对应的记录
-                from app.db.operations import _mark_distribution_refresh_for_detail_ids_txn
+                from app.db.operations import (
+                    _mark_distribution_refresh_for_detail_ids_txn,
+                )
+
                 detail_ids = cursor.execute(
-                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL", (original_q,)
+                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
+                    (original_q,),
                 ).fetchall()
-                _mark_distribution_refresh_for_detail_ids_txn(cursor, [detail["id"] for detail in detail_ids])
-                cursor.execute("DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL", (original_q,))
+                _mark_distribution_refresh_for_detail_ids_txn(
+                    cursor, [detail["id"] for detail in detail_ids]
+                )
+                cursor.execute(
+                    "DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
+                    (original_q,),
+                )
 
                 if len(new_orig) == 0:
                     # 聚类清空，删除整个条目
-                    cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
-                    cursor.execute("DELETE FROM user_question_view WHERE question_bank_id = ?", (question_id,))
-                    cursor.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
-                    cursor.execute("DELETE FROM user_practice_history WHERE question_bank_id = ?", (question_id,))
+                    cursor.execute(
+                        "DELETE FROM question_bank WHERE id = ?", (question_id,)
+                    )
+                    cursor.execute(
+                        "DELETE FROM user_question_view WHERE question_bank_id = ?",
+                        (question_id,),
+                    )
+                    cursor.execute(
+                        "DELETE FROM question_position WHERE question_id = ?",
+                        (question_id,),
+                    )
+                    cursor.execute(
+                        "DELETE FROM user_practice_history WHERE question_bank_id = ?",
+                        (question_id,),
+                    )
                 elif len(new_orig) == 1:
                     # 只剩一个，简化为独立题目
                     cursor.execute(
                         "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (new_orig[0], json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                        (
+                            new_orig[0],
+                            json.dumps(remaining_sources, ensure_ascii=False),
+                            question_id,
+                        ),
                     )
                 else:
                     cursor.execute(
                         "UPDATE question_bank SET original_questions = ?, original_question_sources = ?, frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (json.dumps(new_orig, ensure_ascii=False), json.dumps(new_orig_src, ensure_ascii=False),
-                         len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
+                        (
+                            json.dumps(new_orig, ensure_ascii=False),
+                            json.dumps(new_orig_src, ensure_ascii=False),
+                            len(new_orig),
+                            json.dumps(remaining_sources, ensure_ascii=False),
+                            question_id,
+                        ),
                     )
 
                 # Dual-write: delete removed item from normalized tables (if cluster not fully deleted)
@@ -107,22 +170,40 @@ async def delete_original_question(question_id: int, req: DeleteOriginalQuestion
 
         # 如果聚类还有多题，重新生成统一问题（跳过手动编辑过的）
         if len(remaining_orig) >= 2:
+
             def _check_manual():
                 with get_db_connection() as conn:
-                    r = conn.execute("SELECT question_manually_edited FROM question_bank WHERE id = ?", (old_id,)).fetchone()
-                    return r and r['question_manually_edited']
+                    r = conn.execute(
+                        "SELECT question_manually_edited FROM question_bank WHERE id = ?",
+                        (old_id,),
+                    ).fetchone()
+                    return r and r["question_manually_edited"]
+
             is_manual = await run_db(_check_manual)
             if not is_manual:
                 try:
                     sources_ctx = []
                     for item in remaining_orig_src:
                         s = item.get("sources", [{}])[0] if item.get("sources") else {}
-                        sources_ctx.append({"question": item.get("question", ""), "company": s.get("company", ""), "round": s.get("round", "")})
-                    unified = await generate_unified_question(remaining_orig, sources_context=sources_ctx, user_id=uid)
+                        sources_ctx.append(
+                            {
+                                "question": item.get("question", ""),
+                                "company": s.get("company", ""),
+                                "round": s.get("round", ""),
+                            }
+                        )
+                    unified = await generate_unified_question(
+                        remaining_orig, sources_context=sources_ctx, user_id=uid
+                    )
+
                     def _update_unified():
                         with get_db_connection() as conn:
-                            conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, old_id))
+                            conn.execute(
+                                "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (unified, old_id),
+                            )
                             conn.commit()
+
                     await run_db(_update_unified)
                 except Exception as e:
                     logger.warning(f"删除后重新生成统一问题失败: {e}")
@@ -137,7 +218,9 @@ async def delete_original_question(question_id: int, req: DeleteOriginalQuestion
 
 
 @router.delete("/api/master-bank/{question_id}")
-async def delete_master_question(question_id: int, user: dict = Depends(get_current_user)):
+async def delete_master_question(
+    question_id: int, user: dict = Depends(get_current_user)
+):
     def _delete():
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -146,13 +229,19 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
                 (question_id,),
             ).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="未找到该题目，可能已被删除")
+                raise HTTPException(
+                    status_code=404, detail="未找到该题目，可能已被删除"
+                )
 
             # 权限检查：公共题目仅管理员可删，个人题目仅本人可删
-            is_admin = user.get('is_admin', 0)
-            if row['owner_id'] is None and not is_admin:
+            is_admin = user.get("is_admin", 0)
+            if row["owner_id"] is None and not is_admin:
                 raise HTTPException(status_code=403, detail="无权删除公共题目")
-            if row['owner_id'] is not None and row['owner_id'] != user['id'] and not is_admin:
+            if (
+                row["owner_id"] is not None
+                and row["owner_id"] != user["id"]
+                and not is_admin
+            ):
                 raise HTTPException(status_code=403, detail="无权删除他人的个人题目")
 
             cursor.execute(
@@ -172,7 +261,9 @@ async def delete_master_question(question_id: int, user: dict = Depends(get_curr
 
 
 @router.post("/api/master-bank/batch-delete")
-async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+async def batch_delete_master_bank(
+    req: BatchDeleteRequest, user: dict = Depends(get_current_user)
+):
     """批量删除题库题目，单事务完成"""
     if not req.ids:
         raise HTTPException(status_code=400, detail="ids 不能为空")
@@ -189,12 +280,20 @@ async def batch_delete_master_bank(req: BatchDeleteRequest, user: dict = Depends
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
             # 权限检查
-            is_admin = user.get('is_admin', 0)
+            is_admin = user.get("is_admin", 0)
             for r in rows:
-                if r['owner_id'] is None and not is_admin:
-                    raise HTTPException(status_code=403, detail=f"无权删除公共题目 (id={r['id']})")
-                if r['owner_id'] is not None and r['owner_id'] != user['id'] and not is_admin:
-                    raise HTTPException(status_code=403, detail=f"无权删除他人的个人题目 (id={r['id']})")
+                if r["owner_id"] is None and not is_admin:
+                    raise HTTPException(
+                        status_code=403, detail=f"无权删除公共题目 (id={r['id']})"
+                    )
+                if (
+                    r["owner_id"] is not None
+                    and r["owner_id"] != user["id"]
+                    and not is_admin
+                ):
+                    raise HTTPException(
+                        status_code=403, detail=f"无权删除他人的个人题目 (id={r['id']})"
+                    )
 
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))
@@ -223,9 +322,10 @@ async def get_master_bank_trash(user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
             if user.get("is_admin", 0):
+                # 管理员仅见公共题回收站（个人题回收站仅本人可见）
                 rows = conn.execute(
                     "SELECT id, question, cat1, cat2, tags, difficulty, owner_id, job_position, deleted_at "
-                    "FROM question_bank WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+                    "FROM question_bank WHERE owner_id IS NULL AND deleted_at IS NOT NULL ORDER BY deleted_at DESC"
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -239,7 +339,9 @@ async def get_master_bank_trash(user: dict = Depends(get_current_user)):
 
 
 @router.post("/api/master-bank/restore/{question_id}")
-async def restore_master_question(question_id: int, user: dict = Depends(get_current_user)):
+async def restore_master_question(
+    question_id: int, user: dict = Depends(get_current_user)
+):
     """恢复回收站中的题目。"""
 
     def _restore():
@@ -253,7 +355,11 @@ async def restore_master_question(question_id: int, user: dict = Depends(get_cur
             is_admin = user.get("is_admin", 0)
             if row["owner_id"] is None and not is_admin:
                 raise HTTPException(status_code=403, detail="无权恢复公共题目")
-            if row["owner_id"] is not None and row["owner_id"] != user["id"] and not is_admin:
+            if (
+                row["owner_id"] is not None
+                and row["owner_id"] != user["id"]
+                and not is_admin
+            ):
                 raise HTTPException(status_code=403, detail="无权恢复他人的个人题目")
             conn.execute(
                 "UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -266,7 +372,9 @@ async def restore_master_question(question_id: int, user: dict = Depends(get_cur
 
 
 @router.post("/api/master-bank/batch-restore")
-async def batch_restore_master_bank(req: BatchDeleteRequest, user: dict = Depends(get_current_user)):
+async def batch_restore_master_bank(
+    req: BatchDeleteRequest, user: dict = Depends(get_current_user)
+):
     """批量恢复题库题目。"""
     if not req.ids:
         raise HTTPException(status_code=400, detail="ids 不能为空")
@@ -283,9 +391,18 @@ async def batch_restore_master_bank(req: BatchDeleteRequest, user: dict = Depend
             is_admin = user.get("is_admin", 0)
             for row in rows:
                 if row["owner_id"] is None and not is_admin:
-                    raise HTTPException(status_code=403, detail=f"无权恢复公共题目 (id={row['id']})")
-                if row["owner_id"] is not None and row["owner_id"] != user["id"] and not is_admin:
-                    raise HTTPException(status_code=403, detail=f"无权恢复他人的个人题目 (id={row['id']})")
+                    raise HTTPException(
+                        status_code=403, detail=f"无权恢复公共题目 (id={row['id']})"
+                    )
+                if (
+                    row["owner_id"] is not None
+                    and row["owner_id"] != user["id"]
+                    and not is_admin
+                ):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"无权恢复他人的个人题目 (id={row['id']})",
+                    )
             found_ids = [row["id"] for row in rows]
             ph2 = ",".join("?" * len(found_ids))
             conn.execute(
@@ -300,32 +417,60 @@ async def batch_restore_master_bank(req: BatchDeleteRequest, user: dict = Depend
 
 
 @router.post("/api/master-bank/upload")
-async def upload_to_bank(req: UploadToBankRequest, user: dict = Depends(get_current_user)):
+async def upload_to_bank(
+    req: UploadToBankRequest, user: dict = Depends(get_current_user)
+):
     """上传题目到题库"""
-    if req.target not in ('public', 'personal'):
+    if req.target not in ("public", "personal"):
         raise HTTPException(status_code=400, detail="target 可选: public / personal")
 
     def _insert():
         with get_db_connection() as conn:
-            _, current_pos = get_user_job_position(user['id'])
+            _, current_pos = get_user_job_position(user["id"])
             current_pos = current_pos or get_current_job_position()
-            if req.target == 'personal':
+            if req.target == "personal":
                 conn.execute(
                     "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?)",
-                    (req.question_text, req.cat1, req.cat2, req.tags, req.difficulty, user['id'], user['id'], current_pos)
+                    (
+                        req.question_text,
+                        req.cat1,
+                        req.cat2,
+                        req.tags,
+                        req.difficulty,
+                        user["id"],
+                        user["id"],
+                        current_pos,
+                    ),
                 )
             else:
                 conn.execute(
                     "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, NULL, ?, 'pending', ?)",
-                    (req.question_text, req.cat1, req.cat2, req.tags, req.difficulty, user['id'], current_pos)
+                    (
+                        req.question_text,
+                        req.cat1,
+                        req.cat2,
+                        req.tags,
+                        req.difficulty,
+                        user["id"],
+                        current_pos,
+                    ),
                 )
             new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             # 同步 question_position 关联表
-            pos_row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (current_pos,)).fetchone()
+            pos_row = conn.execute(
+                "SELECT id FROM job_positions WHERE name = ?", (current_pos,)
+            ).fetchone()
             if pos_row:
-                conn.execute("INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)", (new_id, pos_row[0]))
+                conn.execute(
+                    "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
+                    (new_id, pos_row[0]),
+                )
             conn.commit()
 
     await run_db(_insert)
-    status_msg = "已加入个人题库" if req.target == 'personal' else "已提交到公共题库，等待管理员审核"
+    status_msg = (
+        "已加入个人题库"
+        if req.target == "personal"
+        else "已提交到公共题库，等待管理员审核"
+    )
     return {"status": "success", "message": status_msg}

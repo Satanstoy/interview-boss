@@ -80,11 +80,16 @@ def get_deck_definition(conn, user_id: int, deck_key: str) -> dict | None:
         return {**DECK_BY_KEY[deck_key], "kind": DECK_BY_KEY[deck_key]["kind"]}
     if deck_key in {"l1", "l2", "l3"}:
         labels = {"l1": "L1 基础", "l2": "L2 进阶", "l3": "L3 挑战"}
-        return {"key": deck_key, "name": labels[deck_key], "description": "按难度复习", "kind": "difficulty"}
+        return {
+            "key": deck_key,
+            "name": labels[deck_key],
+            "description": "按难度复习",
+            "kind": "difficulty",
+        }
     row = conn.execute(
         "SELECT id, deck_key AS key, name, description, visibility, owner_id, "
         "sort_order, 'custom' AS kind FROM practice_decks "
-        "WHERE deck_key = ? AND (owner_id = ? OR visibility = 'public')",
+        "WHERE deck_key = ? AND owner_id = ?",
         (deck_key, user_id),
     ).fetchone()
     return dict(row) if row else None
@@ -100,7 +105,9 @@ def _base_query_parts(conn, user_id: int, filter_mode: str, deck_key: str):
     join_params, where_params = _split_bank_params(from_clause, params)
     frequency_sql = get_dynamic_frequency_sql(filter_mode, user_id, "qb")
     conditions = [
-        _deck_condition(deck_key, frequency_sql) if deck["kind"] != "custom" else "1 = 1",
+        _deck_condition(deck_key, frequency_sql)
+        if deck["kind"] != "custom"
+        else "1 = 1",
         _difficulty_condition(deck_key),
     ]
     source_params = join_params
@@ -176,10 +183,11 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     """Return named system study plans with live counts and progress."""
 
     result = []
-    custom_where = "owner_id = ? OR visibility = 'public'"
+    custom_where = "owner_id = ?"
     custom_params = [user_id]
     if filter_mode == "public":
-        custom_where = "visibility = 'public'"
+        # 自定义题单纯私有：public 口径不返回任何自定义题单
+        custom_where = "1 = 0"
         custom_params = []
     elif filter_mode == "mine":
         custom_where = "owner_id = ?"
@@ -192,8 +200,8 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     deck_definitions = [{**deck, "kind": deck["kind"]} for deck in DECKS]
     deck_definitions.extend(dict(row) for row in custom_decks)
     for deck in deck_definitions:
-        _, from_clause, where_clause, source_params, where_params, _ = _base_query_parts(
-            conn, user_id, filter_mode, deck["key"]
+        _, from_clause, where_clause, source_params, where_params, _ = (
+            _base_query_parts(conn, user_id, filter_mode, deck["key"])
         )
         query = (
             "SELECT COUNT(*) AS total, "
@@ -209,7 +217,11 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
         due = int(row["due"] or 0)
         result.append(
             {
-                **{key: value for key, value in deck.items() if key not in {"owner_id", "sort_order"}},
+                **{
+                    key: value
+                    for key, value in deck.items()
+                    if key not in {"owner_id", "sort_order"}
+                },
                 "total": total,
                 "reviewed": reviewed,
                 "due": due,
@@ -232,8 +244,8 @@ def list_deck_questions(
 
     limit = max(1, min(int(limit or 100), 200))
     offset = max(0, int(offset or 0))
-    deck, from_clause, where_clause, source_params, where_params, frequency_sql = _base_query_parts(
-        conn, user_id, filter_mode, deck_key
+    deck, from_clause, where_clause, source_params, where_params, frequency_sql = (
+        _base_query_parts(conn, user_id, filter_mode, deck_key)
     )
     join = _review_join("?")
     params = source_params + [user_id, user_id] + where_params
@@ -255,7 +267,11 @@ def list_deck_questions(
         params + [limit, offset],
     ).fetchall()
     return (
-        {key: value for key, value in deck.items() if key not in {"owner_id", "sort_order"}},
+        {
+            key: value
+            for key, value in deck.items()
+            if key not in {"owner_id", "sort_order"}
+        },
         [_normalise_question(row) for row in rows],
         int(total),
     )
@@ -299,7 +315,11 @@ def update_custom_deck(conn, user_id: int, deck_key: str, updates: dict) -> dict
     for field in ("name", "description", "visibility"):
         if updates.get(field) is not None:
             fields.append(f"{field} = ?")
-            params.append(updates[field].strip() if isinstance(updates[field], str) else updates[field])
+            params.append(
+                updates[field].strip()
+                if isinstance(updates[field], str)
+                else updates[field]
+            )
     if fields:
         fields.append("updated_at = CURRENT_TIMESTAMP")
         conn.execute(
@@ -332,7 +352,11 @@ def add_deck_item(conn, user_id: int, deck_key: str, question_id: int) -> dict:
         (deck["id"], question_id),
     ).fetchone()
     if existing:
-        return {"id": existing["id"], "question_id": question_id, "sort_order": existing["sort_order"]}
+        return {
+            "id": existing["id"],
+            "question_id": question_id,
+            "sort_order": existing["sort_order"],
+        }
     next_order = conn.execute(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM practice_deck_items WHERE deck_id = ?",
         (deck["id"],),
@@ -341,7 +365,11 @@ def add_deck_item(conn, user_id: int, deck_key: str, question_id: int) -> dict:
         "INSERT INTO practice_deck_items (deck_id, question_bank_id, sort_order) VALUES (?, ?, ?)",
         (deck["id"], question_id, next_order),
     )
-    return {"id": cursor.lastrowid, "question_id": question_id, "sort_order": next_order}
+    return {
+        "id": cursor.lastrowid,
+        "question_id": question_id,
+        "sort_order": next_order,
+    }
 
 
 def remove_deck_item(conn, user_id: int, deck_key: str, question_id: int) -> None:

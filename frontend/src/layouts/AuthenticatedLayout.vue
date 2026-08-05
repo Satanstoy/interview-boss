@@ -279,7 +279,7 @@ initAuthSingleton({
 const previewUser = {
   id: 'preview-user',
   username: 'Preview',
-  is_admin: true,
+  is_admin: false,  // 预览按普通用户渲染，不暴露管理员入口
   share_default: 'private',
 }
 const displayUser = computed(() => currentUser.value || (isPreviewMode ? previewUser : null))

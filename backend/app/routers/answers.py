@@ -20,54 +20,31 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
 
 
-@router.post("/use-reference-answer/{question_id}")
-async def use_reference_answer(
-    question_id: int, user: dict = Depends(get_current_user)
-):
-    """将管理员的参考答案复制为用户的个人答案"""
-
-    def _get_question():
-        with get_db_connection() as conn:
-            return conn.execute(
-                "SELECT id, question, ai_answer FROM question_bank WHERE id = ?",
-                (question_id,),
-            ).fetchone()
-
-    row = await run_db(_get_question)
-    if not row:
-        raise HTTPException(status_code=404, detail="题目不存在")
-    if not row["ai_answer"] or "生成失败" in row["ai_answer"]:
-        raise HTTPException(status_code=404, detail="该题目暂无参考答案")
-
-    def _upsert_user_answer():
-        with get_db_connection() as conn:
-            conn.execute(
-                "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
-                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
-                (user["id"], question_id, row["ai_answer"], row["ai_answer"]),
-            )
-            conn.commit()
-
-    await run_db(_upsert_user_answer)
-    return {"status": "success", "answer": row["ai_answer"]}
-
-
 @router.put("/save-user-answer/{question_id}")
 async def save_user_answer(
     question_id: int, body: dict, user: dict = Depends(get_current_user)
 ):
-    """保存用户的个人答案（手动编辑）"""
+    """保存用户的背诵稿（手动编辑）"""
     answer = body.get("answer", "")
+
+    def _check_visible():
+        with get_db_connection() as conn:
+            # all 口径：公共题 + 自己的题（背诵稿保存须对用户可见）
+            from app.db.queries import build_bank_where_clause
+
+            from_clause, where_clause, params = build_bank_where_clause(
+                user["id"], "all"
+            )
+            return conn.execute(
+                f"SELECT 1 {from_clause} {where_clause} AND qb.id = ?",
+                params + [question_id],
+            ).fetchone()
+
+    if not await run_db(_check_visible):
+        raise HTTPException(status_code=404, detail="题目不存在或无权访问")
 
     def _upsert():
         with get_db_connection() as conn:
-            # 检查题目是否存在
-            exists = conn.execute(
-                "SELECT 1 FROM question_bank WHERE id = ?", (question_id,)
-            ).fetchone()
-            if not exists:
-                return False
             conn.execute(
                 "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
                 "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
@@ -77,9 +54,7 @@ async def save_user_answer(
             conn.commit()
             return True
 
-    result = await run_db(_upsert)
-    if not result:
-        raise HTTPException(status_code=404, detail="题目不存在")
+    await run_db(_upsert)
     return {"status": "success"}
 
 

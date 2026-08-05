@@ -116,7 +116,6 @@
         </div>
         <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">题单名称</label><input v-model="form.name" data-testid="practice-deck-name" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="例如：Java 并发八股" /></div>
         <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">描述（可选）</label><textarea v-model="form.description" rows="3" class="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="说明这套题单适合什么阶段或岗位" /></div>
-        <div><label class="mb-1.5 block text-xs font-semibold text-muted-foreground">可见范围</label><select v-model="form.visibility" class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20"><option value="private">仅自己可见</option><option value="public">公开题单</option></select></div>
       </div>
       <template #footer><div class="flex justify-end gap-2"><Button variant="outline" @click="editorOpen = false">取消</Button><Button data-testid="practice-deck-save" :disabled="!form.name.trim()" @click="saveDeck">{{ editingDeck ? '保存修改' : '创建题单' }}</Button></div></template>
     </AppDialog>
@@ -125,7 +124,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { BookOpen, ChevronRight, Globe2, Layers, List, LockKeyhole, Pencil, Plus, Search, Trash2, X } from '@lucide/vue'
+import { BookOpen, ChevronRight, Layers, List, LockKeyhole, Pencil, Plus, Search, Trash2, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import AppDialog from '@/components/common/AppDialog.vue'
@@ -157,7 +156,7 @@ const recommendedDecks = [
 ]
 
 function deckIcon(deck) {
-  if (deck.kind === 'custom') return deck.visibility === 'public' ? Globe2 : LockKeyhole
+  if (deck.kind === 'custom') return LockKeyhole
   return deck.key === 'all' ? BookOpen : Layers
 }
 function deckTone(deck) {
