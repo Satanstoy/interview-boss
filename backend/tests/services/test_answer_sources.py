@@ -245,3 +245,127 @@ async def test_batch_generate_writes_answer_sources():
     ]
     assert len(update_calls) == 1
     assert json.loads(update_calls[0].args[1][1]) == sources
+
+
+@pytest.mark.asyncio
+async def test_master_bank_list_returns_answer_sources_array():
+    """列表 API 返回解析后的 answer_sources 数组"""
+    from app.routers.questions import get_master_bank
+
+    row = {
+        "id": 10,
+        "question": "什么是微服务？",
+        "cat1": "架构",
+        "cat2": "",
+        "tags": "",
+        "difficulty": "L2",
+        "ai_answer": "答",
+        "sources": "[]",
+        "original_questions": "[]",
+        "original_question_sources": "[]",
+        "is_starred": 0,
+        "user_answer": "",
+        "review_state": "new",
+        "proficiency": 0,
+        "review_count": 0,
+        "last_rating": None,
+        "last_reviewed_at": None,
+        "next_review_at": None,
+        "interval_days": 0,
+        "ease_factor": 2.3,
+        "owner_id": None,
+        "status": "approved",
+        "job_position": "",
+        "answer_sources": json.dumps(
+            [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
+        ),
+    }
+    filter_counts = {
+        "overall_total": 1,
+        "category_counts": [],
+        "popular_tags": [],
+        "filtered_tag_counts": [],
+    }
+    user = {"id": 1, "is_admin": True}
+
+    with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = [(1, [row]), {}, filter_counts]
+        resp = await get_master_bank(
+            page=1, page_size=50, compact=False, filter="all", user=user
+        )
+
+    item = resp["items"][0]
+    assert item["answer_sources"] == [
+        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_master_bank_list_returns_null_without_sources():
+    """无来源时列表 API 返回 answer_sources = None"""
+    from app.routers.questions import get_master_bank
+
+    row = {
+        "id": 11,
+        "question": "什么是微服务？",
+        "cat1": "架构",
+        "cat2": "",
+        "tags": "",
+        "difficulty": "L2",
+        "ai_answer": "答",
+        "sources": "[]",
+        "original_questions": "[]",
+        "original_question_sources": "[]",
+        "is_starred": 0,
+        "user_answer": "",
+        "review_state": "new",
+        "proficiency": 0,
+        "review_count": 0,
+        "last_rating": None,
+        "last_reviewed_at": None,
+        "next_review_at": None,
+        "interval_days": 0,
+        "ease_factor": 2.3,
+        "owner_id": None,
+        "status": "approved",
+        "job_position": "",
+        "answer_sources": None,
+    }
+    filter_counts = {
+        "overall_total": 1,
+        "category_counts": [],
+        "popular_tags": [],
+        "filtered_tag_counts": [],
+    }
+    user = {"id": 1, "is_admin": True}
+
+    with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = [(1, [row]), {}, filter_counts]
+        resp = await get_master_bank(
+            page=1, page_size=50, compact=False, filter="all", user=user
+        )
+
+    assert resp["items"][0]["answer_sources"] is None
+
+
+@pytest.mark.asyncio
+async def test_question_detail_returns_answer_sources(test_db):
+    """详情 API 返回解析后的 answer_sources 数组"""
+    from app.routers.questions import get_question_detail
+
+    row = {
+        "id": 10,
+        "ai_answer": "答",
+        "user_answer": "",
+        "original_question_sources": "[]",
+        "answer_sources": json.dumps(
+            [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
+        ),
+    }
+    with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.return_value = row
+        result = await get_question_detail(10, {"id": 1, "is_admin": True})
+
+    assert result["answer_sources"] == [
+        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]
