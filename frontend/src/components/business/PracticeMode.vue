@@ -130,7 +130,25 @@
                   <Button size="sm" :disabled="qState._isSavingRecitation" @click="handleSaveRecitation">{{ qState._isSavingRecitation ? '保存中...' : '保存背诵稿' }}</Button>
                 </div>
               </div>
-              <div v-else-if="qState._recitation" class="recitation-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
+              <div v-else-if="qState._recitation">
+                <div class="recitation-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
+                <div v-if="qState._recitationSources.length" class="mt-3 border-t border-border/70 pt-3">
+                  <button type="button"
+                    class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    @click="qState._showRecitationSources = !qState._showRecitationSources">
+                    <ChevronDown class="size-3.5 transition-transform" :class="qState._showRecitationSources ? 'rotate-180' : ''" />
+                    参考来源（{{ qState._recitationSources.length }}）
+                  </button>
+                  <div v-if="qState._showRecitationSources" class="mt-2 flex flex-col gap-1.5">
+                    <a v-for="(src, idx) in qState._recitationSources" :key="src.url || idx"
+                      :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer"
+                      class="flex items-start gap-1.5 text-xs text-primary hover:underline break-all">
+                      <span class="font-mono shrink-0">{{ idx + 1 }}.</span>
+                      <span class="min-w-0">{{ src.title || src.url }}</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
               <div v-else-if="qState._isGeneratingRecitation" class="flex flex-col items-center gap-2 py-4 text-primary">
                 <Loader2 class="size-5 animate-spin" />
                 <span class="text-xs">正在结合你的岗位/简历定制背诵稿...</span>
@@ -228,6 +246,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   BookOpen,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -253,6 +272,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import AppDialog from '@/components/common/AppDialog.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
+import { safeUrl } from '@/utils/validate.js'
 import { useToast } from '@/composables/useNotification.js'
 import {
   dimLabel,
@@ -294,7 +314,7 @@ const rememberedIds = ref(new Set())
 const pendingReviewedId = ref(null)
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
-const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
+const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
   const info = props.practicedQuestions?.[question?.id] || {}

@@ -43,6 +43,8 @@ export function resetQState(qState) {
   qState._editAnswer = ''
   qState._isSavingAnswer = false
   qState._recitation = ''
+  qState._recitationSources = []
+  qState._showRecitationSources = false
   qState._isGeneratingRecitation = false
   qState._isEditingRecitation = false
   qState._editRecitation = ''
@@ -94,6 +96,7 @@ export async function generateRecitationForQuestion(question, qState) {
   try {
     const data = await apiGenerateRecitation(question.id)
     qState._recitation = data.answer
+    qState._recitationSources = data.search_sources || []
     qState._isEditingRecitation = false
     toast.success('背诵稿已生成')
   } catch (e) {
