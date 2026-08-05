@@ -79,7 +79,7 @@ def test_urgency_scaling_is_proportional():
 
 
 def test_interval_beyond_deadline_is_pulled_back():
-    deadline = BASE_TIME + timedelta(days=10)
+    deadline = BASE_TIME + timedelta(days=5)
     result = schedule_review(
         ReviewState(), "easy", now=BASE_TIME, deadline=deadline
     )
