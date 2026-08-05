@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -75,7 +76,7 @@ async def authorization_server_metadata(request: Request):
             "authorization_endpoint": f"{base}/oauth/authorize",
             "token_endpoint": f"{base}/oauth/token",
             "registration_endpoint": f"{base}/oauth/register",
-            "client_id_metadata_document_supported": False,
+            "client_id_metadata_document_supported": True,
             "code_challenge_methods_supported": ["S256"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "response_types_supported": ["code"],
@@ -155,10 +156,45 @@ async def register_client(request: Request):
 
 def _is_chatgpt_client(client: dict) -> bool:
     """Check if client is a ChatGPT connector (allowlist by redirect_uri prefix)."""
-    return any(
-        uri.startswith("https://chatgpt.com/connector/oauth/")
-        for uri in client.get("redirect_uris", [])
+    return any(_is_chatgpt_redirect_uri(uri) for uri in client.get("redirect_uris", []))
+
+
+def _is_chatgpt_redirect_uri(uri: str) -> bool:
+    return uri.startswith(
+        ("https://chatgpt.com/connector/oauth/", "https://chatgpt.com/connector_platform_oauth_redirect")
     )
+
+
+def _is_chatgpt_cimd_client_id(client_id: str) -> bool:
+    parsed = urlparse(client_id)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == "chatgpt.com"
+        and parsed.path.startswith("/oauth/")
+        and parsed.path.endswith("/client.json")
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _get_or_register_cimd_client(
+    client_id: str, redirect_uri: str
+) -> dict | None:
+    """Accept OpenAI's HTTPS CIMD client identity with a strict redirect allowlist."""
+    if not _is_chatgpt_cimd_client_id(client_id) or not _is_chatgpt_redirect_uri(
+        redirect_uri
+    ):
+        return None
+
+    client = db.get_client(client_id)
+    if client:
+        return client
+
+    try:
+        db.create_client(client_id, None, "ChatGPT", [redirect_uri], "none")
+    except sqlite3.IntegrityError:
+        pass
+    return db.get_client(client_id)
 
 
 @router.get("/oauth/authorize")
@@ -176,7 +212,9 @@ async def authorize(
     if response_type != "code":
         raise HTTPException(400, "unsupported response_type")
 
-    client = db.get_client(client_id)
+    client = db.get_client(client_id) or _get_or_register_cimd_client(
+        client_id, redirect_uri
+    )
     if not client:
         raise HTTPException(400, "unknown client_id")
 
@@ -240,7 +278,9 @@ async def authorize_post(
             },
         )
 
-    client = db.get_client(client_id)
+    client = db.get_client(client_id) or _get_or_register_cimd_client(
+        client_id, redirect_uri
+    )
     if not client:
         return templates.TemplateResponse(
             request,
@@ -401,8 +441,9 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
     # Issue tokens
     user_id = code_data["user_id"]
     scopes = code_data["scopes"] or "mcp:read mcp:write"
+    resource = code_data.get("resource") or ""
 
-    access_token = auth.create_access_token(user_id, client_id, scopes)
+    access_token = auth.create_access_token(user_id, client_id, scopes, resource)
     refresh_token = auth.create_refresh_token(user_id, client_id, scopes)
 
     now = datetime.now(timezone.utc)
@@ -419,6 +460,7 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
         client_id,
         scopes,
         (now + timedelta(seconds=auth._REFRESH_TTL)).isoformat(),
+        resource,
     )
 
     return JSONResponse(
@@ -452,8 +494,14 @@ async def _handle_refresh_token(body: dict) -> JSONResponse:
 
     user_id = token_data["user_id"]
     scopes = token_data["scopes"] or "mcp:read mcp:write"
+    stored_resource = token_data.get("resource") or ""
+    requested_resource = body.get("resource") or stored_resource
+    if stored_resource and requested_resource != stored_resource:
+        raise HTTPException(400, "resource mismatch")
 
-    new_access_token = auth.create_access_token(user_id, client_id, scopes)
+    new_access_token = auth.create_access_token(
+        user_id, client_id, scopes, requested_resource
+    )
     new_refresh_token = auth.create_refresh_token(user_id, client_id, scopes)
 
     now = datetime.now(timezone.utc)
@@ -470,6 +518,7 @@ async def _handle_refresh_token(body: dict) -> JSONResponse:
         client_id,
         scopes,
         (now + timedelta(seconds=auth._REFRESH_TTL)).isoformat(),
+        requested_resource,
     )
 
     return JSONResponse(

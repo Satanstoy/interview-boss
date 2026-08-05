@@ -77,10 +77,20 @@ def init_db() -> None:
                 user_id       INTEGER NOT NULL,
                 client_id     TEXT NOT NULL,
                 scopes        TEXT,
+                resource      TEXT,
                 expires_at    TIMESTAMP NOT NULL,
                 created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+
+        # Add fields introduced after the initial OAuth gateway deployment.
+        # SQLite has no CREATE TABLE IF NOT EXISTS migration behavior.
+        refresh_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(oauth_refresh_tokens)")
+        }
+        if "resource" not in refresh_columns:
+            conn.execute("ALTER TABLE oauth_refresh_tokens ADD COLUMN resource TEXT")
 
 
 # ── InterviewBoss DB helpers ──
@@ -276,13 +286,19 @@ def get_access_token(token_hash: str) -> dict | None:
 
 
 def save_refresh_token(
-    token_hash: str, user_id: int, client_id: str, scopes: str, expires_at: str
+    token_hash: str,
+    user_id: int,
+    client_id: str,
+    scopes: str,
+    expires_at: str,
+    resource: str = "",
 ) -> None:
     with run_db() as conn:
         conn.execute(
-            """INSERT INTO oauth_refresh_tokens (token_hash, user_id, client_id, scopes, expires_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (token_hash, user_id, client_id, scopes, expires_at),
+            """INSERT INTO oauth_refresh_tokens
+               (token_hash, user_id, client_id, scopes, resource, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (token_hash, user_id, client_id, scopes, resource, expires_at),
         )
 
 

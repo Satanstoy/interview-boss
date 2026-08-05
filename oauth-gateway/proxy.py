@@ -68,7 +68,8 @@ async def proxy_mcp(request: Request) -> Response:
     # Determine token type and get user_id
     if token.startswith("eyJ"):
         # OAuth JWT token — verify and extract user_id
-        claims = auth.verify_access_token(token)
+        resource = f"{_public_base_url(request)}/mcp"
+        claims = auth.verify_access_token(token, resource)
         if not claims:
             return _mcp_error(request, 401, "Invalid or expired OAuth token")
         user_id = int(claims["sub"])

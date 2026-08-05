@@ -22,17 +22,22 @@ def _get_secret() -> str:
     return _SECRET
 
 
-def create_access_token(user_id: int, client_id: str, scopes: str) -> str:
+def create_access_token(
+    user_id: int, client_id: str, scopes: str, resource: str = ""
+) -> str:
     now = int(time.time())
+    audience = resource or "mcp"
     payload = {
         "iss": "interview-boss-oauth",
         "sub": str(user_id),
-        "aud": "mcp",
+        "aud": audience,
         "scope": scopes,
         "client_id": client_id,
         "iat": now,
         "exp": now + _ACCESS_TTL,
     }
+    if resource:
+        payload["resource"] = resource
     return jwt.encode(payload, _get_secret(), algorithm=_ALGORITHM)
 
 
@@ -40,13 +45,18 @@ def create_refresh_token(user_id: int, client_id: str, scopes: str) -> str:
     return secrets.token_urlsafe(48)
 
 
-def verify_access_token(token: str) -> dict | None:
+def verify_access_token(token: str, expected_resource: str | None = None) -> dict | None:
     """Verify an OAuth JWT access token. Returns claims or None."""
     try:
         claims = jwt.decode(
-            token, _get_secret(), algorithms=[_ALGORITHM], audience="mcp"
+            token,
+            _get_secret(),
+            algorithms=[_ALGORITHM],
+            audience=expected_resource or "mcp",
         )
         if claims.get("iss") != "interview-boss-oauth":
+            return None
+        if expected_resource and claims.get("resource") != expected_resource:
             return None
         return claims
     except JWTError:
