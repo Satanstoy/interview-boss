@@ -17,10 +17,16 @@ def test_autumn_2027_uses_previous_year_window():
 def test_spring_2027_uses_graduation_year_window():
     ms = get_milestones(2027, "spring")
     assert [m.date.year for m in ms] == [2027, 2027]
+    names = [m.name for m in ms]
+    assert names == ["主批高峰", "补录收尾"]
+    assert [m.kind for m in ms] == ["peak", "horizon"]
 
 def test_summer_intern_2027_uses_previous_year_window():
     ms = get_milestones(2027, "summer_intern")
     assert [m.date.year for m in ms] == [2026, 2026, 2026]
+    names = [m.name for m in ms]
+    assert names == ["投递高峰", "投递窗口关闭", "实习开始"]
+    assert [m.kind for m in ms] == ["peak", "window_close", "horizon"]
 
 def test_daily_intern_has_no_milestones():
     assert get_milestones(2027, "daily") == []
