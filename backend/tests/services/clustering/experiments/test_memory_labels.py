@@ -180,3 +180,48 @@ def test_extract_json_array_tolerant_branches():
     assert _extract_json_array("hello world") == []
     # 非法 JSON 但含数组片段 → 正则兜底
     assert _extract_json_array('prefix [{"qb_id": 3}] suffix') == [{"qb_id": 3}]
+
+
+async def test_assign_singletons_llm_decides(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, assign_singletons,
+    )
+
+    calls = {"n": 0}
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        calls["n"] += 1
+        return json.dumps({"match": 1, "reason": "同一道限流题"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        fake_llm,
+    )
+    clusters, singletons = load_cluster_data(test_db)
+    labels = {1: "高并发限流", 2: "Java 线程池"}
+    results = await assign_singletons(singletons, clusters, labels, user_id=None)
+
+    # id=3 的孤岛被分到 cluster 1
+    assert results[3]["match"] == 1
+    assert calls["n"] == 1
+
+
+async def test_assign_singletons_respects_no_match(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, assign_singletons,
+    )
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        return json.dumps({"match": None, "reason": "新主题"}, ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        fake_llm,
+    )
+    clusters, singletons = load_cluster_data(test_db)
+    labels = {1: "高并发限流", 2: "Java 线程池"}
+    results = await assign_singletons(singletons, clusters, labels, user_id=None)
+
+    assert results[3]["match"] is None

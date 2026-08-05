@@ -11,11 +11,15 @@ import re
 from app.services.clustering.clusterer import _normalize_question_text
 from app.services.llm import _call_llm_with_retry
 
-from app.services.clustering.experiments.prompts import CLUSTER_LABEL_PROMPT
+from app.services.clustering.experiments.prompts import (
+    CLUSTER_LABEL_PROMPT,
+    SINGLETON_ASSIGN_PROMPT,
+)
 
 logger = logging.getLogger("interview-boss")
 
 LABELS_PER_BATCH = 20
+ASSIGN_BATCH_SIZE = 20
 
 
 def load_cluster_data(conn) -> tuple[list[dict], list[dict]]:
@@ -151,3 +155,73 @@ def _extract_json_array(raw: str) -> list[dict]:
             except json.JSONDecodeError:
                 return []
         return []
+
+
+async def assign_singletons(
+    singletons: list[dict],
+    clusters: list[dict],
+    labels: dict[int, str],
+    user_id: int | None,
+) -> dict[int, dict]:
+    """孤岛题增量分配：LLM 判断归属已有 cluster / 独立新题。
+
+    Args:
+        labels: {cluster_qb_id: label}（generate_cluster_labels 产物）
+    Returns: {singleton_qb_id: {"match": cluster_qb_id | None, "reason": str}}
+    """
+    # 先做文本预筛，命中直接确定性分配（零 LLM 成本）
+    results: dict[int, dict] = {}
+    pre = text_prefilter(singletons, clusters)
+    for s in singletons:
+        if s["qb_id"] in pre:
+            results[s["qb_id"]] = {"match": pre[s["qb_id"]], "reason": "文本预筛匹配"}
+
+    remaining = [s for s in singletons if s["qb_id"] not in results]
+    label_lines = "\n".join(f"{qid} | {label}" for qid, label in labels.items())
+    if not label_lines:
+        label_lines = "\n".join(f"{c['qb_id']} | {c['question'][:40]}" for c in clusters)
+
+    for i in range(0, len(remaining), ASSIGN_BATCH_SIZE):
+        batch = remaining[i : i + ASSIGN_BATCH_SIZE]
+        for s in batch:
+            prompt = (
+                f"【已有聚类标签】\n{label_lines}\n\n"
+                f"【新题目】\n{s['qb_id']} | {s['question']}\n\n"
+                + SINGLETON_ASSIGN_PROMPT
+            )
+            try:
+                raw = await _call_llm_with_retry(
+                    prompt,
+                    system_msg="你是一个面试题去重专家。",
+                    response_format={"type": "json_object"},
+                    user_id=user_id,
+                    model=None,
+                )
+                data = _extract_json_object(raw)
+                m = data.get("match")
+                results[s["qb_id"]] = {
+                    "match": int(m) if m is not None else None,
+                    "reason": str(data.get("reason", ""))[:200],
+                }
+            except Exception as e:
+                logger.warning(f"[experiment] 增量分配失败 qb_id={s['qb_id']}: {e}")
+                results[s["qb_id"]] = {"match": None, "reason": f"LLM 调用失败: {e}"[:200]}
+    return results
+
+
+def _extract_json_object(raw: str) -> dict:
+    """从 LLM 输出提取 JSON 对象（容忍 markdown 代码块包裹）"""
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.S)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return {}
