@@ -165,12 +165,12 @@ services:
       - "127.0.0.1:8082:8082"
     mem_limit: 64m
     cpus: 0.25
+    env_file: backend/.env
     environment:
       - OAUTH_SECRET_KEY=${OAUTH_SECRET_KEY:-change-me-in-production}
       - INTERVIEW_BOSS_DB=/app/data/interview-boss.db
       - INTERVIEW_BOSS_URL=http://backend:8000
-      - GATEWAY_BASE_URL=https://81.71.140.248
-      - JWT_SECRET=${JWT_SECRET}
+      - GATEWAY_BASE_URL=https://roland-bless-liberal-owners.trycloudflare.com
     volumes:
       - ./backend/data:/app/data:ro
       - oauth-gateway-data:/app/oauth-data
