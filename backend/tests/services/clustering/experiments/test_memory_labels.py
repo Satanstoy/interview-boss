@@ -72,10 +72,44 @@ def test_text_prefilter_exact_and_substring(test_db):
     clusters, singletons = load_cluster_data(test_db)
     # 孤岛题与 cluster 1 文本完全相同
     singletons.append({"qb_id": 99, "question": "高并发场景下怎样做限流？", "cat1": "", "cat2": "", "freq": 1, "oq": []})
+    # 孤岛题是 cluster 1 的子串（规范化后 8 字符，恰好满足 >= 8 阈值）
+    singletons.append({"qb_id": 100, "question": "场景下怎样做限流？", "cat1": "", "cat2": "", "freq": 1, "oq": []})
 
     matches = text_prefilter(singletons, clusters)
     # 完全一致的归到 cluster 1
     assert matches[99] == 1
+    # 子串（长度 >= 8）归到 cluster 1
+    assert matches[100] == 1
+
+
+def test_text_prefilter_substring_below_threshold(test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import load_cluster_data, text_prefilter
+
+    clusters, singletons = load_cluster_data(test_db)
+    # 7 字符子串低于 8 字符阈值：虽包含在 cluster 1 中也不命中
+    singletons.append({"qb_id": 101, "question": "景下怎样做限流？", "cat1": "", "cat2": "", "freq": 1, "oq": []})
+
+    matches = text_prefilter(singletons, clusters)
+    assert 101 not in matches
+
+
+def test_text_prefilter_tie_break_prefers_min_id(test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import load_cluster_data, text_prefilter
+
+    # 新增 cluster 4：规范化文本与 cluster 1 相同（frequency > 1 才算 cluster）
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, cat1, cat2, frequency, original_questions, job_position, deleted_at, owner_id) "
+        "VALUES (4, '高并发场景下怎样做限流', 'Java', '并发', 2, '[]', '后端开发', NULL, NULL)"
+    )
+    test_db.commit()
+    clusters, singletons = load_cluster_data(test_db)
+    singletons.append({"qb_id": 100, "question": "高并发场景下怎样做限流？", "cat1": "", "cat2": "", "freq": 1, "oq": []})
+
+    matches = text_prefilter(singletons, clusters)
+    # 规范化文本相同的 cluster → 归到 id 最小者（1 而非 4）
+    assert matches[100] == 1
 
 
 def test_text_prefilter_returns_empty_for_unrelated(test_db):

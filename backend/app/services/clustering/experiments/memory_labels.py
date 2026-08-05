@@ -57,9 +57,15 @@ def text_prefilter(singletons: list[dict], clusters: list[dict]) -> dict[int, in
     匹配规则（按优先级）：
     1. 规范化文本精确相等
     2. 一方包含另一方（长度 >= 8 时）
+    tie-break：规范化文本相同的 cluster 归到 id 最小者；substring 按
+    dict 插入顺序（clusters 由 load_cluster_data 按 id 升序加载）取第一个命中。
     Returns: {singleton_qb_id: cluster_qb_id}
     """
-    norm_clusters = {_normalize_question_text(c["question"]): c["qb_id"] for c in clusters}
+    norm_clusters: dict[str, int] = {}
+    for c in clusters:
+        k = _normalize_question_text(c["question"])
+        if k and (k not in norm_clusters or c["qb_id"] < norm_clusters[k]):
+            norm_clusters[k] = c["qb_id"]
     matches: dict[int, int] = {}
     for s in singletons:
         s_norm = _normalize_question_text(s["question"])
