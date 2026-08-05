@@ -124,6 +124,7 @@ const currentSectionLabel = computed(
               :share-default="displayUser?.share_default || 'private'"
               :active-season="activeSeason"
               :available-seasons="availableSeasons"
+              :is-admin="isAdmin"
               @share-default-changed="emit('share-default-changed', $event)"
               @profile-updated="emit('profile-updated')"
               @sidebar-collapsed-changed="emit('sidebar-collapsed-changed', $event)"

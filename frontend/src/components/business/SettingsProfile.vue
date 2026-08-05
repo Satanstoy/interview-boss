@@ -231,8 +231,8 @@
       </CardContent>
     </Card>
 
-    <!-- ═══ Card 5: 招聘季 ═══ -->
-    <div class="rounded-xl border bg-card p-6 space-y-4">
+    <!-- ═══ Card 5: 招聘季（仅管理员可配置全局招聘季） ═══ -->
+    <div v-if="isAdmin" class="rounded-xl border bg-card p-6 space-y-4">
       <div class="flex items-center gap-2">
         <Calendar class="size-4 text-muted-foreground" />
         <h4 class="text-sm font-semibold text-foreground">招聘季</h4>
@@ -338,6 +338,7 @@ const props = defineProps({
   shareDefault: { type: String, default: 'private' },
   displayUser: { type: Object, default: null },
   activeSeason: { type: String, default: '' },
+  isAdmin: { type: Boolean, default: false },
   availableSeasons: { type: Array, default: () => [] },
 })
 
