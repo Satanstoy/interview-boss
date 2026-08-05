@@ -164,11 +164,13 @@ async def assign_singletons(
     clusters: list[dict],
     labels: dict[int, str],
     user_id: int | None,
+    prompt: str = SINGLETON_ASSIGN_PROMPT,
 ) -> dict[int, dict]:
     """孤岛题增量分配：LLM 判断归属已有 cluster / 独立新题。
 
     Args:
         labels: {cluster_qb_id: label}（generate_cluster_labels 产物）
+        prompt: 分配 prompt 模板（实验参数，默认收紧版）
     Returns: {singleton_qb_id: {"match": cluster_qb_id | None, "reason": str}}
     """
     # 先做文本预筛，命中直接确定性分配（零 LLM 成本）
@@ -190,7 +192,7 @@ async def assign_singletons(
             prompt = (
                 f"【已有聚类标签】\n{label_lines}\n\n"
                 f"【新题目】\n{s['qb_id']} | {s['question']}\n\n"
-                + SINGLETON_ASSIGN_PROMPT
+                + prompt
             )
             try:
                 raw = await _call_llm_with_retry(

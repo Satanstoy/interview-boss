@@ -25,7 +25,8 @@ SAMPLE_LABELS = 10
 _SAMPLE_SEED = 42
 
 
-async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = True):
+async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = True,
+               sim_threshold: float = 0.7, assign_prompt: str = "tight"):
     os.makedirs(REPORT_DIR, exist_ok=True)
     conn = get_db_connection()
     t0 = time.monotonic()
@@ -35,6 +36,10 @@ async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = Tr
         generate_cluster_labels,
         assign_singletons,
         text_prefilter,
+    )
+    from app.services.clustering.experiments.prompts import (
+        SINGLETON_ASSIGN_PROMPT,
+        SINGLETON_ASSIGN_PROMPT_LOOSE,
     )
 
     clusters, singletons = load_cluster_data(conn)
@@ -52,7 +57,10 @@ async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = Tr
     label_failback = sum(1 for c in clusters if labels.get(c["qb_id"]) == c["question"][:40])
 
     # 3) LLM 增量分配（跳过已被文本预筛命中的）
-    results = await assign_singletons(singletons, clusters, labels, user_id=user_id)
+    assign_prompt_text = SINGLETON_ASSIGN_PROMPT if assign_prompt == "tight" else SINGLETON_ASSIGN_PROMPT_LOOSE
+    results = await assign_singletons(
+        singletons, clusters, labels, user_id=user_id, prompt=assign_prompt_text
+    )
     pre_verify: dict[int, dict] = {}
 
     # 3.5) 验证层：对判定合并的条目二次验证（两轮一致才采纳）
@@ -60,7 +68,10 @@ async def main(round_no: int, user_id: int | None = 1, verify_enabled: bool = Tr
     if verify_enabled:
         from app.services.clustering.experiments.memory_labels import verify_assignments
         pre_verify = dict(results)
-        results = await verify_assignments(results, singletons, clusters, labels, user_id=user_id)
+        results = await verify_assignments(
+            results, singletons, clusters, labels, user_id=user_id,
+            sim_threshold=sim_threshold,
+        )
         verify_downgraded = {
             qid: r for qid, r in results.items()
             if qid not in pre_matches
@@ -199,5 +210,9 @@ if __name__ == "__main__":
     parser.add_argument("--round", type=int, default=1)
     parser.add_argument("--user-id", type=int, default=1, help="实验使用的 LLM 配置用户（user_llm_config 表，默认 1=主账号）")
     parser.add_argument("--no-verify", action="store_true", help="关闭验证层")
+    parser.add_argument("--sim-threshold", type=float, default=0.7, help="验证层相似度阈值（默认 0.7）")
+    parser.add_argument("--assign-prompt", choices=["tight", "loose"], default="tight",
+                        help="分配 prompt 版本：tight=收紧版（默认），loose=原始版")
     args = parser.parse_args()
-    asyncio.run(main(args.round, args.user_id, verify_enabled=not args.no_verify))
+    asyncio.run(main(args.round, args.user_id, verify_enabled=not args.no_verify,
+                     sim_threshold=args.sim_threshold, assign_prompt=args.assign_prompt))
