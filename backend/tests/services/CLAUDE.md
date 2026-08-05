@@ -22,6 +22,7 @@
 | `test_resume_service.py` | 简历服务 |
 | `test_router_refactor.py` | 路由拆分回归测试 |
 | `test_session_search.py` | 会话搜索 |
+| `test_review_urgency_wiring.py` | review 端点接入 urgency/deadline：`_user_urgency` 助手（固定 today 测 deadline 选择）+ 端点记录复习 smoke |
 | `test_settings_position_switch.py` | 设置页岗位切换 |
 | `test_source_display.py` | 来源展示 |
 | `test_title_service.py` | 标题生成 |

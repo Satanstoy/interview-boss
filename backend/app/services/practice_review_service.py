@@ -16,6 +16,8 @@ def record_review(
     score: int | None = None,
     source: str = "flashcard",
     now: datetime | None = None,
+    urgency: float = 0.0,
+    deadline: datetime | None = None,
 ) -> dict:
     """Atomically update a user's state and append an auditable review event."""
 
@@ -24,7 +26,13 @@ def record_review(
         "SELECT * FROM user_question_review WHERE user_id = ? AND question_bank_id = ?",
         (user_id, question_id),
     ).fetchone()
-    result = schedule_review(state_from_row(current), rating, now=reviewed_at)
+    result = schedule_review(
+        state_from_row(current),
+        rating,
+        now=reviewed_at,
+        urgency=urgency,
+        deadline=deadline,
+    )
     timestamp = reviewed_at.strftime("%Y-%m-%d %H:%M:%S")
     next_review_at = result.next_review_at.strftime("%Y-%m-%d %H:%M:%S")
     difficulty = max(

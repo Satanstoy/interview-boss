@@ -1,6 +1,7 @@
 import json
 import logging
 import openai
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.auth import get_current_user
@@ -26,6 +27,7 @@ from app.services.practice_deck_service import (
 from app.services.practice_review_service import record_review
 from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
+from app.services.recruitment_milestones import compute_urgency, get_milestones
 
 logger = logging.getLogger("interview-boss")
 router = (
@@ -44,6 +46,26 @@ def _assert_question_visible(conn, user: dict, question_id: int):
     ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="题目不存在或无权访问")
+
+
+def _user_urgency(user_id: int, today=None) -> tuple[float, datetime | None]:
+    """从用户招聘偏好计算 urgency 和下一个 window_close 截止时间（无偏好 → (0.0, None)）"""
+    today = today or datetime.utcnow().date()
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT graduation_year, batch FROM user_recruitment_pref WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if not row or not row["graduation_year"] or not row["batch"]:
+        return 0.0, None
+    milestones = get_milestones(int(row["graduation_year"]), row["batch"])
+    info = compute_urgency(milestones, today)
+    deadline = None
+    for m in milestones:
+        if m.kind == "window_close" and m.date >= today:
+            deadline = datetime.combine(m.date, datetime.min.time())
+            break
+    return float(info["urgency"]), deadline
 
 
 @router.get("/api/practice/decks")
@@ -183,12 +205,15 @@ async def review_practice_question(
     def _review():
         with get_db_connection() as conn:
             _assert_question_visible(conn, user, req.question_id)
+            urgency, deadline = _user_urgency(user["id"])
             result = record_review(
                 conn,
                 user_id=user["id"],
                 question_id=req.question_id,
                 rating=req.rating,
                 score=req.score,
+                urgency=urgency,
+                deadline=deadline,
             )
             conn.commit()
             return result
@@ -335,6 +360,7 @@ async def evaluate_answer(
                         if result["overall_score"] >= 65
                         else "again"
                     )
+                    urgency, deadline = _user_urgency(user["id"])
                     record_review(
                         conn,
                         user_id=user["id"],
@@ -342,6 +368,8 @@ async def evaluate_answer(
                         rating=rating,
                         score=result["overall_score"],
                         source="self_check",
+                        urgency=urgency,
+                        deadline=deadline,
                     )
                     conn.commit()
 

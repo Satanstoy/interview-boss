@@ -25,7 +25,7 @@
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
 | `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级）；`behavioral` 过滤必须复用分布统计的统一信号词表（HR、人力资源、行为面、软技能、冲突、协作、失败、复盘、STAR、职业规划、影响力）；英语缩写 HR 必须按独立 token 匹配，不能误命中 `thread` 等技术词 | `db/connection`, `routers/questions` |
 | `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间 | — |
-| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件 | `practice_scheduler`, `db/connection` |
+| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency`/`deadline` 给 `schedule_review`（招聘季间隔调制） | `practice_scheduler`, `db/connection` |
 | `practice_deck_service.py` | 今日复习（due）题单 + 系统/收藏题单与自定义题单管理。due 队列复习优先（到期复习 → 新题 → 未来），复习按 `frequency × (5 - proficiency)` 风险加权，新题按 frequency 降序并受 `max_new` 容量预算约束。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；练习足迹聚合（打卡热力图/连击/趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件，score≥60 算对） | `db/queries`, `db/connection` |
