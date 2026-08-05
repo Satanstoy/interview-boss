@@ -1,11 +1,17 @@
 """Profile 路由 — 公共配置 + 管理员配置（LLM/Taxonomy/Position/Email/Resume 已拆分到 profile_pkg/）"""
+
 import re
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user, get_current_user
 from app.core.prompts import DEFAULT_TAXONOMY
-from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
+from app.db.connection import (
+    get_db_connection,
+    run_db,
+    get_current_job_position,
+    get_taxonomy_for_position,
+)
 from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
 from app.models.schemas import ProfileUpdateRequest
@@ -15,33 +21,57 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
 ALLOWED_PROFILE_KEYS = {
-    "active_season", "llm_model",
-    "llm_api_key", "llm_base_url", "llm_timeout",
-    "taxonomy_config"
+    "active_season",
+    "llm_model",
+    "llm_api_key",
+    "llm_base_url",
+    "llm_timeout",
+    "taxonomy_config",
 }
 
 _SENSITIVE_KEYS = {"llm_api_key"}
 _REQUIRED_NON_EMPTY = {"llm_model", "llm_base_url"}
 _MAX_POSITION_LEN = 30
 
+_DEFAULT_SEASONS = [
+    "2026届春招",
+    "2026届秋招",
+    "2026届暑期实习",
+    "2026届日常实习",
+    "2027届春招",
+    "2027届秋招",
+    "2027届暑期实习",
+    "2027届日常实习",
+    "2028届春招",
+    "2028届秋招",
+    "2028届暑期实习",
+    "2028届日常实习",
+]
+
 
 def _get_available_positions() -> list:
     """从 taxonomy + job_positions 合并读取所有岗位列表"""
     with get_db_connection() as conn:
-        tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
+        tax_rows = conn.execute(
+            "SELECT position_name FROM taxonomy ORDER BY position_name"
+        ).fetchall()
         try:
-            pos_rows = conn.execute("SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name").fetchall()
+            pos_rows = conn.execute(
+                "SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name"
+            ).fetchall()
         except Exception:
-            pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+            pos_rows = conn.execute(
+                "SELECT name FROM job_positions ORDER BY name"
+            ).fetchall()
         seen = set()
         result = []
         for r in tax_rows:
-            name = r['position_name']
+            name = r["position_name"]
             if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
                 seen.add(name)
                 result.append(name)
         for r in pos_rows:
-            name = r['name']
+            name = r["name"]
             if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
                 seen.add(name)
                 result.append(name)
@@ -63,29 +93,38 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute("SELECT key, value FROM user_profile").fetchall()
-            settings_map = {r['key']: r['value'] for r in rows}
+            settings_map = {r["key"]: r["value"] for r in rows}
             seasons = conn.execute(
                 "SELECT DISTINCT season FROM interview WHERE season IS NOT NULL AND season != '' ORDER BY season"
             ).fetchall()
-            season_list = [r['season'] for r in seasons]
-            active = settings_map.get('active_season', '')
+            season_list = [r["season"] for r in seasons]
+            active = settings_map.get("active_season", "")
             if active and active not in season_list:
                 season_list.append(active)
-                season_list.sort()
-            tax_rows = conn.execute("SELECT position_name FROM taxonomy ORDER BY position_name").fetchall()
+            for s in _DEFAULT_SEASONS:
+                if s not in season_list:
+                    season_list.append(s)
+            season_list.sort()
+            tax_rows = conn.execute(
+                "SELECT position_name FROM taxonomy ORDER BY position_name"
+            ).fetchall()
             try:
-                pos_rows = conn.execute("SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name").fetchall()
+                pos_rows = conn.execute(
+                    "SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name"
+                ).fetchall()
             except Exception:
-                pos_rows = conn.execute("SELECT name FROM job_positions ORDER BY name").fetchall()
+                pos_rows = conn.execute(
+                    "SELECT name FROM job_positions ORDER BY name"
+                ).fetchall()
             seen = set()
             positions = []
             for r in tax_rows:
-                name = r['position_name']
+                name = r["position_name"]
                 if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
                     seen.add(name)
                     positions.append(name)
             for r in pos_rows:
-                name = r['name']
+                name = r["name"]
                 if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
                     seen.add(name)
                     positions.append(name)
@@ -94,25 +133,35 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
             user_row = conn.execute(
                 "SELECT u.personal_position, jp.name as position_name FROM users u "
                 "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
-                (user['id'],)
+                (user["id"],),
             ).fetchone()
         return settings_map, season_list, positions, user_row
 
     settings, used_seasons, available_positions, user_row = await run_db(_query)
     current_pos = (
-        (user_row['personal_position'] if user_row and user_row['personal_position'] else None)
-        or (user_row['position_name'] if user_row and user_row['position_name'] else None)
-        or settings.get('current_job_position')
-        or DEFAULT_TAXONOMY['job_position']
+        (
+            user_row["personal_position"]
+            if user_row and user_row["personal_position"]
+            else None
+        )
+        or (
+            user_row["position_name"]
+            if user_row and user_row["position_name"]
+            else None
+        )
+        or settings.get("current_job_position")
+        or DEFAULT_TAXONOMY["job_position"]
     )
-    taxonomy_data = await run_db(lambda: get_taxonomy_for_position(current_pos, user_id=user['id']))
+    taxonomy_data = await run_db(
+        lambda: get_taxonomy_for_position(current_pos, user_id=user["id"])
+    )
 
     return {
         "settings": {
             "current_job_position": current_pos,
             "available_positions": available_positions,
             "taxonomy_config": json.dumps(taxonomy_data, ensure_ascii=False),
-            "active_season": settings.get('active_season', ''),
+            "active_season": settings.get("active_season", ""),
         },
         "available_seasons": used_seasons,
     }
@@ -125,15 +174,18 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute("SELECT key, value FROM user_profile").fetchall()
-            settings_map = {r['key']: r['value'] for r in rows}
+            settings_map = {r["key"]: r["value"] for r in rows}
             seasons = conn.execute(
                 "SELECT DISTINCT season FROM interview WHERE season IS NOT NULL AND season != '' ORDER BY season"
             ).fetchall()
-            season_list = [r['season'] for r in seasons]
-            active = settings_map.get('active_season', '')
+            season_list = [r["season"] for r in seasons]
+            active = settings_map.get("active_season", "")
             if active and active not in season_list:
                 season_list.append(active)
-                season_list.sort()
+            for s in _DEFAULT_SEASONS:
+                if s not in season_list:
+                    season_list.append(s)
+            season_list.sort()
         return settings_map, season_list
 
     settings, used_seasons = await run_db(_query)
@@ -170,34 +222,48 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
         user_row = conn.execute(
             "SELECT u.personal_position, jp.name as position_name FROM users u "
             "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
-            (admin['id'],)
+            (admin["id"],),
         ).fetchone()
     current_pos = (
-        (user_row['personal_position'] if user_row and user_row['personal_position'] else None)
-        or (user_row['position_name'] if user_row and user_row['position_name'] else None)
-        or settings.get('current_job_position')
-        or DEFAULT_TAXONOMY['job_position']
+        (
+            user_row["personal_position"]
+            if user_row and user_row["personal_position"]
+            else None
+        )
+        or (
+            user_row["position_name"]
+            if user_row and user_row["position_name"]
+            else None
+        )
+        or settings.get("current_job_position")
+        or DEFAULT_TAXONOMY["job_position"]
     )
-    taxonomy_data = get_taxonomy_for_position(current_pos, user_id=admin['id'])
+    taxonomy_data = get_taxonomy_for_position(current_pos, user_id=admin["id"])
 
-    display_settings['current_job_position'] = current_pos
-    display_settings['available_positions'] = available_positions
-    display_settings['taxonomy_config'] = json.dumps(taxonomy_data, ensure_ascii=False)
+    display_settings["current_job_position"] = current_pos
+    display_settings["available_positions"] = available_positions
+    display_settings["taxonomy_config"] = json.dumps(taxonomy_data, ensure_ascii=False)
 
     return {"settings": display_settings, "available_seasons": used_seasons}
 
 
 @router.put("/api/profile")
-async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_admin_user)):
+async def update_profile(
+    req: ProfileUpdateRequest, admin: dict = Depends(get_admin_user)
+):
     """批量更新用户配置"""
 
     invalid = set(req.settings.keys()) - ALLOWED_PROFILE_KEYS
     if invalid:
         raise HTTPException(status_code=400, detail=f"不允许的配置项: {invalid}")
 
-    filtered = {k: v for k, v in req.settings.items() if not (k in _SENSITIVE_KEYS and not v)}
+    filtered = {
+        k: v for k, v in req.settings.items() if not (k in _SENSITIVE_KEYS and not v)
+    }
 
-    empty_required = [k for k in _REQUIRED_NON_EMPTY if k in filtered and not str(filtered[k]).strip()]
+    empty_required = [
+        k for k in _REQUIRED_NON_EMPTY if k in filtered and not str(filtered[k]).strip()
+    ]
     if empty_required:
         labels = {
             "llm_model": "主模型名称",
@@ -208,21 +274,35 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
 
     if "taxonomy_config" in filtered:
         try:
-            tc = json.loads(filtered["taxonomy_config"]) if isinstance(filtered["taxonomy_config"], str) else filtered["taxonomy_config"]
+            tc = (
+                json.loads(filtered["taxonomy_config"])
+                if isinstance(filtered["taxonomy_config"], str)
+                else filtered["taxonomy_config"]
+            )
             if not isinstance(tc.get("categories"), list):
                 raise ValueError("categories 字段必须是数组")
             position = tc.get("job_position", get_current_job_position())
             from app.db.connection import save_taxonomy_for_position
-            await run_db(lambda: save_taxonomy_for_position(position, tc["categories"], source='user', owner_id=admin['id']))
+
+            await run_db(
+                lambda: save_taxonomy_for_position(
+                    position, tc["categories"], source="user", owner_id=admin["id"]
+                )
+            )
             del filtered["taxonomy_config"]
         except (json.JSONDecodeError, ValueError, AttributeError) as e:
-            raise HTTPException(status_code=400, detail=f"taxonomy_config 格式无效: {e}")
+            raise HTTPException(
+                status_code=400, detail=f"taxonomy_config 格式无效: {e}"
+            )
 
     _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
     for k, v in filtered.items():
-        if k.endswith('_base_url') and v:
+        if k.endswith("_base_url") and v:
             if not _URL_RE.match(v.strip()):
-                raise HTTPException(status_code=400, detail=f"Base URL 格式无效，URL 必须以 http:// 或 https:// 开头")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Base URL 格式无效，URL 必须以 http:// 或 https:// 开头",
+                )
 
     if not filtered:
         return {"status": "success", "message": "无需更新"}
@@ -233,7 +313,7 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
                 conn.execute(
                     "INSERT INTO user_profile (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-                    (k, v)
+                    (k, v),
                 )
             conn.commit()
 
@@ -245,3 +325,21 @@ async def update_profile(req: ProfileUpdateRequest, admin: dict = Depends(get_ad
     except Exception as e:
         logger.exception("保存配置失败")
         raise HTTPException(status_code=500, detail="保存配置失败，请查看服务端日志")
+
+
+@router.put("/api/profile/active-season")
+async def update_active_season(req: dict, user: dict = Depends(get_current_user)):
+    """保存当前用户的活跃招聘季（任意已登录用户）"""
+    season = (req.get("active_season") or "").strip()
+
+    def _save():
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO user_profile (key, value, updated_at) VALUES ('active_season', ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                (season,),
+            )
+            conn.commit()
+
+    await run_db(_save)
+    return {"status": "success", "active_season": season}

@@ -6,6 +6,7 @@ const API = '/api'
 export const fetchProfile = (options) => get(`${API}/profile`, options)
 export const fetchPublicProfile = (options) => get(`${API}/profile/public`, options)
 export const updateProfile = (settings) => put(`${API}/profile`, { settings })
+export const updateActiveSeason = (active_season) => put(`${API}/profile/active-season`, { active_season })
 export const switchPosition = (position) => put(`${API}/profile/position`, { position })
 export const switchPositionById = (position_id) => put(`${API}/profile/position`, { position_id })
 export const switchMyPosition = (position) => put(`${API}/profile/my-position`, { position })

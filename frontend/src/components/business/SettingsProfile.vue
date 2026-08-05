@@ -238,7 +238,7 @@
         <h4 class="text-sm font-semibold text-foreground">招聘季</h4>
       </div>
       <p class="text-xs text-muted-foreground">选择当前活跃的招聘季节</p>
-      <Select :model-value="activeSeason" @update:model-value="$emit('update:activeSeason', $event)">
+      <Select :model-value="activeSeason" @update:model-value="handleSeasonChange">
         <SelectTrigger class="w-full text-sm">
           <SelectValue placeholder="选择招聘季" />
         </SelectTrigger>
@@ -248,7 +248,7 @@
       </Select>
       <div class="flex gap-2">
         <Input v-model="newSeasonInput" placeholder="新增招聘季" class="flex-1 text-sm" @keyup.enter="addSeason" />
-        <Button variant="outline" size="sm" @click="addSeason">添加</Button>
+        <Button variant="outline" size="sm" @click="addSeason" :disabled="savingSeason">{{ savingSeason ? '保存中...' : '添加' }}</Button>
       </div>
     </div>
 
@@ -311,6 +311,7 @@
 import { ref, reactive, computed, watch, onBeforeUnmount, markRaw } from 'vue'
 import { getMyEmail, sendBindCode, bindEmail, authUpdateShareDefault } from '@/services/authApi.js'
 import { uploadResume, getResume, deleteResume } from '@/services/resumeApi.js'
+import { updateActiveSeason } from '@/services/profileApi.js'
 import { useTheme } from '@/composables/useTheme.js'
 import { useToast } from '@/composables/useNotification.js'
 
@@ -523,10 +524,26 @@ const shareDefaultOptions = [
 
 // ── 招聘季 ──
 const newSeasonInput = ref('')
-const addSeason = () => {
+const savingSeason = ref(false)
+
+const handleSeasonChange = async (season) => {
+  emit('update:activeSeason', season)
+  savingSeason.value = true
+  try {
+    await updateActiveSeason(season)
+    toast.success('招聘季已切换')
+  } catch (e) {
+    toast.error('保存招聘季失败：' + (e.message || '未知错误'))
+  } finally {
+    savingSeason.value = false
+  }
+}
+
+const addSeason = async () => {
   if (!newSeasonInput.value.trim()) return
-  emit('update:activeSeason', newSeasonInput.value.trim())
+  const season = newSeasonInput.value.trim()
   newSeasonInput.value = ''
+  await handleSeasonChange(season)
 }
 
 const onBankModeChange = async (mode) => {
