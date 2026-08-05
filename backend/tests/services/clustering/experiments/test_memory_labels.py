@@ -182,6 +182,19 @@ def test_extract_json_array_tolerant_branches():
     assert _extract_json_array('prefix [{"qb_id": 3}] suffix') == [{"qb_id": 3}]
 
 
+def test_extract_json_object_tolerant_branches():
+    from app.services.clustering.experiments.memory_labels import _extract_json_object
+
+    # markdown 代码块包裹
+    assert _extract_json_object('```json\n{"match": 1}\n```') == {"match": 1}
+    # 正常对象
+    assert _extract_json_object('{"match": null, "reason": "x"}') == {"match": None, "reason": "x"}
+    # 垃圾输入 → {}
+    assert _extract_json_object("hello world") == {}
+    # 前缀+对象 → 正则兜底
+    assert _extract_json_object('prefix {"match": 3} suffix') == {"match": 3}
+
+
 async def test_assign_singletons_llm_decides(monkeypatch, test_db):
     _seed_db(test_db)
     from app.services.clustering.experiments.memory_labels import (
@@ -213,7 +226,10 @@ async def test_assign_singletons_respects_no_match(monkeypatch, test_db):
         load_cluster_data, assign_singletons,
     )
 
+    calls = {"n": 0}
+
     async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        calls["n"] += 1
         return json.dumps({"match": None, "reason": "新主题"}, ensure_ascii=False)
 
     monkeypatch.setattr(
@@ -225,3 +241,5 @@ async def test_assign_singletons_respects_no_match(monkeypatch, test_db):
     results = await assign_singletons(singletons, clusters, labels, user_id=None)
 
     assert results[3]["match"] is None
+    assert results[3]["reason"] == "新主题"  # 区分 fallback（"LLM 调用失败..."前缀）
+    assert calls["n"] == 1  # 确认真实走了一次 LLM 调用

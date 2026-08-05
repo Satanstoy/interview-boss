@@ -171,6 +171,7 @@ async def assign_singletons(
     """
     # 先做文本预筛，命中直接确定性分配（零 LLM 成本）
     results: dict[int, dict] = {}
+    cluster_ids = {c["qb_id"] for c in clusters}
     pre = text_prefilter(singletons, clusters)
     for s in singletons:
         if s["qb_id"] in pre:
@@ -199,8 +200,16 @@ async def assign_singletons(
                 )
                 data = _extract_json_object(raw)
                 m = data.get("match")
+                valid_match = None
+                if m is not None:
+                    try:
+                        candidate = int(m)
+                    except (ValueError, TypeError):
+                        candidate = None
+                    if candidate in cluster_ids:
+                        valid_match = candidate
                 results[s["qb_id"]] = {
-                    "match": int(m) if m is not None else None,
+                    "match": valid_match,
                     "reason": str(data.get("reason", ""))[:200],
                 }
             except Exception as e:
