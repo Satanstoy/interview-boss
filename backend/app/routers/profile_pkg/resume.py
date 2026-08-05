@@ -159,9 +159,9 @@ async def optimize_resume_event_stream(user: dict, position: str):
         ))
 
         yield f"data: {json.dumps({'type': 'done', 'position': position}, ensure_ascii=False)}\n\n"
-    except Exception as e:
+    except Exception:
         logger.exception("简历优化失败")
-        yield f"data: {json.dumps({'type': 'error', 'message': f'优化失败: {str(e)[:200]}'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'message': '优化失败，请稍后重试'}, ensure_ascii=False)}\n\n"
 
 
 @router.post("/api/profile/resume/optimize")

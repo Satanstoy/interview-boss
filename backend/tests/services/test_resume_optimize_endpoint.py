@@ -102,3 +102,61 @@ class TestResumeOptimizeEndpoint:
             assert response.json()["raw_text"] == "张三\n后端工程师\n3年经验"
         finally:
             app.dependency_overrides.clear()
+
+    def test_optimize_stream_failure_emits_error_and_no_persist(self, client, test_db, monkeypatch):
+        """T-206: 流式阶段 LLM 异常 → error 事件且不落库"""
+        async def fake_raw_llm_call(user_id, **kwargs):
+            return json.dumps(["要点"], ensure_ascii=False)
+
+        async def fake_stream_raise(messages, user_id=None, **kwargs):
+            raise RuntimeError("模拟 LLM 故障")
+            yield
+
+        app = self._auth()
+        try:
+            self._seed_resume(test_db)
+            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call), \
+                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream_raise):
+                response = client.post(
+                    "/api/profile/resume/optimize", json={"position": "后端工程师"}
+                )
+
+            assert response.status_code == 200
+            events = [json.loads(line[5:]) for line in response.text.splitlines() if line.startswith("data: ")]
+            assert events[0]["type"] == "points"
+            assert events[-1]["type"] == "error"
+            assert "优化失败" in events[-1]["message"]
+
+            from app.services import resume_service
+            assert resume_service.get_optimization(1) is None
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_optimize_invalid_points_json_degrades_to_empty(self, client, test_db, monkeypatch):
+        """T-207: 要点 JSON 解析失败 → points 为空数组但流程继续"""
+        async def fake_raw_llm_call_bad(user_id, **kwargs):
+            return "not json at all"
+
+        async def fake_stream(messages, user_id=None, **kwargs):
+            yield "# 优化版"
+
+        app = self._auth()
+        try:
+            self._seed_resume(test_db)
+            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call_bad), \
+                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream):
+                response = client.post(
+                    "/api/profile/resume/optimize", json={"position": "后端工程师"}
+                )
+
+            events = [json.loads(line[5:]) for line in response.text.splitlines() if line.startswith("data: ")]
+            assert events[0]["type"] == "points"
+            assert events[0]["points"] == []
+            assert events[-1]["type"] == "done"
+
+            from app.services import resume_service
+            opt = resume_service.get_optimization(1)
+            assert opt is not None
+            assert opt["points"] == []
+        finally:
+            app.dependency_overrides.clear()

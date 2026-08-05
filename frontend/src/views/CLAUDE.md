@@ -18,6 +18,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `ImportView.vue` | 导入工作台页 |
 | `CodingView.vue` | 手撕代码页；页面外层与 `/chat` 的 `ChatView.vue` 保持一致的全屏高度和主工作区约束 |
 | `SettingsView.vue` | 设置页：在主工作区外壳内承载 `SettingsPage.vue` |
+| `ResumeView.vue` | 简历保存与优化页 |
 | `LoginView.vue` | 登录页 |
 
 ## 核心规则
