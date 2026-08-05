@@ -57,6 +57,13 @@ def schedule_review(
     current ease, and Easy gets a 30% bonus.  Proficiency is a compact 0..5
     signal used by the product UI, while ``ease_factor`` and intervals remain
     available for later migration to a full FSRS implementation.
+
+    Hiring-season modulation: ``urgency`` (0..1, higher is more urgent)
+    shortens intervals by up to 40%; ``deadline``, when given, pulls any
+    non-again interval that would cross it back to keep at least one day of
+    buffer (0.8 factor) and never before ``now``.  A pulled-back schedule
+    recomputes ``interval_days`` so the reported interval matches
+    ``next_review_at``.
     """
 
     if rating not in VALID_RATINGS:
@@ -103,10 +110,16 @@ def schedule_review(
     if rating != "again":
         interval_days = interval_days * (1.0 - 0.4 * urgency)
     next_review_at = now + timedelta(days=interval_days)
+    pulled_back = False
     if deadline and rating != "again" and next_review_at > deadline:
         days_until = max(1, (deadline - now).days - 1)
         if days_until >= 1:
             next_review_at = deadline - timedelta(days=max(1, round(days_until * 0.8)))
+            pulled_back = True
+        next_review_at = max(next_review_at, now)
+    if pulled_back:
+        # 重算间隔使其与真实排期一致；截止日已过则至少保留最小步长，绝不早于 now
+        interval_days = max((next_review_at - now).total_seconds() / 86400, 0.02)
     interval_days = round(interval_days, 4)
     return ScheduledReview(
         state=state,

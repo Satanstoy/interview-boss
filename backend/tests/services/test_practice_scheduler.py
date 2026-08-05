@@ -97,3 +97,10 @@ def test_again_relearning_step_ignores_deadline():
     deadline = BASE_TIME + timedelta(days=1)
     result = schedule_review(ReviewState(), "again", now=BASE_TIME, deadline=deadline)
     assert result.next_review_at == BASE_TIME + timedelta(minutes=28.8)
+
+
+def test_deadline_today_never_schedules_in_the_past():
+    deadline = BASE_TIME.replace(hour=0, minute=0, second=0)
+    result = schedule_review(ReviewState(), "easy", now=BASE_TIME, deadline=deadline)
+    assert result.next_review_at >= BASE_TIME
+    assert result.interval_days > 0
