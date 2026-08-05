@@ -90,6 +90,9 @@ from app.db.migrations.jobs import (
 from app.db.migrations.interview_distribution import (
     _migration_042_interview_distribution,
 )
+from app.db.migrations.recruitment import (
+    _migration_062_user_recruitment_pref,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -162,6 +165,7 @@ _MIGRATIONS = [
     (58, "coding_playlist_order", _migration_058_coding_playlist_order),
     (59, "practice_queue_indexes", _migration_059_practice_queue_indexes),
     (60, "search_config", _migration_060_search_config),
+    (62, "user_recruitment_pref", _migration_062_user_recruitment_pref),
 ]
 
 
