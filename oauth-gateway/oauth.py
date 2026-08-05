@@ -112,6 +112,24 @@ async def token_openid_configuration(request: Request):
     return await authorization_server_metadata(request)
 
 
+@router.get("/mcp/.well-known/oauth-protected-resource")
+async def mcp_protected_resource_metadata(request: Request):
+    """Compatibility alias for clients nesting discovery below the MCP path."""
+    return await protected_resource_metadata(request)
+
+
+@router.get("/mcp/.well-known/oauth-authorization-server")
+async def mcp_authorization_server_metadata(request: Request):
+    """Compatibility alias for path-nested authorization discovery."""
+    return await authorization_server_metadata(request)
+
+
+@router.get("/mcp/.well-known/openid-configuration")
+async def mcp_openid_configuration(request: Request):
+    """Compatibility alias for path-nested OIDC discovery."""
+    return await authorization_server_metadata(request)
+
+
 # ── Dynamic Client Registration ──
 
 
