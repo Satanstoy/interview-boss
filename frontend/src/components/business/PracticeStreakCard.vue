@@ -39,6 +39,6 @@ defineProps({
 const router = useRouter()
 
 function goPractice() {
-  router.push({ name: 'mock-interview' })
+  router.push({ name: 'practice' })
 }
 </script>

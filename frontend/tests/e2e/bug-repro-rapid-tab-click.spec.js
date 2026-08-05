@@ -4,7 +4,7 @@
  * Steps to reproduce:
  * 1. Login to the app
  * 2. Click on 高频题库 (MasterBank) tab multiple times rapidly
- * 3. Try to open 模拟面试 (Chat), 题目抽测 (MockInterview), 知识图谱 (KnowledgeGraph) tabs
+ * 3. Try to open 模拟面试 (Chat), 知识图谱 (KnowledgeGraph) tabs
  * 4. Observe that these tabs show empty content
  */
 import { test, expect } from '@playwright/test'
@@ -50,7 +50,6 @@ test.describe('Bug Reproduction: Rapid Tab Clicking', () => {
     // Now try to open other tabs and check if they show content
     const tabsToTest = [
       { name: '模拟面试', key: 'Chat' },
-      { name: '题目抽测', key: 'MockInterview' },
       { name: '知识图谱', key: 'KnowledgeGraph' }
     ]
     
@@ -131,7 +130,7 @@ test.describe('Bug Reproduction: Rapid Tab Clicking', () => {
     })
     
     // Rapidly switch between tabs
-    const tabSequence = ['高频题库', '模拟面试', '题目抽测', '知识图谱', '高频题库', '模拟面试']
+    const tabSequence = ['高频题库', '模拟面试', '知识图谱', '高频题库', '模拟面试']
     
     for (const tabName of tabSequence) {
       const tab = page.locator(`button:has-text("${tabName}")`)

@@ -40,7 +40,7 @@ function goReadiness() {
 }
 
 function goPractice() {
-  router.push({ name: 'mock-interview', query: { ...route.query } })
+  router.push({ name: 'practice', query: { ...route.query } })
 }
 </script>
 

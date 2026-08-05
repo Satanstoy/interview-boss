@@ -448,7 +448,6 @@ test.describe('Tab 切换模块', () => {
     '面经库',
     '高频题库',
     '模拟面试',
-    '题目抽测',
     '知识图谱',
     '导入',
     '手撕代码',
@@ -480,11 +479,6 @@ test.describe('Tab 切换模块', () => {
     await page.waitForTimeout(500)
     // JD 表格列头应出现
     await expect(page.getByText('岗位名称').first()).toBeVisible({ timeout: 5000 })
-
-    // 点击题目抽测
-    await page.getByRole('button', { name: '题目抽测' }).click()
-    await page.waitForTimeout(500)
-    await expect(page.getByText('选择领域').first()).toBeVisible({ timeout: 5000 })
 
     // 点击模拟面试
     await page.getByRole('button', { name: '模拟面试' }).click()
@@ -677,76 +671,6 @@ test.describe('面经库模块', () => {
     if (await seasonLabel.isVisible()) {
       // 筛选下拉框应存在
     }
-  })
-})
-
-// ═══════════════════════════════════════════════
-// 5. 模拟面试（题目抽测）模块
-// ═══════════════════════════════════════════════
-test.describe('模拟面试（题目抽测）模块', () => {
-  test.beforeEach(async ({ page }) => {
-    await gotoLoggedIn(page)
-    await page.getByRole('button', { name: '题目抽测' }).click()
-    await page.waitForTimeout(500)
-  })
-
-  test('配置面板渲染', async ({ page }) => {
-    // 标题
-    await expect(page.getByText('模拟面试').first()).toBeVisible({ timeout: 5000 })
-    // 领域选择
-    await expect(page.getByText('选择领域').first()).toBeVisible({ timeout: 5000 })
-    // 开始抽测按钮存在（表明配置面板完整渲染）
-    await expect(page.getByRole('button', { name: '开始抽测' })).toBeVisible({ timeout: 5000 })
-    // 题目数量或难度相关内容在页面中
-    const body = await page.locator('body').textContent()
-    expect(body.includes('题目数量') || body.includes('难度') || body.includes('随机')).toBeTruthy()
-  })
-
-  test('开始抽测按钮存在', async ({ page }) => {
-    const startBtn = page.getByRole('button', { name: '开始抽测' }).first()
-    await expect(startBtn).toBeVisible({ timeout: 5000 })
-  })
-
-  test('难度选项可选择', async ({ page }) => {
-    // 随机难度选项
-    const randomOption = page.getByText('随机').first()
-    if (await randomOption.isVisible()) {
-      await randomOption.click()
-      await page.waitForTimeout(200)
-    }
-
-    // L2 中等选项
-    const mediumOption = page.getByText('L2-中等').first()
-    if (await mediumOption.isVisible()) {
-      await mediumOption.click()
-      await page.waitForTimeout(200)
-    }
-  })
-
-  test('题目数量加减按钮', async ({ page }) => {
-    const plusBtn = page.getByRole('button', { name: '+' }).first()
-    const minusBtn = page.getByRole('button', { name: '-' }).first()
-
-    if (await plusBtn.isVisible()) {
-      await plusBtn.click()
-      await page.waitForTimeout(200)
-    }
-    if (await minusBtn.isVisible()) {
-      await minusBtn.click()
-      await page.waitForTimeout(200)
-    }
-  })
-
-  test('开始抽测后进入答题界面', async ({ page }) => {
-    const startBtn = page.getByRole('button', { name: '开始抽测' }).first()
-    await startBtn.click()
-    await page.waitForTimeout(1000)
-
-    // 应显示题目内容
-    const body = await page.locator('body').textContent()
-    // 抽测后应有题目或 "第" + "题" 的模式
-    const hasQuiz = body.includes('第') && body.includes('题') || body.includes('暂无')
-    expect(hasQuiz).toBeTruthy()
   })
 })
 

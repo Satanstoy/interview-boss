@@ -28,7 +28,6 @@ export const TAB = Object.freeze({
   JD: 'JD',
   INTERVIEW: 'Interview',
   MASTER_BANK: 'MasterBank',
-  MOCK_INTERVIEW: 'MockInterview',
   KNOWLEDGE_GRAPH: 'KnowledgeGraph',
   IMPORT: 'Import',
 })

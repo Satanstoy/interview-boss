@@ -115,6 +115,6 @@ const monthLabels = computed(() => {
 })
 
 function goPractice() {
-  router.push({ name: 'mock-interview' })
+  router.push({ name: 'practice' })
 }
 </script>

@@ -5,7 +5,7 @@
 ## 当前路由
 
 - `/login` → `BlankLayout.vue` → `LoginView.vue`
-- 已登录路由挂在 `AuthenticatedLayout.vue` 下：`/master-bank`, `/chat/:sessionId?`, `/jd`, `/interview`, `/mock-interview`, `/knowledge-graph`, `/import`, `/coding`, `/resume`（简历优化）, `/settings?section=ai?`
+- 已登录路由挂在 `AuthenticatedLayout.vue` 下：`/master-bank`, `/chat/:sessionId?`, `/jd`, `/interview`, `/practice`, `/practice/decks`, `/insights/*`, `/knowledge-graph`, `/import`, `/coding`, `/resume`（简历优化）, `/settings?section=ai?`
 - `/` 和未知路径重定向到 `/master-bank`
 - `preview=1` 可绕过已登录页面的认证守卫，用于预览
 

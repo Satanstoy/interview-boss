@@ -84,7 +84,6 @@ export {
   fetchAnalytics,
   fetchPracticeStats,
   fetchKnowledgeGraph,
-  fetchRandomQuestions,
 } from '../services/analyticsApi.js'
 
 // ── Insights ──

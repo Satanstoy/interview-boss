@@ -53,7 +53,6 @@ const tabs = [
   { route: '/interview', label: '面经库' },
   { route: '/master-bank', label: '高频题库' },
   { route: '/chat', label: '模拟面试' },
-  { route: '/mock-interview', label: '题目抽测' },
   { route: '/knowledge-graph', label: '知识图谱' },
   { route: '/import', label: '导入' },
   { route: '/coding', label: '手撕代码' }

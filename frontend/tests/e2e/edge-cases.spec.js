@@ -159,7 +159,7 @@ test.describe('通用边界', () => {
     await page.waitForTimeout(1000)
     await expect(page.locator('main')).toBeVisible()
 
-    await page.getByRole('button', { name: '题目抽测' }).click()
+    await page.getByRole('button', { name: '模拟面试' }).click()
     await page.waitForTimeout(1000)
     await expect(page.locator('main')).toBeVisible()
   })
@@ -167,7 +167,7 @@ test.describe('通用边界', () => {
   test('快速连续切换 Tab — 不崩溃', async ({ page }) => {
     await gotoLoggedIn(page)
 
-    const tabs = ['面经库', 'JD 筛选', '高频题库', '题目抽测', '模拟面试', '手撕代码', '高频题库']
+    const tabs = ['面经库', 'JD 筛选', '高频题库', '模拟面试', '手撕代码', '高频题库']
 
     // 快速连续点击
     for (const tabName of tabs) {
@@ -216,7 +216,7 @@ test.describe('通用边界', () => {
     expect(htmlClass).toContain('dark')
 
     // 切换所有 Tab
-    const allTabs = ['JD 筛选', '面经库', '高频题库', '模拟面试', '题目抽测', '手撕代码']
+    const allTabs = ['JD 筛选', '面经库', '高频题库', '模拟面试', '手撕代码']
     for (const tabName of allTabs) {
       const tab = page.getByRole('button', { name: tabName })
       if (await tab.isVisible().catch(() => false)) {

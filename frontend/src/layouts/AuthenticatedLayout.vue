@@ -17,7 +17,6 @@ import {
 import {
   BookOpen,
   BotMessageSquare,
-  ClipboardList,
   Code2,
   FileText,
   FileUp,
@@ -80,7 +79,6 @@ const routeToTabMap = {
   'chat': 'Chat',
   'jd': 'JD',
   'interview': 'Interview',
-  'mock-interview': 'MockInterview',
   'practice': 'Practice',
   'practice-decks': 'Practice',
   'knowledge-graph': 'KnowledgeGraph',
@@ -98,7 +96,6 @@ const tabToRouteMap = {
   Chat: '/chat',
   JD: '/jd',
   Interview: '/interview',
-  MockInterview: '/mock-interview',
   Practice: '/practice',
   KnowledgeGraph: '/knowledge-graph',
   InsightsOverview: '/insights/overview',
@@ -200,7 +197,6 @@ const sidebarGroups = computed(() => [
     tabs: [
       { key: 'Practice', label: '刷题', route: '/practice' },
       { key: 'Chat', label: '模拟面试', route: '/chat' },
-      { key: 'MockInterview', label: '题目抽测', route: '/mock-interview' },
       { key: 'Coding', label: '手撕代码', route: '/coding' },
     ],
   },
@@ -228,7 +224,6 @@ const sidebarTabs = computed(() => sidebarGroups.value.flatMap(group => group.ta
 const navIconMap = {
   MasterBank: BookOpen,
   Chat: BotMessageSquare,
-  MockInterview: ClipboardList,
   Practice: Layers,
   Coding: Code2,
   Import: FileUp,

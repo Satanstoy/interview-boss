@@ -29,8 +29,7 @@
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |
-| `MockInterview.vue` | 模拟面试（配置面板 + 抽测模式）；布局紧凑化（header padding `px-4 py-3`，内容 padding `p-4`）；支持临时选择模型留空则走全局默认 |
-| `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
+| `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认使用 |
 | `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
 | `ModelGuardDialog.vue` | AI 模型预检守卫弹窗：模型未配置/未接通时由 `useModelGuard` 触发，引导用户到设置页 AI 配置区 |
 | `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |

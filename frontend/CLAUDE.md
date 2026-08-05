@@ -62,7 +62,6 @@ src/
 │   ├── ChatView.vue
 │   ├── JdView.vue
 │   ├── InterviewView.vue
-│   ├── MockInterviewView.vue
 │   ├── InsightsView.vue       ← 洞察总览/岗位准备度/面试复盘三路由共用编排视图
 │   ├── KnowledgeGraphView.vue ← 旧入口兼容保留
 │   ├── ImportView.vue
@@ -94,7 +93,6 @@ src/
 | 模拟面试 | `/chat` | `views/ChatView.vue` | `components/business/ChatView.vue` |
 | JD 筛选 | `/jd` | `views/JdView.vue` | `composables/useMasterBankData.js` |
 | 面经库 | `/interview` | `views/InterviewView.vue` | `composables/useMasterBankData.js` |
-| 题目抽测 | `/mock-interview` | `views/MockInterviewView.vue` | `components/business/MockInterview.vue` |
 | 刷题 | `/practice` | `views/PracticeView.vue` | `components/business/PracticeMode.vue` |
 | 题单管理 | `/practice/decks` | `views/PracticeDecksView.vue` | `components/business/PracticeDeckManager.vue` |
 | 洞察总览 | `/insights/overview` | `views/InsightsView.vue` | `composables/useInsightsData.js` + `services/insightsApi.js` |
@@ -122,7 +120,7 @@ src/
 | 导入任务 | `composables/useSubmitJobs.js` + `services/dataApi.js` |
 | 数据分析 | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 用户配置 | `services/profileApi.js` + `components/business/SettingsPage.vue` |
-| 模拟面试 | `services/interviewApi.js` + `components/business/MockInterview.vue` |
+| 模拟面试 | `services/chatApi.js` + `components/business/ChatView.vue` |
 | 面试分布 | `services/interviewDistributionApi.js` + `components/business/InterviewDistributionSettings.vue` |
 | 简历管理 | `services/resumeApi.js` |
 | 多选 | `composables/useSelection.js` |

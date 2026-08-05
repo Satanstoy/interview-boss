@@ -4,7 +4,6 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   BookOpen,
   BotMessageSquare,
-  ClipboardList,
   Code2,
   FileText,
   FileUp,
@@ -62,7 +61,6 @@ const iconMap = {
   JD: Filter,
   Interview: Library,
   Resume: FileText,
-  MockInterview: ClipboardList,
   Practice: Layers,
   KnowledgeGraph: Network,
   InsightsOverview: LayoutDashboard,

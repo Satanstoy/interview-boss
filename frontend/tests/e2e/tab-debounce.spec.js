@@ -57,7 +57,7 @@ test.describe('Tab 切换防抖测试', () => {
     await page.waitForTimeout(500)
 
     // 验证其他 tab 仍然可点击且有内容
-    const tabsToTest = ['模拟面试', '题目抽测', '知识图谱']
+    const tabsToTest = ['模拟面试', '知识图谱']
     
     for (const tabName of tabsToTest) {
       const tab = page.locator(`button:has-text("${tabName}")`)
