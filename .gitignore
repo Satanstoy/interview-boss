@@ -80,3 +80,6 @@ Thumbs.db
 # MiMo/CoCode runtime
 .mimocode/
 .superpowers/
+
+# 聚类实验报告（含生产数据抽样，不提交）
+backend/experiment_reports/
