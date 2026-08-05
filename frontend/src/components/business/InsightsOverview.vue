@@ -5,9 +5,18 @@ import { ArrowRight, CircleAlert } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import AppLoading from '@/components/common/AppLoading.vue'
+import PracticeHeatmap from './PracticeHeatmap.vue'
+import PracticeStreakCard from './PracticeStreakCard.vue'
+import PracticeTrendChart from './PracticeTrendChart.vue'
+import PracticeDifficultyChart from './PracticeDifficultyChart.vue'
+import PracticeRadarChart from './PracticeRadarChart.vue'
+import PracticeRecentTimeline from './PracticeRecentTimeline.vue'
 
 const props = defineProps({
   snapshot: { type: Object, required: true },
+  practiceActivity: { type: Object, default: null },
+  practiceLoading: { type: Boolean, default: false },
 })
 
 const router = useRouter()
@@ -20,6 +29,11 @@ const statCards = [
   { key: 'question_count', label: '题库覆盖', suffix: '题' },
   { key: 'practiced_question_count', label: '已练题目', suffix: '题' },
 ]
+
+const todayCount = computed(() => {
+  const heatmap = props.practiceActivity?.heatmap || []
+  return heatmap[heatmap.length - 1]?.count || 0
+})
 
 function goReadiness() {
   router.push({ name: 'insights-readiness', query: { ...route.query } })
@@ -77,5 +91,43 @@ function goPractice() {
         <p v-else class="py-6 text-center text-sm text-muted-foreground">题库还没有形成可执行的主题建议。</p>
       </CardContent>
     </Card>
+
+    <section v-if="practiceLoading" class="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <AppLoading type="skeleton" rows="4" />
+    </section>
+
+    <section v-else-if="!practiceActivity" class="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div class="flex flex-col items-center gap-3 py-10 text-center">
+        <p class="text-sm font-medium text-foreground">练习足迹暂不可用</p>
+        <p class="max-w-md text-xs text-muted-foreground">刷新页面或稍后再试，开始刷题后这里会展示你的打卡热力图和进步趋势。</p>
+      </div>
+    </section>
+
+    <section v-else class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight text-foreground">我的练习足迹</h2>
+          <p class="mt-0.5 text-sm text-muted-foreground">坚持每天刷题，图表会见证你的成长。</p>
+        </div>
+        <Button variant="outline" size="sm" @click="goPractice">去刷题 <ArrowRight class="h-4 w-4" /></Button>
+      </div>
+      <div class="grid gap-3 xl:grid-cols-3">
+        <div class="xl:col-span-2">
+          <PracticeHeatmap :data="practiceActivity.heatmap || []" />
+        </div>
+        <PracticeStreakCard
+          :streak="practiceActivity.streak || { current: 0, longest: 0 }"
+          :today-count="todayCount"
+        />
+        <div class="xl:col-span-2">
+          <PracticeTrendChart :data="practiceActivity.trend || []" />
+        </div>
+        <PracticeDifficultyChart :data="practiceActivity.difficulty || []" />
+        <PracticeRadarChart :data="practiceActivity.radar || []" />
+        <div class="xl:col-span-2">
+          <PracticeRecentTimeline :data="practiceActivity.recent || []" />
+        </div>
+      </div>
+    </section>
   </section>
 </template>

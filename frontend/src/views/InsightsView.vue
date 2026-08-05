@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
@@ -9,7 +9,7 @@ import InsightsReviews from '@/components/business/InsightsReviews.vue'
 import { useInsightsData } from '@/composables/useInsightsData.js'
 
 const route = useRoute()
-const { snapshot, isLoading, error, loadInsights } = useInsightsData()
+const { snapshot, practiceActivity, isLoading, practiceLoading, error, loadInsights, loadPracticeActivity } = useInsightsData()
 const reloading = ref(false)
 
 const activeView = computed(() => {
@@ -19,6 +19,10 @@ const activeView = computed(() => {
 })
 
 onMounted(loadInsights)
+
+watch(activeView, (view) => {
+  if (view === 'overview' && practiceActivity.value === null) loadPracticeActivity()
+}, { immediate: true })
 </script>
 
 <template>
@@ -38,7 +42,12 @@ onMounted(loadInsights)
     </div>
 
     <template v-else-if="snapshot">
-      <InsightsOverview v-if="activeView === 'overview'" :snapshot="snapshot" />
+      <InsightsOverview
+        v-if="activeView === 'overview'"
+        :snapshot="snapshot"
+        :practice-activity="practiceActivity"
+        :practice-loading="practiceLoading"
+      />
       <InsightsReadiness v-else-if="activeView === 'readiness'" :snapshot="snapshot" />
       <InsightsReviews v-else :snapshot="snapshot" />
     </template>
