@@ -63,3 +63,26 @@ def test_load_cluster_data_oq_parse_falls_back_to_empty(test_db):
     assert s3["oq"] == []  # 非法 JSON → 空列表
     c2 = next(c for c in clusters if c["qb_id"] == 2)
     assert c2["oq"] == []  # 合法 JSON 但非 list → 空列表
+
+
+def test_text_prefilter_exact_and_substring(test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import load_cluster_data, text_prefilter
+
+    clusters, singletons = load_cluster_data(test_db)
+    # 孤岛题与 cluster 1 文本完全相同
+    singletons.append({"qb_id": 99, "question": "高并发场景下怎样做限流？", "cat1": "", "cat2": "", "freq": 1, "oq": []})
+
+    matches = text_prefilter(singletons, clusters)
+    # 完全一致的归到 cluster 1
+    assert matches[99] == 1
+
+
+def test_text_prefilter_returns_empty_for_unrelated(test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import load_cluster_data, text_prefilter
+
+    clusters, singletons = load_cluster_data(test_db)
+    # id=3 的孤岛 "介绍一下 MySQL 索引" 与两个 cluster 无关
+    matches = text_prefilter(singletons, clusters)
+    assert 3 not in matches

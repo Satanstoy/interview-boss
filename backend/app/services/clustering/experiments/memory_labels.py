@@ -7,6 +7,8 @@
 import json
 import logging
 
+from app.services.clustering.clusterer import _normalize_question_text
+
 logger = logging.getLogger("interview-boss")
 
 
@@ -47,3 +49,29 @@ def load_cluster_data(conn) -> tuple[list[dict], list[dict]]:
         else:
             singletons.append(item)
     return clusters, singletons
+
+
+def text_prefilter(singletons: list[dict], clusters: list[dict]) -> dict[int, int]:
+    """文本级确定性分配：孤岛题 → 已有 cluster。
+
+    匹配规则（按优先级）：
+    1. 规范化文本精确相等
+    2. 一方包含另一方（长度 >= 8 时）
+    Returns: {singleton_qb_id: cluster_qb_id}
+    """
+    norm_clusters = {_normalize_question_text(c["question"]): c["qb_id"] for c in clusters}
+    matches: dict[int, int] = {}
+    for s in singletons:
+        s_norm = _normalize_question_text(s["question"])
+        if not s_norm:
+            continue
+        if s_norm in norm_clusters:
+            matches[s["qb_id"]] = norm_clusters[s_norm]
+            continue
+        for c_norm, c_qb_id in norm_clusters.items():
+            if len(s_norm) >= 8 and len(c_norm) >= 8 and (
+                s_norm in c_norm or c_norm in s_norm
+            ):
+                matches[s["qb_id"]] = c_qb_id
+                break
+    return matches
