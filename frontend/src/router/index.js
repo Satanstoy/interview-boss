@@ -102,7 +102,8 @@ const routes = [
   },
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/master-bank',
+    name: 'not-found',
+    component: () => import('@/views/NotFoundView.vue'),
   },
 ]
 

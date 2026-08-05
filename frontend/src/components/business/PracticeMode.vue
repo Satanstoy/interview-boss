@@ -1,9 +1,15 @@
 <template>
   <div data-testid="practice-workspace" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
+    <!-- Mobile sidebar overlay -->
+    <div v-if="mobileSidebarOpen" class="fixed inset-0 z-40 bg-black/40 md:hidden" @click="mobileSidebarOpen = false" />
+
     <aside
       data-testid="practice-queue-sidebar"
-      class="sidebar-container z-30 hidden shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
-      :class="{ 'sidebar-collapsed': queueCollapsed }"
+      class="sidebar-container z-30 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
+      :class="[
+        queueCollapsed ? 'sidebar-collapsed' : '',
+        mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-50 flex w-64 md:relative md:w-auto' : 'hidden md:flex',
+      ]"
       :style="{ width: queueCollapsed ? '0px' : '16rem' }"
     >
       <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
@@ -24,7 +30,7 @@
           type="button"
           class="group mb-1 flex w-full items-start gap-2 rounded-md p-2 text-left transition-colors"
           :class="questionIndex === currentIndex ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/65 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
-          @click="currentIndex = questionIndex; resetState()"
+          @click="currentIndex = questionIndex; resetState(); mobileSidebarOpen = false"
         >
           <span class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[10px] tabular-nums" :class="questionIndex === currentIndex ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'">{{ questionIndex + 1 }}</span>
           <span class="min-w-0 flex-1">
@@ -52,6 +58,9 @@
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <Button variant="ghost" size="icon" class="size-7 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
+            <PanelLeft :size="14" />
+          </Button>
           <span class="font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
           <span>·</span>
           <span>高频 {{ currentQ.frequency || 0 }} 次</span>
@@ -276,6 +285,7 @@ const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
 const queueCollapsed = ref(false)
+const mobileSidebarOpen = ref(false)
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
 const showSelfCheck = ref(false)

@@ -44,6 +44,12 @@
       </AppTooltip>
     </div>
 
+    <div v-if="filteredInterviewData.length === 0 && !isDataLoading" class="rounded-xl border border-dashed border-border bg-card p-6 text-center">
+      <FileText class="mx-auto mb-2 size-8 text-muted-foreground/50" />
+      <p class="text-sm text-muted-foreground">暂无面经数据</p>
+      <router-link to="/import" class="mt-2 inline-block text-sm text-primary hover:underline">去导入面经</router-link>
+    </div>
+
     <!-- Interview DataTable -->
     <InterviewDataTable
       :columns="interviewColumns"

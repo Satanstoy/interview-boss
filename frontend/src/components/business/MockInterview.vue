@@ -441,6 +441,7 @@ onMounted(async () => {
     experiences.value = response.data || []
   } catch (error) {
     console.error('Failed to load experiences:', error)
+    toast.error('面经列表加载失败')
   }
 })
 
@@ -475,6 +476,7 @@ const loadQuestions = async () => {
     mockQuestions.value = data.map(q => ({ ...q, _showAnswer: false, _isLoadingAnswer: false, _userAnswer: '', _evaluation: null, _isEvaluating: false, _showHistory: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false }))
   } catch (e) {
     console.error('获取题目失败', e)
+    toast.error('获取题目失败：' + (e.message || '请检查网络'))
     mockQuestions.value = []
   } finally {
     isLoading.value = false

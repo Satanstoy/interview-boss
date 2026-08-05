@@ -107,33 +107,19 @@
         </span>
       </div>
 
-      <!-- Empty state -->
-      <div v-if="!activeConversationId || activeConversationId === 'pending'" class="flex-1 flex flex-col">
-        <!-- 有待创建对话时，显示简洁界面 -->
-        <template v-if="pendingNewConversation">
-          <div class="flex-1 flex items-center justify-center">
-            <div class="text-center text-muted-foreground">
-              <MessageSquare :size="48" class="mx-auto mb-4 text-primary/30" />
-              <p class="text-sm">输入你的回答开始面试</p>
-            </div>
-          </div>
-        </template>
-        
-        <!-- 没有待创建对话时，显示原始空状态 -->
-        <template v-else>
+      <!-- Empty state: no conversation selected at all -->
+      <div v-if="!activeConversationId" class="flex-1 flex flex-col">
         <div
           v-motion
           :initial="{ opacity: 0, y: 16 }"
           :enter="{ opacity: 1, y: 0, transition: { duration: 400, easing: [0.25, 0.46, 0.45, 0.94] } }"
-          class="flex flex-col items-center max-w-2xl mx-auto px-6"
+          class="flex flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-6"
         >
           <div class="size-20 mx-auto mb-6 rounded-xl bg-primary/10 flex items-center justify-center">
             <MessageSquare :size="40" class="text-primary" />
           </div>
           <h2 class="text-3xl font-bold text-foreground mb-3 text-center">开始模拟面试</h2>
           <p class="text-muted-foreground mb-8 text-center text-lg">选择左侧对话或创建新的面试会话</p>
-          
-          <!-- Prompt suggestions -->
           <div class="grid grid-cols-2 gap-4 w-full max-w-lg">
             <button
               v-for="suggestion in promptSuggestions"
@@ -151,13 +137,12 @@
             </button>
           </div>
         </div>
-        </template>
       </div>
 
-      <!-- Active chat -->
+      <!-- Pending or Active chat -->
       <template v-else>
-      <!-- Chat header -->
-      <div class="hidden items-center justify-between px-6 py-1.5 shrink-0 md:flex">
+      <!-- Chat header (hidden in pending state) -->
+      <div v-if="activeConversationId !== 'pending'" class="hidden items-center justify-between px-6 py-1.5 shrink-0 md:flex">
         <div class="min-w-0 flex-1">
           <form v-if="isRenamingHeader" @submit.prevent="saveHeaderRename" class="flex items-center gap-1.5">
             <input
@@ -194,7 +179,14 @@
 
       <!-- Messages area -->
       <div ref="messagesContainer" @scroll="onMessagesScroll" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <div class="max-w-3xl mx-auto px-6 pt-8 pb-8">
+        <!-- Pending state: waiting for first message -->
+        <div v-if="activeConversationId === 'pending' && messages.length === 0" class="flex h-full items-center justify-center">
+          <div class="text-center text-muted-foreground">
+            <MessageSquare :size="48" class="mx-auto mb-4 text-primary/30" />
+            <p class="text-sm">输入你的回答开始面试</p>
+          </div>
+        </div>
+        <div v-else class="max-w-3xl mx-auto px-6 pt-8 pb-8">
           <!-- Grouped messages -->
           <template v-for="(group, groupIndex) in groupedMessages" :key="groupIndex">
             <!-- Time separator -->
@@ -702,6 +694,7 @@ async function loadConversations() {
     }
   } catch (e) {
     console.error('加载对话列表失败:', e)
+    toastError('加载对话列表失败，请重试')
   }
 }
 
@@ -734,6 +727,7 @@ async function selectConversation(id) {
     await scrollToBottom()
   } catch (e) {
     console.error('加载消息失败:', e)
+    toastError('加载消息失败，请重试')
   }
 }
 
@@ -850,6 +844,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       }
     } catch (e) {
       console.error('创建对话失败:', e)
+      toastError('创建对话失败：' + (e.message || '未知错误'))
       return
     }
   }
@@ -1235,6 +1230,7 @@ async function handlePin(id) {
     await loadConversations()
   } catch (e) {
     console.error('置顶对话失败:', e)
+    toastError('置顶失败：' + (e.message || '未知错误'))
   }
 }
 
@@ -1258,6 +1254,7 @@ async function handleRename(id, currentTitle) {
     await loadConversations()
   } catch (e) {
     console.error('重命名对话失败:', e)
+    toastError('重命名失败：' + (e.message || '未知错误'))
   }
 }
 

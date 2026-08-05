@@ -143,15 +143,8 @@ onMounted(loadConfig)
         <!-- API Key -->
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">API Key</Label>
-          <div v-if="settings.llm_api_key_set && !editKey" class="flex items-center gap-2">
-            <span class="flex-1 border border-input rounded-md px-3 py-2 text-sm shadow-xs font-mono bg-muted dark:bg-background text-muted-foreground select-none">
-              {{ settings.llm_api_key }}
-            </span>
-            <Button variant="link" size="sm" @click="editKey = true; form.llm_api_key = ''" class="whitespace-nowrap">
-              更换
-            </Button>
-          </div>
-          <div v-else class="relative">
+          <p v-if="settings.llm_api_key_set" class="text-xs text-muted-foreground mb-1.5">已设置 API Key，留空则保持不变</p>
+          <div class="relative">
             <Input
               v-model="form.llm_api_key"
               :type="showKey ? 'text' : 'password'"

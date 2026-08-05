@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { changePassword, resetPassword, sendVerifyCode } from '@/api/index.js'
 import { validatePassword } from '@/utils/validate.js'
 import { toast } from 'vue-sonner'
+import { useConfirm } from '@/composables/useNotification.js'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const emit = defineEmits(['logout'])
@@ -145,7 +146,9 @@ const handleEmailPasswordChange = async () => {
 }
 
 // ── Logout ──
-const handleLogout = () => {
+const { confirm: showConfirm } = useConfirm()
+const handleLogout = async () => {
+  if (!await showConfirm('确定要退出登录吗？')) return
   emit('logout')
 }
 

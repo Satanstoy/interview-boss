@@ -1,11 +1,12 @@
 import { computed, ref, unref } from 'vue'
 import * as api from '@/api/index.js'
 import { getFriendlyError } from '@/services/http.js'
-import { useToast } from './useNotification.js'
+import { useToast, useConfirm } from './useNotification.js'
 
 /** Loads named study plans and owns the server-backed review queue. */
 export function usePracticeDecks(filter = 'all') {
   const toast = useToast()
+  const { confirm: showConfirm } = useConfirm()
   const decks = ref([])
   const questions = ref([])
   const selectedDeckKey = ref('all')
@@ -104,6 +105,9 @@ export function usePracticeDecks(filter = 'all') {
   }
 
   async function deleteDeck(deckKey) {
+    const deck = decks.value.find(d => d.key === deckKey)
+    const deckName = deck?.label || deckKey
+    if (!await showConfirm(`确定要删除题单「${deckName}」吗？题单内的题目不会被删除。`, { title: '确认删除', variant: 'danger' })) return false
     try {
       await api.deletePracticeDeck(deckKey)
       questionCache.delete(`${unref(filter)}:${deckKey}`)

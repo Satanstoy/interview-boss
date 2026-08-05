@@ -8,8 +8,10 @@
 import { ref, computed, watch } from 'vue'
 import { invalidateCache, getFriendlyError } from '@/services/http.js'
 import * as api from '@/api/index.js'
+import { useToast } from './useNotification.js'
 
 export function useMasterBankData({ onAfterFetch } = {}) {
+  const toast = useToast()
   // ── Core data ──
   const jdData = ref([])
   const interviewData = ref([])
@@ -99,6 +101,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
       hasMore.value = masterBank.value.length < masterBankTotal.value
     } catch (e) {
       console.warn('加载更多题目失败', e)
+      toast.warning('加载更多题目失败，请重试')
     } finally { isLoadingMore.value = false }
   }
 

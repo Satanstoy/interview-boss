@@ -171,6 +171,7 @@
 
 <script setup>
 import { inject, ref } from 'vue'
+import { useToast } from '@/composables/useNotification.js'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
 import BatchActionPanel from '@/components/common/BatchActionPanel.vue'
@@ -197,6 +198,7 @@ const {
   toggleSubTag,
 } = inject('appData')
 
+const toast = useToast()
 const masterBankRef = ref(null)
 
 const skeletonCards = [
@@ -224,13 +226,13 @@ const handleShare = async (question) => {
     const { shareQuestionToBank } = await import('@/services/masterBankApi.js')
     const result = await shareQuestionToBank(question.id)
     if (result?.result === 'merged') {
-      window.$toast?.success?.('已分享：与公共题库已有题目合并')
+      toast.success('已分享：与公共题库已有题目合并')
     } else {
-      window.$toast?.success?.('已提交审核，通过后对所有人可见')
+      toast.success('已提交审核，通过后对所有人可见')
     }
     fetchTableData()
   } catch (e) {
-    window.$toast?.error?.(`分享失败: ${e.message}`)
+    toast.error(`分享失败: ${e.message}`)
   }
 }
 

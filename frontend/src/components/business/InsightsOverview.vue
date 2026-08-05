@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, CircleAlert } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
@@ -11,7 +12,7 @@ const props = defineProps({
 
 const router = useRouter()
 const route = useRoute()
-const summary = props.snapshot.summary
+const summary = computed(() => props.snapshot?.summary || {})
 
 const statCards = [
   { key: 'jd_count', label: '岗位 JD', suffix: '份' },
