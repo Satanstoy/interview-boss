@@ -48,3 +48,7 @@ export const testMySearchConfig = (query) => post(`${API}/profile/search/test`, 
 export const fetchMyMCPConfig = () => get(`${API}/profile/mcp`, { noCache: true })
 export const rotateMyMCPToken = () => post(`${API}/profile/mcp/token`, null)
 export const revokeMyMCPToken = () => del(`${API}/profile/mcp/token`)
+
+// ── Recruitment time preference ──
+export const fetchRecruitmentPref = () => get(`${API}/profile/recruitment`, { noCache: true })
+export const updateRecruitmentPref = (payload) => put(`${API}/profile/recruitment`, payload)

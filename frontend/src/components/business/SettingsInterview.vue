@@ -1,10 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
+import { CalendarClock } from '@lucide/vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { switchMyPosition, deletePosition, createPosition, generateTaxonomy, confirmTaxonomy, fetchPositions } from '@/services/profileApi.js'
+import { switchMyPosition, deletePosition, createPosition, generateTaxonomy, confirmTaxonomy, fetchPositions, fetchRecruitmentPref, updateRecruitmentPref } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import InterviewDistributionSettings from '@/components/business/InterviewDistributionSettings.vue'
@@ -30,7 +32,62 @@ onMounted(async () => {
   } catch (e) {
     console.error('Failed to fetch positions', e)
   }
+  loadRecruitmentPref()
 })
+
+// ── Recruitment time preference ──
+const YEAR_OPTIONS = Array.from({ length: 2035 - 2024 + 1 }, (_, i) => String(2024 + i))
+const BATCH_OPTIONS = [
+  { value: '__none__', label: '暂不参加校招' },
+  { value: 'daily', label: '日常实习' },
+  { value: 'summer_intern', label: '暑期实习' },
+  { value: 'autumn', label: '秋招' },
+  { value: 'spring', label: '春招' },
+]
+
+const graduationYear = ref(null)
+const batch = ref('__none__')
+const dailyCapacity = ref(30)
+const timeline = ref([])
+const savingPref = ref(false)
+
+const loadRecruitmentPref = async () => {
+  try {
+    const data = await fetchRecruitmentPref()
+    graduationYear.value = data.graduation_year ? String(data.graduation_year) : null
+    batch.value = data.batch || '__none__'
+    dailyCapacity.value = data.daily_capacity || 30
+    timeline.value = data.milestones || []
+  } catch (e) {
+    console.error('Failed to fetch recruitment pref', e)
+  }
+}
+
+const daysFromNow = (dateStr) => {
+  const target = new Date(`${dateStr}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000)
+  return diff >= 0 ? `${diff} 天后` : `已过 ${-diff} 天`
+}
+
+const savePref = async () => {
+  savingPref.value = true
+  try {
+    const payload = {
+      graduation_year: graduationYear.value ? Number(graduationYear.value) : null,
+      batch: batch.value === '__none__' ? '' : batch.value,
+      daily_capacity: Number(dailyCapacity.value) || 30,
+    }
+    const data = await updateRecruitmentPref(payload)
+    timeline.value = data.milestones || []
+    toastSuccess('面试时间偏好已保存')
+  } catch (e) {
+    toastError('保存失败，请稍后重试')
+  } finally {
+    savingPref.value = false
+  }
+}
 
 // ── Position management ──
 const positions = ref([])
@@ -254,6 +311,61 @@ const handleGoToQuestion = (question) => {
           <svg class="size-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
           </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: 面试时间偏好 -->
+    <div class="rounded-xl border bg-card p-6 space-y-4">
+      <div class="flex items-center gap-2">
+        <CalendarClock class="size-4 text-muted-foreground" />
+        <h4 class="text-sm font-semibold text-foreground">面试时间偏好</h4>
+      </div>
+      <p class="text-xs text-muted-foreground">选择你的招聘季和每日复习容量，系统将据此自动安排每天的复习题量和新题比例（影响「今日复习」队列）</p>
+
+      <div class="flex flex-col gap-4">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-2">
+            <Label class="text-sm font-medium text-foreground">届次</Label>
+            <Select :model-value="graduationYear || undefined" @update:model-value="graduationYear = $event || null">
+              <SelectTrigger class="w-full text-sm">
+                <SelectValue placeholder="选择届次" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="y in YEAR_OPTIONS" :key="y" :value="y">{{ y }} 届</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="space-y-2">
+            <Label class="text-sm font-medium text-foreground">招聘批次</Label>
+            <Select :model-value="batch" @update:model-value="batch = $event">
+              <SelectTrigger class="w-full text-sm">
+                <SelectValue placeholder="选择批次" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="opt in BATCH_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <Label class="text-sm font-medium text-foreground">每日容量</Label>
+          <Input v-model.number="dailyCapacity" type="number" min="5" max="200" class="max-w-40 text-sm" />
+          <p class="text-xs text-muted-foreground">每天计划复习的题目数量（5 - 200）</p>
+        </div>
+
+        <div v-if="timeline.length > 0" class="rounded-lg border border-border bg-muted/50 p-3 flex flex-col gap-1.5">
+          <div v-for="m in timeline" :key="m.name" class="text-xs text-muted-foreground">
+            {{ m.name }} {{ m.date }}（{{ daysFromNow(m.date) }}）
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button :disabled="savingPref" @click="savePref" class="sm:w-auto">
+            {{ savingPref ? '保存中...' : '保存' }}
+          </Button>
+          <p class="text-xs text-muted-foreground">将根据距最近里程碑的天数自动调整每日复习题量和新题比例，越临近窗口关闭复习越密集</p>
         </div>
       </div>
     </div>
