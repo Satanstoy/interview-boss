@@ -28,7 +28,7 @@
 | `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件 | `practice_scheduler`, `db/connection` |
 | `practice_deck_service.py` | 系统/难度/收藏/高频题单查询，以及用户自定义题单和题目关联管理。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
-| `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要 | `db/queries`, `db/connection` |
+| `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；练习足迹聚合（打卡热力图/连击/趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件，score≥60 算对） | `db/queries`, `db/connection` |
 
 ## 核心规则
 

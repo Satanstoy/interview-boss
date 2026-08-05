@@ -15,7 +15,7 @@
 | `practiceApi.js` | 刷题题单、题单题目关联、闪卡复习/答案生成 | `/api/practice/*`, `/api/answers/*` |
 | `interviewApi.js` | 模拟面试 | `/api/interview/*` |
 | `analyticsApi.js` | 数据分析 | `/api/analytics/*` |
-| `insightsApi.js` | 洞察工作台聚合快照 | `/api/insights` |
+| `insightsApi.js` | 洞察工作台聚合快照、练习足迹图表数据 | `/api/insights`, `/api/insights/practice-activity` |
 | `profileApi.js` | 用户配置 | `/api/profile/*` |
 | `resumeApi.js` | 简历管理 | `/api/profile/resume` |
 | `codingApi.js` | 手撕代码练习 | `/api/coding/*` |

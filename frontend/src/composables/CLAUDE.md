@@ -9,6 +9,7 @@ Vue 3 Composition API 的可复用逻辑，`use*` 命名前缀。
 | `useAuth.js` | 认证状态单例；登录成功、自动刷新、统一退出登录（调用后端 logout 清 refresh cookie 后清本地状态） |
 | `useBatchActions.js` | 批量操作逻辑（选择、删除、移动） |
 | `useBuildTrigger.js` | 题库重建/个人题库重建触发与 SSE 进度 |
+| `useEChart.js` | ECharts 生命周期封装（init / ResizeObserver / 主题切换 / dispose），图表组件共享 |
 | `useHighlightNav.js` | 导航高亮 |
 | `useMasterBankData.js` | 题库/JD/面经/统计数据加载、筛选和分页 |
 | `useInsightsData.js` | 洞察快照加载、加载状态和错误状态 |

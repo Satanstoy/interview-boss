@@ -17,9 +17,15 @@
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
-| `InsightsOverview.vue` | 洞察总览：证据状态、统计卡片和下一步行动 |
+| `InsightsOverview.vue` | 洞察总览：证据状态、统计卡片、下一步行动和「我的练习足迹」图表区（热力图/连击/趋势/难度/雷达/最近刷题，数据来自 `/api/insights/practice-activity`） |
 | `InsightsReadiness.vue` | 岗位准备度能力矩阵；承载旧知识图谱的辅助视图 |
 | `InsightsReviews.vue` | 面试复盘会话列表和无数据入口 |
+| `PracticeHeatmap.vue` | 练习足迹 - GitHub 风格打卡热力图（CSS grid 自绘 90 天，5 档颜色 + AppTooltip） |
+| `PracticeStreakCard.vue` | 练习足迹 - 连续打卡卡片（当前/最长连击 + 激励文案 + 去刷题 CTA） |
+| `PracticeTrendChart.vue` | 练习足迹 - 近 30 天刷题趋势（ECharts 柱状次数 + 折线平均分双轴） |
+| `PracticeDifficultyChart.vue` | 练习足迹 - 难度分布环形图（ECharts 饼图 + 正确率 tooltip） |
+| `PracticeRadarChart.vue` | 练习足迹 - 主题熟练度雷达图（ECharts，SRS 熟练度 top8） |
+| `PracticeRecentTimeline.vue` | 练习足迹 - 最近刷题时间线（答题/复习徽标 + 分数/评级 + 相对时间） |
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |

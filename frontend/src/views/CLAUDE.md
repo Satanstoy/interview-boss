@@ -13,7 +13,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `MockInterviewView.vue` | 题目抽测页（紧凑 padding `px-4 py-4`） |
 | `PracticeView.vue` | 刷题页：消费应用壳共享题单状态，在认证应用壳内承载 Chat 风格闪卡刷题工作台 |
 | `PracticeDecksView.vue` | 题单管理页：消费应用壳共享题单状态，管理“全部题/我的收藏”和用户自定义题单及题目关联 |
-| `InsightsView.vue` | 洞察工作台编排：总览、岗位准备度、面试复盘三个路由共用数据快照 |
+| `InsightsView.vue` | 洞察工作台编排：总览、岗位准备度、面试复盘三个路由共用数据快照；总览路由额外加载练习足迹图表数据 |
 | `KnowledgeGraphView.vue` | 知识图谱页 |
 | `ImportView.vue` | 导入工作台页 |
 | `CodingView.vue` | 手撕代码页；页面外层与 `/chat` 的 `ChatView.vue` 保持一致的全屏高度和主工作区约束 |
