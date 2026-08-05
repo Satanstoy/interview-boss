@@ -330,3 +330,30 @@ def test_practice_activity_is_user_scoped(test_db):
     assert data["radar"] == []
     assert data["difficulty"] == []
     assert data["recent"] == []
+
+
+def test_practice_activity_endpoint_contract(client, test_db):
+    from app.asgi import app
+    from app.core.auth import get_current_user
+
+    _insert_user(test_db, 501)
+    app.dependency_overrides[get_current_user] = lambda: {"id": 501}
+    try:
+        response = client.get("/api/insights/practice-activity")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "version",
+        "heatmap",
+        "streak",
+        "trend",
+        "radar",
+        "difficulty",
+        "recent",
+    }
+    assert len(body["heatmap"]) == 90
+    assert len(body["trend"]) == 30
+    assert body["streak"] == {"current": 0, "longest": 0}
