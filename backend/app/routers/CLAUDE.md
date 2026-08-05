@@ -16,7 +16,7 @@
 | `interview.py` | `/api/interview/*` | 模拟面试 |
 | `analytics.py` | `/api/analytics/*` | 数据分析 |
 | `insights.py` | `/api/insights` | 洞察工作台聚合快照 |
-| `profile.py` | `/api/profile/*` | 用户配置（公共+管理员）。`active-season` 为全局配置仅 admin 可写（user_profile 是全局单例） |
+| `profile.py` | `/api/profile/*` | 用户配置（公共+管理员）。`active-season` 为全局配置仅 admin 可写（user_profile 是全局单例）。`/api/profile/recruitment`（GET/PUT，任意登录用户）读写 per-user `user_recruitment_pref`（届次+批次+每日容量），返回展开的时间线里程碑与紧迫度，供刷题「今日复习」调度与前端状态行使用 |
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent）。`build-personal` 合并：管理员可并入公共题（现有行为），非管理员只落个人题（个人题吸收公共题来源，公共题数据绝不改动，防审核旁路） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
