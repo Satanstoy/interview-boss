@@ -3,7 +3,7 @@
 > 位置: `backend/app/routers/answers.py` + `frontend/src/components/business/QuestionCard.vue` + `PracticeMode.vue`  
 > 类型: 产品/架构纠偏 spec  
 > 日期: 2026-08-05  
-> 状态: 待实施  
+> 状态: 已实施（Phase 1-4，含联网搜索来源落库与双端展示，2026-08-05）  
 > 触发背景: 公共题库与个人题库逻辑混乱，核心是"答案"存在公共（`question_bank.ai_answer`）与个人（`user_question_view.user_answer`）两份并展示方式怪异；同时 per-user 联网搜索模块（`search_service.py`）已上线但利用不充分。
 
 ## 结论
