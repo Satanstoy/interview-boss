@@ -3,6 +3,7 @@
 使用 pypdf 提取 PDF 文本，存储到 user_resumes 表。
 每个用户仅保留一份最新简历（重复上传覆盖旧的）。
 """
+import json
 import logging
 from io import BytesIO
 from typing import Optional
@@ -128,3 +129,72 @@ def has_resume(user_id: int) -> bool:
         ).fetchone()
 
     return row is not None
+
+
+def save_optimization(
+    user_id: int,
+    position: str,
+    points: list,
+    optimized_text: str,
+) -> bool:
+    """保存简历优化结果（覆盖旧结果）
+
+    Args:
+        user_id: 用户 ID
+        position: 优化时使用的目标岗位
+        points: 优化要点列表
+        optimized_text: 优化版简历全文
+
+    Returns:
+        True 表示保存成功
+    """
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            UPDATE user_resumes
+            SET optimized_text = ?,
+                optimization_points = ?,
+                optimized_position = ?,
+                optimized_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (
+                optimized_text,
+                json.dumps(points, ensure_ascii=False),
+                position,
+                user_id,
+            ),
+        )
+        conn.commit()
+        return conn.total_changes > 0
+
+
+def get_optimization(user_id: int) -> Optional[dict]:
+    """获取用户最新的简历优化结果
+
+    Returns:
+        {position, points, optimized_text, optimized_at} 或 None
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT optimized_text, optimization_points, optimized_position, optimized_at
+            FROM user_resumes WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+    if not row or row[0] is None:
+        return None
+
+    try:
+        points = json.loads(row[1]) if row[1] else []
+    except (json.JSONDecodeError, TypeError):
+        points = []
+
+    return {
+        "optimized_text": row[0],
+        "points": points,
+        "position": row[2],
+        "optimized_at": row[3],
+    }

@@ -116,3 +116,60 @@ class TestPDFExtraction:
 
         with pytest.raises(ValueError, match="PDF"):
             extract_pdf_text(b"this is not a pdf file")
+
+
+class TestResumeOptimizationStorage:
+    """优化结果存取（migration 061 新列）"""
+
+    def test_save_and_get_optimization(self, test_db):
+        """T-101: save_optimization 后 get_optimization 能取回全部字段"""
+        from app.services import resume_service
+
+        conn = test_db
+        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES ('opt_user', 'hash', 0)")
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user'").fetchone()[0]
+        resume_service.save_resume(user_id, "resume.pdf", "张三\n软件工程师\n3年经验")
+
+        resume_service.save_optimization(
+            user_id,
+            position="后端工程师",
+            points=["量化项目成果", "补充技术栈关键词"],
+            optimized_text="# 张三\n## 教育背景\n...",
+        )
+
+        opt = resume_service.get_optimization(user_id)
+        assert opt is not None
+        assert opt["position"] == "后端工程师"
+        assert opt["points"] == ["量化项目成果", "补充技术栈关键词"]
+        assert "教育背景" in opt["optimized_text"]
+        assert opt["optimized_at"]
+
+    def test_get_optimization_returns_none_when_absent(self, test_db):
+        """T-102: 未优化过应返回 None"""
+        from app.services import resume_service
+
+        conn = test_db
+        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES ('opt_user2', 'hash', 0)")
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user2'").fetchone()[0]
+
+        assert resume_service.get_optimization(user_id) is None
+
+    def test_save_optimization_overwrites_previous(self, test_db):
+        """T-103: 重复优化覆盖旧结果，只保留最新一份"""
+        from app.services import resume_service
+
+        conn = test_db
+        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES ('opt_user3', 'hash', 0)")
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user3'").fetchone()[0]
+        resume_service.save_resume(user_id, "r.pdf", "内容")
+
+        resume_service.save_optimization(user_id, "岗位A", ["要点1"], "版本1")
+        resume_service.save_optimization(user_id, "岗位B", ["要点2"], "版本2")
+
+        opt = resume_service.get_optimization(user_id)
+        assert opt["position"] == "岗位B"
+        assert opt["points"] == ["要点2"]
+        assert opt["optimized_text"] == "版本2"

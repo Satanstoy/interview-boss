@@ -70,6 +70,7 @@ from app.db.migrations.coding import (
     _migration_053_coding_library,
     _migration_058_coding_playlist_order,
 )
+from app.db.migrations.resume import _migration_061_resume_optimization
 from app.db.migrations.clustering import (
     _migration_032_embedding_column,
     _migration_033_cluster_id,
@@ -165,6 +166,7 @@ _MIGRATIONS = [
     (58, "coding_playlist_order", _migration_058_coding_playlist_order),
     (59, "practice_queue_indexes", _migration_059_practice_queue_indexes),
     (60, "search_config", _migration_060_search_config),
+    (61, "resume_optimization", _migration_061_resume_optimization),
     (62, "user_recruitment_pref", _migration_062_user_recruitment_pref),
 ]
 
