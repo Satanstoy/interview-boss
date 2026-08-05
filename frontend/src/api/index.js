@@ -88,7 +88,7 @@ export {
 } from '../services/analyticsApi.js'
 
 // ── Insights ──
-export { fetchInsights } from '../services/insightsApi.js'
+export { fetchInsights, fetchPracticeActivity } from '../services/insightsApi.js'
 
 // ── Profile ──
 export {
