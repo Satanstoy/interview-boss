@@ -37,7 +37,7 @@ def test_decks_link_high_frequency_bank_and_review_state(client, test_db):
         decks = client.get("/api/practice/decks")
         assert decks.status_code == 200
         by_key = {item["key"]: item for item in decks.json()["items"]}
-        assert set(by_key) == {"all", "starred"}
+        assert set(by_key) == {"due", "all", "starred"}
         assert by_key["all"]["total"] == 2
         assert by_key["starred"]["total"] == 1
 

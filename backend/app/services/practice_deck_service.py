@@ -10,6 +10,13 @@ from app.db.queries import build_bank_where_clause, get_dynamic_frequency_sql
 
 DECKS = (
     {
+        "key": "due",
+        "name": "今日复习",
+        "description": "到期复习优先，按重要度和遗忘风险安排",
+        "kind": "due",
+        "sort_order": 0,
+    },
+    {
         "key": "all",
         "name": "全部题",
         "description": "按复习状态和面试频率安排顺序",
@@ -239,6 +246,7 @@ def list_deck_questions(
     filter_mode: str = "all",
     limit: int = 100,
     offset: int = 0,
+    max_new: int | None = None,
 ) -> tuple[dict, list[dict], int]:
     """Load a deck ordered as a review queue, not as a random bank page."""
 
@@ -254,18 +262,40 @@ def list_deck_questions(
     ).fetchone()[0]
     custom_order = "pdi.sort_order ASC, " if deck["kind"] == "custom" else ""
     order = (
-        " ORDER BY CASE WHEN uqr.next_review_at IS NULL THEN 0 "
-        "WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 1 ELSE 2 END, "
+        " ORDER BY CASE WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 0 "
+        "WHEN uqr.next_review_at IS NULL THEN 1 ELSE 2 END, "
+        "CASE WHEN uqr.next_review_at IS NULL THEN COALESCE(qb.frequency, 0) "
+        "ELSE COALESCE(qb.frequency, 0) * (5 - COALESCE(uqr.proficiency, 0)) END DESC, "
         "COALESCE(uqr.next_review_at, '1970-01-01') ASC, "
         f"{custom_order}"
         # Reuse the SELECT alias instead of evaluating the correlated
         # dynamic-frequency subquery a second time for every row.
-        "frequency DESC, qb.id ASC LIMIT ? OFFSET ?"
+        "frequency DESC, qb.id ASC"
     )
-    rows = conn.execute(
-        _select_sql(from_clause, where_clause, frequency_sql) + order,
-        params + [limit, offset],
-    ).fetchall()
+    if deck_key == "due" and max_new is not None and offset == 0:
+        max_new = max(0, int(max_new))
+        due_cond = _deck_condition("due", "")
+        due_where = where_clause.replace(
+            due_cond,
+            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) <= datetime('now'))",
+        )
+        new_where = where_clause.replace(due_cond, "(uqr.next_review_at IS NULL)")
+        due_rows = conn.execute(
+            _select_sql(from_clause, due_where, frequency_sql) + order, params
+        ).fetchall()
+        new_rows = conn.execute(
+            _select_sql(from_clause, new_where, frequency_sql)
+            + " ORDER BY COALESCE(qb.frequency, 0) DESC, qb.id ASC LIMIT ?",
+            params + [max_new],
+        ).fetchall()
+        rows = due_rows + new_rows
+    else:
+        rows = conn.execute(
+            _select_sql(from_clause, where_clause, frequency_sql)
+            + order
+            + " LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
     return (
         {
             key: value
