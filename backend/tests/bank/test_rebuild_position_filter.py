@@ -150,10 +150,15 @@ class TestAnswerRecoveryImprovement:
     """BUG-003 附加: 答案恢复逻辑优化"""
 
     def test_answer_recovery_tries_original_questions(self):
-        """修复后：答案恢复应尝试匹配 original_questions 中的每个题目"""
+        """修复后：答案恢复应尝试匹配 original_questions 中的每个题目，并同步恢复 answer_sources"""
         existing_answers_map = {
-            "什么是闭包？": "闭包是...",
-            "解释原型链": "原型链是..."
+            "什么是闭包？": {
+                "answer": "闭包是...",
+                "sources": json.dumps(
+                    [{"title": "MDN", "url": "https://mdn.dev"}], ensure_ascii=False
+                ),
+            },
+            "解释原型链": {"answer": "原型链是...", "sources": None},
         }
 
         # 模拟聚类详情：统一后的问题文本不在答案 map 中，但 original_questions 中有
@@ -166,16 +171,22 @@ class TestAnswerRecoveryImprovement:
             ]
         }
 
-        # 模拟恢复逻辑
-        ai_answer = existing_answers_map.get(cluster['question'])
+        # 模拟恢复逻辑（与生产 _restore_answers 一致：dict 取值，sources 随答案一并恢复）
+        saved = existing_answers_map.get(cluster['question'])
+        ai_answer = saved['answer'] if saved else None
+        answer_sources = saved['sources'] if saved else None
         if not ai_answer:
             for oq in cluster.get('original_questions', []):
-                ai_answer = existing_answers_map.get(oq)
-                if ai_answer:
+                saved = existing_answers_map.get(oq)
+                if saved and saved['answer']:
+                    ai_answer = saved['answer']
+                    answer_sources = saved['sources']
                     break
 
         assert ai_answer is not None, "应从 original_questions 中匹配到已有答案"
         assert ai_answer == "闭包是...", "应匹配到第一个 original_question 的答案"
+        assert answer_sources == existing_answers_map["什么是闭包？"]["sources"], \
+            "answer_sources 应随答案一并从匹配到的 original_question 恢复"
 
 
 class TestPositionIsolationIntegration:

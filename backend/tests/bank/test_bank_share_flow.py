@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -103,6 +104,18 @@ class TestShareEndpoint:
         from app.routers.questions_pkg.share import share_private_question
 
         _seed_share_data(test_db)
+        # 私有题 101 带参考答案与来源，分享时应随答案一并复制到公共 pending
+        test_db.execute(
+            "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = 101",
+            (
+                "TCP 三次握手：SYN -> SYN-ACK -> ACK",
+                json.dumps(
+                    [{"title": "TCP 协议文档", "url": "https://example.com/tcp", "snippet": "三次握手"}],
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        test_db.commit()
         result = share_private_question(test_db, question_id=101, user_id=1)
 
         assert result["result"] == "pending"
@@ -114,6 +127,11 @@ class TestShareEndpoint:
         assert row["owner_id"] is None
         assert row["status"] == "pending"
         assert row["submitted_by"] == 1
+        # 参考答案与 answer_sources 随分享一并复制
+        assert row["ai_answer"] == "TCP 三次握手：SYN -> SYN-ACK -> ACK"
+        assert json.loads(row["answer_sources"]) == [
+            {"title": "TCP 协议文档", "url": "https://example.com/tcp", "snippet": "三次握手"}
+        ]
         # 私有副本保留
         row = test_db.execute(
             "SELECT deleted_at FROM question_bank WHERE id = 101"
