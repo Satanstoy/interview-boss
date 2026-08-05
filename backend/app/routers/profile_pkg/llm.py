@@ -69,11 +69,24 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
 
     if not model:
         raise HTTPException(status_code=400, detail="模型名称不能为空")
-    if not base_url:
-        raise HTTPException(status_code=400, detail="Base URL 不能为空")
 
     _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
-    if not _URL_RE.match(base_url):
+
+    def _resolve():
+        with get_db_connection() as conn:
+            existing = conn.execute(
+                "SELECT api_key, base_url FROM user_llm_config WHERE user_id = ?",
+                (user["id"],),
+            ).fetchone()
+            final_key = api_key or (existing["api_key"] if existing else "")
+            final_base_url = base_url or (existing["base_url"] if existing else "")
+            return final_key, final_base_url
+
+    final_key, final_base_url = await run_db(_resolve)
+
+    if not final_base_url:
+        raise HTTPException(status_code=400, detail="Base URL 不能为空")
+    if not _URL_RE.match(final_base_url):
         raise HTTPException(
             status_code=400, detail="Base URL 格式无效，必须以 http:// 或 https:// 开头"
         )
@@ -102,7 +115,7 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
                 "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(user_id) DO UPDATE SET api_key = excluded.api_key, base_url = excluded.base_url, "
                 "model = excluded.model, timeout = excluded.timeout, updated_at = CURRENT_TIMESTAMP",
-                (user["id"], final_key, base_url, model, timeout),
+                (user["id"], final_key, final_base_url, model, timeout),
             )
             conn.commit()
 

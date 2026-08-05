@@ -100,11 +100,27 @@ const onShowPublic = async () => {
   }
 }
 
-const onUsePublic = (tax) => {
-  localTaxonomy.categories = tax.categories.map(c => ({ ...c, _open: false }))
+const onUsePublic = async (tax) => {
+  const categories = tax.categories.map(c => ({ ...c, _open: false }))
+  localTaxonomy.categories = categories
+  const valid = categories
+    .filter(c => c.cat1?.trim())
+    .map(c => ({
+      cat1: c.cat1.trim(),
+      children: (c.children || []).filter(Boolean),
+    }))
   showPublicTaxonomies.value = false
-  emit('taxonomy-updated')
-  toastSuccess(`已加载"${tax.position_name}"的分类`)
+  if (!valid.length) {
+    toastWarning('该公开分类没有有效分类，无法使用')
+    return
+  }
+  try {
+    await savePersonalTaxonomy(valid)
+    emit('taxonomy-updated')
+    toastSuccess(`已加载并保存"${tax.position_name}"的分类`)
+  } catch (e) {
+    toastError(`加载分类失败: ${e.message}`)
+  }
 }
 
 const onDeletePublic = async (tax) => {

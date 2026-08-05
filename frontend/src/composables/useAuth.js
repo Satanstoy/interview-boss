@@ -61,8 +61,10 @@ const handleLogout = async () => {
 }
 
 // ── 切换分享默认值（share/private） ──
-const handleShareDefaultChanged = (user) => {
-  currentUser.value = user
+const handleShareDefaultChanged = (shareDefault) => {
+  if (currentUser.value && typeof currentUser.value === 'object') {
+    currentUser.value = { ...currentUser.value, share_default: shareDefault }
+  }
   _onDataRefresh?.()
 }
 

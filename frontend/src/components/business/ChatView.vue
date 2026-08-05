@@ -436,7 +436,7 @@ import NewChatModal from './NewChatModal.vue'
 import ModelSelector from './ModelSelector.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import * as chatApi from '@/services/chatApi.js'
-import { fetchMyLLMConfig } from '@/services/profileApi.js'
+import { fetchMyLLMConfig, updateMyLLMConfig } from '@/services/profileApi.js'
 
 const props = defineProps({
   jdList: { type: Array, default: () => [] },
@@ -1214,8 +1214,15 @@ function handleLike({ id, liked }) {
   console.log('Like message:', id, liked)
 }
 
-function handleModelSelect(modelId) {
+async function handleModelSelect(modelId) {
   selectedModel.value = modelId
+  if (props.preview) return
+  try {
+    await updateMyLLMConfig({ llm_model: modelId })
+    toastSuccess('默认模型已更新')
+  } catch (e) {
+    toastError('保存模型失败：' + (e.message || '未知错误'))
+  }
 }
 
 async function handlePin(id) {

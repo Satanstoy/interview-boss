@@ -70,42 +70,6 @@
           </div>
         </div>
 
-        <!-- Interview difficulty + Experience row -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <!-- Interview difficulty -->
-          <div>
-            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z"/></svg>
-              面试难度
-            </label>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="opt in interviewDifficultyOptions" :key="opt.value"
-                @click="interviewDifficulty = opt.value"
-                class="text-xs px-3 py-1.5 rounded-full border transition-colors"
-                :class="interviewDifficulty === opt.value ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 border-primary-300 dark:border-primary-700 font-semibold' : 'bg-card text-muted-foreground border-border hover:bg-muted dark:hover:bg-muted'"
-              >{{ opt.label }}</button>
-            </div>
-          </div>
-
-          <!-- Experience selection -->
-          <div>
-            <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              面经来源（可选）
-            </label>
-            <select
-              v-model="experienceId"
-              class="w-full text-xs px-3 py-2 rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option :value="null">不使用面经</option>
-              <option v-for="exp in experiences" :key="exp.id" :value="exp.id">
-                {{ exp.company }} - {{ exp.round }} ({{ exp.question_count }}题)
-              </option>
-            </select>
-          </div>
-        </div>
-
         <!-- Model selection (optional override) -->
         <div>
           <label class="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
@@ -386,7 +350,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
@@ -396,7 +360,6 @@ import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import ModelSelectField from '@/components/business/ModelSelectField.vue'
-import { getExperiences } from '@/services/interviewApi.js'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()
@@ -413,37 +376,36 @@ const difficultyOptions = [
   { value: 'L3', label: 'L3-困难' }
 ]
 
-const interviewDifficultyOptions = [
-  { value: 'junior', label: '初级' },
-  { value: 'mid', label: '中级' },
-  { value: 'senior', label: '高级' },
-  { value: 'staff_plus', label: '专家' }
-]
+// Config state（持久化到 localStorage，刷新不丢）
+const QUIZ_CONFIG_KEY = 'mock-interview-config'
+const loadQuizConfig = () => {
+  try {
+    return JSON.parse(localStorage.getItem(QUIZ_CONFIG_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+const saveQuizConfig = () => {
+  localStorage.setItem(QUIZ_CONFIG_KEY, JSON.stringify({
+    selectedCat: selectedCat.value,
+    selectedDifficulty: selectedDifficulty.value,
+    questionCount: questionCount.value,
+    selectedModel: selectedModel.value,
+  }))
+}
 
-// Config state
-const selectedCat = ref('')
-const selectedDifficulty = ref('')
-const questionCount = ref(10)
-const selectedModel = ref('')
-const interviewDifficulty = ref('mid')
-const experienceId = ref(null)
-const experiences = ref([])
+const savedConfig = loadQuizConfig()
+const selectedCat = ref(savedConfig.selectedCat || '')
+const selectedDifficulty = ref(savedConfig.selectedDifficulty || '')
+const questionCount = ref(savedConfig.questionCount || 10)
+const selectedModel = ref(savedConfig.selectedModel || '')
+
+watch([selectedCat, selectedDifficulty, questionCount, selectedModel], saveQuizConfig)
 
 // Quiz state
 const quizStarted = ref(false)
 const isLoading = ref(false)
 const mockQuestions = ref([])
-
-// 加载面经列表
-onMounted(async () => {
-  try {
-    const response = await getExperiences()
-    experiences.value = response.data || []
-  } catch (error) {
-    console.error('Failed to load experiences:', error)
-    toast.error('面经列表加载失败')
-  }
-})
 
 const selectedDifficultyLabel = computed(() =>
   difficultyOptions.find(o => o.value === selectedDifficulty.value)?.label || '随机'
