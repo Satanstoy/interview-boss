@@ -95,8 +95,14 @@ async def generate_master_answer(
             def _update():
                 with get_db_connection() as conn:
                     conn.execute(
-                        "UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (answer, question_id),
+                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (
+                            answer,
+                            json.dumps(search_sources, ensure_ascii=False)
+                            if search_sources
+                            else None,
+                            question_id,
+                        ),
                     )
                     conn.commit()
 
@@ -248,7 +254,7 @@ async def batch_generate_answers(
                 nonlocal generated, failed, done_count
                 async with semaphore:
                     try:
-                        prompt, _ = await prepare_answer_prompt(
+                        prompt, search_sources = await prepare_answer_prompt(
                             question_text, user_id=user["id"]
                         )
                         answer = await _call_llm_with_retry(prompt, user_id=user["id"])
@@ -256,8 +262,14 @@ async def batch_generate_answers(
                         def _update():
                             with get_db_connection() as conn:
                                 conn.execute(
-                                    "UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (answer, qid),
+                                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    (
+                                        answer,
+                                        json.dumps(search_sources, ensure_ascii=False)
+                                        if search_sources
+                                        else None,
+                                        qid,
+                                    ),
                                 )
                                 conn.commit()
 
