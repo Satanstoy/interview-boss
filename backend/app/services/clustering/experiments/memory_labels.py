@@ -38,6 +38,8 @@ def load_cluster_data(conn) -> tuple[list[dict], list[dict]]:
             oq = json.loads(oq_raw) if isinstance(oq_raw, str) else []
         except (json.JSONDecodeError, TypeError):
             oq = []
+        if not isinstance(oq, list):
+            oq = []
         oq = [str(q).strip() for q in oq if str(q).strip()]
         item["oq"] = oq
         if item["freq"] > 1:

@@ -1,5 +1,4 @@
 """mock-LLM 单元测试：数据加载与纯逻辑函数（不调真实 LLM）"""
-import pytest
 
 
 def _seed_db(conn):
@@ -33,13 +32,13 @@ def test_load_cluster_data_splits_clusters_and_singletons(test_db):
     cluster_ids = {c["qb_id"] for c in clusters}
     assert cluster_ids == {1, 2}
     assert singletons[0]["qb_id"] == 3
-    # cluster 必须带原始题列表（去重后）
+    # cluster 必须带原始题列表
     c1 = next(c for c in clusters if c["qb_id"] == 1)
     assert "怎样做限流？" in c1["oq"]
     assert c1["cat2"] == "并发"
 
 
-def test_load_cluster_data_skips_deleted_and_keeps_oq(test_db):
+def test_load_cluster_data_skips_deleted(test_db):
     _seed_db(test_db)
     from app.services.clustering.experiments.memory_labels import load_cluster_data
 
@@ -48,3 +47,19 @@ def test_load_cluster_data_skips_deleted_and_keeps_oq(test_db):
     clusters, singletons = load_cluster_data(test_db)
 
     assert [c["qb_id"] for c in clusters] == [1]
+
+
+def test_load_cluster_data_oq_parse_falls_back_to_empty(test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import load_cluster_data
+
+    test_db.execute("UPDATE question_bank SET original_questions = 'not-json' WHERE id = 3")
+    test_db.execute("UPDATE question_bank SET original_questions = '{\"a\": 1}' WHERE id = 2")
+    test_db.commit()
+
+    clusters, singletons = load_cluster_data(test_db)
+
+    s3 = next(s for s in singletons if s["qb_id"] == 3)
+    assert s3["oq"] == []  # 非法 JSON → 空列表
+    c2 = next(c for c in clusters if c["qb_id"] == 2)
+    assert c2["oq"] == []  # 合法 JSON 但非 list → 空列表
