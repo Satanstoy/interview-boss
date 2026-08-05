@@ -131,12 +131,12 @@ class TestResumeOptimizationStorage:
         user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user'").fetchone()[0]
         resume_service.save_resume(user_id, "resume.pdf", "张三\n软件工程师\n3年经验")
 
-        resume_service.save_optimization(
+        assert resume_service.save_optimization(
             user_id,
             position="后端工程师",
             points=["量化项目成果", "补充技术栈关键词"],
             optimized_text="# 张三\n## 教育背景\n...",
-        )
+        ) is True
 
         opt = resume_service.get_optimization(user_id)
         assert opt is not None
@@ -166,10 +166,21 @@ class TestResumeOptimizationStorage:
         user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user3'").fetchone()[0]
         resume_service.save_resume(user_id, "r.pdf", "内容")
 
-        resume_service.save_optimization(user_id, "岗位A", ["要点1"], "版本1")
-        resume_service.save_optimization(user_id, "岗位B", ["要点2"], "版本2")
+        assert resume_service.save_optimization(user_id, "岗位A", ["要点1"], "版本1") is True
+        assert resume_service.save_optimization(user_id, "岗位B", ["要点2"], "版本2") is True
 
         opt = resume_service.get_optimization(user_id)
         assert opt["position"] == "岗位B"
         assert opt["points"] == ["要点2"]
         assert opt["optimized_text"] == "版本2"
+
+    def test_save_optimization_without_resume_returns_false(self, test_db):
+        """T-104: 无简历行时 save_optimization 应返回 False"""
+        from app.services import resume_service
+
+        conn = test_db
+        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES ('opt_user4', 'hash', 0)")
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user4'").fetchone()[0]
+
+        assert resume_service.save_optimization(user_id, "岗位A", ["要点1"], "版本1") is False

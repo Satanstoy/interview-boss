@@ -134,7 +134,7 @@ def has_resume(user_id: int) -> bool:
 def save_optimization(
     user_id: int,
     position: str,
-    points: list,
+    points: list[str],
     optimized_text: str,
 ) -> bool:
     """保存简历优化结果（覆盖旧结果）
@@ -149,7 +149,7 @@ def save_optimization(
         True 表示保存成功
     """
     with get_db_connection() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE user_resumes
             SET optimized_text = ?,
@@ -166,7 +166,7 @@ def save_optimization(
             ),
         )
         conn.commit()
-        return conn.total_changes > 0
+        return cursor.rowcount > 0
 
 
 def get_optimization(user_id: int) -> Optional[dict]:
