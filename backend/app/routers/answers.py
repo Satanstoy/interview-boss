@@ -10,6 +10,7 @@ from app.models.schemas import BatchGenerateAnswersRequest
 from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry
 from app.services.answer_enrichment import (
+    _sources_json,
     prepare_answer_prompt,
     prepare_recitation_prompt,
 )
@@ -96,13 +97,7 @@ async def generate_master_answer(
                 with get_db_connection() as conn:
                     conn.execute(
                         "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (
-                            answer,
-                            json.dumps(search_sources, ensure_ascii=False)
-                            if search_sources
-                            else None,
-                            question_id,
-                        ),
+                        (answer, _sources_json(search_sources), question_id),
                     )
                     conn.commit()
 
@@ -263,13 +258,7 @@ async def batch_generate_answers(
                             with get_db_connection() as conn:
                                 conn.execute(
                                     "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (
-                                        answer,
-                                        json.dumps(search_sources, ensure_ascii=False)
-                                        if search_sources
-                                        else None,
-                                        qid,
-                                    ),
+                                    (answer, _sources_json(search_sources), qid),
                                 )
                                 conn.commit()
 

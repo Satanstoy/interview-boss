@@ -42,7 +42,7 @@ async def load_questions_node(state: BatchGenerateState) -> dict:
 async def generate_answer_node(state: BatchGenerateState) -> dict:
     """为当前题目生成答案"""
     from app.services.llm import _call_llm_with_retry
-    from app.services.answer_enrichment import prepare_answer_prompt
+    from app.services.answer_enrichment import prepare_answer_prompt, _sources_json
     from app.db.connection import get_db_connection, run_db
 
     idx = state.get("current_index", 0)
@@ -69,7 +69,9 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
 
     start = time.monotonic()
     try:
-        prompt, _ = await prepare_answer_prompt(question, user_id=state.get("user_id"))
+        prompt, search_sources = await prepare_answer_prompt(
+            question, user_id=state.get("user_id")
+        )
         answer = await _call_llm_with_retry(prompt, user_id=state.get("user_id"))
         elapsed = time.monotonic() - start
         quality = evaluate_answer_quality(answer, question)
@@ -77,7 +79,10 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
         # 保存答案
         def _save():
             conn = get_db_connection()
-            conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, qid))
+            conn.execute(
+                "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (answer, _sources_json(search_sources), qid),
+            )
             conn.commit()
         await run_db(_save)
 

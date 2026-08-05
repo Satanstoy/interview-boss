@@ -104,3 +104,95 @@ async def test_generate_answer_writes_null_when_no_sources():
     sql, params = mock_conn.execute.call_args[0]
     assert "answer_sources" in sql
     assert params[1] is None
+
+
+def _exec(fn):
+    return fn()
+
+
+@pytest.mark.asyncio
+async def test_background_generate_answer_writes_answer_sources():
+    """后台流水线生成：answer_sources 随 ai_answer 一起写库"""
+    from app.services.submit_service import background_generate_answer
+
+    sources = [
+        {"title": "Redis 官方文档", "url": "https://redis.io/docs", "snippet": "x"}
+    ]
+
+    # 注意：submit_service.background_generate_answer 的 prepare_answer_prompt /
+    # _call_llm_with_retry 是函数内 import（from app.services.answer_enrichment / llm），
+    # 必须 patch 源模块，不能 patch submit_service 模块属性。
+    with patch(
+        "app.services.answer_enrichment.prepare_answer_prompt",
+        new_callable=AsyncMock,
+    ) as mock_prep:
+        mock_prep.return_value = ("prompt", sources)
+        with patch(
+            "app.services.llm._call_llm_with_retry", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = "答案内容"
+            with patch(
+                "app.services.submit_service.run_db", new_callable=AsyncMock
+            ) as mock_run_db:
+                # run_db 必须 mock 成「执行传入函数」的版本（AsyncMock side_effect
+                # 列表不会执行函数），否则 _update 闭包不会运行
+                mock_run_db.side_effect = _exec
+                with patch(
+                    "app.services.submit_service.get_db_connection"
+                ) as mock_get_conn:
+                    mock_conn = MagicMock()
+                    mock_conn.__enter__.return_value = mock_conn
+                    mock_conn.__exit__.return_value = None
+                    mock_get_conn.return_value = mock_conn
+                    await background_generate_answer(10, "什么是微服务？", user_id=1)
+
+    sql, params = mock_conn.execute.call_args[0]
+    assert "answer_sources" in sql
+    assert json.loads(params[1]) == sources
+
+
+@pytest.mark.asyncio
+async def test_batch_generate_writes_answer_sources():
+    """批量生成：_gen_one 的 UPDATE 落库 answer_sources（SSE 流驱动）"""
+    from app.models.schemas import BatchGenerateAnswersRequest
+    from app.routers.answers import batch_generate_answers
+
+    user = {"id": 1, "is_admin": True}
+    rows = [{"id": 10, "question": "什么是微服务？", "ai_answer": None}]
+    sources = [
+        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]
+
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = _exec
+        with patch("app.routers.answers.get_db_connection") as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_conn.__enter__.return_value = mock_conn
+            mock_conn.__exit__.return_value = None
+            # _load 阶段：conn.execute(...).fetchall() 返回待生成题目行
+            mock_conn.execute.return_value.fetchall.return_value = rows
+            mock_get_conn.return_value = mock_conn
+            with patch(
+                "app.routers.answers._call_llm_with_retry", new_callable=AsyncMock
+            ) as mock_llm:
+                mock_llm.return_value = "答案内容"
+                with patch(
+                    "app.routers.answers.prepare_answer_prompt",
+                    new_callable=AsyncMock,
+                ) as mock_prep:
+                    mock_prep.return_value = ("prompt", sources)
+                    req = BatchGenerateAnswersRequest(ids=[10])
+                    resp = await batch_generate_answers(req, user)
+                    # SSE StreamingResponse：驱动 event_stream 生成器消费事件
+                    chunks = []
+                    async for chunk in resp.body_iterator:
+                        chunks.append(chunk)
+
+    assert "".join(chunks)  # SSE 流正常产出事件
+    update_calls = [
+        call
+        for call in mock_conn.execute.call_args_list
+        if call.args and "answer_sources" in call.args[0]
+    ]
+    assert len(update_calls) == 1
+    assert json.loads(update_calls[0].args[1][1]) == sources

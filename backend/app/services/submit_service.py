@@ -27,15 +27,20 @@ def _get_current_position_for_user(user_id: int) -> str:
 
 async def background_generate_answer(question_id: int, question_text: str, user_id: int = None):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
-    from app.services.answer_enrichment import prepare_answer_prompt
+    from app.services.answer_enrichment import prepare_answer_prompt, _sources_json
     from app.services.llm import _call_llm_with_retry
     try:
-        prompt, _ = await prepare_answer_prompt(question_text, user_id=user_id)
+        prompt, search_sources = await prepare_answer_prompt(
+            question_text, user_id=user_id
+        )
         answer = await _call_llm_with_retry(prompt, user_id=user_id)
 
         def _update():
             with get_db_connection() as conn:
-                conn.execute("UPDATE question_bank SET ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (answer, question_id))
+                conn.execute(
+                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (answer, _sources_json(search_sources), question_id),
+                )
                 conn.commit()
 
         await run_db(_update)
