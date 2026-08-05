@@ -1,4 +1,4 @@
-"""Question bank domain migrations: 001, 002, 004, 005, 006, 007."""
+"""Question bank domain migrations: 001, 002, 004, 005, 006, 007, 063."""
 
 import json
 import logging
