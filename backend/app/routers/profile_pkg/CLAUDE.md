@@ -10,7 +10,7 @@
 | `taxonomy.py` | `/api/profile/taxonomy` | 分类体系管理（CRUD + 导入导出） |
 | `position.py` | `/api/profile/positions` | 岗位管理（CRUD + 切换） |
 | `email.py` | `/api/profile/bind-email`, `/api/profile/send-bind-code` | 邮箱绑定（验证码） |
-| `resume.py` | `/api/profile/resume` | 简历上传/查询/删除 |
+| `resume.py` | `/api/profile/resume`, `/api/profile/resume/text`, `/api/profile/resume/optimize`, `/api/profile/resume/optimization` | 简历上传/查询/删除、原文预览、SSE 优化（points → delta → done）与结果查询 |
 | `interview_distribution.py` | `/api/profile/interview-distribution-preference` | 用户按岗位保存模拟面试分布偏好 |
 | `mcp.py` | `/api/profile/mcp` | 用户级 MCP 端点、Token 轮换与客户端配置 |
 
