@@ -328,8 +328,8 @@ async def update_profile(
 
 
 @router.put("/api/profile/active-season")
-async def update_active_season(req: dict, user: dict = Depends(get_current_user)):
-    """保存当前用户的活跃招聘季（任意已登录用户）"""
+async def update_active_season(req: dict, user: dict = Depends(get_admin_user)):
+    """保存全局活跃招聘季（仅管理员；user_profile 为全局 key-value 单例）"""
     season = (req.get("active_season") or "").strip()
 
     def _save():

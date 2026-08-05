@@ -5,6 +5,7 @@
 覆盖 L3（bank_mode 透传）、H1（detail IDOR）、L1（save-user-answer 可见性）。
 """
 
+import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import HTTPException
@@ -471,6 +472,185 @@ class TestPracticeActionsVisibility:
 
         result = await add_practice_deck_item("my-deck", req, user)
         assert result["question_id"] == qid
+
+
+class TestDataCascadeDeleteScope:
+    """data.py 级联删除必须限定 owner — 不碰公共数据与他人数据"""
+
+    @pytest.mark.asyncio
+    async def test_delete_own_jd_does_not_touch_public_or_other_interview(
+        self, client, test_db
+    ):
+        from app.routers.data import delete_data
+        from app.core.prompts import DEFAULT_TAXONOMY
+
+        url = "https://example.com/jd/1"
+        pos = DEFAULT_TAXONOMY["job_position"]
+        _ensure_user(test_db, 2)
+        _ensure_user(test_db, 999)
+        test_db.execute(
+            "INSERT INTO jd (url, owner_id, status, job_position) VALUES (?, ?, ?, ?)",
+            (url, 2, "approved", pos),
+        )
+        test_db.commit()
+        jd_id = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        test_db.execute(
+            "INSERT INTO interview (url, owner_id, status) VALUES (?, NULL, 'approved')",
+            (url,),
+        )
+        test_db.execute(
+            "INSERT INTO interview (url, owner_id, status) VALUES (?, 999, 'approved')",
+            (url,),
+        )
+        test_db.commit()
+
+        user = _mock_user(user_id=2, is_admin=False)
+        await delete_data("jd", jd_id, user)
+
+        rows = test_db.execute(
+            "SELECT owner_id, deleted_at FROM interview WHERE url = ?", (url,)
+        ).fetchall()
+        assert len(rows) == 2
+        for r in rows:
+            assert r["deleted_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_delete_own_jd_does_not_cleanup_public_question_sources(
+        self, client, test_db
+    ):
+        from app.routers.data import delete_data
+        from app.core.prompts import DEFAULT_TAXONOMY
+
+        url = "https://example.com/jd/2"
+        pos = DEFAULT_TAXONOMY["job_position"]
+        _ensure_user(test_db, 2)
+        test_db.execute(
+            "INSERT INTO jd (url, owner_id, status, job_position) VALUES (?, ?, ?, ?)",
+            (url, 2, "approved", pos),
+        )
+        test_db.commit()
+        jd_id = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        test_db.execute(
+            "INSERT INTO interview (url, owner_id, status) VALUES (?, NULL, 'approved')",
+            (url,),
+        )
+        test_db.commit()
+        test_db.execute(
+            "INSERT INTO question_bank (question, cat1, cat2, status, job_position, sources) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "公共题",
+                "A.项目经验",
+                "A1",
+                "approved",
+                pos,
+                json.dumps([{"url": url}], ensure_ascii=False),
+            ),
+        )
+        test_db.commit()
+
+        user = _mock_user(user_id=2, is_admin=False)
+        await delete_data("jd", jd_id, user)
+
+        row = test_db.execute(
+            "SELECT deleted_at, sources FROM question_bank WHERE question = ?", ("公共题",)
+        ).fetchone()
+        assert row["deleted_at"] is None  # 公共题未被软删除
+        assert json.loads(row["sources"]) == [{"url": url}]  # 公共题来源未被清理
+
+    @pytest.mark.asyncio
+    async def test_delete_own_interview_does_not_touch_other_details(
+        self, client, test_db
+    ):
+        from app.routers.data import delete_data
+
+        url = "https://example.com/interview/1"
+        _ensure_user(test_db, 2)
+        _ensure_user(test_db, 999)
+        test_db.execute(
+            "INSERT INTO interview (url, owner_id, status) VALUES (?, ?, 'approved')",
+            (url, 2),
+        )
+        test_db.commit()
+        i_id = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        test_db.execute(
+            "INSERT INTO questions_detail (interview_id, url, question, owner_id, status) "
+            "VALUES (NULL, ?, ?, 999, 'approved')",
+            (url, "他人detail"),
+        )
+        test_db.commit()
+
+        user = _mock_user(user_id=2, is_admin=False)
+        await delete_data("interview", i_id, user)
+
+        row = test_db.execute(
+            "SELECT deleted_at FROM questions_detail WHERE question = ?", ("他人detail",)
+        ).fetchone()
+        assert row["deleted_at"] is None
+
+
+class TestActiveSeasonPermission:
+    """普通用户不得写全局 active_season 配置"""
+
+    def test_regular_user_rejected(self, client, test_db):
+        from app.core.auth import create_access_token
+
+        _ensure_user(test_db, 2)
+        token = create_access_token({"user_id": 2, "type": "access"})
+
+        response = client.put(
+            "/api/profile/active-season",
+            json={"active_season": "2026春招"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+
+class TestErrorReportLimits:
+    """error-report 匿名上报必须限长防刷"""
+
+    def test_too_many_errors_rejected(self, client):
+        response = client.post(
+            "/api/error-report",
+            json={"errors": [{"message": "x"} for _ in range(200)]},
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is False
+
+    def test_oversized_message_truncated(self, client):
+        with patch("app.routers.error_report.logger") as mock_logger:
+            response = client.post(
+                "/api/error-report",
+                json={"errors": [{"message": "x" * 10000}]},
+            )
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        mock_logger.error.assert_called_once()
+        logged_message = mock_logger.error.call_args.kwargs["message"]
+        assert len(logged_message) <= 2001  # 2000 截断 + 省略号
+
+
+class TestPublicTaxonomyNoOwnerId:
+    """公开分类列表不得返回 owner_id"""
+
+    @pytest.mark.asyncio
+    async def test_public_list_hides_owner_id(self, client, test_db):
+        from app.db.operations import get_public_shared_taxonomies
+
+        _ensure_user(test_db, 7)
+        test_db.execute(
+            "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, is_public) "
+            "VALUES (?, ?, ?, ?, 1)",
+            ("后端", '[]', "user", 7),
+        )
+        test_db.commit()
+
+        user = _mock_user(user_id=2, is_admin=False)
+        result = await get_public_shared_taxonomies(user)
+
+        assert len(result) == 1
+        assert "owner_id" not in result[0]
+        assert result[0]["owner_name"] == "user7"
 
 
 class TestSaveUserAnswerVisibility:

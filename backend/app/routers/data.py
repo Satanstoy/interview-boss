@@ -39,17 +39,22 @@ def _safe_table_name(name: str) -> str:
     return name
 
 
-def _cleanup_sources_for_url(cursor, url: str):
+def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
     """清理 question_bank 中指向指定 URL 的所有贡献：sources、original_questions、original_question_sources。
-    frequency=0 的公共 QB 及其 question_position 一并删除。"""
+
+    只清理 owner_scope 限定范围内的题（`owner_id IS ?`，NULL 匹配公共题），
+    绝不触碰他人私有题或公共题。frequency=0 的目标 QB 及其 question_position 一并删除。
+    """
     # Normalized rows are the fast path, while the JSON columns remain the
     # repair path.  A previous delete can leave one representation updated
     # and the other untouched, so using only one of them is not sufficient.
     affected_ids = set()
     try:
         normalized_rows = cursor.execute(
-            "SELECT DISTINCT question_bank_id FROM question_sources WHERE url = ?",
-            (url,),
+            "SELECT DISTINCT qs.question_bank_id FROM question_sources qs "
+            "JOIN question_bank qb ON qb.id = qs.question_bank_id "
+            "WHERE qs.url = ? AND qb.owner_id IS ?",
+            (url, owner_scope),
         ).fetchall()
         for row in normalized_rows:
             try:
@@ -64,8 +69,9 @@ def _cleanup_sources_for_url(cursor, url: str):
     try:
         json_rows = cursor.execute(
             "SELECT id, sources, original_questions, original_question_sources "
-            "FROM question_bank WHERE sources LIKE ? OR original_question_sources LIKE ?",
-            (f"%{url}%", f"%{url}%"),
+            "FROM question_bank WHERE (sources LIKE ? OR original_question_sources LIKE ?) "
+            "AND owner_id IS ?",
+            (f"%{url}%", f"%{url}%", owner_scope),
         ).fetchall()
     except sqlite3.OperationalError:
         json_rows = []
@@ -163,7 +169,7 @@ def _cleanup_sources_for_url(cursor, url: str):
         logger.warning("question_sources 表不可用，跳过 URL 来源清理: %s", url)
 
 
-def _cleanup_sources_best_effort(cursor, url: str):
+def _cleanup_sources_best_effort(cursor, url: str, owner_scope=None):
     """Run source cleanup in a savepoint so it cannot abort main deletion.
 
     The main interview row is deliberately updated before this savepoint. If
@@ -177,7 +183,7 @@ def _cleanup_sources_best_effort(cursor, url: str):
     savepoint = "interview_source_cleanup"
     cursor.execute(f"SAVEPOINT {savepoint}")
     try:
-        _cleanup_sources_for_url(cursor, url)
+        _cleanup_sources_for_url(cursor, url, owner_scope)
     except Exception:
         logger.exception("面经来源清理失败，将保留主记录删除结果: %s", url)
         try:
@@ -205,26 +211,27 @@ def _delete_interview_txn(cursor, record_id: int, target_row):
         for row in cursor.execute("PRAGMA table_info(questions_detail)").fetchall()
     }
     url = target_row["url"]
+    owner_scope = target_row["owner_id"]
     if "interview_id" in detail_columns:
         if url:
             cursor.execute(
                 "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
-                "WHERE deleted_at IS NULL AND "
+                "WHERE deleted_at IS NULL AND owner_id IS ? AND "
                 "(interview_id = ? OR (interview_id IS NULL AND url = ?))",
-                (record_id, url),
+                (owner_scope, record_id, url),
             )
         else:
             cursor.execute(
                 "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
-                "WHERE interview_id = ? AND deleted_at IS NULL",
-                (record_id,),
+                "WHERE interview_id = ? AND owner_id IS ? AND deleted_at IS NULL",
+                (record_id, owner_scope),
             )
     elif url:
         # Compatibility with databases created before interview_id was added.
         cursor.execute(
             "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
-            "WHERE url = ? AND deleted_at IS NULL",
-            (url,),
+            "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
+            (url, owner_scope),
         )
 
     # Mark the primary row before optional derived-data cleanup. This makes
@@ -234,7 +241,7 @@ def _delete_interview_txn(cursor, record_id: int, target_row):
         "WHERE id = ?",
         (record_id,),
     )
-    _cleanup_sources_best_effort(cursor, url)
+    _cleanup_sources_best_effort(cursor, url, owner_scope)
 
 
 def _restore_sources_for_url(cursor, url: str):
@@ -472,22 +479,25 @@ async def delete_data(
 
             if table_name == "jd":
                 if url:
-                    # BUG-017: 先清理关联面经在 question_bank 中的 sources
+                    # BUG-017: 先清理关联面经在 question_bank 中的 sources（仅限同一 owner 范围）
+                    owner_scope = target_row["owner_id"]
                     interview_urls = cursor.execute(
                         "SELECT DISTINCT url FROM interview WHERE url = ? AND deleted_at IS NULL",
                         (url,),
                     ).fetchall()
                     for iu in interview_urls:
                         if iu["url"]:
-                            _cleanup_sources_best_effort(cursor, iu["url"])
-                    # 级联软删除关联的 interview 和 questions_detail
+                            _cleanup_sources_best_effort(cursor, iu["url"], owner_scope)
+                    # 级联软删除关联的 interview 和 questions_detail（仅限同一 owner 范围）
                     cursor.execute(
-                        "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
-                        (url,),
+                        "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP "
+                        "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
+                        (url, owner_scope),
                     )
                     cursor.execute(
-                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
-                        (url,),
+                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
+                        "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
+                        (url, owner_scope),
                     )
 
             if table_name == "interview":
