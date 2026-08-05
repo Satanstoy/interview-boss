@@ -153,6 +153,27 @@
               </button>
             </div>
             <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content prose prose-sm dark:prose-invert max-w-none" v-html="cachedMarkdown"></div>
+
+            <!-- 参考来源（答案生成时的联网搜索证据） -->
+            <div v-if="answerSources.length" class="border-t border-border/50 mt-3">
+              <button @click="question._showAnswerSources = !question._showAnswerSources"
+                class="w-full px-4 py-2 flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/25 transition-colors">
+                <svg class="size-3 transform transition-transform duration-200" :class="question._showAnswerSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                <span>参考来源</span>
+                <span class="text-label text-muted-foreground ml-0.5">{{ answerSources.length }}条</span>
+              </button>
+              <div v-if="question._showAnswerSources" class="px-4 pb-4 flex flex-col gap-1.5">
+                <div v-for="(src, idx) in answerSources" :key="src.url || idx"
+                  class="bg-card border border-border rounded-md p-2.5 flex items-start gap-2.5">
+                  <span class="text-caption text-muted-foreground font-mono shrink-0 mt-0.5">{{ idx + 1 }}.</span>
+                  <div class="flex-1 min-w-0">
+                    <a :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer"
+                      class="text-xs font-medium text-primary hover:underline break-all">{{ src.title || src.url }}</a>
+                    <p v-if="src.snippet" class="text-xs text-muted-foreground mt-0.5 line-clamp-2">{{ src.snippet }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else-if="isLoadingDetail" class="flex flex-col items-center justify-center py-8 text-primary gap-3">
@@ -251,6 +272,11 @@ const sourcesContentRef = ref(null)
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { safeUrl } from '@/utils/validate.js'
 import { get } from '@/services/http.js'
+
+const answerSources = computed(() => {
+  const raw = props.question.answer_sources
+  return Array.isArray(raw) ? raw : []
+})
 
 // Lazy-loaded full answer detail (for compact mode)
 const fullAnswer = ref(null)
