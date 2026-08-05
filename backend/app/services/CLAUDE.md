@@ -9,7 +9,7 @@
 |------|------|------|
 | `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出 | `core/config` |
 | `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库）与 `compact.py` 孤岛碎片整理 | `clustering`, `db` |
-| `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容；`experiments/` 为独立实验模块（语义标签摘要记忆：`load_cluster_data` + `text_prefilter` + LLM 标签生成 `generate_cluster_labels` + 孤岛增量分配 `assign_singletons`，评估通过才并入生产） | `llm`, `embedding_service` |
+| `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容；`experiments/` 为独立实验模块（语义标签摘要记忆：`load_cluster_data` + `text_prefilter` + LLM 标签生成 `generate_cluster_labels` + 孤岛增量分配 `assign_singletons`，`evaluate.py` 为评估入口，跑全流程并输出 Markdown 报告到 `backend/experiment_reports/`；评估通过才并入生产） | `llm`, `embedding_service` |
 | `clustering_maintenance.py` | 聚类元数据审计/确定性修复（frequency、cluster_id、normalized tables、精确重复） | `db/question_bank_sources`, `pipeline/batch` |
 | `submit_service.py` | 提交业务逻辑：题目标注、答案生成、增量更新题库 | `llm`, `db`, `pipeline` |
 | `embedding_service.py` | 向量编码（双后端：SiliconFlow bge-m3 1024维 + 本地 ONNX bge-small-zh 512维）+ FAISS 预筛选 + hash fallback | `openai`, `onnxruntime`, `tokenizers`, `faiss-cpu` |
