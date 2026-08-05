@@ -69,15 +69,17 @@ export function usePracticeDecks(filter = 'all') {
     try {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
+      const item = questions.value.find(question => question.id === questionId)
       if (selectedDeckKey.value === 'due' && nextState.next_review_at) {
+        // next_review_at 是服务器 UTC naive 时间（YYYY-MM-DD HH:MM:SS）→ 按 UTC 解析后取本地日期比较
+        const nextDate = new Date(String(nextState.next_review_at).replace(' ', 'T') + 'Z')
         const todayStr = new Date().toLocaleDateString('en-CA')
-        const nextDateStr = String(nextState.next_review_at).slice(0, 10)
+        const nextDateStr = nextDate.toLocaleDateString('en-CA')
         if (nextDateStr > todayStr) {
           const idx = questions.value.findIndex(question => question.id === questionId)
           if (idx !== -1) questions.value.splice(idx, 1)
         }
       }
-      const item = questions.value.find(question => question.id === questionId)
       if (item) Object.assign(item, nextState)
       const deck = decks.value.find(candidate => candidate.key === selectedDeckKey.value)
       if (deck) {

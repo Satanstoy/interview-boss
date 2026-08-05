@@ -401,7 +401,18 @@ function onGlobalKeydown(event) {
   else if (event.key === 'Enter' && currentQ.value && !answerRevealed.value) { event.preventDefault(); answerRevealed.value = true }
 }
 
-watch(sessionQuestions, (questions) => { if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1) })
+watch(sessionQuestions, (questions) => {
+  // 复习移除题卡导致队列缩短时，按当前题目 id 重新定位，避免跳过下一题
+  const currentId = currentQ.value?.id
+  if (currentId) {
+    const idx = questions.findIndex(q => q.id === currentId)
+    if (idx !== -1) {
+      currentIndex.value = idx
+      return
+    }
+  }
+  if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1)
+})
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
 watch(() => props.selectedDeckKey, (key) => { if (key) { sessionKey.value = key; currentIndex.value = 0; resetState() } })
 onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
