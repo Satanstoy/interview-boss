@@ -31,12 +31,25 @@ def _base_url() -> str:
     return _BASE_URL
 
 
+def _request_base_url(request: Request) -> str:
+    """Use the public reverse-proxy host for browser-facing OAuth metadata."""
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        host = forwarded_host.split(",", 1)[0].strip()
+        proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
+        return f"{proto}://{host}".rstrip("/")
+    host = request.headers.get("host", "")
+    if host and not host.startswith(("127.0.0.1", "localhost")):
+        return f"https://{host}".rstrip("/")
+    return _base_url()
+
+
 # ── Discovery ──
 
 
 @router.get("/.well-known/oauth-protected-resource")
-async def protected_resource_metadata():
-    base = _base_url()
+async def protected_resource_metadata(request: Request):
+    base = _request_base_url(request)
     return JSONResponse(
         {
             "resource": f"{base}/mcp",
@@ -47,9 +60,15 @@ async def protected_resource_metadata():
     )
 
 
+@router.get("/.well-known/oauth-protected-resource/{resource_path:path}")
+async def protected_resource_metadata_for_path(request: Request, resource_path: str):
+    """Serve path-aware OAuth PRM discovery required for MCP /mcp resources."""
+    return await protected_resource_metadata(request)
+
+
 @router.get("/.well-known/oauth-authorization-server")
-async def authorization_server_metadata():
-    base = _base_url()
+async def authorization_server_metadata(request: Request):
+    base = _request_base_url(request)
     return JSONResponse(
         {
             "issuer": base,

@@ -73,7 +73,9 @@ async def _forward_to_backend(request: Request, mcp_token: str) -> Response:
     """Forward the request to InterviewBoss backend with the given MCP token."""
     backend = _backend_url()
     path = request.url.path
-    if not path.startswith("/mcp"):
+    if path == "/mcp":
+        path = "/mcp/"
+    elif not path.startswith("/mcp"):
         path = "/mcp" + path
 
     url = f"{backend}{path}"
