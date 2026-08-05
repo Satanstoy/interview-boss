@@ -134,8 +134,6 @@
           @toggle-star="toggleStar"
           @retag="retagQuestion"
           @generate-answer="generateAnswer"
-          @use-reference-answer="useReferenceAnswer"
-          @save-user-answer="saveUserAnswer"
           @save-field="saveFieldFromEvent"
           @practice="practiceQuestion = $event"
           @split-question="splitQuestion"
@@ -191,8 +189,8 @@ const {
   isLoadingMore, hasMore, loadMoreMasterBank,
   isBuilding, triggerBuildMasterBank, triggerBuildPersonalBank,
   fetchTableData, enterPracticeMode,
-  toggleStar, retagQuestion, generateAnswer, useReferenceAnswer,
-  saveUserAnswer, saveFieldFromEvent, deleteQuestion, deleteOriginalQuestion,
+  toggleStar, retagQuestion, generateAnswer,
+  saveFieldFromEvent, deleteQuestion, deleteOriginalQuestion,
   editQuestion, onUpdateAnswer, splitQuestion, startMerge,
   onNavigateToInterview, masterBankEverShown,
   practiceQuestion,

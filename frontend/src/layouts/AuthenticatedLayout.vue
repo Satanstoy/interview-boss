@@ -414,7 +414,7 @@ const {
   reprocessingIds, reprocessProgress, activeReprocessing,
   deleteDataRow, reprocessInterview, retagQuestion,
   saveField, saveFieldFromEvent, toggleStar,
-  generateAnswer, useReferenceAnswer, saveUserAnswer,
+  generateAnswer, saveUserAnswer,
   deleteQuestion, deleteOriginalQuestion, editQuestion, onUpdateAnswer, splitQuestion,
 } = useQuestionOps(masterBank, currentUser, fetchTableData, fetchAnalytics)
 
@@ -557,7 +557,7 @@ provide('appData', {
   reprocessingIds, reprocessProgress, activeReprocessing,
   deleteDataRow, reprocessInterview, retagQuestion,
   saveField, saveFieldFromEvent, toggleStar,
-  generateAnswer, useReferenceAnswer, saveUserAnswer,
+  generateAnswer, saveUserAnswer,
   deleteQuestion, deleteOriginalQuestion, editQuestion,
   onUpdateAnswer, splitQuestion,
   // Merge
@@ -721,7 +721,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
     <ConfirmDialog />
     <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
-    <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" @close="practiceQuestion = null" />
+    <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" :is-admin="currentUser?.is_admin" @close="practiceQuestion = null" />
     <MergeQuestionDialog
       :visible="mergeDialogVisible"
       :source-question="mergeSourceOriginalQ"

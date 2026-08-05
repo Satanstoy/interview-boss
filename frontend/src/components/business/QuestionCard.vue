@@ -143,17 +143,14 @@
 
         <!-- View answer mode -->
         <div v-else>
-          <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
-            <div class="absolute top-0 right-0 flex gap-1 z-10">
+            <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
+            <div v-if="isAdmin" class="absolute top-0 right-0 flex gap-1 z-10">
               <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
                 编辑
               </button>
               <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
                 重新生成
               </button>
-            </div>
-            <div v-if="(fullUserAnswer || question.user_answer) && question.has_reference_answer" class="mb-2 flex items-center gap-1.5">
-              <span class="text-label text-primary bg-primary/10 dark:bg-primary/15 px-2 py-0.5 rounded">个人答案</span>
             </div>
             <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content prose prose-sm dark:prose-invert max-w-none" v-html="cachedMarkdown"></div>
           </div>
@@ -181,17 +178,14 @@
             </p>
             <p v-else class="text-muted-foreground mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
-              <Button variant="outline" size="sm" v-if="question.has_reference_answer && !(fullUserAnswer || question.user_answer)" @click.stop="$emit('use-reference-answer', question)" class="px-5 py-2">
-                <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                使用参考答案
-              </Button>
-              <Button variant="default" size="sm" @click.stop="$emit('generate-answer', question)" class="px-5 py-2">
+              <Button v-if="isAdmin" variant="default" size="sm" @click.stop="$emit('generate-answer', question)" class="px-5 py-2">
                 <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 AI 生成答案
               </Button>
-              <Button variant="ghost" size="sm" @click="question._isEditingAnswer = true; question._editAnswer = ''" class="px-5 py-2">
+              <Button v-if="isAdmin" variant="ghost" size="sm" @click="question._isEditingAnswer = true; question._editAnswer = ''" class="px-5 py-2">
                 手动编写
               </Button>
+              <p v-else class="text-caption text-muted-foreground">暂无参考答案，请等待管理员生成</p>
             </div>
           </div>
         </div>
@@ -260,7 +254,6 @@ import { get } from '@/services/http.js'
 
 // Lazy-loaded full answer detail (for compact mode)
 const fullAnswer = ref(null)
-const fullUserAnswer = ref(null)
 const isLoadingDetail = ref(false)
 const detailError = ref(false)
 
@@ -268,7 +261,6 @@ async function loadFullAnswer() {
   if (fullAnswer.value !== null) return
   if (props.question.ai_answer) {
     fullAnswer.value = props.question.ai_answer
-    fullUserAnswer.value = props.question.user_answer
     return
   }
   if (!props.question.has_reference_answer && !props.question.id) return
@@ -276,9 +268,8 @@ async function loadFullAnswer() {
   try {
     const detail = await get(`/api/master-bank/${props.question.id}/detail`)
     fullAnswer.value = detail.ai_answer || ''
-    fullUserAnswer.value = detail.user_answer || ''
     // Emit to parent so it updates the question object too
-    emit('update-answer', { id: props.question.id, ai_answer: detail.ai_answer, user_answer: detail.user_answer })
+    emit('update-answer', { id: props.question.id, ai_answer: detail.ai_answer })
   } catch (e) {
     console.warn('Failed to load answer detail:', e)
     detailError.value = true
@@ -298,7 +289,7 @@ const props = defineProps({
   contentOnly: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
+const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
 
 // Trigger detail load when answer section is shown
 watch(() => props.question._showAnswer, (show) => {
@@ -312,10 +303,10 @@ onMounted(() => {
   }
 })
 
-// Sync fullUserAnswer when parent updates question.user_answer (e.g., useReferenceAnswer)
-watch(() => props.question.user_answer, (val) => {
-  if (val && val !== fullUserAnswer.value) {
-    fullUserAnswer.value = val
+// Sync fullAnswer when parent updates question.ai_answer (e.g., admin generate)
+watch(() => props.question.ai_answer, (val) => {
+  if (val && val !== fullAnswer.value) {
+    fullAnswer.value = val
   }
 })
 
@@ -425,10 +416,8 @@ const difficultyClass = computed(() => {
 })
 
 const displayAnswer = computed(() => {
-  // 优先显示个人答案，其次显示全局答案
-  const userAns = fullUserAnswer.value || props.question.user_answer
-  const aiAns = fullAnswer.value || props.question.ai_answer
-  return userAns || aiAns || ''
+  // 公共参考答案（题解）是唯一答案展示源
+  return fullAnswer.value || props.question.ai_answer || ''
 })
 
 const cachedMarkdown = computed(() => {

@@ -93,10 +93,45 @@ INTERVIEW_PROMPT = """你是一名顶级的信息提取专家。请从用户提�
 DEFAULT_TAXONOMY = {
     "job_position": "agent开发/大模型应用开发/大模型开发",
     "categories": [
-        {"cat1": "A.项目经验与设计", "children": ["A1.项目介绍与背景", "A2.系统架构设计", "A3.难点攻关与优化", "A4.反思与改进"]},
-        {"cat1": "B.Agent与LLM应用", "children": ["B1.Agent架构与范式", "B2.RAG系统设计", "B3.工具调用与协议集成", "B4.记忆与上下文管理", "B5.Prompt工程", "B6.评估安全与优化", "B7.AI Coding与代码智能", "B8.模型与框架选型"]},
-        {"cat1": "C.基础工程能力", "children": ["C1.编程语言基础", "C2.框架与中间件", "C3.数据库基础", "C4.操作系统与网络"]},
-        {"cat1": "D.分布式与高并发", "children": ["D1.缓存设计与优化", "D2.高并发与限流", "D3.分布式事务与一致性"]},
+        {
+            "cat1": "A.项目经验与设计",
+            "children": [
+                "A1.项目介绍与背景",
+                "A2.系统架构设计",
+                "A3.难点攻关与优化",
+                "A4.反思与改进",
+            ],
+        },
+        {
+            "cat1": "B.Agent与LLM应用",
+            "children": [
+                "B1.Agent架构与范式",
+                "B2.RAG系统设计",
+                "B3.工具调用与协议集成",
+                "B4.记忆与上下文管理",
+                "B5.Prompt工程",
+                "B6.评估安全与优化",
+                "B7.AI Coding与代码智能",
+                "B8.模型与框架选型",
+            ],
+        },
+        {
+            "cat1": "C.基础工程能力",
+            "children": [
+                "C1.编程语言基础",
+                "C2.框架与中间件",
+                "C3.数据库基础",
+                "C4.操作系统与网络",
+            ],
+        },
+        {
+            "cat1": "D.分布式与高并发",
+            "children": [
+                "D1.缓存设计与优化",
+                "D2.高并发与限流",
+                "D3.分布式事务与一致性",
+            ],
+        },
         {"cat1": "E.算法与数据结构", "children": ["E1.数据结构", "E2.算法手撕"]},
     ],
 }
@@ -167,7 +202,9 @@ def build_tagging_prompt(taxonomy_config: dict | None = None) -> str:
     categories = config.get("categories") or DEFAULT_TAXONOMY["categories"]
     taxonomy_text = _format_taxonomy_text(categories)
     examples_text = _build_examples(categories)
-    return _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text).replace("{examples}", examples_text)
+    return _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text).replace(
+        "{examples}", examples_text
+    )
 
 
 TAGGING_PROMPT = build_tagging_prompt(DEFAULT_TAXONOMY)
@@ -211,6 +248,31 @@ ANSWER_PROMPT = """你是一名资深后端与算法面试官。请根据【面�
 ===USER_CONTENT_END===
 
 ## 请直接用上述规则生成回答：
+"""
+
+RECITATION_PROMPT = """你是一名求职辅导教练。请根据【公共参考答案】和【考生背景】，把参考答案改写成**考生个人专属的口述背诵稿**。
+
+## 目标
+- 背诵稿要结合考生背景（目标岗位/简历经历），让回答听起来是"考生自己的话"，而不是背教材。
+- 技术事实以【公共参考答案】为准：不得改变考点、不得遗漏关键要点；可以补充少量时新信息（仅限参考资料中的内容）。
+- 保持口述级：短句、大白话、可背诵，用 Markdown **加粗**关键骨架词。
+- 格式与参考答案保持一致（代码题保留可运行的 Python 代码块）。
+- 总字数控制在参考答题篇幅的 ±20% 内。
+
+## 考生背景
+{profile}
+
+## 公共参考答案（权威基座，不可改变技术事实）
+===REFERENCE_START===
+{reference_answer}
+===REFERENCE_END===
+
+## 面试题：
+===USER_CONTENT_START===
+{question}
+===USER_CONTENT_END===
+
+## 请直接生成背诵稿：
 """
 
 EVAL_PROMPT = """你是一名资深面试评估专家。请对比【参考答案】和【我的回答】，对回答质量进行多维度评估。

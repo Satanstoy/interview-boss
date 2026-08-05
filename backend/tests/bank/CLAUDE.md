@@ -12,7 +12,7 @@
 | `test_edit_question.py` | 编辑题目 |
 | `test_master_bank_syntax.py` | 题库语法 |
 | `test_oqs_backfill.py` | original_questions 回填 |
-| `test_per_user_answers.py` | 用户级答案 |
+| `test_per_user_answers.py` | 用户级答案（生成权限：普通用户 403、管理员可生成）+ 背诵稿定制（generate-recitation：写个人答案、无参考答案 404、不可见题 404） |
 | `test_rebuild_position_filter.py` | 岗位过滤重建 |
 | `test_source_url_count_mismatch.py` | 来源 URL 计数不匹配 |
 | `test_split_question_data_loss.py` | 拆分题目数据丢失 |

@@ -7,6 +7,7 @@
       :selected-deck-key="selectedDeckKey"
       :review-loading="isReviewing"
       :deck-loading="isLoading"
+      :is-admin="currentUser?.is_admin"
       class="w-full min-w-0"
       @close="closePractice"
       @select-deck="selectDeck"
@@ -32,7 +33,7 @@ const PracticeMode = defineAsyncComponent({
 })
 
 const router = useRouter()
-const { filteredMasterBank, practicedQuestions, toggleStar } = inject('appData')
+const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, isLoading, isReviewing, serverReady,
   loadQuestions, submitReview, addItem,

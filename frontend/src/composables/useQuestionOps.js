@@ -144,16 +144,6 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     finally { question._isLoadingAnswer = false }
   }
 
-  const useReferenceAnswer = async (question) => {
-    question._isLoadingAnswer = true
-    try {
-      const data = await api.useReferenceAnswer(question.id)
-      question.user_answer = data.answer
-      toast.success('已使用参考答案')
-    } catch (e) { toast.error('操作失败：' + getFriendlyError(e)) }
-    finally { question._isLoadingAnswer = false }
-  }
-
   const saveUserAnswer = async ({ question, answer }) => {
     try {
       await api.saveUserAnswer(question.id, answer)
@@ -224,7 +214,6 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     saveFieldFromEvent,
     toggleStar,
     generateAnswer,
-    useReferenceAnswer,
     saveUserAnswer,
     deleteQuestion,
     deleteOriginalQuestion,

@@ -11,7 +11,7 @@
 | `submit.py` | `/api/submit-stream-v2`, `/api/submit-jobs*` | JD/面经提交（LangGraph SSE + 后台 Job），并 re-export submit service 兼容旧内部导入 |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新 |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索 |
-| `answers.py` | `/api/answers/*` | AI 答案生成 |
+| `answers.py` | `/api/master-bank/*` | AI 答案生成。公共参考答案（`ai_answer`）仅管理员可生成（单题/批量均 403 拦截普通用户）；`generate-recitation` 为用户定制个人背诵稿（公共参考答案为基座 + 岗位/简历上下文 + 用户搜索配置），写入 `user_question_view.user_answer`；`use-reference-answer` 已废弃 |
 | `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习 |
 | `interview.py` | `/api/interview/*` | 模拟面试 |
 | `analytics.py` | `/api/analytics/*` | 数据分析 |

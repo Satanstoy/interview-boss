@@ -80,8 +80,8 @@
                 <div class="flex items-center justify-between mb-3">
                   <span class="text-xs font-semibold text-muted-foreground">AI 参考答案</span>
                   <div class="flex gap-1.5">
-                    <Button @click="qState._isEditingAnswer = true; qState._editAnswer = question.ai_answer" variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5">编辑</Button>
-                    <Button @click="handleGenerate" :disabled="qState._isLoadingAnswer" variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5">重新生成</Button>
+                    <Button v-if="isAdmin" @click="qState._isEditingAnswer = true; qState._editAnswer = question.ai_answer" variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5">编辑</Button>
+                    <Button v-if="isAdmin" @click="handleGenerate" :disabled="qState._isLoadingAnswer" variant="ghost" size="sm" class="text-[10px] h-auto px-2 py-0.5">重新生成</Button>
                   </div>
                 </div>
                 <div class="text-sm text-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(question.ai_answer)"></div>
@@ -93,8 +93,8 @@
 
               <div v-else class="text-center py-12">
                 <p v-if="isFailedAnswer(question.ai_answer)" class="text-red-500 dark:text-red-400 mb-3 text-sm">上次生成失败，请重试</p>
-                <p v-else class="text-muted-foreground mb-4 text-sm">暂无参考答案</p>
-                <Button @click="handleGenerate" size="sm">
+                <p v-else class="text-muted-foreground mb-4 text-sm">{{ isAdmin ? '暂无参考答案' : '暂无参考答案，请等待管理员生成' }}</p>
+                <Button v-if="isAdmin" @click="handleGenerate" size="sm">
                   <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                   AI 生成答案
                 </Button>
@@ -251,7 +251,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  question: { type: Object, default: null }
+  question: { type: Object, default: null },
+  isAdmin: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'answer-evaluated', 'navigate-to-interview'])

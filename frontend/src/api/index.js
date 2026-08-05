@@ -54,6 +54,7 @@ export {
   generateAnswer,
   useReferenceAnswer,
   saveUserAnswer,
+  generateRecitation,
   toggleStar,
   deleteMasterQuestion,
   updateQuestion,

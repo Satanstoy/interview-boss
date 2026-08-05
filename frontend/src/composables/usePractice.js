@@ -1,4 +1,4 @@
-import { generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord } from '../api/index.js'
+import { generateAnswer as apiGenerateAnswer, generateRecitation as apiGenerateRecitation, evaluateAnswer, fetchPracticeHistory, updateRecord, saveUserAnswer as apiSaveUserAnswer } from '../api/index.js'
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { sanitizeAgainstInjection } from '../utils/validate.js'
 import { useToast } from './useNotification.js'
@@ -41,6 +41,11 @@ export function resetQState(qState) {
   qState._isEditingAnswer = false
   qState._editAnswer = ''
   qState._isSavingAnswer = false
+  qState._recitation = ''
+  qState._isGeneratingRecitation = false
+  qState._isEditingRecitation = false
+  qState._editRecitation = ''
+  qState._isSavingRecitation = false
 }
 
 export async function generateAnswerForQuestion(question, qState) {
@@ -75,6 +80,42 @@ export async function saveAnswerForQuestion(question, qState) {
     toast.error(`保存失败: ${e.message}`)
   } finally {
     qState._isSavingAnswer = false
+  }
+}
+
+export async function generateRecitationForQuestion(question, qState) {
+  const toast = useToast()
+  qState._isGeneratingRecitation = true
+  try {
+    const data = await apiGenerateRecitation(question.id)
+    qState._recitation = data.answer
+    qState._isEditingRecitation = false
+    toast.success('背诵稿已生成')
+  } catch (e) {
+    toast.error(`生成失败: ${e.message}`)
+  } finally {
+    qState._isGeneratingRecitation = false
+  }
+}
+
+export async function saveRecitationForQuestion(question, qState) {
+  const toast = useToast()
+  try {
+    sanitizeAgainstInjection(qState._editRecitation, '背诵稿')
+  } catch (e) {
+    toast.warning(e.message)
+    return
+  }
+  qState._isSavingRecitation = true
+  try {
+    await apiSaveUserAnswer(question.id, qState._editRecitation)
+    qState._recitation = qState._editRecitation
+    qState._isEditingRecitation = false
+    toast.success('背诵稿已保存')
+  } catch (e) {
+    toast.error(`保存失败: ${e.message}`)
+  } finally {
+    qState._isSavingRecitation = false
   }
 }
 

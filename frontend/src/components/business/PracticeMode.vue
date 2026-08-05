@@ -85,8 +85,8 @@
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div class="flex items-center gap-2 text-sm font-semibold text-foreground"><BookOpen class="size-4 text-primary" />AI 参考答案</div>
               <div class="flex items-center gap-1">
-                <Button variant="ghost" size="sm" class="h-8 px-2 text-xs" @click="startEditAnswer"><Pencil class="mr-1.5 size-3.5" />编辑</Button>
-                <Button variant="ghost" size="sm" class="h-8 px-2 text-xs" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><RefreshCw class="mr-1.5 size-3.5" :class="{ 'animate-spin': qState._isLoadingAnswer }" />重新生成</Button>
+                <Button v-if="isAdmin" variant="ghost" size="sm" class="h-8 px-2 text-xs" @click="startEditAnswer"><Pencil class="mr-1.5 size-3.5" />编辑</Button>
+                <Button v-if="isAdmin" variant="ghost" size="sm" class="h-8 px-2 text-xs" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><RefreshCw class="mr-1.5 size-3.5" :class="{ 'animate-spin': qState._isLoadingAnswer }" />重新生成</Button>
               </div>
             </div>
 
@@ -99,8 +99,34 @@
             </div>
             <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="flashcard-answer rounded-xl border border-border/80 bg-muted/30 p-4 text-sm leading-7 text-foreground md:p-6" v-html="renderMarkdown(currentQ.ai_answer)"></div>
             <div v-else class="rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
-              <p class="text-sm text-muted-foreground">这道题还没有参考答案</p>
-              <Button size="sm" class="mt-4 gap-1.5" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><Sparkles class="size-4" />AI 生成答案</Button>
+              <p v-if="isAdmin" class="text-sm text-muted-foreground">这道题还没有参考答案</p>
+              <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
+              <Button v-if="isAdmin" size="sm" class="mt-4 gap-1.5" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><Sparkles class="size-4" />AI 生成答案</Button>
+            </div>
+
+            <!-- 背诵稿（普通用户）：基于公共参考答案结合个人背景定制 -->
+            <div v-if="!isAdmin && currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="mt-6 rounded-xl border border-border/80 bg-muted/30 p-4 md:p-5">
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2 text-sm font-semibold text-foreground"><BookOpen class="size-4 text-primary" />我的背诵稿</div>
+                <div v-if="qState._recitation" class="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" class="h-8 px-2 text-xs" @click="startEditRecitation"><Pencil class="mr-1.5 size-3.5" />编辑</Button>
+                  <Button variant="ghost" size="sm" class="h-8 px-2 text-xs" :disabled="qState._isGeneratingRecitation" @click="handleGenerateRecitation"><RefreshCw class="mr-1.5 size-3.5" :class="{ 'animate-spin': qState._isGeneratingRecitation }" />重新生成</Button>
+                </div>
+              </div>
+
+              <div v-if="qState._isEditingRecitation" class="flex flex-col gap-3">
+                <textarea v-model="qState._editRecitation" rows="10" class="w-full resize-y rounded-lg border border-input bg-background p-3 text-sm leading-relaxed text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"></textarea>
+                <div class="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" @click="qState._isEditingRecitation = false">取消</Button>
+                  <Button size="sm" :disabled="qState._isSavingRecitation" @click="handleSaveRecitation">{{ qState._isSavingRecitation ? '保存中...' : '保存背诵稿' }}</Button>
+                </div>
+              </div>
+              <div v-else-if="qState._recitation" class="recitation-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
+              <div v-else-if="qState._isGeneratingRecitation" class="flex flex-col items-center gap-2 py-4 text-primary">
+                <Loader2 class="size-5 animate-spin" />
+                <span class="text-xs">正在结合你的岗位/简历定制背诵稿...</span>
+              </div>
+              <Button v-else size="sm" class="gap-1.5" :disabled="qState._isGeneratingRecitation" @click="handleGenerateRecitation"><Sparkles class="size-4" />AI 定制我的背诵稿</Button>
             </div>
           </div>
         </div>
@@ -227,6 +253,8 @@ import {
   scoreTextColor,
   resetQState,
   generateAnswerForQuestion,
+  generateRecitationForQuestion,
+  saveRecitationForQuestion,
   saveAnswerForQuestion,
   evaluateAnswerForQuestion,
   loadHistory,
@@ -255,7 +283,7 @@ const showHistory = ref(false)
 const rememberedIds = ref(new Set())
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
-const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false })
+const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
   const info = props.practicedQuestions?.[question?.id] || {}
@@ -309,7 +337,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -347,6 +375,9 @@ async function toggleHistory() { showHistory.value = !showHistory.value; if (sho
 function startEditAnswer() { qState._isEditingAnswer = true; qState._editAnswer = currentQ.value?.ai_answer || '' }
 async function handleGenerate() { if (currentQ.value) await generateAnswerForQuestion(currentQ.value, qState) }
 async function handleSaveAnswer() { if (currentQ.value) await saveAnswerForQuestion(currentQ.value, qState) }
+function startEditRecitation() { qState._isEditingRecitation = true; qState._editRecitation = qState._recitation }
+async function handleGenerateRecitation() { if (currentQ.value) await generateRecitationForQuestion(currentQ.value, qState) }
+async function handleSaveRecitation() { if (currentQ.value) await saveRecitationForQuestion(currentQ.value, qState) }
 async function handleEvaluate() { if (!currentQ.value) return; const result = await evaluateAnswerForQuestion(currentQ.value, qState); if (result) emit('answer-evaluated', { questionId: currentQ.value.id, score: result.overall_score }) }
 function evaluationSummary(evaluation) { return Object.entries(evaluation?.dimensions || {}).map(([key, value]) => `${dimLabel[key] || key} ${value.score}`).join(' · ') || '已完成一次自测' }
 function formatHistoryDate(date) { return date ? String(date).slice(0, 16).replace('T', ' ') : '刚刚' }

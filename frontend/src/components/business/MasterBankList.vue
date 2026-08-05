@@ -75,8 +75,6 @@
               @toggle-star="$emit('toggle-star', $event)"
               @retag="$emit('retag', $event)"
               @generate-answer="$emit('generate-answer', $event)"
-              @use-reference-answer="$emit('use-reference-answer', $event)"
-              @save-user-answer="$emit('save-user-answer', $event)"
               @save-field="$emit('save-field', $event)"
               @toggle-item="$emit('toggle-item', $event)"
               @practice="$emit('practice', $event)"
@@ -128,7 +126,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'toggle-star', 'retag',
-  'generate-answer', 'use-reference-answer', 'save-user-answer', 'save-field',
+  'generate-answer', 'save-field',
   'toggle-item', 'practice', 'split-question',
   'start-merge', 'navigate-to-interview', 'delete', 'edit-question',
   'delete-original-question', 'update-answer', 'load-more', 'share',
