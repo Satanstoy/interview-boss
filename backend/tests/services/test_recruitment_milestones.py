@@ -4,6 +4,7 @@ import pytest
 
 from app.services.recruitment_milestones import (
     BATCH_LABELS,
+    compute_urgency,
     get_milestones,
     Milestone,
 )
@@ -42,3 +43,40 @@ def test_milestone_shape():
     assert isinstance(m.date, date)
     assert m.kind in {"window_close", "peak", "horizon"}
     assert BATCH_LABELS["autumn"] == "秋招"
+
+def test_no_milestones_means_zero_urgency():
+    result = compute_urgency([], date(2026, 8, 5))
+    assert result["urgency"] == 0
+    assert result["next_milestone"] is None
+    assert result["days_left"] is None
+
+def test_far_away_milestone_means_zero_urgency():
+    ms = [Milestone("正式批高峰", date(2026, 10, 15), "peak")]
+    result = compute_urgency(ms, date(2026, 8, 5))
+    assert result["urgency"] == 0  # 71 days away > 60-day horizon
+
+def test_approaching_milestone_ramps_urgency():
+    ms = [Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close")]
+    result = compute_urgency(ms, date(2026, 8, 5))
+    assert result["urgency"] > 0.4
+    assert result["urgency"] < 0.6  # 26/60 -> ~0.567
+    assert result["next_milestone"]["name"] == "提前批窗口关闭"
+    assert result["days_left"] == 26
+
+def test_milestone_today_is_max_urgency():
+    ms = [Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close")]
+    assert compute_urgency(ms, date(2026, 8, 31))["urgency"] == 1.0
+
+def test_all_milestones_past_means_zero():
+    ms = [Milestone("补录收尾", date(2026, 12, 31), "horizon")]
+    result = compute_urgency(ms, date(2027, 3, 1))
+    assert result["urgency"] == 0
+    assert result["next_milestone"] is None
+
+def test_picks_the_next_milestone_not_the_closest_date():
+    ms = [
+        Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close"),
+        Milestone("正式批高峰", date(2026, 10, 15), "peak"),
+    ]
+    result = compute_urgency(ms, date(2026, 9, 5))
+    assert result["next_milestone"]["name"] == "正式批高峰"
