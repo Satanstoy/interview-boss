@@ -15,6 +15,7 @@ import {
 
 import { createSubmitJob } from '@/services/dataApi.js'
 import { useSubmitJobs, attachJob } from '@/composables/useSubmitJobs.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
 
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -180,6 +181,9 @@ async function onSubmit() {
       return
     }
   }
+
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: '提交解析' })) return
 
   isSubmitting.value = true
   try {

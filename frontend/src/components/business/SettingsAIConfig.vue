@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 import { fetchMyLLMConfig, updateMyLLMConfig, deleteMyLLMConfig } from '@/services/profileApi.js'
 import { validateBaseUrl } from '@/utils/validate.js'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import ModelSelectField from '@/components/business/ModelSelectField.vue'
 
 const { success: toastSuccess, error: toastError } = useToast()
 const { confirm: showConfirm } = useConfirm()
+const { invalidateModelStatus, testModelConnection, testing } = useModelGuard()
 const loading = ref(false)
 const saving = ref(false)
 const configured = ref(false)
@@ -86,6 +88,7 @@ const handleSave = async () => {
     }
     await updateMyLLMConfig(payload)
     toastSuccess('AI 配置已保存')
+    invalidateModelStatus()
     await loadConfig()
   } catch (e) {
     error.value = `保存失败: ${e.message}`
@@ -101,11 +104,21 @@ const handleDelete = async () => {
   try {
     await deleteMyLLMConfig()
     toastSuccess('AI 配置已清除')
+    invalidateModelStatus()
     await loadConfig()
   } catch (e) {
     error.value = `清除失败: ${e.message}`
   } finally {
     saving.value = false
+  }
+}
+
+const handleTestConnection = async () => {
+  const status = await testModelConnection()
+  if (status.connected) {
+    toastSuccess(`连接成功：模型 ${status.model || ''} 可正常提供服务`)
+  } else {
+    toastError(status.error || '连接失败，请检查配置')
   }
 }
 
@@ -238,6 +251,9 @@ onMounted(loadConfig)
           </div>
         </div>
         <div class="flex gap-2">
+          <Button variant="outline" size="sm" @click="handleTestConnection" :disabled="testing">
+            {{ testing ? '测试中...' : '测试连接' }}
+          </Button>
           <Button variant="outline" size="sm" @click="startEdit(); editKey = true">
             修改配置
           </Button>

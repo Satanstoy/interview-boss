@@ -404,6 +404,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -455,6 +456,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 const { success: toastSuccess, error: toastError } = useToast()
 const { confirm: showConfirm } = useConfirm()
+const { ensureModelReady } = useModelGuard()
 
 // State
 const conversations = ref([])
@@ -815,6 +817,9 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     }
   }
   if (!text || isSending.value) return
+
+  // 模型未配置/未接通时引导去设置页，中止发送
+  if (!props.preview && !(await ensureModelReady({ action: '发送消息' }))) return
 
   // 如果有待创建的对话，先创建对话
   if (pendingNewConversation.value && activeConversationId.value === 'pending') {

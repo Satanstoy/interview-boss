@@ -226,6 +226,7 @@ import { Textarea } from '@/components/ui/textarea'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { useToast } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 import CodeEditor from './CodeEditor.vue'
 import { addCodingPlaylistItem, fetchCodingProblem, fetchCodingProblems, importCodingProblems, removeCodingPlaylistItem, submitCodingCode, toggleCodingFavorite } from '@/services/codingApi.js'
 
@@ -404,6 +405,8 @@ async function handleMarkdownFile(event) {
 
 async function importProblems() {
   if (!importMarkdown.value.trim()) return
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: 'AI 导入题目' })) return
   isImporting.value = true
   importError.value = ''
   try {
@@ -432,6 +435,8 @@ function clearProblem(problem) {
 
 async function submitCode(problem, mode) {
   if (!problem._code.trim() || (mode === 'hint' && problem._hintCount >= 3)) return
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: mode === 'hint' ? 'AI 提示' : '提交评审' })) return
   problem._isSubmitting = true
   problem._currentMode = mode
   problem._currentStep = ''

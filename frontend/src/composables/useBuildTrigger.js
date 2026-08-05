@@ -8,10 +8,12 @@ import { ref, computed } from 'vue'
 import { getFriendlyError } from '@/services/http.js'
 import * as api from '@/api/index.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 
 export function useBuildTrigger({ onRebuildDone } = {}) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
+  const { ensureModelReady } = useModelGuard()
 
   const isBuilding = ref(false)
   const buildProgress = ref({ step: '', current: 0, total: 0, message: '' })
@@ -49,6 +51,7 @@ export function useBuildTrigger({ onRebuildDone } = {}) {
     } catch (e) { console.warn('检查分析状态失败，继续重建:', e) }
 
     if (!await showConfirm('将基于现有分类重新聚类（不会重新打标），确定继续？', { title: '重新聚类', variant: 'danger' })) return
+    if (!await ensureModelReady({ action: '题库重建' })) return
     isBuilding.value = true
     buildProgress.value = { step: '', current: 0, total: 0, message: '提交重建任务...' }
     try {
@@ -69,6 +72,7 @@ export function useBuildTrigger({ onRebuildDone } = {}) {
 
   const triggerBuildPersonalBank = async () => {
     if (!await showConfirm('将把你的个人题目与公共题库进行聚类合并，匹配到的题目会并入公共题库，确定继续？', { title: '重建个人题库' })) return
+    if (!await ensureModelReady({ action: '个人题库重建' })) return
     isBuilding.value = true
     buildProgress.value = { step: '', current: 0, total: 0, message: '' }
     try {

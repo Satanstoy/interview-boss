@@ -393,12 +393,14 @@ import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { fetchRandomQuestions, generateAnswer as apiGenerateAnswer, evaluateAnswer, fetchPracticeHistory, updateRecord, toggleStar as apiToggleStar } from '@/api/index.js'
 import { sanitizeAgainstInjection, validateNumber } from '@/utils/validate.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import ModelSelectField from '@/components/business/ModelSelectField.vue'
 import { getExperiences } from '@/services/interviewApi.js'
 
 const toast = useToast()
 const { confirm: showConfirm } = useConfirm()
+const { ensureModelReady } = useModelGuard()
 
 const props = defineProps({
   popularTags: { type: Object, default: () => ({}) }
@@ -480,6 +482,7 @@ const loadQuestions = async () => {
 }
 
 const handleGenerate = async (q) => {
+  if (!await ensureModelReady({ action: 'AI 生成答案' })) return
   q._isLoadingAnswer = true
   try {
     const data = await apiGenerateAnswer(q.id)
@@ -533,6 +536,7 @@ const handleEvaluate = async (q) => {
     toast.warning(e.message)
     return
   }
+  if (!await ensureModelReady({ action: '自测评估' })) return
   q._isEvaluating = true
   q._evaluation = null
   try {

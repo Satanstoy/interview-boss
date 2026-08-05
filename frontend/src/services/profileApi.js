@@ -34,6 +34,8 @@ export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)
 export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, settings)
 export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 export const fetchAvailableModels = () => get(`${API}/profile/llm/models`)
+export const fetchLLMStatus = (opts = {}) =>
+  get(`${API}/profile/llm/status${opts.probe ? '?probe=1' : ''}`, { noCache: true })
 
 // ── Per-user web search config ──
 export const fetchMySearchConfig = () => get(`${API}/profile/search`, { noCache: true })

@@ -2,6 +2,7 @@ import { generateAnswer as apiGenerateAnswer, generateRecitation as apiGenerateR
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { sanitizeAgainstInjection } from '../utils/validate.js'
 import { useToast } from './useNotification.js'
+import { useModelGuard } from './useModelGuard.js'
 
 export const dimLabel = { completeness: '完整性', depth: '深度', accuracy: '准确性', logic: '逻辑性' }
 
@@ -50,6 +51,8 @@ export function resetQState(qState) {
 
 export async function generateAnswerForQuestion(question, qState) {
   const toast = useToast()
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: 'AI 生成答案' })) return
   qState._isLoadingAnswer = true
   try {
     const data = await apiGenerateAnswer(question.id)
@@ -85,6 +88,8 @@ export async function saveAnswerForQuestion(question, qState) {
 
 export async function generateRecitationForQuestion(question, qState) {
   const toast = useToast()
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: '生成背诵稿' })) return
   qState._isGeneratingRecitation = true
   try {
     const data = await apiGenerateRecitation(question.id)
@@ -135,6 +140,8 @@ export async function evaluateAnswerForQuestion(question, qState) {
     toast.warning(e.message)
     return null
   }
+  const { ensureModelReady } = useModelGuard()
+  if (!await ensureModelReady({ action: '自测评估' })) return null
   qState._isEvaluating = true
   qState._evaluation = null
   try {

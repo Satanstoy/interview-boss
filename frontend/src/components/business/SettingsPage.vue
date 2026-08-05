@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { User, Target, Bot, Shield, Settings, Server, Search, PanelLeft } from '@lucide/vue'
 import SettingsNav from './SettingsNav.vue'
 import SettingsProfile from './SettingsProfile.vue'
@@ -28,6 +29,7 @@ const emit = defineEmits([
   'sidebar-collapsed-changed',
 ])
 
+const route = useRoute()
 const activeSection = ref('profile')
 const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
 const navCollapsed = ref(isMobileViewport())
@@ -44,6 +46,15 @@ const sections = computed(() => {
   if (props.isAdmin) items.push({ id: 'admin', label: '管理员设置', description: '分类和题库操作', icon: Settings })
   return items
 })
+
+// 支持 /settings?section=ai 直达对应配置区（模型守卫引导入口）
+const sectionFromQuery = (value) => {
+  const known = ['profile', 'interview', 'ai', 'search', 'mcp', 'security', 'admin']
+  return known.includes(value) ? value : 'profile'
+}
+watch(() => route.query.section, (value) => {
+  if (value) activeSection.value = sectionFromQuery(value)
+}, { immediate: true })
 
 const currentSectionLabel = computed(
   () => sections.value.find(s => s.id === activeSection.value)?.label || '设置',

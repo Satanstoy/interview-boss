@@ -52,7 +52,6 @@ export {
   buildPersonalBankSSE,
   retagQuestion,
   generateAnswer,
-  useReferenceAnswer,
   saveUserAnswer,
   generateRecitation,
   toggleStar,
@@ -111,6 +110,7 @@ export {
   fetchMyLLMConfig,
   updateMyLLMConfig,
   deleteMyLLMConfig,
+  fetchLLMStatus,
 } from '../services/profileApi.js'
 
 // ── Practice ──

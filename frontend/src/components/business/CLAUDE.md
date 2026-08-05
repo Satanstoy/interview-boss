@@ -26,18 +26,19 @@
 | `MockInterview.vue` | 模拟面试（配置面板 + 抽测模式）；布局紧凑化（header padding `px-4 py-3`，内容 padding `p-4`）；支持临时选择模型留空则走全局默认 |
 | `ModelSelectField.vue` | 模型选择字段（表单场景）：可搜索下拉 + 允许手动输入；`SettingsAIConfig` 全局默认与 `MockInterview` 临时覆盖复用同一组件 |
 | `ModelSelector.vue` | 工具栏场景的模型切换按钮（图标+下拉，`ChatView` 使用）；不依赖外部 v-model，自带 fetchAvailableModels |
+| `ModelGuardDialog.vue` | AI 模型预检守卫弹窗：模型未配置/未接通时由 `useModelGuard` 触发，引导用户到设置页 AI 配置区 |
 | `NewChatModal.vue` | 新建对话弹窗（模式、JD/简历、面试难度、参考面经节奏） |
 | `PracticeMode.vue` | `/practice` 路由内的 Chat 风格闪卡刷题工作台：题单选择器由全局 `SiteHeader` 提供，侧栏只展示当前题单的搜索和题目列表；支持单卡翻答案、收藏、加入题单、AI 答案生成/编辑（仅管理员）、普通用户「AI 定制我的背诵稿」（基于公共参考答案 + 岗位/简历个性化改写，可编辑保存）、可选自测与练习记录，题卡内部独立滚动并按容器尺寸自适应字号 |
 | `PracticeDeckManager.vue` | `/practice/decks` 题单管理工作台：展示“全部题/我的收藏”和用户自定义题单，支持自定义题单 CRUD、公开范围、推荐模板，以及题目关联管理 |
 | `PracticePanel.vue` | 练习面板 |
 | `QuestionCard.vue` | 题目卡片（私有题显示「私有」徽标 + 分享按钮）；答案区仅展示公共参考答案（题解），生成/编辑/手动编写按钮仅管理员；普通用户无生成入口，个人答案（背诵稿）不在题库卡片展示 |
 | `SearchFilterBar.vue` | 搜索过滤栏 |
-| `SettingsPage.vue` | 统一设置页面（左侧工作区导航 + 右侧内容面板；个人信息、面试偏好、AI 配置、账户安全、管理员设置）；侧栏折叠/展开动画对齐 ChatView |
+| `SettingsPage.vue` | 统一设置页面（左侧工作区导航 + 右侧内容面板；个人信息、面试偏好、AI 配置、账户安全、管理员设置）；侧栏折叠/展开动画对齐 ChatView；支持 `?section=ai` 直达配置区 |
 | `SettingsNav.vue` | 设置页左侧导航栏，风格对齐模拟面试/手撕代码的内部侧栏 |
 | `SettingsProfile.vue` | 设置 - 个人信息（邮箱、简历、进度、分享默认值、外观） |
 | `SettingsInterview.vue` | 设置 - 面试偏好（岗位、收藏夹、AI 分类） |
 | `InterviewDistributionSettings.vue` | 五类模拟面试题型比例与主问题数；系统默认或用户自定义保存 |
-| `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数） |
+| `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数；保存/清除后失效模型缓存；「测试连接」实时探测模型可用性） |
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
 | `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作） |
 | `StagingPanel.vue` | 暂存面板（导入时分享设置：分享到公共题库 / 仅自己可见，所有用户可见） |

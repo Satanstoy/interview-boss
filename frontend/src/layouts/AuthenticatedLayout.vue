@@ -42,6 +42,7 @@ import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
 import { defineAsyncComponent } from 'vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import ModelGuardDialog from '@/components/business/ModelGuardDialog.vue'
 import LoginModal from '@/components/business/LoginModal.vue'
 import LoginPage from '@/components/business/LoginPage.vue'
 import MergeQuestionDialog from '@/components/business/MergeQuestionDialog.vue'
@@ -719,6 +720,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
     </div>
 
     <ConfirmDialog />
+    <ModelGuardDialog />
     <LoginModal :visible="showLoginModal && !isPreviewMode" @close="showLoginModal = false" @login-success="handleLoginSuccess" />
     <AdminReview :visible="showReviewPanel" @close="showReviewPanel = false" @reviewed="fetchTableData" />
     <PracticePanel :visible="!!practiceQuestion" :question="practiceQuestion" :is-admin="currentUser?.is_admin" @close="practiceQuestion = null" />

@@ -2,10 +2,12 @@ import { ref, computed } from 'vue'
 import * as api from '@/api/index.js'
 import { getFriendlyError } from '@/services/http.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 
 export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAnalytics) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
+  const { ensureModelReady } = useModelGuard()
 
   const reprocessingIds = ref({})
   const reprocessProgress = ref({})
@@ -131,6 +133,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
   }
 
   const generateAnswer = async (question) => {
+    if (!await ensureModelReady({ action: 'AI 生成答案' })) return
     question._isLoadingAnswer = true
     try {
       const data = await api.generateAnswer(question.id)

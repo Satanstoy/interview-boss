@@ -116,6 +116,7 @@ src/
 | 题库重建 | `composables/useBuildTrigger.js` |
 | 题目操作 | `composables/useQuestionOps.js` + `services/masterBankApi.js` |
 | 批量操作 | `composables/useBatchActions.js` |
+| 模型预检守卫 | `composables/useModelGuard.js` + `components/business/ModelGuardDialog.vue`（配置检查 + 会话内探测缓存，未就绪弹 Dialog 引导设置页） |
 | 合并弹窗 | `composables/useMergeDialog.js` |
 | 练习/面试 | `composables/usePractice.js` + `composables/usePracticeDecks.js` + `services/practiceApi.js` + `views/PracticeView.vue` + `views/PracticeDecksView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticeDeckManager.vue` + `components/business/PracticePanel.vue` |
 | 导入任务 | `composables/useSubmitJobs.js` + `services/dataApi.js` |

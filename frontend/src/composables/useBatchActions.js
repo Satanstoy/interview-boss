@@ -2,10 +2,12 @@ import { computed } from 'vue'
 import * as api from '@/api/index.js'
 import { getFriendlyError } from '@/services/http.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
+import { useModelGuard } from '@/composables/useModelGuard.js'
 
 export function useBatchActions({ currentUser, jdSelection, interviewSelection, masterSelection, fetchTableData, fetchAnalytics }) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
+  const { ensureModelReady } = useModelGuard()
 
   const jdBatchActions = computed(() => {
     if (!currentUser.value?.is_admin) return []
@@ -104,6 +106,7 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
       handler: async (onProgress) => {
         const ids = [...masterSelection.selectedIds.value]
         if (!await showConfirm(`确定要为选中的 ${ids.length} 道题目生成答案？`)) return
+        if (!await ensureModelReady({ action: '批量生成答案' })) return
         try {
           const result = await api.batchGenerateAnswers(ids, (event) => {
             if (event.type === 'init') {
