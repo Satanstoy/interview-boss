@@ -70,7 +70,7 @@ export function usePracticeDecks(filter = 'all') {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
       if (selectedDeckKey.value === 'due' && nextState.next_review_at) {
-        const todayStr = new Date().toISOString().slice(0, 10)
+        const todayStr = new Date().toLocaleDateString('en-CA')
         const nextDateStr = String(nextState.next_review_at).slice(0, 10)
         if (nextDateStr > todayStr) {
           const idx = questions.value.findIndex(question => question.id === questionId)
