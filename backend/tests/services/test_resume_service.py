@@ -184,3 +184,21 @@ class TestResumeOptimizationStorage:
         user_id = conn.execute("SELECT id FROM users WHERE username = 'opt_user4'").fetchone()[0]
 
         assert resume_service.save_optimization(user_id, "岗位A", ["要点1"], "版本1") is False
+
+
+class TestResumePrompts:
+    """简历优化 prompt 构造"""
+
+    def test_build_resume_optimize_prompts(self):
+        """T-110: 要点 prompt 要求 JSON 输出，全文 prompt 包含岗位与原文"""
+        from app.core.prompts import build_resume_optimize_points_prompt, build_resume_optimize_text_prompt
+
+        points_prompt = build_resume_optimize_points_prompt("张三\n后端工程师", "后端工程师")
+        assert "JSON" in points_prompt
+        assert "后端工程师" in points_prompt
+        assert "张三" in points_prompt
+
+        text_prompt = build_resume_optimize_text_prompt("张三\n后端工程师", "后端工程师")
+        assert "优化" in text_prompt
+        assert "后端工程师" in text_prompt
+        assert "张三" in text_prompt
