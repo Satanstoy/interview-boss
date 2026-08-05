@@ -66,7 +66,7 @@ Routers → Services → Core/DB → (external)
 
 ### Services (`app/services/`) — 业务逻辑层
 - `llm.py` — AsyncOpenAI + tenacity 重试
-- `clustering/` — LLM 聚类去重（matcher/clusterer/full_recluster/prompts）
+- `clustering/` — LLM 聚类去重（matcher/clusterer/full_recluster/prompts）；`experiments/` 为独立实验模块（语义标签摘要记忆，评估通过才并入生产）
 - `clustering_maintenance.py` — 聚类元数据审计/确定性修复
 - `pipeline/` — 批处理流水线（batch.py）、单例压缩（compact.py）、队列、清洗、写库
 - `submit_service.py` — 提交业务逻辑（标签、答案生成、增量更新）
