@@ -15,6 +15,7 @@ from app.db.migrations.question_bank import (
     _migration_005_question_bank_extra_columns,
     _migration_006_job_positions,
     _migration_007_taxonomy,
+    _migration_063_answer_sources,
 )
 from app.db.migrations.auth import (
     _migration_003_auth_tables,
@@ -168,6 +169,7 @@ _MIGRATIONS = [
     (60, "search_config", _migration_060_search_config),
     (61, "resume_optimization", _migration_061_resume_optimization),
     (62, "user_recruitment_pref", _migration_062_user_recruitment_pref),
+    (63, "answer_sources", _migration_063_answer_sources),
 ]
 
 

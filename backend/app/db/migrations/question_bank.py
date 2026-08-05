@@ -599,3 +599,16 @@ def _migration_007_taxonomy(conn):
         CREATE UNIQUE INDEX IF NOT EXISTS idx_taxonomy_position_owner
         ON taxonomy(position_name, source, owner_id)
     """)
+
+
+def _migration_063_answer_sources(conn):
+    """question_bank 增加 answer_sources 列（答案生成时联网搜索的来源，JSON 数组，无来源为 NULL）"""
+    cursor = conn.cursor()
+    columns = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info('question_bank')").fetchall()
+    }
+    if "answer_sources" not in columns:
+        cursor.execute(
+            "ALTER TABLE question_bank ADD COLUMN answer_sources TEXT DEFAULT NULL"
+        )
