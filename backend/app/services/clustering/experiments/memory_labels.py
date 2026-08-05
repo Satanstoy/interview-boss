@@ -98,6 +98,7 @@ async def generate_cluster_labels(clusters: list[dict], user_id: int | None = No
     labels: dict[int, str] = {}
     for i in range(0, len(clusters), LABELS_PER_BATCH):
         batch = clusters[i : i + LABELS_PER_BATCH]
+        batch_ids = {c["qb_id"] for c in batch}
         lines = "\n".join(
             f"{c['qb_id']} | {c['question']} | " + " | ".join(c["oq"][:6])
             for c in batch
@@ -113,11 +114,17 @@ async def generate_cluster_labels(clusters: list[dict], user_id: int | None = No
             )
             parsed = _extract_json_array(raw)
             for item in parsed:
-                label = (item.get("label") or "").strip()
                 qid_raw = item.get("qb_id")
-                if not qid_raw or not label:
+                label = (item.get("label") or "").strip()
+                if qid_raw is None or not label:
                     continue
-                labels[int(qid_raw)] = label
+                try:
+                    qid = int(qid_raw)
+                except (ValueError, TypeError):
+                    continue
+                if qid not in batch_ids:  # 过滤幻觉 id，避免流入 Task 4 prompt
+                    continue
+                labels[qid] = label
         except Exception as e:
             logger.warning(f"[experiment] 标签摘要生成失败，回退代表题: {e}")
         for c in batch:

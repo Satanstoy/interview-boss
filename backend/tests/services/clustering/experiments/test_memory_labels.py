@@ -133,6 +133,7 @@ async def test_generate_cluster_labels_parses_llm_json(monkeypatch, test_db):
         return json.dumps([
             {"qb_id": 1, "label": "高并发限流方案", "keywords": ["限流", "高并发", "网关"]},
             {"qb_id": 2, "label": "Java 线程池", "keywords": ["线程池", "JUC"]},
+            {"qb_id": 999, "label": "幻觉 id", "keywords": ["不存在"]},
         ], ensure_ascii=False)
 
     monkeypatch.setattr(
@@ -144,6 +145,7 @@ async def test_generate_cluster_labels_parses_llm_json(monkeypatch, test_db):
 
     assert labels[1] == "高并发限流方案"
     assert labels[2] == "Java 线程池"
+    assert 999 not in labels  # 幻觉 id（不在当前批）必须被过滤
 
 
 async def test_generate_cluster_labels_falls_back_to_question(monkeypatch, test_db):
@@ -165,3 +167,16 @@ async def test_generate_cluster_labels_falls_back_to_question(monkeypatch, test_
 
     assert labels[1].startswith("高并发")  # 回退到代表题文本
     assert len(labels) == 2
+
+
+def test_extract_json_array_tolerant_branches():
+    from app.services.clustering.experiments.memory_labels import _extract_json_array
+
+    # markdown 代码块包裹
+    assert _extract_json_array('```json\n[{"qb_id": 1}]\n```') == [{"qb_id": 1}]
+    # {"clusters": [...]} 对象包裹
+    assert _extract_json_array('{"clusters": [{"qb_id": 2}]}') == [{"qb_id": 2}]
+    # 垃圾输入 → []
+    assert _extract_json_array("hello world") == []
+    # 非法 JSON 但含数组片段 → 正则兜底
+    assert _extract_json_array('prefix [{"qb_id": 3}] suffix') == [{"qb_id": 3}]
