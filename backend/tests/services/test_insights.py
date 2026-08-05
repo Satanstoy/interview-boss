@@ -9,11 +9,11 @@ def _insert_user(conn, user_id, position="测试岗位"):
     )
 
 
-def _insert_question(conn, question_id, topic, position="测试岗位", frequency=1, deleted_at=None):
+def _insert_question(conn, question_id, topic, position="测试岗位", frequency=1, deleted_at=None, difficulty="简单"):
     conn.execute(
         "INSERT INTO question_bank "
-        "(id, question, cat1, cat2, frequency, status, owner_id, job_position, deleted_at) "
-        "VALUES (?, ?, ?, ?, ?, 'approved', NULL, ?, ?)",
+        "(id, question, cat1, cat2, frequency, status, owner_id, job_position, deleted_at, difficulty) "
+        "VALUES (?, ?, ?, ?, ?, 'approved', NULL, ?, ?, ?)",
         (
             question_id,
             f"{topic}面试题",
@@ -22,6 +22,7 @@ def _insert_question(conn, question_id, topic, position="测试岗位", frequenc
             frequency,
             position,
             deleted_at,
+            difficulty,
         ),
     )
 
@@ -133,3 +134,199 @@ def test_insights_endpoint_requires_auth_and_returns_contract(client, test_db):
         "reviews",
         "data_quality",
     }
+
+
+def _insert_review(conn, user_id, review_id, question_bank_id, rating, reviewed_at, score=None):
+    conn.execute(
+        "INSERT INTO user_question_review "
+        "(id, user_id, question_bank_id, proficiency, state, last_rating) "
+        "VALUES (?, ?, ?, 40, 'review', ?)",
+        (review_id, user_id, question_bank_id, rating),
+    )
+    conn.execute(
+        "INSERT INTO practice_review_events "
+        "(user_id, question_bank_id, review_id, rating, score, reviewed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, question_bank_id, review_id, rating, score, reviewed_at),
+    )
+
+
+def test_practice_activity_heatmap_trend_and_streak(test_db):
+    from datetime import datetime, timedelta
+
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 401)
+    _insert_question(test_db, 1, "RAG系统设计", difficulty="medium")
+    today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    three_days_ago = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+
+    for i, score in enumerate((85, 90)):
+        test_db.execute(
+            "INSERT INTO user_practice_history "
+            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
+            (401, 1, score, f"{today} 10:0{i}:00"),
+        )
+    test_db.execute(
+        "INSERT INTO user_practice_history "
+        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
+        (401, 1, 50, f"{three_days_ago} 09:00:00"),
+    )
+    _insert_review(test_db, 401, 1, 1, "good", f"{yesterday} 20:00:00", score=85)
+    test_db.commit()
+
+    data = build_practice_activity({"id": 401})
+
+    assert data["streak"] == {"current": 2, "longest": 2}
+    assert len(data["heatmap"]) == 90
+    assert len(data["trend"]) == 30
+    day_map = {d["date"]: d for d in data["heatmap"]}
+    assert day_map[today]["count"] == 2
+    assert day_map[today]["avg_score"] == 87.5
+    assert day_map[yesterday]["count"] == 1
+    assert day_map[three_days_ago]["count"] == 1
+    trend_map = {d["date"]: d for d in data["trend"]}
+    assert trend_map[today]["count"] == 2
+    assert trend_map[today]["avg_score"] == 87.5
+
+
+def test_practice_activity_streak_breaks_with_gap(test_db):
+    from datetime import datetime, timedelta
+
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 402)
+    _insert_question(test_db, 2, "Agent编排")
+    today = datetime.now().strftime("%Y-%m-%d")
+    three_days_ago = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    test_db.execute(
+        "INSERT INTO user_practice_history "
+        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
+        (402, 2, 70, f"{today} 09:00:00"),
+    )
+    test_db.execute(
+        "INSERT INTO user_practice_history "
+        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
+        (402, 2, 70, f"{three_days_ago} 09:00:00"),
+    )
+    test_db.commit()
+
+    data = build_practice_activity({"id": 402})
+
+    assert data["streak"] == {"current": 1, "longest": 1}
+
+
+def test_practice_activity_streak_zero_without_activity(test_db):
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 403)
+    _insert_question(test_db, 3, "函数调用")
+
+    data = build_practice_activity({"id": 403})
+
+    assert data["streak"] == {"current": 0, "longest": 0}
+    assert data["heatmap"][-1]["count"] == 0
+
+
+def test_practice_activity_radar_topics_by_proficiency(test_db):
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 404)
+    _insert_question(test_db, 1, "RAG系统设计")
+    _insert_question(test_db, 2, "Agent编排")
+    _insert_question(test_db, 3, "前端工程", position="其他岗位")
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency) VALUES (?, ?, ?)",
+        (404, 1, 80),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency) VALUES (?, ?, ?)",
+        (404, 2, 40),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency) VALUES (?, ?, ?)",
+        (404, 3, 90),
+    )
+    test_db.commit()
+
+    data = build_practice_activity({"id": 404})
+
+    topics = {item["topic"]: item["proficiency"] for item in data["radar"]}
+    assert topics == {"前端工程": 90, "RAG系统设计": 80, "Agent编排": 40}
+
+
+def test_practice_activity_difficulty_correct_rate(test_db):
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 405)
+    _insert_question(test_db, 1, "RAG系统设计", difficulty="简单")
+    _insert_question(test_db, 2, "Agent编排", difficulty="中等")
+    _insert_question(test_db, 3, "前端工程", difficulty="hard")
+    _insert_question(test_db, 4, "未标注难度", difficulty="")
+    for qid, score in ((1, 70), (1, 50), (2, 90), (3, 45), (4, 66)):
+        test_db.execute(
+            "INSERT INTO user_practice_history "
+            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, datetime('now'))",
+            (405, qid, score),
+        )
+    test_db.commit()
+
+    data = build_practice_activity({"id": 405})
+
+    stats = {item["difficulty"]: item for item in data["difficulty"]}
+    assert stats["简单"] == {"difficulty": "简单", "count": 2, "correct_rate": 50}
+    assert stats["中等"] == {"difficulty": "中等", "count": 1, "correct_rate": 100}
+    assert stats["困难"] == {"difficulty": "困难", "count": 1, "correct_rate": 0}
+    assert stats["未标注"] == {"difficulty": "未标注", "count": 1, "correct_rate": 100}
+
+
+def test_practice_activity_recent_merges_and_limits(test_db):
+    from datetime import datetime
+
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 406)
+    _insert_question(test_db, 1, "RAG系统设计")
+    for i in range(12):
+        test_db.execute(
+            "INSERT INTO user_practice_history "
+            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
+            (406, 1, 60 + i, f"2026-08-01 {i:02d}:00:00"),
+        )
+    _insert_review(test_db, 406, 1, 1, "easy", "2026-08-05 09:00:00")
+    test_db.commit()
+
+    data = build_practice_activity({"id": 406})
+
+    assert len(data["recent"]) == 10
+    first = data["recent"][0]
+    assert first["type"] == "review"
+    assert first["rating"] == "easy"
+    assert first["question"] == "RAG系统设计面试题"
+    assert first["score"] is None
+    answers = [item for item in data["recent"] if item["type"] == "answer"]
+    assert len(answers) == 9
+    assert all(item["score"] is not None and item["created_at"] for item in answers)
+
+
+def test_practice_activity_is_user_scoped(test_db):
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 407)
+    _insert_user(test_db, 408)
+    _insert_question(test_db, 1, "RAG系统设计")
+    test_db.execute(
+        "INSERT INTO user_practice_history "
+        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, datetime('now'))",
+        (407, 1, 88),
+    )
+    test_db.commit()
+
+    data = build_practice_activity({"id": 408})
+
+    assert data["heatmap"][-1]["count"] == 0
+    assert data["streak"] == {"current": 0, "longest": 0}
+    assert data["radar"] == []
+    assert data["difficulty"] == []
+    assert data["recent"] == []

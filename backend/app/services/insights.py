@@ -4,6 +4,7 @@
 """
 
 from collections import defaultdict
+from datetime import date, datetime, timedelta
 
 from app.db.connection import get_db_connection, get_user_job_position
 from app.db.queries import build_bank_where_clause
@@ -220,4 +221,212 @@ def build_insights_snapshot(user: dict) -> dict:
                 else "准备度包含个人练习评分证据。"
             ),
         },
+    }
+
+
+_DIFFICULTY_LABELS = {"easy": "简单", "medium": "中等", "hard": "困难"}
+
+
+def _difficulty_label(raw: str | None) -> str:
+    return _DIFFICULTY_LABELS.get((raw or "").lower(), raw or "未标注")
+
+
+def _activity_day_counts(conn, user_id: int, since: str) -> dict[str, int]:
+    """按天统计练习次数（正式答题 + 闪卡复习）。"""
+    counts: dict[str, int] = {}
+    for row in conn.execute(
+        "SELECT date(created_at) AS day, COUNT(*) AS cnt FROM user_practice_history "
+        "WHERE user_id = ? AND created_at >= ? GROUP BY day",
+        (user_id, since),
+    ).fetchall():
+        counts[row["day"]] = counts.get(row["day"], 0) + row["cnt"]
+    for row in conn.execute(
+        "SELECT date(reviewed_at) AS day, COUNT(*) AS cnt FROM practice_review_events "
+        "WHERE user_id = ? AND reviewed_at >= ? GROUP BY day",
+        (user_id, since),
+    ).fetchall():
+        counts[row["day"]] = counts.get(row["day"], 0) + row["cnt"]
+    return counts
+
+
+def _daily_avg_scores(conn, user_id: int, since: str) -> dict[str, float]:
+    """按天统计答题平均分（仅 user_practice_history 的有分记录）。"""
+    avgs = {}
+    for row in conn.execute(
+        "SELECT date(created_at) AS day, AVG(score) AS avg_s FROM user_practice_history "
+        "WHERE user_id = ? AND score IS NOT NULL AND created_at >= ? GROUP BY day",
+        (user_id, since),
+    ).fetchall():
+        avgs[row["day"]] = round(row["avg_s"] or 0, 1)
+    return avgs
+
+
+def _build_daily_series(
+    conn, user_id: int, days: int, today: date
+) -> list[dict]:
+    """生成近 N 天的 {date, count, avg_score} 序列（含今天，无活动补 0）。"""
+    since = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    counts = _activity_day_counts(conn, user_id, since)
+    avgs = _daily_avg_scores(conn, user_id, since)
+    series = []
+    for i in range(days - 1, -1, -1):
+        key = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        series.append(
+            {
+                "date": key,
+                "count": counts.get(key, 0),
+                "avg_score": avgs.get(key, 0),
+            }
+        )
+    return series
+
+
+def _practice_days(conn, user_id: int) -> set[str]:
+    """返回用户全部有练习活动的日期集合（跨 90 天窗口，用于 streak）。"""
+    days = set()
+    for table, column in (
+        ("user_practice_history", "created_at"),
+        ("practice_review_events", "reviewed_at"),
+    ):
+        rows = conn.execute(
+            f"SELECT DISTINCT date({column}) AS day FROM {table} WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        for row in rows:
+            if row["day"]:
+                days.add(row["day"])
+    return days
+
+
+def _streak_stats(days: set[str], today: str) -> dict:
+    """计算当前连续天数与历史最长连续天数（自然日，今天未打卡不断连）。"""
+    today_date = datetime.strptime(today, "%Y-%m-%d").date()
+    cursor = today_date if today in days else today_date - timedelta(days=1)
+    current = 0
+    while cursor.strftime("%Y-%m-%d") in days:
+        current += 1
+        cursor -= timedelta(days=1)
+
+    longest = 0
+    run = 0
+    prev = None
+    for day_str in sorted(days):
+        day = datetime.strptime(day_str, "%Y-%m-%d").date()
+        run = run + 1 if prev is not None and (day - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = day
+    return {"current": current, "longest": longest}
+
+
+def _radar_topics(conn, user_id: int, limit: int = 8) -> list[dict]:
+    """按 SRS 熟练度取前 N 个主题（cat2 fallback cat1）。"""
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(qb.cat2, ''), NULLIF(qb.cat1, ''), '未分类') AS topic, "
+        "AVG(uqr.proficiency) AS prof "
+        "FROM user_question_review uqr "
+        "JOIN question_bank qb ON qb.id = uqr.question_bank_id "
+        "WHERE uqr.user_id = ? AND qb.deleted_at IS NULL "
+        "GROUP BY topic ORDER BY prof DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    return [{"topic": row["topic"], "proficiency": round(row["prof"] or 0)} for row in rows]
+
+
+def _difficulty_stats(conn, user_id: int) -> list[dict]:
+    """按难度统计练习次数与正确率（score >= 60 算对）。"""
+    rows = conn.execute(
+        "SELECT qb.difficulty AS d, COUNT(*) AS total, "
+        "SUM(CASE WHEN uph.score >= 60 THEN 1 ELSE 0 END) AS correct "
+        "FROM user_practice_history uph "
+        "JOIN question_bank qb ON qb.id = uph.question_bank_id "
+        "WHERE uph.user_id = ? AND uph.score IS NOT NULL "
+        "GROUP BY qb.difficulty",
+        (user_id,),
+    ).fetchall()
+    stats = []
+    for row in rows:
+        total = row["total"]
+        correct = row["correct"] or 0
+        stats.append(
+            {
+                "difficulty": _difficulty_label(row["d"]),
+                "count": total,
+                "correct_rate": round(correct * 100 / total),
+            }
+        )
+    stats.sort(key=lambda item: -item["count"])
+    return stats
+
+
+def _recent_activities(conn, user_id: int, limit: int = 10) -> list[dict]:
+    """合并最近的答题与复习事件，按时间倒序取前 N 条。"""
+    answers = conn.execute(
+        "SELECT uph.id, 'answer' AS type, uph.question_bank_id, uph.score, "
+        "uph.created_at AS ts FROM user_practice_history uph "
+        "WHERE uph.user_id = ? ORDER BY uph.created_at DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    reviews = conn.execute(
+        "SELECT pre.id, 'review' AS type, pre.question_bank_id, NULL AS score, "
+        "pre.rating, pre.reviewed_at AS ts FROM practice_review_events pre "
+        "WHERE pre.user_id = ? ORDER BY pre.reviewed_at DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+    merged = sorted(
+        [dict(row) for row in answers] + [dict(row) for row in reviews],
+        key=lambda item: item["ts"] or "",
+        reverse=True,
+    )[:limit]
+
+    questions = {}
+    qids = [item["question_bank_id"] for item in merged]
+    if qids:
+        placeholders = ",".join("?" * len(qids))
+        for row in conn.execute(
+            f"SELECT id, question, difficulty, cat2 FROM question_bank "
+            f"WHERE id IN ({placeholders})",
+            qids,
+        ).fetchall():
+            questions[row["id"]] = dict(row)
+
+    result = []
+    for item in merged:
+        q = questions.get(item["question_bank_id"]) or {}
+        result.append(
+            {
+                "id": item["id"],
+                "type": item["type"],
+                "question": q.get("question") or "题目已删除",
+                "difficulty": _difficulty_label(q.get("difficulty")),
+                "topic": q.get("cat2") or "未分类",
+                "score": item.get("score"),
+                "rating": item.get("rating"),
+                "created_at": item.get("ts"),
+            }
+        )
+    return result
+
+
+def build_practice_activity(user: dict) -> dict:
+    """同步聚合当前用户的练习足迹数据（热力图/连击/趋势/雷达/难度/最近刷题）。"""
+
+    user_id = int(user["id"])
+    with get_db_connection() as conn:
+        today = datetime.now().date()
+        heatmap = _build_daily_series(conn, user_id, 90, today)
+        trend = _build_daily_series(conn, user_id, 30, today)
+        days = _practice_days(conn, user_id)
+        streak = _streak_stats(days, today.strftime("%Y-%m-%d"))
+        radar = _radar_topics(conn, user_id)
+        difficulty = _difficulty_stats(conn, user_id)
+        recent = _recent_activities(conn, user_id)
+
+    return {
+        "version": API_VERSION,
+        "heatmap": heatmap,
+        "streak": streak,
+        "trend": trend,
+        "radar": radar,
+        "difficulty": difficulty,
+        "recent": recent,
     }
