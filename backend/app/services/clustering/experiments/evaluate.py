@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import logging
 import os
+import random
 import time
 
 from app.db.connection import get_db_connection
@@ -16,6 +17,11 @@ logging.basicConfig(level=logging.INFO)
 REPORT_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "experiment_reports")
 )
+
+SAMPLE_LLM_ASSIGNS = 25
+SAMPLE_ISLANDS = 15
+SAMPLE_LABELS = 10
+_SAMPLE_SEED = 42
 
 
 async def main(round_no: int):
@@ -51,18 +57,26 @@ async def main(round_no: int):
         qid: r for qid, r in results.items()
         if qid not in pre_matches and r["match"] is not None
     }
-    new_island = {
-        qid: r for qid, r in results.items() if r["match"] is None
+    llm_failed = {
+        qid: r for qid, r in results.items()
+        if qid not in pre_matches and r["reason"].startswith("LLM 调用失败")
     }
+    new_island = {
+        qid: r for qid, r in results.items()
+        if qid not in pre_matches and r["match"] is None and qid not in llm_failed
+    }
+    cluster_oq = {c["qb_id"]: c["oq"] for c in clusters}
 
     elapsed = time.monotonic() - t0
-    _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign, new_island, label_failback, elapsed)
+    _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
+                  llm_failed, new_island, cluster_oq, label_failback, elapsed)
     print(f"[experiment] 完成: 已知cluster={stats['known_clusters']} 孤岛={stats['singletons']} "
           f"确定性合并={len(pre_matches)} LLM合并={len(llm_assign)} 维持孤岛={len(new_island)} "
           f"耗时={elapsed:.1f}s -> {REPORT_DIR}/round{round_no}.md")
 
 
-def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign, new_island, label_failback, elapsed):
+def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
+                  llm_failed, new_island, cluster_oq, label_failback, elapsed):
     lines = [
         f"# 聚类实验报告 round {round_no}",
         "",
@@ -79,23 +93,34 @@ def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assig
         f"- 文本预筛确定性合并: **{len(pre_matches)}**",
         f"- LLM 判断合并到已有聚类: **{len(llm_assign)}**",
         f"- 维持独立新题: **{len(new_island)}**",
+        f"- LLM 调用失败: **{len(llm_failed)}** 条（未计入维持孤岛）",
         f"- 孤岛率变化: {stats['singletons']} → {len(new_island)}（-{(1 - len(new_island) / max(stats['singletons'], 1)) * 100:.1f}%）",
         "",
-        "## 抽样核验（LLM 合并前 25 条）",
+        f"## 抽样核验（LLM 合并前 {SAMPLE_LLM_ASSIGNS} 条）",
         "",
     ]
-    for i, (qid, r) in enumerate(sorted(llm_assign.items(), key=lambda kv: kv[0])[:25], 1):
+    for i, (qid, r) in enumerate(_seeded_sample(llm_assign.items(), SAMPLE_LLM_ASSIGNS), 1):
         target = _q_by_id(conn, r["match"])
         src = _q_by_id(conn, qid)
+        target_oq = " | ".join(cluster_oq.get(r["match"], [])[:3])
         lines += [
             f"### {i}. 孤岛题 {qid} → 聚类 {r['match']}",
             f"- 孤岛题: {src}",
             f"- 目标代表题: {target}",
+            f"- 目标聚类原始题面: {target_oq}",
             f"- 原因: {r['reason']}",
             "",
         ]
-    lines += ["## 标签摘要样本（前 10 个聚类）", ""]
-    for cid, label in sorted(labels.items())[:10]:
+    lines += [f"## 维持孤岛样本（前 {SAMPLE_ISLANDS} 条）", ""]
+    for qid, r in _seeded_sample(new_island.items(), SAMPLE_ISLANDS):
+        src = _q_by_id(conn, qid)
+        lines += [
+            f"- 孤岛题 {qid}: {src}",
+            f"  - 原因: {r['reason']}",
+            "",
+        ]
+    lines += [f"## 标签摘要样本（前 {SAMPLE_LABELS} 个聚类）", ""]
+    for cid, label in sorted(labels.items())[:SAMPLE_LABELS]:
         lines.append(f"- cluster {cid}: {label}")
     lines.append("")
     lines += ["## 成本估算", ""]
@@ -109,6 +134,13 @@ def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assig
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"[experiment] 报告已写入 {path}")
+
+
+def _seeded_sample(items, k: int):
+    """固定种子随机抽样，保证同一 round 报告可复现"""
+    sample_items = sorted(items)
+    random.Random(_SAMPLE_SEED).shuffle(sample_items)
+    return sample_items[:k]
 
 
 def _q_by_id(conn, qid: int) -> str:
