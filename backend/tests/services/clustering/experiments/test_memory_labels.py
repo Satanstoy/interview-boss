@@ -1,4 +1,5 @@
 """mock-LLM 单元测试：数据加载与纯逻辑函数（不调真实 LLM）"""
+import json
 
 
 def _seed_db(conn):
@@ -120,3 +121,47 @@ def test_text_prefilter_returns_empty_for_unrelated(test_db):
     # id=3 的孤岛 "介绍一下 MySQL 索引" 与两个 cluster 无关
     matches = text_prefilter(singletons, clusters)
     assert 3 not in matches
+
+
+async def test_generate_cluster_labels_parses_llm_json(monkeypatch, test_db):
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, generate_cluster_labels,
+    )
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        return json.dumps([
+            {"qb_id": 1, "label": "高并发限流方案", "keywords": ["限流", "高并发", "网关"]},
+            {"qb_id": 2, "label": "Java 线程池", "keywords": ["线程池", "JUC"]},
+        ], ensure_ascii=False)
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        fake_llm,
+    )
+    clusters, _ = load_cluster_data(test_db)
+    labels = await generate_cluster_labels(clusters, user_id=None)
+
+    assert labels[1] == "高并发限流方案"
+    assert labels[2] == "Java 线程池"
+
+
+async def test_generate_cluster_labels_falls_back_to_question(monkeypatch, test_db):
+    """LLM 失败/缺字段时，回退用代表题文本，绝不中断"""
+    _seed_db(test_db)
+    from app.services.clustering.experiments.memory_labels import (
+        load_cluster_data, generate_cluster_labels,
+    )
+
+    async def broken_llm(prompt, system_msg, response_format, user_id, model):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(
+        "app.services.clustering.experiments.memory_labels._call_llm_with_retry",
+        broken_llm,
+    )
+    clusters, _ = load_cluster_data(test_db)
+    labels = await generate_cluster_labels(clusters, user_id=None)
+
+    assert labels[1].startswith("高并发")  # 回退到代表题文本
+    assert len(labels) == 2

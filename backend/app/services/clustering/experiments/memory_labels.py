@@ -6,10 +6,16 @@
 """
 import json
 import logging
+import re
 
 from app.services.clustering.clusterer import _normalize_question_text
+from app.services.llm import _call_llm_with_retry
+
+from app.services.clustering.experiments.prompts import CLUSTER_LABEL_PROMPT
 
 logger = logging.getLogger("interview-boss")
+
+LABELS_PER_BATCH = 20
 
 
 def load_cluster_data(conn) -> tuple[list[dict], list[dict]]:
@@ -81,3 +87,60 @@ def text_prefilter(singletons: list[dict], clusters: list[dict]) -> dict[int, in
                 matches[s["qb_id"]] = c_qb_id
                 break
     return matches
+
+
+async def generate_cluster_labels(clusters: list[dict], user_id: int | None = None) -> dict[int, str]:
+    """为每个 cluster 生成语义标签摘要。
+
+    Returns: {cluster_qb_id: label_text}
+    任何 cluster 失败都回退为代表题文本，保证 100% 覆盖率。
+    """
+    labels: dict[int, str] = {}
+    for i in range(0, len(clusters), LABELS_PER_BATCH):
+        batch = clusters[i : i + LABELS_PER_BATCH]
+        lines = "\n".join(
+            f"{c['qb_id']} | {c['question']} | " + " | ".join(c["oq"][:6])
+            for c in batch
+        )
+        prompt = CLUSTER_LABEL_PROMPT.format(qb_id="{qb_id}", questions=lines)
+        try:
+            raw = await _call_llm_with_retry(
+                prompt,
+                system_msg="你是一个面试题题库管理专家。",
+                response_format={"type": "json_object"},
+                user_id=user_id,
+                model=None,
+            )
+            parsed = _extract_json_array(raw)
+            for item in parsed:
+                label = (item.get("label") or "").strip()
+                qid_raw = item.get("qb_id")
+                if not qid_raw or not label:
+                    continue
+                labels[int(qid_raw)] = label
+        except Exception as e:
+            logger.warning(f"[experiment] 标签摘要生成失败，回退代表题: {e}")
+        for c in batch:
+            labels.setdefault(c["qb_id"], c["question"][:40])
+    return labels
+
+
+def _extract_json_array(raw: str) -> list[dict]:
+    """从 LLM 输出提取 JSON 数组（容忍 markdown 代码块包裹）"""
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            # 兼容 {"clusters": [...]} 包裹
+            data = data.get("clusters") or data.get("items") or []
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        m = re.search(r"\[.*\]", text, re.S)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                return data if isinstance(data, list) else []
+            except json.JSONDecodeError:
+                return []
+        return []
