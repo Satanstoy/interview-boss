@@ -197,8 +197,17 @@ class TestResumePrompts:
         assert "JSON" in points_prompt
         assert "后端工程师" in points_prompt
         assert "张三" in points_prompt
+        assert "安全提示" in points_prompt
+        assert "===USER_RESUME_START===" in points_prompt
+        assert "===USER_RESUME_END===" in points_prompt
+        assert "===USER_RESUME_START===\n张三" in points_prompt
+        assert "只输出 JSON 数组" in points_prompt
 
         text_prompt = build_resume_optimize_text_prompt("张三\n后端工程师", "后端工程师")
         assert "优化" in text_prompt
         assert "后端工程师" in text_prompt
         assert "张三" in text_prompt
+        assert "安全提示" in text_prompt
+        assert "===USER_RESUME_START===" in text_prompt
+        assert "===USER_RESUME_END===" in text_prompt
+        assert "===USER_RESUME_START===\n张三" in text_prompt
