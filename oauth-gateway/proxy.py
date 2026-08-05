@@ -32,7 +32,7 @@ def _public_base_url(request: Request) -> str:
         proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
         return f"{proto}://{host}".rstrip("/")
 
-    return os.getenv("GATEWAY_BASE_URL", "https://interviewboss.online").rstrip("/")
+    return os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
 
 
 def _mcp_error(request: Request, status: int, detail: str) -> JSONResponse:
