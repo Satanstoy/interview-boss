@@ -11,7 +11,7 @@ from app.services.search_service import SearchProviderError, search_web
 logger = logging.getLogger("interview-boss")
 
 
-def _sources_json(sources: list[dict]) -> str | None:
+def sources_json(sources: list[dict]) -> str | None:
     """把联网搜索来源序列化为 JSON 字符串；无来源返回 None（落库用）。"""
     if not sources:
         return None

@@ -111,6 +111,55 @@ def _exec(fn):
 
 
 @pytest.mark.asyncio
+async def test_agent_generate_answer_node_writes_answer_sources(test_db):
+    """Agent 批量生成节点：有搜索结果时 answer_sources 落库为 JSON"""
+    from app.agents.batch_generate.nodes import generate_answer_node
+
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, ai_answer) VALUES (20, 'Redis持久化', NULL)"
+    )
+    test_db.commit()
+
+    sources = [
+        {"title": "Redis 官方文档", "url": "https://redis.io/docs", "snippet": "x"}
+    ]
+
+    async def _run_db_sync(func):
+        return func()
+
+    with patch(
+        "app.db.connection.run_db", side_effect=_run_db_sync
+    ), patch(
+        "app.db.connection.get_db_connection", return_value=test_db
+    ), patch(
+        # 节点内是函数级 import（from app.services.answer_enrichment import ...），
+        # 必须 patch 源模块，不能 patch nodes 模块属性
+        "app.services.answer_enrichment.prepare_answer_prompt",
+        new_callable=AsyncMock,
+    ) as mock_prep, patch(
+        "app.services.llm._call_llm_with_retry", new_callable=AsyncMock
+    ) as mock_llm:
+        mock_prep.return_value = ("prompt", sources)
+        mock_llm.return_value = "Redis 支持 RDB 和 AOF 两种持久化"
+
+        state = {
+            "question_ids": [20],
+            "current_index": 0,
+            "user_id": 1,
+            "success_count": 0,
+            "fail_count": 0,
+        }
+        result = await generate_answer_node(state)
+
+    assert result["success_count"] == 1
+    row = test_db.execute(
+        "SELECT ai_answer, answer_sources FROM question_bank WHERE id = 20"
+    ).fetchone()
+    assert row["ai_answer"] == "Redis 支持 RDB 和 AOF 两种持久化"
+    assert json.loads(row["answer_sources"]) == sources
+
+
+@pytest.mark.asyncio
 async def test_background_generate_answer_writes_answer_sources():
     """后台流水线生成：answer_sources 随 ai_answer 一起写库"""
     from app.services.submit_service import background_generate_answer
