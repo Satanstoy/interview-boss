@@ -80,6 +80,7 @@ def create_test_db():
             difficulty TEXT,
             frequency INTEGER DEFAULT 1,
             ai_answer TEXT,
+            answer_sources TEXT,
             vector TEXT,
             sources TEXT DEFAULT '[]',
             original_questions TEXT DEFAULT '[]',

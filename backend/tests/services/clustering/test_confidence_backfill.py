@@ -183,7 +183,8 @@ class TestCompactConfidenceFallback:
             mock_conn.return_value = MagicMock()
             mock_conn.return_value.execute.return_value.fetchone.return_value = {
                 'question': '测试旧题', 'sources': '[]', 'original_questions': '[]',
-                'original_question_sources': '[]', 'ai_answer': None
+                'original_question_sources': '[]', 'ai_answer': None,
+                'answer_sources': None
             }
             mock_snapshot.return_value = {}
 

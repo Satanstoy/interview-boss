@@ -150,7 +150,7 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
     """获取题目当前状态快照(用于合并前备份)"""
     row = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
-        "ai_answer, sources, original_questions, original_question_sources, "
+        "ai_answer, answer_sources, sources, original_questions, original_question_sources, "
         "status, job_position, created_at, updated_at "
         "FROM question_bank WHERE id = ?",
         (qb_id,),
@@ -200,7 +200,7 @@ def _do_merge_to_existing(
     """
     conn = get_db_connection()
     existing = conn.execute(
-        "SELECT question, sources, original_questions, original_question_sources, ai_answer "
+        "SELECT question, sources, original_questions, original_question_sources, ai_answer, answer_sources "
         "FROM question_bank WHERE id = ?",
         (survivor_id,),
     ).fetchone()
@@ -218,8 +218,10 @@ def _do_merge_to_existing(
     )
 
     s_ai_answer = existing["ai_answer"]
+    s_answer_sources = existing["answer_sources"]
     if not s_ai_answer:
         s_ai_answer = entry.get("ai_answer")
+        s_answer_sources = entry.get("answer_sources")
 
     seen_urls = {x.get("url") for x in s_src}
     o_src = _safe_json_list(entry.get("sources"))
@@ -257,13 +259,14 @@ def _do_merge_to_existing(
     conn.execute(
         "UPDATE question_bank SET frequency = ?, sources = ?, "
         "original_questions = ?, original_question_sources = ?, "
-        "ai_answer = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (
             max(1, len(s_oqs)),
             json.dumps(s_src, ensure_ascii=False),
             json.dumps(s_oqs, ensure_ascii=False),
             json.dumps(s_oqs_src, ensure_ascii=False),
             s_ai_answer,
+            s_answer_sources,
             survivor_id,
         ),
     )
@@ -548,7 +551,7 @@ async def compact_singletons_in_db(
             conn = get_db_connection()
             rows = conn.execute(
                 "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, "
-                "original_questions, original_question_sources, ai_answer "
+                "original_questions, original_question_sources, ai_answer, answer_sources "
                 "FROM question_bank "
                 "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
                 "AND frequency = 1 "

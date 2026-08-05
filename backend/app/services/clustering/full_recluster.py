@@ -58,7 +58,7 @@ async def full_recluster_hybrid(
             try:
                 entry = conn.execute(
                     "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
-                    "sources, original_questions, original_question_sources, ai_answer "
+                    "sources, original_questions, original_question_sources, ai_answer, answer_sources "
                     "FROM question_bank WHERE id = ?",
                     (m,),
                 ).fetchone()

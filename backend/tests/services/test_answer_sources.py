@@ -369,3 +369,78 @@ async def test_question_detail_returns_answer_sources(test_db):
     assert result["answer_sources"] == [
         {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
     ]
+
+
+def test_compact_merge_inherits_answer_sources_from_merged(test_db):
+    """孤岛合并：survivor 无答案时，从被合并题继承 ai_answer 和 answer_sources"""
+    from app.services.pipeline.compact import _do_merge_to_existing
+
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, ai_answer, answer_sources, frequency, status, sources, original_questions, original_question_sources) "
+        "VALUES (1, '什么是 Redis？', NULL, NULL, 2, 'approved', '[]', '[]', '[]')"
+    )
+    test_db.commit()
+
+    entry = {
+        "id": 2,
+        "question": "Redis 是什么",
+        "sources": [],
+        "original_questions": [],
+        "original_question_sources": [],
+        "ai_answer": "Redis 是内存数据库",
+        "answer_sources": json.dumps(
+            [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
+        ),
+    }
+    _do_merge_to_existing(
+        1,
+        entry,
+        operation_type="auto",
+        phase="test",
+        cat2="",
+        operator_id=1,
+        confidence=0.5,
+    )
+
+    row = test_db.execute(
+        "SELECT ai_answer, answer_sources FROM question_bank WHERE id = 1"
+    ).fetchone()
+    assert row["ai_answer"] == "Redis 是内存数据库"
+    assert json.loads(row["answer_sources"]) == [
+        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]
+
+
+def test_apply_matched_keeps_existing_answer_sources(test_db):
+    """apply_matched：survivor 已有答案时 answer_sources 保持不变"""
+    from app.services.pipeline.writer import apply_matched
+
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, ai_answer, answer_sources, frequency, status, sources, original_questions, original_question_sources, job_position, deleted_at) "
+        "VALUES (1, '什么是 Redis？', '已有答案', ?, 2, 'approved', '[]', '[]', '[]', '后端开发', NULL)",
+        (
+            json.dumps(
+                [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
+            ),
+        ),
+    )
+    test_db.commit()
+
+    matched = [
+        {
+            "cluster_id": 1,
+            "url": "https://example.com/mianshi",
+            "company": "某公司",
+            "round": "一面",
+            "question": "Redis 集群怎么搭建",
+        }
+    ]
+    apply_matched(test_db, matched, "后端开发", {})
+
+    row = test_db.execute(
+        "SELECT ai_answer, answer_sources FROM question_bank WHERE id = 1"
+    ).fetchone()
+    assert row["ai_answer"] == "已有答案"
+    assert json.loads(row["answer_sources"]) == [
+        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]

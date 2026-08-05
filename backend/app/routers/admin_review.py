@@ -274,7 +274,7 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                     conn.execute(
                         "UPDATE question_bank SET "
                         "question = ?, cat1 = ?, cat2 = ?, tags = ?, difficulty = ?, "
-                        "frequency = ?, ai_answer = ?, sources = ?, "
+                        "frequency = ?, ai_answer = ?, answer_sources = ?, sources = ?, "
                         "original_questions = ?, original_question_sources = ?, "
                         "status = ?, job_position = ?, "
                         "updated_at = CURRENT_TIMESTAMP "
@@ -287,6 +287,7 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                             pre_snapshot.get("difficulty", ""),
                             pre_snapshot.get("frequency", 1),
                             pre_snapshot.get("ai_answer", ""),
+                            pre_snapshot.get("answer_sources"),
                             pre_snapshot.get("sources", "[]"),
                             pre_snapshot.get("original_questions", "[]"),
                             pre_snapshot.get("original_question_sources", "[]"),

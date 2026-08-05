@@ -204,19 +204,20 @@ async def cluster_batch(
     saved_answers = {}
     for url in batch_urls:
         rows = conn.execute(
-            "SELECT question, original_questions, ai_answer FROM question_bank "
+            "SELECT question, original_questions, ai_answer, answer_sources "
+            "FROM question_bank "
             "WHERE sources LIKE ? AND ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
             (f"%{url}%", job_position),
         ).fetchall()
         for r in rows:
-            if r["ai_answer"]:
-                saved_answers[r["question"]] = r["ai_answer"]
-                try:
-                    for oq in json.loads(r["original_questions"] or "[]"):
-                        if oq and oq not in saved_answers:
-                            saved_answers[oq] = r["ai_answer"]
-                except Exception:
-                    pass
+            saved = {"answer": r["ai_answer"], "sources": r["answer_sources"]}
+            saved_answers[r["question"]] = saved
+            try:
+                for oq in json.loads(r["original_questions"] or "[]"):
+                    if oq and oq not in saved_answers:
+                        saved_answers[oq] = saved
+            except Exception:
+                pass
         del rows
 
     if not skip_clean:

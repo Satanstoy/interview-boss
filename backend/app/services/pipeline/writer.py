@@ -72,7 +72,7 @@ def apply_matched(conn, matched, job_position, saved_answers):
     for item in matched:
         cluster_id = item['cluster_id']
         existing = conn.execute(
-            "SELECT id, frequency, sources, original_questions, original_question_sources, ai_answer "
+            "SELECT id, frequency, sources, original_questions, original_question_sources, ai_answer, answer_sources "
             "FROM question_bank WHERE id = ?",
             (cluster_id,)
         ).fetchone()
@@ -116,17 +116,22 @@ def apply_matched(conn, matched, job_position, saved_answers):
                     break
 
         ai_answer = existing['ai_answer']
+        answer_sources = existing['answer_sources']
         if not ai_answer:
-            ai_answer = saved_answers.get(q)
+            saved = saved_answers.get(q)
+            if saved:
+                ai_answer = saved['answer']
+                answer_sources = saved.get('sources')
 
         conn.execute(
             "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, "
             "original_question_sources = ?, ai_answer = COALESCE(?, ai_answer), "
+            "answer_sources = COALESCE(?, answer_sources), "
             "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (len(oqs), json.dumps(sources, ensure_ascii=False),
              json.dumps(oqs, ensure_ascii=False),
              json.dumps(oqs_src, ensure_ascii=False),
-             ai_answer, cluster_id)
+             ai_answer, answer_sources, cluster_id)
         )
 
         if url_is_new:
@@ -192,12 +197,18 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
             )
 
         ai_answer = None
+        answer_sources = None
         for oq in entry['original_questions']:
-            if oq in saved_answers:
-                ai_answer = saved_answers[oq]
+            saved = saved_answers.get(oq)
+            if saved:
+                ai_answer = saved['answer']
+                answer_sources = saved.get('sources')
                 break
         if ai_answer:
-            conn.execute("UPDATE question_bank SET ai_answer = ? WHERE id = ?", (ai_answer, new_id))
+            conn.execute(
+                "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
+                (ai_answer, answer_sources, new_id),
+            )
 
     return new_qb_ids
 
