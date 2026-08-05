@@ -5,6 +5,7 @@
 """
 import argparse
 import asyncio
+import json
 import logging
 import os
 import random
@@ -68,11 +69,26 @@ async def main(round_no: int, user_id: int | None = 1):
     cluster_oq = {c["qb_id"]: c["oq"] for c in clusters}
 
     elapsed = time.monotonic() - t0
+    _persist_results(round_no, stats, pre_matches, labels, results)
     _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
                   llm_failed, new_island, cluster_oq, label_failback, elapsed)
     print(f"[experiment] 完成: 已知cluster={stats['known_clusters']} 孤岛={stats['singletons']} "
           f"确定性合并={len(pre_matches)} LLM合并={len(llm_assign)} 维持孤岛={len(new_island)} "
           f"耗时={elapsed:.1f}s -> {REPORT_DIR}/round{round_no}.md")
+
+
+def _persist_results(round_no: int, stats: dict, pre_matches: dict, labels: dict, results: dict):
+    """持久化中间结果，供漏合并复核/多轮对比复用，避免重跑 LLM。"""
+    path = os.path.join(REPORT_DIR, f"round{round_no}_results.json")
+    payload = {
+        "stats": stats,
+        "pre_matches": {str(k): v for k, v in pre_matches.items()},
+        "labels": {str(k): v for k, v in labels.items()},
+        "results": {str(k): {"match": v["match"], "reason": v["reason"]} for k, v in results.items()},
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"[experiment] 中间结果已写入 {path}")
 
 
 def _write_report(round_no, conn, stats, pre_matches, labels, results, llm_assign,
