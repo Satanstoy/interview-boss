@@ -10,7 +10,7 @@ def _migration_062_user_recruitment_pref(conn):
             graduation_year INTEGER,
             batch TEXT DEFAULT '',
             daily_capacity INTEGER DEFAULT 30,
-            updated_at TEXT
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
