@@ -355,49 +355,21 @@ async def update_active_season(req: dict, user: dict = Depends(get_admin_user)):
 @router.get("/api/profile/recruitment")
 async def get_recruitment_pref(user: dict = Depends(get_current_user)):
     """当前用户的招聘偏好 + 展开的时间线 + 紧迫度（今日复习调度输入）"""
-
-    def _query():
-        with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT graduation_year, batch, daily_capacity FROM user_recruitment_pref WHERE user_id = ?",
-                (user["id"],),
-            ).fetchone()
-        return dict(row) if row else {}
-
-    pref = await run_db(_query)
-    year = int(pref.get("graduation_year") or 0)
-    batch = str(pref.get("batch") or "")
-    milestones = get_milestones(year, batch) if year and batch else []
-    urgency_info = compute_urgency(milestones, date_cls.today())
-    return {
-        "graduation_year": year or None,
-        "batch": batch or "",
-        "daily_capacity": int(pref.get("daily_capacity") or 30),
-        "milestones": [
-            {"name": m.name, "date": m.date.isoformat(), "kind": m.kind}
-            for m in milestones
-        ],
-        **urgency_info,
-    }
+    return await run_db(lambda: _recruitment_pref_payload(user["id"]))
 
 
 @router.put("/api/profile/recruitment")
 async def update_recruitment_pref(req: dict, user: dict = Depends(get_current_user)):
-    """保存用户招聘偏好（届次 + 批次 + 每日容量）"""
-    year = req.get("graduation_year")
+    """保存用户招聘偏好（届次 + 批次 + 每日容量），返回 GET 形状响应（含时间线）"""
+    year = _coerce_pref_int(req.get("graduation_year"), "届次年份")
+    if year is not None and not (ALLOWED_YEAR_RANGE[0] <= year <= ALLOWED_YEAR_RANGE[1]):
+        raise HTTPException(status_code=400, detail="届次年份超出合理范围")
     batch = (req.get("batch") or "").strip()
-    capacity = req.get("daily_capacity")
-
-    if year is not None:
-        year = int(year)
-        if not (ALLOWED_YEAR_RANGE[0] <= year <= ALLOWED_YEAR_RANGE[1]):
-            raise HTTPException(status_code=400, detail="届次年份超出合理范围")
     if batch and batch not in VALID_BATCHES:
         raise HTTPException(status_code=400, detail=f"批次必须是: {VALID_BATCHES}")
-    if capacity is not None:
-        capacity = int(capacity)
-        if not (5 <= capacity <= 200):
-            raise HTTPException(status_code=400, detail="每日容量须在 5-200 之间")
+    capacity = _coerce_pref_int(req.get("daily_capacity"), "每日容量")
+    if capacity is not None and not (5 <= capacity <= 200):
+        raise HTTPException(status_code=400, detail="每日容量须在 5-200 之间")
 
     def _save():
         with get_db_connection() as conn:
@@ -414,4 +386,39 @@ async def update_recruitment_pref(req: dict, user: dict = Depends(get_current_us
             conn.commit()
 
     await run_db(_save)
-    return {"status": "success", "graduation_year": year, "batch": batch, "daily_capacity": capacity or 30}
+    payload = await run_db(lambda: _recruitment_pref_payload(user["id"]))
+    return {"status": "success", **payload}
+
+
+def _coerce_pref_int(value, label: str) -> int | None:
+    """招聘偏好数值字段转换：None/空串 → None，非数值 → 400"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{label}格式无效")
+
+
+def _recruitment_pref_payload(user_id: int) -> dict:
+    """读取用户招聘偏好并构建 GET 形状响应（milestones + urgency）"""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT graduation_year, batch, daily_capacity FROM user_recruitment_pref WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    pref = dict(row) if row else {}
+    year = int(pref.get("graduation_year") or 0)
+    batch = str(pref.get("batch") or "")
+    milestones = get_milestones(year, batch) if year and batch else []
+    urgency_info = compute_urgency(milestones, date_cls.today())
+    return {
+        "graduation_year": year or None,
+        "batch": batch or "",
+        "daily_capacity": int(pref.get("daily_capacity") or 30),
+        "milestones": [
+            {"name": m.name, "date": m.date.isoformat(), "kind": m.kind}
+            for m in milestones
+        ],
+        **urgency_info,
+    }
