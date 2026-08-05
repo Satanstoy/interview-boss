@@ -142,3 +142,17 @@ def test_due_queue_max_new_budget_limits_new_questions(test_db):
     assert total == 3
     # 无到期复习，只放 1 道最高频新题
     assert [item["id"] for item in items] == [1]
+
+
+def test_due_queue_max_new_ignored_when_offset(test_db):
+    with get_db_connection() as conn:
+        _seed(conn)
+        _review(
+            conn,
+            1,
+            proficiency=2,
+            next_review_at=_fmt(datetime.utcnow() - timedelta(days=2)),
+        )
+        _, items, _ = list_deck_questions(conn, 1, "due", max_new=0, offset=1)
+    # offset>0 时预算不生效：走通用分页路径，新题(3) 依然返回（max_new=0 被忽略）
+    assert [item["id"] for item in items] == [3, 2]

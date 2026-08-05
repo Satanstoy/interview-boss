@@ -248,7 +248,12 @@ def list_deck_questions(
     offset: int = 0,
     max_new: int | None = None,
 ) -> tuple[dict, list[dict], int]:
-    """Load a deck ordered as a review queue, not as a random bank page."""
+    """Load a deck ordered as a review queue, not as a random bank page.
+
+    For the due deck with max_new, ``total`` is the full due count
+    (reviews + all new, uncapped) while items may be fewer — the frontend
+    should render counts from ``len(items)``.
+    """
 
     limit = max(1, min(int(limit or 100), 200))
     offset = max(0, int(offset or 0))
@@ -264,6 +269,8 @@ def list_deck_questions(
     order = (
         " ORDER BY CASE WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 0 "
         "WHEN uqr.next_review_at IS NULL THEN 1 ELSE 2 END, "
+        # Risk weight uses static question_bank.frequency (not the dynamic
+        # MAX alias) to keep the expression cheap and deterministic in ORDER BY.
         "CASE WHEN uqr.next_review_at IS NULL THEN COALESCE(qb.frequency, 0) "
         "ELSE COALESCE(qb.frequency, 0) * (5 - COALESCE(uqr.proficiency, 0)) END DESC, "
         "COALESCE(uqr.next_review_at, '1970-01-01') ASC, "
@@ -272,8 +279,14 @@ def list_deck_questions(
         # dynamic-frequency subquery a second time for every row.
         "frequency DESC, qb.id ASC"
     )
+    # The due queue is not paginated: the frontend always requests the first
+    # page (offset == 0), so the budget only applies there.  On offset > 0 the
+    # generic pagination path below runs and max_new is silently bypassed.
     if deck_key == "due" and max_new is not None and offset == 0:
         max_new = max(0, int(max_new))
+        # Due reviews are intentionally uncapped (Anki consensus: never cap
+        # reviews); only the new-question tail is limited by max_new.  limit
+        # applies to non-due decks and the generic path only.
         due_cond = _deck_condition("due", "")
         due_where = where_clause.replace(
             due_cond,
