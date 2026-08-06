@@ -82,12 +82,23 @@ def _json_mode_override() -> str:
 
 
 def _should_use_response_format(base_url: str = None) -> bool:
-    """判断当前配置的 LLM 端点是否支持 response_format 参数"""
-    if base_url is not None:
-        return _detect_provider(base_url) == "openai"
-    from app.core.config import LLM_BASE_URL
+    """判断当前配置的 LLM 端点是否应下发 response_format（json_object）。
 
-    return _detect_provider(LLM_BASE_URL) == "openai"
+    优先级：LLM_JSON_MODE_OVERRIDE（应急开关）→ 能力矩阵 → provider 兜底。
+    Anthropic 原生不支持，恒 False（走 prompt 指令降级，见 _call_anthropic）。
+    """
+    override = _json_mode_override()
+    if override == "force-on":
+        return True
+    if override == "force-off":
+        return False
+    if base_url is None:
+        from app.core.config import LLM_BASE_URL
+
+        base_url = LLM_BASE_URL
+    if _detect_provider(base_url) != "openai":
+        return False
+    return get_provider_capabilities(base_url)["json_mode"]
 
 
 def _make_client(api_key: str, base_url: str, timeout: float, provider: str = "openai"):
