@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import random
 import time
 from datetime import datetime
 from math import log1p, sqrt
 from typing import Optional
+
+logger = logging.getLogger("interview-boss")
 
 from app.db import connection as db_connection
 from app.db.question_bank_sources import get_sources
@@ -41,6 +44,64 @@ def _map_difficulty(difficulty: str) -> list[str]:
     }
     lower = (difficulty or "").strip().lower()
     return mapping.get(lower, [f"%{difficulty}%"])
+
+
+def _embedding_supplement(
+    *,
+    conn,
+    query_text: str,
+    existing_ids: set[int],
+    exclude_ids: set[int],
+    limit: int,
+) -> list:
+    """SQL 候选不足时，用 embedding 语义补充候选（实验结论 P1b）。
+
+    生产 embedding 为 bge-m3（SiliconFlow，1024 维）。任何失败优雅降级返回 []。
+    """
+    if limit <= 0:
+        return []
+    try:
+        import struct
+
+        from app.services.embedding_service import encode_texts
+
+        query_vec = encode_texts([query_text])[0]
+        if hasattr(query_vec, "tolist"):
+            query_vec = query_vec.tolist()
+    except Exception:
+        return []
+
+    rows = conn.execute(
+        "SELECT id, question, cat1, cat2, tags, difficulty, frequency, ai_answer, embedding "
+        "FROM question_bank "
+        "WHERE deleted_at IS NULL AND status = 'approved' AND embedding IS NOT NULL"
+    ).fetchall()
+
+    def _cosine(emb_bytes):
+        try:
+            n = len(emb_bytes) // 4
+            vec = struct.unpack(f"<{n}f", emb_bytes)
+            if len(vec) != len(query_vec):
+                return 0.0
+            dot = sum(a * b for a, b in zip(query_vec, vec))
+            na = sum(x * x for x in query_vec) ** 0.5
+            nb = sum(x * x for x in vec) ** 0.5
+            return dot / (na * nb + 1e-9) if na and nb else 0.0
+        except Exception:
+            return 0.0
+
+    scored = []
+    for r in rows:
+        qid = r["id"]
+        if qid in existing_ids or qid in exclude_ids:
+            continue
+        scored.append((_cosine(r["embedding"]), r))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [r for _, r in scored[:limit]]
+
+
+# 触发 embedding 补充的候选池下限（实验结论：SQL 候选萎缩是抽题 0 分主因）
+_EMBEDDING_MIN_POOL = 5
 
 
 def draw_questions(
@@ -136,6 +197,25 @@ def draw_questions(
             params.extend(sorted(exclude_ids))
 
         candidates = _query(conditions, params)
+
+        # 实验结论 P1b：SQL 候选不足时用 embedding 语义补充（修复 0 题/1 题候选灾难）
+        if len(candidates) < _EMBEDDING_MIN_POOL and (cat2 or topic or cat1):
+            query_text = " ".join(filter(None, [cat2, topic, cat1])) or "面试题"
+            existing_ids = {r["id"] for r in candidates}
+            extra = _embedding_supplement(
+                conn=conn,
+                query_text=query_text,
+                existing_ids=existing_ids,
+                exclude_ids=exclude_ids,
+                limit=_EMBEDDING_MIN_POOL - len(candidates),
+            )
+            if extra:
+                candidates = list(candidates) + extra
+                logger.info(
+                    "draw_questions: SQL 候选 %d 不足，embedding 补充 %d 题",
+                    len(candidates) - len(extra),
+                    len(extra),
+                )
 
         # Fallback: if difficulty filter yielded nothing, retry without it
         if not candidates and difficulty_applied:
