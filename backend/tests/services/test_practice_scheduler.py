@@ -78,29 +78,36 @@ def test_urgency_scaling_is_proportional():
     assert full.interval_days < half.interval_days < 3.0
 
 
-def test_interval_beyond_deadline_is_pulled_back():
-    deadline = BASE_TIME + timedelta(days=5)
-    result = schedule_review(
-        ReviewState(), "easy", now=BASE_TIME, deadline=deadline
-    )
-    assert result.next_review_at <= deadline
-    assert result.next_review_at > BASE_TIME + timedelta(days=1)
+def test_mastered_good_resets_to_30_days():
+    mastered = ReviewState(state="mastered", proficiency=5, review_count=8,
+                           interval_days=200.0, ease_factor=2.6)
+    result = schedule_review(mastered, "good", now=BASE_TIME)
+    assert result.next_review_at == BASE_TIME + timedelta(days=30)
+    assert result.state == "mastered"
+    assert result.proficiency == 5
+    assert result.interval_days == 30.0
 
 
-def test_interval_within_deadline_untouched():
-    deadline = BASE_TIME + timedelta(days=60)
-    result = schedule_review(ReviewState(), "easy", now=BASE_TIME, deadline=deadline)
-    assert result.next_review_at == BASE_TIME + timedelta(days=7)
+def test_mastered_easy_resets_to_30_days_and_clamps_proficiency():
+    mastered = ReviewState(state="mastered", proficiency=5, review_count=8,
+                           interval_days=200.0, ease_factor=2.6)
+    result = schedule_review(mastered, "easy", now=BASE_TIME)
+    assert result.next_review_at == BASE_TIME + timedelta(days=30)
+    assert result.proficiency == 5  # clamp
+    assert result.state == "mastered"
 
 
-def test_again_relearning_step_ignores_deadline():
-    deadline = BASE_TIME + timedelta(days=1)
-    result = schedule_review(ReviewState(), "again", now=BASE_TIME, deadline=deadline)
+def test_mastered_again_falls_back_to_relearning():
+    mastered = ReviewState(state="mastered", proficiency=5, review_count=8,
+                           interval_days=200.0, ease_factor=2.6)
+    result = schedule_review(mastered, "again", now=BASE_TIME)
+    assert result.state == "relearning"
+    assert result.proficiency == 4
     assert result.next_review_at == BASE_TIME + timedelta(minutes=28.8)
 
 
-def test_deadline_today_never_schedules_in_the_past():
-    deadline = BASE_TIME.replace(hour=0, minute=0, second=0)
-    result = schedule_review(ReviewState(), "easy", now=BASE_TIME, deadline=deadline)
-    assert result.next_review_at >= BASE_TIME
-    assert result.interval_days > 0
+def test_mastered_30_days_not_scaled_by_urgency():
+    mastered = ReviewState(state="mastered", proficiency=5, review_count=8,
+                           interval_days=200.0, ease_factor=2.6)
+    result = schedule_review(mastered, "good", now=BASE_TIME, urgency=1.0)
+    assert result.next_review_at == BASE_TIME + timedelta(days=30)  # 抽查恒定 30 天

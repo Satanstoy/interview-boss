@@ -47,7 +47,6 @@ def schedule_review(
     *,
     now: datetime | None = None,
     urgency: float = 0.0,
-    deadline: datetime | None = None,
 ) -> ScheduledReview:
     """Calculate the next interval from a flashcard review rating.
 
@@ -59,11 +58,10 @@ def schedule_review(
     available for later migration to a full FSRS implementation.
 
     Hiring-season modulation: ``urgency`` (0..1, higher is more urgent)
-    shortens intervals by up to 40%; ``deadline``, when given, pulls any
-    non-again interval that would cross it back to keep at least one day of
-    buffer (0.8 factor) and never before ``now``.  A pulled-back schedule
-    recomputes ``interval_days`` so the reported interval matches
-    ``next_review_at``.
+    shortens intervals by up to 40%.  ``mastered`` cards (proficiency 5
+    check-in loop) are reset to a fixed 30-day interval on any non-again
+    rating — never scaled by urgency; ``again`` degrades them back to
+    relearning.
     """
 
     if rating not in VALID_RATINGS:
@@ -75,6 +73,20 @@ def schedule_review(
     proficiency = max(0, min(5, int(current.proficiency or 0)))
     review_count = max(0, int(current.review_count or 0)) + 1
     lapse_count = max(0, int(current.lapse_count or 0))
+
+    if current.state == "mastered" and rating != "again":
+        # 已掌握题 30 天循环抽查（实验定稿：固定 30 天，不受 urgency 缩放）
+        proficiency = min(5, proficiency + {"hard": 0, "good": 1, "easy": 2}[rating])
+        return ScheduledReview(
+            state="mastered",
+            proficiency=proficiency,
+            review_count=review_count,
+            lapse_count=lapse_count,
+            interval_days=30.0,
+            ease_factor=round(prior_ease, 4),
+            next_review_at=now + timedelta(days=30),
+            last_rating=rating,
+        )
 
     if rating == "again":
         interval_days = 0.02  # about 29 minutes
@@ -106,20 +118,10 @@ def schedule_review(
             ease_factor = _clamp(prior_ease + 0.15, 1.3, 2.8)
         state = "mastered" if proficiency >= 5 else "review"
 
-    # 招聘季调制层：urgency 越高间隔越短；deadline 前保证至少一次复习
+    # 招聘季调制层：urgency 越高间隔越短（again 不受调制）
     if rating != "again":
         interval_days = interval_days * (1.0 - 0.4 * urgency)
     next_review_at = now + timedelta(days=interval_days)
-    pulled_back = False
-    if deadline and rating != "again" and next_review_at > deadline:
-        days_until = max(1, (deadline - now).days - 1)
-        if days_until >= 1:
-            next_review_at = deadline - timedelta(days=max(1, round(days_until * 0.8)))
-            pulled_back = True
-        next_review_at = max(next_review_at, now)
-    if pulled_back:
-        # 重算间隔使其与真实排期一致；截止日已过则至少保留最小步长，绝不早于 now
-        interval_days = max((next_review_at - now).total_seconds() / 86400, 0.02)
     interval_days = round(interval_days, 4)
     return ScheduledReview(
         state=state,
