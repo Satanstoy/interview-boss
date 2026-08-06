@@ -129,7 +129,7 @@
       :style="floatingBtnStyle"
     >
       <ArrowLeft class="size-3" />
-      {{ returnToPracticeMode ? '返回刷题模式' : '返回题库' }}
+      {{ returnToPracticeMode ? '返回八股刷题' : '返回题库' }}
     </button>
   </div>
 </template>

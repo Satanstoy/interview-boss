@@ -83,7 +83,7 @@
                 {{ isBuilding ? '重建中...' : '重建题库' }}
               </Button>
               <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
-                刷题模式
+                八股刷题模式
               </Button>
               <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
                 刷新

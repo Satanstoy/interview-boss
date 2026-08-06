@@ -624,8 +624,8 @@ test.describe('题库模块', () => {
     }
   })
 
-  test('刷题模式按钮', async ({ page }) => {
-    const practiceModeBtn = page.getByText('刷题模式').first()
+  test('八股刷题按钮', async ({ page }) => {
+    const practiceModeBtn = page.getByText('八股刷题').first()
     if (await practiceModeBtn.isVisible()) {
       await practiceModeBtn.click()
       await page.waitForTimeout(500)

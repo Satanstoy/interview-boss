@@ -521,7 +521,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('独立刷题工作台使用全局题单顶栏', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
     await expect(page).toHaveURL(/\/practice/)
     await expect(page.getByTestId('practice-header')).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-deck-select')).toBeVisible()
@@ -538,8 +538,8 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(page.getByText('我的回答')).not.toBeVisible({ timeout: 3000 })
   })
 
-  test('刷题模式支持收藏题单和单卡查看答案', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题模式' }).click()
+  test('八股刷题支持收藏题单和单卡查看答案', async ({ page }) => {
+    await page.getByRole('button', { name: '八股刷题模式' }).click()
 
     await expect(page.getByTestId('practice-header')).toBeVisible({ timeout: 5000 })
     const deckSelect = page.getByTestId('practice-deck-select')
@@ -555,7 +555,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('当前题卡可以加入用户题单', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
     await expect(page.getByTestId('practice-add-to-deck')).toBeVisible()
 
     await page.getByTestId('practice-add-to-deck').click()
@@ -566,7 +566,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('刷题作为训练区独立 Tab 展示', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 
     await expect(page).toHaveURL(/\/practice/)
     await expect(page.getByTestId('practice-focus-card')).toContainText('请介绍一下 Vue 的响应式原理')
@@ -575,7 +575,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('刷题工作区沿用训练页滚动容器并适配视口宽度', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 
     await expect(page.getByTestId('practice-view')).toBeVisible()
     await expect(page.getByTestId('practice-workspace')).toBeVisible()
@@ -605,7 +605,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 
     await expect(page.getByTestId('practice-header')).toBeVisible()
     await expect(page.getByTestId('practice-focus-card')).toBeVisible()
@@ -624,7 +624,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('刷题题单与高频题库联动并保存熟练度', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 
     const deckSelect = page.getByTestId('practice-deck-select')
     await expect(deckSelect).toContainText('全部题')
@@ -645,7 +645,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
       if (url.pathname.endsWith('/questions')) questionRequests.push(url.pathname)
     })
 
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
     const deckSelect = page.getByTestId('practice-deck-select')
     await expect(deckSelect).toContainText('全部题')
 
@@ -667,7 +667,7 @@ test.describe('练习完整流程 — PracticePanel', () => {
   })
 
   test('题单管理页可查看自定义题单并进入题目管理', async ({ page }) => {
-    await page.getByRole('button', { name: '刷题', exact: true }).click()
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
     await page.getByTestId('practice-deck-select').click()
     await page.getByTestId('practice-manage-decks').click()
 

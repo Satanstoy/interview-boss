@@ -195,7 +195,7 @@ const sidebarGroups = computed(() => [
   {
     label: '训练',
     tabs: [
-      { key: 'Practice', label: '刷题', route: '/practice' },
+      { key: 'Practice', label: '八股刷题', route: '/practice' },
       { key: 'Chat', label: '模拟面试', route: '/chat' },
       { key: 'Coding', label: '手撕代码', route: '/coding' },
     ],

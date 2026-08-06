@@ -8,14 +8,21 @@
       data-testid="practice-queue-sidebar"
       class="sidebar-container z-30 w-64 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
       :class="[
+        queueCollapsed ? 'sidebar-collapsed' : '',
         mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-50 flex w-64 md:relative md:w-auto' : 'hidden md:flex',
       ]"
+      :style="{ width: queueCollapsed ? '0px' : '16rem' }"
     >
       <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
         <div class="relative min-w-0 flex-1">
           <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
         </div>
+        <AppTooltip text="收起题单侧栏" side="right">
+          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题单侧栏" @click="queueCollapsed = true">
+            <PanelLeftClose :size="14" />
+          </Button>
+        </AppTooltip>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar sidebar-content">
         <button
@@ -34,10 +41,15 @@
         </button>
         <p v-if="!sessionQuestions.length" class="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">这个题单还没有可复习的题</p>
       </div>
-      <div class="shrink-0 border-t border-border p-2 sidebar-content">
-        <Button data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 w-full justify-start gap-1.5 text-xs text-muted-foreground hover:text-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回算法刷题模式</Button>
-      </div>
     </aside>
+
+    <div v-if="viewMode === 'browse' && queueCollapsed" class="flex shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons">
+      <AppTooltip text="展开题单侧栏" side="right">
+        <Button variant="ghost" size="icon" class="size-7" aria-label="展开题单侧栏" @click="queueCollapsed = false">
+          <PanelLeft :size="14" />
+        </Button>
+      </AppTooltip>
+    </div>
 
     <div class="flex min-w-0 flex-1 flex-col">
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
@@ -48,6 +60,7 @@
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
+          <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
           <Button variant="ghost" size="icon" class="size-7 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
           </Button>
@@ -87,7 +100,7 @@
                 <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-36 gap-2" @click="handleSelfAssess('hard')"><Target class="size-4" />有点印象</Button>
                 <Button data-testid="practice-self-assess-good" size="lg" class="w-36 gap-2" @click="handleSelfAssess('good')"><Check class="size-4" />能答出</Button>
               </div>
-              <span class="text-[11px] text-muted-foreground">先自评，再看答案 · ← → 切换题目</span>
+              <span class="text-[11px] text-muted-foreground">先自评，再看答案</span>
             </template>
             <template v-else>
               <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
@@ -305,6 +318,7 @@ import {
   List,
   Loader2,
   PanelLeft,
+  PanelLeftClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -353,6 +367,7 @@ const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
+const queueCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
