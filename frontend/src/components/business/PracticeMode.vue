@@ -47,7 +47,7 @@
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><BookOpen class="size-3.5" />看题列表</Button>
+          <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
           <Button variant="ghost" size="icon" class="size-7 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
           </Button>
