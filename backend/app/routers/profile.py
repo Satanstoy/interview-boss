@@ -17,9 +17,9 @@ from app.core.config import _reload_from_db, _sync_env_file
 from app.core import config as app_config
 from app.models.schemas import ProfileUpdateRequest
 from app.services.recruitment_milestones import (
-    VALID_BATCHES,
-    get_milestones,
+    VALID_PACES,
     compute_urgency,
+    get_season_windows,
 )
 
 logger = logging.getLogger("interview-boss")
@@ -39,6 +39,7 @@ _SENSITIVE_KEYS = {"llm_api_key"}
 _REQUIRED_NON_EMPTY = {"llm_model", "llm_base_url"}
 _MAX_POSITION_LEN = 30
 ALLOWED_YEAR_RANGE = (2020, 2035)
+VALID_BATCHES = ("daily", "summer_intern", "autumn", "spring")
 
 _DEFAULT_SEASONS = [
     "2026届春招",
@@ -360,7 +361,7 @@ async def get_recruitment_pref(user: dict = Depends(get_current_user)):
 
 @router.put("/api/profile/recruitment")
 async def update_recruitment_pref(req: dict, user: dict = Depends(get_current_user)):
-    """保存用户招聘偏好（届次 + 批次 + 每日容量），返回 GET 形状响应（含时间线）"""
+    """保存用户招聘偏好（届次 + 批次 + 每日容量 + 节奏），返回 GET 形状响应（含时间线）"""
     year = _coerce_pref_int(req.get("graduation_year"), "届次年份")
     if year is not None and not (ALLOWED_YEAR_RANGE[0] <= year <= ALLOWED_YEAR_RANGE[1]):
         raise HTTPException(status_code=400, detail="届次年份超出合理范围")
@@ -370,18 +371,22 @@ async def update_recruitment_pref(req: dict, user: dict = Depends(get_current_us
     capacity = _coerce_pref_int(req.get("daily_capacity"), "每日容量")
     if capacity is not None and not (5 <= capacity <= 200):
         raise HTTPException(status_code=400, detail="每日容量须在 5-200 之间")
+    pace = str(req.get("pace") or "standard")
+    if pace not in VALID_PACES:
+        raise HTTPException(status_code=400, detail=f"节奏必须是: {VALID_PACES}")
 
     def _save():
         with get_db_connection() as conn:
             conn.execute(
-                "INSERT INTO user_recruitment_pref (user_id, graduation_year, batch, daily_capacity, updated_at) "
-                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "INSERT INTO user_recruitment_pref (user_id, graduation_year, batch, daily_capacity, pace, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(user_id) DO UPDATE SET "
                 "graduation_year = excluded.graduation_year, "
                 "batch = excluded.batch, "
                 "daily_capacity = excluded.daily_capacity, "
+                "pace = excluded.pace, "
                 "updated_at = CURRENT_TIMESTAMP",
-                (user["id"], year, batch, capacity if capacity is not None else 30),
+                (user["id"], year, batch, capacity if capacity is not None else 30, pace),
             )
             conn.commit()
 
@@ -401,24 +406,24 @@ def _coerce_pref_int(value, label: str) -> int | None:
 
 
 def _recruitment_pref_payload(user_id: int) -> dict:
-    """读取用户招聘偏好并构建 GET 形状响应（milestones + urgency）"""
+    """读取用户招聘偏好并构建 GET 形状响应（windows + pace + urgency）"""
     with get_db_connection() as conn:
         row = conn.execute(
-            "SELECT graduation_year, batch, daily_capacity FROM user_recruitment_pref WHERE user_id = ?",
+            "SELECT graduation_year, batch, daily_capacity, pace FROM user_recruitment_pref WHERE user_id = ?",
             (user_id,),
         ).fetchone()
     pref = dict(row) if row else {}
     year = int(pref.get("graduation_year") or 0)
-    batch = str(pref.get("batch") or "")
-    milestones = get_milestones(year, batch) if year and batch else []
-    urgency_info = compute_urgency(milestones, date_cls.today())
+    windows = get_season_windows(year) if year else []
+    urgency_info = compute_urgency(windows, date_cls.today(), str(pref.get("pace") or "standard"))
     return {
         "graduation_year": year or None,
-        "batch": batch or "",
+        "batch": str(pref.get("batch") or ""),
         "daily_capacity": int(pref.get("daily_capacity") or 30),
-        "milestones": [
-            {"name": m.name, "date": m.date.isoformat(), "kind": m.kind}
-            for m in milestones
+        "pace": str(pref.get("pace") or "standard"),
+        "windows": [
+            {"name": w.name, "peak": w.peak.isoformat(), "weight": w.weight}
+            for w in windows
         ],
         **urgency_info,
     }
