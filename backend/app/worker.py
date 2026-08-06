@@ -608,6 +608,23 @@ async def scheduled_compaction_task(ctx):
         raise
 
 
+async def scheduled_quality_audit_task(ctx):
+    """定时聚类质量审查：每周日凌晨 3:30 抽查公共题库聚类质量。
+
+    误合并率超阈值（10%）时 triggered_cleanup=1，提示清洗（不自动执行）。
+    """
+    from app.services.clustering_maintenance import run_quality_audit
+
+    logger.info("[定时任务] 开始聚类质量审查...")
+    try:
+        result = await run_quality_audit(user_id=None)
+        logger.info("[定时任务] 质量审查完成: %s", result)
+        return result
+    except Exception as e:
+        logger.exception(f"[定时任务] 质量审查失败: {e}")
+        raise
+
+
 class WorkerSettings:
     functions = [
         cluster_questions_task,
@@ -616,7 +633,8 @@ class WorkerSettings:
         force_cluster_all_task,
         build_master_bank_task,
         submit_import_task,
-        scheduled_compaction_task
+        scheduled_compaction_task,
+        scheduled_quality_audit_task
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -629,5 +647,6 @@ class WorkerSettings:
     # 定时任务：每天凌晨 3 点运行 compaction
     cron_jobs = [
         cron(scheduled_compaction_task, hour={3}, minute={0}),
+        cron(scheduled_quality_audit_task, hour={3}, minute={30}),
         cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
     ]

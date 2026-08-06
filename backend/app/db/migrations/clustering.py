@@ -371,3 +371,28 @@ def _migration_066_cluster_label(conn):
             "ALTER TABLE question_bank ADD COLUMN cluster_label TEXT DEFAULT NULL"
         )
     logger.info("migration_066: question_bank.cluster_label 列已就绪")
+
+
+def _migration_067_quality_audit(conn):
+    """quality_audit 表：公共题库聚类质量定期抽查记录。
+
+    审查机制（根因三问题解决后的质量监控）：每周抽样核验变体一致性，
+    记录误合并率/重复率/涵盖率，阈值告警触发清洗。
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS quality_audit ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "audited_at TEXT NOT NULL,"
+        "sample_size INTEGER NOT NULL,"
+        "total_variants INTEGER NOT NULL,"
+        "inconsistent_count INTEGER NOT NULL,"
+        "duplicate_count INTEGER NOT NULL,"
+        "coverage_count INTEGER NOT NULL,"
+        "inconsistent_rate REAL NOT NULL,"
+        "duplicate_rate REAL NOT NULL,"
+        "coverage_rate REAL NOT NULL,"
+        "report_path TEXT,"
+        "triggered_cleanup INTEGER DEFAULT 0"
+        ")"
+    )
+    logger.info("migration_067: quality_audit 表已就绪")

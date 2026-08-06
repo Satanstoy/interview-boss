@@ -5,6 +5,7 @@ question_bank clustering metadata. It deliberately avoids using embedding
 thresholds as merge decisions.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -452,3 +453,141 @@ def _merge_variant_duplicates(oq: list[str], dup_pairs: list[list[int]]) -> list
         keep, drop = min(pair), max(pair)  # 保留较小下标
         merge_targets.add(drop)
     return [v for idx, v in enumerate(oq) if idx not in merge_targets]
+
+
+# ── 聚类质量定期审查（根因三问题解决后的质量监控）──
+
+AUDIT_SAMPLE_SIZE = 20
+AUDIT_INCONSISTENT_THRESHOLD = 0.10  # 误合并率 > 10% → 触发清洗提示
+
+AUDIT_EVAL_PROMPT = """你是面试题去重专家。以下是同一聚类下的【代表题】与【原始题面变体】。
+
+请评估：
+1. 每个变体与代表题考察点是否一致（consistent=true 一致 / false 误合并）
+2. 代表题是否涵盖所有一致变体（representative_covers_all）
+3. 变体间是否重复（duplicates: 重复变体 index 数组）
+
+【代表题】
+{representative}
+
+【变体列表】
+{variants}
+
+输出格式（严格 JSON）：
+{{"variants": [{{"index": 0, "consistent": true, "reason": "一句话"}}],
+  "representative_covers_all": true,
+  "duplicates": [0, 2]}}"""
+
+
+async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE_SIZE) -> dict:
+    """公共题库聚类质量抽查：抽样核验变体一致性，写 quality_audit 表。
+
+    误合并率 > AUDIT_INCONSISTENT_THRESHOLD → triggered_cleanup=1（提示清洗）。
+    Returns: 指标 dict
+    """
+    import os
+    import time as _time
+
+    from app.db.connection import get_db_connection
+    from app.services.llm import _call_llm_with_retry
+    from app.services.llm_judge import parse_json_object
+
+    report_dir = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "experiment_reports"
+    ))
+    os.makedirs(report_dir, exist_ok=True)
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, question, frequency, original_questions FROM question_bank "
+            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "ORDER BY frequency DESC LIMIT ?",
+            (sample_size,),
+        ).fetchall()
+    sample = []
+    for r in rows:
+        try:
+            oq = json.loads(r["original_questions"] or "[]")
+        except Exception:
+            oq = []
+        oq = [str(q).strip() for q in oq if str(q).strip()]
+        if oq:
+            sample.append({"id": r["id"], "question": r["question"], "oq": oq})
+
+    total_variants = inconsistent = duplicates = coverage = 0
+    lines = [f"# 聚类质量定期审查报告", "",
+             f"**时间**: {_time.strftime('%Y-%m-%d %H:%M:%S')}", "",
+             f"- 抽样: {len(sample)} 个聚类", ""]
+
+    for rep in sample:
+        variants_text = "\n".join(f"{i}. {v}" for i, v in enumerate(rep["oq"]))
+        prompt = AUDIT_EVAL_PROMPT.format(representative=rep["question"], variants=variants_text)
+        try:
+            raw = await _call_llm_with_retry(
+                prompt, system_msg="你是一个面试题去重专家。",
+                response_format=None, user_id=user_id, model=None,
+            )
+            data = parse_json_object(raw) or {}
+        except Exception as e:
+            logger.warning(f"[质量审查] 聚类 {rep['id']} 核验失败: {e}")
+            continue
+        v_map = {v.get("index"): v for v in data.get("variants", []) if isinstance(v, dict)}
+        n = len(rep["oq"])
+        total_variants += n
+        bad = sum(1 for i in range(n) if not v_map.get(i, {}).get("consistent", True))
+        inconsistent += bad
+        duplicates += len(set(data.get("duplicates", []) or []))
+        if data.get("representative_covers_all"):
+            coverage += 1
+        lines.append(
+            f"- 聚类 {rep['id']}: {n} 变体 | 不一致 {bad} | "
+            f"重复 {len(set(data.get('duplicates', []) or []))} | "
+            f"涵盖 {'✅' if data.get('representative_covers_all') else '❌'}"
+        )
+
+    n_clusters = len(sample)
+    inconsistent_rate = inconsistent / max(total_variants, 1)
+    duplicate_rate = duplicates / max(total_variants, 1)
+    coverage_rate = coverage / max(n_clusters, 1)
+    triggered = int(inconsistent_rate > AUDIT_INCONSISTENT_THRESHOLD)
+
+    report_path = os.path.join(report_dir, f"quality_audit_{_time.strftime('%Y%m%d_%H%M%S')}.md")
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n\n"
+                f"## 指标\n\n- 误合并率: {inconsistent_rate * 100:.1f}%"
+                f"（阈值 {AUDIT_INCONSISTENT_THRESHOLD * 100:.0f}%）\n"
+                f"- 重复率: {duplicate_rate * 100:.1f}%\n"
+                f"- 涵盖率: {coverage_rate * 100:.0f}%\n"
+                f"- 触发清洗: {'✅' if triggered else '否'}\n")
+
+    def _save():
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO quality_audit (audited_at, sample_size, total_variants, "
+                "inconsistent_count, duplicate_count, coverage_count, "
+                "inconsistent_rate, duplicate_rate, coverage_rate, report_path, triggered_cleanup) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (_time.strftime('%Y-%m-%d %H:%M:%S'), n_clusters, total_variants,
+                 inconsistent, duplicates, coverage,
+                 round(inconsistent_rate, 4), round(duplicate_rate, 4),
+                 round(coverage_rate, 4), report_path, triggered),
+            )
+            conn.commit()
+
+    try:
+        await asyncio.to_thread(_save)
+    except Exception as e:
+        logger.warning(f"[质量审查] 落库失败: {e}")
+
+    logger.info(
+        "[质量审查] 抽样 %d 聚类: 误合并率 %.1f%% 重复率 %.1f%% 涵盖率 %.0f%% 触发清洗=%s",
+        n_clusters, inconsistent_rate * 100, duplicate_rate * 100,
+        coverage_rate * 100, triggered,
+    )
+    return {
+        "sample_size": n_clusters, "total_variants": total_variants,
+        "inconsistent_rate": round(inconsistent_rate, 4),
+        "duplicate_rate": round(duplicate_rate, 4),
+        "coverage_rate": round(coverage_rate, 4),
+        "triggered_cleanup": triggered, "report_path": report_path,
+    }
