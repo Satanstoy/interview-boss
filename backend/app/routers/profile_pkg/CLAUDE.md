@@ -6,7 +6,7 @@
 
 | 文件 | 端点前缀 | 职责 |
 |------|---------|------|
-| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL） |
+| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL、接口类型 api_format、深度思考 thinking）；PUT 校验 api_format 必须在端点能力矩阵支持范围内（不匹配返回 400） |
 | `taxonomy.py` | `/api/profile/taxonomy` | 分类体系管理（CRUD + 导入导出） |
 | `position.py` | `/api/profile/positions` | 岗位管理（CRUD + 切换） |
 | `email.py` | `/api/profile/bind-email`, `/api/profile/send-bind-code` | 邮箱绑定（验证码） |
