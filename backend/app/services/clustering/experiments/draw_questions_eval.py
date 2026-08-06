@@ -21,7 +21,7 @@ import urllib.request
 from app.db.connection import get_db_connection
 
 REPORT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "experiment_reports"))
-EMB_CACHE = "/tmp/draw_eval_embeddings.json"
+EMB_CACHE = os.path.join(REPORT_DIR, "draw_eval_embeddings.json")
 EMB_URL = "https://api.siliconflow.cn/v1/embeddings"
 EMB_KEY = "sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym"
 EMB_MODEL = "BAAI/bge-m3"
@@ -166,7 +166,7 @@ async def llm_call(prompt, system_msg="你是一个资深面试官。"):
     """走统一 LLM 封装（app.services.llm，用户主账号配置）。"""
     from app.services.llm import _call_llm_with_retry
     return await _call_llm_with_retry(
-        prompt, system_msg=system_msg, response_format={"type": "json_object"},
+        prompt, system_msg=system_msg, response_format=None,
         user_id=1, model=None,
     )
 
@@ -191,12 +191,12 @@ def norm_score_list(raw):
     """兼容 LLM 打分输出的多种包裹形态（裸数组 / {"scores":[...]} / 单对象 / 碎片）"""
     data = parse_json(raw)
     if isinstance(data, list):
-        return data
+        return [x for x in data if isinstance(x, dict) and "score" in x]
     if isinstance(data, dict):
         for k in ("scores", "results", "result", "items"):
             v = data.get(k)
             if isinstance(v, list):
-                return v
+                return [x for x in v if isinstance(x, dict) and "score" in x]
         if "score" in data:
             return [data]
     # 整体解析失败 → 逐个提取 {"id":..,"score":..} 对象碎片恢复
@@ -237,15 +237,14 @@ async def main():
         json.dump(cache, open(EMB_CACHE, "w"))
 
     lines = [f"# 抽题工具评估报告", "", f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}", "",
-             f"- 题库: {len(qs)} 题（活跃）", f"- 场景: {len(SCENARIOS)} 个", ""]
+             f"- 题库: {len(qs)} 题（活跃）", f"- 场景: {len(SCENARIOS)} 个（LLM 并发执行）", ""]
     summary = []
 
+    # 2) 准备阶段（无 LLM）：各场景候选集
+    prepared = []
     for s in SCENARIOS:
         name = s["name"]
-        print(f"[eval] === 场景: {name} ===")
-        # 方案 A：现状
         cands_a, picked_a = sql_draw(qs, s)
-        # 方案 B：embedding top-20
         query_vec = query_vecs[name]
         scored_all = sorted(
             ((r, cosine(query_vec, cache[f"q{r['id']}"])) for r in qs),
@@ -253,9 +252,18 @@ async def main():
         )
         top20 = [r for r, _ in scored_all[:20]]
         top3_b = [r for r, _ in scored_all[:3]]
-        # 方案 C：LLM rerank
+        prepared.append((s, cands_a, picked_a, top20, top3_b))
+
+    # 3) 并发 LLM 阶段（semaphore 限制并发，避免 mimo 限流）
+    sem = asyncio.Semaphore(4)
+
+    async def llm_limited(prompt, system_msg="你是一个资深面试官。"):
+        async with sem:
+            return await llm_call(prompt, system_msg=system_msg)
+
+    async def rerank_task(s, top20):
         items_c = "\n".join(f"{r['id']}. {r['question']}" for r in top20)
-        raw = await llm_call(RERANK_PROMPT.format(query=s["query"], n=3, items=items_c))
+        raw = await llm_limited(RERANK_PROMPT.format(query=s["query"], n=3, items=items_c))
         data = parse_json(raw) or {}
         if isinstance(data, dict):
             for k in ("result", "results"):
@@ -264,20 +272,43 @@ async def main():
                     data = v
                     break
         sel_ids = data.get("selected", []) if isinstance(data, dict) else []
-        picked_c = [next(r for r in top20 if r["id"] == int(i)) for i in sel_ids if any(r["id"] == int(i) for r in top20)]
+        return [r for r in top20 if r["id"] in {int(i) for i in sel_ids}]
 
-        def fmt(items):
-            return "\n".join(f"{r['id']}. {r['question']}（cat2={r['cat2']}）" for r in items)
+    async def score_task(s, tag, items):
+        if not items:
+            return []
+        fmt = "\n".join(f"{r['id']}. {r['question']}（cat2={r['cat2']}）" for r in items)
+        raw = await llm_limited(SCORE_PROMPT.format(query=s["query"], n=len(items), items=fmt))
+        return norm_score_list(raw)
 
-        # LLM 打分：三个方案各一次
-        scores = {}
-        for tag, items in [("A_现状SQL", picked_a), ("B_embedding", top3_b), ("C_RAG_LLM", picked_c)]:
-            if not items:
-                scores[tag] = []
-                continue
-            raw = await llm_call(SCORE_PROMPT.format(query=s["query"], n=len(items), items=fmt(items)))
-            scores[tag] = norm_score_list(raw)
+    # A/B 打分 + rerank 全部并发
+    score_ab = {}
+    rerank_tasks = {}
+    for s, cands_a, picked_a, top20, top3_b in prepared:
+        name = s["name"]
+        score_ab[name] = {}
+        for tag, items in [("A_现状SQL", picked_a), ("B_embedding", top3_b)]:
+            score_ab[name][tag] = asyncio.create_task(score_task(s, tag, items))
+        rerank_tasks[name] = asyncio.create_task(rerank_task(s, top20))
 
+    # 等 rerank 完成后，对 C 的结果打分（依赖 rerank 输出）
+    picked_c_map = {}
+    score_c = {}
+    for s, cands_a, picked_a, top20, top3_b in prepared:
+        name = s["name"]
+        picked_c_map[name] = await rerank_tasks[name]
+        score_c[name] = asyncio.create_task(score_task(s, "C_RAG_LLM", picked_c_map[name]))
+
+    # 汇总
+    summary = []
+    for s, cands_a, picked_a, top20, top3_b in prepared:
+        name = s["name"]
+        picked_c = picked_c_map[name]
+        scores = {
+            "A_现状SQL": await score_ab[name]["A_现状SQL"],
+            "B_embedding": await score_ab[name]["B_embedding"],
+            "C_RAG_LLM": await score_c[name],
+        }
         avg = {tag: (sum(x.get("score", 0) for x in v) / len(v) if v else 0.0) for tag, v in scores.items()}
         summary.append((name, len(cands_a), len(top20), avg))
 
