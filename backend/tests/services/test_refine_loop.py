@@ -32,6 +32,8 @@ async def test_refine_returns_draft_unchanged_when_critic_passes():
     assert result == _DRAFT
     assert issues == []
     assert mock_llm.call_count == 1
+    # critic 必须开启深度思考（关思考会让审查变宽松，漏报问题）
+    assert mock_llm.call_args.kwargs.get("thinking") is True
 
 
 async def test_refine_revises_once_when_issues_and_then_passes():
@@ -117,7 +119,9 @@ async def test_refine_treats_unknown_verdict_as_pass():
     with patch(
         "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
     ) as mock_llm:
-        mock_llm.return_value = _critic_response("OK", [{"problem": "p", "evidence": "e"}])
+        mock_llm.return_value = _critic_response(
+            "OK", [{"problem": "p", "evidence": "e"}]
+        )
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )

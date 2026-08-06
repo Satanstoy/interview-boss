@@ -181,8 +181,7 @@ verdict 为 PASS 时 issues 必须为空数组。只输出 JSON，不要输出�
 def _build_revise_prompt(question: str, draft: str, issues: list[dict]) -> str:
     """构建 revise 提示词：原题 + 草稿 + 问题列表 → 重写"""
     issue_lines = "\n".join(
-        f"- {i.get('problem', '')}（依据：{i.get('evidence', '')}）"
-        for i in issues
+        f"- {i.get('problem', '')}（依据：{i.get('evidence', '')}）" for i in issues
     )
     return f"""你是面试答案写手。请根据【问题清单】修订下面的【候选答案】。
 
@@ -232,13 +231,18 @@ def _parse_critique(raw: str) -> dict:
 async def _critic_answer(
     question: str, draft: str, sources: list[dict], user_id: int | None
 ) -> dict:
-    """调用 critic：返回 {"verdict", "issues"}；LLM 异常返回 PASS 语义"""
+    """调用 critic：返回 {"verdict", "issues"}；LLM 异常返回 PASS 语义
+
+    critic 显式开启深度思考（thinking=True）：关思考会让审查变宽松，
+    漏报字数超标等实质问题（2026-08-06 实验观察）。
+    """
     try:
         raw = await _call_llm_with_retry(
             _build_critic_prompt(question, draft, sources),
             system_msg=_CRITIC_SYSTEM,
             response_format={"type": "json_object"},
             user_id=user_id,
+            thinking=True,
         )
         return _parse_critique(raw)
     except Exception:
