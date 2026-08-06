@@ -14,7 +14,7 @@
 | `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容；`experiments/` 为独立实验模块（语义标签摘要记忆：`load_cluster_data` + `text_prefilter` + LLM 标签生成 `generate_cluster_labels` + 孤岛增量分配 `assign_singletons` + 合并二次验证 `verify_assignments`（fail-closed，验证层默认开启，`evaluate.py --no-verify` 可关），`evaluate.py` 为评估入口，跑全流程并输出 Markdown 报告到 `backend/experiment_reports/`；评估通过才并入生产） | `llm`, `embedding_service` |
 | `clustering_maintenance.py` | 聚类元数据审计/确定性修复（frequency、cluster_id、normalized tables、精确重复） | `db/question_bank_sources`, `pipeline/batch` |
 | `submit_service.py` | 提交业务逻辑：题目标注、答案生成、增量更新题库 | `llm`, `db`, `pipeline` |
-| `embedding_service.py` | 向量编码（双后端：SiliconFlow bge-m3 1024维 + 本地 ONNX bge-small-zh 512维）+ FAISS 预筛选 + hash fallback | `openai`, `onnxruntime`, `tokenizers`, `faiss-cpu` |
+| `embedding_service.py` | 向量编码（双后端：SiliconFlow bge-m3 1024维 + 本地 ONNX bge-small-zh 512维）+ FAISS 预筛选 + hash fallback；**生产已切 SiliconFlow bge-m3**（`EMBEDDING_BACKEND=siliconflow`，2026-08-06 全量重算 320 题，DB 记录 `embedding_model/embedding_dim`）；`EMBEDDING_BACKEND=auto` 时 onnx 优先、siliconflow 次之、hash 兜底（hash 无语义，仅防崩） | `openai`, `onnxruntime`, `tokenizers`, `faiss-cpu` |
 | `faiss_index_manager.py` | Per-cat2 centroid 缓存 + FAISS 索引管理器，消除 cluster_batch 全表扫描；singleton 实例通过 `get_index_manager()` 访问 | `embedding_service`, `faiss-cpu` |
 | `backpressure.py` | 自适应并发限制器（RateLimitError 自动降并发、成功后恢复）；matcher/compact 共享 singleton | — |
 | `chat_service.py` | 对话管理、消息存储、durable side-effect jobs、memory provenance/version guard、CandidateSet、interview event/generation read model | `llm`, `memory_recall_service` |
