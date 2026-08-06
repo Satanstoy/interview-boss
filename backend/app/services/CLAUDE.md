@@ -8,7 +8,7 @@
 | 文件 | 职责 | 依赖 |
 |------|------|------|
 | `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出；**供应商能力兼容层**：`_PROVIDER_CAPABILITIES` 矩阵（json_mode/max_output_tokens，按 base_url 前缀匹配）+ `LLM_JSON_MODE_OVERRIDE` 应急开关（force-on/force-off/auto）；json_object 不可靠的端点（如 mimo Token Plan 2026-08-06 实测截断）自动降级为 prompt 指令 + 调用方容错解析兜底，调用方保持声明式传参零改动；所有调用显式下发 `max_tokens`（默认 4096）避免服务端默认值截断 | `core/config` |
-| `answer_enrichment.py` | 答案/背诵稿提示词构建：联网搜索（best-effort，失败回退纯模型）+ 来源格式化；`sources_json()` 序列化来源供落库 | `search_service`, `core/prompts` |
+| `answer_enrichment.py` | 答案/背诵稿提示词构建：联网搜索（best-effort，失败回退纯模型）+ 来源格式化；`sources_json()` 序列化来源供落库；`refine_answer()` 生成后质量 loop（critic 对照参考资料+硬性 checklist，结构化 JSON verdict，PASS 提前停；revise 仅在有 issues 时执行；LLM 异常/JSON 解析失败回退草稿；单题 max_rounds=2、批量/流水线/agent max_rounds=1；无搜索来源跳过 loop） | `search_service`, `core/prompts`, `llm` |
 | `search_service.py` | 用户可配置联网搜索（Tavily/Brave/Bocha/Exa 等多 provider）；`search_web()` 返回规范化结果 `[{title, url, snippet, published_at}]`，未配置返回空列表不抛错 | `core/config` |
 | `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库）与 `compact.py` 孤岛碎片整理 | `clustering`, `db` |
 | `clustering/` | LLM 聚类去重包（matcher、clusterer、full_recluster、prompts），`__init__.py` 保持旧导入兼容；`experiments/` 为独立实验模块（语义标签摘要记忆：`load_cluster_data` + `text_prefilter` + LLM 标签生成 `generate_cluster_labels` + 孤岛增量分配 `assign_singletons` + 合并二次验证 `verify_assignments`（fail-closed，验证层默认开启，`evaluate.py --no-verify` 可关），`evaluate.py` 为评估入口，跑全流程并输出 Markdown 报告到 `backend/experiment_reports/`；评估通过才并入生产） | `llm`, `embedding_service` |
