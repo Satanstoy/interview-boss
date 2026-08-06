@@ -1,7 +1,7 @@
 """答案生成质量 loop（Critic → Revise）测试：PASS 提前停、ISSUES 修订、异常回退草稿。"""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.answer_enrichment import _extract_question, refine_answer
 
@@ -140,3 +140,45 @@ def test_extract_question_falls_back_to_first_300_chars():
     assert _extract_question("") == ""
     long_prompt = "题" * 500
     assert _extract_question(long_prompt) == "题" * 300
+
+
+async def test_generate_master_answer_uses_refine_loop():
+    """单题生成：写库前调用 refine_answer（max_rounds=2），落库的是修订稿"""
+    from app.routers.answers import generate_master_answer
+
+    user = {"id": 1, "is_admin": True}
+    mock_question = {"id": 10, "question": "什么是微服务？", "ai_answer": None}
+    sources = [
+        {"title": "Redis 官方文档", "url": "https://redis.io/docs", "snippet": "x"}
+    ]
+
+    def _exec(fn):
+        return fn()
+
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = _exec
+        with patch("app.routers.answers.get_db_connection") as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_conn.__enter__.return_value = mock_conn
+            mock_conn.__exit__.return_value = None
+            mock_conn.execute.return_value.fetchone.return_value = mock_question
+            mock_get_conn.return_value = mock_conn
+            with patch(
+                "app.routers.answers.prepare_answer_prompt", new_callable=AsyncMock
+            ) as mock_prep:
+                mock_prep.return_value = ("prompt", sources)
+                with patch(
+                    "app.routers.answers.refine_answer", new_callable=AsyncMock
+                ) as mock_refine:
+                    mock_refine.return_value = ("修订后的答案", [])
+                    with patch(
+                        "app.routers.answers._call_llm_with_retry",
+                        new_callable=AsyncMock,
+                    ) as mock_llm:
+                        mock_llm.return_value = "草稿答案"
+                        result = await generate_master_answer(10, user)
+
+    assert result["answer"] == "修订后的答案"
+    mock_refine.assert_awaited_once()
+    # max_rounds=2（单题允许 2 轮）
+    assert mock_refine.call_args.kwargs.get("max_rounds") == 2

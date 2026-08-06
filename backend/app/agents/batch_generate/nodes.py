@@ -42,7 +42,7 @@ async def load_questions_node(state: BatchGenerateState) -> dict:
 async def generate_answer_node(state: BatchGenerateState) -> dict:
     """为当前题目生成答案"""
     from app.services.llm import _call_llm_with_retry
-    from app.services.answer_enrichment import prepare_answer_prompt, sources_json
+    from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
     from app.db.connection import get_db_connection, run_db
 
     idx = state.get("current_index", 0)
@@ -73,6 +73,13 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
             question, user_id=state.get("user_id")
         )
         answer = await _call_llm_with_retry(prompt, user_id=state.get("user_id"))
+        answer, _ = await refine_answer(
+            prompt,
+            answer,
+            search_sources,
+            user_id=state.get("user_id"),
+            max_rounds=1,
+        )
         elapsed = time.monotonic() - start
         quality = evaluate_answer_quality(answer, question)
 

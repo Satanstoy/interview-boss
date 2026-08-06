@@ -10,6 +10,7 @@ from app.models.schemas import BatchGenerateAnswersRequest
 from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry
 from app.services.answer_enrichment import (
+    refine_answer,
     sources_json,
     prepare_answer_prompt,
     prepare_recitation_prompt,
@@ -90,6 +91,9 @@ async def generate_master_answer(
             row["question"], user_id=user["id"]
         )
         answer = await _call_llm_with_retry(prompt, user_id=user["id"])
+        answer, _ = await refine_answer(
+            prompt, answer, search_sources, user_id=user["id"], max_rounds=2
+        )
 
         if is_admin:
             # 管理员：存入 question_bank.ai_answer（全局）
@@ -253,6 +257,9 @@ async def batch_generate_answers(
                             question_text, user_id=user["id"]
                         )
                         answer = await _call_llm_with_retry(prompt, user_id=user["id"])
+                        answer, _ = await refine_answer(
+                            prompt, answer, search_sources, user_id=user["id"], max_rounds=1
+                        )
 
                         def _update():
                             with get_db_connection() as conn:
