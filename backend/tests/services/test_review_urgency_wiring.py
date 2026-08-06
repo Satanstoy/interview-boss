@@ -16,14 +16,20 @@ from app.db.connection import get_db_connection
 POSITION = "agent开发/大模型应用开发/大模型开发"
 
 
+_USER_SEQ = {"n": 0}
+
+
 def _make_user(client, test_db):
     """创建测试用户并返回 (Bearer token, user_id)"""
     from app.core.auth import create_access_token
 
+    _USER_SEQ["n"] += 1
+    seq = _USER_SEQ["n"]
+    username = f"test_review_user_{seq}"
     cursor = test_db.execute(
         "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
         "VALUES (?, ?, ?, 0, 'private')",
-        ("test_review_user", "test-hash", "test_review_user@example.com"),
+        (username, "test-hash", f"{username}@example.com"),
     )
     test_db.commit()
     user_id = cursor.lastrowid
