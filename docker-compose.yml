@@ -34,7 +34,7 @@ x-app-service: &app-service
     - HF_HUB_OFFLINE=1
     - HF_HOME=/home/appuser/.cache/huggingface
     - ENV=production
-    - EMBEDDING_BACKEND=onnx
+    - EMBEDDING_BACKEND=siliconflow
     - EMBEDDING_MODEL_DIR=/app/models/bge-small-zh-v1.5
     - EMBEDDING_OFFLINE=1
   volumes:
