@@ -167,6 +167,8 @@ def _build_critic_prompt(question: str, draft: str, sources: list[dict]) -> str:
 3. 结构：是否匹配场景 A/B/C（算法题给可运行 Python 代码；系统设计题给落地要点与权衡；原理题给核心解释+记忆锚点+实用场景）。
 4. 字数：非代码题应在 300–500 字，明显超出或过短应指出。
 5. 完整性：是否遗漏该题的核心考点。
+6. 去 AI 味：是否出现小标题（如"**核心解法：**""落地要点"）、总结腔（"总而言之""一句话总结""本质上"）、铺垫句（"好的面试官""首先"）、排比堆砌——有则必须指出。
+7. 无废话：是否有重复定义、无信息增量的填充句——有则必须指出。
 
 ## 输出格式（严格 JSON）
 {{
@@ -197,8 +199,13 @@ def _build_revise_prompt(question: str, draft: str, issues: list[dict]) -> str:
 ## 修订要求
 - 只修改问题清单中指出的问题，保留正确的部分，不要无谓重写。
 - 保持口述性：短句、大白话、可背诵。
+- 总字数：非代码题必须控制在 500 字以内，删掉多余叙述，保留全部考点。
 - 不要添加【参考资料】之外的新事实；不确定的内容宁可删掉也不编造。
 - 输出修订后的完整答案（Markdown），不要输出其他内容。"""
+
+
+# 确定性字数上限：超过即强制修订（不依赖 critic 的 LLM 估算）
+_MAX_ANSWER_LEN = 600
 
 
 def _parse_critique(raw: str) -> dict:
@@ -292,7 +299,16 @@ async def refine_answer(
         critique = await _critic_answer(question, current, sources, user_id)
         issues = critique.get("issues") or []
         if critique.get("verdict", "PASS") == "PASS" or not issues:
-            break
+            # 确定性字数校验：超过上限视为 ISSUES（不依赖 LLM 估算）
+            if len(current) > _MAX_ANSWER_LEN:
+                issues = [
+                    {
+                        "problem": f"候选答案共 {len(current)} 字，超出确定性上限 {_MAX_ANSWER_LEN} 字",
+                        "evidence": "字数校验（确定性规则）",
+                    }
+                ]
+            else:
+                break
         all_issues = issues
         current = await _revise_answer(question, current, issues, user_id)
     return current, all_issues

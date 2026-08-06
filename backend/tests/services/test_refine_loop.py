@@ -130,6 +130,40 @@ async def test_refine_treats_unknown_verdict_as_pass():
     assert mock_llm.call_count == 1
 
 
+async def test_refine_forces_revision_when_draft_too_long():
+    """critic PASS 但草稿超过确定性字数上限 → 强制注入字数 ISSUE 并 revise"""
+    long_draft = "字" * 700
+    revised = "字" * 400
+    with patch(
+        "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
+    ) as mock_llm:
+        mock_llm.side_effect = [
+            _critic_response("PASS"),
+            revised,
+            _critic_response("PASS"),
+        ]
+        result, issues = await refine_answer(
+            "prompt", long_draft, _SOURCES, user_id=1, max_rounds=2
+        )
+    assert result == revised
+    assert any("超出" in i.get("problem", "") for i in issues)
+    assert mock_llm.call_count == 3
+
+
+async def test_refine_skips_length_check_for_short_draft():
+    """critic PASS 且字数合规 → 不额外调用 revise"""
+    short_draft = "字" * 300
+    with patch(
+        "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
+    ) as mock_llm:
+        mock_llm.return_value = _critic_response("PASS")
+        result, _ = await refine_answer(
+            "prompt", short_draft, _SOURCES, user_id=1, max_rounds=2
+        )
+    assert result == short_draft
+    assert mock_llm.call_count == 1
+
+
 def test_extract_question_extracts_between_markers():
     """有 marker 时提取 USER_CONTENT 内的面试题原文"""
     prompt = (
