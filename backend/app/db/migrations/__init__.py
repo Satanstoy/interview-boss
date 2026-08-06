@@ -94,6 +94,7 @@ from app.db.migrations.interview_distribution import (
 )
 from app.db.migrations.recruitment import (
     _migration_062_user_recruitment_pref,
+    _migration_064_user_recruitment_pace,
 )
 
 logger = logging.getLogger("interview-boss")
@@ -170,6 +171,7 @@ _MIGRATIONS = [
     (61, "resume_optimization", _migration_061_resume_optimization),
     (62, "user_recruitment_pref", _migration_062_user_recruitment_pref),
     (63, "answer_sources", _migration_063_answer_sources),
+    (64, "user_recruitment_pace", _migration_064_user_recruitment_pace),
 ]
 
 

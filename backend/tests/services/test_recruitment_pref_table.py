@@ -10,6 +10,12 @@ def test_user_recruitment_pref_table_exists(test_db):
     assert "daily_capacity" in cols
 
 
+def test_pace_column_exists(test_db):
+    with get_db_connection() as conn:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(user_recruitment_pref)").fetchall()]
+    assert "pace" in cols
+
+
 def test_pref_upsert_roundtrip(test_db):
     with get_db_connection() as conn:
         conn.execute(
