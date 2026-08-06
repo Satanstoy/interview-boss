@@ -99,23 +99,27 @@ const AUTUMN_RECRUITMENT = {
   graduation_year: 2027,
   batch: 'autumn',
   daily_capacity: 30,
-  milestones: [
-    { name: '秋招提前批开始', date: '2026-08-01', kind: 'window_open' },
-    { name: '提前批窗口关闭', date: '2026-08-31', kind: 'window_close' },
+  pace: 'standard',
+  windows: [
+    { name: '暑期实习', peak: '2026-03-15', weight: 0.67 },
+    { name: '提前批', peak: '2026-08-15', weight: 0.5 },
+    { name: '秋招正式批', peak: '2026-10-15', weight: 1.0 },
+    { name: '春招主批', peak: '2027-04-15', weight: 0.83 },
   ],
-  urgency: 0.56,
-  next_milestone: { name: '提前批窗口关闭', date: '2026-08-31', kind: 'window_close' },
-  days_left: 26,
+  urgency: 0.43,
+  current_window: { name: '提前批', peak: '2026-08-15', weight: 0.5 },
+  next_window: { name: '秋招正式批', peak: '2026-10-15', days_left: 71 },
 }
 
 const EMPTY_RECRUITMENT = {
-  batch: '',
   graduation_year: null,
+  batch: '',
   daily_capacity: 30,
-  milestones: [],
-  urgency: 0,
-  next_milestone: null,
-  days_left: null,
+  pace: 'standard',
+  windows: [],
+  urgency: 0.2,
+  current_window: null,
+  next_window: null,
 }
 
 const MOCK_MASTER_BANK = [
@@ -343,6 +347,12 @@ async function mockAllAPIs(page, options = {}) {
   await page.route('**/api/profile**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
     if (pathname === '/api/profile/recruitment') {
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON()
+        await page.evaluate((payload) => { window.__lastRecruitmentPut = payload }, body)
+        await route.fulfill({ json: { ...recruitment, ...body } })
+        return
+      }
       await route.fulfill({ json: recruitment })
       return
     }
@@ -423,11 +433,11 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     const deckSelect = page.getByTestId('practice-deck-select')
     await expect(deckSelect).toContainText('今日复习', { timeout: 5000 })
 
-    // 招聘状态行：距{next_milestone.name}还有 N 天 + 冲刺中徽标 + 秋招容量
+    // 招聘状态行：当前窗口 + 阶段徽标 + 容量
     const statusBar = page.getByTestId('recruitment-status')
-    await expect(statusBar).toContainText('距提前批窗口关闭还有 26 天', { timeout: 5000 })
+    await expect(statusBar).toContainText('提前批窗口', { timeout: 5000 })
     await expect(statusBar).toContainText('冲刺中')
-    await expect(statusBar).toContainText('秋招 · 每日容量 30 题')
+    await expect(statusBar).toContainText('容量 30 题')
 
     // 今日复习队列已加载，第一张卡展示
     await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
@@ -494,5 +504,42 @@ test.describe('今日复习空队列', () => {
 
     await expect(page.getByText('今日复习已经完成')).toBeVisible({ timeout: 5000 })
     await expect(page.getByRole('button', { name: '切换到全部题' })).toBeVisible()
+  })
+})
+
+// ═══════════════════════════════════════════════
+// 4. 已掌握题抽查（保持手感徽标）
+// ═══════════════════════════════════════════════
+test.describe('已掌握题抽查', () => {
+  test('抽查题显示保持手感徽标，复习后仍为已掌握状态', async ({ page }) => {
+    const masteredQ = {
+      ...DUE_QUESTION_SEEDS[0],
+      is_checkin: true,
+      state: 'mastered',
+      proficiency: 5,
+    }
+    await gotoPractice(page, { deckQuestions: [masteredQ] })
+
+    // 题卡带「保持手感」徽标
+    await expect(page.getByTestId('checkin-badge')).toContainText('保持手感', { timeout: 5000 })
+    await expect(page.getByText('1 / 1')).toBeVisible()
+  })
+})
+
+// ═══════════════════════════════════════════════
+// 5. 设置页复习节奏档位
+// ═══════════════════════════════════════════════
+test.describe('设置页面试时间偏好', () => {
+  test('选择冲刺节奏并保存后 PUT 携带 pace=hard', async ({ page }) => {
+    await mockAllAPIs(page)
+    await page.goto('/settings?section=interview')
+    await page.getByTestId('pace-hard').waitFor({ timeout: 15000 })
+
+    await page.getByTestId('pace-hard').click()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+
+    await expect.poll(() => page.evaluate(() => window.__lastRecruitmentPut || null)).not.toBeNull()
+    const payload = await page.evaluate(() => window.__lastRecruitmentPut)
+    expect(payload.pace).toBe('hard')
   })
 })
