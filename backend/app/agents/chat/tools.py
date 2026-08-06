@@ -245,11 +245,23 @@ AGENT_PRIVATE_SEARCH_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "keywords": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
-                "question_type": {"type": "string", "enum": ["system_design", "knowledge_probe"]},
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 5,
+                },
+                "question_type": {
+                    "type": "string",
+                    "enum": ["system_design", "knowledge_probe"],
+                },
                 "interview_format": {
                     "type": "string",
-                    "enum": ["concept", "system_design", "code_review", "protocol_review"],
+                    "enum": [
+                        "concept",
+                        "system_design",
+                        "code_review",
+                        "protocol_review",
+                    ],
                 },
                 "capability": {"type": "string"},
                 "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 5},
@@ -272,10 +284,18 @@ AGENT_PRIVATE_DRAW_SCHEMA = {
             "properties": {
                 "count": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5},
                 "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
-                "question_type": {"type": "string", "enum": ["system_design", "knowledge_probe"]},
+                "question_type": {
+                    "type": "string",
+                    "enum": ["system_design", "knowledge_probe"],
+                },
                 "interview_format": {
                     "type": "string",
-                    "enum": ["concept", "system_design", "code_review", "protocol_review"],
+                    "enum": [
+                        "concept",
+                        "system_design",
+                        "code_review",
+                        "protocol_review",
+                    ],
                 },
                 "capability": {"type": "string"},
             },
@@ -294,7 +314,12 @@ AGENT_PRIVATE_SELECT_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "candidate_index": {"type": "integer", "default": 0, "minimum": 0, "maximum": 4},
+                "candidate_index": {
+                    "type": "integer",
+                    "default": 0,
+                    "minimum": 0,
+                    "maximum": 4,
+                },
             },
         },
     },
@@ -315,14 +340,22 @@ def get_tools_for_state(state: ChatState) -> list[dict]:
         return ALL_TOOLS
 
     private_load_schema = json.loads(json.dumps(LOAD_SKILL_SCHEMA, ensure_ascii=False))
-    private_load_schema["function"]["parameters"]["properties"]["skill_name"]["enum"] = [
+    private_load_schema["function"]["parameters"]["properties"]["skill_name"][
+        "enum"
+    ] = [
         *SKILL_NAMES,
         "agent-interview",
     ]
-    private_load_schema["function"]["parameters"]["properties"]["skill_name"]["description"] += (
-        "\n- agent-interview: Agent 开发岗位专属内部面试策略（仅当前 Agent profile 可用）"
-    )
-    return [private_load_schema, SEARCH_QUESTIONS_SCHEMA, DRAW_QUESTIONS_SCHEMA, SELECT_QUESTION_SCHEMA, *AGENT_PRIVATE_TOOLS]
+    private_load_schema["function"]["parameters"]["properties"]["skill_name"][
+        "description"
+    ] += "\n- agent-interview: Agent 开发岗位专属内部面试策略（仅当前 Agent profile 可用）"
+    return [
+        private_load_schema,
+        SEARCH_QUESTIONS_SCHEMA,
+        DRAW_QUESTIONS_SCHEMA,
+        SELECT_QUESTION_SCHEMA,
+        *AGENT_PRIVATE_TOOLS,
+    ]
 
 
 # ── Progress Messages ────────────────────────────────────
@@ -452,26 +485,28 @@ async def _llm_rerank_in_tool(
     user_id: int,
     model: str = None,
 ) -> list[dict] | None:
-    """LLM-based reranking inside search_questions tool.
+    """LLM-based reranking inside search_questions tool (listwise).
 
-    Uses the LLM to score candidate questions by relevance to the current
-    conversation context. Filters by _RERANK_RELEVANCE_THRESHOLD.
+    实验结论（2026-08-06 抽题/检索评估）：listwise（LLM 从候选中选择最相关 top-3）
+    比 pointwise（0-1 打分 + 阈值过滤）质量更高（4.2 vs 3.5），且避免 LLM 分数
+    波动导致的阈值误判。选中项按原候选顺序保序返回。
     Returns None on failure so callers can preserve the original tool envelope.
     """
     if len(candidates) < 3:
         return candidates
 
     candidate_text = "\n".join(
-        f"{i+1}. [{q.get('cat1', '')}/{q.get('cat2', '')}] {q.get('question', '')}"
+        f"{i + 1}. [{q.get('cat1', '')}/{q.get('cat2', '')}] {q.get('question', '')}"
         for i, q in enumerate(candidates[:15])
     )
 
     prompt = (
-        "根据以下面试对话上下文，对候选题目的相关性评分（0-1）。\n"
+        "根据以下面试对话上下文，从候选题中选出最相关的题目（最多 3 道，宁缺毋滥）。\n"
         "只输出一个JSON对象，不要解释，不要使用Markdown。\n\n"
         f"对话上下文：\n{conversation_context[:500]}\n\n"
         f"候选题目：\n{candidate_text}\n\n"
-        '输出格式：{"scores": [0.9, 0.3, 0.8]}，scores长度必须与候选题数量一致。'
+        '输出格式：{"selected_indices": [0, 3, 7]}，selected_indices 是候选题的序号（从 0 开始），'
+        "按相关性从高到低排列，最多 3 个。"
     )
 
     try:
@@ -484,43 +519,68 @@ async def _llm_rerank_in_tool(
                 {
                     "role": "system",
                     "content": (
-                        "你是面试题相关性打分器。必须只返回JSON对象，"
-                        '格式为{"scores":[数字数组]}。'
+                        "你是面试题相关性选择器。必须只返回JSON对象，"
+                        '格式为{"selected_indices":[整数数组]}。'
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=256,
             response_format={"type": "json_object"},
         )
-        scores = _parse_rerank_scores(result)
+        indices = _parse_selected_indices(result, max_idx=len(candidates[:15]))
+        if indices is None:
+            raise ValueError("rerank response does not contain selected_indices")
 
-        for i, q in enumerate(candidates[: len(scores)]):
-            q["_relevance_score"] = float(scores[i])
+        if not indices:
+            logger.info("LLM rerank: 未选中任何候选，使用前 3 道")
+            return candidates[:3]
 
-        filtered = [
-            q
-            for q in candidates
-            if q.get("_relevance_score", 0) >= _RERANK_RELEVANCE_THRESHOLD
-        ]
-        filtered.sort(key=lambda q: q.get("_relevance_score", 0), reverse=True)
-
-        if filtered:
-            logger.info(
-                "LLM rerank: %d/%d candidates above threshold %.1f",
-                len(filtered),
-                len(candidates),
-                _RERANK_RELEVANCE_THRESHOLD,
-            )
-            return filtered[:5]
-
-        logger.info("LLM rerank: all candidates below threshold, using top 3")
-        return candidates[:3]
+        selected = [candidates[i] for i in sorted(indices)]
+        logger.info(
+            "LLM rerank(listwise): 选中 %d/%d 道", len(selected), len(candidates)
+        )
+        return selected[:5]
 
     except Exception as e:
         logger.warning("LLM rerank in search_questions failed: %s", e)
         return None
+
+
+def _parse_selected_indices(raw: str, max_idx: int) -> list[int] | None:
+    """Extract selected_indices from strict JSON or JSON embedded in model prose.
+
+    Returns:
+        list[int]: 合法 JSON 中的选中索引（越界/非数字已过滤）
+        None: 无法解析出合法 JSON（调用方应视为失败，保留原 envelope）
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+
+    decoder = json.JSONDecoder()
+    starts = [idx for idx, char in enumerate(text) if char in "[{"]
+    for start in starts:
+        try:
+            parsed, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            indices = parsed.get("selected_indices") or parsed.get("selected")
+        else:
+            indices = parsed
+        if isinstance(indices, list):
+            out = []
+            for idx in indices:
+                try:
+                    i = int(idx)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= i < max_idx:
+                    out.append(i)
+            return out
+    return None
 
 
 async def _execute_search_questions(args: dict, state: ChatState) -> str:

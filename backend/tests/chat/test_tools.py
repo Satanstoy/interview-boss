@@ -411,7 +411,9 @@ class TestExecuteToolSearchQuestions:
             ),
             patch(
                 "app.services.llm.raw_llm_call",
-                new=AsyncMock(return_value=json.dumps({"scores": [0.9, 0.8, 0.7, 0.6]})),
+                new=AsyncMock(
+                    return_value=json.dumps({"selected_indices": [0, 1, 2, 3]})
+                ),
             ),
         ):
             result = await execute_tool(tool_call, sample_state)
@@ -440,9 +442,24 @@ class TestExecuteToolSearchQuestions:
 
         mock_results = [
             {"id": 1, "question": "What is JVM?", "cat1": "Java", "cat2": "Basics"},
-            {"id": 2, "question": "Redis 缓存穿透怎么解决？", "cat1": "Backend", "cat2": "Redis"},
-            {"id": 3, "question": "Redis 过期策略有哪些？", "cat1": "Backend", "cat2": "Redis"},
-            {"id": 4, "question": "CSS 盒模型是什么？", "cat1": "Frontend", "cat2": "CSS"},
+            {
+                "id": 2,
+                "question": "Redis 缓存穿透怎么解决？",
+                "cat1": "Backend",
+                "cat2": "Redis",
+            },
+            {
+                "id": 3,
+                "question": "Redis 过期策略有哪些？",
+                "cat1": "Backend",
+                "cat2": "Redis",
+            },
+            {
+                "id": 4,
+                "question": "CSS 盒模型是什么？",
+                "cat1": "Frontend",
+                "cat2": "CSS",
+            },
         ]
         tool_call = {
             "function": {
@@ -458,15 +475,17 @@ class TestExecuteToolSearchQuestions:
             ),
             patch(
                 "app.services.llm.raw_llm_call",
-                new=AsyncMock(return_value=json.dumps({"scores": [0.1, 0.9, 0.8, 0.0]})),
+                new=AsyncMock(return_value=json.dumps({"selected_indices": [1, 2]})),
             ) as mock_rerank,
         ):
             result = await execute_tool(tool_call, sample_state)
 
         parsed = json.loads(result)
         assert mock_rerank.await_count == 1
-        assert mock_rerank.await_args.kwargs["response_format"] == {"type": "json_object"}
-        assert mock_rerank.await_args.kwargs["max_tokens"] >= 512
+        assert mock_rerank.await_args.kwargs["response_format"] == {
+            "type": "json_object"
+        }
+        assert mock_rerank.await_args.kwargs["max_tokens"] >= 256
         assert [item["id"] for item in parsed["items"]] == [2, 3]
         assert parsed["metadata"]["result_count"] == 2
         assert [item["id"] for item in sample_state["retrieved_questions"]] == [2, 3]
@@ -484,6 +503,103 @@ class TestExecuteToolSearchQuestions:
             0.2,
             0.8,
         ]
+
+    # ── Listwise rerank（实验结论落地：pointwise → listwise）──
+
+    def test_parse_selected_indices_accepts_variants(self):
+        """_parse_selected_indices 容忍多种包裹形态 + 越界过滤"""
+        from app.agents.chat.tools import _parse_selected_indices
+
+        assert _parse_selected_indices(
+            '{"selected_indices": [0, 2, 4]}', max_idx=5
+        ) == [0, 2, 4]
+        assert _parse_selected_indices(
+            '```json\n{"selected_indices": [1, 3]}\n```', max_idx=5
+        ) == [1, 3]
+        assert _parse_selected_indices(
+            '选择如下：{"selected_indices": [0]}', max_idx=5
+        ) == [0]
+        assert _parse_selected_indices('{"selected": [2, 4]}', max_idx=5) == [2, 4]
+        assert _parse_selected_indices("[1, 2, 3]", max_idx=5) == [1, 2, 3]
+        # 越界 / 非数字
+        assert _parse_selected_indices(
+            '{"selected_indices": [0, 99, -1]}', max_idx=5
+        ) == [0]
+        # 垃圾输入 → None（解析失败，调用方保留原 envelope）
+        assert _parse_selected_indices("完全无关的输出", max_idx=5) is None
+        # 合法但空选择 → []（LLM 明确不选）
+        assert _parse_selected_indices('{"selected_indices": []}', max_idx=5) == []
+
+    async def test_listwise_rerank_returns_selected_in_original_order(
+        self, monkeypatch
+    ):
+        """listwise：LLM 选择索引 → 按原候选顺序保序返回"""
+        from app.agents.chat.tools import _llm_rerank_in_tool
+
+        candidates = [
+            {"id": 1, "question": "A", "cat1": "c1", "cat2": "c2"},
+            {"id": 2, "question": "B", "cat1": "c1", "cat2": "c2"},
+            {"id": 3, "question": "C", "cat1": "c1", "cat2": "c2"},
+            {"id": 4, "question": "D", "cat1": "c1", "cat2": "c2"},
+            {"id": 5, "question": "E", "cat1": "c1", "cat2": "c2"},
+        ]
+
+        async def fake_raw_llm_call(user_id=None, model=None, **kwargs):
+            return '{"selected_indices": [4, 0, 2]}'
+
+        monkeypatch.setattr("app.services.llm.raw_llm_call", fake_raw_llm_call)
+        result = await _llm_rerank_in_tool(candidates, "上下文", user_id=1)
+        # 按原顺序保序：id 1, 3, 5（索引 0, 2, 4）
+        assert [q["id"] for q in result] == [1, 3, 5]
+
+    async def test_listwise_rerank_accepts_fewer_selections(self, monkeypatch):
+        """listwise：LLM 只选 2 道 → 返回 2 道（宁缺毋滥）"""
+        from app.agents.chat.tools import _llm_rerank_in_tool
+
+        candidates = [
+            {"id": 1, "question": "A", "cat1": "c1", "cat2": "c2"},
+            {"id": 2, "question": "B", "cat1": "c1", "cat2": "c2"},
+            {"id": 3, "question": "C", "cat1": "c1", "cat2": "c2"},
+        ]
+
+        async def fake_raw_llm_call(user_id=None, model=None, **kwargs):
+            return '{"selected_indices": [1]}'
+
+        monkeypatch.setattr("app.services.llm.raw_llm_call", fake_raw_llm_call)
+        result = await _llm_rerank_in_tool(candidates, "上下文", user_id=1)
+        assert [q["id"] for q in result] == [2]
+
+    async def test_listwise_rerank_failure_returns_none(self, monkeypatch):
+        """listwise：LLM 失败/解析失败 → None（调用方保留原 envelope）"""
+        from app.agents.chat.tools import _llm_rerank_in_tool
+
+        candidates = [
+            {"id": 1, "question": "A", "cat1": "c1", "cat2": "c2"},
+            {"id": 2, "question": "B", "cat1": "c1", "cat2": "c2"},
+            {"id": 3, "question": "C", "cat1": "c1", "cat2": "c2"},
+        ]
+
+        async def broken_llm(user_id=None, model=None, **kwargs):
+            return "模型输出不可解析的内容"
+
+        monkeypatch.setattr("app.services.llm.raw_llm_call", broken_llm)
+        assert await _llm_rerank_in_tool(candidates, "上下文", user_id=1) is None
+
+    async def test_listwise_rerank_short_candidates_skips_llm(self, monkeypatch):
+        """candidates < 3 → 原样返回，不调 LLM"""
+        from app.agents.chat.tools import _llm_rerank_in_tool
+
+        called = {"n": 0}
+
+        async def fake_raw_llm_call(user_id=None, model=None, **kwargs):
+            called["n"] += 1
+            return '{"selected_indices": [0]}'
+
+        monkeypatch.setattr("app.services.llm.raw_llm_call", fake_raw_llm_call)
+        candidates = [{"id": 1, "question": "A", "cat1": "c1", "cat2": "c2"}]
+        result = await _llm_rerank_in_tool(candidates, "上下文", user_id=1)
+        assert result == candidates
+        assert called["n"] == 0
 
     async def test_search_with_question_type(self, sample_state):
         """search_questions should pass question_type through to hybrid_search."""
@@ -881,9 +997,7 @@ class TestLoadSkillStepEvent:
                 "id": "call_1",
                 "function": {
                     "name": "load_skill",
-                    "arguments": json.dumps(
-                        {"skill_name": "project-deep-dive"}
-                    ),
+                    "arguments": json.dumps({"skill_name": "project-deep-dive"}),
                 },
             }
 
