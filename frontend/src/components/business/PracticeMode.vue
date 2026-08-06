@@ -6,7 +6,7 @@
     <aside
       v-if="viewMode === 'browse'"
       data-testid="practice-queue-sidebar"
-      class="sidebar-container z-30 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
+      class="sidebar-container z-30 w-64 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
       :class="[
         mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-50 flex w-64 md:relative md:w-auto' : 'hidden md:flex',
       ]"
