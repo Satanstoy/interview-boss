@@ -12,7 +12,7 @@
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新。删除级联严格限定 owner 范围（`owner_id IS ?`，NULL 匹配公共数据）：私有删除不碰公共/他人面经、detail、question_bank sources；`_cleanup_sources_for_url` 带 owner_scope |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索。detail 用 all 口径可见性过滤（公共 approved OR 自己的）；编辑权限唯一矩阵 `can_edit_question`（公共题仅 admin，个人题仅本人，admin 也不能改他人个人题） |
 | `answers.py` | `/api/master-bank/*` | AI 答案生成。公共参考答案（`ai_answer`）仅管理员可生成（单题/批量均 403 拦截普通用户）；`generate-recitation` 为用户定制个人背诵稿（公共参考答案为基座 + 岗位/简历上下文 + 用户搜索配置），写入 `user_question_view.user_answer`；`save-user-answer` 仅允许对用户可见的题写入（all 口径可见性断言）；`use-reference-answer` 已删除；生成时联网搜索来源写入 `question_bank.answer_sources` 并在题库列表/详情 API 返回（questions.py） |
-| `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习。收藏/复习/加题单/evaluate-answer 的可见性统一 all 口径（`build_bank_where_clause(user_id, "all")`：公共题 + 自己的题），与题库列表一致。复习与自评记录复习时通过 `_user_urgency()` 按用户招聘偏好（`user_recruitment_pref`）计算 urgency 与下一个 `window_close` deadline 传入 `record_review`（无偏好 → (0.0, None)，行为与旧版一致） |
+| `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习。收藏/复习/加题单/evaluate-answer 的可见性统一 all 口径（`build_bank_where_clause(user_id, "all")`：公共题 + 自己的题），与题库列表一致。复习与自评记录复习时通过 `_user_urgency()` 按用户招聘偏好（`user_recruitment_pref` 届次 + pace）计算机会窗口 urgency 传入 `record_review`（无偏好 → 0.2 base） |
 | `interview.py` | `/api/interview/*` | 模拟面试 |
 | `analytics.py` | `/api/analytics/*` | 数据分析 |
 | `insights.py` | `/api/insights` | 洞察工作台聚合快照 |

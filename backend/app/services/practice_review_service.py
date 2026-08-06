@@ -17,7 +17,6 @@ def record_review(
     source: str = "flashcard",
     now: datetime | None = None,
     urgency: float = 0.0,
-    deadline: datetime | None = None,
 ) -> dict:
     """Atomically update a user's state and append an auditable review event."""
 
@@ -31,7 +30,6 @@ def record_review(
         rating,
         now=reviewed_at,
         urgency=urgency,
-        deadline=deadline,
     )
     timestamp = reviewed_at.strftime("%Y-%m-%d %H:%M:%S")
     next_review_at = result.next_review_at.strftime("%Y-%m-%d %H:%M:%S")
