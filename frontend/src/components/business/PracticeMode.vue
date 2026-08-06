@@ -4,24 +4,18 @@
     <div v-if="mobileSidebarOpen" class="fixed inset-0 z-40 bg-black/40 md:hidden" @click="mobileSidebarOpen = false" />
 
     <aside
+      v-if="viewMode === 'browse'"
       data-testid="practice-queue-sidebar"
       class="sidebar-container z-30 shrink-0 flex-col overflow-hidden border-r border-border bg-background md:flex md:z-auto"
       :class="[
-        queueCollapsed ? 'sidebar-collapsed' : '',
         mobileSidebarOpen ? 'fixed inset-y-0 left-0 z-50 flex w-64 md:relative md:w-auto' : 'hidden md:flex',
       ]"
-      :style="{ width: queueCollapsed ? '0px' : '16rem' }"
     >
       <div class="flex shrink-0 items-center gap-2 p-2 sidebar-content">
         <div class="relative min-w-0 flex-1">
           <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
         </div>
-        <AppTooltip text="收起题单侧栏" side="right">
-          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题单侧栏" @click="queueCollapsed = true">
-            <PanelLeftClose :size="14" />
-          </Button>
-        </AppTooltip>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar sidebar-content">
         <button
@@ -40,12 +34,15 @@
         </button>
         <p v-if="!sessionQuestions.length" class="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">这个题单还没有可复习的题</p>
       </div>
+      <div class="shrink-0 border-t border-border p-2 sidebar-content">
+        <Button data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 w-full justify-start gap-1.5 text-xs text-muted-foreground hover:text-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回算法刷题模式</Button>
+      </div>
     </aside>
 
-    <div v-if="queueCollapsed" class="hidden shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons md:flex">
-      <AppTooltip text="展开题单侧栏" side="right">
-        <Button variant="ghost" size="icon" class="size-7" aria-label="展开题单侧栏" @click="queueCollapsed = false">
-          <PanelLeft :size="14" />
+    <div v-if="viewMode === 'quiz'" class="flex shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons">
+      <AppTooltip text="看题列表" side="right">
+        <Button data-testid="practice-switch-browse" variant="ghost" size="icon" class="size-7" aria-label="展开看题列表" @click="switchToBrowse">
+          <BookOpen :size="14" />
         </Button>
       </AppTooltip>
     </div>
@@ -69,6 +66,7 @@
         </div>
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
+          <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
             <Button variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
           </AppTooltip>
@@ -225,9 +223,14 @@
     </div>
 
     <div v-if="currentQ" class="mx-auto flex shrink-0 w-full flex-wrap items-center justify-between gap-3 px-1">
-      <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
-      <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
-      <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
+      <template v-if="isAlgorithmQueue">
+        <span class="mx-auto text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
+      </template>
+      <template v-else>
+        <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
+        <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
+        <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
+      </template>
     </div>
         </div>
       </main>
@@ -260,6 +263,37 @@
       </div>
     </template>
   </AppDialog>
+
+  <AppDialog
+    :open="showPracticed"
+    title="已刷过的题"
+    :max-width="'32rem'"
+    @update:open="showPracticed = $event"
+  >
+    <template #default>
+      <div class="max-h-[60vh] overflow-y-auto custom-scrollbar">
+        <p v-if="practicedLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</p>
+        <div v-else-if="practicedList.length" class="flex flex-col gap-1.5">
+          <div
+            v-for="item in practicedList"
+            :key="item.id"
+            class="flex items-center gap-2.5 rounded-lg border border-border bg-card p-2.5"
+          >
+            <span class="flex size-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold" :class="scoreTextColor(item.proficiency * 20)">{{ item.proficiency }}/5</span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm text-foreground">{{ item.question }}</p>
+              <p class="mt-0.5 text-[11px] text-muted-foreground">
+                刷过 {{ item.review_count }} 次
+                <span v-if="item.next_review_at"> · 下次复习 {{ formatNextReview(item.next_review_at) }}</span>
+                <span v-if="item.last_rating"> · {{ { again: '不会', hard: '有点模糊', good: '记得了', easy: '很熟' }[item.last_rating] || item.last_rating }}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+        <p v-else class="py-8 text-center text-sm text-muted-foreground">还没有刷过的题，先去刷几道吧。</p>
+      </div>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
@@ -278,7 +312,6 @@ import {
   List,
   Loader2,
   PanelLeft,
-  PanelLeftClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -327,7 +360,6 @@ const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
-const queueCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
@@ -337,8 +369,13 @@ const rememberedIds = ref(new Set())
 const pendingReviewedId = ref(null)
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
-// 墨墨模式：算法队列（due）先自评三选项 → 显示答案 → 下一题时提交复习评分
-const isAlgorithmQueue = computed(() => props.selectedDeckKey === 'due')
+// 已刷过的题（右上角入口）
+const showPracticed = ref(false)
+const practicedList = ref([])
+const practicedLoading = ref(false)
+// 模式：quiz=算法队列刷题（无侧栏，先自评再看答案）；browse=列表浏览（侧栏可自由切题）
+const viewMode = ref(props.selectedDeckKey === 'due' ? 'quiz' : 'browse')
+const isAlgorithmQueue = computed(() => viewMode.value === 'quiz')
 const selfRating = ref(null)
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
@@ -419,6 +456,12 @@ function selectFromSidebar(questionIndex) {
   resetState()
   mobileSidebarOpen.value = false
 }
+// 模式切换：quiz（算法刷题）↔ browse（列表浏览）
+function switchToBrowse() { viewMode.value = 'browse' }
+function switchToQuiz() {
+  viewMode.value = 'quiz'
+  if (props.selectedDeckKey !== 'due') emit('select-deck', 'due')
+}
 function goPrev() { if (queueSwitchBlocked()) return; if (currentIndex.value > 0) { currentIndex.value -= 1; pendingReviewedId.value = null; resetState() } }
 function goNext() {
   if (queueSwitchBlocked()) return
@@ -446,6 +489,32 @@ function nextWithRating() {
   selfRating.value = null
 }
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
+async function togglePracticed() {
+  showPracticed.value = !showPracticed.value
+  if (showPracticed.value && !practicedList.value.length) {
+    practicedLoading.value = true
+    try {
+      const { fetchPracticedQuestions } = await import('@/services/practiceApi.js')
+      const data = await fetchPracticedQuestions()
+      practicedList.value = data.items || []
+    } catch (e) {
+      toast.error('加载已刷题列表失败')
+    } finally {
+      practicedLoading.value = false
+    }
+  }
+}
+function formatNextReview(date) {
+  if (!date) return ''
+  const d = new Date(String(date).replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return String(date).slice(0, 10)
+  const now = Date.now()
+  const diff = d.getTime() - now
+  if (diff < 0) return '已到期'
+  const hours = Math.round(diff / 3600000)
+  if (hours < 24) return `${hours} 小时后`
+  return `${Math.round(hours / 24)} 天后`
+}
 function openDeckPicker() {
   addDeckKey.value = customDecks.value[0]?.key || ''
   showDeckPicker.value = true
@@ -489,7 +558,16 @@ watch(sessionQuestions, (questions) => {
   if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1)
 })
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
-watch(() => props.selectedDeckKey, (key) => { if (key) { sessionKey.value = key; currentIndex.value = 0; pendingReviewedId.value = null; resetState() } })
+watch(() => props.selectedDeckKey, (key) => {
+  if (key) {
+    sessionKey.value = key
+    currentIndex.value = 0
+    pendingReviewedId.value = null
+    resetState()
+    // due 队列 = 算法刷题模式；其他题单 = 浏览模式
+    viewMode.value = key === 'due' ? 'quiz' : 'browse'
+  }
+})
 onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 </script>
