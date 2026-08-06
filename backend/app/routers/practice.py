@@ -129,7 +129,9 @@ async def delete_practice_deck(deck_key: str, user: dict = Depends(get_current_u
             try:
                 delete_custom_deck(conn, user["id"], deck_key)
             except KeyError:
-                raise HTTPException(status_code=404, detail="题单不存在或系统题单不可删除")
+                raise HTTPException(
+                    status_code=404, detail="题单不存在或系统题单不可删除"
+                )
             conn.commit()
 
     await run_db(_delete)
@@ -184,12 +186,25 @@ async def get_practice_deck_questions(
     def _query():
         with get_db_connection() as conn:
             try:
-                return list_deck_questions(conn, user["id"], deck_key, filter_mode=filter, limit=limit, offset=offset)
+                return list_deck_questions(
+                    conn,
+                    user["id"],
+                    deck_key,
+                    filter_mode=filter,
+                    limit=limit,
+                    offset=offset,
+                )
             except KeyError:
                 raise HTTPException(status_code=404, detail="题单不存在")
 
     deck, items, total = await run_db(_query)
-    return {"deck": deck, "items": items, "total": total, "page_size": limit, "offset": offset}
+    return {
+        "deck": deck,
+        "items": items,
+        "total": total,
+        "page_size": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/api/practice/review")
@@ -403,6 +418,28 @@ async def evaluate_answer(
     except Exception as e:
         logger.exception("答案评估失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+
+
+@router.get("/api/practice/practiced")
+async def get_practiced_questions(user: dict = Depends(get_current_user)):
+    """当前用户刷过的题（按最近复习时间倒序，最多 50 条）"""
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.difficulty, "
+                "uqr.state, uqr.proficiency, uqr.review_count, uqr.last_rating, "
+                "uqr.last_reviewed_at, uqr.next_review_at "
+                "FROM user_question_review uqr "
+                "JOIN question_bank qb ON qb.id = uqr.question_bank_id "
+                "WHERE uqr.user_id = ? AND qb.deleted_at IS NULL "
+                "ORDER BY uqr.updated_at DESC LIMIT 50",
+                (user["id"],),
+            ).fetchall()
+            return rows
+
+    rows = await run_db(_query)
+    return {"items": [dict(r) for r in rows]}
 
 
 @router.get("/api/practice-history/{question_id}")

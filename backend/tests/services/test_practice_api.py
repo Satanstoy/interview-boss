@@ -114,7 +114,9 @@ def test_custom_deck_can_be_created_managed_and_used_as_a_review_queue(client, t
         assert queue.json()["items"][0]["id"] == question_id
 
         listed = client.get("/api/practice/decks")
-        custom = next(item for item in listed.json()["items"] if item["key"] == deck_key)
+        custom = next(
+            item for item in listed.json()["items"] if item["key"] == deck_key
+        )
         assert custom["kind"] == "custom"
         assert custom["total"] == 1
 
@@ -130,14 +132,18 @@ def test_custom_deck_can_be_created_managed_and_used_as_a_review_queue(client, t
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         assert removed.status_code == 200
-        assert client.get(f"/api/practice/decks/{deck_key}/questions").json()["total"] == 0
+        assert (
+            client.get(f"/api/practice/decks/{deck_key}/questions").json()["total"] == 0
+        )
 
         deleted = client.delete(
             f"/api/practice/decks/{deck_key}",
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         assert deleted.status_code == 200
-        assert client.get(f"/api/practice/decks/{deck_key}/questions").status_code == 404
+        assert (
+            client.get(f"/api/practice/decks/{deck_key}/questions").status_code == 404
+        )
     finally:
         app.dependency_overrides.pop(dependency, None)
 
@@ -157,3 +163,44 @@ def test_migration_backfills_legacy_answer_history(test_db):
     ).fetchone()
     assert row[0] == 1
     assert row[1] == 3
+
+
+def test_practiced_questions_lists_recently_reviewed(client, test_db):
+    """已刷过的题列表：按最近复习时间倒序，带熟练度与下次复习时间"""
+    q1 = _insert_question(test_db, "什么是连接池？", frequency=8)
+    q2 = _insert_question(test_db, "什么是幂等？", frequency=1)
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, state, proficiency, review_count, last_rating, last_reviewed_at, next_review_at, updated_at) "
+        "VALUES (1, ?, 'learning', 2, 1, 'good', '2026-08-05 10:00:00', '2026-08-08 10:00:00', '2026-08-05 11:00:00')",
+        (q1,),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, state, proficiency, review_count, last_rating, last_reviewed_at, next_review_at, updated_at) "
+        "VALUES (1, ?, 'review', 4, 3, 'easy', '2026-08-06 10:00:00', '2026-08-12 10:00:00', '2026-08-06 11:00:00')",
+        (q2,),
+    )
+    test_db.commit()
+    app, dependency = _override_user()
+
+    try:
+        resp = client.get("/api/practice/practiced")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 2
+        print("DEBUG items:", [(i["id"], i.get("last_reviewed_at")) for i in items])
+        print(
+            "DEBUG db:",
+            [
+                dict(r)
+                for r in test_db.execute(
+                    "SELECT question_bank_id, updated_at FROM user_question_review"
+                ).fetchall()
+            ],
+        )
+        assert items[0]["id"] == q2  # 最近复习的在前
+        assert items[0]["proficiency"] == 4
+        assert items[1]["id"] == q1
+        assert items[1]["review_count"] == 1
+        assert items[0]["next_review_at"]
+    finally:
+        app.dependency_overrides.pop(dependency, None)
