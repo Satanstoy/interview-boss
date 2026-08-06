@@ -7,7 +7,7 @@
 
 | 文件 | 职责 | 依赖 |
 |------|------|------|
-| `llm.py` | LLM 调用（OpenAI/Anthropic 双格式）、重试、流式输出；**供应商能力兼容层**：`_PROVIDER_CAPABILITIES` 矩阵（json_mode/max_output_tokens，按 base_url 前缀匹配）+ `LLM_JSON_MODE_OVERRIDE` 应急开关（force-on/force-off/auto）；json_object 不可靠的端点（如 mimo Token Plan 2026-08-06 实测截断）自动降级为 prompt 指令 + 调用方容错解析兜底，调用方保持声明式传参零改动；所有调用显式下发 `max_tokens`（默认 4096）避免服务端默认值截断 | `core/config` |
+| `llm.py` | LLM 调用（OpenAI Chat / OpenAI Responses / Anthropic Messages 三格式）、重试、流式输出；**供应商能力兼容层**：`_PROVIDER_CAPABILITIES` 矩阵（json_mode/max_output_tokens/api_formats，按 base_url 前缀匹配）+ `LLM_JSON_MODE_OVERRIDE`/`LLM_API_FORMAT` 应急开关（force-on/force-off/auto、chat/responses/anthropic/auto）；json_object 不可靠的端点自动降级为 prompt 指令 + 容错解析兜底；三格式完整参数支持（流式/工具调用/tool_choice/参数映射：messages→input、system→instructions、max_tokens→max_output_tokens、response_format→text.format、tools 扁平化、tool_choice 转换）；所有调用显式下发 `max_tokens`（默认 4096）避免服务端默认值截断 | `core/config` |
 | `answer_enrichment.py` | 答案/背诵稿提示词构建：联网搜索（best-effort，失败回退纯模型）+ 来源格式化；`sources_json()` 序列化来源供落库；`refine_answer()` 生成后质量 loop（critic 对照参考资料+硬性 checklist，结构化 JSON verdict，PASS 提前停；revise 仅在有 issues 时执行；LLM 异常/JSON 解析失败回退草稿；单题 max_rounds=2、批量/流水线/agent max_rounds=1；无搜索来源跳过 loop） | `search_service`, `core/prompts`, `llm` |
 | `search_service.py` | 用户可配置联网搜索（Tavily/Brave/Bocha/Exa 等多 provider）；`search_web()` 返回规范化结果 `[{title, url, snippet, published_at}]`，未配置返回空列表不抛错 | `core/config` |
 | `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库）与 `compact.py` 孤岛碎片整理 | `clustering`, `db` |
@@ -26,9 +26,9 @@
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
 | `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级）；`behavioral` 过滤必须复用分布统计的统一信号词表（HR、人力资源、行为面、软技能、冲突、协作、失败、复盘、STAR、职业规划、影响力）；英语缩写 HR 必须按独立 token 匹配，不能误命中 `thread` 等技术词 | `db/connection`, `routers/questions` |
-| `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间；`schedule_review` 支持 `urgency`（0..1 缩放间隔，最多 -40%）与 `deadline`（下一个 window_close 前压缩复习，保证截止前至少一次；`again` 不受调制） | — |
+| `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间；`schedule_review` 支持 `urgency`（0..1 缩放间隔，最多 -40%，`again` 不受调制）；`mastered` 卡 30 天固定抽查间隔，不受 urgency 缩放 | — |
 | `recruitment_milestones.py` | 招聘季机会窗口纯函数：`get_season_windows(届次)` 生成全年 4 窗口（暑期实习/提前批/秋招正式批/春招主批，含相对权重）；`compute_urgency(windows, 今天, pace)` 机会脉冲模型——紧迫度 = clamp(base 0.2 + Σ 窗口脉冲 + 节奏偏移，0..1)，返回当前窗口与下一窗口；无窗口 → 恒 base（社招/日常实习节奏） | — |
-| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency`/`deadline` 给 `schedule_review`（招聘季间隔调制） | `practice_scheduler`, `db/connection` |
+| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency` 给 `schedule_review`（招聘季间隔调制） | `practice_scheduler`, `db/connection` |
 | `practice_deck_service.py` | 今日复习（due）题单 + 系统/收藏题单与自定义题单管理。due 队列四桶排序（到期复习 → mastered 抽查「保持手感」→ 新题 → 未来），复习按 `frequency × (5 - proficiency)` 风险加权，新题按 frequency 降序并受预算约束（`max_new` 参数显式传入，或自动取 `user_recruitment_pref.daily_capacity − 到期复习 − 抽查`，下界 0）；item 带 `is_checkin`（state=mastered）标记。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；练习足迹聚合（打卡热力图/连击/趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件，score≥60 算对） | `db/queries`, `db/connection` |
