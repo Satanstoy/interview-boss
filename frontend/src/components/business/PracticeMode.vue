@@ -89,8 +89,19 @@
           <h2 class="practice-question font-semibold leading-relaxed tracking-tight text-foreground">{{ currentQ.question }}</h2>
 
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">
-            <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
-            <span class="text-[11px] text-muted-foreground">Enter 查看答案 · ← → 切换题目</span>
+            <template v-if="isAlgorithmQueue">
+              <p class="text-sm text-muted-foreground">先判断一下，能答出来吗？</p>
+              <div class="flex flex-col gap-2.5 sm:flex-row">
+                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-36 gap-2" @click="handleSelfAssess('again')"><X class="size-4" />不会</Button>
+                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-36 gap-2" @click="handleSelfAssess('hard')"><Target class="size-4" />有点印象</Button>
+                <Button data-testid="practice-self-assess-good" size="lg" class="w-36 gap-2" @click="handleSelfAssess('good')"><Check class="size-4" />能答出</Button>
+              </div>
+              <span class="text-[11px] text-muted-foreground">先自评，再看答案 · ← → 切换题目</span>
+            </template>
+            <template v-else>
+              <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
+              <span class="text-[11px] text-muted-foreground">Enter 查看答案 · ← → 切换题目</span>
+            </template>
           </div>
 
           <div v-else class="mt-10 text-left">
@@ -162,7 +173,14 @@
         </div>
 
         <div v-if="answerRevealed" data-testid="practice-review-actions" class="mt-6 border-t border-border pt-5">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div v-if="isAlgorithmQueue" class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-foreground">自评已记录</p>
+              <p class="mt-1 text-[11px] text-muted-foreground">对照答案再看看，然后进入下一题</p>
+            </div>
+            <Button data-testid="practice-next-question" size="sm" class="gap-1.5" @click="nextWithRating"><ArrowRight class="size-3.5" />下一题</Button>
+          </div>
+          <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p class="text-sm font-semibold text-foreground">记得怎么样？</p>
               <p class="mt-1 text-[11px] text-muted-foreground">先判断记忆程度，再进入下一题</p>
@@ -247,6 +265,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
+  ArrowRight,
   BookOpen,
   Check,
   ChevronDown,
@@ -268,6 +287,7 @@ import {
   Sparkles,
   Star,
   Target,
+  X,
   Zap,
 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -317,6 +337,9 @@ const rememberedIds = ref(new Set())
 const pendingReviewedId = ref(null)
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
+// 墨墨模式：算法队列（due）先自评三选项 → 显示答案 → 下一题时提交复习评分
+const isAlgorithmQueue = computed(() => props.selectedDeckKey === 'due')
+const selfRating = ref(null)
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
@@ -371,7 +394,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -395,6 +418,17 @@ function markAndNext(rating) {
   pendingReviewedId.value = currentQ.value.id
   if (serverDeckMode.value) emit('review', { questionId: currentQ.value.id, rating })
   goNext()
+}
+// 墨墨模式：点三选项只本地记录评分并显示答案，点「下一题」才提交复习
+function handleSelfAssess(rating) {
+  if (!currentQ.value?.id || answerRevealed.value) return
+  selfRating.value = rating
+  answerRevealed.value = true
+}
+function nextWithRating() {
+  if (selfRating.value) markAndNext(selfRating.value)
+  else goNext()
+  selfRating.value = null
 }
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
 function openDeckPicker() {
@@ -424,7 +458,7 @@ function onGlobalKeydown(event) {
   if (target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
   if (event.key === 'ArrowLeft') { event.preventDefault(); goPrev() }
   else if (event.key === 'ArrowRight') { event.preventDefault(); goNext() }
-  else if (event.key === 'Enter' && currentQ.value && !answerRevealed.value) { event.preventDefault(); answerRevealed.value = true }
+  else if (event.key === 'Enter' && currentQ.value && !answerRevealed.value && !isAlgorithmQueue.value) { event.preventDefault(); answerRevealed.value = true }
 }
 
 watch(sessionQuestions, (questions) => {

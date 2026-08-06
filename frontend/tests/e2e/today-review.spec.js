@@ -470,20 +470,20 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(sidebar.getByText(seeds[0].question)).toBeVisible()
     await expect(page.getByText('1 / 4')).toBeVisible()
 
-    // 复习 Q1：翻答案 → 记得了
-    await page.getByTestId('practice-show-answer').click()
+    // 复习 Q1：自评「能答出」→ 显示答案 → 下一题（提交复习）
+    await page.getByTestId('practice-self-assess-good').click()
     await expect(page.getByTestId('practice-review-actions')).toBeVisible()
-    await page.getByTestId('practice-review-good').click()
+    await page.getByTestId('practice-next-question').click()
 
     // Q1 从侧栏队列移除；当前卡为 Q2（索引补偿，不跳过）；剩余 3 张
     await expect(sidebar.getByText(seeds[0].question)).not.toBeVisible()
     await expect(card.getByText(seeds[1].question)).toBeVisible()
     await expect(page.getByText('1 / 3')).toBeVisible()
 
-    // 复习 Q2：翻答案 → 记得了 → 当前卡为 Q3
-    await page.getByTestId('practice-show-answer').click()
+    // 复习 Q2：自评「能答出」→ 显示答案 → 下一题 → 当前卡为 Q3
+    await page.getByTestId('practice-self-assess-good').click()
     await expect(page.getByTestId('practice-review-actions')).toBeVisible()
-    await page.getByTestId('practice-review-good').click()
+    await page.getByTestId('practice-next-question').click()
 
     await expect(sidebar.getByText(seeds[1].question)).not.toBeVisible()
     await expect(card.getByText(seeds[2].question)).toBeVisible()
