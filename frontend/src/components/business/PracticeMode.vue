@@ -30,7 +30,7 @@
           type="button"
           class="group mb-1 flex w-full items-start gap-2 rounded-md p-2 text-left transition-colors"
           :class="questionIndex === currentIndex ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/65 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'"
-          @click="currentIndex = questionIndex; resetState(); mobileSidebarOpen = false"
+          @click="selectFromSidebar(questionIndex)"
         >
           <span class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-[10px] tabular-nums" :class="questionIndex === currentIndex ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'">{{ questionIndex + 1 }}</span>
           <span class="min-w-0 flex-1">
@@ -405,8 +405,23 @@ function selectSession(key) {
   resetState()
   if (serverDeckMode.value) emit('select-deck', key)
 }
-function goPrev() { if (currentIndex.value > 0) { currentIndex.value -= 1; pendingReviewedId.value = null; resetState() } }
+// 墨墨模式：due 队列未完成自评前禁止切换题目
+function queueSwitchBlocked() {
+  if (isAlgorithmQueue.value && !answerRevealed.value) {
+    toast.warning('先自评这道题（不会 / 有点印象 / 能答出），再看答案切换')
+    return true
+  }
+  return false
+}
+function selectFromSidebar(questionIndex) {
+  if (queueSwitchBlocked()) return
+  currentIndex.value = questionIndex
+  resetState()
+  mobileSidebarOpen.value = false
+}
+function goPrev() { if (queueSwitchBlocked()) return; if (currentIndex.value > 0) { currentIndex.value -= 1; pendingReviewedId.value = null; resetState() } }
 function goNext() {
+  if (queueSwitchBlocked()) return
   if (!sessionQuestions.value.length) return
   if (isLastQuestion.value) { currentIndex.value = 0; resetState(); toast.info('这一轮完成了，已回到第 1 题'); return }
   currentIndex.value += 1
