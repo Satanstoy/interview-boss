@@ -61,20 +61,28 @@ def _detect_provider(base_url: str) -> str:
 # 应急开关：LLM_JSON_MODE_OVERRIDE=force-on/force-off/auto
 
 _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
-    ("token-plan-cn.xiaomimimo.com", {"json_mode": False, "max_output_tokens": 4096}),
-    ("api.siliconflow.cn", {"json_mode": True, "max_output_tokens": 4096}),
-    ("api.openai.com", {"json_mode": True, "max_output_tokens": 4096}),
-    ("*", {"json_mode": False, "max_output_tokens": 4096}),
+    # mimo Token Plan：json_object 2026-08-06 曾截断 → 降级 prompt 指令；支持 chat + responses
+    ("token-plan-cn.xiaomimimo.com", {"json_mode": False, "max_output_tokens": 4096,
+                                      "api_formats": ["chat", "responses"]}),
+    # SiliconFlow：json_object 正常；responses 未实测，保守只声明 chat
+    ("api.siliconflow.cn", {"json_mode": True, "max_output_tokens": 4096,
+                            "api_formats": ["chat"]}),
+    ("api.openai.com", {"json_mode": True, "max_output_tokens": 4096,
+                        "api_formats": ["chat", "responses"]}),
+    ("api.anthropic.com", {"json_mode": False, "max_output_tokens": 8192,
+                           "api_formats": ["anthropic"]}),
+    ("*", {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}),
 ]
 
-_DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096}
+_DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}
 
 
 def get_provider_capabilities(base_url: str = None) -> dict:
     """按 base_url 前缀匹配供应商能力。
 
-    Returns: {"json_mode": bool, "max_output_tokens": int}
-    未匹配到具名供应商时回退到 "*" 保守默认（json_mode=False）。
+    Returns: {"json_mode": bool, "max_output_tokens": int, "api_formats": list[str]}
+    api_formats 取值：chat（OpenAI Chat Completions）/ responses（OpenAI Responses）/
+    anthropic（Anthropic Messages）。未匹配到具名供应商时回退 "*" 保守默认。
     """
     if not base_url:
         return dict(_DEFAULT_CAPS)
@@ -83,6 +91,37 @@ def get_provider_capabilities(base_url: str = None) -> dict:
         if prefix == "*" or prefix in lower:
             return dict(caps)
     return dict(_DEFAULT_CAPS)
+
+
+def get_provider_formats(base_url: str = None) -> list[str]:
+    """返回端点支持的接口格式列表（chat / responses / anthropic）。"""
+    return list(get_provider_capabilities(base_url).get("api_formats", ["chat"]))
+
+
+def _api_format_override() -> str:
+    """接口格式应急开关：chat / responses / anthropic / auto（默认）"""
+    return os.environ.get("LLM_API_FORMAT", "auto").strip().lower()
+
+
+def resolve_api_format(base_url: str = None) -> str:
+    """解析应使用的接口格式。
+
+    优先级：LLM_API_FORMAT（应急开关）→ 端点能力（anthropic 端点用 anthropic；
+    responses-only 端点用 responses；其余默认 chat）。
+    """
+    override = _api_format_override()
+    if override in ("chat", "responses", "anthropic"):
+        return override
+    if base_url is None:
+        from app.core.config import LLM_BASE_URL
+
+        base_url = LLM_BASE_URL
+    formats = get_provider_formats(base_url)
+    if "anthropic" in formats:
+        return "anthropic"
+    if "responses" in formats and "chat" not in formats:
+        return "responses"
+    return "chat"
 
 
 def _json_mode_override() -> str:
@@ -264,6 +303,16 @@ async def _probe_llm(user_id: int) -> tuple:
                 ),
                 timeout=wait_for,
             )
+        elif resolve_api_format(base_url) == "responses":
+            await asyncio.wait_for(
+                resolved_client.responses.create(
+                    model=model,
+                    input=[{"type": "message", "role": "user",
+                            "content": [{"type": "input_text", "text": "ping"}]}],
+                    max_output_tokens=1,
+                ),
+                timeout=wait_for,
+            )
         else:
             await asyncio.wait_for(
                 resolved_client.chat.completions.create(
@@ -353,6 +402,68 @@ def _convert_tools_to_anthropic(openai_tools: list) -> list:
             }
         )
     return anthropic_tools
+
+
+def _convert_tools_to_responses(openai_tools: list) -> list:
+    """OpenAI Chat tools → Responses API 扁平格式。
+
+    OpenAI: {"type": "function", "function": {"name", "description", "parameters", "strict"}}
+    Responses: {"type": "function", "name", "description", "parameters", "strict"}
+    """
+    responses_tools = []
+    for t in openai_tools:
+        if t.get("type") != "function":
+            responses_tools.append(t)  # 内置工具原样透传
+            continue
+        func = t.get("function", {})
+        item = {"type": "function", "name": func["name"]}
+        if func.get("description"):
+            item["description"] = func["description"]
+        if func.get("parameters"):
+            item["parameters"] = func["parameters"]
+        if func.get("strict") is not None:
+            item["strict"] = func["strict"]
+        responses_tools.append(item)
+    return responses_tools
+
+
+def _convert_tool_choice_to_anthropic(tool_choice) -> dict:
+    """OpenAI tool_choice → Anthropic 格式。
+
+    auto → {"type": "auto"}；required → {"type": "any"}；
+    {"type": "function", "function": {"name": N}} → {"type": "tool", "name": N}；
+    none → {"type": "none"}
+    """
+    if isinstance(tool_choice, str):
+        if tool_choice == "required":
+            return {"type": "any"}
+        if tool_choice == "none":
+            return {"type": "none"}
+        return {"type": "auto"}
+    if isinstance(tool_choice, dict):
+        if tool_choice.get("type") == "function":
+            fn = tool_choice.get("function", {})
+            name = fn.get("name") if isinstance(fn, dict) else None
+            return {"type": "tool", "name": name} if name else {"type": "auto"}
+        if tool_choice.get("type") in ("any", "auto", "none", "tool"):
+            return tool_choice
+    return {"type": "auto"}
+
+
+def _convert_tool_choice_to_responses(tool_choice):
+    """OpenAI Chat tool_choice → Responses 格式（扁平 name 字段）。
+
+    {"type": "function", "function": {"name": N}} → {"type": "function", "name": N}
+    """
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if isinstance(tool_choice, dict):
+        if tool_choice.get("type") == "function":
+            fn = tool_choice.get("function", {})
+            name = fn.get("name") if isinstance(fn, dict) else None
+            return {"type": "function", "name": name} if name else "auto"
+        return tool_choice
+    return "auto"
 
 
 def _convert_messages_with_tools_to_anthropic(messages: list) -> tuple[str, list]:
@@ -539,6 +650,8 @@ async def _llm_with_tools_call(
     max_tokens,
     temperature,
     system_text,
+    tool_choice=None,
+    base_url=None,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     if provider == "anthropic":
@@ -552,6 +665,8 @@ async def _llm_with_tools_call(
         )
         if anthropic_tools:
             call_kwargs["tools"] = anthropic_tools
+        if tool_choice is not None:
+            call_kwargs["tool_choice"] = _convert_tool_choice_to_anthropic(tool_choice)
         response = await resolved_client.messages.create(**call_kwargs)
 
         tool_calls = _extract_tool_calls(response, "anthropic")
@@ -572,7 +687,38 @@ async def _llm_with_tools_call(
             "finish_reason": finish_reason,
         }
 
-    # OpenAI path
+    # OpenAI path（chat 或 responses）
+    if resolve_api_format(base_url) == "responses":
+        caps = get_provider_capabilities(base_url)
+        input_items = _convert_messages_to_responses_input(messages, system_text)
+        call_kwargs = dict(
+            model=model,
+            input=input_items or " ",
+            instructions=system_text or None,
+            max_output_tokens=caps["max_output_tokens"],
+            temperature=temperature,
+        )
+        if tools:
+            call_kwargs["tools"] = _convert_tools_to_responses(tools)
+        if tool_choice is not None:
+            call_kwargs["tool_choice"] = _convert_tool_choice_to_responses(tool_choice)
+        response = await resolved_client.responses.create(**call_kwargs)
+
+        tool_calls = _extract_responses_tool_calls(response)
+        text_content = _extract_responses_text(response)
+        status = getattr(response, "status", None)
+        if status == "incomplete":
+            finish_reason = "length"
+        elif tool_calls:
+            finish_reason = "tool_calls"
+        else:
+            finish_reason = "stop"
+        return {
+            "content": text_content if text_content else None,
+            "tool_calls": tool_calls,
+            "finish_reason": finish_reason,
+        }
+
     call_kwargs = dict(
         model=model,
         messages=messages,
@@ -581,6 +727,8 @@ async def _llm_with_tools_call(
     )
     if tools:
         call_kwargs["tools"] = tools
+    if tool_choice is not None:
+        call_kwargs["tool_choice"] = tool_choice
     response = await resolved_client.chat.completions.create(**call_kwargs)
 
     msg = response.choices[0].message
@@ -619,6 +767,7 @@ async def llm_with_tools(
     model = kwargs.pop("model", None) or model
     max_tokens = kwargs.get("max_tokens", 4096)
     temperature = kwargs.get("temperature", 0.7)
+    tool_choice = kwargs.get("tool_choice")
 
     # Anthropic 需要预先转换消息格式
     if provider == "anthropic":
@@ -634,6 +783,8 @@ async def llm_with_tools(
             max_tokens,
             temperature,
             system_text,
+            tool_choice=tool_choice,
+            base_url=base_url,
         )
 
     return await _llm_with_tools_call(
@@ -645,6 +796,8 @@ async def llm_with_tools(
         max_tokens,
         temperature,
         None,
+        tool_choice=tool_choice,
+        base_url=base_url,
     )
 
 
@@ -757,6 +910,7 @@ async def _call_anthropic(
     temperature: float = 0.3,
     response_format: dict = None,
     max_tokens: int = 8192,
+    **kwargs,
 ) -> str:
     """调用 Anthropic Messages API。"""
     # 如果需要 JSON 输出，在 system 提示中追加指令（Anthropic 不支持 response_format）
@@ -766,14 +920,18 @@ async def _call_anthropic(
             "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         )
 
-    kwargs = dict(
+    body = dict(
         model=model,
         max_tokens=max_tokens,
         system=effective_system,
         messages=messages,
         temperature=temperature,
     )
-    response = await anthropic_client.messages.create(**kwargs)
+    for key in ("top_p", "top_k", "stop_sequences", "metadata", "service_tier",
+                "thinking", "cache_control"):
+        if key in kwargs and kwargs[key] is not None:
+            body[key] = kwargs[key]
+    response = await anthropic_client.messages.create(**body)
     return _extract_anthropic_text(response)
 
 
@@ -784,6 +942,127 @@ def _extract_anthropic_text(response) -> str:
             return block.text.strip()
     # fallback：拼接所有 block 的 str
     return "".join(str(b) for b in response.content).strip()
+
+
+def _convert_messages_to_responses_input(messages: list, system_text: str = "") -> list:
+    """OpenAI messages → Responses API input items。
+
+    映射（对齐 LiteLLM responses 规范）：
+    - system role → 跳过（由调用方拼进 instructions）
+    - user → message item（input_text 块）
+    - assistant（含 tool_calls）→ message item（output_text）+ function_call 顶层 item
+    - tool → function_call_output 顶层 item
+    """
+    items = []
+    for msg in messages:
+        role = msg.get("role")
+        if role == "system":
+            continue
+        if role == "tool":
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": str(msg.get("content", "") or ""),
+                }
+            )
+            continue
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if msg.get("content"):
+                items.append(
+                    {"type": "message", "role": "assistant",
+                     "content": [{"type": "output_text", "text": msg["content"]}]}
+                )
+            for tc in tool_calls or []:
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                    }
+                )
+            continue
+        items.append(
+            {"type": "message", "role": role or "user",
+             "content": [{"type": "input_text", "text": str(msg.get("content", "") or "")}]}
+        )
+    return items
+
+
+def _extract_responses_tool_calls(response) -> list | None:
+    """从 Responses API 响应提取 function_call items（OpenAI 统一格式）。"""
+    out = getattr(response, "output", []) or []
+    calls = []
+    for item in out:
+        if getattr(item, "type", None) == "function_call":
+            calls.append(
+                {
+                    "id": getattr(item, "call_id", ""),
+                    "function": {
+                        "name": getattr(item, "name", ""),
+                        "arguments": getattr(item, "arguments", "") or "",
+                    },
+                }
+            )
+    return calls or None
+
+
+async def _call_responses(
+    client,
+    model: str,
+    system_msg: str,
+    messages: list,
+    temperature: float = 0.3,
+    response_format: dict = None,
+    max_output_tokens: int = 4096,
+    **kwargs,
+) -> str:
+    """调用 OpenAI Responses API（POST /v1/responses）。
+
+    参数映射（对齐 LiteLLM 映射表）：
+    messages+system → input + instructions；max_tokens → max_output_tokens；
+    response_format(json_object) → text.format；工具消息 → function_call/function_call_output
+    顶层 item；其余 OpenAI Responses 参数（tools/tool_choice/reasoning/top_p/
+    parallel_tool_calls/previous_response_id/store/metadata/user 等）透传。
+    """
+    input_items = _convert_messages_to_responses_input(messages, system_msg)
+    body = dict(
+        model=model,
+        input=input_items or " ",
+        instructions=system_msg or None,
+        max_output_tokens=max_output_tokens,
+        temperature=temperature,
+    )
+    if response_format and response_format.get("type") == "json_object":
+        body["text"] = {"format": {"type": "json_object"}}
+    for key in (
+        "top_p", "tools", "tool_choice", "parallel_tool_calls", "reasoning",
+        "previous_response_id", "store", "metadata", "user", "stream_options",
+        "include", "truncation", "service_tier",
+    ):
+        if key in kwargs and kwargs[key] is not None:
+            body[key] = kwargs[key]
+    response = await client.responses.create(**body)
+    return _extract_responses_text(response)
+
+
+def _extract_responses_text(response) -> str:
+    """从 Responses API 响应提取文本（兼容 reasoning + message 混合、流式输出）。"""
+    if hasattr(response, "output_text"):
+        text = response.output_text
+        if text:
+            return text.strip()
+    out = getattr(response, "output", []) or []
+    parts = []
+    for item in out:
+        if getattr(item, "type", None) == "message":
+            for block in getattr(item, "content", []) or []:
+                text = getattr(block, "text", "") or ""
+                if text:
+                    parts.append(text)
+    return "".join(parts).strip()
 
 
 async def raw_llm_call(user_id: int, **kwargs) -> str:
@@ -831,6 +1110,33 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
                     "content": f"{msgs[0].get('content', '')}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。",
                 }
                 kwargs["messages"] = msgs
+
+    if resolve_api_format(base_url) == "responses":
+        # Responses API 路径：messages → input、system → instructions
+        messages = kwargs.get("messages", [])
+        system_text = ""
+        for m in messages:
+            if m.get("role") == "system":
+                system_text += str(m.get("content", "")) + "\n"
+        input_items = _convert_messages_to_responses_input(messages, system_text)
+        body = dict(
+            model=kwargs["model"],
+            input=input_items or " ",
+            instructions=system_text.strip() or kwargs.get("instructions"),
+            max_output_tokens=kwargs.get("max_output_tokens", kwargs.get("max_tokens", caps["max_output_tokens"])),
+            temperature=kwargs.get("temperature", 0.3),
+        )
+        for key in (
+            "top_p", "tools", "tool_choice", "parallel_tool_calls", "reasoning",
+            "previous_response_id", "store", "metadata", "user", "text",
+        ):
+            if key in kwargs and kwargs[key] is not None:
+                body[key] = kwargs[key]
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+            body["text"] = {"format": {"type": "json_object"}}
+        response = await resolved_client.responses.create(**body)
+        return _extract_responses_text(response)
+
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
     response = await resolved_client.chat.completions.create(**kwargs)
@@ -874,6 +1180,31 @@ async def _call_llm_with_retry(
             system_msg=system_msg,
             messages=[{"role": "user", "content": prompt}],
             response_format=response_format,
+        )
+
+    if resolve_api_format(base_url) == "responses":
+        caps = get_provider_capabilities(base_url)
+        if response_format and _should_use_response_format(base_url):
+            return await _call_responses(
+                resolved_client,
+                resolved_model,
+                system_msg,
+                [{"role": "user", "content": prompt}],
+                response_format=response_format,
+                max_output_tokens=caps["max_output_tokens"],
+            )
+        # json_mode=false 时降级：prompt 指令 + 无 text.format
+        effective_system = system_msg
+        if response_format and response_format.get("type") == "json_object":
+            effective_system += (
+                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
+            )
+        return await _call_responses(
+            resolved_client,
+            resolved_model,
+            effective_system,
+            [{"role": "user", "content": prompt}],
+            max_output_tokens=caps["max_output_tokens"],
         )
 
     kwargs = dict(
@@ -932,6 +1263,22 @@ async def _call_llm_with_retry_messages(
     if response_format and not _should_use_response_format(base_url):
         kwargs.pop("response_format", None)
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
+
+    if resolve_api_format(base_url) == "responses":
+        system_text = ""
+        for m in messages:
+            if m.get("role") == "system":
+                system_text += str(m.get("content", "")) + "\n"
+        input_items = _convert_messages_to_responses_input(messages, system_text)
+        kwargs.pop("messages", None)
+        kwargs["input"] = input_items or " "
+        kwargs["instructions"] = kwargs.get("instructions") or system_text.strip() or None
+        kwargs["max_output_tokens"] = kwargs.pop("max_tokens", caps["max_output_tokens"])
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+            kwargs["text"] = {"format": {"type": "json_object"}}
+        kwargs.pop("response_format", None)
+        response = await resolved_client.responses.create(**kwargs)
+        return _extract_responses_text(response)
 
     response = await resolved_client.chat.completions.create(
         messages=messages, **kwargs
@@ -1002,6 +1349,27 @@ async def stream_llm_messages(
     # OpenAI 兼容流式
     kwargs.setdefault("model", model)
     kwargs.setdefault("temperature", 0.7)
+
+    if resolve_api_format(base_url) == "responses":
+        # Responses API 流式：语义事件
+        kwargs.pop("messages", None)
+        kwargs["input"] = kwargs.pop("input", None) or _convert_messages_to_responses_input(messages, "")
+        stream = await resolved_client.responses.create(stream=True, **kwargs)
+        async for event in stream:
+            etype = getattr(event, "type", "")
+            if etype == "response.output_text.delta":
+                delta = getattr(event, "delta", "")
+                if delta:
+                    if yield_thinking:
+                        yield {"type": "content", "content": delta}
+                    else:
+                        yield delta
+            elif etype in ("response.reasoning_text.delta", "response.reasoning_summary_text.delta"):
+                delta = getattr(event, "delta", "")
+                if delta and yield_thinking:
+                    yield {"type": "thinking", "content": delta}
+        return
+
     stream = await resolved_client.chat.completions.create(
         messages=messages,
         stream=True,

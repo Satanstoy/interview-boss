@@ -55,7 +55,8 @@ class TestProviderDetection:
 
     def test_should_use_response_format(self):
         from app.services.llm import _should_use_response_format
-        assert _should_use_response_format("https://example.com/v1") is True
+        # 未知 OpenAI 兼容端点：能力矩阵保守默认（json_mode=False，走 prompt 指令 + 容错解析）
+        assert _should_use_response_format("https://example.com/v1") is False
         assert _should_use_response_format("https://example.com/anthropic") is False
 
     def test_make_client_openai(self):
