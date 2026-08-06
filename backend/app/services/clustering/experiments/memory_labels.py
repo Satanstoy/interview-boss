@@ -114,7 +114,7 @@ async def generate_cluster_labels(clusters: list[dict], user_id: int | None = No
             raw = await _call_llm_with_retry(
                 prompt,
                 system_msg="你是一个面试题题库管理专家。",
-                response_format={"type": "json_object"},
+                response_format=None,
                 user_id=user_id,
                 model=None,
             )
@@ -198,7 +198,7 @@ async def assign_singletons(
                 raw = await _call_llm_with_retry(
                     prompt,
                     system_msg="你是一个面试题去重专家。",
-                    response_format={"type": "json_object"},
+                    response_format=None,
                     user_id=user_id,
                     model=None,
                 )
@@ -278,7 +278,7 @@ async def verify_assignments(
             raw = await _call_llm_with_retry(
                 prompt,
                 system_msg="你是一个面试题去重专家。",
-                response_format={"type": "json_object"},
+                response_format=None,
                 user_id=user_id,
                 model=None,
             )

@@ -128,7 +128,7 @@ async def main(round_no: int, user_id: int | None):
                 raw = await _call_llm_with_retry(
                     prompt,
                     system_msg="你是一个面试题去重专家。",
-                    response_format={"type": "json_object"},
+                    response_format=None,
                     user_id=user_id,
                 )
                 data = _extract_json_object(raw)
