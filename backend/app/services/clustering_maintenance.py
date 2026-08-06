@@ -4,13 +4,18 @@ This module keeps admin routes thin and centralizes safe repairs for
 question_bank clustering metadata. It deliberately avoids using embedding
 thresholds as merge decisions.
 """
+
 import json
 import logging
 import re
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-from app.db.question_bank_sources import delete_all_for_qb, insert_original_item, insert_source
+from app.db.question_bank_sources import (
+    delete_all_for_qb,
+    insert_original_item,
+    insert_source,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -44,8 +49,7 @@ def _append_unique(items: list, value: str) -> bool:
 def _merge_sources(existing: list, incoming: list) -> list:
     merged = [s for s in existing if isinstance(s, dict)]
     seen = {
-        (s.get("url", ""), s.get("company", ""), s.get("round", ""))
-        for s in merged
+        (s.get("url", ""), s.get("company", ""), s.get("round", "")) for s in merged
     }
     for src in incoming:
         if not isinstance(src, dict):
@@ -117,11 +121,19 @@ def _sync_normalized_tables(conn, qb_id: int, sources: list, original_sources: l
     for src in sources:
         if not isinstance(src, dict):
             continue
-        insert_source(conn, qb_id, src.get("url", ""), src.get("company", ""), src.get("round", ""))
+        insert_source(
+            conn,
+            qb_id,
+            src.get("url", ""),
+            src.get("company", ""),
+            src.get("round", ""),
+        )
     for item in original_sources:
         if not isinstance(item, dict):
             continue
-        insert_original_item(conn, qb_id, item.get("question", ""), item.get("sources", []))
+        insert_original_item(
+            conn, qb_id, item.get("question", ""), item.get("sources", [])
+        )
 
 
 def audit_clustering_state(conn) -> Dict:
@@ -136,12 +148,14 @@ def audit_clustering_state(conn) -> Dict:
     for row in rows:
         norm = normalize_question_text(row["question"])
         if norm:
-            exact_groups[norm].append({
-                "id": row["id"],
-                "question": row["question"],
-                "cat2": row.get("cat2") or "",
-                "frequency": row.get("frequency") or 0,
-            })
+            exact_groups[norm].append(
+                {
+                    "id": row["id"],
+                    "question": row["question"],
+                    "cat2": row.get("cat2") or "",
+                    "frequency": row.get("frequency") or 0,
+                }
+            )
 
     exact_duplicate_groups = [
         {"normalized": key, "items": items}
@@ -150,9 +164,15 @@ def audit_clustering_state(conn) -> Dict:
     ]
 
     normalized_counts = {
-        "question_sources": conn.execute("SELECT COUNT(*) FROM question_sources").fetchone()[0],
-        "question_original_items": conn.execute("SELECT COUNT(*) FROM question_original_items").fetchone()[0],
-        "question_original_item_sources": conn.execute("SELECT COUNT(*) FROM question_original_item_sources").fetchone()[0],
+        "question_sources": conn.execute(
+            "SELECT COUNT(*) FROM question_sources"
+        ).fetchone()[0],
+        "question_original_items": conn.execute(
+            "SELECT COUNT(*) FROM question_original_items"
+        ).fetchone()[0],
+        "question_original_item_sources": conn.execute(
+            "SELECT COUNT(*) FROM question_original_item_sources"
+        ).fetchone()[0],
     }
 
     freq_mismatch = []
@@ -161,22 +181,26 @@ def audit_clustering_state(conn) -> Dict:
         originals, _ = _canonical_cluster_payload(row)
         expected = max(1, len(originals))
         if (row.get("frequency") or 0) != expected:
-            freq_mismatch.append({
-                "id": row["id"],
-                "frequency": row.get("frequency") or 0,
-                "expected": expected,
-                "question": row["question"],
-            })
+            freq_mismatch.append(
+                {
+                    "id": row["id"],
+                    "frequency": row.get("frequency") or 0,
+                    "expected": expected,
+                    "question": row["question"],
+                }
+            )
         qoi_count = conn.execute(
             "SELECT COUNT(*) FROM question_original_items WHERE question_bank_id = ?",
             (row["id"],),
         ).fetchone()[0]
         if qoi_count != len(originals):
-            normalized_mismatch.append({
-                "id": row["id"],
-                "normalized_original_count": qoi_count,
-                "expected": len(originals),
-            })
+            normalized_mismatch.append(
+                {
+                    "id": row["id"],
+                    "normalized_original_count": qoi_count,
+                    "expected": len(originals),
+                }
+            )
 
     return {
         "total_active": len(rows),
@@ -231,14 +255,24 @@ def _merge_exact_duplicate_pair(conn, survivor_id: int, merged_id: int) -> Dict:
         cat2=row["cat2"] or "",
         confidence=0.95,
     )
-    return {"survivor_id": survivor_id, "merged_id": merged_id, "question": row["question"]}
+    return {
+        "survivor_id": survivor_id,
+        "merged_id": merged_id,
+        "question": row["question"],
+    }
 
 
-def run_clustering_maintenance(conn, execute: bool = False, merge_exact_duplicates: bool = True) -> Dict:
+def run_clustering_maintenance(
+    conn, execute: bool = False, merge_exact_duplicates: bool = True
+) -> Dict:
     """Audit clustering data and optionally apply deterministic repairs."""
     before = audit_clustering_state(conn)
     if not execute:
-        return {"dry_run": True, "audit": before, "applied": {"metadata": [], "exact_merges": []}}
+        return {
+            "dry_run": True,
+            "audit": before,
+            "applied": {"metadata": [], "exact_merges": []},
+        }
 
     applied = {"metadata": [], "exact_merges": []}
     rows = conn.execute(
@@ -255,10 +289,14 @@ def run_clustering_maintenance(conn, execute: bool = False, merge_exact_duplicat
         if merge_exact_duplicates:
             audit_after_metadata = audit_clustering_state(conn)
             for group in audit_after_metadata["exact_duplicate_groups"]:
-                items = sorted(group["items"], key=lambda x: (-(x["frequency"] or 0), x["id"]))
+                items = sorted(
+                    group["items"], key=lambda x: (-(x["frequency"] or 0), x["id"])
+                )
                 survivor = items[0]
                 for item in items[1:]:
-                    result = _merge_exact_duplicate_pair(conn, survivor["id"], item["id"])
+                    result = _merge_exact_duplicate_pair(
+                        conn, survivor["id"], item["id"]
+                    )
                     if result:
                         applied["exact_merges"].append(result)
 
@@ -284,7 +322,9 @@ CLUSTER_LABEL_PROMPT = """你是面试题题库管理专家。下面是一个【
 只输出 JSON 对象：{{"label": "..."}}"""
 
 
-async def generate_missing_cluster_labels(user_id: int = None, batch_size: int = 20) -> dict:
+async def generate_missing_cluster_labels(
+    user_id: int = None, batch_size: int = 20
+) -> dict:
     """为缺少 cluster_label 的已有聚类（frequency > 1 的代表题）分批生成语义标签。
 
     幂等：只处理 cluster_label IS NULL 的代表题；失败回退保持 NULL（下次再补）。
@@ -346,19 +386,10 @@ async def generate_missing_cluster_labels(user_id: int = None, batch_size: int =
 
 def _extract_label_from_json(raw: str) -> str:
     """从 LLM 输出提取 label（容忍 markdown/前后文字/对象包裹）"""
-    import json as _json
-    import re
+    from app.services.llm_judge import parse_json_object
 
-    text = (raw or "").strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
-    try:
-        data = _json.loads(text)
-        if isinstance(data, dict):
-            label = data.get("label")
-            return str(label).strip() if label else ""
-    except _json.JSONDecodeError:
-        pass
-    m = re.search(r'"label"\s*:\s*"([^"]+)"', text)
-    if m:
-        return m.group(1).strip()
+    data = parse_json_object(raw)
+    if data:
+        label = data.get("label")
+        return str(label).strip() if label else ""
     return ""
