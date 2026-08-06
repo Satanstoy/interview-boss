@@ -118,3 +118,17 @@
 5. P4（抽公共 + 测试）→ commit
 
 每 Phase 独立可验证、可回滚。全量回归：`backend/tests/services/ backend/tests/chat/ backend/tests/pipeline/ backend/tests/bank/`。
+
+## 实施状态（2026-08-06 完成）
+
+| Phase | 内容 | commit | 测试 |
+|-------|------|--------|------|
+| P1a | rerank listwise | `4f8cfea` | chat 917 passed（全量） |
+| P1b | draw embedding 补充 | `e6fb8ea` | 21 passed |
+| P2 | cluster_label 列 + prompt 标签 + 生成函数 | `557ff63` + 迁移 066 | 4 passed + 回归 250 passed |
+| P3 | 聚类异步化 + 攒批 | `dcfb628` | pipeline 114 passed（3 预存失败无关） |
+| P4 | llm_judge 统一模块 | `93eb023` | 7 passed |
+
+- 生产数据：迁移 066 已执行；133 个聚类标签已用 mimo 真实生成（质量抽查优秀）
+- 综合回归：406 passed（6 个失败均为预存：3 前端契约 + 3 pipeline cleanup）
+- 待部署：`./deploy/docker-deploy.sh update`（生产镜像重建后生效）
