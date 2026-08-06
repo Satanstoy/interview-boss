@@ -1,5 +1,8 @@
 """验证层覆盖（根因 #1）：高置信直通匹配可选二次验证"""
 
+import asyncio
+import json
+
 
 def test_partition_matches_by_risk_unchanged():
     """分区逻辑不变：高置信直通、中置信进验证"""
@@ -42,13 +45,13 @@ async def test_direct_matches_routed_to_validation_when_enabled(monkeypatch):
         return ([m for m in matches if m["new_id"] == "1"], {})
 
     async def fake_llm(prompt, response_format, user_id):
-        return {"matches": [
+        return json.dumps({"matches": [
             {"new_id": "1", "cluster_id": "10", "confidence": 0.95},
             {"new_id": "2", "cluster_id": "11", "confidence": 0.6},
-        ]}
+        ]})
 
     monkeypatch.setenv("CLUSTER_VALIDATE_DIRECT", "1")
-    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.services.clustering.matcher._call_llm_with_retry", fake_llm)
     monkeypatch.setattr(
         "app.services.clustering.matcher._validate_merges", fake_validate
     )

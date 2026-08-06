@@ -34,7 +34,7 @@ async def test_match_new_questions_dedupes_multi_matches(monkeypatch):
         })
 
     monkeypatch.setattr(
-        "app.services.llm._call_llm_with_retry", fake_llm
+        "app.services.clustering.matcher._call_llm_with_retry", fake_llm
     )
 
     new_rows = [{"id": 1, "question": "GraphRAG和普通RAG的区别是什么？",
@@ -62,7 +62,7 @@ async def test_match_new_questions_distinct_questions_still_match_all(monkeypatc
         })
 
     monkeypatch.setattr(
-        "app.services.llm._call_llm_with_retry", fake_llm
+        "app.services.clustering.matcher._call_llm_with_retry", fake_llm
     )
 
     new_rows = [
@@ -86,7 +86,7 @@ async def test_match_new_questions_unmatched_stays_unmatched(monkeypatch):
         return json.dumps({"matches": [{"new_id": 1, "cluster_id": 6075}]})
 
     monkeypatch.setattr(
-        "app.services.llm._call_llm_with_retry", fake_llm
+        "app.services.clustering.matcher._call_llm_with_retry", fake_llm
     )
 
     new_rows = [
