@@ -268,3 +268,19 @@ def _migration_054_mcp_token_seed(conn):
     }
     if "token_seed" not in cols:
         conn.execute("ALTER TABLE mcp_tokens ADD COLUMN token_seed TEXT")
+
+
+def _migration_065_llm_api_format(conn):
+    """user_llm_config 增加 api_format（接口类型 auto/chat/responses/anthropic）与
+    thinking（深度思考开关，mimo 默认关以提速）列"""
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info('user_llm_config')").fetchall()
+    }
+    if "api_format" not in cols:
+        conn.execute(
+            "ALTER TABLE user_llm_config ADD COLUMN api_format TEXT DEFAULT 'auto'"
+        )
+    if "thinking" not in cols:
+        conn.execute(
+            "ALTER TABLE user_llm_config ADD COLUMN thinking INTEGER DEFAULT 0"
+        )

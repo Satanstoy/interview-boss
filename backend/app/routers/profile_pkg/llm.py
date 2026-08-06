@@ -28,7 +28,7 @@ async def get_my_llm_config(user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
             row = conn.execute(
-                "SELECT api_key, base_url, model, timeout FROM user_llm_config WHERE user_id = ?",
+                "SELECT api_key, base_url, model, timeout, api_format, thinking FROM user_llm_config WHERE user_id = ?",
                 (user["id"],),
             ).fetchone()
             return dict(row) if row else None
@@ -45,6 +45,8 @@ async def get_my_llm_config(user: dict = Depends(get_current_user)):
             "llm_base_url": cfg["base_url"] or "",
             "llm_model": cfg["model"] or "gpt-4o",
             "llm_timeout": cfg["timeout"] or 120,
+            "llm_api_format": cfg.get("api_format") or "auto",
+            "llm_thinking": bool(cfg.get("thinking")),
         },
     }
 
@@ -66,6 +68,8 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
     base_url = (req.get("llm_base_url") or "").strip()
     model = (req.get("llm_model") or "").strip()
     timeout = req.get("llm_timeout")
+    api_format = (req.get("llm_api_format") or "auto").strip().lower()
+    thinking = 1 if req.get("llm_thinking") else 0
 
     if not model:
         raise HTTPException(status_code=400, detail="模型名称不能为空")
@@ -91,6 +95,25 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
             status_code=400, detail="Base URL 格式无效，必须以 http:// 或 https:// 开头"
         )
 
+    # 接口类型校验：必须在端点能力矩阵支持的格式内
+    if api_format not in ("auto", "chat", "responses", "anthropic"):
+        raise HTTPException(
+            status_code=400,
+            detail="接口类型无效，可选：auto / chat / responses / anthropic",
+        )
+    if api_format != "auto":
+        from app.services.llm import get_provider_formats
+
+        supported = get_provider_formats(final_base_url)
+        if api_format not in supported:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"该端点不支持 {api_format} 接口，仅支持："
+                    f"{', '.join(supported)}。请检查 Base URL 与接口类型是否匹配"
+                ),
+            )
+
     if timeout is not None:
         try:
             timeout = int(timeout)
@@ -111,11 +134,12 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
                 final_key = api_key
 
             conn.execute(
-                "INSERT INTO user_llm_config (user_id, api_key, base_url, model, timeout, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "INSERT INTO user_llm_config (user_id, api_key, base_url, model, timeout, api_format, thinking, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(user_id) DO UPDATE SET api_key = excluded.api_key, base_url = excluded.base_url, "
-                "model = excluded.model, timeout = excluded.timeout, updated_at = CURRENT_TIMESTAMP",
-                (user["id"], final_key, final_base_url, model, timeout),
+                "model = excluded.model, timeout = excluded.timeout, api_format = excluded.api_format, "
+                "thinking = excluded.thinking, updated_at = CURRENT_TIMESTAMP",
+                (user["id"], final_key, final_base_url, model, timeout, api_format, thinking),
             )
             conn.commit()
 

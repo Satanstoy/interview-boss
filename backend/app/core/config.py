@@ -113,7 +113,7 @@ def get_user_llm_config(user_id: int) -> dict | None:
 
         with get_db_connection() as conn:
             row = conn.execute(
-                "SELECT api_key, base_url, model, timeout FROM user_llm_config WHERE user_id = ?",
+                "SELECT api_key, base_url, model, timeout, api_format, thinking FROM user_llm_config WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
             if row:

@@ -26,6 +26,7 @@ from app.db.migrations.auth import (
     _migration_052_mcp_tokens,
     _migration_054_mcp_token_seed,
     _migration_060_search_config,
+    _migration_065_llm_api_format,
 )
 from app.db.migrations.data_repair import (
     _migration_011_data_backfills,
@@ -172,6 +173,7 @@ _MIGRATIONS = [
     (62, "user_recruitment_pref", _migration_062_user_recruitment_pref),
     (63, "answer_sources", _migration_063_answer_sources),
     (64, "user_recruitment_pace", _migration_064_user_recruitment_pace),
+    (65, "llm_api_format", _migration_065_llm_api_format),
 ]
 
 

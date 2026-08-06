@@ -109,12 +109,23 @@ def _api_format_override() -> str:
     return os.environ.get("LLM_API_FORMAT", "auto").strip().lower()
 
 
-def resolve_api_format(base_url: str = None) -> str:
+def resolve_api_format(base_url: str = None, user_id: int = None) -> str:
     """解析应使用的接口格式。
 
-    优先级：LLM_API_FORMAT（应急开关）→ 端点能力（anthropic 端点用 anthropic；
-    responses-only 端点用 responses；其余默认 chat）。
+    优先级：用户配置的 api_format（非 auto）→ LLM_API_FORMAT（应急开关）→
+    端点能力（anthropic 端点用 anthropic；responses-only 端点用 responses；
+    其余默认 chat）。
     """
+    if user_id is not None:
+        try:
+            from app.core.config import get_user_llm_config
+
+            user_cfg = get_user_llm_config(user_id)
+            user_format = (user_cfg or {}).get("api_format")
+            if user_format and user_format != "auto":
+                return user_format
+        except Exception:
+            pass
     override = _api_format_override()
     if override in ("chat", "responses", "anthropic"):
         return override
@@ -309,7 +320,7 @@ async def _probe_llm(user_id: int) -> tuple:
                 ),
                 timeout=wait_for,
             )
-        elif resolve_api_format(base_url) == "responses":
+        elif resolve_api_format(base_url, user_id) == "responses":
             await asyncio.wait_for(
                 resolved_client.responses.create(
                     model=model,
@@ -658,6 +669,7 @@ async def _llm_with_tools_call(
     system_text,
     tool_choice=None,
     base_url=None,
+    user_id: int = None,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     if provider == "anthropic":
@@ -694,7 +706,7 @@ async def _llm_with_tools_call(
         }
 
     # OpenAI path（chat 或 responses）
-    if resolve_api_format(base_url) == "responses":
+    if resolve_api_format(base_url, user_id) == "responses":
         caps = get_provider_capabilities(base_url)
         input_items = _convert_messages_to_responses_input(messages, system_text)
         call_kwargs = dict(
@@ -791,6 +803,7 @@ async def llm_with_tools(
             system_text,
             tool_choice=tool_choice,
             base_url=base_url,
+            user_id=user_id,
         )
 
     return await _llm_with_tools_call(
@@ -804,6 +817,7 @@ async def llm_with_tools(
         None,
         tool_choice=tool_choice,
         base_url=base_url,
+        user_id=user_id,
     )
 
 
@@ -1117,7 +1131,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
                 }
                 kwargs["messages"] = msgs
 
-    if resolve_api_format(base_url) == "responses":
+    if resolve_api_format(base_url, user_id) == "responses":
         # Responses API 路径：messages → input、system → instructions
         messages = kwargs.get("messages", [])
         system_text = ""
@@ -1166,14 +1180,14 @@ async def _call_llm_with_retry(
     response_format: dict = None,
     user_id: int = None,
     model: str = None,
-    thinking: bool = False,
+    thinking: bool = None,
 ) -> str:
     """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）
 
     model 参数非空时覆盖用户/全局默认模型配置，仅切换本次调用的模型名，
     不会修改 base_url、api_key 等其他配置。
     thinking: mimo 端点默认关闭深度思考（显著提速，temperature 才真正生效）；
-              传 True 保留思考。
+              传 True 保留思考；None（默认）时按用户配置的 llm_thinking 决定。
     """
     resolved_client, resolved_model, timeout, base_url, provider = (
         _resolve_client_and_model(user_id)
@@ -1191,7 +1205,16 @@ async def _call_llm_with_retry(
             response_format=response_format,
         )
 
-    if resolve_api_format(base_url) == "responses":
+    if thinking is None:
+        try:
+            from app.core.config import get_user_llm_config
+
+            user_cfg = get_user_llm_config(user_id)
+            thinking = bool((user_cfg or {}).get("thinking"))
+        except Exception:
+            thinking = False
+
+    if resolve_api_format(base_url, user_id) == "responses":
         caps = get_provider_capabilities(base_url)
         if response_format and _should_use_response_format(base_url):
             return await _call_responses(
@@ -1275,7 +1298,7 @@ async def _call_llm_with_retry_messages(
         kwargs.pop("response_format", None)
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
-    if resolve_api_format(base_url) == "responses":
+    if resolve_api_format(base_url, user_id) == "responses":
         system_text = ""
         for m in messages:
             if m.get("role") == "system":
@@ -1361,7 +1384,7 @@ async def stream_llm_messages(
     kwargs.setdefault("model", model)
     kwargs.setdefault("temperature", 0.7)
 
-    if resolve_api_format(base_url) == "responses":
+    if resolve_api_format(base_url, user_id) == "responses":
         # Responses API 流式：语义事件
         kwargs.pop("messages", None)
         kwargs["input"] = kwargs.pop("input", None) or _convert_messages_to_responses_input(messages, "")
