@@ -7,6 +7,7 @@ import { validateBaseUrl } from '@/utils/validate.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import ModelSelectField from '@/components/business/ModelSelectField.vue'
 
 const { success: toastSuccess, error: toastError } = useToast()
@@ -24,6 +25,8 @@ const settings = reactive({
   llm_base_url: '',
   llm_model: '',
   llm_timeout: 120,
+  llm_api_format: 'auto',
+  llm_thinking: false,
 })
 
 const form = reactive({
@@ -31,6 +34,8 @@ const form = reactive({
   llm_base_url: '',
   llm_model: '',
   llm_timeout: 120,
+  llm_api_format: 'auto',
+  llm_thinking: false,
 })
 
 const error = ref('')
@@ -57,6 +62,8 @@ const startEdit = () => {
   form.llm_base_url = settings.llm_base_url || ''
   form.llm_model = settings.llm_model || ''
   form.llm_timeout = settings.llm_timeout || 120
+  form.llm_api_format = settings.llm_api_format || 'auto'
+  form.llm_thinking = !!settings.llm_thinking
 }
 
 const handleSave = async () => {
@@ -82,6 +89,8 @@ const handleSave = async () => {
       llm_base_url: form.llm_base_url.trim(),
       llm_model: form.llm_model.trim(),
       llm_timeout: Number(form.llm_timeout) || 120,
+      llm_api_format: form.llm_api_format || 'auto',
+      llm_thinking: !!form.llm_thinking,
     }
     if (form.llm_api_key) {
       payload.llm_api_key = form.llm_api_key.trim()
@@ -199,6 +208,38 @@ onMounted(loadConfig)
           />
         </div>
 
+        <!-- 接口类型 -->
+        <div>
+          <Label class="text-xs font-semibold text-muted-foreground mb-1.5">接口类型</Label>
+          <Select v-model="form.llm_api_format">
+            <SelectTrigger class="w-full h-10 text-sm">
+              <SelectValue placeholder="自动检测" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动检测（推荐）</SelectItem>
+              <SelectItem value="chat">OpenAI Chat Completions</SelectItem>
+              <SelectItem value="responses">OpenAI Responses</SelectItem>
+              <SelectItem value="anthropic">Anthropic Messages</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground mt-1.5">需与 Base URL 匹配：mimo OpenAI 端点支持 chat / responses，Anthropic 端点支持 anthropic；不匹配保存时会提示错误</p>
+        </div>
+
+        <!-- 深度思考 -->
+        <div>
+          <Label class="text-xs font-semibold text-muted-foreground mb-1.5">深度思考</Label>
+          <Select :model-value="form.llm_thinking ? '1' : '0'" @update:model-value="(v) => form.llm_thinking = v === '1'">
+            <SelectTrigger class="w-full h-10 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">关闭（更快，推荐）</SelectItem>
+              <SelectItem value="1">开启</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground mt-1.5">mimo 关闭深度思考可显著提速，且 temperature 参数才会真正生效</p>
+        </div>
+
         <!-- Actions -->
         <div class="flex gap-2 pt-1">
           <Button @click="handleSave" :disabled="saving" size="sm">
@@ -241,6 +282,14 @@ onMounted(loadConfig)
           <div class="flex items-center gap-3">
             <span class="text-xs text-muted-foreground w-16 shrink-0">超时</span>
             <span class="font-mono text-foreground">{{ settings.llm_timeout || 120 }}s</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">接口类型</span>
+            <span class="font-mono text-foreground">{{ settings.llm_api_format === 'auto' ? '自动检测' : settings.llm_api_format }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-16 shrink-0">深度思考</span>
+            <span class="font-mono text-foreground">{{ settings.llm_thinking ? '开启' : '关闭' }}</span>
           </div>
         </div>
         <div class="flex gap-2">
