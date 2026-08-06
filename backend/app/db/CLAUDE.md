@@ -36,7 +36,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **模拟面试回合**：`chat_turns` 是进行中请求的唯一 fence；同一 conversation 只能有一个 `running` turn，旧 turn 不能绕过 `turn_id + fence` finalize。
 - **手撕代码**：`coding_problems`（题库，50 道 seed 数据）+ `coding_submissions`（提交记录 + AI 评审结果），migration 030
 - **刷题记忆**：`user_question_review` 记录每个用户每道题的熟练度、复习间隔和下次复习时间；`practice_review_events` 保留复习事件；`practice_deck_items` 连接自定义题单与高频题库题目。
-- **刷题题单**：系统默认题单提供 `due`（今日复习）、`all` 和 `starred`；自定义题单由用户创建管理。队列按复习状态优先级排序（到期复习 → 新题 → 未来），并使用 `question_bank.frequency` 与动态来源频率的较高值提升高频题权重。
+- **刷题题单**：系统默认题单提供 `due`（今日复习）、`all` 和 `starred`；自定义题单由用户创建管理。队列按复习状态优先级排序（到期复习 → 新题 → 未来），排序使用静态 `question_bank.frequency` 作风险权重；**展示频率 = 动态来源数**（`get_dynamic_frequency_sql`，活跃面经按 URL 去重，过滤 `qs.deleted_at`），与题库列表口径一致，严禁用静态合并数（原始问法条数）作为展示频率。
 
 ## 修改后必做
 

@@ -129,15 +129,13 @@ def _base_query_parts(conn, user_id: int, filter_mode: str, deck_key: str):
 
 
 def _select_sql(from_clause: str, where_clause: str, frequency_sql: str) -> str:
-    # question_bank.frequency is the high-frequency-bank signal.  The
-    # dynamic frequency query captures the user's current bank scope; using
-    # the larger of the two keeps high-frequency interview questions visible
-    # near the front of every queue without turning them into a separate UI
-    # category.
-    frequency_score_sql = f"MAX(COALESCE(qb.frequency, 0), ({frequency_sql}))"
+    # question_bank.frequency 是聚类合并的原始问题文本条数（同一面经里
+    # 一道题的多个问法也会被合并计数），不是「出现在几条面经中」；
+    # 题卡展示与排序的风险权重都用动态来源数（与题库列表口径一致），
+    # 静态变体数不参与展示/排序。
     return (
         "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
-        f"{frequency_score_sql} AS frequency, qb.ai_answer, qb.sources, "
+        f"({frequency_sql}) AS frequency, qb.ai_answer, qb.sources, "
         "qb.original_questions, qb.original_question_sources, qb.owner_id, "
         "COALESCE(uqv.is_starred, 0) AS is_starred, "
         "COALESCE(uqv.user_answer, '') AS user_answer, "
@@ -274,15 +272,16 @@ def list_deck_questions(
         "WHEN uqr.state = 'mastered' AND datetime(uqr.next_review_at) <= datetime('now') THEN 1 "
         "WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 0 "
         "ELSE 3 END, "
-        # Risk weight uses static question_bank.frequency (not the dynamic
-        # MAX alias) to keep the expression cheap and deterministic in ORDER BY.
-        "CASE WHEN uqr.next_review_at IS NULL THEN COALESCE(qb.frequency, 0) "
-        "ELSE COALESCE(qb.frequency, 0) * (5 - COALESCE(uqr.proficiency, 0)) END DESC, "
+        # 风险权重 = 真实出现频率（动态来源数）× (5 - proficiency)，
+        # 与题卡展示口径一致。SQLite 的 ORDER BY 不支持别名参与表达式
+        # （别名只允许整体引用，表达式内会解析为静态列 qb.frequency），
+        # 所以显式内联动态频率子查询；因相关子查询无自动 CSE，单用户
+        # 题量级下重复求值开销可忽略（题库列表排序同样做法）。
+        f"CASE WHEN uqr.next_review_at IS NULL THEN ({frequency_sql}) "
+        f"ELSE ({frequency_sql}) * (5 - COALESCE(uqr.proficiency, 0)) END DESC, "
         "COALESCE(uqr.next_review_at, '1970-01-01') ASC, "
         f"{custom_order}"
-        # Reuse the SELECT alias instead of evaluating the correlated
-        # dynamic-frequency subquery a second time for every row.
-        "frequency DESC, qb.id ASC"
+        f"({frequency_sql}) DESC, qb.id ASC"
     )
     # The due queue is not paginated: the frontend always requests the first
     # page (offset == 0), so the budget only applies there.  On offset > 0 the
@@ -325,7 +324,7 @@ def list_deck_questions(
             )
         new_rows = conn.execute(
             _select_sql(from_clause, new_where, frequency_sql)
-            + " ORDER BY COALESCE(qb.frequency, 0) DESC, qb.id ASC LIMIT ?",
+            + f" ORDER BY ({frequency_sql}) DESC, qb.id ASC LIMIT ?",
             params + [new_budget],
         ).fetchall()
         rows = due_rows + checkin_rows + new_rows

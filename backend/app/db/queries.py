@@ -74,9 +74,13 @@ def get_dynamic_frequency_sql(
 ) -> str:
     """根据过滤口径返回动态计算频率的 SQL 子查询片段。
 
-    频率 = question_sources 表中匹配当前口径的面试记录数量。
+    频率 = question_sources 表中匹配当前口径的活跃面试记录数量（按 URL 去重）。
     - public:           只统计 owner_id IS NULL 的面试
     - all / mine:       统计公共 + 自己的面试（原 personal/mixed 语义）
+
+    使用 EXISTS 而非 JOIN 计数：interview.url 只保证 (url, owner_id) 唯一，
+    同一 URL 可同时存在公共面经与用户私有面经，JOIN 会让 COUNT(*) 翻倍；
+    同时过滤软删除的 source（面经删除时 question_sources 仅软删）。
     """
     prefix = f"{table_alias}." if table_alias else ""
     owner_filter = (
@@ -87,9 +91,9 @@ def get_dynamic_frequency_sql(
 
     return (
         f"(SELECT COUNT(*) FROM question_sources qs "
-        f"JOIN interview i ON qs.url = i.url "
-        f"WHERE qs.question_bank_id = {prefix}id "
-        f"AND i.deleted_at IS NULL {owner_filter})"
+        f"WHERE qs.question_bank_id = {prefix}id AND qs.deleted_at IS NULL "
+        f"AND EXISTS (SELECT 1 FROM interview i "
+        f"WHERE i.url = qs.url AND i.deleted_at IS NULL {owner_filter}))"
     )
 
 
