@@ -3,7 +3,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
-from app.services.answer_enrichment import refine_answer
+from app.services.answer_enrichment import _extract_question, refine_answer
 
 _SOURCES = [
     {
@@ -110,3 +110,33 @@ async def test_refine_no_sources_skips_critic():
         result, _ = await refine_answer("prompt", _DRAFT, [], user_id=1, max_rounds=2)
     assert result == _DRAFT
     mock_llm.assert_not_called()
+
+
+async def test_refine_treats_unknown_verdict_as_pass():
+    """critic 返回未知 verdict（如 OK）→ 按 PASS 处理，不触发 revise"""
+    with patch(
+        "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
+    ) as mock_llm:
+        mock_llm.return_value = _critic_response("OK", [{"problem": "p", "evidence": "e"}])
+        result, issues = await refine_answer(
+            "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
+        )
+    assert result == _DRAFT
+    assert issues == []
+    assert mock_llm.call_count == 1
+
+
+def test_extract_question_extracts_between_markers():
+    """有 marker 时提取 USER_CONTENT 内的面试题原文"""
+    prompt = (
+        "prefix\n===USER_CONTENT_START===\nRedis 的数据结构有哪些？\n"
+        "===USER_CONTENT_END===\nsuffix"
+    )
+    assert _extract_question(prompt) == "Redis 的数据结构有哪些？"
+
+
+def test_extract_question_falls_back_to_first_300_chars():
+    """无 marker 时回退到 prompt 前 300 字"""
+    assert _extract_question("") == ""
+    long_prompt = "题" * 500
+    assert _extract_question(long_prompt) == "题" * 300

@@ -132,21 +132,23 @@ async def prepare_recitation_prompt(
 _CRITIC_SYSTEM = "你是严格的面试答案质量审查员。你只输出 JSON，不输出其他内容。"
 
 
-def _truncate_source_text(source: dict, limit: int = 500) -> str:
-    """截断单条来源文本，控制 critic prompt 的 token 开销"""
-    title = (source.get("title") or "未命名来源")[:80]
-    url = source.get("url") or ""
-    snippet = (source.get("snippet") or "").strip()
-    if len(snippet) > limit:
-        snippet = snippet[:limit] + "…"
-    return f"### 来源 {title}\nURL：{url}\n摘要：{snippet}"
+def _truncate_sources(results: list[dict], limit: int = 500) -> list[dict]:
+    """截断来源 snippet（500 字 + "…"）与 title（80 字），控制 critic prompt 的 token 开销"""
+    truncated = []
+    for source in results or []:
+        item = dict(source)
+        item["title"] = (source.get("title") or "未命名来源")[:80]
+        snippet = (source.get("snippet") or "").strip()
+        if len(snippet) > limit:
+            snippet = snippet[:limit] + "…"
+        item["snippet"] = snippet
+        truncated.append(item)
+    return truncated
 
 
 def _build_critic_prompt(question: str, draft: str, sources: list[dict]) -> str:
     """构建 critic 提示词：草稿 + 截断参考资料 + 硬性 checklist，要求 JSON 输出"""
-    source_text = "\n\n".join(
-        _truncate_source_text(s) for s in (sources or [])[:5]
-    )
+    source_text = _format_sources(_truncate_sources(sources)[:5])
     return f"""你是面试答案质量审查员。请审查下面这份【候选答案】，对照【参考资料】与【质量标准】找出真实存在的问题。
 
 ## 面试题
@@ -218,10 +220,12 @@ def _parse_critique(raw: str) -> dict:
             return {"verdict": "PASS", "issues": []}
     if not isinstance(parsed, dict):
         return {"verdict": "PASS", "issues": []}
-    verdict = parsed.get("verdict", "PASS")
     issues = parsed.get("issues", [])
     if not isinstance(issues, list):
         issues = []
+    verdict = str(parsed.get("verdict", "PASS")).strip().upper()
+    if verdict != "ISSUES":
+        verdict = "PASS"
     return {"verdict": verdict, "issues": issues}
 
 
