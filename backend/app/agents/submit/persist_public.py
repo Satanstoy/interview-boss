@@ -22,12 +22,23 @@ async def persist_public_node(state: SubmitState) -> dict:
         is_admin = state.get("is_admin", False)
         user_id = state["user_id"]
         record_owner_id = None
-        record_status = 'approved' if is_admin else 'pending'
+        record_status = "approved" if is_admin else "pending"
 
-        questions = "\n".join(f"{i+1}. {q}" for i, q in enumerate(data.get("具体题目清单", [])))
-        interview_id = await run_db(lambda: submit_interview_txn_tag_only(
-            saved_url, data, questions, season, record_owner_id, record_status, current_pos, tagged_rows
-        ))
+        questions = "\n".join(
+            f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
+        )
+        interview_id = await run_db(
+            lambda: submit_interview_txn_tag_only(
+                saved_url,
+                data,
+                questions,
+                season,
+                record_owner_id,
+                record_status,
+                current_pos,
+                tagged_rows,
+            )
+        )
         enqueue_questions(interview_id)
 
     emit_progress(state, "match", "已保存面经并加入聚类队列")
@@ -35,33 +46,33 @@ async def persist_public_node(state: SubmitState) -> dict:
         "saved_interview_id": interview_id,
         "record_owner_id": record_owner_id,
         "record_status": record_status,
-        "node_timings": {**state.get("node_timings", {}), "persist_public": timer.elapsed},
+        "node_timings": {
+            **state.get("node_timings", {}),
+            "persist_public": timer.elapsed,
+        },
     }
 
 
 async def cluster_public_node(state: SubmitState) -> dict:
-    """公共题库: 同步完成聚类（必须聚类成功才算提交完成）"""
-    from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
+    """公共题库: 聚类异步化（实验结论 P3）。
+
+    不再同步 await cluster_batch（曾使单次导入等待 30-90s）；改为调度后台
+    攒批任务（pending ≥ BATCH_SIZE 立即聚，否则延迟 CLUSTER_DELAY_SECONDS
+    合并连续导入）。SSE 到 save 阶段即完成，聚类结果稍后出现。
+    """
+    from app.services.pipeline.queue import _run_cluster_batch_in_background
 
     with NodeTimer() as timer:
-        new_count = 0
-        batch = dequeue_batch()
-        if batch:
-            try:
-                new_count = await cluster_batch(batch, user_id=state["user_id"])
-                queue_ids = [item['queue_id'] for item in batch]
-                mark_batch_done(queue_ids)
-            except Exception as e:
-                logger.error(f"聚类失败，回退队列状态: {e}")
-                queue_ids = [item['queue_id'] for item in batch]
-                mark_batch_failed(queue_ids)
-                return {
-                    "error": f"聚类失败: {str(e)[:100]}",
-                    "node_timings": {**state.get("node_timings", {}), "cluster": timer.elapsed},
-                }
+        scheduled = _run_cluster_batch_in_background(user_id=state.get("user_id"))
 
-    emit_progress(state, "save", f"聚类完成，新增 {new_count} 个聚类" if new_count else "聚类完成，无新增聚类")
+    emit_progress(
+        state,
+        "save",
+        "题目已保存，聚类后台进行中"
+        if scheduled
+        else "题目已保存（聚类队列已有任务在跑）",
+    )
     return {
-        "cluster_result": {"new_qb_count": new_count},
+        "cluster_result": {"new_qb_count": 0, "scheduled": scheduled},
         "node_timings": {**state.get("node_timings", {}), "cluster": timer.elapsed},
     }

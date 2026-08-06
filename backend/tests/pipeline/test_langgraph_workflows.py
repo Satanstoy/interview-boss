@@ -812,38 +812,20 @@ class TestSubmitNodes:
         assert iv["owner_id"] is None
 
     def test_cluster_public_triggers_clustering(self, mock_db):
-        """验证公共路径的聚类节点调用 pipeline.cluster_batch"""
+        """验证公共路径的聚类节点调度后台任务（P3 异步化）"""
         from app.agents.submit.persist_public import cluster_public_node
 
-        mock_cluster = AsyncMock(return_value=5)
         with (
-            patch("app.services.pipeline.should_trigger_clustering", return_value=True),
             patch(
-                "app.services.pipeline.dequeue_batch",
-                return_value=[
-                    {
-                        "queue_id": 1,
-                        "qd_id": 1,
-                        "question": "Q1",
-                        "cat1": "A",
-                        "cat2": "B",
-                        "tags": "",
-                        "diff_tag": "L2",
-                        "url": "u",
-                        "company": "c",
-                        "round": "r",
-                        "job_position": "",
-                    }
-                ],
-            ),
-            patch("app.services.pipeline.cluster_batch", mock_cluster),
-            patch("app.services.pipeline.mark_batch_done"),
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                return_value=True,
+            ) as mock_schedule,
         ):
             state = {"user_id": 1}
             result = asyncio.run(cluster_public_node(state))
 
-        mock_cluster.assert_called_once()
-        assert result["cluster_result"]["new_qb_count"] == 5
+        mock_schedule.assert_called_once_with(user_id=1)
+        assert result["cluster_result"]["scheduled"] is True
 
 
 # ═══════════════════════════════════════════════
@@ -1078,7 +1060,10 @@ class TestBatchGenerateNodes:
         for qid in (20, 21, 22):
             conn.execute(
                 "INSERT INTO question_bank (id, question, ai_answer) VALUES (?, ?, NULL)",
-                (qid, f"题目{qid}",),
+                (
+                    qid,
+                    f"题目{qid}",
+                ),
             )
         conn.commit()
 
@@ -1121,7 +1106,10 @@ class TestBatchGenerateNodes:
         for qid in (20, 21, 22):
             conn.execute(
                 "INSERT INTO question_bank (id, question, ai_answer) VALUES (?, ?, NULL)",
-                (qid, f"题目{qid}",),
+                (
+                    qid,
+                    f"题目{qid}",
+                ),
             )
         conn.commit()
 

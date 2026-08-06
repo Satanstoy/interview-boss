@@ -2,7 +2,9 @@
 队列操作：enqueue / dequeue / mark_done / mark_failed / trigger 判断
 """
 
+import asyncio
 import logging
+import os
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
@@ -160,3 +162,72 @@ def mark_batch_failed(queue_ids: List[int]):
         queue_ids,
     )
     conn.commit()
+
+
+# ──────────────────────────────────────────────────────────────
+# 聚类异步化（实验结论 P3）：cluster_public_node 不再同步 await，
+# 改为调度后台任务；攒批触发（pending ≥ BATCH_SIZE 立即聚，否则延迟）
+# ──────────────────────────────────────────────────────────────
+
+# 攒批延迟窗口（秒）：pending < BATCH_SIZE 时延迟再聚，给连续导入留合并窗口。
+# 可用环境变量 CLUSTER_DELAY_SECONDS 覆盖。
+CLUSTER_DELAY_SECONDS = int(os.environ.get("CLUSTER_DELAY_SECONDS", "300"))
+
+# 模块级标志：同时只允许一个后台聚类任务在等/在跑（多 worker 进程各自维护，
+# dequeue_batch 原子取批兜底防重复）。
+_cluster_task_running = False
+
+
+def _run_cluster_batch_in_background(user_id: int = None) -> bool:
+    """调度后台聚类任务（攒批语义），返回是否已调度。
+
+    - pending >= BATCH_SIZE → 立即执行
+    - pending < BATCH_SIZE → 延迟 CLUSTER_DELAY_SECONDS 再执行（期间新提交并入同一批）
+    - 已有任务在等/在跑 → 不重复调度（新题会被该任务处理）
+    """
+    global _cluster_task_running
+    if _cluster_task_running:
+        return False
+    _cluster_task_running = True
+
+    async def _run():
+        global _cluster_task_running
+        try:
+            _recover_stuck_processing()
+            pending = get_pending_count()
+            if pending >= BATCH_SIZE:
+                delay = 0
+            else:
+                delay = CLUSTER_DELAY_SECONDS
+            if delay:
+                logger.info(
+                    "[聚类后台] pending=%d < %d，延迟 %ds 后聚类（攒批窗口）",
+                    pending,
+                    BATCH_SIZE,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                _recover_stuck_processing()
+                if get_pending_count() == 0:
+                    return
+            batch = dequeue_batch(BATCH_SIZE)
+            if not batch:
+                return
+            try:
+                new_count = await cluster_batch(batch, user_id=user_id)
+                mark_batch_done([item["queue_id"] for item in batch])
+                logger.info(
+                    "[聚类后台] 完成: %d 题 → %d 个新聚类", len(batch), new_count
+                )
+            except Exception as e:
+                logger.error("[聚类后台] 失败，回退队列状态: %s", e)
+                mark_batch_failed([item["queue_id"] for item in batch])
+        except Exception as e:
+            logger.error("[聚类后台] 任务异常: %s", e)
+        finally:
+            _cluster_task_running = False
+
+    from app.services.pipeline import cluster_batch, mark_batch_done, mark_batch_failed
+
+    asyncio.create_task(_run())
+    return True
