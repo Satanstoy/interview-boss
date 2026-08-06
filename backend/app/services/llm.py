@@ -68,15 +68,31 @@ def _is_mimo(base_url: str | None) -> bool:
 
 _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
     # mimo Token Plan：json_object 2026-08-06 曾截断 → 降级 prompt 指令；支持 chat + responses
-    ("token-plan-cn.xiaomimimo.com", {"json_mode": False, "max_output_tokens": 4096,
-                                      "api_formats": ["chat", "responses"]}),
+    (
+        "token-plan-cn.xiaomimimo.com",
+        {
+            "json_mode": False,
+            "max_output_tokens": 4096,
+            "api_formats": ["chat", "responses"],
+        },
+    ),
     # SiliconFlow：json_object 正常；responses 未实测，保守只声明 chat
-    ("api.siliconflow.cn", {"json_mode": True, "max_output_tokens": 4096,
-                            "api_formats": ["chat"]}),
-    ("api.openai.com", {"json_mode": True, "max_output_tokens": 4096,
-                        "api_formats": ["chat", "responses"]}),
-    ("api.anthropic.com", {"json_mode": False, "max_output_tokens": 8192,
-                           "api_formats": ["anthropic"]}),
+    (
+        "api.siliconflow.cn",
+        {"json_mode": True, "max_output_tokens": 4096, "api_formats": ["chat"]},
+    ),
+    (
+        "api.openai.com",
+        {
+            "json_mode": True,
+            "max_output_tokens": 4096,
+            "api_formats": ["chat", "responses"],
+        },
+    ),
+    (
+        "api.anthropic.com",
+        {"json_mode": False, "max_output_tokens": 8192, "api_formats": ["anthropic"]},
+    ),
     ("*", {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}),
 ]
 
@@ -324,8 +340,13 @@ async def _probe_llm(user_id: int) -> tuple:
             await asyncio.wait_for(
                 resolved_client.responses.create(
                     model=model,
-                    input=[{"type": "message", "role": "user",
-                            "content": [{"type": "input_text", "text": "ping"}]}],
+                    input=[
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "ping"}],
+                        }
+                    ],
                     max_output_tokens=1,
                 ),
                 timeout=wait_for,
@@ -947,8 +968,15 @@ async def _call_anthropic(
         messages=messages,
         temperature=temperature,
     )
-    for key in ("top_p", "top_k", "stop_sequences", "metadata", "service_tier",
-                "thinking", "cache_control"):
+    for key in (
+        "top_p",
+        "top_k",
+        "stop_sequences",
+        "metadata",
+        "service_tier",
+        "thinking",
+        "cache_control",
+    ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
     response = await anthropic_client.messages.create(**body)
@@ -991,8 +1019,11 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
             tool_calls = msg.get("tool_calls")
             if msg.get("content"):
                 items.append(
-                    {"type": "message", "role": "assistant",
-                     "content": [{"type": "output_text", "text": msg["content"]}]}
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": msg["content"]}],
+                    }
                 )
             for tc in tool_calls or []:
                 items.append(
@@ -1005,8 +1036,13 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
                 )
             continue
         items.append(
-            {"type": "message", "role": role or "user",
-             "content": [{"type": "input_text", "text": str(msg.get("content", "") or "")}]}
+            {
+                "type": "message",
+                "role": role or "user",
+                "content": [
+                    {"type": "input_text", "text": str(msg.get("content", "") or "")}
+                ],
+            }
         )
     return items
 
@@ -1058,9 +1094,19 @@ async def _call_responses(
     if response_format and response_format.get("type") == "json_object":
         body["text"] = {"format": {"type": "json_object"}}
     for key in (
-        "top_p", "tools", "tool_choice", "parallel_tool_calls", "reasoning",
-        "previous_response_id", "store", "metadata", "user", "stream_options",
-        "include", "truncation", "service_tier",
+        "top_p",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning",
+        "previous_response_id",
+        "store",
+        "metadata",
+        "user",
+        "stream_options",
+        "include",
+        "truncation",
+        "service_tier",
     ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
@@ -1143,19 +1189,41 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
             model=kwargs["model"],
             input=input_items or " ",
             instructions=system_text.strip() or kwargs.get("instructions"),
-            max_output_tokens=kwargs.get("max_output_tokens", kwargs.get("max_tokens", caps["max_output_tokens"])),
+            max_output_tokens=kwargs.get(
+                "max_output_tokens", kwargs.get("max_tokens", caps["max_output_tokens"])
+            ),
             temperature=kwargs.get("temperature", 0.3),
         )
         for key in (
-            "top_p", "tools", "tool_choice", "parallel_tool_calls", "reasoning",
-            "previous_response_id", "store", "metadata", "user", "text",
+            "top_p",
+            "tools",
+            "tool_choice",
+            "parallel_tool_calls",
+            "reasoning",
+            "previous_response_id",
+            "store",
+            "metadata",
+            "user",
+            "text",
         ):
             if key in kwargs and kwargs[key] is not None:
                 body[key] = kwargs[key]
-        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+        if (
+            kwargs.get("response_format")
+            and kwargs["response_format"].get("type") == "json_object"
+        ):
             body["text"] = {"format": {"type": "json_object"}}
+        if _is_mimo(base_url) and not kwargs.get("thinking"):
+            body["reasoning"] = {"effort": "none"}
         response = await resolved_client.responses.create(**body)
         return _extract_responses_text(response)
+
+    if _is_mimo(base_url) and not kwargs.get("thinking"):
+        # mimo 默认开启深度思考：长输出任务（rerank/结构化）会被思考吃光
+        # max_tokens 预算导致空响应（2026-08-06 实测）→ 默认关闭，与 _call_llm_with_retry 对齐
+        extra_body = dict(kwargs.get("extra_body") or {})
+        extra_body["thinking"] = {"type": "disabled"}
+        kwargs["extra_body"] = extra_body
 
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
@@ -1306,9 +1374,16 @@ async def _call_llm_with_retry_messages(
         input_items = _convert_messages_to_responses_input(messages, system_text)
         kwargs.pop("messages", None)
         kwargs["input"] = input_items or " "
-        kwargs["instructions"] = kwargs.get("instructions") or system_text.strip() or None
-        kwargs["max_output_tokens"] = kwargs.pop("max_tokens", caps["max_output_tokens"])
-        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
+        kwargs["instructions"] = (
+            kwargs.get("instructions") or system_text.strip() or None
+        )
+        kwargs["max_output_tokens"] = kwargs.pop(
+            "max_tokens", caps["max_output_tokens"]
+        )
+        if (
+            kwargs.get("response_format")
+            and kwargs["response_format"].get("type") == "json_object"
+        ):
             kwargs["text"] = {"format": {"type": "json_object"}}
         kwargs.pop("response_format", None)
         response = await resolved_client.responses.create(**kwargs)
@@ -1387,7 +1462,9 @@ async def stream_llm_messages(
     if resolve_api_format(base_url, user_id) == "responses":
         # Responses API 流式：语义事件
         kwargs.pop("messages", None)
-        kwargs["input"] = kwargs.pop("input", None) or _convert_messages_to_responses_input(messages, "")
+        kwargs["input"] = kwargs.pop(
+            "input", None
+        ) or _convert_messages_to_responses_input(messages, "")
         stream = await resolved_client.responses.create(stream=True, **kwargs)
         async for event in stream:
             etype = getattr(event, "type", "")
@@ -1398,7 +1475,10 @@ async def stream_llm_messages(
                         yield {"type": "content", "content": delta}
                     else:
                         yield delta
-            elif etype in ("response.reasoning_text.delta", "response.reasoning_summary_text.delta"):
+            elif etype in (
+                "response.reasoning_text.delta",
+                "response.reasoning_summary_text.delta",
+            ):
                 delta = getattr(event, "delta", "")
                 if delta and yield_thinking:
                     yield {"type": "thinking", "content": delta}
