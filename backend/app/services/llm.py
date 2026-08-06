@@ -860,8 +860,15 @@ async def _call_llm_with_retry(
         ],
         temperature=0.3,
     )
+    caps = get_provider_capabilities(base_url)
     if response_format and _should_use_response_format(base_url):
         kwargs["response_format"] = response_format
+    else:
+        if response_format and response_format.get("type") == "json_object":
+            kwargs["messages"][0]["content"] = (
+                f"{system_msg}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
+            )
+    kwargs["max_tokens"] = caps["max_output_tokens"]
 
     response = await resolved_client.chat.completions.create(**kwargs)
     return response.choices[0].message.content.strip()
