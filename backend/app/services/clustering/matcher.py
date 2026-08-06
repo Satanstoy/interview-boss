@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from typing import List, Dict, Any
 
 import numpy as np
@@ -122,6 +123,15 @@ def _extract_raw_matches(result: Dict, unmatched_ids: set[str]) -> List[Dict]:
             normalized["cluster_id"] = cid
             raw_matches.append(normalized)
     return raw_matches
+
+
+def _validate_direct_matches_enabled() -> bool:
+    """高置信直通匹配是否也进二次验证（根因 #1：直通里有偏宽误合并）。
+
+    默认关闭（保持现状行为与 LLM 成本）；验证层效果确认后可开启：
+    CLUSTER_VALIDATE_DIRECT=1
+    """
+    return os.environ.get("CLUSTER_VALIDATE_DIRECT", "").strip().lower() in ("1", "true", "yes")
 
 
 def _partition_matches_by_risk(
@@ -549,6 +559,11 @@ async def _match_and_cluster_cat2(
             direct_matches, matches_to_validate = _partition_matches_by_risk(
                 raw_matches, cat2
             )
+
+            # 根因 #1：高置信直通也进二次验证（可选，CLUSTER_VALIDATE_DIRECT=1）
+            if _validate_direct_matches_enabled() and direct_matches:
+                matches_to_validate = list(direct_matches) + list(matches_to_validate)
+                direct_matches = []
 
             if matches_to_validate:
                 logger.info(
