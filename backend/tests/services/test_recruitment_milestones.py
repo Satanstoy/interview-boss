@@ -3,80 +3,79 @@ from datetime import date
 import pytest
 
 from app.services.recruitment_milestones import (
-    BATCH_LABELS,
+    OpportunityWindow,
+    PACE_OFFSETS,
     compute_urgency,
-    get_milestones,
-    Milestone,
+    get_season_windows,
 )
 
-def test_autumn_2027_uses_previous_year_window():
-    ms = get_milestones(2027, "autumn")
-    assert [m.date.year for m in ms] == [2026, 2026, 2026]
-    names = [m.name for m in ms]
-    assert names == ["提前批窗口关闭", "正式批高峰", "补录收尾"]
+def test_season_windows_for_2027_span_two_years():
+    windows = get_season_windows(2027)
+    assert [w.name for w in windows] == ["暑期实习", "提前批", "秋招正式批", "春招主批"]
+    assert windows[0].peak == date(2026, 3, 15)
+    assert windows[1].peak == date(2026, 8, 15)
+    assert windows[2].peak == date(2026, 10, 15)
+    assert windows[3].peak == date(2027, 4, 15)
+    assert windows[2].weight == 1.0
 
-def test_spring_2027_uses_graduation_year_window():
-    ms = get_milestones(2027, "spring")
-    assert [m.date.year for m in ms] == [2027, 2027]
-    names = [m.name for m in ms]
-    assert names == ["主批高峰", "补录收尾"]
-    assert [m.kind for m in ms] == ["peak", "horizon"]
+def test_weights():
+    windows = get_season_windows(2027)
+    assert [round(w.weight, 2) for w in windows] == [0.67, 0.5, 1.0, 0.83]
 
-def test_summer_intern_2027_uses_previous_year_window():
-    ms = get_milestones(2027, "summer_intern")
-    assert [m.date.year for m in ms] == [2026, 2026, 2026]
-    names = [m.name for m in ms]
-    assert names == ["投递高峰", "投递窗口关闭", "实习开始"]
-    assert [m.kind for m in ms] == ["peak", "window_close", "horizon"]
+def test_urgency_at_peak_within_window():
+    windows = get_season_windows(2027)
+    result = compute_urgency(windows, date(2026, 10, 15), "standard")
+    assert result["urgency"] == pytest.approx(0.8, abs=0.001)
 
-def test_daily_intern_has_no_milestones():
-    assert get_milestones(2027, "daily") == []
+def test_urgency_base_floor_outside_windows():
+    windows = get_season_windows(2027)
+    result = compute_urgency(windows, date(2027, 1, 15), "standard")
+    assert result["urgency"] == pytest.approx(0.2, abs=0.001)
 
-def test_invalid_batch_rejected():
+def test_urgency_ramp_toward_peak():
+    windows = get_season_windows(2027)
+    early = compute_urgency(windows, date(2026, 9, 1), "standard")["urgency"]
+    late = compute_urgency(windows, date(2026, 10, 1), "standard")["urgency"]
+    assert late > early
+
+def test_pace_offsets():
+    windows = get_season_windows(2027)
+    peak = date(2026, 10, 15)
+    easy = compute_urgency(windows, peak, "easy")["urgency"]
+    standard = compute_urgency(windows, peak, "standard")["urgency"]
+    hard = compute_urgency(windows, peak, "hard")["urgency"]
+    assert easy < standard < hard
+    assert easy == pytest.approx(0.5, abs=0.001)
+    assert hard == pytest.approx(1.0, abs=0.001)
+
+def test_no_windows_means_base_only():
+    result = compute_urgency([], date(2026, 8, 5), "standard")
+    assert result["urgency"] == pytest.approx(0.2)
+    assert result["current_window"] is None
+    assert result["next_window"] is None
+
+def test_current_and_next_window():
+    windows = get_season_windows(2027)
+    result = compute_urgency(windows, date(2026, 8, 5), "standard")
+    assert result["current_window"]["name"] == "提前批"
+    assert result["next_window"]["name"] == "秋招正式批"
+    assert result["next_window"]["days_left"] == 71
+
+def test_current_window_picks_highest_weight_when_overlap():
+    windows = get_season_windows(2027)
+    result = compute_urgency(windows, date(2026, 9, 10), "standard")
+    assert result["current_window"]["name"] == "秋招正式批"
+
+def test_all_windows_past_degrades_to_base():
+    windows = get_season_windows(2027)
+    result = compute_urgency(windows, date(2027, 7, 15), "standard")
+    assert result["urgency"] == pytest.approx(0.2)
+    assert result["current_window"] is None
+
+def test_pace_validation():
+    windows = get_season_windows(2027)
     with pytest.raises(ValueError):
-        get_milestones(2027, "unknown_batch")
+        compute_urgency(windows, date(2026, 8, 5), "unknown_pace")
 
-def test_milestone_shape():
-    ms = get_milestones(2027, "autumn")
-    m = ms[0]
-    assert isinstance(m, Milestone)
-    assert isinstance(m.date, date)
-    assert m.kind in {"window_close", "peak", "horizon"}
-    assert BATCH_LABELS["autumn"] == "秋招"
-
-def test_no_milestones_means_zero_urgency():
-    result = compute_urgency([], date(2026, 8, 5))
-    assert result["urgency"] == 0
-    assert result["next_milestone"] is None
-    assert result["days_left"] is None
-
-def test_far_away_milestone_means_zero_urgency():
-    ms = [Milestone("正式批高峰", date(2026, 10, 15), "peak")]
-    result = compute_urgency(ms, date(2026, 8, 5))
-    assert result["urgency"] == 0  # 71 days away > 60-day horizon
-
-def test_approaching_milestone_ramps_urgency():
-    ms = [Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close")]
-    result = compute_urgency(ms, date(2026, 8, 5))
-    assert result["urgency"] > 0.4
-    assert result["urgency"] < 0.6  # 26/60 -> ~0.567
-    assert result["next_milestone"]["name"] == "提前批窗口关闭"
-    assert result["days_left"] == 26
-
-def test_milestone_today_is_max_urgency():
-    ms = [Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close")]
-    assert compute_urgency(ms, date(2026, 8, 31))["urgency"] == 1.0
-
-def test_all_milestones_past_means_zero():
-    ms = [Milestone("补录收尾", date(2026, 12, 31), "horizon")]
-    result = compute_urgency(ms, date(2027, 3, 1))
-    assert result["urgency"] == 0
-    assert result["next_milestone"] is None
-
-def test_picks_the_next_milestone_not_the_closest_date():
-    ms = [
-        Milestone("提前批窗口关闭", date(2026, 8, 31), "window_close"),
-        Milestone("正式批高峰", date(2026, 10, 15), "peak"),
-    ]
-    result = compute_urgency(ms, date(2026, 9, 5))
-    assert result["next_milestone"]["name"] == "正式批高峰"
+def test_pace_offsets_mapping():
+    assert PACE_OFFSETS == {"easy": -0.3, "standard": 0.0, "hard": 0.3}
