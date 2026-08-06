@@ -1,13 +1,17 @@
 <template>
   <div data-testid="practice-view" class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-    <div v-if="recruitmentStatus.batch" data-testid="recruitment-status" class="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground">
+    <div v-if="recruitmentStatus.graduation_year" data-testid="recruitment-status" class="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground">
       <CalendarClock class="size-3.5" />
-      <template v-if="recruitmentStatus.next_milestone">
-        <span class="font-medium text-foreground">距{{ recruitmentStatus.next_milestone.name }}还有 {{ recruitmentStatus.days_left }} 天</span>
+      <template v-if="recruitmentStatus.current_window">
+        <span class="font-medium text-foreground">{{ recruitmentStatus.current_window.name }}窗口</span>
         <Badge variant="secondary" class="text-[10px]">{{ stageLabel }}</Badge>
       </template>
-      <span v-else>未设置面试时间偏好，使用默认复习节奏</span>
-      <span class="ml-auto">{{ batchLabel }} · 每日容量 {{ recruitmentStatus.daily_capacity }} 题</span>
+      <template v-else-if="recruitmentStatus.next_window">
+        <span>距{{ recruitmentStatus.next_window.name }}高峰还有 {{ recruitmentStatus.next_window.days_left }} 天</span>
+        <Badge variant="secondary" class="text-[10px]">{{ stageLabel }}</Badge>
+      </template>
+      <span v-else>持续准备中</span>
+      <span class="ml-auto">{{ windowsLabel }} · 容量 {{ recruitmentStatus.daily_capacity }} 题{{ paceLabel }}</span>
     </div>
     <PracticeMode
       :questions="practiceQuestions"
@@ -52,7 +56,10 @@ const {
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 
-const recruitmentStatus = ref({ batch: '', next_milestone: null, days_left: null, daily_capacity: 30 })
+const recruitmentStatus = ref({
+  graduation_year: null, batch: '', daily_capacity: 30, pace: 'standard',
+  windows: [], current_window: null, next_window: null, urgency: 0,
+})
 
 const stageLabel = computed(() => {
   const urgency = recruitmentStatus.value.urgency ?? 0
@@ -62,12 +69,16 @@ const stageLabel = computed(() => {
   return '从容复习'
 })
 
-const batchLabel = computed(() => ({
-  daily: '日常实习',
-  summer_intern: '暑期实习',
-  autumn: '秋招',
-  spring: '春招',
-})[recruitmentStatus.value.batch] || '')
+const windowsLabel = computed(() => {
+  const windows = recruitmentStatus.value.windows || []
+  if (windows.length === 0) return '社招模式'
+  return `${windows[0]?.name}等 ${windows.length} 个窗口`
+})
+
+const paceLabel = computed(() => ({
+  easy: ' · 轻松',
+  hard: ' · 冲刺',
+})[recruitmentStatus.value.pace] || '')
 
 onMounted(async () => {
   try {

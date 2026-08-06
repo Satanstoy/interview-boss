@@ -48,8 +48,15 @@ const BATCH_OPTIONS = [
 const graduationYear = ref(null)
 const batch = ref('__none__')
 const dailyCapacity = ref(30)
+const pace = ref('standard')
 const timeline = ref([])
 const savingPref = ref(false)
+
+const PACE_OPTIONS = [
+  { value: 'easy', label: '轻松', desc: '降低复习强度，间隔拉长' },
+  { value: 'standard', label: '标准', desc: '按招聘季节奏自动安排' },
+  { value: 'hard', label: '冲刺', desc: '加密复习间隔，优先到期题' },
+]
 
 const loadRecruitmentPref = async () => {
   try {
@@ -57,7 +64,8 @@ const loadRecruitmentPref = async () => {
     graduationYear.value = data.graduation_year ? String(data.graduation_year) : null
     batch.value = data.batch || '__none__'
     dailyCapacity.value = data.daily_capacity || 30
-    timeline.value = data.milestones || []
+    pace.value = data.pace || 'standard'
+    timeline.value = data.windows || []
   } catch (e) {
     console.error('Failed to fetch recruitment pref', e)
   }
@@ -78,9 +86,10 @@ const savePref = async () => {
       graduation_year: graduationYear.value ? Number(graduationYear.value) : null,
       batch: batch.value === '__none__' ? '' : batch.value,
       daily_capacity: Number(dailyCapacity.value) || 30,
+      pace: pace.value,
     }
     const data = await updateRecruitmentPref(payload)
-    timeline.value = data.milestones || []
+    timeline.value = data.windows || []
     toastSuccess('面试时间偏好已保存')
   } catch (e) {
     toastError('保存失败，请稍后重试')
@@ -355,9 +364,29 @@ const handleGoToQuestion = (question) => {
           <p class="text-xs text-muted-foreground">每天计划复习的题目数量（5 - 200）</p>
         </div>
 
+        <div class="space-y-2">
+          <Label class="text-sm font-medium text-foreground">复习节奏</Label>
+          <div class="flex gap-2">
+            <button
+              v-for="opt in PACE_OPTIONS"
+              :key="opt.value"
+              type="button"
+              :class="['h-9 flex-1 rounded-md border px-2 text-xs transition-colors',
+                       pace === opt.value
+                         ? 'border-primary bg-primary/10 text-primary font-medium'
+                         : 'border-border text-muted-foreground hover:bg-muted']"
+              :data-testid="`pace-${opt.value}`"
+              @click="pace = opt.value"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">{{ PACE_OPTIONS.find(o => o.value === pace)?.desc }}</p>
+        </div>
+
         <div v-if="timeline.length > 0" class="rounded-lg border border-border bg-muted/50 p-3 flex flex-col gap-1.5">
-          <div v-for="m in timeline" :key="m.name" class="text-xs text-muted-foreground">
-            {{ m.name }} {{ m.date }}（{{ daysFromNow(m.date) }}）
+          <div v-for="w in timeline" :key="w.name" class="text-xs text-muted-foreground">
+            {{ w.name }}高峰 {{ w.peak }}（{{ daysFromNow(w.peak) }}）
           </div>
         </div>
 
@@ -365,7 +394,7 @@ const handleGoToQuestion = (question) => {
           <Button :disabled="savingPref" @click="savePref" class="sm:w-auto">
             {{ savingPref ? '保存中...' : '保存' }}
           </Button>
-          <p class="text-xs text-muted-foreground">将根据距最近里程碑的天数自动调整每日复习题量和新题比例，越临近窗口关闭复习越密集</p>
+          <p class="text-xs text-muted-foreground">系统按招聘季窗口自动安排每天的复习题量和新题比例，临近窗口高峰复习越密集；节奏档位可随时调整</p>
         </div>
       </div>
     </div>

@@ -83,6 +83,9 @@
         </div>
 
         <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-col py-6 text-center md:py-8" :class="answerRevealed ? 'flex-none justify-start' : 'flex-1 justify-center'">
+          <div v-if="currentQ.is_checkin" class="mb-3 flex justify-center">
+            <Badge variant="outline" class="text-[10px] text-muted-foreground" data-testid="checkin-badge">保持手感 · 已掌握题每 30 天复查一次</Badge>
+          </div>
           <h2 class="practice-question font-semibold leading-relaxed tracking-tight text-foreground">{{ currentQ.question }}</h2>
 
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">
