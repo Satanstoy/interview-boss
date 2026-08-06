@@ -8,7 +8,7 @@ LangGraph 状态机：加载指定题目 → 逐题生成并写回 AI 答案 →
 START → load_questions → generate_answer ↺ → summarize → END
 ```
 
-`generate_answer_node` 自身负责生成、质量评估和写回；`should_continue_generate` 决定继续下一题或进入 `summarize`。
+`generate_answer_node` 自身负责生成、质量评估和写回；每批 `_BATCH_CONCURRENCY`（3）道题 `asyncio.gather` 并发生成（与 answers.py 批量端点 Semaphore(3) 对齐），`current_index` 按批推进；`should_continue_generate` 决定继续下一批或进入 `summarize`。
 
 ## 修改后必做
 

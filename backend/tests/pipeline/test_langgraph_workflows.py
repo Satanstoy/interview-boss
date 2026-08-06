@@ -1070,6 +1070,84 @@ class TestBatchGenerateNodes:
         result = asyncio.run(summarize_node({"success_count": 8, "fail_count": 2}))
         assert "8/10" in result["events"][0]["message"]
 
+    def test_generate_answer_node_processes_batch_concurrently(self, mock_db):
+        """批量并发：一次节点调用并发处理一批题目，current_index 按批推进"""
+        from app.agents.batch_generate.nodes import generate_answer_node
+
+        conn = mock_db
+        for qid in (20, 21, 22):
+            conn.execute(
+                "INSERT INTO question_bank (id, question, ai_answer) VALUES (?, ?, NULL)",
+                (qid, f"题目{qid}",),
+            )
+        conn.commit()
+
+        async def _slow_llm(prompt, **kwargs):
+            await asyncio.sleep(0.2)
+            return MOCK_ANSWER
+
+        with patch(
+            "app.services.llm._call_llm_with_retry", AsyncMock(side_effect=_slow_llm)
+        ):
+            state = {
+                "question_ids": [20, 21, 22],
+                "current_index": 0,
+                "user_id": 1,
+                "success_count": 0,
+                "fail_count": 0,
+            }
+            t0 = time.monotonic()
+            result = asyncio.run(generate_answer_node(state))
+            elapsed = time.monotonic() - t0
+
+        assert result["current_index"] == 3
+        assert result["success_count"] == 3
+        assert len(result["results"]) == 3
+        assert all(r["success"] for r in result["results"])
+        # 3 题并发（每题 0.2s），总耗时应显著小于串行的 0.6s
+        assert elapsed < 0.55, f"并发未生效，总耗时 {elapsed:.2f}s"
+        # 3 题都写入了答案
+        rows = conn.execute(
+            "SELECT COUNT(*) AS c FROM question_bank WHERE id IN (20,21,22) AND ai_answer = ?",
+            (MOCK_ANSWER,),
+        ).fetchone()
+        assert rows["c"] == 3
+
+    def test_generate_answer_node_batch_isolates_failures(self, mock_db):
+        """批量并发：单题失败不影响批内其他题"""
+        from app.agents.batch_generate.nodes import generate_answer_node
+
+        conn = mock_db
+        for qid in (20, 21, 22):
+            conn.execute(
+                "INSERT INTO question_bank (id, question, ai_answer) VALUES (?, ?, NULL)",
+                (qid, f"题目{qid}",),
+            )
+        conn.commit()
+
+        async def _flaky_llm(prompt, **kwargs):
+            if "题目21" in prompt:
+                raise RuntimeError("boom")
+            return MOCK_ANSWER
+
+        with patch(
+            "app.services.llm._call_llm_with_retry", AsyncMock(side_effect=_flaky_llm)
+        ):
+            state = {
+                "question_ids": [20, 21, 22],
+                "current_index": 0,
+                "user_id": 1,
+                "success_count": 0,
+                "fail_count": 0,
+            }
+            result = asyncio.run(generate_answer_node(state))
+
+        assert result["current_index"] == 3
+        assert result["success_count"] == 2
+        assert result["fail_count"] == 1
+        failed = [r for r in result["results"] if not r["success"]]
+        assert len(failed) == 1 and failed[0]["id"] == 21
+
 
 # ═══════════════════════════════════════════════
 #  7. Submit Graph 端到端集成测试（与原始流程对比）
