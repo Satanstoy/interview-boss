@@ -52,6 +52,35 @@ def _detect_provider(base_url: str) -> str:
     return "openai"
 
 
+# --------------- 供应商能力矩阵 ---------------
+
+
+_PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
+    ("token-plan-cn.xiaomimimo.com", {"json_mode": False, "max_output_tokens": 4096}),
+    ("api.siliconflow.cn", {"json_mode": True, "max_output_tokens": 4096}),
+    ("api.openai.com", {"json_mode": True, "max_output_tokens": 4096}),
+    ("*", {"json_mode": False, "max_output_tokens": 4096}),
+]
+
+_DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096}
+
+
+def get_provider_capabilities(base_url: str = None) -> dict:
+    """按 base_url 前缀匹配供应商能力。未匹配到具名供应商时回退 "*" 保守默认。"""
+    if not base_url:
+        return dict(_DEFAULT_CAPS)
+    lower = base_url.lower()
+    for prefix, caps in _PROVIDER_CAPABILITIES:
+        if prefix == "*" or prefix in lower:
+            return dict(caps)
+    return dict(_DEFAULT_CAPS)
+
+
+def _json_mode_override() -> str:
+    """应急开关：force-on / force-off / auto（默认）"""
+    return os.environ.get("LLM_JSON_MODE_OVERRIDE", "auto").strip().lower()
+
+
 def _should_use_response_format(base_url: str = None) -> bool:
     """判断当前配置的 LLM 端点是否支持 response_format 参数"""
     if base_url is not None:
