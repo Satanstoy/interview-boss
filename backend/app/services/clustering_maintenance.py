@@ -275,3 +275,90 @@ def run_clustering_maintenance(conn, execute: bool = False, merge_exact_duplicat
         len(applied["exact_merges"]),
     )
     return {"dry_run": False, "audit": before, "applied": applied, "after": after}
+
+
+# ── 聚类语义标签生成（实验结论 P2）──
+
+CLUSTER_LABEL_PROMPT = """你是面试题题库管理专家。下面是一个【已有题目聚类】的代表题与原始题面变体，请为该聚类生成一个**规范标签**（一句话概括规范题面，20 字以内，作为该聚类的"记忆标签"）。
+
+只输出 JSON 对象：{{"label": "..."}}"""
+
+
+async def generate_missing_cluster_labels(user_id: int = None, batch_size: int = 20) -> dict:
+    """为缺少 cluster_label 的已有聚类（frequency > 1 的代表题）分批生成语义标签。
+
+    幂等：只处理 cluster_label IS NULL 的代表题；失败回退保持 NULL（下次再补）。
+    Returns: {"generated": int, "skipped": int, "failed": int}
+    """
+    from app.db.connection import get_db_connection
+    from app.services.llm import _call_llm_with_retry
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, question, original_questions FROM question_bank "
+            "WHERE deleted_at IS NULL AND frequency > 1 AND cluster_label IS NULL "
+            "ORDER BY id"
+        ).fetchall()
+    if not rows:
+        return {"generated": 0, "skipped": 0, "failed": 0}
+
+    generated = failed = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        for r in batch:
+            try:
+                import json
+
+                oq = []
+                try:
+                    oq = json.loads(r["original_questions"] or "[]")[:6]
+                except Exception:
+                    oq = []
+                variants = " | ".join(str(q) for q in oq if str(q).strip())
+                prompt = (
+                    f"【聚类代表题】\n{r['question']}\n\n"
+                    f"【原始题面变体】\n{variants or '（无）'}\n\n"
+                    + CLUSTER_LABEL_PROMPT
+                )
+                raw = await _call_llm_with_retry(
+                    prompt,
+                    system_msg="你是一个面试题题库管理专家。",
+                    response_format=None,
+                    user_id=user_id,
+                    model=None,
+                )
+                label = _extract_label_from_json(raw)
+                if not label:
+                    failed += 1
+                    continue
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "UPDATE question_bank SET cluster_label = ? WHERE id = ?",
+                        (label, r["id"]),
+                    )
+                generated += 1
+            except Exception as e:
+                logger.warning(f"[聚类标签] 生成失败 qb_id={r['id']}: {e}")
+                failed += 1
+    logger.info("[聚类标签] 完成: generated=%d failed=%d", generated, failed)
+    return {"generated": generated, "skipped": 0, "failed": failed}
+
+
+def _extract_label_from_json(raw: str) -> str:
+    """从 LLM 输出提取 label（容忍 markdown/前后文字/对象包裹）"""
+    import json as _json
+    import re
+
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    try:
+        data = _json.loads(text)
+        if isinstance(data, dict):
+            label = data.get("label")
+            return str(label).strip() if label else ""
+    except _json.JSONDecodeError:
+        pass
+    m = re.search(r'"label"\s*:\s*"([^"]+)"', text)
+    if m:
+        return m.group(1).strip()
+    return ""

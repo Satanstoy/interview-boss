@@ -355,3 +355,19 @@ def _migration_048_embedding_metadata(conn):
             "ALTER TABLE question_bank ADD COLUMN embedding_dim INTEGER DEFAULT NULL"
         )
     logger.info("migration_048: question_bank.embedding_model/embedding_dim 列已就绪")
+
+
+def _migration_066_cluster_label(conn):
+    """Add cluster_label column to question_bank.
+
+    实验结论 P2：聚类匹配 prompt 带 LLM 生成的语义标签（标签摘要记忆方案），
+    候选展示格式从「[ID] 代表题」升级为「[ID] [标签] 代表题」（标签缺失时回退）。
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+    }
+    if "cluster_label" not in columns:
+        conn.execute(
+            "ALTER TABLE question_bank ADD COLUMN cluster_label TEXT DEFAULT NULL"
+        )
+    logger.info("migration_066: question_bank.cluster_label 列已就绪")

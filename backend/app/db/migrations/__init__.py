@@ -81,6 +81,7 @@ from app.db.migrations.clustering import (
     _migration_037_backfill_embeddings,
     _migration_039_merge_review_tables,
     _migration_048_embedding_metadata,
+    _migration_066_cluster_label,
     _classify_e_question,
 )
 from app.db.migrations.jobs import (
@@ -174,6 +175,7 @@ _MIGRATIONS = [
     (63, "answer_sources", _migration_063_answer_sources),
     (64, "user_recruitment_pace", _migration_064_user_recruitment_pace),
     (65, "llm_api_format", _migration_065_llm_api_format),
+    (66, "cluster_label", _migration_066_cluster_label),
 ]
 
 

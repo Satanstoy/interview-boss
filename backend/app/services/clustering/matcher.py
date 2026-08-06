@@ -144,10 +144,18 @@ def _partition_matches_by_risk(
 
 
 def _format_existing_clusters(clusters):
-    """格式化已有聚类供 Prompt 使用（只传 ID + 代表题，节省 Token）"""
+    """格式化已有聚类供 Prompt 使用（只传 ID + [标签] + 代表题，节省 Token）
+
+    实验结论 P2：已有聚类的语义标签（cluster_label）帮助 LLM 快速定位
+    考察点，标签缺失时回退为「[ID] 代表题」。
+    """
     lines = []
     for c in clusters:
-        lines.append(f"[{c['id']}] {c['question']}")
+        label = c.get("cluster_label") if isinstance(c, dict) else None
+        if label:
+            lines.append(f"[{c['id']}] [{label}] {c['question']}")
+        else:
+            lines.append(f"[{c['id']}] {c['question']}")
     return "\n".join(lines)
 
 
