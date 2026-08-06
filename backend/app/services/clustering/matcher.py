@@ -716,6 +716,9 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None)
         group_unmatched = []
         group_matched_ids = set()
 
+        # 同一新题被 LLM 匹配到多个聚类时只保留第一个（bug 回归：
+        # mock 增量评估实测一道题返回 3 个 cluster 匹配，个人路径无去重；
+        # 与生产 _match_and_cluster_cat2 的 accepted_ids 语义保持一致）
         for m in result.get("matches", []):
             new_id = _extract_id(m.get("new_id"))
             cluster_id = _extract_id(m.get("cluster_id"))
@@ -728,6 +731,7 @@ async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None)
                 new_id_int is not None
                 and cluster_id_int is not None
                 and cluster_id_int in id_to_qb
+                and new_id_int not in group_matched_ids
             ):
                 group_matched.append(
                     {"new_id": new_id_int, "question_bank_id": id_to_qb[cluster_id_int]}
