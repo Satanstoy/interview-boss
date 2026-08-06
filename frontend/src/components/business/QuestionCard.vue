@@ -235,7 +235,8 @@
                   {{ src.company === '未提供' ? '未知' : src.company }}
                   <span class="text-primary/40 dark:text-primary/50 mx-0.5">|</span>
                   {{ src.round === '未提供' ? '未知' : src.round }}
-                  <AppTooltip v-if="src.url && src.url !== '未提供链接'" text="查看原文">
+                  <span v-if="src._internal" class="ml-1 text-caption text-primary/60 dark:text-primary/50">内部面经</span>
+                  <AppTooltip v-else-if="src.url && src.url !== '未提供链接'" text="查看原文">
                     <a @click.stop :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="ml-1 text-primary hover:text-primary/80 dark:hover:text-primary/70 font-bold transition-colors duration-200">[原文]</a>
                   </AppTooltip>
                 </span>
@@ -490,17 +491,22 @@ const dedupedSources = computed(() => {
         }
       }
     }
-    return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '' }))
+    return sources.map(s => ({ ...s, _origQuestion: urlToOq[s.url] || '', _internal: isInternalUrl(s.url) }))
   }
 
   // compact 模式回退：用 source_labels（url → 原题文本）
   const labels = q.source_labels || {}
   if (Object.keys(labels).length) {
-    return sources.map(s => ({ ...s, _origQuestion: labels[s.url] || '' }))
+    return sources.map(s => ({ ...s, _origQuestion: labels[s.url] || '', _internal: isInternalUrl(s.url) }))
   }
 
-  return sources
+  return sources.map(s => ({ ...s, _internal: isInternalUrl(s.url) }))
 })
+
+// internal:// 来源（用户粘贴 App 内部分享链接或无链接面经）：不渲染为可点击链接
+function isInternalUrl(url) {
+  return !!url && url.startsWith('internal://')
+}
 </script>
 
 <style scoped>
