@@ -32,6 +32,7 @@
 | `mock_clustering_approaches.py` | 聚类策略 mock 对比脚本（产出 `mock_clustering_report.json`） |
 | `rescore_with_judge.py` | 用 judge 模型对已有评测结果重新评分 |
 | `fix_sources_frequency.py` | 来源数量/frequency 修复脚本 |
+| `fix_source_consistency.py` | 面经/来源一致性修复：回填缺失 url_signature（旧数据缺口导致 xsec_token 变体重复上传）、合并同签名重复面经（detail 重挂去重 + 来源表 URL 归一 + JSON 双写列同步）、报告 internal:// 现状（展示层降级）。`--dry-run` 预览（写入后回滚，与实际执行一致） |
 | `fix_duplicate_of_mirrors.py` | 清理历史 duplicate_of 镜像题（软删除，--dry-run 预览） |
 | `eval_framework/` | Interview Agent 评测框架内部模块（candidate、scenarios、rubrics、scoring、reports、metrics、http_client、runner、types）；由 `eval_interview_agent.py` 调用；每轮请求必须携带 `client_request_id`，并用 turn status 对账 SSE terminal |
 
