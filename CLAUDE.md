@@ -122,7 +122,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 数据管理（JD/面经 CRUD） | `routers/data.py` | `services/dataApi.js` |
 | 题库管理 | `routers/questions.py` + `routers/questions_pkg/` + `routers/admin_review.py` + `routers/bank_build.py` | `services/masterBankApi.js` + `components/business/MasterBankList.vue` |
 | 答案生成 | `routers/answers.py` + `services/llm.py` | `services/practiceApi.js` |
-| 练习/今日复习 | `routers/practice.py` + `services/practice_deck_service.py`（due 队列 + 风险排序 + 新题预算）+ `services/practice_review_service.py` + `services/practice_scheduler.py`（SM-2-lite + urgency/deadline 调制）+ `services/recruitment_milestones.py`（招聘季里程碑/紧迫度） | `views/PracticeView.vue` + `views/PracticeDecksView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticeDeckManager.vue` + `components/business/PracticePanel.vue` |
+| 练习/今日复习 | `routers/practice.py` + `services/practice_deck_service.py`（due 队列 + 风险排序 + 新题预算 + mastered 抽查桶）+ `services/practice_review_service.py` + `services/practice_scheduler.py`（SM-2-lite + urgency 调制 + mastered 30 天抽查）+ `services/recruitment_milestones.py`（机会窗口/紧迫度脉冲模型） | `views/PracticeView.vue` + `views/PracticeDecksView.vue` + `components/business/PracticeMode.vue` + `components/business/PracticeDeckManager.vue` + `components/business/PracticePanel.vue` |
 | 模拟面试（Chat） | `routers/chat.py` + `routers/interview.py` + `services/chat_service.py` + `agents/chat/` + `mcp_server/` | `views/ChatView.vue` + `components/business/ChatView.vue` + `services/chatApi.js` |
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 洞察工作台 | `routers/insights.py` + `services/insights.py`（含练习足迹聚合 `/api/insights/practice-activity`） | `views/InsightsView.vue` + `services/insightsApi.js` + `components/business/Insights*.vue` + `Practice*.vue` 足迹图表组件 |
@@ -151,6 +151,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 
 - Python 依赖管理用根目录 uv（`uv add`），测试必须通过 Docker `test-runtime` 执行，禁止宿主机直接 `uv run pytest`
 - SQLite 迁移后必须重启 backend 容器
+- 招聘季调度参数（base 0.2 / amp 0.6 / 窗口半宽 45 天 / 抽查周期 30 天 / 节奏 ±0.3）由实验定稿（`docs/analysis/2026-08-06-today-review-scheduler-decisions.md`），改参数需重跑实验；`user_recruitment_pref.pace` 三档（easy/standard/hard），`batch` 字段已降级为展示标签不参与调度
 - `http.js` 的 `get()` 不自动转换 params，必须用 URLSearchParams
 - 日志系统使用 structlog（生产 JSON / 开发彩色），前端错误通过 sendBeacon 上报到 `/api/error-report`
 - Docker 日志轮转：每服务 max-size 10m × max-file 3，用 `docker compose logs backend | jq .` 查看结构化日志
