@@ -26,36 +26,41 @@ def test_get_provider_capabilities_max_tokens_default():
 
 def test_should_use_response_format_mimo_false():
     from app.services.llm import _should_use_response_format
+
     assert _should_use_response_format("https://token-plan-cn.xiaomimimo.com/v1") is False
 
 
 def test_should_use_response_format_siliconflow_true():
     from app.services.llm import _should_use_response_format
+
     assert _should_use_response_format("https://api.siliconflow.cn/v1") is True
 
 
 def test_should_use_response_format_override(monkeypatch):
     from app.services.llm import _should_use_response_format
+
     monkeypatch.setenv("LLM_JSON_MODE_OVERRIDE", "force-on")
     assert _should_use_response_format("https://token-plan-cn.xiaomimimo.com/v1") is True
+
     monkeypatch.setenv("LLM_JSON_MODE_OVERRIDE", "force-off")
     assert _should_use_response_format("https://api.siliconflow.cn/v1") is False
 
 
 def test_should_use_response_format_anthropic_never():
     from app.services.llm import _should_use_response_format
+
     assert _should_use_response_format("https://api.anthropic.com/v1") is False
 
 
 class FakeResponse:
-    def __init__(self, content="{\"ok\": true}"):
+    def __init__(self, content='{"ok": true}'):
         self.choices = [type("C", (), {"message": type("M", (), {"content": content})})()]
 
 
 class FakeCompletions:
     def __init__(self, captured, content=None):
         self._captured = captured
-        self._content = content or "{\"ok\": true}"
+        self._content = content or '{"ok": true}'
 
     async def create(self, **kwargs):
         self._captured.update(kwargs)
@@ -73,6 +78,7 @@ class FakeClient:
 
 
 async def test_call_with_retry_mimo_downgrades(monkeypatch):
+    """mimo：json_object 不下发，system 附加 JSON 指令，max_tokens 显式"""
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
@@ -89,6 +95,7 @@ async def test_call_with_retry_mimo_downgrades(monkeypatch):
 
 
 async def test_call_with_retry_siliconflow_keeps_json_mode(monkeypatch):
+    """SiliconFlow：json_object 正常下发"""
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
@@ -101,3 +108,41 @@ async def test_call_with_retry_siliconflow_keeps_json_mode(monkeypatch):
 
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["max_tokens"] == 4096
+
+
+async def test_raw_llm_call_mimo_downgrades(monkeypatch):
+    """raw_llm_call：mimo 时 response_format 被剥离，max_tokens 默认显式"""
+    captured = {}
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (FakeClient(captured), "mimo-v2.5", 60,
+                         "https://token-plan-cn.xiaomimimo.com/v1", "openai"),
+    )
+    from app.services.llm import raw_llm_call
+
+    await raw_llm_call(
+        user_id=1, model="mimo-v2.5",
+        messages=[{"role": "user", "content": "给个 JSON"}],
+        response_format={"type": "json_object"},
+    )
+
+    assert "response_format" not in captured
+    assert captured["max_tokens"] == 4096
+
+
+async def test_raw_llm_call_siliconflow_keeps(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (FakeClient(captured), "model", 60,
+                         "https://api.siliconflow.cn/v1", "openai"),
+    )
+    from app.services.llm import raw_llm_call
+
+    await raw_llm_call(
+        user_id=1, model="model",
+        messages=[{"role": "user", "content": "hi"}],
+        response_format={"type": "json_object"},
+    )
+
+    assert captured["response_format"] == {"type": "json_object"}

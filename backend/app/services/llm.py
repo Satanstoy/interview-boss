@@ -53,7 +53,12 @@ def _detect_provider(base_url: str) -> str:
 
 
 # --------------- 供应商能力矩阵 ---------------
-
+#
+# 兼容层：部分 OpenAI 兼容端点（如 mimo Token Plan）的 json_object 模式
+# 输出会被服务端截断（2026-08-06 实测：只返回 '```json\n['）。调用方保持
+# 声明式传参（response_format={"type": "json_object"}），由本层按 base_url
+# 前缀匹配能力决定是否下发。供应商修复后把对应前缀 json_mode 改回 True 即恢复。
+# 应急开关：LLM_JSON_MODE_OVERRIDE=force-on/force-off/auto
 
 _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
     ("token-plan-cn.xiaomimimo.com", {"json_mode": False, "max_output_tokens": 4096}),
@@ -66,7 +71,11 @@ _DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096}
 
 
 def get_provider_capabilities(base_url: str = None) -> dict:
-    """按 base_url 前缀匹配供应商能力。未匹配到具名供应商时回退 "*" 保守默认。"""
+    """按 base_url 前缀匹配供应商能力。
+
+    Returns: {"json_mode": bool, "max_output_tokens": int}
+    未匹配到具名供应商时回退到 "*" 保守默认（json_mode=False）。
+    """
     if not base_url:
         return dict(_DEFAULT_CAPS)
     lower = base_url.lower()
@@ -809,6 +818,21 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         )
         return _extract_anthropic_text(response)
 
+    caps = get_provider_capabilities(base_url)
+    response_format = kwargs.get("response_format")
+    if response_format and not _should_use_response_format(base_url):
+        # 降级：剥离 response_format；json 指令在 messages 的 system 里追加
+        kwargs.pop("response_format", None)
+        if response_format.get("type") == "json_object":
+            msgs = list(kwargs.get("messages", []))
+            if msgs and msgs[0].get("role") == "system":
+                msgs[0] = {
+                    **msgs[0],
+                    "content": f"{msgs[0].get('content', '')}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。",
+                }
+                kwargs["messages"] = msgs
+    kwargs.setdefault("max_tokens", caps["max_output_tokens"])
+
     response = await resolved_client.chat.completions.create(**kwargs)
     return response.choices[0].message.content.strip()
 
@@ -864,6 +888,7 @@ async def _call_llm_with_retry(
     if response_format and _should_use_response_format(base_url):
         kwargs["response_format"] = response_format
     else:
+        # 降级：端点不支持/不可靠 json_object → prompt 指令约束 + 调用方容错解析兜底
         if response_format and response_format.get("type") == "json_object":
             kwargs["messages"][0]["content"] = (
                 f"{system_msg}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
@@ -902,6 +927,12 @@ async def _call_llm_with_retry_messages(
         )
 
     kwargs.setdefault("model", model)
+    caps = get_provider_capabilities(base_url)
+    response_format = kwargs.get("response_format")
+    if response_format and not _should_use_response_format(base_url):
+        kwargs.pop("response_format", None)
+    kwargs.setdefault("max_tokens", caps["max_output_tokens"])
+
     response = await resolved_client.chat.completions.create(
         messages=messages, **kwargs
     )
