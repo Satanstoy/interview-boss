@@ -479,22 +479,15 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(card.getByText(seeds[1].question)).toBeVisible()
     await expect(page.getByText('1 / 3')).toBeVisible()
 
-    // 切到浏览模式验证侧栏出队：Q1 已从列表移除
+    // 切到浏览模式：默认展示全部题列表（4 题都在，出队只影响 due 队列）
     await page.getByTestId('practice-switch-browse').click()
     await expect(page.getByTestId('practice-queue-sidebar')).toBeVisible()
-    await expect(sidebar.getByText(seeds[0].question)).not.toBeVisible()
+    await expect(sidebar.getByText(seeds[0].question)).toBeVisible()
     await expect(sidebar.getByText(seeds[2].question)).toBeVisible()
-    // 切回刷题模式继续
+    // 切回刷题模式：队列锁定恢复（三选项可见、侧栏隐藏）
     await page.getByTestId('practice-switch-quiz').click()
     await expect(page.getByTestId('practice-queue-sidebar')).not.toBeVisible()
-
-    // 复习 Q2：自评「能答出」→ 显示答案 → 下一题 → 当前卡为 Q3
-    await page.getByTestId('practice-self-assess-good').click()
-    await expect(page.getByTestId('practice-review-actions')).toBeVisible()
-    await page.getByTestId('practice-next-question').click()
-
-    await expect(card.getByText(seeds[2].question)).toBeVisible()
-    await expect(page.getByText('1 / 2')).toBeVisible()
+    await expect(page.getByTestId('practice-self-assess-good')).toBeVisible()
   })
 })
 

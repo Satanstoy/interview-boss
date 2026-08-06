@@ -39,14 +39,6 @@
       </div>
     </aside>
 
-    <div v-if="viewMode === 'quiz'" class="flex shrink-0 flex-col items-center gap-1 px-2 py-2 sidebar-expand-buttons">
-      <AppTooltip text="看题列表" side="right">
-        <Button data-testid="practice-switch-browse" variant="ghost" size="icon" class="size-7" aria-label="展开看题列表" @click="switchToBrowse">
-          <BookOpen :size="14" />
-        </Button>
-      </AppTooltip>
-    </div>
-
     <div class="flex min-w-0 flex-1 flex-col">
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
         <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-3 overflow-hidden px-4 py-4 md:px-6 md:py-5">
@@ -55,6 +47,7 @@
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
         <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><BookOpen class="size-3.5" />看题列表</Button>
           <Button variant="ghost" size="icon" class="size-7 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
           </Button>
@@ -456,8 +449,11 @@ function selectFromSidebar(questionIndex) {
   resetState()
   mobileSidebarOpen.value = false
 }
-// 模式切换：quiz（算法刷题）↔ browse（列表浏览）
-function switchToBrowse() { viewMode.value = 'browse' }
+// 模式切换：quiz（算法刷题）↔ browse（列表看题，默认全部题）
+function switchToBrowse() {
+  viewMode.value = 'browse'
+  if (props.selectedDeckKey === 'due') emit('select-deck', 'all')
+}
 function switchToQuiz() {
   viewMode.value = 'quiz'
   if (props.selectedDeckKey !== 'due') emit('select-deck', 'due')
