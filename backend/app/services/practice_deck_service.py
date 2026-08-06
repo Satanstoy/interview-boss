@@ -159,6 +159,7 @@ def _normalise_question(row) -> dict:
     item["is_personal"] = item.get("owner_id") is not None
     item["has_been_practiced"] = int(item.get("review_count") or 0) > 0
     item["is_due"] = not item.get("next_review_at") or _is_due(item["next_review_at"])
+    item["is_checkin"] = item.get("review_state") == "mastered"
     item["proficiency"] = int(item.get("proficiency") or 0)
     item["review_count"] = int(item.get("review_count") or 0)
     item["lapse_count"] = int(item.get("lapse_count") or 0)
@@ -250,9 +251,10 @@ def list_deck_questions(
 ) -> tuple[dict, list[dict], int]:
     """Load a deck ordered as a review queue, not as a random bank page.
 
-    For the due deck with max_new, ``total`` is the full due count
-    (reviews + all new, uncapped) while items may be fewer — the frontend
-    should render counts from ``len(items)``.
+    For the due deck, ``total`` is the full due count
+    (reviews + check-ins + all new, uncapped) while items may be fewer when
+    the new-question budget (explicit max_new or auto from daily_capacity)
+    applies — the frontend should render counts from ``len(items)``.
     """
 
     limit = max(1, min(int(limit or 100), 200))
@@ -267,8 +269,11 @@ def list_deck_questions(
     ).fetchone()[0]
     custom_order = "pdi.sort_order ASC, " if deck["kind"] == "custom" else ""
     order = (
-        " ORDER BY CASE WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 0 "
-        "WHEN uqr.next_review_at IS NULL THEN 1 ELSE 2 END, "
+        # 四桶：到期复习(0) → mastered 抽查(1) → 新题(2) → 未来(3)
+        " ORDER BY CASE WHEN uqr.next_review_at IS NULL THEN 2 "
+        "WHEN uqr.state = 'mastered' AND datetime(uqr.next_review_at) <= datetime('now') THEN 1 "
+        "WHEN datetime(uqr.next_review_at) <= datetime('now') THEN 0 "
+        "ELSE 3 END, "
         # Risk weight uses static question_bank.frequency (not the dynamic
         # MAX alias) to keep the expression cheap and deterministic in ORDER BY.
         "CASE WHEN uqr.next_review_at IS NULL THEN COALESCE(qb.frequency, 0) "
@@ -281,27 +286,49 @@ def list_deck_questions(
     )
     # The due queue is not paginated: the frontend always requests the first
     # page (offset == 0), so the budget only applies there.  On offset > 0 the
-    # generic pagination path below runs and max_new is silently bypassed.
-    if deck_key == "due" and max_new is not None and offset == 0:
-        max_new = max(0, int(max_new))
-        # Due reviews are intentionally uncapped (Anki consensus: never cap
-        # reviews); only the new-question tail is limited by max_new.  limit
-        # applies to non-due decks and the generic path only.
+    # generic pagination path below runs and the new budget is silently bypassed.
+    if deck_key == "due" and offset == 0:
         due_cond = _deck_condition("due", "")
         due_where = where_clause.replace(
             due_cond,
-            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) <= datetime('now'))",
+            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) <= datetime('now') "
+            "AND COALESCE(uqr.state, 'new') != 'mastered')",
+        )
+        checkin_where = where_clause.replace(
+            due_cond,
+            "(uqr.state = 'mastered' AND uqr.next_review_at IS NOT NULL "
+            "AND datetime(uqr.next_review_at) <= datetime('now'))",
         )
         new_where = where_clause.replace(due_cond, "(uqr.next_review_at IS NULL)")
+        # Due reviews and mastered check-ins are intentionally uncapped (Anki
+        # consensus: never cap reviews); only the new-question tail is limited
+        # by the budget.
         due_rows = conn.execute(
             _select_sql(from_clause, due_where, frequency_sql) + order, params
         ).fetchall()
+        checkin_rows = conn.execute(
+            _select_sql(from_clause, checkin_where, frequency_sql) + order, params
+        ).fetchall()
+        if max_new is not None:
+            new_budget = max(0, int(max_new))
+        else:
+            # 新题预算 = max(0, 每日容量 − 到期复习 − mastered 抽查)
+            capacity_row = conn.execute(
+                "SELECT daily_capacity FROM user_recruitment_pref WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            capacity = (
+                int(capacity_row["daily_capacity"] or 30) if capacity_row else 30
+            )
+            new_budget = max(
+                0, capacity - len(due_rows) - len(checkin_rows)
+            )
         new_rows = conn.execute(
             _select_sql(from_clause, new_where, frequency_sql)
             + " ORDER BY COALESCE(qb.frequency, 0) DESC, qb.id ASC LIMIT ?",
-            params + [max_new],
+            params + [new_budget],
         ).fetchall()
-        rows = due_rows + new_rows
+        rows = due_rows + checkin_rows + new_rows
     else:
         rows = conn.execute(
             _select_sql(from_clause, where_clause, frequency_sql)

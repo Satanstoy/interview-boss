@@ -156,3 +156,73 @@ def test_due_queue_max_new_ignored_when_offset(test_db):
         _, items, _ = list_deck_questions(conn, 1, "due", max_new=0, offset=1)
     # offset>0 时预算不生效：走通用分页路径，新题(3) 依然返回（max_new=0 被忽略）
     assert [item["id"] for item in items] == [3, 2]
+
+
+def _seed_mastered(conn):
+    conn.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, state, proficiency, review_count, "
+        "interval_days, ease_factor, next_review_at, updated_at) "
+        "VALUES (1, 2, 'mastered', 5, 9, 30.0, 2.6, datetime('now', '-1 days'), CURRENT_TIMESTAMP)"
+    )
+    conn.commit()
+
+
+def test_due_queue_orders_review_checkin_new(test_db):
+    with get_db_connection() as conn:
+        _seed(conn)
+        _review(
+            conn,
+            1,
+            proficiency=2,
+            next_review_at=_fmt(datetime.utcnow() - timedelta(days=2)),
+        )
+        _seed_mastered(conn)
+        _, items, total = list_deck_questions(conn, 1, "due")
+    # 到期复习(1) → mastered 抽查(2) → 新题(3)
+    assert [i["id"] for i in items] == [1, 2, 3]
+    assert items[1]["is_checkin"] is True
+    assert items[0]["is_checkin"] is False
+
+
+def test_due_queue_checkin_after_future_review(test_db):
+    with get_db_connection() as conn:
+        _seed(conn)
+        conn.execute(
+            "INSERT INTO user_question_review (user_id, question_bank_id, state, proficiency, review_count, "
+            "interval_days, ease_factor, next_review_at, updated_at) "
+            "VALUES (1, 1, 'mastered', 5, 9, 30.0, 2.6, datetime('now', '+5 days'), CURRENT_TIMESTAMP)"
+        )
+        conn.commit()
+        _, due_items, _ = list_deck_questions(conn, 1, "due")
+        _, all_items, _ = list_deck_questions(conn, 1, "all")
+    # mastered 但未来到期：不进今日复习的抽查桶（due 队列本身不含未来题），
+    # 全部题队列中排在最后（新题 → 未来）
+    assert [i["id"] for i in due_items] == [3, 2]
+    assert [i["id"] for i in all_items] == [3, 2, 1]
+    assert all_items[-1]["id"] == 1
+
+
+def test_due_queue_auto_new_budget_from_capacity(test_db):
+    with get_db_connection() as conn:
+        _seed(conn)
+        _review(
+            conn,
+            1,
+            proficiency=2,
+            next_review_at=_fmt(datetime.utcnow() - timedelta(days=2)),
+        )
+        _seed_mastered(conn)
+        conn.execute(
+            "INSERT INTO user_recruitment_pref (user_id, graduation_year, batch, daily_capacity, pace) "
+            "VALUES (1, 2027, 'autumn', 3, 'standard')"
+        )
+        conn.commit()
+        _, items, _ = list_deck_questions(conn, 1, "due")
+    # 容量 3：due 1 + 抽查 1 = 2 已占 → 新题预算 1
+    assert [i["id"] for i in items] == [1, 2, 3]
+    with get_db_connection() as conn:
+        conn.execute("UPDATE user_recruitment_pref SET daily_capacity = 1 WHERE user_id = 1")
+        conn.commit()
+        _, items, _ = list_deck_questions(conn, 1, "due")
+    # 容量 1：due 1 + 抽查 1 = 2 已占 → 新题预算 0
+    assert [i["id"] for i in items] == [1, 2]
