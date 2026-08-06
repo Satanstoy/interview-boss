@@ -15,7 +15,9 @@ START → recognize → extract
 
 > 个人路径与公共路径统一：`match_and_persist_personal_node` 落库后调用
 > `enqueue_questions(interview_id, owner_id=user_id)`，与公共路径共用
-> `cluster_public_node` 完成聚类；`dequeue_batch` 按 owner_id 分桶保证
+> `cluster_public_node` 调度后台聚类（异步化 P3：攒批触发，pending ≥ BATCH_SIZE
+> 立即聚，否则延迟 CLUSTER_DELAY_SECONDS 合并连续导入，`_run_cluster_batch_in_background`
+> 模块级标志去重）；`dequeue_batch` 按 owner_id 分桶保证
 > 个人批与公共批不混，`cluster_batch` 通过 FAISSIndexManager
 > `(job_position, owner_id)` 双层 key 严格隔离题库。
 
@@ -31,7 +33,7 @@ START → recognize → extract
 | `match_and_persist_personal_node` | `persist_personal.py` | 个人题库匹配、入库、生成 answer_tasks |
 | `jd_persist_node` / `error_empty_node` | `persist_personal.py` | JD 直接入库；空题错误结束 |
 | `persist_public_node` | `persist_public.py` | 公共题库入库 |
-| `cluster_public_node` | `persist_public.py` | 公共题库入库后的 LLM 聚类去重 |
+| `cluster_public_node` | `persist_public.py` | 公共题库入库后的 LLM 聚类去重（**异步化**：调度后台攒批任务，不再同步 await；SSE 到 save 即完成） |
 
 ## 关键依赖
 
