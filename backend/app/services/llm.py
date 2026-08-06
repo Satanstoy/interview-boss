@@ -52,6 +52,12 @@ def _detect_provider(base_url: str) -> str:
     return "openai"
 
 
+def _is_mimo(base_url: str | None) -> bool:
+    """判断是否为 mimo（小米）OpenAI 兼容端点：默认开启深度思考且不支持自定义
+    temperature；关闭思考可显著提速并让 temperature 真正生效。"""
+    return bool(base_url and "mimo" in base_url.lower())
+
+
 # --------------- 供应商能力矩阵 ---------------
 #
 # 兼容层：部分 OpenAI 兼容端点（如 mimo Token Plan）的 json_object 模式
@@ -1160,11 +1166,14 @@ async def _call_llm_with_retry(
     response_format: dict = None,
     user_id: int = None,
     model: str = None,
+    thinking: bool = False,
 ) -> str:
     """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）
 
     model 参数非空时覆盖用户/全局默认模型配置，仅切换本次调用的模型名，
     不会修改 base_url、api_key 等其他配置。
+    thinking: mimo 端点默认关闭深度思考（显著提速，temperature 才真正生效）；
+              传 True 保留思考。
     """
     resolved_client, resolved_model, timeout, base_url, provider = (
         _resolve_client_and_model(user_id)
@@ -1224,6 +1233,8 @@ async def _call_llm_with_retry(
             kwargs["messages"][0]["content"] = (
                 f"{system_msg}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
             )
+    if not thinking and _is_mimo(base_url):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     kwargs["max_tokens"] = caps["max_output_tokens"]
 
     response = await resolved_client.chat.completions.create(**kwargs)
