@@ -213,6 +213,37 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
     return new_qb_ids
 
 
+def _dedupe_variants(variants: list[str]) -> list[str]:
+    """变体归一化（根因 #2）：规范化相等 + 子串包含去重，保留较长者。
+
+    重复变体（同题多表述，21.5%）会虚高 frequency 并污染 oq；
+    文本规则是零成本第一层，语义级重复由维护工具（LLM 判重）补充。
+    """
+    from app.services.clustering.clusterer import _normalize_question_text
+
+    norm_list = []
+    for v in variants:
+        n = _normalize_question_text(v)
+        if n:
+            norm_list.append((v, n))
+    kept = []
+    for v, n in norm_list:
+        dup = False
+        for i, (kv, kn) in enumerate(kept):
+            if n == kn:
+                dup = True
+                break
+            longer, shorter = (n, kn) if len(n) >= len(kn) else (kn, n)
+            if len(shorter) >= 4 and shorter in longer:
+                dup = True
+                if len(n) > len(kn):
+                    kept[i] = (v, n)
+                break
+        if not dup:
+            kept.append((v, n))
+    return [v for v, _ in kept]
+
+
 def _build_new_entry(cluster, job_position):
     """为新聚类构建 question_bank 写入数据"""
     items = cluster.get("items", [])
@@ -247,6 +278,16 @@ def _build_new_entry(cluster, job_position):
                 "question": q,
                 "sources": [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}]
             })
+
+    # 变体归一化（根因 #2）：文本规则去重，frequency 与去重后 oq 一致
+    if len(original_questions) > 1:
+        deduped = _dedupe_variants(original_questions)
+        if len(deduped) < len(original_questions):
+            original_questions = deduped
+            oq_set = set(original_questions)
+            original_question_sources = [
+                s for s in original_question_sources if s["question"] in oq_set
+            ]
 
     return {
         'question': cluster['representative'],

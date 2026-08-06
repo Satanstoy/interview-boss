@@ -393,3 +393,62 @@ def _extract_label_from_json(raw: str) -> str:
         label = data.get("label")
         return str(label).strip() if label else ""
     return ""
+
+
+# ── 变体归一化（根因 #2）：LLM 语义判重，清洗重复变体 ──
+
+VARIANT_DUPLICATE_PROMPT = """你是面试题去重专家。以下是同一聚类下的【原始题面变体】列表。
+
+请找出**语义重复**的变体对（同一道面试题的不同表述，如"介绍rag流程"与"讲述一下rag的流程"）。
+注意：仅表述不同但考察点相同的算重复；考察点不同的不算（那是误合并，不属于本任务）。
+
+{items}
+
+输出格式（严格 JSON）：{{"duplicates": [[0, 1], [2, 0]]}}
+其中每对 [i, j] 表示变体 i 与变体 j 重复，保留编号小者（编号大者将被合并掉）。"""
+
+
+async def _llm_find_duplicate_variants(variants: list[str], user_id: int = None) -> list[list[int]]:
+    """LLM 语义判重：返回重复变体对 [[keep_idx, merge_idx], ...]（keep 保留较小下标）。
+
+    失败返回 []（不动数据，等待下次清洗）。
+    """
+    if len(variants) < 2:
+        return []
+    items = "\n".join(f"{i}. {v}" for i, v in enumerate(variants))
+    prompt = VARIANT_DUPLICATE_PROMPT.format(items=items)
+    try:
+        from app.services.llm import _call_llm_with_retry
+        from app.services.llm_judge import parse_json_object
+
+        raw = await _call_llm_with_retry(
+            prompt, system_msg="你是一个面试题去重专家。",
+            response_format=None, user_id=user_id, model=None,
+        )
+        data = parse_json_object(raw)
+        pairs = data.get("duplicates", []) if data else []
+        out = []
+        for p in pairs:
+            if not isinstance(p, list) or len(p) != 2:
+                continue
+            try:
+                i, j = int(p[0]), int(p[1])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(variants) and 0 <= j < len(variants) and i != j:
+                out.append(sorted([i, j]))
+        return out
+    except Exception as e:
+        logger.warning(f"[变体归一] LLM 判重失败: {e}")
+        return []
+
+
+def _merge_variant_duplicates(oq: list[str], dup_pairs: list[list[int]]) -> list[str]:
+    """按判重对合并变体：每对保留较小下标者，返回去重后的 oq（保持原顺序）。"""
+    if not dup_pairs:
+        return oq
+    merge_targets = set()
+    for pair in dup_pairs:
+        keep, drop = min(pair), max(pair)  # 保留较小下标
+        merge_targets.add(drop)
+    return [v for idx, v in enumerate(oq) if idx not in merge_targets]
