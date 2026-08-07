@@ -58,6 +58,43 @@ def test_split_variant_invalid_index_returns_none(test_db):
     assert split_variant(test_db, qb_id=1, variant_index=99) is None
 
 
+def test_split_variant_uses_rewritten_representative(test_db):
+    """拆出 + 预生成重写题面：新题代表题 = 重写版，原问法降为新题问法（保真）"""
+    from app.services.clustering_maintenance import split_variant
+
+    _seed_issue_cluster(test_db)
+    # 原问法「关于研究生方向」脱离访谈上下文不自明 → LLM 预生成重写题面
+    rewritten = "结合你的研究生方向，为什么没有延续该方向学习就业？"
+    new_id = split_variant(
+        test_db, qb_id=1, variant_index=2, new_representative=rewritten
+    )
+
+    assert new_id is not None
+    new_row = test_db.execute(
+        "SELECT question, frequency, original_questions FROM question_bank WHERE id = ?",
+        (new_id,),
+    ).fetchone()
+    # 新题代表题 = 重写版
+    assert new_row[0] == rewritten
+    # 原问法降为新题问法（可追溯）
+    oq = json.loads(new_row[2])
+    assert "关于研究生方向" in oq
+    assert new_row[1] == 1
+
+
+def test_split_variant_falls_back_to_original_without_rewrite(test_db):
+    """未传入重写题面 → 新题代表题用原问法原文（向后兼容）"""
+    from app.services.clustering_maintenance import split_variant
+
+    _seed_issue_cluster(test_db)
+    new_id = split_variant(test_db, qb_id=1, variant_index=2)
+    assert new_id is not None
+    new_row = test_db.execute(
+        "SELECT question FROM question_bank WHERE id = ?", (new_id,)
+    ).fetchone()
+    assert new_row[0] == "关于研究生方向"
+
+
 def test_refine_representative_swaps_and_keeps_original(test_db):
     """替换代表题：新题面入 question，原代表题进 oq（保真）"""
     from app.services.clustering_maintenance import refine_representative

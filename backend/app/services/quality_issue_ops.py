@@ -85,7 +85,11 @@ def execute_issue(conn, issue) -> None:
 
     action = issue["suggested_action"]
     if action == "split":
-        new_id = split_variant(conn, issue["qb_id"], issue["variant_index"])
+        # split 时新题代表题用 LLM 预生成的重写题面（suggested_value），原问法降为新题问法
+        new_id = split_variant(
+            conn, issue["qb_id"], issue["variant_index"],
+            new_representative=issue["suggested_value"],
+        )
         if new_id is None:
             raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
     elif action == "dedupe":

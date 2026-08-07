@@ -36,8 +36,8 @@ const issueTypeColor = (type) => {
 }
 
 // 目标题语义：操作后「原题」变成什么。
-// split → 被拆出的问法成为新独立题；refine → LLM 建议的规范题面；
-// merge → 并入的目标题；dedupe → 移除后原题保持。
+// split → 被拆出的问法成为新独立题（用 LLM 重写题面 suggested_value，无则原问法）；
+// refine → LLM 建议的规范题面；merge → 并入的目标题；dedupe → 移除后原题保持。
 const targetOf = (issue) => {
   const action = issue.suggested_action
   if (action === 'merge') {
@@ -47,19 +47,9 @@ const targetOf = (issue) => {
     return { label: '新题面', text: issue.suggested_value }
   }
   if (action === 'split') {
-    return { label: '新独立题', text: issue.variant }
+    return { label: '新独立题', text: issue.suggested_value || issue.variant }
   }
   return { label: '目标题', text: issue.question }
-}
-
-const movedText = (issue) => {
-  if (issue.suggested_action === 'split') {
-    return '将拆出：' + (issue.variant || '')
-  }
-  if (issue.suggested_action === 'merge') {
-    return '将并入：' + (issue.variant || '')
-  }
-  return ''
 }
 
 const loadIssues = async () => {
@@ -197,14 +187,20 @@ onMounted(loadIssues)
               </span>
             </div>
 
-            <!-- 前后对照：原题 → 目标题 -->
+            <!-- 前后对照：原代表题+原题目 → 目标题 -->
             <div class="mt-2 grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
-              <!-- 原题 -->
+              <!-- 原代表题 + 原题目 -->
               <div class="min-w-0 rounded-md border border-border bg-muted/60 px-2.5 py-2">
-                <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">原题</div>
+                <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">原代表题</div>
                 <div class="text-xs font-medium leading-snug">{{ issue.question }}</div>
-                <div v-if="movedText(issue)" class="mt-1 text-[11px] text-destructive leading-snug">
-                  {{ movedText(issue) }}
+                <div
+                  v-if="issue.variant && issue.suggested_action !== 'refine_representative'"
+                  class="mt-2 border-t border-border/70 pt-2"
+                >
+                  <div class="text-[10px] font-semibold text-destructive uppercase tracking-wide mb-0.5">
+                    原题目（要{{ issue.suggested_action === 'split' ? '拆出' : '并入' }}）
+                  </div>
+                  <div class="text-[11px] text-destructive leading-snug">{{ issue.variant }}</div>
                 </div>
               </div>
               <!-- 箭头 -->

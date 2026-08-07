@@ -53,20 +53,9 @@ const targetOf = (conf) => {
     return { label: '新题面', text: issue.suggested_value }
   }
   if (action === 'split') {
-    return { label: '新独立题', text: issue.variant }
+    return { label: '新独立题', text: issue.suggested_value || issue.variant }
   }
   return { label: '目标题', text: issue.question }
-}
-
-const movedText = (conf) => {
-  const issue = conf.issue || {}
-  if (issue.suggested_action === 'split') {
-    return '将拆出：' + (issue.variant || '')
-  }
-  if (issue.suggested_action === 'merge') {
-    return '将并入：' + (issue.variant || '')
-  }
-  return ''
 }
 
 const genSession = () => {
@@ -271,13 +260,19 @@ onMounted(async () => {
                   </span>
                 </div>
 
-                <!-- 前后对照：原题 → 目标题 -->
+                <!-- 前后对照：原代表题+原题目 → 目标题 -->
                 <div class="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
                   <div class="min-w-0 rounded-md border border-border bg-muted/60 px-2 py-1.5">
-                    <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">原题</div>
+                    <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">原代表题</div>
                     <div class="text-[11px] font-medium leading-snug">{{ conf.issue?.question }}</div>
-                    <div v-if="movedText(conf)" class="mt-0.5 text-[10px] text-destructive leading-snug">
-                      {{ movedText(conf) }}
+                    <div
+                      v-if="conf.issue?.variant && conf.issue?.suggested_action !== 'refine_representative'"
+                      class="mt-1.5 border-t border-border/70 pt-1.5"
+                    >
+                      <div class="text-[10px] font-semibold text-destructive uppercase tracking-wide mb-0.5">
+                        原题目（要{{ conf.issue?.suggested_action === 'split' ? '拆出' : '并入' }}）
+                      </div>
+                      <div class="text-[10px] text-destructive leading-snug">{{ conf.issue?.variant }}</div>
                     </div>
                   </div>
                   <div class="flex items-center justify-center text-muted-foreground">

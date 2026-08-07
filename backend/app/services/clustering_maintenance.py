@@ -595,8 +595,12 @@ async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE
 
 # ── 审查清单操作（管理员审批后执行）──
 
-def split_variant(conn, qb_id: int, variant_index: int) -> int | None:
+def split_variant(conn, qb_id: int, variant_index: int, new_representative: str | None = None) -> int | None:
     """拆出误合并变体：从代表题 oq 移除该变体 + frequency-1，拆出的变体独立入库。
+
+    拆出的问法脱离访谈上下文可能不自明（如「关于研究生方向…」）。若传入
+    new_representative（清单生成时 LLM 预生成的重写题面），用它作为新题代表题，
+    原问法降为新题的 original_questions（保真，可追溯）；未传入则用原问法原文。
 
     执行前重检（业界实践：审批后执行前再查当前状态）：oq 中不存在该下标 → None。
     Returns: 新题 id / None
@@ -615,6 +619,7 @@ def split_variant(conn, qb_id: int, variant_index: int) -> int | None:
     if not (0 <= variant_index < len(oq)):
         return None
     variant = oq[variant_index]
+    new_rep = (new_representative or "").strip() or variant
 
     new_oq = [q for i, q in enumerate(oq) if i != variant_index]
     conn.execute(
@@ -626,7 +631,7 @@ def split_variant(conn, qb_id: int, variant_index: int) -> int | None:
         "status, owner_id, job_position, original_questions, sources) "
         "VALUES (?, ?, ?, ?, ?, 1, 'approved', ?, ?, ?, ?)",
         (
-            variant,
+            new_rep,
             row["cat1"] or "",
             row["cat2"] or "",
             row["tags"] or "",
@@ -712,6 +717,26 @@ CONFIRM_ISSUE_PROMPT = """你是面试题去重专家。以下是聚类中的【
 
 输出格式（严格 JSON）：{{"confirm": true 或 false, "confidence": 0.0-1.0, "reason": "一句话"}}"""
 
+SPLIT_REWRITE_PROMPT = """你是面试题题库管理专家。误合并的一个问法将被拆成独立题，但该问法来自访谈现场，
+脱离上下文后可能不自明（如「关于研究生方向…」）。请基于以下信息，把它重写为
+一个**自明、规范、面试官能直接提问**的独立题面（20-40 字）。
+
+要求：
+- 保留原问法的核心考察点，不改变语义
+- 补充必要的上下文，使其脱离访谈也能看懂
+- 不要用「关于」「对于」这类含糊开头，要像一道完整面试题
+
+【被拆出的原题目】
+{original}
+
+【来源代表题】（该问法原本所属的题）
+{representative}
+
+【同来源其他问法】
+{others}
+
+输出格式（严格 JSON）：{{"rewritten": "重写后的规范题面", "reason": "一句话说明为什么这样重写"}}"""
+
 # 置信度分级（业界实践：Claro 三级阈值）
 ISSUE_CONFIDENCE_HIGH = 0.85   # 高置信：可批量审批
 ISSUE_CONFIDENCE_LOW = 0.50    # 低于此置信度不进清单（丢弃记录）
@@ -766,6 +791,23 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                 continue
             if not confirmed or confidence < ISSUE_CONFIDENCE_LOW:
                 continue  # 未确认或低置信 → 不进清单
+            # 误合并 → 预生成重写题面（原题目脱离上下文可能不自明，拆成独立题需补偿）
+            rewritten = None
+            others = [q for i2, q in enumerate(rep["oq"]) if i2 != idx and q != variant][:5]
+            try:
+                raw = await _call_llm_with_retry(
+                    SPLIT_REWRITE_PROMPT.format(
+                        original=variant,
+                        representative=rep["question"],
+                        others="\n".join(f"- {o}" for o in others) or "（无）",
+                    ),
+                    system_msg="你是一个面试题题库管理专家。",
+                    response_format=None, user_id=user_id, model=None,
+                )
+                data = parse_json_object(raw) or {}
+                rewritten = (data.get("rewritten") or "").strip() or None
+            except Exception as e:
+                logger.warning(f"[清单生成] 拆出重写失败 qb={rep['id']} idx={idx}: {e}")
             # 已存在相同 issue → 跳过（幂等）
             with get_db_connection() as conn:
                 dup = conn.execute(
@@ -777,10 +819,11 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                     continue
                 conn.execute(
                     "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                    "suggested_action, reason, confidence, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                    "suggested_action, reason, suggested_value, confidence, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
                     (rep["id"], idx, "mismerge", "split",
-                     data.get("reason", "")[:300], round(confidence, 2)),
+                     data.get("reason", "")[:300], rewritten,
+                     round(confidence, 2)),
                 )
                 conn.commit()
             created += 1
