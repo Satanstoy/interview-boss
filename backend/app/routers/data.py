@@ -133,7 +133,7 @@ def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
                     "original_questions = ?, original_question_sources = ?, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (
-                        len(new_oqs) if new_oqs else len(new_sources),
+                        max(1, len(new_oqs)),
                         json.dumps(new_sources, ensure_ascii=False),
                         json.dumps(new_oqs, ensure_ascii=False),
                         json.dumps(new_oqs_sources, ensure_ascii=False),
@@ -321,7 +321,7 @@ def _restore_sources_for_url(cursor, url: str):
             cursor.execute(
                 "UPDATE question_bank SET frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (
-                    len(orig_qs) if orig_qs else len(sources),
+                    max(1, len(orig_qs)),
                     json.dumps(sources, ensure_ascii=False),
                     r["id"],
                 ),

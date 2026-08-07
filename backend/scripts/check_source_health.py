@@ -1,117 +1,161 @@
 #!/usr/bin/env python3
-"""来源健康检查 CLI：同签名重复面经 / internal:// 增长 / JSON 双写不一致。
+"""
+面经/题目来源健康检查脚本：检测来源数据是否出现新的不一致。
+
+检查项：
+1. 同 url_signature 重复面经（interview / jd，xsec_token 等变体重复上传）
+2. internal:// 无效来源数量（interview / jd / question_sources）
+3. 同 qb 内同笔记多 URL 变体（小红书/牛客/Boss 签名相同但完整 URL 不同）
+4. question_bank.sources JSON 与 question_sources 表双写不一致
+5. 孤儿 questions_detail（interview_id 指向不存在的面经）
 
 用法：
-    python backend/scripts/check_source_health.py                # 人类可读报告
-    python backend/scripts/check_source_health.py --json         # 结构化 JSON 输出
-    python backend/scripts/check_source_health.py --baseline <路径>   # 指定 internal 基线文件
-    python backend/scripts/check_source_health.py --exit-code   # 发现问题时以非 0 退出（cron 告警用）
+  docker compose exec backend uv run python backend/scripts/check_source_health.py
 
-说明：
-    - 只读检查，绝不修改数据库；唯一副作用是更新 internal 基线文件。
-    - 基线默认存 backend/data/source_health_baseline.json，用于识别
-      internal:// 相对上一次的新增。
-    - 复用 app.services.source_health 的同一份实现，与 weekly cron
-      （worker.scheduled_source_health_task）保持口径一致。
+退出码：0 = 健康；1 = 发现问题。
 """
-import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-
-from app.services.source_health import run_source_health_checks  # noqa: E402
 
 DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data",
     "interview-boss.db",
 )
-DEFAULT_BASELINE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data",
-    "source_health_baseline.json",
-)
+
+_NOTE_RE = re.compile(r"xiaohongshu\.com/(?:explore|item|discovery/item)/([0-9a-f]+)")
+_PROBLEMS = []
 
 
-def _fmt_groups(groups):
-    if not groups:
-        return "  无"
-    return "".join(
-        f"  - {g['signature']} × {g['count']} (id {g['min_id']}~{g['max_id']})\n"
-        for g in groups
-    ).rstrip()
+def _note_key(url):
+    m = _NOTE_RE.search(url or "")
+    return m.group(1) if m else url
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="来源健康检查")
-    parser.add_argument("--json", action="store_true", help="输出结构化 JSON")
-    parser.add_argument(
-        "--baseline",
-        default=DEFAULT_BASELINE,
-        help="internal 基线文件路径（默认 backend/data/source_health_baseline.json）",
-    )
-    parser.add_argument(
-        "--exit-code", action="store_true", help="发现问题时退出码非 0"
-    )
-    parser.add_argument(
-        "--db", default=DB_PATH, help="SQLite 数据库路径（默认生产库）"
-    )
-    args = parser.parse_args()
+def _problem(desc):
+    _PROBLEMS.append(desc)
+    print(f"  ❌ {desc}")
 
-    if not os.path.exists(args.db):
-        print(f"❌ 数据库不存在: {args.db}", file=sys.stderr)
-        return 2
 
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+def check(conn):
+    print("🔍 面经/来源健康检查")
+    print("=" * 60)
+
+    # 1. 同签名重复面经
+    print("\n1. 同签名重复面经")
+    dup_found = False
+    for table in ("interview", "jd"):
+        rows = conn.execute(
+            f"""
+            SELECT url_signature, COUNT(*) c FROM {table}
+            WHERE deleted_at IS NULL AND url_signature != ''
+            GROUP BY url_signature HAVING c > 1
+            """
+        ).fetchall()
+        for sig, c in rows:
+            _problem(f"{table} 表同签名 {sig} 有 {c} 条活跃记录")
+            dup_found = True
+    if not dup_found:
+        print("  ✅ 无重复")
+
+    # 2. internal:// 无效来源（提示级：历史遗留的无链接面经，展示层已降级，需关注增长）
+    print("\n2. internal:// 来源（提示，不阻断）")
+    for table in ("interview", "jd"):
+        n = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE url LIKE 'internal://%' AND deleted_at IS NULL"
+        ).fetchone()[0]
+        print(f"  ℹ️ {table} 表 {n} 条")
+    n = conn.execute(
+        "SELECT COUNT(*) FROM question_sources WHERE url LIKE 'internal://%' AND deleted_at IS NULL"
+    ).fetchone()[0]
+    print(f"  ℹ️ question_sources {n} 行")
+
+    # 3. 同 qb 内同笔记多 URL 变体
+    print("\n3. 同 qb 内同笔记多 URL 变体")
+    rows = conn.execute(
+        "SELECT question_bank_id, url FROM question_sources WHERE deleted_at IS NULL"
+    ).fetchall()
+    by_qb = {}
+    for qb_id, u in rows:
+        by_qb.setdefault(qb_id, {}).setdefault(_note_key(u), set()).add(u)
+    bad = [
+        (qb, nk, len(urls))
+        for qb, notes in by_qb.items()
+        for nk, urls in notes.items()
+        if len(urls) > 1 and nk.startswith(("69", "5", "62"))
+    ]
+    # 只对含域名路径的笔记 id 报告（generic 变体噪音大）
+    bad = [
+        (qb, nk, len(urls))
+        for qb, notes in by_qb.items()
+        for nk, urls in notes.items()
+        if len(urls) > 1
+        and any("xiaohongshu.com" in u for u in urls)
+        or any("nowcoder.com" in u for u in urls)
+        or any("zhipin.com" in u for u in urls)
+    ]
+    if bad:
+        for qb, nk, c in bad[:10]:
+            _problem(f"qb={qb} 笔记 {nk} 有 {c} 个 URL 变体")
+    else:
+        print("  ✅ 无变体")
+
+    # 4. sources JSON 与 question_sources 表双写一致性
+    print("\n4. JSON 双写一致性（sources vs question_sources 表）")
+    mismatched = 0
+    total = 0
+    for r in conn.execute(
+        "SELECT id, sources FROM question_bank WHERE deleted_at IS NULL AND sources IS NOT NULL AND sources != '[]'"
+    ).fetchall():
+        total += 1
+        try:
+            json_urls = {s.get("url") for s in json.loads(r[1])}
+        except Exception:
+            _problem(f"qb={r[0]} sources JSON 解析失败")
+            mismatched += 1
+            continue
+        table_urls = {
+            row[0]
+            for row in conn.execute(
+                "SELECT url FROM question_sources WHERE question_bank_id = ? AND deleted_at IS NULL",
+                (r[0],),
+            )
+        }
+        if json_urls != table_urls:
+            mismatched += 1
+            if mismatched <= 3:
+                _problem(f"qb={r[0]} JSON {len(json_urls)} 条 vs 表 {len(table_urls)} 条，差集: {json_urls ^ table_urls}")
+    if not mismatched:
+        print(f"  ✅ {total} 个 qb 全部一致")
+
+    # 5. 孤儿 questions_detail（提示级：历史遗留，需单独决策）
+    print("\n5. 孤儿 questions_detail（提示，不阻断）")
+    n = conn.execute(
+        "SELECT COUNT(*) FROM questions_detail qd LEFT JOIN interview i ON i.id = qd.interview_id WHERE i.id IS NULL"
+    ).fetchone()[0]
+    print(f"  ℹ️ {n} 条 detail 的 interview 不存在")
+
+    print("=" * 60)
+    return len(_PROBLEMS)
+
+
+def main():
+    if not os.path.exists(DB_PATH):
+        print(f"数据库不存在: {DB_PATH}")
+        sys.exit(2)
+    conn = sqlite3.connect(DB_PATH)
     try:
-        report = run_source_health_checks(conn, baseline_path=args.baseline)
+        n = check(conn)
     finally:
         conn.close()
-
-    if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-    else:
-        print("🔍 来源健康检查")
-        print("=" * 60)
-        dup_i = report["duplicate_signature_groups"]["interview"]
-        dup_j = report["duplicate_signature_groups"]["jd"]
-        print(f"1. 同签名重复面经: interview={len(dup_i)} 组, jd={len(dup_j)} 组")
-        if dup_i:
-            print("   interview 重复组:")
-            print(_fmt_groups(dup_i))
-        if dup_j:
-            print("   jd 重复组:")
-            print(_fmt_groups(dup_j))
-        internal = report["internal"]
-        print(
-            f"2. internal:// 现状: interview={internal['interview']} "
-            f"jd={internal['jd']} question_sources={internal['question_sources']}"
-        )
-        if internal["new_urls"]:
-            print(f"   自上次新增 {len(internal['new_urls'])} 条:")
-            for u in internal["new_urls"]:
-                print(f"    - {u}")
-        mismatches = report["dual_write_mismatches"]
-        print(f"3. JSON 双写不一致: {len(mismatches)} 处")
-        for m in mismatches[:20]:
-            print(
-                f"   - qb_id={m['qb_id']} {m['field']} "
-                f"json_only={len(m['json_only'])} table_only={len(m['table_only'])}"
-            )
-        if len(mismatches) > 20:
-            print(f"   ... 等 {len(mismatches)} 处")
-        print("=" * 60)
-        print("✅ 健康" if report["ok"] else "⚠️  发现问题，建议运行 fix_source_consistency.py 处理")
-
-    if args.exit_code and not report["ok"]:
-        return 1
-    return 0
+    if n:
+        print(f"\n发现 {n} 类问题，需要人工处理。")
+        sys.exit(1)
+    print("\n✅ 全部健康")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
