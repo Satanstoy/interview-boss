@@ -396,3 +396,29 @@ def _migration_067_quality_audit(conn):
         ")"
     )
     logger.info("migration_067: quality_audit 表已就绪")
+
+
+def _migration_068_quality_issue(conn):
+    """quality_issue 表：审查发现的问题清单（管理员审批工作流）。
+
+    issue_type: mismerge（误合并，应拆出）/ duplicate（重复变体，应去重）/
+                weak_representative（代表题弱，建议替换）
+    status: pending → approved/rejected → done
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS quality_issue ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "qb_id INTEGER NOT NULL,"
+        "variant_index INTEGER,"
+        "issue_type TEXT NOT NULL,"
+        "suggested_action TEXT NOT NULL,"
+        "reason TEXT,"
+        "suggested_value TEXT,"
+        "confidence REAL,"
+        "status TEXT DEFAULT 'pending',"
+        "created_at TEXT,"
+        "reviewed_at TEXT,"
+        "reviewed_by INTEGER"
+        ")"
+    )
+    logger.info("migration_068: quality_issue 表已就绪")

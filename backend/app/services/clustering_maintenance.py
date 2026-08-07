@@ -694,3 +694,178 @@ def update_representative(conn, qb_id: int, new_representative: str) -> bool:
     )
     conn.commit()
     return True
+
+
+# ── 审查清单生成（两轮确认 + 置信度分级）──
+
+CONFIRM_ISSUE_PROMPT = """你是面试题去重专家。以下是聚类中的【代表题】和【被标记的问题变体】。
+
+第一轮审查标记该变体与代表题考察点不一致（疑似误合并）。请**独立确认**：
+该变体是否真的与代表题属于不同考察点（确实应该拆出/修正）？
+注意：不要因为表述差异就确认；只有考察点确实不同才算问题。
+
+【代表题】
+{representative}
+
+【问题变体】
+{variant}
+
+输出格式（严格 JSON）：{{"confirm": true 或 false, "confidence": 0.0-1.0, "reason": "一句话"}}"""
+
+# 置信度分级（业界实践：Claro 三级阈值）
+ISSUE_CONFIDENCE_HIGH = 0.85   # 高置信：可批量审批
+ISSUE_CONFIDENCE_LOW = 0.50    # 低于此置信度不进清单（丢弃记录）
+
+
+async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
+    """审查发现的问题 → 两轮确认 → quality_issue 清单。
+
+    两轮确认（验证层思想）：第一轮核验（run_quality_audit 的 inconsistent 变体）
+    → 第二轮独立确认（本函数）→ 两轮一致才生成 issue。
+    """
+    from app.db.connection import get_db_connection
+    from app.services.llm import _call_llm_with_retry
+    from app.services.llm_judge import parse_json_object
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, question, frequency, original_questions FROM question_bank "
+            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "ORDER BY frequency DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    candidates = []
+    for r in rows:
+        try:
+            oq = json.loads(r["original_questions"] or "[]")
+        except Exception:
+            oq = []
+        oq = [str(q).strip() for q in oq if str(q).strip()]
+        if len(oq) >= 2:
+            candidates.append({"id": r["id"], "question": r["question"], "oq": oq})
+
+    created = 0
+    for rep in candidates:
+        for idx, variant in enumerate(rep["oq"]):
+            if variant == rep["question"]:
+                continue  # 代表题自身不是问题
+            prompt = CONFIRM_ISSUE_PROMPT.format(
+                representative=rep["question"], variant=variant
+            )
+            try:
+                raw = await _call_llm_with_retry(
+                    prompt, system_msg="你是一个面试题去重专家。",
+                    response_format=None, user_id=user_id, model=None,
+                )
+                data = parse_json_object(raw) or {}
+                confirmed = bool(data.get("confirm"))
+                confidence = float(data.get("confidence", 0))
+            except Exception as e:
+                logger.warning(f"[清单生成] 确认失败 qb={rep['id']} idx={idx}: {e}")
+                continue
+            if not confirmed or confidence < ISSUE_CONFIDENCE_LOW:
+                continue  # 未确认或低置信 → 不进清单
+            # 已存在相同 issue → 跳过（幂等）
+            with get_db_connection() as conn:
+                dup = conn.execute(
+                    "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
+                    "AND status IN ('pending', 'approved')",
+                    (rep["id"], idx),
+                ).fetchone()
+                if dup:
+                    continue
+                conn.execute(
+                    "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
+                    "suggested_action, reason, confidence, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                    (rep["id"], idx, "mismerge", "split",
+                     data.get("reason", "")[:300], round(confidence, 2)),
+                )
+                conn.commit()
+            created += 1
+    logger.info("[清单生成] 新增 issue: %d 条", created)
+    return {"created": created}
+
+
+# ── weak_representative 检测 + 规范题面建议（LLM 生成）──
+
+WEAK_REPRESENTATIVE_PROMPT = """你是面试题题库管理专家。以下是【代表题】和它的【原始题面变体】。
+
+请判断代表题是否**足够规范**（能涵盖所有变体的核心考察点、表述完整具体）。
+若不够规范（过于简略、口语化、遗漏部分变体的考察点），请基于全部变体生成一个
+**更规范的题面建议**（20-40 字，覆盖所有变体的考察点，去除面试现场口语）。
+
+【代表题】
+{representative}
+
+【变体列表】
+{variants}
+
+输出格式（严格 JSON）：
+{{"weak": true 或 false, "suggested": "规范题面建议（weak=true 时必填）或 null",
+  "reason": "一句话原因"}}"""
+
+
+async def generate_weak_representative_issues(user_id: int = None, limit: int = 20) -> dict:
+    """检测代表题过弱的聚类 → 生成 weak_representative issue（含 LLM 建议题面）。
+
+    幂等：已存在 pending/approved 的 weak_representative issue → 跳过。
+    """
+    from app.db.connection import get_db_connection
+    from app.services.llm import _call_llm_with_retry
+    from app.services.llm_judge import parse_json_object
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, question, frequency, original_questions FROM question_bank "
+            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "ORDER BY frequency DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    created = 0
+    for r in rows:
+        try:
+            oq = json.loads(r["original_questions"] or "[]")
+        except Exception:
+            oq = []
+        oq = [str(q).strip() for q in oq if str(q).strip()]
+        if not oq:
+            continue
+        variants_text = "\n".join(f"{i}. {v}" for i, v in enumerate(oq[:8]))
+        prompt = WEAK_REPRESENTATIVE_PROMPT.format(
+            representative=r["question"], variants=variants_text
+        )
+        try:
+            raw = await _call_llm_with_retry(
+                prompt, system_msg="你是一个面试题题库管理专家。",
+                response_format=None, user_id=user_id, model=None,
+            )
+            data = parse_json_object(raw) or {}
+        except Exception as e:
+            logger.warning(f"[代表题评估] qb={r['id']} 失败: {e}")
+            continue
+        if not data.get("weak"):
+            continue
+        suggested = (data.get("suggested") or "").strip()
+        if not suggested or suggested == r["question"]:
+            continue
+        with get_db_connection() as conn:
+            dup = conn.execute(
+                "SELECT id FROM quality_issue WHERE qb_id = ? AND issue_type = 'weak_representative' "
+                "AND status IN ('pending', 'approved')",
+                (r["id"],),
+            ).fetchone()
+            if dup:
+                continue
+            conn.execute(
+                "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
+                "suggested_action, reason, suggested_value, confidence, status, created_at) "
+                "VALUES (?, NULL, 'weak_representative', 'update_representative', ?, ?, 0.7, 'pending', datetime('now'))",
+                (r["id"], data.get("reason", "")[:300], suggested),
+            )
+            conn.commit()
+        created += 1
+    logger.info("[代表题评估] 新增 weak_representative issue: %d 条", created)
+    return {"created": created}
