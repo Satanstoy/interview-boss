@@ -215,6 +215,21 @@ def build_insights_snapshot(user: dict) -> dict:
             unassigned_params,
         ).fetchone()[0]
 
+        # 岗位高频待练：面经 questions_detail 按 cat2 聚合被问频次（降序）
+        # 仅当前岗位，排除已删，过滤「其他」/空分类等无意义主题
+        high_freq_rows = conn.execute(
+            "SELECT cat2 AS topic, COUNT(*) AS frequency "
+            "FROM questions_detail "
+            "WHERE deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL) "
+            "AND cat2 IS NOT NULL AND cat2 != '' AND cat2 NOT IN ('其他', '未分类') "
+            "GROUP BY cat2 ORDER BY frequency DESC LIMIT 10",
+            (position_name,),
+        ).fetchall()
+        high_frequency = [
+            {"topic": row["topic"], "frequency": int(row["frequency"])}
+            for row in high_freq_rows
+        ]
+
     has_practice_evidence = bool(practiced_question_ids)
     return {
         "version": API_VERSION,
@@ -232,6 +247,7 @@ def build_insights_snapshot(user: dict) -> dict:
         },
         "actions": actions,
         "readiness": {"items": readiness_items},
+        "high_frequency": high_frequency,
         "reviews": {"total": review_total, "items": reviews},
         "data_quality": {
             "unassigned_question_count": unassigned_count,

@@ -138,6 +138,7 @@ def test_insights_endpoint_requires_auth_and_returns_contract(client, test_db):
         "summary",
         "actions",
         "readiness",
+        "high_frequency",
         "reviews",
         "data_quality",
     }
@@ -364,3 +365,60 @@ def test_practice_activity_endpoint_contract(client, test_db):
     assert len(body["heatmap"]) == 90
     assert len(body["trend"]) == 30
     assert body["streak"] == {"current": 0, "longest": 0}
+
+
+def _insert_questions_detail(conn, detail_id, cat2, position="测试岗位"):
+    conn.execute(
+        "INSERT INTO questions_detail (id, question, cat2, job_position, deleted_at) "
+        "VALUES (?, ?, ?, ?, NULL)",
+        (detail_id, f"{cat2}面经题", cat2, position),
+    )
+
+
+def test_insights_high_frequency_topics_aggregates_questions_detail(test_db):
+    """高频待练 = 面经 questions_detail 按 cat2 聚合频次降序（不含空/已删/其他）。"""
+    from app.services.insights import build_insights_snapshot
+
+    _insert_user(test_db, 601)
+    # 面经题目：Agent架构 3 次、RAG 2 次、其他岗位 RAG 1 次（应排除）、已删 1 次（应排除）、其他 4 次（应排除）
+    _insert_questions_detail(test_db, 1, "Agent架构与范式")
+    _insert_questions_detail(test_db, 2, "Agent架构与范式")
+    _insert_questions_detail(test_db, 3, "Agent架构与范式")
+    _insert_questions_detail(test_db, 4, "RAG系统设计")
+    _insert_questions_detail(test_db, 5, "RAG系统设计")
+    _insert_questions_detail(test_db, 6, "RAG系统设计", position="其他岗位")
+    _insert_questions_detail(test_db, 7, "其他")
+    _insert_questions_detail(test_db, 8, "其他")
+    _insert_questions_detail(test_db, 9, "其他")
+    _insert_questions_detail(test_db, 10, "其他")
+    test_db.execute(
+        "INSERT INTO questions_detail (id, question, cat2, job_position, deleted_at) "
+        "VALUES (11, '已删', '已删主题', '测试岗位', '2026-08-01')"
+    )
+    test_db.commit()
+
+    snapshot = build_insights_snapshot({"id": 601})
+
+    assert "high_frequency" in snapshot
+    assert snapshot["high_frequency"] == [
+        {"topic": "Agent架构与范式", "frequency": 3},
+        {"topic": "RAG系统设计", "frequency": 2},
+    ]
+
+
+def test_insights_high_frequency_empty_without_details(client, test_db):
+    """无面经题目时 high_frequency 为空数组。"""
+    from app.asgi import app
+    from app.core.auth import get_current_user
+
+    _insert_user(test_db, 602)
+    app.dependency_overrides[get_current_user] = lambda: {"id": 602}
+    try:
+        response = client.get("/api/insights")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "high_frequency" in body
+    assert body["high_frequency"] == []
