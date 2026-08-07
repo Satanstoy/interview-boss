@@ -668,8 +668,8 @@ def dedupe_variant(conn, qb_id: int, variant_indices: list[int]) -> int:
     return len(drop)
 
 
-def update_representative(conn, qb_id: int, new_representative: str) -> bool:
-    """替换代表题：新题面入 question，原代表题进 oq（保真，可回滚）。
+def refine_representative(conn, qb_id: int, new_representative: str) -> bool:
+    """精炼代表题：LLM 建议的规范题面入 question，原代表题进 oq（保真，可回滚）。
 
     new_representative 为空/与现代表题相同 → False。
     """
@@ -862,7 +862,7 @@ async def generate_weak_representative_issues(user_id: int = None, limit: int = 
             conn.execute(
                 "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
                 "suggested_action, reason, suggested_value, confidence, status, created_at) "
-                "VALUES (?, NULL, 'weak_representative', 'update_representative', ?, ?, 0.7, 'pending', datetime('now'))",
+                "VALUES (?, NULL, 'weak_representative', 'refine_representative', ?, ?, 0.7, 'pending', datetime('now'))",
                 (r["id"], data.get("reason", "")[:300], suggested),
             )
             conn.commit()

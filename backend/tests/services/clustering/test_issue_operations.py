@@ -1,4 +1,4 @@
-"""审查清单操作函数测试：split_variant / dedupe_variant / update_representative"""
+"""审查清单操作函数测试：split_variant / dedupe_variant / refine_representative"""
 import json
 
 
@@ -58,12 +58,12 @@ def test_split_variant_invalid_index_returns_none(test_db):
     assert split_variant(test_db, qb_id=1, variant_index=99) is None
 
 
-def test_update_representative_swaps_and_keeps_original(test_db):
+def test_refine_representative_swaps_and_keeps_original(test_db):
     """替换代表题：新题面入 question，原代表题进 oq（保真）"""
-    from app.services.clustering_maintenance import update_representative
+    from app.services.clustering_maintenance import refine_representative
 
     _seed_issue_cluster(test_db)
-    update_representative(
+    refine_representative(
         test_db, qb_id=1, new_representative="RAG 的完整流程包括哪些步骤？"
     )
 
