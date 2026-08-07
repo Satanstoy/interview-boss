@@ -591,3 +591,106 @@ async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE
         "coverage_rate": round(coverage_rate, 4),
         "triggered_cleanup": triggered, "report_path": report_path,
     }
+
+
+# ── 审查清单操作（管理员审批后执行）──
+
+def split_variant(conn, qb_id: int, variant_index: int) -> int | None:
+    """拆出误合并变体：从代表题 oq 移除该变体 + frequency-1，拆出的变体独立入库。
+
+    执行前重检（业界实践：审批后执行前再查当前状态）：oq 中不存在该下标 → None。
+    Returns: 新题 id / None
+    """
+    row = conn.execute(
+        "SELECT id, question, cat1, cat2, tags, difficulty, job_position, original_questions, sources "
+        "FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+        (qb_id,),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        oq = json.loads(row["original_questions"] or "[]")
+    except Exception:
+        oq = []
+    if not (0 <= variant_index < len(oq)):
+        return None
+    variant = oq[variant_index]
+
+    new_oq = [q for i, q in enumerate(oq) if i != variant_index]
+    conn.execute(
+        "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
+        (json.dumps(new_oq, ensure_ascii=False), max(len(new_oq), 1), qb_id),
+    )
+    cur = conn.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, "
+        "status, owner_id, job_position, original_questions, sources) "
+        "VALUES (?, ?, ?, ?, ?, 1, 'approved', ?, ?, ?, ?)",
+        (
+            variant,
+            row["cat1"] or "",
+            row["cat2"] or "",
+            row["tags"] or "",
+            row["difficulty"] or "L2-中等",
+            row["owner_id"] if "owner_id" in row.keys() else None,
+            row["job_position"] or "",
+            json.dumps([variant], ensure_ascii=False),
+            row["sources"] or "[]",
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def dedupe_variant(conn, qb_id: int, variant_indices: list[int]) -> int:
+    """去重重复变体：移除指定变体 + frequency 相应减少（保留代表题）。
+
+    Returns: 移除的变体数
+    """
+    row = conn.execute(
+        "SELECT original_questions FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+        (qb_id,),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        oq = json.loads(row["original_questions"] or "[]")
+    except Exception:
+        oq = []
+    drop = {i for i in variant_indices if 0 <= i < len(oq)}
+    if not drop:
+        return 0
+    new_oq = [q for i, q in enumerate(oq) if i not in drop]
+    conn.execute(
+        "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
+        (json.dumps(new_oq, ensure_ascii=False), max(len(new_oq), 1), qb_id),
+    )
+    conn.commit()
+    return len(drop)
+
+
+def update_representative(conn, qb_id: int, new_representative: str) -> bool:
+    """替换代表题：新题面入 question，原代表题进 oq（保真，可回滚）。
+
+    new_representative 为空/与现代表题相同 → False。
+    """
+    if not new_representative or not new_representative.strip():
+        return False
+    new_rep = new_representative.strip()
+    row = conn.execute(
+        "SELECT question, original_questions FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+        (qb_id,),
+    ).fetchone()
+    if not row or row["question"] == new_rep:
+        return False
+    try:
+        oq = json.loads(row["original_questions"] or "[]")
+    except Exception:
+        oq = []
+    if row["question"] not in oq:
+        oq.insert(0, row["question"])
+    conn.execute(
+        "UPDATE question_bank SET question = ?, original_questions = ?, frequency = ? WHERE id = ?",
+        (new_rep, json.dumps(oq, ensure_ascii=False), len(oq), qb_id),
+    )
+    conn.commit()
+    return True
