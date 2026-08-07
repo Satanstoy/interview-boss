@@ -112,3 +112,12 @@
 - **FAISS 索引重建**：`faiss_index_manager` 的 per-cat2 centroid 缓存须在重算后失效重建。
 - **敏感字段**：embedding_api_key 沿用 `llm_api_key` 明文存 `user_profile` + 掩码读取模式。
 - **`_sync_env_file` 目前对 LLM key 是跳过**（`config.py:240-246` 注释"已迁移 per-user"）：本设计不改动它，全局 LLM 保存后 `rebuild_clients()` 已保证热生效，`.env` 回写非必需。
+
+## grill-me 决策确认（2026-08-07）
+
+以下为追问式工作流确认的方案级决策，实现必须遵循：
+
+1. **重算失败原子性**：逐批 UPDATE 前先读取旧 `embedding` 值，失败时逆向恢复已更新行（"全成功或全不动"），job 标 failed 并提示重试。杜绝新旧模型向量混库导致 FAISS 维度不一致崩溃。
+2. **重算范围**：`question_bank` 全部未删除题（`deleted_at IS NULL`），含个人题与 pending——与 FAISS 按 `(job_position, owner_id)` 分池口径一致，避免个人池维度不一致。
+3. **配置切换时序（方案 A）**：保存配置立即 reload + invalidate FAISS，接受过渡窗口（重算完成前 embedding 检索/聚类短暂不可用或失真，几十秒，其余功能不受影响）。不加"重算期间禁用 embedding"防护。
+4. **启动配置同步**：`asgi.py` 与 `worker.py` 启动加载处，紧跟 `_reload_from_db()` 之后调用 `reload_embedding_config()`，保证容器重启后配置保持；DB 无 `embedding_*` key 时 no-op（env 兜底兼容）。
