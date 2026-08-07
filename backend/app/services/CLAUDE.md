@@ -34,6 +34,7 @@
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；练习足迹聚合（打卡热力图/连击/趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件，score≥60 算对） | `db/queries`, `db/connection` |
 | `quality_issue_ops.py` | 聚合质量审查清单业务逻辑（`quality_issue` 表）：`serialize_issue`/`execute_issue`（从 admin_quality 抽出，管理员助手确认路径与 admin_quality 路由共用同一份实现，避免行为漂移）、`list_issues`/`review_issue`、`approve_issue`（`min_confidence=None` 保留单条审批不过滤语义；给值则 SQL 加置信度下限）、`reject_issue`、`batch_approve`（置信度下限强制 `max(0.85, 传入)`） | `clustering_maintenance`, `db/connection` |
 | `admin_assistant_service.py` | 管理员 AI 助手编排：5 个 OpenAI 风格 tool schema + 简体中文系统提示词 + `run_assistant_turn`（LLM tool 循环 ≤8 次，读工具即时执行、写工具只读暂存返回 `requires_confirmation`）、`confirm_and_execute`（**唯一执行点**：单线程单事务重新校验 + reviewed_by 留痕）、`get_assistant_history`（按 session_id+admin_id 隔离）。对话与操作写入 `admin_assistant_log`（role: user/assistant/action）；action 回执以 `[已执行操作]` user 消息喂回 LLM（Anthropic 会把 system 消息合并到顶部，中段回执必须用 user 消息保序）。批量置信度下限 0.85 服务端强制 | `llm`, `quality_issue_ops`, `db/connection` |
+| `source_health.py` | 来源健康检查（只读 + 更新 internal 基线文件）：`run_source_health_checks()` 扫同签名重复面经（interview/jd 按 url_signature 分组）、internal:// 现状与相对基线的增长、question_bank JSON 双写列（sources/original_questions/original_question_sources）与规范化表不一致。供 weekly cron（`worker.scheduled_source_health_task`）与脚本 `backend/scripts/check_source_health.py` 复用同口径；`ok` 为 False 时 worker 记 warning、脚本 `--exit-code` 返回 1 | `db/connection` |
 
 ## 核心规则
 

@@ -22,6 +22,7 @@
 | 文件 | 用途 |
 |------|------|
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
+| `check_source_health.py` | 来源健康检查（只读）：同签名重复面经（interview/jd 按 url_signature 分组）、internal:// 现状与相对基线的增长、question_bank JSON 双写列与规范化表不一致。复用 `app.services.source_health` 实现，与 weekly cron（worker `scheduled_source_health_task`）同口径；`--json` 结构化输出、`--exit-code` 供 cron 告警（脏库非 0）；唯一副作用是更新 internal 基线文件（默认 `backend/data/source_health_baseline.json`） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
 | `import_agent_private_catalog.py` | 将内部 Agent 面试 Markdown 编译为 MCP 内部运行时目录，不写入 question_bank |
 | `eval_interview_agent.py` | 统一 Interview Agent 评测框架（多场景、LLM 候选人、评分、JSON/MD 报告） |

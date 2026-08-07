@@ -62,6 +62,7 @@ backend/scripts/*
 !backend/scripts/rescore_with_judge.py
 !backend/scripts/verify_chat_tools_real_e2e.py
 !backend/scripts/verify_interview_agent_real_e2e.py
+!backend/scripts/check_source_health.py
 *.log
 
 # 文档（内部记录，不提交）

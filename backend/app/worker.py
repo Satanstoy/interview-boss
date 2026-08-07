@@ -625,6 +625,46 @@ async def scheduled_quality_audit_task(ctx):
         raise
 
 
+async def scheduled_source_health_task(ctx):
+    """定时来源健康检查：每周日凌晨 3:40 扫同签名重复面经 / internal:// 增长 / JSON 双写不一致。
+
+    只读检查 + 更新 internal 基线文件，发现问题只记日志告警，
+    不自动修改数据（修复走 backend/scripts/fix_source_consistency.py）。
+    """
+    import os
+
+    from app.services.source_health import run_source_health_checks
+
+    baseline = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "..",
+        "data",
+        "source_health_baseline.json",
+    )
+    logger.info("[定时任务] 开始来源健康检查...")
+    try:
+        report = await asyncio.to_thread(
+            run_source_health_checks, None, os.path.normpath(baseline)
+        )
+        if report["ok"]:
+            logger.info("[定时任务] 来源健康检查通过")
+        else:
+            logger.warning(
+                "[定时任务] 来源健康检查发现问题: 同签名重复 "
+                "interview=%d 组/jd=%d 组, internal 新增=%d, "
+                "JSON 双写不一致=%d 处",
+                len(report["duplicate_signature_groups"]["interview"]),
+                len(report["duplicate_signature_groups"]["jd"]),
+                len(report["internal"]["new_urls"]),
+                len(report["dual_write_mismatches"]),
+            )
+        return report
+    except Exception as e:
+        logger.exception(f"[定时任务] 来源健康检查失败: {e}")
+        raise
+
+
 class WorkerSettings:
     functions = [
         cluster_questions_task,
@@ -634,7 +674,8 @@ class WorkerSettings:
         build_master_bank_task,
         submit_import_task,
         scheduled_compaction_task,
-        scheduled_quality_audit_task
+        scheduled_quality_audit_task,
+        scheduled_source_health_task
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -644,9 +685,10 @@ class WorkerSettings:
     keep_result = 3600         # 结果保留 1 小时
     queue_read_limit = 10      # 每次最多读取 10 个任务
 
-    # 定时任务：每天凌晨 3 点运行 compaction
+    # 定时任务：每天凌晨 3 点运行 compaction，每周日 3:30 质量审查、3:40 来源健康检查
     cron_jobs = [
         cron(scheduled_compaction_task, hour={3}, minute={0}),
         cron(scheduled_quality_audit_task, hour={3}, minute={30}),
+        cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
     ]

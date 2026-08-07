@@ -50,3 +50,27 @@ class TestBug001WorkerCronJobs:
             assert isinstance(cj, CronJob), (
                 f"cron_jobs contains {type(cj).__name__} instead of CronJob"
             )
+
+
+class TestSourceHealthCron:
+    """来源健康检查定时任务：必须在 functions 注册 + cron 挂载。"""
+
+    def test_source_health_task_in_functions(self):
+        from app.worker import WorkerSettings
+
+        names = [f.__name__ for f in WorkerSettings.functions]
+        assert "scheduled_source_health_task" in names
+
+    def test_source_health_cron_registered(self):
+        from app.worker import WorkerSettings
+        from arq.cron import CronJob
+
+        source_health_jobs = [
+            cj for cj in WorkerSettings.cron_jobs
+            if getattr(cj, "name", "") == "cron:scheduled_source_health_task"
+        ]
+        assert len(source_health_jobs) == 1
+        cj = source_health_jobs[0]
+        assert isinstance(cj, CronJob)
+        assert cj.hour == {3}
+        assert cj.minute == {40}

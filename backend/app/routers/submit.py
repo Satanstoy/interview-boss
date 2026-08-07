@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import openai
 import magic as _magic
 import base64
@@ -22,6 +21,7 @@ from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
 from app.core.auth import get_current_user
+from app.core.validation import validate_source_url
 from app.db.connection import get_db_connection, run_db, get_taxonomy_for_position
 from app.db.operations import (
     _check_duplicate_url_sync,
@@ -43,21 +43,6 @@ from app.services.submit_service import (
 )
 
 
-def _validate_submit_url(url: str) -> str:
-    """校验面经来源链接：非空时必须为 http(s) URL。
-
-    回归防护：用户粘贴 App 内部分享链接（internal://<base64>）会被拒绝，
-    避免无效来源进入 question_sources（历史上有 33 行 internal:// 脏数据）。
-    """
-    url = (url or "").strip()
-    if url and not re.match(r"^https?://", url, re.IGNORECASE):
-        raise HTTPException(
-            status_code=400,
-            detail="来源链接必须是有效的 http(s) 链接，请检查后重试（没有链接可以留空）",
-        )
-    return url
-
-
 @router.post("/api/submit-stream-v2")
 async def submit_data_stream_v2(
     bg_tasks: BackgroundTasks,
@@ -76,7 +61,7 @@ async def submit_data_stream_v2(
         raise HTTPException(
             status_code=400, detail="文本内容过长，请限制在 50000 字符以内"
         )
-    url = _validate_submit_url(url)
+    url = validate_source_url(url)
     submit_target = (target or "private").lower()
     # 分享意愿：share → 公共审核队列；private → 个人路径（目标内部映射）
     if submit_target not in ("share", "private"):
@@ -198,7 +183,7 @@ async def create_submit_job(
         raise HTTPException(
             status_code=400, detail="文本内容过长，请限制在 50000 字符以内"
         )
-    url = _validate_submit_url(url)
+    url = validate_source_url(url)
     submit_target = (target or "private").lower()
     # 分享意愿：share → 公共审核队列；private → 个人路径（目标内部映射）
     if submit_target not in ("share", "private"):

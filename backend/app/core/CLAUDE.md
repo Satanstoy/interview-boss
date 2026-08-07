@@ -11,6 +11,7 @@
 | `prompts.py` | LLM 提示词模板（SYSTEM_PROMPT、TAGGING_PROMPT、ANSWER_PROMPT、CODING_REVIEW_PROMPT、CODING_HINT_PROMPT） |
 | `logging_config.py` | 日志配置（structlog 双模式：生产 JSON / 开发彩色） |
 | `interview_distribution_config.py` | 模拟面试统计的岗位族映射；未知岗位只映射到自身，禁止跨岗位混合 |
+| `validation.py` | 来源链接协议校验：`validate_source_url()` 非空时必须为 http(s)，否则 HTTPException(400)。submit 提交与 admin 编辑（data.py update_generic_data 的 interview/questions_detail/jd.url）共用，防止 App 内部分享链接（internal://）等无效值入库 |
 
 ## 关键模式
 

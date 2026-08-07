@@ -5,6 +5,7 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
+from app.core.validation import validate_source_url
 from app.db.connection import (
     get_db_connection,
     run_db,
@@ -778,6 +779,10 @@ async def update_generic_data(
                 status_code=400,
                 detail=f"安全拦截：不允许更新字段 '{col}'，允许的字段: {allowed_cols}",
             )
+
+    # 来源链接校验：interview/questions_detail/jd 的 url 字段非空时必须为 http(s)
+    if req.table_name in ("interview", "questions_detail", "jd") and "url" in req.update_data:
+        validate_source_url(str(req.update_data["url"]))
 
     # Bug #5: 通用更新接口添加所有权校验 — admin 不能修改个人题目
     if req.table_name == "question_bank":
