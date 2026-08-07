@@ -320,16 +320,13 @@ def _classify_probe_error(exc: Exception) -> str:
     return f"模型服务异常：{type(exc).__name__}: {str(exc)[:200]}"
 
 
-async def _probe_llm(user_id: int) -> tuple:
-    """向用户配置的模型发最小请求验证可用性，返回 (connected, error)。"""
-    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(
-        user_id
-    )
+async def _probe_resolved(client, model, timeout, base_url, provider, user_id=None) -> tuple:
+    """向给定的 client/model 发最小请求验证可用性，返回 (connected, error)。"""
     wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
     try:
         if provider == "anthropic":
             await asyncio.wait_for(
-                resolved_client.messages.create(
+                client.messages.create(
                     model=model,
                     max_tokens=1,
                     messages=[{"role": "user", "content": "ping"}],
@@ -338,7 +335,7 @@ async def _probe_llm(user_id: int) -> tuple:
             )
         elif resolve_api_format(base_url, user_id) == "responses":
             await asyncio.wait_for(
-                resolved_client.responses.create(
+                client.responses.create(
                     model=model,
                     input=[
                         {
@@ -353,7 +350,7 @@ async def _probe_llm(user_id: int) -> tuple:
             )
         else:
             await asyncio.wait_for(
-                resolved_client.chat.completions.create(
+                client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": "ping"}],
                     max_tokens=1,
@@ -363,6 +360,31 @@ async def _probe_llm(user_id: int) -> tuple:
         return True, None
     except Exception as exc:
         return False, _classify_probe_error(exc)
+
+
+async def _probe_llm(user_id: int) -> tuple:
+    """向用户配置的模型发最小请求验证可用性，返回 (connected, error)。"""
+    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(
+        user_id
+    )
+    return await _probe_resolved(resolved_client, model, timeout, base_url, provider, user_id)
+
+
+async def check_global_llm_status() -> dict:
+    """用全局 LLM 配置探测连通性（管理员「测试连接」用，绕过缓存）。"""
+    from app.core.config import _get_global_llm_config
+
+    cfg = _get_global_llm_config()
+    if not cfg or not cfg.get("api_key"):
+        return {"configured": False, "connected": False, "error": None, "model": None}
+
+    model = cfg.get("model")
+    timeout = cfg.get("timeout") or 120
+    base_url = cfg.get("base_url")
+    provider = _detect_provider(base_url)
+    client = _make_client(cfg["api_key"], base_url, timeout, provider)
+    connected, error = await _probe_resolved(client, model, timeout, base_url, provider)
+    return {"configured": True, "connected": connected, "error": error, "model": model}
 
 
 async def check_llm_status(user_id: int, force_probe: bool = False) -> dict:

@@ -3,7 +3,7 @@
 import re
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
@@ -58,6 +58,15 @@ async def get_llm_status(probe: int = 0, user: dict = Depends(get_current_user))
     from app.services.llm import check_llm_status
 
     return await check_llm_status(user["id"], force_probe=bool(probe))
+
+
+@router.post("/api/profile/llm/test-global")
+async def test_global_llm(admin: dict = Depends(get_admin_user)):
+    """用全局 LLM 配置探测连通性（仅管理员，绕过缓存）"""
+
+    from app.services.llm import check_global_llm_status
+
+    return await check_global_llm_status()
 
 
 @router.put("/api/profile/llm")
