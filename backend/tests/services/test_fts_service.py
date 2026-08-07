@@ -372,6 +372,22 @@ class TestReciprocalRankFusion:
 class TestHybridSearch:
     """混合搜索集成测试"""
 
+    @pytest.fixture(autouse=True)
+    def _fixed_512_embedding_env(self):
+        """固定 embedding 为 512 维 hash 后端，与测试构造的向量维度一致。
+
+        生产 .env 已是 siliconflow（1024 维），若不固定，查询向量维度与
+        测试构造的 512 维 FAISS 索引不匹配导致 assert d == self.d 失败。
+        """
+        import app.services.embedding_service as es
+
+        saved = {n: getattr(es, n) for n in ("_BACKEND", "_DIMENSION")}
+        es._BACKEND = "hash"
+        es._DIMENSION = 512
+        yield
+        for n, v in saved.items():
+            setattr(es, n, v)
+
     def _seed_questions_with_embeddings(self, conn):
         """插入测试题目和 embedding"""
         import numpy as np

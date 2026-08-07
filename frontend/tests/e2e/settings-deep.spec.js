@@ -108,6 +108,16 @@ async function mockAllAPIs(page, userOverrides = {}) {
   await page.route('**/api/positions**', async (route) => {
     await route.fulfill({ json: MOCK_PROFILE.positions })
   })
+  // 其它 profile 子路径与全局数据兜底（避免泄露到真实后端）
+  await page.route('**/api/profile**', async (route) => {
+    await route.fulfill({ json: { status: 'success', settings: {} } })
+  })
+  await page.route('**/api/practice-stats', async (route) => {
+    await route.fulfill({ json: {} })
+  })
+  await page.route('**/api/submit-jobs/active', async (route) => {
+    await route.fulfill({ json: [] })
+  })
 }
 
 async function gotoLoggedIn(page) {
@@ -118,7 +128,7 @@ async function gotoLoggedIn(page) {
 }
 
 async function openSettings(page) {
-  const settingsBtn = page.locator('button[title="系统配置"]').first()
+  const settingsBtn = page.getByRole('button', { name: '设置' }).first()
   await expect(settingsBtn).toBeVisible({ timeout: 5000 })
   await settingsBtn.click()
   await page.waitForTimeout(500)
@@ -134,15 +144,19 @@ test.describe('设置深层', () => {
     await openSettings(page)
 
     // 设置面板标题
-    await expect(page.getByText('系统配置').first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('个人信息').first()).toBeVisible({ timeout: 5000 })
   })
 
   test('LLM 配置区域渲染', async ({ page }) => {
     await gotoLoggedIn(page)
     await openSettings(page)
 
-    // LLM 配置标题
-    await expect(page.getByText('我的 LLM 配置').first()).toBeVisible({ timeout: 5000 })
+    // 切换到 AI 配置 section
+    await page.locator('.settings-sidebar').getByText('AI 配置').click()
+    await page.waitForTimeout(500)
+
+    // AI 配置标题
+    await expect(page.getByText('AI 配置').first()).toBeVisible({ timeout: 5000 })
 
     // 已配置时应显示"修改配置"按钮
     const modifyBtn = page.getByText('修改配置')
@@ -160,6 +174,10 @@ test.describe('设置深层', () => {
   test('目标岗位显示', async ({ page }) => {
     await gotoLoggedIn(page)
     await openSettings(page)
+
+    // 切换到面试偏好 section
+    await page.locator('.settings-sidebar').getByText('面试偏好').click()
+    await page.waitForTimeout(500)
 
     // 目标岗位标题
     await expect(page.getByText('目标岗位').first()).toBeVisible({ timeout: 5000 })
@@ -240,34 +258,28 @@ test.describe('设置深层', () => {
     }
   })
 
-  test('关闭设置面板', async ({ page }) => {
+  test('离开设置页', async ({ page }) => {
     await gotoLoggedIn(page)
     await openSettings(page)
 
-    // 关闭按钮
-    const closeBtn = page.getByRole('button', { name: '关闭' }).first()
-    await expect(closeBtn).toBeVisible({ timeout: 5000 })
-    await closeBtn.click()
+    // 通过侧边栏导航离开设置页（高频题库是侧边栏按钮）
+    await page.getByRole('button', { name: /高频题库/ }).first().click()
     await page.waitForTimeout(500)
 
-    // 面板应关闭 — LLM 配置标题不应可见
-    await expect(page.getByText('我的 LLM 配置')).not.toBeVisible({ timeout: 5000 })
+    // 设置页应关闭 — AI 配置标题不应可见
+    await expect(page.getByText('AI 配置')).not.toBeVisible({ timeout: 5000 })
   })
 
   test('暗色模式下面板正常', async ({ page }) => {
     await gotoLoggedIn(page)
-
-    // 开启暗色模式
-    const darkToggle = page.locator('button[title*="暗色"], button[title*="亮色"]').first()
-    await darkToggle.click()
-    await page.waitForTimeout(300)
-
-    // 打开设置面板
     await openSettings(page)
 
+    // 默认在个人信息 section，外观偏好卡片内切换暗色
+    await page.getByText('暗色').first().click()
+    await page.waitForTimeout(300)
+
     // 面板应正常渲染
-    await expect(page.getByText('系统配置').first()).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText('我的 LLM 配置').first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('个人信息').first()).toBeVisible({ timeout: 5000 })
 
     // html 应有 dark class
     const htmlClass = await page.locator('html').getAttribute('class')
