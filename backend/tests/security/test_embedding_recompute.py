@@ -1,12 +1,14 @@
 """embedding 重算 job：模型变化触发、执行、失败回滚。"""
+import asyncio
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import numpy as np
 
 from app.core.auth import create_access_token
 from app.db.connection import get_db_connection
 
+# 默认已内联执行；显式设 ARQ=0 保持测试确定性（不依赖 redis）
 ARQ_OFF = {"EMBEDDING_RECOMPUTE_USE_ARQ": "0"}
 
 
@@ -74,7 +76,9 @@ def _save_embedding(client, **overrides):
         "dimension": 1024,
     }
     payload.update(overrides)
-    with patch("app.services.embedding_service.reload_embedding_config"):
+    # mock reload 与 inline 调度：PUT 只负责保存 + 创建 job，执行由测试显式驱动
+    with patch("app.services.embedding_service.reload_embedding_config"), \
+         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
         return client.put("/api/profile/embedding", json=payload, headers=_admin_headers())
 
 
@@ -101,6 +105,20 @@ def test_put_embedding_same_config_skips_recompute(client, test_db, seed_admin_u
     r2 = _save_embedding(client)  # 相同配置（不带 api_key）
     assert r1.json()["recompute_triggered"] is True
     assert r2.json()["recompute_triggered"] is False
+
+
+async def test_create_recompute_job_defaults_to_inline(client, test_db, seed_admin_users, monkeypatch):
+    """默认（未设 EMBEDDING_RECOMPUTE_USE_ARQ）内联执行，不依赖 ARQ worker 常驻。"""
+    monkeypatch.delenv("EMBEDDING_RECOMPUTE_USE_ARQ", raising=False)
+
+    from app.routers.profile_pkg.embedding import _create_recompute_job
+
+    with patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()) as mock_run:
+        job_id = await _create_recompute_job(1)
+        await asyncio.sleep(0.1)  # 让 create_task 调度执行
+
+    assert job_id is not None
+    assert mock_run.called
 
 
 async def test_recompute_updates_vectors_and_completes(client, test_db, seed_admin_users, monkeypatch):

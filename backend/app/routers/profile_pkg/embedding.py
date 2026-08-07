@@ -173,8 +173,9 @@ async def _create_recompute_job(admin_id: int) -> int:
 
     job_id = await run_db(_create)
 
-    # 优先 ARQ，失败回退内联
-    if os.environ.get("EMBEDDING_RECOMPUTE_USE_ARQ", "1").lower() in ("1", "true", "yes"):
+    # 默认内联执行（全量重算是低频操作，不依赖 ARQ worker 常驻）；
+    # 显式设 EMBEDDING_RECOMPUTE_USE_ARQ=1 时优先 ARQ，失败再回退内联
+    if os.environ.get("EMBEDDING_RECOMPUTE_USE_ARQ", "0").lower() in ("1", "true", "yes"):
         try:
             from app.worker import enqueue_recompute_embedding_job
 
@@ -184,9 +185,9 @@ async def _create_recompute_job(admin_id: int) -> int:
             logger.warning("ARQ 调度 embedding 重算失败，回退内联: %s", e)
 
     try:
-        from app.services.embedding_recompute import run_recompute_inline
+        from app.services.embedding_recompute import run_recompute
 
-        asyncio.create_task(run_recompute_inline(job_id))
+        asyncio.create_task(run_recompute(job_id))
     except Exception as e:
         logger.warning("内联调度 embedding 重算失败: %s", e)
     return job_id

@@ -1,6 +1,6 @@
 """管理员 embedding 配置端点：权限、校验、掩码、热加载。"""
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from app.core.auth import create_access_token
 from app.db.connection import get_db_connection
@@ -43,16 +43,17 @@ def test_embedding_config_requires_admin_user(client, test_db, seed_admin_users)
 
 
 def test_embedding_config_roundtrip_with_mask(client, test_db, seed_admin_users):
-    resp = client.put(
-        "/api/profile/embedding",
-        json={
-            "backend": "siliconflow",
-            "api_key": "sk-secret-1234",
-            "api_model": "BAAI/bge-m3",
-            "dimension": 1024,
-        },
-        headers=_admin_headers(),
-    )
+    with patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
+        resp = client.put(
+            "/api/profile/embedding",
+            json={
+                "backend": "siliconflow",
+                "api_key": "sk-secret-1234",
+                "api_model": "BAAI/bge-m3",
+                "dimension": 1024,
+            },
+            headers=_admin_headers(),
+        )
     assert resp.status_code == 200
     assert resp.json()["status"] == "success"
 
@@ -85,7 +86,8 @@ def test_embedding_config_siliconflow_requires_model(client, test_db, seed_admin
 
 
 def test_embedding_config_put_calls_reload(client, test_db, seed_admin_users):
-    with patch("app.services.embedding_service.reload_embedding_config") as mock_reload:
+    with patch("app.services.embedding_service.reload_embedding_config") as mock_reload, \
+         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
         resp = client.put(
             "/api/profile/embedding",
             json={"backend": "onnx", "dimension": 512},
@@ -96,7 +98,8 @@ def test_embedding_config_put_calls_reload(client, test_db, seed_admin_users):
 
 
 def test_embedding_config_put_preserves_api_key_when_blank(client, test_db, seed_admin_users):
-    with patch("app.services.embedding_service.reload_embedding_config"):
+    with patch("app.services.embedding_service.reload_embedding_config"), \
+         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
         client.put(
             "/api/profile/embedding",
             json={"backend": "siliconflow", "api_key": "sk-secret-1234", "api_model": "BAAI/bge-m3", "dimension": 1024},
