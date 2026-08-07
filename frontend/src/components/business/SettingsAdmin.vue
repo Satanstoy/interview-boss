@@ -5,6 +5,7 @@ import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Gl
 import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, fetchProfile } from '@/services/profileApi.js'
 import SettingsQuality from './SettingsQuality.vue'
 import SettingsQualityAssistant from './SettingsQualityAssistant.vue'
+import SettingsSourceHealth from './SettingsSourceHealth.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -335,7 +336,7 @@ const onRebuild = () => {
           聚合质量审查
         </h3>
         <p class="text-xs text-muted-foreground mt-1">
-          每周自动审查公共题库聚类质量（误合并 / 重复变体 / 代表题过弱），
+          每周自动审查公共题库聚类质量（误合并 / 重复问法 / 代表题不规范），
           由 LLM 给出修改建议，管理员审批后执行。记录永久保留可审计。
         </p>
       </div>
@@ -354,9 +355,17 @@ const onRebuild = () => {
         >
           AI 助手
         </button>
+        <button
+          class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+          :class="qualitySubTab === 'health' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+          @click="qualitySubTab = 'health'"
+        >
+          来源健康
+        </button>
       </div>
       <SettingsQuality v-if="qualitySubTab === 'list'" />
-      <SettingsQualityAssistant v-else />
+      <SettingsQualityAssistant v-else-if="qualitySubTab === 'assistant'" />
+      <SettingsSourceHealth v-else />
     </div>
   </div>
 </template>

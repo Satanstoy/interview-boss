@@ -19,7 +19,11 @@ _INTERNAL_PREFIX = "internal://"
 
 
 def _duplicate_signature_groups(conn, table: str) -> list:
-    """按 url_signature 分组，返回存在重复（>1 活跃记录）的组。"""
+    """按 url_signature 分组，返回存在重复（>1 活跃记录）的组。
+
+    只统计公共面经（owner_id IS NULL）：私有面经属于用户个人，由 submit
+    入口按 owner 去重；管理员监控/合并只针对公共数据。
+    """
     if "url_signature" not in {
         row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
     }:
@@ -28,7 +32,7 @@ def _duplicate_signature_groups(conn, table: str) -> list:
         f"""
         SELECT url_signature, COUNT(*) AS n, MIN(id) AS min_id, MAX(id) AS max_id
         FROM {table}
-        WHERE deleted_at IS NULL AND url_signature != ''
+        WHERE deleted_at IS NULL AND url_signature != '' AND owner_id IS NULL
         GROUP BY url_signature
         HAVING COUNT(*) > 1
         ORDER BY n DESC

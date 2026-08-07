@@ -18,7 +18,6 @@
 
 安全：破坏性操作前自动备份（shutil.copy2 + WAL checkpoint 后的 .db 主文件）。
 """
-import json
 import os
 import shutil
 import sqlite3
@@ -55,12 +54,6 @@ def _sig_for(url):
     return f"generic:{parsed.netloc}{parsed.path}"
 
 
-def _soft_delete(conn, table, where, args):
-    conn.execute(
-        f"UPDATE {table} SET deleted_at = CURRENT_TIMESTAMP WHERE {where}", args
-    )
-
-
 def backfill_url_signatures(conn, dry_run):
     """回填 interview / jd 表空 url_signature。"""
     fixed = 0
@@ -79,159 +72,23 @@ def backfill_url_signatures(conn, dry_run):
     return fixed
 
 
-def _normalize_json_urls(obj, url_map):
-    """递归把 JSON 结构中的 url 字段按映射归一（双写列同步）。"""
-    if isinstance(obj, dict):
-        if "url" in obj and obj["url"] in url_map:
-            obj["url"] = url_map[obj["url"]]
-        for v in obj.values():
-            _normalize_json_urls(v, url_map)
-    elif isinstance(obj, list):
-        for item in obj:
-            _normalize_json_urls(item, url_map)
-
-
 def merge_duplicate_interviews(conn, dry_run):
-    """合并同 url_signature 的重复面经（保留 id 最小的记录）。"""
-    merged = 0
-    groups = conn.execute(
-        """
-        SELECT url_signature FROM interview
-        WHERE deleted_at IS NULL AND url_signature != ''
-        GROUP BY url_signature HAVING COUNT(*) > 1
-        """
-    ).fetchall()
-    for (sig,) in groups:
-        rows = conn.execute(
-            """
-            SELECT id, url FROM interview
-            WHERE deleted_at IS NULL AND url_signature = ?
-            ORDER BY id ASC
-            """,
-            (sig,),
-        ).fetchall()
-        keep_id, keep_url = rows[0]
-        drop_pairs = [(i, u) for i, u in rows[1:]]
-        url_map = {drop_url: keep_url for _, drop_url in drop_pairs}
+    """合并同 url_signature 的重复公共面经（保留 id 最小，软删其余）。
 
-        if dry_run:
-            print(
-                f"  [DRY] 合并面经组 {sig}: 保留 id={keep_id}，"
-                f"合并 {len(drop_pairs)} 条: {[i for i, _ in drop_pairs]}"
-            )
+    委托 `app.services.interview_merge_service`（与 admin 来源健康界面共用
+    同一份实现）。范围限定公共面经（owner_id IS NULL），私有面经不合并。
+    """
+    from app.services.interview_merge_service import merge_all_duplicate_groups
 
-        # 1) questions_detail 重挂 + 去重
-        for drop_id, drop_url in drop_pairs:
-            conn.execute(
-                "UPDATE questions_detail SET interview_id = ? WHERE interview_id = ?",
-                (keep_id, drop_id),
-            )
-        conn.execute(
-            """
-            DELETE FROM questions_detail WHERE id NOT IN (
-                SELECT MIN(id) FROM questions_detail
-                WHERE interview_id = ? GROUP BY question
-            ) AND interview_id = ?
-            """,
-            (keep_id, keep_id),
+    result = merge_all_duplicate_groups(conn, table="interview", dry_run=dry_run)
+    for r in result["results"]:
+        tag = "DRY" if dry_run else "OK"
+        print(
+            f"  [{tag}] 合并面经组 {r['signature']}: "
+            f"保留 id={r['keep_id']}，合并 {r['merged_count']} 条: "
+            f"{[d['id'] for d in r['drop']]}"
         )
-
-        # 2) question_sources URL 归一：冲突行（同 qb 已有 keep_url）物理删除
-        #    （归一消除的是重复变体，物理删保持恢复语义干净；备份可恢复），
-        #    剩余 drop 行 UPDATE 为 keep_url（表有 UNIQUE(question_bank_id, url) 约束）
-        for drop_id, drop_url in drop_pairs:
-            conn.execute(
-                """
-                DELETE FROM question_sources
-                WHERE url = ? AND deleted_at IS NULL
-                  AND question_bank_id IN (
-                      SELECT question_bank_id FROM question_sources
-                      WHERE url = ? AND deleted_at IS NULL
-                  )
-                """,
-                (drop_url, keep_url),
-            )
-            conn.execute(
-                "UPDATE question_sources SET url = ? WHERE url = ? AND deleted_at IS NULL",
-                (keep_url, drop_url),
-            )
-
-        # 3) question_original_item_sources URL 归一 + 同题去重
-        for drop_id, drop_url in drop_pairs:
-            conn.execute(
-                """
-                UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP
-                WHERE url = ? AND deleted_at IS NULL
-                  AND original_item_id IN (
-                      SELECT original_item_id FROM question_original_item_sources
-                      WHERE url = ? AND deleted_at IS NULL
-                  )
-                """,
-                (drop_url, keep_url),
-            )
-            conn.execute(
-                """
-                UPDATE question_original_item_sources SET url = ?
-                WHERE url = ? AND deleted_at IS NULL
-                """,
-                (keep_url, drop_url),
-            )
-        conn.execute(
-            """
-            UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP
-            WHERE deleted_at IS NULL AND id NOT IN (
-                SELECT MIN(id) FROM question_original_item_sources
-                WHERE deleted_at IS NULL GROUP BY original_item_id, url
-            )
-            """
-        )
-
-        # 4) question_bank JSON 双写列同步归一
-        qb_rows = conn.execute(
-            "SELECT id, sources, original_question_sources FROM question_bank"
-        ).fetchall()
-        for qb_id, sources_json, oqs_json in qb_rows:
-            changed = False
-            try:
-                sources = json.loads(sources_json) if sources_json else []
-            except Exception:
-                sources = None
-            try:
-                oqs = json.loads(oqs_json) if oqs_json else []
-            except Exception:
-                oqs = None
-            if sources is not None:
-                _normalize_json_urls(sources, url_map)
-                seen = set()
-                deduped = []
-                for s in sources:
-                    u = s.get("url", "")
-                    if u and u in seen:
-                        continue
-                    seen.add(u)
-                    deduped.append(s)
-                new_json = json.dumps(deduped, ensure_ascii=False)
-                if new_json != sources_json:
-                    changed = True
-                    sources_json = new_json
-            if oqs is not None:
-                _normalize_json_urls(oqs, url_map)
-                new_json = json.dumps(oqs, ensure_ascii=False)
-                if new_json != oqs_json:
-                    changed = True
-                    oqs_json = new_json
-            if changed:
-                conn.execute(
-                    "UPDATE question_bank SET sources = ?, original_question_sources = ? WHERE id = ?",
-                    (sources_json, oqs_json, qb_id),
-                )
-
-        # 5) 软删被合并的 interview
-        for drop_id, drop_url in drop_pairs:
-            _soft_delete(conn, "interview", "id = ? AND deleted_at IS NULL", (drop_id,))
-        merged += len(drop_pairs)
-
-    return merged
+    return result["merged_count"]
 
 
 def report_internal_sources(conn):

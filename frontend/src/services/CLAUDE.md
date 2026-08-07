@@ -21,6 +21,7 @@
 | `codingApi.js` | 手撕代码练习 | `/api/coding/*` |
 | `interviewDistributionApi.js` | 系统默认分布与用户岗位偏好 | `/api/interview/distribution/*`, `/api/profile/interview-distribution-preference` |
 | `adminAssistantApi.js` | 管理员 AI 助手（聚合质量审查）：发消息 / 确认执行写操作 / 会话历史。历史 GET 必须 `{ ttl: 0 }` 绕过 http.js 30s 缓存 | `/api/admin/assistant/*` |
+| `adminSourceHealthApi.js` | 来源健康（同签名重复公共面经）：列表 / 合并（dry_run 参数）。列表 GET 必须 `{ ttl: 0 }` 绕过 http.js 30s 缓存 | `/api/admin/source-health/*` |
 
 ## 核心规则
 

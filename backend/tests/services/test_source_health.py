@@ -10,11 +10,21 @@ import pytest
 from app.services.source_health import run_source_health_checks
 
 
-def _insert_interview(test_db, url, sig, deleted_at=None):
+def _insert_user(test_db, user_id):
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, email, password_hash) "
+        "VALUES (?, ?, ?, 'x')",
+        (user_id, f"user{user_id}", f"u{user_id}@test.com"),
+    )
+
+
+def _insert_interview(test_db, url, sig, deleted_at=None, owner_id=None):
+    if owner_id is not None:
+        _insert_user(test_db, owner_id)
     test_db.execute(
         "INSERT INTO interview (url, url_signature, company, round, owner_id, status, deleted_at) "
-        "VALUES (?, ?, '测试公司', '一面', NULL, 'approved', ?)",
-        (url, sig, deleted_at),
+        "VALUES (?, ?, '测试公司', '一面', ?, 'approved', ?)",
+        (url, sig, owner_id, deleted_at),
     )
 
 
@@ -59,6 +69,19 @@ def test_duplicate_signature_detected_in_jd(test_db):
     test_db.commit()
     report = run_source_health_checks(test_db)
     assert len(report["duplicate_signature_groups"]["jd"]) == 1
+
+
+def test_duplicate_signature_private_excluded(test_db):
+    """私有面经的同签名重复不进重复组（仅统计公共面经 owner_id IS NULL）"""
+    _insert_interview(test_db, "http://a.com/x?a=1", "nc:1")                 # 公共
+    _insert_interview(test_db, "https://a.com/x?a=2", "nc:1")                # 公共
+    _insert_interview(test_db, "http://b.com/y?a=1", "nc:2", owner_id=99)    # 私有
+    _insert_interview(test_db, "https://b.com/y?a=2", "nc:2", owner_id=99)   # 私有
+    test_db.commit()
+    report = run_source_health_checks(test_db)
+    groups = report["duplicate_signature_groups"]["interview"]
+    assert len(groups) == 1
+    assert groups[0]["signature"] == "nc:1"
 
 
 # ── internal:// 增长 ──

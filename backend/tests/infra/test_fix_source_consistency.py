@@ -44,7 +44,7 @@ def conn():
         """CREATE TABLE questions_detail (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             interview_id INTEGER, question TEXT, cat1 TEXT, url TEXT,
-            deleted_at TIMESTAMP
+            owner_id INTEGER, deleted_at TIMESTAMP
         )"""
     )
     c.execute(
@@ -53,6 +53,14 @@ def conn():
             question_bank_id INTEGER, url TEXT, company TEXT DEFAULT '',
             round TEXT DEFAULT '', deleted_at TIMESTAMP,
             UNIQUE(question_bank_id, url)
+        )"""
+    )
+    c.execute(
+        """CREATE TABLE question_original_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_bank_id INTEGER, question_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP,
+            UNIQUE(question_bank_id, question_text)
         )"""
     )
     c.execute(
@@ -65,7 +73,9 @@ def conn():
     c.execute(
         """CREATE TABLE question_bank (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sources TEXT, original_question_sources TEXT, deleted_at TIMESTAMP
+            question TEXT DEFAULT '', owner_id INTEGER,
+            sources TEXT, original_question_sources TEXT,
+            status TEXT DEFAULT 'approved', deleted_at TIMESTAMP
         )"""
     )
     yield c
@@ -116,8 +126,9 @@ def test_merge_duplicate_interviews(conn):
     _insert(conn, "question_sources", question_bank_id=qb_id, url=keep_url)
     _insert(conn, "question_sources", question_bank_id=qb_id, url=drop_url)
 
-    # original_item_sources：drop_url 一行
-    _insert(conn, "question_original_item_sources", original_item_id=1, url=drop_url)
+    # original_item_sources：drop_url 一行（关联公共 qb 的 original_item）
+    oi_id = _insert(conn, "question_original_items", question_bank_id=qb_id, question_text="Q1")
+    _insert(conn, "question_original_item_sources", original_item_id=oi_id, url=drop_url)
 
     # JSON 双写列：含 drop_url
     conn.execute(
