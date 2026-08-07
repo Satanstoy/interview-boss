@@ -152,3 +152,58 @@ def test_healthy_state_ok_flag(test_db):
     test_db.commit()
     report = run_source_health_checks(test_db)
     assert report["ok"] is True
+
+
+# ── 同 qb 同笔记 URL 变体 ──
+
+
+def test_per_qb_url_variants_detected(test_db):
+    """同一 qb 内同笔记（xsec_token 不同）多个 URL → 变体告警"""
+    qb_id = _insert_qb(test_db)
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (?, ?)",
+        (qb_id, "https://www.xiaohongshu.com/explore/69ebf7ec000000001f0075ba?xsec_token=A"),
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (?, ?)",
+        (qb_id, "https://www.xiaohongshu.com/explore/69ebf7ec000000001f0075ba?xsec_token=B"),
+    )
+    test_db.commit()
+    report = run_source_health_checks(test_db)
+    variants = [v for v in report["per_qb_url_variants"] if v["qb_id"] == qb_id]
+    assert len(variants) == 1
+    assert variants[0]["note_key"] == "xhs:69ebf7ec000000001f0075ba"
+    assert variants[0]["url_count"] == 2
+    assert report["ok"] is False
+
+
+def test_per_qb_no_variants_healthy(test_db):
+    """同 qb 不同笔记 URL → 不是变体"""
+    urls = [
+        "https://www.xiaohongshu.com/explore/69ebf7ec000000001f0075ba?xsec_token=A",
+        "https://www.nowcoder.com/discuss/123",
+    ]
+    qb_id = _insert_qb(test_db, sources_json=json.dumps([{"url": u} for u in urls]))
+    for u in urls:
+        test_db.execute(
+            "INSERT INTO question_sources (question_bank_id, url) VALUES (?, ?)",
+            (qb_id, u),
+        )
+    test_db.commit()
+    report = run_source_health_checks(test_db)
+    assert report["per_qb_url_variants"] == []
+    assert report["ok"] is True
+
+
+# ── 孤儿 questions_detail ──
+
+
+def test_orphan_details_counted(test_db):
+    """interview 不存在的 detail → 孤儿计数（不参与 ok 判定）"""
+    test_db.execute(
+        "INSERT INTO questions_detail (interview_id, question) VALUES (99999, '孤儿题')"
+    )
+    test_db.commit()
+    report = run_source_health_checks(test_db)
+    assert report["orphan_details"] >= 1
+    assert report["ok"] is True  # 孤儿只提示不阻断

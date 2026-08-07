@@ -22,8 +22,7 @@
 | 文件 | 用途 |
 |------|------|
 | `check_embedding_health.py` | Embedding 服务健康检查（环境变量 / 模型文件 / 编码测试 / 覆盖率） |
-| `check_source_health.py` | 面经/来源健康检查：同签名重复面经、同 qb 同笔记 URL 变体、sources JSON 与 question_sources 表双写不一致（问题级，exit 1）；internal:// 与孤儿 detail（提示级不阻断）。运行 `docker compose exec backend uv run python backend/scripts/check_source_health.py` |
-| `check_source_health.py` | 来源健康检查（只读）：同签名重复面经（interview/jd 按 url_signature 分组）、internal:// 现状与相对基线的增长、question_bank JSON 双写列与规范化表不一致。复用 `app.services.source_health` 实现，与 weekly cron（worker `scheduled_source_health_task`）同口径；`--json` 结构化输出、`--exit-code` 供 cron 告警（脏库非 0）；唯一副作用是更新 internal 基线文件（默认 `backend/data/source_health_baseline.json`） |
+| `check_source_health.py` | 来源健康检查（只读）：同签名重复面经（interview/jd 按 url_signature 分组）、internal:// 现状与相对基线的增长、question_bank JSON 双写列与规范化表不一致、同 qb 同笔记 URL 变体（xhs/nc/boss 签名）、孤儿 questions_detail。复用 `app.services.source_health` 实现，与 weekly cron（worker `scheduled_source_health_task`）同口径；`--json` 结构化输出、`--exit-code` 供 cron 告警（脏库非 0）；唯一副作用是更新 internal 基线文件（默认 `backend/data/source_health_baseline.json`） |
 | `backfill_embeddings.py` | 批量回填 question_bank 表中缺失的 embedding 向量 |
 | `import_agent_private_catalog.py` | 将内部 Agent 面试 Markdown 编译为 MCP 内部运行时目录，不写入 question_bank |
 | `eval_interview_agent.py` | 统一 Interview Agent 评测框架（多场景、LLM 候选人、评分、JSON/MD 报告） |

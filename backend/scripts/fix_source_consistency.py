@@ -5,19 +5,18 @@
 修复内容：
 1. 回填 interview / jd 表缺失的 url_signature（旧数据未回填，导致 xsec_token 变体
    重复上传未被 _check_duplicate_url_sync 拦截）
-2. 合并同 url_signature 的重复面经（如小红书同笔记不同 xsec_token 的两条记录）：
-   - questions_detail 重挂到保留记录 + 按题目文本去重
-   - question_sources / question_original_item_sources 的 URL 归一 + 同题去重
-   - question_bank 的 sources / original_question_sources JSON 双写列同步归一
-   - 被合并记录软删（可恢复）
-3. 报告 internal:// 来源数量（展示层已做"内部面经"降级，数据保留）
+2. 合并同 url_signature 的重复公共面经 —— 委托 app.services.interview_merge_service
+   （与 admin 来源健康界面共用同一份实现，仅处理公共面经 owner_id IS NULL；
+   detail 重挂去重 + 来源表 URL 归一 + JSON 双写列同步 + 软删被合并记录）
+3. 报告 internal:// 来源现状（展示层已做"内部面经"降级，数据保留）
 
 用法：
-    python fix_source_consistency.py --dry-run   # 仅预览，不写入
+    python fix_source_consistency.py --dry-run   # 只读预览（不写入）
     python fix_source_consistency.py              # 执行修复（自动备份）
 
 安全：破坏性操作前自动备份（shutil.copy2 + WAL checkpoint 后的 .db 主文件）。
 """
+import json
 import os
 import shutil
 import sqlite3
@@ -29,8 +28,6 @@ DB_PATH = os.path.join(
     "data",
     "interview-boss.db",
 )
-
-_XHS_RE = None
 
 
 def _sig_for(url):
@@ -55,7 +52,7 @@ def _sig_for(url):
 
 
 def backfill_url_signatures(conn, dry_run):
-    """回填 interview / jd 表空 url_signature。"""
+    """回填 interview / jd 表空 url_signature。dry_run 时仍写入，由调用方回滚/提交。"""
     fixed = 0
     for table in ("interview", "jd"):
         rows = conn.execute(
@@ -70,25 +67,6 @@ def backfill_url_signatures(conn, dry_run):
                     (sig, row[0]),
                 )
     return fixed
-
-
-def merge_duplicate_interviews(conn, dry_run):
-    """合并同 url_signature 的重复公共面经（保留 id 最小，软删其余）。
-
-    委托 `app.services.interview_merge_service`（与 admin 来源健康界面共用
-    同一份实现）。范围限定公共面经（owner_id IS NULL），私有面经不合并。
-    """
-    from app.services.interview_merge_service import merge_all_duplicate_groups
-
-    result = merge_all_duplicate_groups(conn, table="interview", dry_run=dry_run)
-    for r in result["results"]:
-        tag = "DRY" if dry_run else "OK"
-        print(
-            f"  [{tag}] 合并面经组 {r['signature']}: "
-            f"保留 id={r['keep_id']}，合并 {r['merged_count']} 条: "
-            f"{[d['id'] for d in r['drop']]}"
-        )
-    return result["merged_count"]
 
 
 def report_internal_sources(conn):
@@ -108,7 +86,9 @@ def report_internal_sources(conn):
 def main():
     dry_run = "--dry-run" in sys.argv
     if dry_run:
-        print("=== DRY RUN 模式（不会修改数据库）===\n")
+        print("=== DRY RUN 模式（只读，不会修改数据库）===\n")
+
+    from app.services.interview_merge_service import merge_all_duplicate_groups
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -119,14 +99,20 @@ def main():
         print(f"已备份: {backup}")
 
     sig_n = backfill_url_signatures(conn, dry_run)
-    if not dry_run:
-        conn.commit()
     print(f"步骤1 回填 url_signature: {sig_n} 条")
 
-    merged_n = merge_duplicate_interviews(conn, dry_run)
-    if not dry_run:
-        conn.commit()
-    print(f"步骤2 合并重复面经: {merged_n} 条被合并")
+    result = merge_all_duplicate_groups(conn, "interview", dry_run=dry_run)
+    merged_n = result["merged_count"]
+    if merged_n:
+        print(f"步骤2 合并重复面经: {merged_n} 条被合并")
+        if dry_run:
+            for r in result["results"]:
+                print(
+                    f"  [DRY] 签名 {r['signature']}: 保留 id={r['keep_id']}，"
+                    f"合并 {r['merged_count']} 条: {[d['id'] for d in r['drop']]}"
+                )
+    else:
+        print("步骤2 合并重复面经: 无重复组")
 
     interview_n, jd_n, qs_n = report_internal_sources(conn)
     print(

@@ -287,12 +287,15 @@ def run_source_health_checks(conn=None, baseline_path: str | None = None) -> dic
                 "new_urls": new_urls,
             },
             "dual_write_mismatches": _check_dual_write(conn),
+            "per_qb_url_variants": _per_qb_url_variants(conn),
+            "orphan_details": _orphan_details(conn),
         }
         report["ok"] = (
             not report["duplicate_signature_groups"]["interview"]
             and not report["duplicate_signature_groups"]["jd"]
             and not report["internal"]["new_urls"]
             and not report["dual_write_mismatches"]
+            and not report["per_qb_url_variants"]
         )
         return report
     finally:
@@ -311,3 +314,55 @@ def _generic_path_key(url: str) -> str:
     parsed = urlparse(url if _HTTP_URL_RE.match(url) else f"https://{url}")
     host = parsed.netloc.removeprefix("www.")
     return f"{host}{parsed.path}".rstrip("/")
+
+
+def _per_qb_url_variants(conn) -> list:
+    """同一 qb 内同笔记多 URL 变体（如 xsec_token 变体漏合并）。
+
+    按平台笔记 ID（小红书 explore/item、牛客 discuss、Boss job_detail）
+    归一后分组，同一 qb 内同一笔记出现多个不同完整 URL 即为变体。
+    判断依据与 url_signature 一致（xhs:/nc:/boss: 前缀）。
+    """
+    if not _table_exists(conn, "question_sources"):
+        return []
+    rows = conn.execute(
+        "SELECT question_bank_id, url FROM question_sources WHERE deleted_at IS NULL"
+    ).fetchall()
+    variants = []
+    grouped = {}
+    for qb_id, url in rows:
+        key = None
+        m = re.search(r"xiaohongshu\.com/(?:explore|item|discovery/item)/([0-9a-f]+)", url or "")
+        if m:
+            key = f"xhs:{m.group(1)}"
+        else:
+            m = re.search(r"/discuss/(\d+)", url or "")
+            if m:
+                key = f"nc:{m.group(1)}"
+            else:
+                m = re.search(r"/job_detail/([^?]+)", url or "")
+                if m:
+                    key = f"boss:{m.group(1)}"
+        if key:
+            grouped.setdefault((qb_id, key), set()).add(url)
+    for (qb_id, key), urls in sorted(grouped.items()):
+        if len(urls) > 1:
+            variants.append(
+                {
+                    "qb_id": qb_id,
+                    "note_key": key,
+                    "url_count": len(urls),
+                    "urls": sorted(urls),
+                }
+            )
+    return variants
+
+
+def _orphan_details(conn) -> int:
+    """孤儿 questions_detail：interview_id 指向不存在的面经。"""
+    if not _table_exists(conn, "questions_detail"):
+        return 0
+    return conn.execute(
+        "SELECT COUNT(*) FROM questions_detail qd "
+        "LEFT JOIN interview i ON i.id = qd.interview_id WHERE i.id IS NULL"
+    ).fetchone()[0]
