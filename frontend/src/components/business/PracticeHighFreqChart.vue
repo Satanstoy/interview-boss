@@ -14,6 +14,7 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEChart } from '@/composables/useEChart.js'
+import { porcelain, porcelainTooltip, rampLevel, EASE } from '@/utils/chartTokens.js'
 
 echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
@@ -24,52 +25,51 @@ const props = defineProps({
 const chartRef = ref(null)
 const maxFreq = Math.max(...props.data.map((d) => d.frequency || 0), 1)
 
-const buildOption = (dark) => ({
-  tooltip: {
-    trigger: 'axis',
-    axisPointer: { type: 'shadow' },
-    confine: true,
-    backgroundColor: dark ? 'rgba(45, 42, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-    borderColor: dark ? '#574f49' : '#e8e4dd',
-    textStyle: { color: dark ? '#e7e5e2' : '#4a4540', fontSize: 12 },
-  },
-  grid: { left: 8, right: 30, top: 8, bottom: 8, containLabel: true },
-  xAxis: {
-    type: 'value',
-    min: 0,
-    max: maxFreq,
-    axisLabel: { color: dark ? '#8f8881' : '#a8a29e', fontSize: 10 },
-    splitLine: { lineStyle: { color: dark ? '#2e2a27' : '#f1efe9' } },
-  },
-  yAxis: {
-    type: 'category',
-    // 反向：让频次最高在顶部
-    data: props.data.map((d) => d.topic).reverse(),
-    axisLabel: { color: dark ? '#e7e5e2' : '#111111', fontSize: 12, fontWeight: 600 },
-    axisLine: { lineStyle: { color: dark ? '#574f49' : '#e8e4dd' } },
-    axisTick: { show: false },
-  },
-  series: [
-    {
-      name: '被问次数',
-      type: 'bar',
-      data: props.data.map((d) => d.frequency).reverse(),
-      itemStyle: {
-        color: '#6366f1',
-        borderRadius: [0, 4, 4, 0],
-      },
-      barMaxWidth: 18,
-      label: {
-        show: true,
-        position: 'right',
-        fontSize: 12,
-        fontWeight: 600,
-        color: dark ? '#e7e5e2' : '#111111',
-        formatter: '{c}',
-      },
+const buildOption = (dark) => {
+  const t = porcelain(dark)
+  const total = props.data.length
+  return {
+    ...EASE,
+    tooltip: { ...porcelainTooltip(dark, 'axis'), axisPointer: { type: 'shadow' } },
+    grid: { left: 8, right: 30, top: 8, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'value',
+      min: 0,
+      max: maxFreq,
+      axisLabel: { color: t.muted, fontSize: 10 },
+      splitLine: { lineStyle: { color: t.grid } },
     },
-  ],
-})
+    yAxis: {
+      type: 'category',
+      // 反向：让频次最高在顶部
+      data: props.data.map((d) => d.topic).reverse(),
+      axisLabel: { color: t.txt, fontSize: 12, fontWeight: 600 },
+      axisLine: { lineStyle: { color: t.track } },
+      axisTick: { show: false },
+    },
+    series: [
+      {
+        name: '被问次数',
+        type: 'bar',
+        // 排名数据：明度即排名（第一名最深 → 最后一名最浅）
+        data: props.data.map((d, i) => ({
+          value: d.frequency,
+          itemStyle: { color: rampLevel(total - 1 - i, dark) },
+        })).reverse(),
+        itemStyle: { borderRadius: [0, 4, 4, 0] },
+        barMaxWidth: 18,
+        label: {
+          show: true,
+          position: 'right',
+          fontSize: 12,
+          fontWeight: 700,
+          color: t.txt,
+          formatter: '{c}',
+        },
+      },
+    ],
+  }
+}
 
 const { refresh } = useEChart(chartRef, buildOption)
 watch(() => props.data, refresh, { deep: true })

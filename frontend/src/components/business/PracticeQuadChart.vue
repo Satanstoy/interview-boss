@@ -30,20 +30,22 @@ const props = defineProps({
 
 const chartRef = ref(null)
 
-// 象限颜色（深色/浅色共用，图形组件不随主题变）
-const QUAD_COLORS = {
-  breakthrough: '#f43f5e',
-  advantage: '#10b981',
-  maintain: '#f59e0b',
-  lowPriority: '#94a3b8',
+// 象限颜色（porcelain 蓝阶，明度即紧迫度：重点突破最深 → 不急最浅）
+function getQuadColors(dark) {
+  return dark
+    ? { breakthrough: '#EDEFF1', advantage: '#9EB3CD', maintain: '#6C93C7', lowPriority: '#4D82C6' }
+    : { breakthrough: '#081F5C', advantage: '#334EAC', maintain: '#7096D1', lowPriority: '#BAD6EB' }
 }
 
-const orderedQuadrants = computed(() => [
-  { key: 'breakthrough', ...QUADRANTS.breakthrough, color: QUAD_COLORS.breakthrough },
-  { key: 'advantage', ...QUADRANTS.advantage, color: QUAD_COLORS.advantage },
-  { key: 'maintain', ...QUADRANTS.maintain, color: QUAD_COLORS.maintain },
-  { key: 'lowPriority', ...QUADRANTS.lowPriority, color: QUAD_COLORS.lowPriority },
-])
+const orderedQuadrants = computed(() => {
+  const colors = getQuadColors(false)
+  return [
+    { key: 'breakthrough', ...QUADRANTS.breakthrough, color: colors.breakthrough },
+    { key: 'advantage', ...QUADRANTS.advantage, color: colors.advantage },
+    { key: 'maintain', ...QUADRANTS.maintain, color: colors.maintain },
+    { key: 'lowPriority', ...QUADRANTS.lowPriority, color: colors.lowPriority },
+  ]
+})
 
 const SKILL_MAX = 100
 const HEAT_MAX = computed(() => {
@@ -68,17 +70,18 @@ function scatterData(items, median) {
 const buildOption = (dark) => {
   const median = heatMedian(props.items)
   const byQuad = scatterData(props.items, median)
-  const axisColor = dark ? '#8f8881' : '#a8a29e'
-  const splitColor = dark ? '#2e2a27' : '#f1efe9'
-  const labelColor = dark ? '#cfcac5' : '#4a4540'
+  const colors = getQuadColors(dark)
+  const axisColor = dark ? '#9EB3CD' : 'rgba(8,31,92,.60)'
+  const splitColor = dark ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.12)'
+  const labelColor = dark ? '#D5DBE2' : 'rgba(8,31,92,.72)'
 
   return {
     tooltip: {
       trigger: 'item',
       confine: true,
-      backgroundColor: dark ? 'rgba(45, 42, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-      borderColor: dark ? '#574f49' : '#e8e4dd',
-      textStyle: { color: dark ? '#e7e5e2' : '#4a4540', fontSize: 12 },
+      backgroundColor: dark ? 'rgba(8,31,92,.95)' : 'rgba(255,255,255,.95)',
+      borderColor: dark ? '#3472C2' : 'rgba(8,31,92,.20)',
+      textStyle: { color: dark ? '#D5DBE2' : '#081F5C', fontSize: 12 },
       formatter: (params) => {
         const d = params.data
         if (!d) return ''
@@ -111,12 +114,12 @@ const buildOption = (dark) => {
       type: 'scatter',
       data: byQuad[key],
       symbolSize: (val) => 10 + (val?.[1] ?? 0) / HEAT_MAX.value * 12,
-      itemStyle: { color: QUAD_COLORS[key], opacity: 0.85 },
+      itemStyle: { color: colors[key], opacity: 0.85 },
       label: {
         show: true,
         position: 'top',
         fontSize: 10,
-        color: dark ? '#e7e5e2' : '#1a1816',
+        color: dark ? '#D5DBE2' : '#081F5C',
         formatter: (p) => (p.data.name?.length > 8 ? p.data.name.slice(0, 8) + '…' : p.data.name),
       },
       emphasis: { scale: 1.2 },
@@ -126,6 +129,7 @@ const buildOption = (dark) => {
 
 // 用 graphic 画 4 个半透明象限矩形 + 标签文字
 function buildQuadrantGraphics(dark) {
+  const colors = getQuadColors(dark)
   const skillMid = 50 // x 方向 50% 分界（熟练度中位）
   const heatMid = 50 // y 方向 50% 分界（热度中位）
   const alpha = dark ? 0.06 : 0.08
@@ -141,13 +145,13 @@ function buildQuadrantGraphics(dark) {
       type: 'rect',
       left: q.x + '%', top: q.y + '%',
       right: (100 - q.x - q.w) + '%', bottom: (100 - q.y - q.h) + '%',
-      style: { fill: QUAD_COLORS[q.key], opacity: alpha },
+      style: { fill: colors[q.key], opacity: alpha },
       silent: true,
     },
     {
       type: 'text',
       left: (q.x + 2) + '%', top: (q.y + 1) + '%',
-      style: { text: q.label, fill: QUAD_COLORS[q.key], ...labelStyle },
+      style: { text: q.label, fill: colors[q.key], ...labelStyle },
       silent: true,
     },
   ])

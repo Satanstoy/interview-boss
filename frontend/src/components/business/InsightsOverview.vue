@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, CircleAlert } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
@@ -11,9 +11,7 @@ import PracticeStreakCard from './PracticeStreakCard.vue'
 import PracticeTrendChart from './PracticeTrendChart.vue'
 import PracticeDifficultyChart from './PracticeDifficultyChart.vue'
 import PracticeRadarChart from './PracticeRadarChart.vue'
-import PracticeRecentTimeline from './PracticeRecentTimeline.vue'
-import PracticeHighFreqChart from './PracticeHighFreqChart.vue'
-import PracticeQuadChart from './PracticeQuadChart.vue'
+import PracticeStarChart from './PracticeStarChart.vue'
 
 const props = defineProps({
   snapshot: { type: Object, required: true },
@@ -24,18 +22,6 @@ const props = defineProps({
 const router = useRouter()
 const route = useRoute()
 const summary = computed(() => props.snapshot?.summary || {})
-const hasPracticeEvidence = computed(() => props.snapshot?.data_quality?.has_practice_evidence === true)
-const topTwoHighFreq = computed(() => {
-  const hf = props.snapshot?.high_frequency || []
-  return hf.slice(0, 2).map((d) => `${d.topic}(${d.frequency}次)`).join('、')
-})
-
-const statCards = [
-  { key: 'jd_count', label: '岗位 JD', suffix: '份' },
-  { key: 'interview_count', label: '面经题目', suffix: '条' },
-  { key: 'question_count', label: '题库覆盖', suffix: '题' },
-  { key: 'practiced_question_count', label: '已练题目', suffix: '题' },
-]
 
 const todayCount = computed(() => {
   const heatmap = props.practiceActivity?.heatmap || []
@@ -67,36 +53,17 @@ function goPractice() {
       </div>
     </div>
 
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Card v-for="card in statCards" :key="card.key">
-        <CardContent class="p-4">
-          <p class="text-xs text-muted-foreground">{{ card.label }}</p>
-          <p class="mt-2 text-2xl font-semibold text-foreground">{{ summary[card.key] }}<span class="ml-1 text-sm font-normal text-muted-foreground">{{ card.suffix }}</span></p>
-        </CardContent>
-      </Card>
-    </div>
-
-    <Card data-testid="high-freq-card" v-if="!hasPracticeEvidence">
+    <Card data-testid="star-map-card">
       <CardHeader>
-        <CardTitle>岗位高频待练</CardTitle>
-        <p class="text-sm text-muted-foreground">面经里被问得最多的主题 —— 从这些开始刷，命中面试的概率最高。</p>
+        <CardTitle>岗位知识地图</CardTitle>
+        <p class="text-sm text-muted-foreground">岗位要什么、你覆盖了多少 —— 从最常被问的主题开始刷，命中面试的概率最高。</p>
       </CardHeader>
       <CardContent>
-        <div class="mb-3 flex items-start gap-2 rounded-xl border border-accent/25 bg-accent/5 p-3 text-sm leading-6">
-          <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
-          <span>你还没有练习记录。从最常被问的主题开始刷：<span class="font-semibold text-foreground">{{ topTwoHighFreq }}</span> 是命中概率最高的。</span>
-        </div>
-        <PracticeHighFreqChart :data="snapshot.high_frequency || []" />
-      </CardContent>
-    </Card>
-
-    <Card data-testid="quadrant-card" v-else>
-      <CardHeader>
-        <CardTitle>岗位重点知识</CardTitle>
-        <p class="text-sm text-muted-foreground">横轴是你的熟练度，纵轴是岗位热度 —— 右上角是要守住的优势，左上角是要优先补的重点。</p>
-      </CardHeader>
-      <CardContent>
-        <PracticeQuadChart :items="snapshot.readiness.items" />
+        <PracticeStarChart
+          :items="snapshot.readiness.items"
+          :position-name="snapshot.target_position.name"
+          @select-topic="goReadiness"
+        />
       </CardContent>
     </Card>
 
@@ -127,13 +94,12 @@ function goPractice() {
           :streak="practiceActivity.streak || { current: 0, longest: 0 }"
           :today-count="todayCount"
         />
-        <div class="xl:col-span-2">
+        <div class="xl:col-span-3">
           <PracticeTrendChart :data="practiceActivity.trend || []" />
         </div>
         <PracticeDifficultyChart :data="practiceActivity.difficulty || []" />
-        <PracticeRadarChart :data="practiceActivity.radar || []" />
         <div class="xl:col-span-2">
-          <PracticeRecentTimeline :data="practiceActivity.recent || []" />
+          <PracticeRadarChart :data="practiceActivity.radar || []" />
         </div>
       </div>
     </section>

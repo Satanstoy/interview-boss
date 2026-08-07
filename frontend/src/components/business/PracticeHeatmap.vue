@@ -8,10 +8,10 @@
       <div v-if="totalCount > 0" class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <span>少</span>
         <span class="h-2.5 w-2.5 rounded-[3px] bg-muted/50" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-emerald-200 dark:bg-emerald-800" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-emerald-300 dark:bg-emerald-600" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-emerald-500" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-emerald-600 dark:bg-emerald-400" />
+        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#D0E3FF]" />
+        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#9EBFEA]" />
+        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#7096D1]" />
+        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#334EAC]" />
         <span>多</span>
       </div>
     </div>
@@ -69,10 +69,10 @@ const totalCount = computed(() => props.data.reduce((sum, day) => sum + (day.cou
 
 function cellClass(cell) {
   if (!cell.date || cell.count === 0) return 'bg-muted/50'
-  if (cell.count <= 2) return 'bg-emerald-200 dark:bg-emerald-800'
-  if (cell.count <= 5) return 'bg-emerald-300 dark:bg-emerald-600'
-  if (cell.count <= 9) return 'bg-emerald-500'
-  return 'bg-emerald-600 dark:bg-emerald-400'
+  if (cell.count <= 2) return 'bg-[#D0E3FF]'
+  if (cell.count <= 5) return 'bg-[#9EBFEA]'
+  if (cell.count <= 9) return 'bg-[#7096D1]'
+  return 'bg-[#334EAC]'
 }
 
 const weeks = computed(() => {

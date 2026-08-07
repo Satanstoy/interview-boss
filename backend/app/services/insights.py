@@ -134,6 +134,10 @@ def build_insights_snapshot(user: dict) -> dict:
                 practice_by_topic[topic_name]["scores"].append(float(row["score"]))
 
         readiness_items = []
+        proficiency_by_topic = {
+            row["topic"]: row["proficiency"]
+            for row in _radar_topics(conn, user_id, limit=10000)
+        }
         for topic_name, topic in topic_rows.items():
             practice = practice_by_topic[topic_name]
             scores = practice["scores"]
@@ -147,6 +151,7 @@ def build_insights_snapshot(user: dict) -> dict:
                     "question_frequency": topic["question_frequency"],
                     "practice_count": practice["count"],
                     "average_score": average_score,
+                    "proficiency": proficiency_by_topic.get(topic_name),
                     "status": status,
                     "reason": reason,
                 }

@@ -18,6 +18,7 @@ import { RadarChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEChart } from '@/composables/useEChart.js'
+import { porcelain, porcelainTooltip, EASE } from '@/utils/chartTokens.js'
 
 echarts.use([RadarChart, TooltipComponent, CanvasRenderer])
 
@@ -31,40 +32,40 @@ function shortName(name) {
   return name.length > 6 ? `${name.slice(0, 6)}…` : name
 }
 
-const buildOption = (dark) => ({
-  tooltip: {
-    trigger: 'item',
-    confine: true,
-    backgroundColor: dark ? 'rgba(45, 42, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-    borderColor: dark ? '#574f49' : '#e8e4dd',
-    textStyle: { color: dark ? '#e7e5e2' : '#4a4540', fontSize: 12 },
-    formatter: (params) => `${params.name}: 熟练度 ${params.value}%`,
-  },
-  radar: {
-    indicator: props.data.map((item) => ({ name: shortName(item.topic), max: 100 })),
-    radius: '68%',
-    center: ['50%', '55%'],
-    axisName: { color: dark ? '#cfcac5' : '#4a4540', fontSize: 10 },
-    splitLine: { lineStyle: { color: dark ? '#2e2a27' : '#f1efe9' } },
-    splitArea: { areaStyle: { color: dark ? ['#1e1b19', '#221f1c'] : ['#faf9f7', '#f5f3ef'] } },
-    axisLine: { lineStyle: { color: dark ? '#2e2a27' : '#f1efe9' } },
-  },
-  series: [
-    {
-      type: 'radar',
-      data: [
-        {
-          name: '熟练度',
-          value: props.data.map((item) => item.proficiency),
-          areaStyle: { color: 'rgba(99, 102, 241, 0.25)' },
-          lineStyle: { color: '#6366f1', width: 2 },
-          itemStyle: { color: '#6366f1' },
-          symbolSize: 4,
-        },
-      ],
+const buildOption = (dark) => {
+  const t = porcelain(dark)
+  return {
+    ...EASE,
+    tooltip: {
+      ...porcelainTooltip(dark),
+      formatter: (params) => `${params.name}: 熟练度 ${params.value}%`,
     },
-  ],
-})
+    radar: {
+      indicator: props.data.map((item) => ({ name: shortName(item.topic), max: 100 })),
+      radius: '68%',
+      center: ['50%', '55%'],
+      splitNumber: 3,
+      axisName: { color: t.label, fontSize: 10 },
+      splitLine: { lineStyle: { color: t.grid } },
+      axisLine: { lineStyle: { color: t.grid } },
+    },
+    series: [
+      {
+        type: 'radar',
+        data: [
+          {
+            name: '熟练度',
+            value: props.data.map((item) => item.proficiency),
+            areaStyle: { color: dark ? 'rgba(237,239,241,.16)' : 'rgba(51,78,172,.16)' },
+            lineStyle: { color: t.data, width: 2.5 },
+            itemStyle: { color: t.data },
+            symbolSize: 4,
+          },
+        ],
+      },
+    ],
+  }
+}
 
 const { refresh } = useEChart(chartRef, buildOption)
 watch(() => props.data, refresh)

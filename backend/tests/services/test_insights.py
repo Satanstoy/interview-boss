@@ -422,3 +422,31 @@ def test_insights_high_frequency_empty_without_details(client, test_db):
     body = response.json()
     assert "high_frequency" in body
     assert body["high_frequency"] == []
+
+
+def test_insights_readiness_items_include_srs_proficiency(test_db):
+    """readiness.items 必须带 proficiency（SRS 熟练度聚合，练过才有值，未练为 None）。"""
+    from app.services.insights import build_insights_snapshot
+
+    _insert_user(test_db, 701)
+    _insert_question(test_db, 21, "RAG系统设计")
+    _insert_question(test_db, 22, "Agent编排")
+    _insert_question(test_db, 23, "未练主题")
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency, review_count) "
+        "VALUES (?, ?, ?, ?)",
+        (701, 21, 85, 3),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency, review_count) "
+        "VALUES (?, ?, ?, ?)",
+        (701, 22, 60, 1),
+    )
+    test_db.commit()
+
+    snapshot = build_insights_snapshot({"id": 701})
+    items = {item["name"]: item for item in snapshot["readiness"]["items"]}
+
+    assert items["RAG系统设计"]["proficiency"] == 85
+    assert items["Agent编排"]["proficiency"] == 60
+    assert items["未练主题"]["proficiency"] is None
