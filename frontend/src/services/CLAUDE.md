@@ -16,7 +16,7 @@
 | `interviewApi.js` | 模拟面试 | `/api/interview/*` |
 | `analyticsApi.js` | 数据分析 | `/api/analytics/*` |
 | `insightsApi.js` | 洞察工作台聚合快照、练习足迹图表数据 | `/api/insights`, `/api/insights/practice-activity` |
-| `profileApi.js` | 用户配置 | `/api/profile/*` |
+| `profileApi.js` | 用户配置；含管理员全局模型配置（`fetchGlobalEmbeddingConfig`/`updateGlobalEmbeddingConfig`/`testGlobalEmbedding`/`testGlobalLLM`） | `/api/profile/*` |
 | `resumeApi.js` | 简历管理 + 优化（SSE：points → delta → done） | `/api/profile/resume`, `/api/profile/resume/optimize` |
 | `codingApi.js` | 手撕代码练习 | `/api/coding/*` |
 | `interviewDistributionApi.js` | 系统默认分布与用户岗位偏好 | `/api/interview/distribution/*`, `/api/profile/interview-distribution-preference` |

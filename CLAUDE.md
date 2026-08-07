@@ -127,6 +127,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 数据分析 | `routers/analytics.py` | `services/analyticsApi.js` + `components/business/AnalyticsSidebar.vue` |
 | 洞察工作台 | `routers/insights.py` + `services/insights.py`（含练习足迹聚合 `/api/insights/practice-activity`） | `views/InsightsView.vue` + `services/insightsApi.js` + `components/business/Insights*.vue` + `Practice*.vue` 足迹图表组件 |
 | 用户配置 | `routers/profile.py` + `routers/profile_pkg/` + `core/config.py` | `services/profileApi.js` + `components/business/SettingsPage.vue` |
+| 全局模型配置（admin） | `routers/profile_pkg/embedding.py` + `routers/profile_pkg/llm.py`（test-global）+ `services/embedding_service.py`（reload_embedding_config）+ `services/embedding_recompute.py` | `services/profileApi.js` + `components/business/SettingsGlobalModel.vue`（SettingsAdmin「模型配置」tab） |
 | 手撕代码 | `routers/coding.py` | `services/codingApi.js` + `components/business/CodingPractice.vue` |
 | 音频转写 | `routers/audio.py` + `services/deepgram_service.py` | — |
 | 面试题型分布 | `routers/interview_distribution.py` + `services/interview_distribution.py` + `core/interview_distribution_config.py` | `services/interviewDistributionApi.js` + `components/business/InterviewDistributionSettings.vue` |

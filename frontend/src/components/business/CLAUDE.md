@@ -47,7 +47,8 @@
 | `InterviewDistributionSettings.vue` | 五类模拟面试题型比例与主问题数；系统默认或用户自定义保存 |
 | `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数；保存/清除后失效模型缓存；「测试连接」实时探测模型可用性） |
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
-| `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；含「聚合质量」tab：子分段切换「审查清单」|「AI 助手」|「来源健康」；审查清单审批 split/dedupe/精炼代表题，来源健康展示/合并重复公共面经） |
+| `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；「聚合质量」tab：子分段切换「审查清单」|「AI 助手」|「来源健康」；「模型配置」tab：`SettingsGlobalModel` 管理全局 LLM 与 embedding） |
+| `SettingsGlobalModel.vue` | 设置 - 管理员模型配置：全局 LLM 表单（Base URL/模型名/API Key 掩码/超时 + 测试连接，复用 `GET/PUT /api/profile`）+ Embedding 表单（后端模式 onnx/siliconflow/auto、模型名、API Key、维度 + 测试连接；保存后若 `recompute_triggered` 用 `getSSE` 订阅 `/api/jobs/{id}/stream` 显示重算进度） |
 | `SettingsQuality.vue` | 设置 - 聚合质量审查清单（待审批/已处理/已拒绝三态；卡片「原题 → 目标题」左右对照展示操作前后变化，含目标题语义 targetOf/movedText；批准弹窗为纯确认门不再重复对照；批准/拒绝/批量高置信；记录永久保留） |
 | `SettingsSourceHealth.vue` | 设置 - 来源健康（同签名重复公共面经）：面经/JD 子分段、重复组列表（签名/计数/保留 id/成员 URL）、「合并」按钮（确认后调用 merge，软删可恢复） |
 | `SettingsQualityAssistant.vue` | 设置 - 聚合质量 AI 助手（仅管理员）：自然语言筛选/批量处理清单；工具轨迹可折叠展示；写操作渲染「待确认操作」卡片（同款「原题→目标题」左右对照 + 确认→`/confirm`→`{message:""}` 续接让 LLM 确认并提下一步）；session_id 存 localStorage |

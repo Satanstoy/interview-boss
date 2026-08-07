@@ -6,7 +6,8 @@
 
 | 文件 | 端点前缀 | 职责 |
 |------|---------|------|
-| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL、接口类型 api_format、深度思考 thinking）；PUT 校验 api_format 必须在端点能力矩阵支持范围内（不匹配返回 400） |
+| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL、接口类型 api_format、深度思考 thinking）；`/api/profile/llm/test-global` 用全局配置探测连通性（仅 admin，绕过缓存，`check_global_llm_status`）；PUT 校验 api_format 必须在端点能力矩阵支持范围内（不匹配返回 400） |
+| `embedding.py` | `/api/profile/embedding` | 全局 Embedding 配置管理（仅 admin）：GET 读取（API key 掩码 + `api_key_set`）、PUT 保存到 `user_profile` 的 `embedding_*` key + `reload_embedding_config()` 热加载、模型/维度变化触发全量重算 job（复用 `jobs` 表 + SSE）、POST `/test` 连通性探测（siliconflow 调 embedding 接口 / onnx 校验模型文件） |
 | `taxonomy.py` | `/api/profile/taxonomy` | 分类体系管理（CRUD + 导入导出） |
 | `position.py` | `/api/profile/positions` | 岗位管理（CRUD + 切换） |
 | `email.py` | `/api/profile/bind-email`, `/api/profile/send-bind-code` | 邮箱绑定（验证码） |
