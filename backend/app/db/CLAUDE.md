@@ -26,7 +26,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `migrations/practice_decks.py` | 自定义题单所有者、可见性与题单题目关联的 migration 056 |
 | `migrations/practice_defaults.py` | 清理旧的今日复习/高频/未刷分类，仅保留全部题和我的收藏系统题单的 migration 057 |
 | `migrations/practice_performance.py` | 刷题队列切换查询的覆盖索引 migration 059 |
-| `migrations/admin_assistant.py` | 管理员 AI 助手对话/操作审计日志表 migration 069：`admin_assistant_log`（session_id + admin_id 隔离，role: user/assistant/action） |
+| `migrations/admin_assistant.py` | 管理员 AI 助手对话/操作审计日志表 migration 069：`admin_assistant_log`（session_id + admin_id 隔离，role: user/assistant/action）；migration 070：`quality_issue.target_qb_id`（误合并「并入到其他题」的目标题 ID） |
 
 ## 关键模式
 

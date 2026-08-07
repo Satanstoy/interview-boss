@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { ClipboardCheck, ShieldCheck, ShieldX, Check, X, Sparkles, Loader2 } from '@lucide/vue'
+import { ClipboardCheck, ShieldCheck, ShieldX, Check, X, Sparkles, Loader2, ArrowRight } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -35,6 +35,33 @@ const issueTypeColor = (type) => {
   return 'bg-blue-500/15 text-blue-600'
 }
 
+// 目标题语义：操作后「原题」变成什么。
+// split → 被拆出的问法成为新独立题；refine → LLM 建议的规范题面；
+// merge → 并入的目标题；dedupe → 移除后原题保持。
+const targetOf = (issue) => {
+  const action = issue.suggested_action
+  if (action === 'merge') {
+    return { label: '并入到 #' + issue.target_qb_id, text: issue.target_question }
+  }
+  if (action === 'refine_representative') {
+    return { label: '新题面', text: issue.suggested_value }
+  }
+  if (action === 'split') {
+    return { label: '新独立题', text: issue.variant }
+  }
+  return { label: '目标题', text: issue.question }
+}
+
+const movedText = (issue) => {
+  if (issue.suggested_action === 'split') {
+    return '将拆出：' + (issue.variant || '')
+  }
+  if (issue.suggested_action === 'merge') {
+    return '将并入：' + (issue.variant || '')
+  }
+  return ''
+}
+
 const loadIssues = async () => {
   loading.value = true
   try {
@@ -52,9 +79,13 @@ const switchStatus = async (s) => {
 }
 
 const onApprove = async (issue) => {
+  const t = targetOf(issue)
+  // 纯确认门：前后对照已在卡片上看过，弹窗只做最后确认
   const ok = await showConfirm(
-    '确认执行该修复？',
-    `将执行「${issue.action_label}」：${issue.question?.slice(0, 40) || ''}${issue.variant ? '（' + issue.variant.slice(0, 30) + '）' : ''}`,
+    `确认${issue.action_label}？`,
+    t.text
+      ? `操作后：${t.label}「${t.text?.slice(0, 40)}」`
+      : `将执行「${issue.action_label}」`,
   )
   if (!ok) return
   processing.value.add(issue.id)
@@ -165,16 +196,33 @@ onMounted(loadIssues)
                 置信度 {{ (issue.confidence * 100).toFixed(0) }}%
               </span>
             </div>
-            <div class="text-sm font-medium leading-snug">
-              {{ issue.question }}
+
+            <!-- 前后对照：原题 → 目标题 -->
+            <div class="mt-2 grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+              <!-- 原题 -->
+              <div class="min-w-0 rounded-md border border-border bg-muted/60 px-2.5 py-2">
+                <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">原题</div>
+                <div class="text-xs font-medium leading-snug">{{ issue.question }}</div>
+                <div v-if="movedText(issue)" class="mt-1 text-[11px] text-destructive leading-snug">
+                  {{ movedText(issue) }}
+                </div>
+              </div>
+              <!-- 箭头 -->
+              <div class="flex items-center justify-center text-muted-foreground">
+                <ArrowRight :size="14" />
+              </div>
+              <!-- 目标题 -->
+              <div class="min-w-0 rounded-md border border-primary/25 bg-primary/5 px-2.5 py-2">
+                <div class="text-[10px] font-semibold text-primary uppercase tracking-wide mb-1">
+                  {{ targetOf(issue).label }}
+                </div>
+                <div class="text-xs font-medium leading-snug">
+                  {{ targetOf(issue).text }}
+                </div>
+              </div>
             </div>
-            <div v-if="issue.variant" class="mt-1 text-xs text-muted-foreground line-clamp-2">
-              <span class="text-destructive">问题变体：</span>{{ issue.variant }}
-            </div>
-            <div v-if="issue.suggested_value" class="mt-1 rounded bg-blue-500/5 border border-blue-500/20 px-2 py-1 text-xs">
-              <span class="text-blue-600">建议题面：</span>{{ issue.suggested_value }}
-            </div>
-            <div v-if="issue.reason" class="mt-1 text-xs text-muted-foreground">
+
+            <div v-if="issue.reason" class="mt-1.5 text-xs text-muted-foreground">
               {{ issue.reason }}
             </div>
             <div v-if="status !== 'pending'" class="mt-1 text-[11px] text-muted-foreground">

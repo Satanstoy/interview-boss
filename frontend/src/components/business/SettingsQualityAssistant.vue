@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Wrench,
   ChevronDown,
+  ArrowRight,
 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -38,8 +39,35 @@ const QUICK_PROMPTS = [
   { label: '列出待审批', text: '列出当前待审批的聚合质量问题' },
   { label: '筛选高置信误合并', text: '帮我筛选置信度 ≥ 0.9 的误合并问题，逐一列出' },
   { label: '批量批准高置信', text: '批量批准所有置信度 ≥ 0.85 的误合并问题' },
-  { label: '代表题过弱', text: '有哪些代表题过弱的问题？分别给出处理建议' },
+  { label: '代表题不规范', text: '有哪些代表题不规范的问题？分别给出处理建议' },
 ]
+
+// 目标题语义（与 SettingsQuality 卡片一致）：操作后「原题」变成什么
+const targetOf = (conf) => {
+  const issue = conf.issue || {}
+  const action = issue.suggested_action
+  if (action === 'merge') {
+    return { label: '并入到 #' + issue.target_qb_id, text: issue.target_question }
+  }
+  if (action === 'refine_representative') {
+    return { label: '新题面', text: issue.suggested_value }
+  }
+  if (action === 'split') {
+    return { label: '新独立题', text: issue.variant }
+  }
+  return { label: '目标题', text: issue.question }
+}
+
+const movedText = (conf) => {
+  const issue = conf.issue || {}
+  if (issue.suggested_action === 'split') {
+    return '将拆出：' + (issue.variant || '')
+  }
+  if (issue.suggested_action === 'merge') {
+    return '将并入：' + (issue.variant || '')
+  }
+  return ''
+}
 
 const genSession = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
@@ -234,7 +262,7 @@ onMounted(async () => {
               <!-- 待确认操作卡片 -->
               <div v-for="conf in msg.confirmations" :key="conf.confirm_id"
                 class="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5">
-                <div class="flex items-center gap-1.5 mb-1">
+                <div class="flex items-center gap-1.5 mb-1.5">
                   <ShieldAlert :size="13" class="text-amber-500" />
                   <span class="text-xs font-medium text-amber-600 dark:text-amber-400">待确认操作</span>
                   <Badge class="text-[10px]">{{ conf.issue?.action_label || conf.tool }}</Badge>
@@ -242,12 +270,31 @@ onMounted(async () => {
                     置信度 {{ (conf.issue.confidence * 100).toFixed(0) }}%
                   </span>
                 </div>
-                <p class="text-xs text-muted-foreground line-clamp-2">{{ conf.summary }}</p>
-                <p v-if="conf.issue?.question" class="mt-1 text-xs text-foreground/80 line-clamp-2">
-                  {{ conf.issue.question }}
-                </p>
-                <p v-if="conf.issue?.variant" class="mt-0.5 text-[11px] text-muted-foreground line-clamp-1">
-                  变体：{{ conf.issue.variant }}
+
+                <!-- 前后对照：原题 → 目标题 -->
+                <div class="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+                  <div class="min-w-0 rounded-md border border-border bg-muted/60 px-2 py-1.5">
+                    <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">原题</div>
+                    <div class="text-[11px] font-medium leading-snug">{{ conf.issue?.question }}</div>
+                    <div v-if="movedText(conf)" class="mt-0.5 text-[10px] text-destructive leading-snug">
+                      {{ movedText(conf) }}
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-center text-muted-foreground">
+                    <ArrowRight :size="13" />
+                  </div>
+                  <div class="min-w-0 rounded-md border border-primary/25 bg-primary/5 px-2 py-1.5">
+                    <div class="text-[10px] font-semibold text-primary uppercase tracking-wide mb-0.5">
+                      {{ targetOf(conf).label }}
+                    </div>
+                    <div class="text-[11px] font-medium leading-snug">
+                      {{ targetOf(conf).text }}
+                    </div>
+                  </div>
+                </div>
+
+                <p v-if="conf.issue?.reason" class="mt-1.5 text-[10px] text-muted-foreground leading-snug">
+                  {{ conf.issue.reason }}
                 </p>
                 <div class="mt-2 flex gap-2">
                   <Button size="sm" class="h-6 gap-1 text-[11px]" :disabled="busyConfirm" @click="onConfirm(msg, conf)">

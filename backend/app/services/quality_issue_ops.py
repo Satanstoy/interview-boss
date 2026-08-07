@@ -13,16 +13,17 @@ from fastapi import HTTPException
 
 logger = logging.getLogger("interview-boss")
 
-# issue_type → 操作名映射（供前端/助手展示）
+# issue_type → 操作名映射（供前端/助手展示，人话命名，避免内部术语）
 ISSUE_TYPE_LABELS = {
     "mismerge": "误合并",
-    "duplicate": "重复变体",
-    "weak_representative": "代表题过弱",
+    "duplicate": "重复问法",
+    "weak_representative": "代表题不规范",
 }
 ACTION_LABELS = {
-    "split": "拆出变体",
-    "dedupe": "去重变体",
-    "refine_representative": "精炼代表题",
+    "split": "拆成独立题",
+    "dedupe": "移除重复问法",
+    "refine_representative": "换成规范题面",
+    "merge": "并入到其他题",
 }
 
 
@@ -38,6 +39,12 @@ def serialize_issue(row, conn) -> dict:
         "SELECT question, cat2, original_questions FROM question_bank WHERE id = ?",
         (row["qb_id"],),
     ).fetchone()
+    # 并入目标题（target_qb_id）对应的代表题（用于卡片「目标题」对照）
+    target_qb = None
+    if row["target_qb_id"] is not None:
+        target_qb = conn.execute(
+            "SELECT question FROM question_bank WHERE id = ?", (row["target_qb_id"],)
+        ).fetchone()
     return {
         "id": row["id"],
         "qb_id": row["qb_id"],
@@ -61,6 +68,8 @@ def serialize_issue(row, conn) -> dict:
         "suggested_value": row["suggested_value"],
         "confidence": row["confidence"],
         "status": row["status"],
+        "target_qb_id": row["target_qb_id"],
+        "target_question": target_qb["question"] if target_qb else None,
         "created_at": row["created_at"],
         "reviewed_at": row["reviewed_at"],
     }

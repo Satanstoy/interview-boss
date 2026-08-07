@@ -30,3 +30,20 @@ def _migration_069_admin_assistant_log(conn):
         "ON admin_assistant_log(session_id, admin_id, id)"
     )
     logger.info("migration_069: admin_assistant_log 表已就绪")
+
+
+def _migration_070_quality_issue_target(conn):
+    """quality_issue 表新增 target_qb_id：误合并「并入到其他题」的目标题 ID。
+
+    split（拆成独立题）/ refine_representative（换成规范题面）时为空；
+    merge（并入到其他题）时指向目标题。供卡片「目标题」对照与并入执行使用。
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info('quality_issue')")
+    columns = [info[1] for info in cursor.fetchall()]
+    if "target_qb_id" not in columns:
+        conn.execute(
+            "ALTER TABLE quality_issue ADD COLUMN target_qb_id INTEGER DEFAULT NULL"
+        )
+    logger.info("migration_070: quality_issue.target_qb_id 已就绪")
+
