@@ -9,8 +9,9 @@ from app.routers.profile_pkg.resume import router as resume_router
 from app.routers.profile_pkg.interview_distribution import router as interview_distribution_router
 from app.routers.profile_pkg.mcp import router as mcp_router
 from app.routers.profile_pkg.search import router as search_router
+from app.routers.profile_pkg.embedding import router as embedding_router
 
 # 合并所有子路由为一个总路由
 router = APIRouter()
-for sub_router in [llm_router, search_router, taxonomy_router, position_router, email_router, resume_router, interview_distribution_router, mcp_router]:
+for sub_router in [llm_router, search_router, taxonomy_router, position_router, email_router, resume_router, interview_distribution_router, mcp_router, embedding_router]:
     router.include_router(sub_router)

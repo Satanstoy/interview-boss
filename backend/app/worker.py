@@ -71,6 +71,22 @@ async def enqueue_interview_distribution_refresh(scope: str, job_position: str):
         await pool.close()
 
 
+async def enqueue_recompute_embedding_job(job_id: int):
+    """将全量 embedding 重算任务入队"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("recompute_embedding_task", job_id)
+    finally:
+        await pool.close()
+
+
+async def recompute_embedding_task(ctx, job_id: int):
+    """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
+    from app.services.embedding_recompute import run_recompute
+
+    await run_recompute(job_id)
+
+
 async def startup(ctx):
     """Worker 启动时初始化"""
     from app.db.connection import init_db
@@ -677,7 +693,8 @@ class WorkerSettings:
         submit_import_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
-        scheduled_source_health_task
+        scheduled_source_health_task,
+        recompute_embedding_task
     ]
     on_startup = startup
     on_shutdown = shutdown
