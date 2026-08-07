@@ -52,3 +52,9 @@ export const revokeMyMCPToken = () => del(`${API}/profile/mcp/token`)
 // ── Recruitment time preference ──
 export const fetchRecruitmentPref = () => get(`${API}/profile/recruitment`, { noCache: true })
 export const updateRecruitmentPref = (payload) => put(`${API}/profile/recruitment`, payload)
+
+// ── Admin: Global embedding config ──
+export const fetchGlobalEmbeddingConfig = () => get(`${API}/profile/embedding`, { noCache: true })
+export const updateGlobalEmbeddingConfig = (settings) => put(`${API}/profile/embedding`, settings)
+export const testGlobalEmbedding = (settings) => post(`${API}/profile/embedding/test`, settings)
+export const testGlobalLLM = () => post(`${API}/profile/llm/test-global`, {})

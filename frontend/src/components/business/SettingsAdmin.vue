@@ -6,6 +6,7 @@ import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePubli
 import SettingsQuality from './SettingsQuality.vue'
 import SettingsQualityAssistant from './SettingsQualityAssistant.vue'
 import SettingsSourceHealth from './SettingsSourceHealth.vue'
+import SettingsGlobalModel from './SettingsGlobalModel.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +16,7 @@ import AppTooltip from '@/components/common/AppTooltip.vue'
 const adminTabs = [
   { id: 'taxonomy', label: '分类管理' },
   { id: 'quality', label: '聚合质量' },
+  { id: 'model', label: '模型配置' },
 ]
 const adminTab = ref('taxonomy')
 const qualitySubTab = ref('list')
@@ -366,6 +368,11 @@ const onRebuild = () => {
       <SettingsQuality v-if="qualitySubTab === 'list'" />
       <SettingsQualityAssistant v-else-if="qualitySubTab === 'assistant'" />
       <SettingsSourceHealth v-else />
+    </div>
+
+    <!-- 模型配置 -->
+    <div v-else-if="adminTab === 'model'" class="rounded-xl border bg-card p-6">
+      <SettingsGlobalModel />
     </div>
   </div>
 </template>

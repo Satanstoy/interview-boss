@@ -110,6 +110,10 @@ export {
   updateMyLLMConfig,
   deleteMyLLMConfig,
   fetchLLMStatus,
+  fetchGlobalEmbeddingConfig,
+  updateGlobalEmbeddingConfig,
+  testGlobalEmbedding,
+  testGlobalLLM,
 } from '../services/profileApi.js'
 
 // ── Practice ──
