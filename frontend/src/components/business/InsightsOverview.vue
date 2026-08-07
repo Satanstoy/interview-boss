@@ -12,6 +12,7 @@ import PracticeTrendChart from './PracticeTrendChart.vue'
 import PracticeDifficultyChart from './PracticeDifficultyChart.vue'
 import PracticeRadarChart from './PracticeRadarChart.vue'
 import PracticeRecentTimeline from './PracticeRecentTimeline.vue'
+import PracticeQuadChart from './PracticeQuadChart.vue'
 
 const props = defineProps({
   snapshot: { type: Object, required: true },
@@ -69,26 +70,13 @@ function goPractice() {
       </Card>
     </div>
 
-    <Card>
-      <CardHeader class="flex flex-row items-center justify-between gap-4">
-        <div>
-          <CardTitle>本周最该做</CardTitle>
-          <p class="mt-1 text-sm text-muted-foreground">优先处理岗位热度高、个人证据不足的主题。</p>
-        </div>
-        <Button variant="outline" size="sm" @click="goReadiness">查看准备度 <ArrowRight class="h-4 w-4" /></Button>
+    <Card data-testid="quadrant-card">
+      <CardHeader>
+        <CardTitle>岗位重点知识</CardTitle>
+        <p class="text-sm text-muted-foreground">横轴是你的熟练度，纵轴是岗位热度 —— 右上角是要守住的优势，左上角是要优先补的重点。</p>
       </CardHeader>
       <CardContent>
-        <div v-if="snapshot.actions.length" class="grid gap-3 lg:grid-cols-3">
-          <div v-for="item in snapshot.actions" :key="item.id" class="rounded-xl border border-border bg-muted/20 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <h2 class="font-medium text-foreground">{{ item.title }}</h2>
-              <Badge :variant="item.priority === 'high' ? 'destructive' : 'secondary'">{{ item.priority === 'high' ? '优先' : '可巩固' }}</Badge>
-            </div>
-            <p class="mt-2 min-h-10 text-sm leading-6 text-muted-foreground">{{ item.description }}</p>
-            <Button variant="link" class="mt-2 h-auto px-0" @click="goPractice">{{ item.action }} <ArrowRight class="h-4 w-4" /></Button>
-          </div>
-        </div>
-        <p v-else class="py-6 text-center text-sm text-muted-foreground">题库还没有形成可执行的主题建议。</p>
+        <PracticeQuadChart :items="snapshot.readiness.items" />
       </CardContent>
     </Card>
 
@@ -129,5 +117,28 @@ function goPractice() {
         </div>
       </div>
     </section>
+
+    <Card>
+      <CardHeader class="flex flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle>本周最该做</CardTitle>
+          <p class="mt-1 text-sm text-muted-foreground">优先处理岗位热度高、个人证据不足的主题。</p>
+        </div>
+        <Button variant="outline" size="sm" @click="goReadiness">查看准备度 <ArrowRight class="h-4 w-4" /></Button>
+      </CardHeader>
+      <CardContent>
+        <div v-if="snapshot.actions.length" class="grid gap-3 lg:grid-cols-3">
+          <div v-for="item in snapshot.actions" :key="item.id" class="rounded-xl border border-border bg-muted/20 p-4">
+            <div class="flex items-start justify-between gap-3">
+              <h2 class="font-medium text-foreground">{{ item.title }}</h2>
+              <Badge :variant="item.priority === 'high' ? 'destructive' : 'secondary'">{{ item.priority === 'high' ? '优先' : '可巩固' }}</Badge>
+            </div>
+            <p class="mt-2 min-h-10 text-sm leading-6 text-muted-foreground">{{ item.description }}</p>
+            <Button variant="link" class="mt-2 h-auto px-0" @click="goPractice">{{ item.action }} <ArrowRight class="h-4 w-4" /></Button>
+          </div>
+        </div>
+        <p v-else class="py-6 text-center text-sm text-muted-foreground">题库还没有形成可执行的主题建议。</p>
+      </CardContent>
+    </Card>
   </section>
 </template>

@@ -11,6 +11,7 @@
 | `logger.js` | 前端日志与错误上报到 `/api/error-report` |
 | `markdown.js` | Markdown 渲染（marked + DOMPurify） |
 | `validate.js` | 表单验证工具 |
+| `quadrant.js` | 四象限决策图纯函数：`mapToQuadrant(item, heatMedian)` 把 readiness item 映射到重点突破/优势/可保持/不急象限，`heatMedian` 计算岗位热度中位数分界 |
 
 ## 核心规则
 
