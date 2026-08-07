@@ -49,6 +49,54 @@ def _fix_proxy_for_httpx():
             os.environ[key] = val.replace("socks5h://", "socks5://", 1)
 
 
+# 用户可通过 DB（user_profile 表）覆盖的配置 key → (模块级变量名, 转换函数)
+_DB_CONFIG_MAP = {
+    "embedding_backend": ("_BACKEND", lambda v: v.lower()),
+    "embedding_model_repo": ("_MODEL_REPO", str),
+    "embedding_model_dir": ("_MODEL_DIR", lambda v: Path(v)),
+    "embedding_dimension": ("_DIMENSION", int),
+    "embedding_api_key": ("_SILICONFLOW_API_KEY", str),
+    "embedding_api_model": ("_EMBEDDING_API_MODEL", str),
+    "embedding_api_base_url": ("_SILICONFLOW_BASE_URL", str),
+}
+
+
+def reload_embedding_config() -> None:
+    """从 user_profile 表读取 embedding 配置覆盖模块级常量。
+
+    在保存配置后调用，使新配置立即生效。会重置已缓存的
+    ONNX session / tokenizer / SiliconFlow client / FAISS 索引缓存。
+    """
+    from app.core.config import get_profile_setting
+
+    changed = False
+    for profile_key, (attr_name, transform) in _DB_CONFIG_MAP.items():
+        raw = get_profile_setting(profile_key)
+        if raw:
+            try:
+                globals()[attr_name] = transform(raw)
+                changed = True
+            except (ValueError, TypeError):
+                logger.warning("无效的 embedding 配置 %s=%r", profile_key, raw)
+
+    if not changed:
+        return
+
+    # 重建运行时资源
+    global _SESSION, _TOKENIZER
+    _SESSION = None
+    _TOKENIZER = None
+    _SILICONFLOW_CLIENTS.clear()
+
+    from app.services.faiss_index_manager import get_index_manager
+    get_index_manager().invalidate()
+
+    logger.info(
+        "embedding 配置已从 DB 加载: backend=%s dim=%d model=%s",
+        _BACKEND, _DIMENSION, _EMBEDDING_API_MODEL,
+    )
+
+
 def _download_model_if_needed() -> None:
     onnx_path = _MODEL_DIR / _ONNX_FILE
     tokenizer_path = _MODEL_DIR / "tokenizer.json"

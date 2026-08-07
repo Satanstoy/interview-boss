@@ -75,8 +75,10 @@ async def startup(ctx):
     """Worker 启动时初始化"""
     from app.db.connection import init_db
     from app.core.config import _reload_from_db
+    from app.services.embedding_service import reload_embedding_config
     init_db()
     _reload_from_db()
+    reload_embedding_config()
     logger.info("ARQ Worker 已启动")
 
 

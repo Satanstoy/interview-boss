@@ -41,6 +41,11 @@ from app.mcp_server.app import mcp, mcp_app
 init_db()
 _reload_from_db()
 
+# 同步 embedding 配置（DB 优先，env 兜底）：容器重启后保持管理员保存的配置
+from app.services.embedding_service import reload_embedding_config
+
+reload_embedding_config()
+
 # ── 环境配置 ──
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 ALLOWED_ORIGINS = [
