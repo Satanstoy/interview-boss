@@ -9,11 +9,11 @@ def _insert_user(conn, user_id, position="测试岗位"):
     )
 
 
-def _insert_question(conn, question_id, topic, position="测试岗位", frequency=1, deleted_at=None, difficulty="简单"):
+def _insert_question(conn, question_id, topic, position="测试岗位", frequency=1, deleted_at=None, difficulty="简单", sources=None):
     conn.execute(
         "INSERT INTO question_bank "
-        "(id, question, cat1, cat2, frequency, status, owner_id, job_position, deleted_at, difficulty) "
-        "VALUES (?, ?, ?, ?, ?, 'approved', NULL, ?, ?, ?)",
+        "(id, question, cat1, cat2, frequency, status, owner_id, job_position, deleted_at, difficulty, sources) "
+        "VALUES (?, ?, ?, ?, ?, 'approved', NULL, ?, ?, ?, ?)",
         (
             question_id,
             f"{topic}面试题",
@@ -23,6 +23,7 @@ def _insert_question(conn, question_id, topic, position="测试岗位", frequenc
             position,
             deleted_at,
             difficulty,
+            sources,
         ),
     )
 
@@ -31,7 +32,12 @@ def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
     from app.services.insights import build_insights_snapshot
 
     _insert_user(test_db, 101)
-    _insert_question(test_db, 1, "RAG系统设计", frequency=5)
+    _insert_question(
+        test_db, 1, "RAG系统设计", frequency=5,
+        sources='[{"url": "https://a.com/1", "company": "A", "round": "一面"},'
+                '{"url": "https://a.com/1", "company": "A", "round": "二面"},'
+                '{"url": "https://b.com/1", "company": "B", "round": "一面"}]',
+    )
     _insert_question(test_db, 2, "Agent编排", frequency=3)
     _insert_question(test_db, 3, "前端工程", position="其他岗位", frequency=99)
     _insert_question(test_db, 4, "已删除主题", frequency=99, deleted_at="2026-08-01")
@@ -57,7 +63,8 @@ def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
         "evidence_state": "available",
     }
     items = {item["name"]: item for item in snapshot["readiness"]["items"]}
-    assert items["RAG系统设计"]["question_frequency"] == 5
+    # 口径：独立来源数（url 去重 = 2），非问法数 frequency=5
+    assert items["RAG系统设计"]["question_frequency"] == 2
     assert items["RAG系统设计"]["status"] == "needs_work"
     assert items["RAG系统设计"]["average_score"] == 50
     assert items["Agent编排"]["status"] == "stable"

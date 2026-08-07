@@ -5,9 +5,28 @@
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+import json
 
 from app.db.connection import get_db_connection, get_user_job_position
 from app.db.queries import build_bank_where_clause
+
+
+def _count_unique_sources(sources_raw) -> int:
+    """sources JSON（[{url, company, round}]）按 url 去重计数；异常返回 0。
+
+    洞察页"被问次数"口径：独立来源数而非问法数（变体归一化配套，
+    避免同一面试多个问法虚高 frequency）。
+    """
+    if not sources_raw:
+        return 0
+    try:
+        sources = json.loads(sources_raw)
+    except (json.JSONDecodeError, TypeError):
+        return 0
+    if not isinstance(sources, list):
+        return 0
+    urls = {s.get("url") for s in sources if isinstance(s, dict) and s.get("url")}
+    return len(urls)
 
 
 API_VERSION = 1
@@ -76,7 +95,7 @@ def build_insights_snapshot(user: dict) -> dict:
             user_id, "all", "qb"
         )
         bank_rows = conn.execute(
-            f"SELECT qb.id, qb.cat1, qb.cat2, qb.frequency {from_clause} {bank_where}",
+            f"SELECT qb.id, qb.cat1, qb.cat2, qb.frequency, qb.sources {from_clause} {bank_where}",
             bank_params,
         ).fetchall()
 
@@ -92,7 +111,9 @@ def build_insights_snapshot(user: dict) -> dict:
             topic_name = row["cat2"] or row["cat1"] or "未分类"
             topic = topic_rows[topic_name]
             topic["question_count"] += 1
-            topic["question_frequency"] += int(row["frequency"] or 0)
+            # 口径修复：洞察页"被问次数"用独立来源数（sources 按 url 去重），
+            # 避免同一面试多个问法虚高 frequency（变体归一化的配套）
+            topic["question_frequency"] += _count_unique_sources(row["sources"])
             topic["question_ids"].append(row["id"])
             question_to_topic[row["id"]] = topic_name
 
