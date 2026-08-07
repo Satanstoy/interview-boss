@@ -20,6 +20,7 @@
 | `resumeApi.js` | 简历管理 + 优化（SSE：points → delta → done） | `/api/profile/resume`, `/api/profile/resume/optimize` |
 | `codingApi.js` | 手撕代码练习 | `/api/coding/*` |
 | `interviewDistributionApi.js` | 系统默认分布与用户岗位偏好 | `/api/interview/distribution/*`, `/api/profile/interview-distribution-preference` |
+| `adminAssistantApi.js` | 管理员 AI 助手（聚合质量审查）：发消息 / 确认执行写操作 / 会话历史。历史 GET 必须 `{ ttl: 0 }` 绕过 http.js 30s 缓存 | `/api/admin/assistant/*` |
 
 ## 核心规则
 

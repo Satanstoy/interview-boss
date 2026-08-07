@@ -165,3 +165,10 @@ export {
   fetchCodingSubmission,
   fetchCodingErrorStats,
 } from '../services/codingApi.js'
+
+// ── Admin Assistant ──
+export {
+  sendAssistantMessage,
+  confirmAssistantAction,
+  fetchAssistantHistory,
+} from '../services/adminAssistantApi.js'

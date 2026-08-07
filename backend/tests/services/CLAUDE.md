@@ -23,9 +23,12 @@
 | `test_router_refactor.py` | 路由拆分回归测试 |
 | `test_session_search.py` | 会话搜索 |
 | `test_review_urgency_wiring.py` | review 端点接入 urgency/deadline：`_user_urgency` 助手（固定 today 测 deadline 选择）+ 端点记录复习 smoke |
+| `test_practice_due_queue.py` | 今日复习 due 队列：四桶排序、复习风险权重 = 动态来源数 × (5 - proficiency)（静态变体数不参与）、新题预算与动态频率排序、mastered 抽查 |
+| `test_frequency_display_bugs.py` | 频率口径回归：动态频率 SQL 必须过滤 `qs.deleted_at`、同 URL 公共/私有面经去重、面经软删不计；题卡展示频率 = 活跃来源数（静态 6 / 动态 1 时显示 1，无来源显示 0） |
 | `test_settings_position_switch.py` | 设置页岗位切换 |
 | `test_source_display.py` | 来源展示 |
 | `test_title_service.py` | 标题生成 |
+| `test_admin_assistant_api.py` | 管理员 AI 助手：鉴权（401/403）、读工具即时执行、写操作内联确认门（staging 不改 DB + 批量置信度下限 0.85）、确认端点执行与审计（reviewed_by + action 日志）、会话持久化与 `[已执行操作]` 续接回执；mock `app.services.admin_assistant_service.llm_with_tools` |
 | `clustering/` | 聚类相关测试子目录（质量、稳定性、频率、来源、压缩、v2、孤岛修复等 20+ 文件） |
 
 ## 运行

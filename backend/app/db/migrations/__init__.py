@@ -83,8 +83,10 @@ from app.db.migrations.clustering import (
     _migration_048_embedding_metadata,
     _migration_066_cluster_label,
     _migration_067_quality_audit,
+    _migration_068_quality_issue,
     _classify_e_question,
 )
+from app.db.migrations.admin_assistant import _migration_069_admin_assistant_log
 from app.db.migrations.jobs import (
     _migration_009_analysis_queue,
     _migration_022_jobs_table,
@@ -178,6 +180,8 @@ _MIGRATIONS = [
     (65, "llm_api_format", _migration_065_llm_api_format),
     (66, "cluster_label", _migration_066_cluster_label),
     (67, "quality_audit", _migration_067_quality_audit),
+    (68, "quality_issue", _migration_068_quality_issue),
+    (69, "admin_assistant_log", _migration_069_admin_assistant_log),
 ]
 
 

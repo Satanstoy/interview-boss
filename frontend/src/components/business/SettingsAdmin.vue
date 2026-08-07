@@ -4,6 +4,7 @@ import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Globe, ClipboardCheck } from '@lucide/vue'
 import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, fetchProfile } from '@/services/profileApi.js'
 import SettingsQuality from './SettingsQuality.vue'
+import SettingsQualityAssistant from './SettingsQualityAssistant.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +16,7 @@ const adminTabs = [
   { id: 'quality', label: '聚合质量' },
 ]
 const adminTab = ref('taxonomy')
+const qualitySubTab = ref('list')
 
 const props = defineProps({
   taxonomy: { type: Object, default: () => ({ categories: [] }) },
@@ -325,7 +327,7 @@ const onRebuild = () => {
       </Button>
     </div>
 
-    <!-- 聚合质量：审查清单（管理员审批） -->
+    <!-- 聚合质量：审查清单 / AI 助手（子分段切换） -->
     <div v-else-if="adminTab === 'quality'" class="rounded-xl border bg-card p-6">
       <div class="mb-4">
         <h3 class="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
@@ -337,7 +339,24 @@ const onRebuild = () => {
           由 LLM 给出修改建议，管理员审批后执行。记录永久保留可审计。
         </p>
       </div>
-      <SettingsQuality />
+      <div class="mb-3 flex items-center gap-1.5 rounded-lg border border-border p-1 w-fit">
+        <button
+          class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+          :class="qualitySubTab === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+          @click="qualitySubTab = 'list'"
+        >
+          审查清单
+        </button>
+        <button
+          class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+          :class="qualitySubTab === 'assistant' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+          @click="qualitySubTab = 'assistant'"
+        >
+          AI 助手
+        </button>
+      </div>
+      <SettingsQuality v-if="qualitySubTab === 'list'" />
+      <SettingsQualityAssistant v-else />
     </div>
   </div>
 </template>

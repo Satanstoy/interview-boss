@@ -131,6 +131,8 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 | 音频转写 | `routers/audio.py` + `services/deepgram_service.py` | — |
 | 面试题型分布 | `routers/interview_distribution.py` + `services/interview_distribution.py` + `core/interview_distribution_config.py` | `services/interviewDistributionApi.js` + `components/business/InterviewDistributionSettings.vue` |
 | 题目去重 | `services/clustering/` + `services/clustering_maintenance.py` | — |
+| 聚合质量审查 | `routers/admin_quality.py` + `services/quality_issue_ops.py`（quality_issue 清单审批共享逻辑） | `services/adminQualityApi.js` + `components/business/SettingsQuality.vue` |
+| 管理 AI 助手 | `routers/admin_assistant.py` + `services/admin_assistant_service.py`（LLM tool 循环 + 写操作内联确认门）+ `services/quality_issue_ops.py` + `db/migrations/admin_assistant.py`（admin_assistant_log 审计） | `services/adminAssistantApi.js` + `components/business/SettingsQualityAssistant.vue`（聚合质量 tab 内「AI 助手」子切换） |
 | LLM 调用 | `services/llm.py` + `core/prompts.py` | — |
 | 全文搜索 | `services/fts_service.py` | — |
 | 简历管理/优化 | `services/resume_service.py` + `core/prompts.py`（build_resume_optimize_*） | `services/resumeApi.js` + `views/ResumeView.vue` |

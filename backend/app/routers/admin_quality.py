@@ -2,6 +2,9 @@
 
 清单数据固化在 quality_issue 表（审查生成，永不删除），管理员审批后
 执行对应操作（split/dedupe/refine_representative），状态流转留痕。
+
+业务逻辑（序列化/执行/单条批量审批）在 `app.services.quality_issue_ops`，
+本路由仅做 HTTP 感知。
 """
 import logging
 
@@ -10,64 +13,11 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection
+from app.services.quality_issue_ops import execute_issue, serialize_issue
 
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter(prefix="/api/admin/quality-issues", tags=["admin-quality"])
-
-# issue_type → 操作名映射（供前端展示）
-ISSUE_TYPE_LABELS = {
-    "mismerge": "误合并",
-    "duplicate": "重复变体",
-    "weak_representative": "代表题过弱",
-}
-ACTION_LABELS = {
-    "split": "拆出变体",
-    "dedupe": "去重变体",
-    "refine_representative": "精炼代表题",
-}
-
-
-def _serialize_issue(row, conn) -> dict:
-    qb = conn.execute(
-        "SELECT question, cat2, original_questions FROM question_bank WHERE id = ?",
-        (row["qb_id"],),
-    ).fetchone()
-    return {
-        "id": row["id"],
-        "qb_id": row["qb_id"],
-        "question": qb["question"] if qb else "",
-        "cat2": qb["cat2"] if qb else "",
-        "variant_index": row["variant_index"],
-        "variant": (
-            None
-            if (not qb or row["variant_index"] is None)
-            else (
-                json_loads(qb["original_questions"])[row["variant_index"]]
-                if qb["original_questions"]
-                else None
-            )
-        ),
-        "issue_type": row["issue_type"],
-        "issue_type_label": ISSUE_TYPE_LABELS.get(row["issue_type"], row["issue_type"]),
-        "suggested_action": row["suggested_action"],
-        "action_label": ACTION_LABELS.get(row["suggested_action"], row["suggested_action"]),
-        "reason": row["reason"],
-        "suggested_value": row["suggested_value"],
-        "confidence": row["confidence"],
-        "status": row["status"],
-        "created_at": row["created_at"],
-        "reviewed_at": row["reviewed_at"],
-    }
-
-
-def json_loads(raw):
-    import json
-
-    try:
-        return json.loads(raw)
-    except Exception:
-        return []
 
 
 @router.get("")
@@ -83,34 +33,9 @@ async def list_issues(
             "SELECT * FROM quality_issue WHERE status = ? ORDER BY confidence DESC, id",
             (status,),
         ).fetchall()
-        return [_serialize_issue(r, conn) for r in rows]
+        return [serialize_issue(r, conn) for r in rows]
 
     return await run_in_threadpool(_query)
-
-
-def _execute_issue(conn, issue) -> None:
-    """按 issue 建议执行操作（执行前重检：数据可能已被其他审批修改）。"""
-    from app.services.clustering_maintenance import (
-        split_variant,
-        dedupe_variant,
-        refine_representative,
-    )
-
-    action = issue["suggested_action"]
-    if action == "split":
-        new_id = split_variant(conn, issue["qb_id"], issue["variant_index"])
-        if new_id is None:
-            raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
-    elif action == "dedupe":
-        removed = dedupe_variant(conn, issue["qb_id"], [issue["variant_index"]])
-        if removed == 0:
-            raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
-    elif action == "refine_representative":
-        ok = refine_representative(conn, issue["qb_id"], issue["suggested_value"])
-        if not ok:
-            raise HTTPException(status_code=409, detail="代表题已变更（可能已被处理）")
-    else:
-        raise HTTPException(status_code=400, detail=f"未知操作: {action}")
 
 
 @router.post("/{issue_id}/approve")
@@ -128,7 +53,7 @@ async def approve_issue(
         ).fetchone()
         if not issue:
             raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-        _execute_issue(conn, issue)
+        execute_issue(conn, issue)
         conn.execute(
             "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
             "reviewed_by = ? WHERE id = ?",
@@ -186,7 +111,7 @@ async def batch_approve_issues(
                 failed.append({"id": iid, "reason": "不存在/已处理/置信度不足"})
                 continue
             try:
-                _execute_issue(conn, issue)
+                execute_issue(conn, issue)
                 conn.execute(
                     "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
                     "reviewed_by = ? WHERE id = ?",

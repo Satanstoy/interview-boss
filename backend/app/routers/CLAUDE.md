@@ -9,7 +9,7 @@
 |------|------|------|
 | `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie |
 | `submit.py` | `/api/submit-stream-v2`, `/api/submit-jobs*` | JD/面经提交（LangGraph SSE + 后台 Job），并 re-export submit service 兼容旧内部导入 |
-| `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新。删除级联严格限定 owner 范围（`owner_id IS ?`，NULL 匹配公共数据）：私有删除不碰公共/他人面经、detail、question_bank sources；`_cleanup_sources_for_url` 带 owner_scope |
+| `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新。删除级联严格限定 owner 范围（`owner_id IS ?`，NULL 匹配公共数据）：私有删除不碰公共/他人面经、detail、question_bank sources；`_cleanup_sources_for_url` 带 owner_scope。**静态 `question_bank.frequency` 恒为「聚类变体数」语义**（`original_questions` 长度，下限 `max(1, ...)`）：删除/恢复时 oqs 缺失必须保守取 1，禁止用剩余来源数冒充频率（真实出现频率 = 动态来源数，由刷题/题库列表动态计算） |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索。detail 用 all 口径可见性过滤（公共 approved OR 自己的）；编辑权限唯一矩阵 `can_edit_question`（公共题仅 admin，个人题仅本人，admin 也不能改他人个人题） |
 | `answers.py` | `/api/master-bank/*` | AI 答案生成。公共参考答案（`ai_answer`）仅管理员可生成（单题/批量均 403 拦截普通用户）；`generate-recitation` 为用户定制个人背诵稿（公共参考答案为基座 + 岗位/简历上下文 + 用户搜索配置），写入 `user_question_view.user_answer`；`save-user-answer` 仅允许对用户可见的题写入（all 口径可见性断言）；`use-reference-answer` 已删除；生成时联网搜索来源写入 `question_bank.answer_sources` 并在题库列表/详情 API 返回（questions.py） |
 | `practice.py` | `/api/practice/*` | LeetCode 风格刷题队列、系统/自定义题单、题单题目管理与间隔复习。收藏/复习/加题单/evaluate-answer 的可见性统一 all 口径（`build_bank_where_clause(user_id, "all")`：公共题 + 自己的题），与题库列表一致。复习与自评记录复习时通过 `_user_urgency()` 按用户招聘偏好（`user_recruitment_pref` 届次 + pace）计算机会窗口 urgency 传入 `record_review`（无偏好 → 0.2 base） |
@@ -19,6 +19,8 @@
 | `profile.py` | `/api/profile/*` | 用户配置（公共+管理员）。`active-season` 为全局配置仅 admin 可写（user_profile 是全局单例）。`/api/profile/recruitment`（GET/PUT，任意登录用户）读写 per-user `user_recruitment_pref`（届次+批次+每日容量+pace 节奏），返回全年机会窗口、当前/下一窗口与紧迫度（机会脉冲模型），供刷题「今日复习」调度与前端状态行使用 |
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent）。`build-personal` 合并：管理员可并入公共题（现有行为），非管理员只落个人题（个人题吸收公共题来源，公共题数据绝不改动，防审核旁路） |
+| `admin_quality.py` | `/api/admin/quality-issues/*` | 聚合质量审查清单审批（列表/单条 approve·reject/batch-approve）。业务逻辑在 `app.services.quality_issue_ops`，本路由只做 HTTP 感知（不重复实现序列化/执行） |
+| `admin_assistant.py` | `/api/admin/assistant/*` | 管理员 AI 助手（聚合质量审查）：`POST /chat`（LLM tool-calling，读工具即时执行，写工具只暂存为待确认）、`POST /confirm`（确认并执行写操作，重新校验 + reviewed_by 留痕）、`GET /history`（会话日志）。全部 `Depends(get_admin_user)`；工具 schema 只在后端，前端从不持有 |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
 | `coding.py` | `/api/coding/*` | 手撕代码练习（题目/题单/导入/提交/语言与 LeetCode/ACM 模式/错误统计） |
 | `audio.py` | `/api/audio/*` | 语音转文字（Deepgram） |

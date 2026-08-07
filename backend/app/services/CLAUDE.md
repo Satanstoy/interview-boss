@@ -29,9 +29,11 @@
 | `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间；`schedule_review` 支持 `urgency`（0..1 缩放间隔，最多 -40%，`again` 不受调制）；`mastered` 卡 30 天固定抽查间隔，不受 urgency 缩放 | — |
 | `recruitment_milestones.py` | 招聘季机会窗口纯函数：`get_season_windows(届次)` 生成全年 4 窗口（暑期实习/提前批/秋招正式批/春招主批，含相对权重）；`compute_urgency(windows, 今天, pace)` 机会脉冲模型——紧迫度 = clamp(base 0.2 + Σ 窗口脉冲 + 节奏偏移，0..1)，返回当前窗口与下一窗口；无窗口 → 恒 base（社招/日常实习节奏） | — |
 | `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency` 给 `schedule_review`（招聘季间隔调制） | `practice_scheduler`, `db/connection` |
-| `practice_deck_service.py` | 今日复习（due）题单 + 系统/收藏题单与自定义题单管理。due 队列四桶排序（到期复习 → mastered 抽查「保持手感」→ 新题 → 未来），复习按 `frequency × (5 - proficiency)` 风险加权，新题按**动态来源频率**（活跃面经来源数）降序并受预算约束（`max_new` 参数显式传入，或自动取 `user_recruitment_pref.daily_capacity − 到期复习 − 抽查`，下界 0）；题卡 `frequency` 展示用动态来源数（与题库列表口径一致），静态 `question_bank.frequency`（聚类变体数）仅作排序信号，不参与展示；item 带 `is_checkin`（state=mastered）标记。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
+| `practice_deck_service.py` | 今日复习（due）题单 + 系统/收藏题单与自定义题单管理。due 队列四桶排序（到期复习 → mastered 抽查「保持手感」→ 新题 → 未来），复习风险权重 = **真实出现频率（动态来源数）× (5 - proficiency)**，新题按动态来源频率降序并受预算约束（`max_new` 参数显式传入，或自动取 `user_recruitment_pref.daily_capacity − 到期复习 − 抽查`，下界 0）；题卡 `frequency` 展示与全部排序均用动态来源数（与题库列表口径一致），静态 `question_bank.frequency`（聚类变体数）仅为聚类元数据，不参与展示/排序（SQLite ORDER BY 不支持别名参与表达式，需显式内联动态频率子查询）；item 带 `is_checkin`（state=mastered）标记。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；练习足迹聚合（打卡热力图/连击/趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件，score≥60 算对） | `db/queries`, `db/connection` |
+| `quality_issue_ops.py` | 聚合质量审查清单业务逻辑（`quality_issue` 表）：`serialize_issue`/`execute_issue`（从 admin_quality 抽出，管理员助手确认路径与 admin_quality 路由共用同一份实现，避免行为漂移）、`list_issues`/`review_issue`、`approve_issue`（`min_confidence=None` 保留单条审批不过滤语义；给值则 SQL 加置信度下限）、`reject_issue`、`batch_approve`（置信度下限强制 `max(0.85, 传入)`） | `clustering_maintenance`, `db/connection` |
+| `admin_assistant_service.py` | 管理员 AI 助手编排：5 个 OpenAI 风格 tool schema + 简体中文系统提示词 + `run_assistant_turn`（LLM tool 循环 ≤8 次，读工具即时执行、写工具只读暂存返回 `requires_confirmation`）、`confirm_and_execute`（**唯一执行点**：单线程单事务重新校验 + reviewed_by 留痕）、`get_assistant_history`（按 session_id+admin_id 隔离）。对话与操作写入 `admin_assistant_log`（role: user/assistant/action）；action 回执以 `[已执行操作]` user 消息喂回 LLM（Anthropic 会把 system 消息合并到顶部，中段回执必须用 user 消息保序）。批量置信度下限 0.85 服务端强制 | `llm`, `quality_issue_ops`, `db/connection` |
 
 ## 核心规则
 
@@ -45,7 +47,8 @@
 - Chat turn 必须先通过 `reserve_chat_turn()` 原子获取 conversation fence；assistant finalize、取消和 turn-owned 副作用必须校验 `turn_id + fence + user_id + status = 'running'`，不能只按 conversation 写入。
 - Durable side effects 必须从 `chat_side_effect_jobs` claim；memory extraction 按 source turn/job 与 content hash 去重，metadata/session notes 更新必须支持 expected version conflict。
 - CandidateSet 只保存题目引用；消费后必须从权威 `question_bank` reload，不能信任客户端或候选集中的自然语言题面。
-- **题卡频率口径**：`practice_deck_service._select_sql` 的展示 `frequency` 必须是动态来源数（活跃面经按 URL 去重），不是 `MAX(静态 qb.frequency, 动态)`——`qb.frequency` 是聚类合并的原始问法条数（同一面经多个问法也计数），当展示频率会虚高（如 1 条面经来源却显示 6）。静态 frequency 只作排序风险权重。
+- **题卡频率口径（唯一权威 = 动态来源数）**：展示 `frequency`、复习风险权重（`frequency × (5 - proficiency)`）、新题排序、排序 tiebreak 全部用动态来源数（活跃面经按 URL 去重、过滤 `deleted_at`，公共+本人 all 口径），与题库列表一致。`question_bank.frequency` 是聚类合并的原始问法条数（同一面经多个问法也计数），仅为聚类元数据，**禁止**参与展示/排序（历史教训：MAX 展示虚高 1 来源显示 6；风险权重用静态列导致显示高频却不靠前）。
+- **SQLite ORDER BY 别名陷阱**：ORDER BY 不支持别名参与表达式——`frequency * (5 - proficiency)` 中的 `frequency` 会**静默解析为真实列** `qb.frequency`（静态列），而非 SELECT 别名；别名只允许整体引用（如裸 `frequency DESC`，同样解析为列名）。要按动态频率排序必须显式内联相关子查询 `({frequency_sql})`（无自动 CSE，单用户题量级开销可忽略）。
 
 ## 修改后必做
 
