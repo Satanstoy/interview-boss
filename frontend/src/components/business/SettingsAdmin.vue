@@ -1,13 +1,20 @@
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Globe } from '@lucide/vue'
+import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Globe, ClipboardCheck } from '@lucide/vue'
 import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, fetchProfile } from '@/services/profileApi.js'
+import SettingsQuality from './SettingsQuality.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AppTooltip from '@/components/common/AppTooltip.vue'
+
+const adminTabs = [
+  { id: 'taxonomy', label: '分类管理' },
+  { id: 'quality', label: '聚合质量' },
+]
+const adminTab = ref('taxonomy')
 
 const props = defineProps({
   taxonomy: { type: Object, default: () => ({ categories: [] }) },
@@ -157,8 +164,21 @@ const onRebuild = () => {
       <p class="text-sm text-muted-foreground mt-1">管理系统级配置（仅管理员可见）</p>
     </div>
 
+    <!-- Tab 切换：分类管理 / 聚合质量 -->
+    <div class="flex items-center gap-1.5 rounded-lg border border-border p-1 w-fit">
+      <button
+        v-for="tab in adminTabs"
+        :key="tab.id"
+        class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+        :class="adminTab === tab.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+        @click="adminTab = tab.id"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
     <!-- Card 1: 分类体系管理 -->
-    <div class="rounded-xl border bg-card p-6 space-y-4">
+    <div v-if="adminTab === 'taxonomy'" class="rounded-xl border bg-card p-6 space-y-4">
       <div class="flex items-center justify-between">
         <h3 class="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
           <FolderTree class="size-4" />
@@ -292,7 +312,7 @@ const onRebuild = () => {
     </Teleport>
 
     <!-- Card 3: 题库操作 (Danger Zone) -->
-    <div class="rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 p-6 space-y-4">
+    <div v-if="adminTab === 'taxonomy'" class="rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 p-6 space-y-4">
       <h3 class="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider flex items-center gap-2">
         <AlertTriangle class="size-4" />
         题库操作
@@ -303,6 +323,21 @@ const onRebuild = () => {
       <Button variant="destructive" size="sm" @click="onRebuild" :disabled="isBuilding">
         {{ isBuilding ? '聚类中...' : '重新聚类题库' }}
       </Button>
+    </div>
+
+    <!-- 聚合质量：审查清单（管理员审批） -->
+    <div v-else-if="adminTab === 'quality'" class="rounded-xl border bg-card p-6">
+      <div class="mb-4">
+        <h3 class="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
+          <ClipboardCheck class="size-4" />
+          聚合质量审查
+        </h3>
+        <p class="text-xs text-muted-foreground mt-1">
+          每周自动审查公共题库聚类质量（误合并 / 重复变体 / 代表题过弱），
+          由 LLM 给出修改建议，管理员审批后执行。记录永久保留可审计。
+        </p>
+      </div>
+      <SettingsQuality />
     </div>
   </div>
 </template>
