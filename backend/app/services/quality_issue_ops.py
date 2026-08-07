@@ -43,13 +43,17 @@ def serialize_issue(row, conn) -> dict:
     target_qb = None
     if row["target_qb_id"] is not None:
         target_qb = conn.execute(
-            "SELECT question FROM question_bank WHERE id = ?", (row["target_qb_id"],)
+            "SELECT question, cat2 FROM question_bank WHERE id = ?", (row["target_qb_id"],)
         ).fetchone()
     return {
         "id": row["id"],
         "qb_id": row["qb_id"],
         "question": qb["question"] if qb else "",
         "cat2": qb["cat2"] if qb else "",
+        "new_cat2": row["new_cat2"] if "new_cat2" in row.keys() else None,
+        "original_questions": (
+            json_loads(qb["original_questions"]) if qb and qb["original_questions"] else []
+        ),
         "variant_index": row["variant_index"],
         "variant": (
             None
@@ -70,6 +74,7 @@ def serialize_issue(row, conn) -> dict:
         "status": row["status"],
         "target_qb_id": row["target_qb_id"],
         "target_question": target_qb["question"] if target_qb else None,
+        "target_cat2": target_qb["cat2"] if target_qb else None,
         "created_at": row["created_at"],
         "reviewed_at": row["reviewed_at"],
     }
@@ -81,17 +86,27 @@ def execute_issue(conn, issue) -> None:
         split_variant,
         dedupe_variant,
         refine_representative,
+        merge_variant,
     )
 
     action = issue["suggested_action"]
     if action == "split":
-        # split 时新题代表题用 LLM 预生成的重写题面（suggested_value），原问法降为新题问法
+        # split 时新题代表题用 LLM 预生成的重写题面（suggested_value），原问法降为新题问法；
+        # 新题分类用 LLM 判定的 new_cat2（不继承原题，误合并常因跨领域）
         new_id = split_variant(
             conn, issue["qb_id"], issue["variant_index"],
             new_representative=issue["suggested_value"],
+            new_cat2=issue["new_cat2"],
         )
         if new_id is None:
             raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
+    elif action == "merge":
+        # 并入目标题（target_qb_id）：来源题移除该问法，目标题加问法
+        ok = merge_variant(
+            conn, issue["qb_id"], issue["variant_index"], issue["target_qb_id"]
+        )
+        if not ok:
+            raise HTTPException(status_code=409, detail="变体/目标题不存在（可能已被处理）")
     elif action == "dedupe":
         removed = dedupe_variant(conn, issue["qb_id"], [issue["variant_index"]])
         if removed == 0:

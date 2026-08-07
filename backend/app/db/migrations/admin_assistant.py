@@ -47,3 +47,19 @@ def _migration_070_quality_issue_target(conn):
         )
     logger.info("migration_070: quality_issue.target_qb_id 已就绪")
 
+
+def _migration_071_quality_issue_new_cat2(conn):
+    """quality_issue 表新增 new_cat2：拆出/并入后新题的分类。
+
+    拆成独立题时 LLM 重写代表题并重新判定分类（不继承原题 cat2）；
+    并入时跟随目标题分类。供卡片「分类变化」展示与 split_variant 执行使用。
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info('quality_issue')")
+    columns = [info[1] for info in cursor.fetchall()]
+    if "new_cat2" not in columns:
+        conn.execute(
+            "ALTER TABLE quality_issue ADD COLUMN new_cat2 TEXT DEFAULT NULL"
+        )
+    logger.info("migration_071: quality_issue.new_cat2 已就绪")
+

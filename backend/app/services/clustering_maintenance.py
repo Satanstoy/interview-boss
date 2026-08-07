@@ -595,12 +595,18 @@ async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE
 
 # ── 审查清单操作（管理员审批后执行）──
 
-def split_variant(conn, qb_id: int, variant_index: int, new_representative: str | None = None) -> int | None:
+def split_variant(
+    conn, qb_id: int, variant_index: int,
+    new_representative: str | None = None, new_cat2: str | None = None,
+) -> int | None:
     """拆出误合并变体：从代表题 oq 移除该变体 + frequency-1，拆出的变体独立入库。
 
     拆出的问法脱离访谈上下文可能不自明（如「关于研究生方向…」）。若传入
     new_representative（清单生成时 LLM 预生成的重写题面），用它作为新题代表题，
     原问法降为新题的 original_questions（保真，可追溯）；未传入则用原问法原文。
+
+    new_cat2（LLM 重写的分类判定）：拆出的问法可能属于别的 cat2（误合并常因跨领域），
+    不应硬继承原题分类；传入则用新分类，未传入回退原题 cat2。
 
     执行前重检（业界实践：审批后执行前再查当前状态）：oq 中不存在该下标 → None。
     Returns: 新题 id / None
@@ -620,6 +626,7 @@ def split_variant(conn, qb_id: int, variant_index: int, new_representative: str 
         return None
     variant = oq[variant_index]
     new_rep = (new_representative or "").strip() or variant
+    new_cat2_val = (new_cat2 or "").strip() or row["cat2"] or ""
 
     new_oq = [q for i, q in enumerate(oq) if i != variant_index]
     conn.execute(
@@ -633,7 +640,7 @@ def split_variant(conn, qb_id: int, variant_index: int, new_representative: str 
         (
             new_rep,
             row["cat1"] or "",
-            row["cat2"] or "",
+            new_cat2_val,
             row["tags"] or "",
             row["difficulty"] or "L2-中等",
             row["owner_id"] if "owner_id" in row.keys() else None,
@@ -671,6 +678,53 @@ def dedupe_variant(conn, qb_id: int, variant_indices: list[int]) -> int:
     )
     conn.commit()
     return len(drop)
+
+
+def merge_variant(conn, source_qb_id: int, variant_index: int, target_qb_id: int) -> bool:
+    """并入误合并变体：从来源题移除该变体 + frequency-1，加入目标题 + frequency+1。
+
+    误合并的问法若更适合并入其他题（跨 cat2 也允许），则不拆成独立题。
+    执行前重检：来源题 oq 中不存在该下标 → False；目标题不存在 → False。
+    Returns: 是否成功
+    """
+    src = conn.execute(
+        "SELECT original_questions FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+        (source_qb_id,),
+    ).fetchone()
+    if not src:
+        return False
+    try:
+        src_oq = json.loads(src["original_questions"] or "[]")
+    except Exception:
+        src_oq = []
+    if not (0 <= variant_index < len(src_oq)):
+        return False
+    variant = src_oq[variant_index]
+
+    tgt = conn.execute(
+        "SELECT original_questions FROM question_bank WHERE id = ? AND deleted_at IS NULL",
+        (target_qb_id,),
+    ).fetchone()
+    if not tgt:
+        return False
+    try:
+        tgt_oq = json.loads(tgt["original_questions"] or "[]")
+    except Exception:
+        tgt_oq = []
+    # 目标题已含该问法 → 直接从来源题移除即可（去重效果），不重复添加
+    new_src_oq = [q for i, q in enumerate(src_oq) if i != variant_index]
+    conn.execute(
+        "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
+        (json.dumps(new_src_oq, ensure_ascii=False), max(len(new_src_oq), 1), source_qb_id),
+    )
+    if variant not in tgt_oq:
+        tgt_oq.append(variant)
+        conn.execute(
+            "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
+            (json.dumps(tgt_oq, ensure_ascii=False), len(tgt_oq), target_qb_id),
+        )
+    conn.commit()
+    return True
 
 
 def refine_representative(conn, qb_id: int, new_representative: str) -> bool:
@@ -719,12 +773,14 @@ CONFIRM_ISSUE_PROMPT = """你是面试题去重专家。以下是聚类中的【
 
 SPLIT_REWRITE_PROMPT = """你是面试题题库管理专家。误合并的一个问法将被拆成独立题，但该问法来自访谈现场，
 脱离上下文后可能不自明（如「关于研究生方向…」）。请基于以下信息，把它重写为
-一个**自明、规范、面试官能直接提问**的独立题面（20-40 字）。
+一个**自明、规范、面试官能直接提问**的独立题面（20-40 字），并从可选分类中
+判定该新题最匹配的 cat2（分类）。
 
 要求：
 - 保留原问法的核心考察点，不改变语义
 - 补充必要的上下文，使其脱离访谈也能看懂
 - 不要用「关于」「对于」这类含糊开头，要像一道完整面试题
+- cat2 只能从【可选分类】中选一个，不得发明新分类
 
 【被拆出的原题目】
 {original}
@@ -735,7 +791,27 @@ SPLIT_REWRITE_PROMPT = """你是面试题题库管理专家。误合并的一个
 【同来源其他问法】
 {others}
 
-输出格式（严格 JSON）：{{"rewritten": "重写后的规范题面", "reason": "一句话说明为什么这样重写"}}"""
+【可选分类（cat2）】
+{categories}
+
+输出格式（严格 JSON）：{{"rewritten": "重写后的规范题面", "cat2": "最匹配的分类", "reason": "一句话说明为什么这样重写"}}"""
+
+FIND_MERGE_TARGET_PROMPT = """你是面试题去重专家。一个问法被误合并进了某道题（考察点不同），需要判断它更适合
+「并入到另一道更合适的题」还是「拆成独立题」。
+
+请从候选目标题中判断：是否存在一道题，该问法的考察点**正好属于**它的范围（并入后不违和）。
+若存在，返回最合适的一道（可跨分类，只要语义匹配）；若都不合适，说明该问法应拆成独立题。
+
+【被并入的问法】
+{variant}
+
+【来源代表题】（当前误合并所在题）
+{source}
+
+【候选目标题】
+{candidates}
+
+输出格式（严格 JSON）：{{"merge": true 或 false, "target_qb_id": 整数或 null, "reason": "一句话"}}"""
 
 # 置信度分级（业界实践：Claro 三级阈值）
 ISSUE_CONFIDENCE_HIGH = 0.85   # 高置信：可批量审批
@@ -754,7 +830,7 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
 
     with get_db_connection() as conn:
         rows = conn.execute(
-            "SELECT id, question, frequency, original_questions FROM question_bank "
+            "SELECT id, question, cat1, cat2, frequency, original_questions FROM question_bank "
             "WHERE deleted_at IS NULL AND frequency > 1 "
             "ORDER BY frequency DESC LIMIT ?",
             (limit,),
@@ -768,7 +844,24 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
             oq = []
         oq = [str(q).strip() for q in oq if str(q).strip()]
         if len(oq) >= 2:
-            candidates.append({"id": r["id"], "question": r["question"], "oq": oq})
+            candidates.append({
+                "id": r["id"],
+                "question": r["question"],
+                "cat1": r["cat1"] or "",
+                "cat2": r["cat2"] or "",
+                "oq": oq,
+            })
+
+    # 岗位分类体系（cat2 候选）：LLM 拆出重写时判定新题分类，不发明新分类
+    from app.db.queries import get_taxonomy_for_position
+
+    taxonomy = get_taxonomy_for_position()
+    cat2_candidates = []
+    for _c in taxonomy.get("categories", []) or []:
+        for _child in (_c.get("children") or []):
+            if _child:
+                cat2_candidates.append(str(_child))
+    categories_text = "\n".join(f"- {c}" for c in cat2_candidates) or "（无）"
 
     created = 0
     for rep in candidates:
@@ -791,8 +884,62 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                 continue
             if not confirmed or confidence < ISSUE_CONFIDENCE_LOW:
                 continue  # 未确认或低置信 → 不进清单
-            # 误合并 → 预生成重写题面（原题目脱离上下文可能不自明，拆成独立题需补偿）
+
+            # 判断「并入其他题」还是「拆成独立题」：跨 cat2 也允许并入（语义匹配为准）
+            merge_target = None
+            try:
+                with get_db_connection() as conn2:
+                    merge_cands = conn2.execute(
+                        "SELECT id, question, cat1, cat2 FROM question_bank "
+                        "WHERE deleted_at IS NULL AND id != ? AND frequency > 0 "
+                        "ORDER BY (cat1 = ?) DESC, frequency DESC LIMIT 6",
+                        (rep["id"], rep["cat1"]),
+                    ).fetchall()
+                cand_text = "\n".join(
+                    f"- #{c['id']}: {c['question']}（{c['cat1']}/{c['cat2']}）" for c in merge_cands
+                ) or "（无）"
+                mraw = await _call_llm_with_retry(
+                    FIND_MERGE_TARGET_PROMPT.format(
+                        variant=variant, source=rep["question"], candidates=cand_text,
+                    ),
+                    system_msg="你是一个面试题去重专家。",
+                    response_format=None, user_id=user_id, model=None,
+                )
+                mdata = parse_json_object(mraw) or {}
+                if mdata.get("merge"):
+                    merge_target = mdata.get("target_qb_id")
+                    # 校验目标题确实是候选之一（防 LLM 编造 id）
+                    valid_ids = {c["id"] for c in merge_cands}
+                    if merge_target not in valid_ids:
+                        merge_target = None
+            except Exception as e:
+                logger.warning(f"[清单生成] 并入判定失败 qb={rep['id']} idx={idx}: {e}")
+
+            if merge_target is not None:
+                # 并入路径：来源题移除该问法，目标题加问法
+                with get_db_connection() as conn:
+                    dup = conn.execute(
+                        "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
+                        "AND status IN ('pending', 'approved')",
+                        (rep["id"], idx),
+                    ).fetchone()
+                    if dup:
+                        continue
+                    conn.execute(
+                        "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
+                        "suggested_action, reason, target_qb_id, confidence, status, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                        (rep["id"], idx, "mismerge", "merge",
+                         data.get("reason", "")[:300], merge_target,
+                         round(confidence, 2)),
+                    )
+                    conn.commit()
+                created += 1
+                continue
+
+            # 拆成独立题：预生成重写题面（原题目脱离上下文可能不自明，需补偿）
             rewritten = None
+            new_cat2 = None
             others = [q for i2, q in enumerate(rep["oq"]) if i2 != idx and q != variant][:5]
             try:
                 raw = await _call_llm_with_retry(
@@ -800,12 +947,14 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                         original=variant,
                         representative=rep["question"],
                         others="\n".join(f"- {o}" for o in others) or "（无）",
+                        categories=categories_text,
                     ),
                     system_msg="你是一个面试题题库管理专家。",
                     response_format=None, user_id=user_id, model=None,
                 )
                 data = parse_json_object(raw) or {}
                 rewritten = (data.get("rewritten") or "").strip() or None
+                new_cat2 = (data.get("cat2") or "").strip() or None
             except Exception as e:
                 logger.warning(f"[清单生成] 拆出重写失败 qb={rep['id']} idx={idx}: {e}")
             # 已存在相同 issue → 跳过（幂等）
@@ -819,10 +968,10 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                     continue
                 conn.execute(
                     "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                    "suggested_action, reason, suggested_value, confidence, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                    "suggested_action, reason, suggested_value, new_cat2, confidence, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
                     (rep["id"], idx, "mismerge", "split",
-                     data.get("reason", "")[:300], rewritten,
+                     data.get("reason", "")[:300], rewritten, new_cat2,
                      round(confidence, 2)),
                 )
                 conn.commit()

@@ -17,7 +17,7 @@
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
 | `KnowledgeGraph.vue` | 知识图谱可视化 |
-| `InsightsOverview.vue` | 洞察总览：证据状态、统计卡片、岗位重点知识四象限图（前置）、「我的练习足迹」图表区（热力图/连击/趋势/难度/雷达/最近刷题）与「本周最该做」行动清单（后置），数据来自 `/api/insights` + `/api/insights/practice-activity` |
+| `InsightsOverview.vue` | 洞察总览：证据状态、统计卡片、岗位高频待练横向条形图（无练习数据时）/岗位重点知识四象限图（有练习数据时）、「我的练习足迹」图表区与「本周最该做」行动清单，数据来自 `/api/insights` + `/api/insights/practice-activity` |
 | `InsightsReadiness.vue` | 岗位准备度能力矩阵；承载旧知识图谱的辅助视图 |
 | `InsightsReviews.vue` | 面试复盘会话列表和无数据入口 |
 | `PracticeHeatmap.vue` | 练习足迹 - GitHub 风格打卡热力图（CSS grid 自绘 90 天，5 档颜色 + AppTooltip） |
@@ -26,7 +26,8 @@
 | `PracticeDifficultyChart.vue` | 练习足迹 - 难度分布环形图（ECharts 饼图 + 正确率 tooltip） |
 | `PracticeRadarChart.vue` | 练习足迹 - 主题熟练度雷达图（ECharts，SRS 熟练度 top8） |
 | `PracticeRecentTimeline.vue` | 练习足迹 - 最近刷题时间线（答题/复习徽标 + 分数/评级 + 相对时间） |
-| `PracticeQuadChart.vue` | 岗位重点知识四象限决策图（ECharts Scatter + graphic 象限背景）：X=熟练度 Y=岗位热度，象限=重点突破/优势/可保持/不急；数据来自 `readiness.items`，象限分类纯函数在 `utils/quadrant.js` |
+| `PracticeQuadChart.vue` | 岗位重点知识四象限决策图（ECharts Scatter + graphic 象限背景）：X=熟练度 Y=岗位热度，象限=重点突破/优势/可保持/不急；数据来自 `readiness.items`，象限分类纯函数在 `utils/quadrant.js`；**有练习数据时洞察总览显示** |
+| `PracticeHighFreqChart.vue` | 岗位高频待练横向条形图（ECharts BarChart 横向）：面经 questions_detail 按 cat2 被问频次降序 Top10，数据来自 snapshot `high_frequency`；**无练习数据时洞察总览显示** |
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |

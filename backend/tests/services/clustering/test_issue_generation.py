@@ -142,3 +142,65 @@ async def test_generate_quality_issues_pre_generates_rewrite(test_db, monkeypatc
         "SELECT suggested_value FROM quality_issue WHERE issue_type='mismerge'"
     ).fetchone()
     assert row[0] == rewritten
+
+
+async def test_generate_quality_issues_split_stores_new_cat2(test_db, monkeypatch):
+    """拆成独立题：重写返回的 cat2 存 new_cat2（LLM 判定新题分类，不继承原题）"""
+    from app.services.clustering_maintenance import generate_quality_issues
+
+    _seed_issue_source(test_db)
+    rewritten = "结合你的研究生方向，为什么没有延续该方向学习就业？"
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        if "候选目标题" in prompt:
+            # 并入判定：都不合适 → 拆
+            return json.dumps({"merge": False, "target_qb_id": None, "reason": "无合适目标"})
+        if "重写后的规范题面" in prompt:
+            return json.dumps({"rewritten": rewritten, "cat2": "G.个人规划", "reason": "脱离上下文需补上下文"})
+        if "关于研究生方向" in prompt:
+            return json.dumps({"confirm": True, "confidence": 0.92, "reason": "考察点不同"})
+        return json.dumps({"confirm": False, "confidence": 0.6, "reason": "同一题"})
+
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: test_db)
+
+    result = await generate_quality_issues(user_id=None, limit=10)
+    assert result["created"] == 1
+    row = test_db.execute(
+        "SELECT suggested_value, new_cat2 FROM quality_issue WHERE issue_type='mismerge'"
+    ).fetchone()
+    assert row[0] == rewritten
+    assert row[1] == "G.个人规划"  # LLM 判定新分类，而非继承 B2.RAG系统设计
+
+
+async def test_generate_quality_issues_merge_path(test_db, monkeypatch):
+    """误合并判定为并入：存 merge issue + target_qb_id（跨 cat2 目标）"""
+    from app.services.clustering_maintenance import generate_quality_issues
+
+    _seed_issue_source(test_db)
+    # 目标题：跨 cat2（G.个人规划 vs 来源 B2.RAG系统设计）
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, status, cat1, cat2, original_questions) VALUES "
+        "(2, '为什么选择现在的职业方向', 1, 'approved', 'G', 'G.个人规划', ?)",
+        (json.dumps(["为什么选择现在的职业方向"], ensure_ascii=False),),
+    )
+    test_db.commit()
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        if "候选目标题" in prompt:
+            # 并入判定：并入到 #2
+            return json.dumps({"merge": True, "target_qb_id": 2, "reason": "考察点匹配"})
+        if "关于研究生方向" in prompt:
+            return json.dumps({"confirm": True, "confidence": 0.92, "reason": "考察点不同"})
+        return json.dumps({"confirm": False, "confidence": 0.6, "reason": "同一题"})
+
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: test_db)
+
+    result = await generate_quality_issues(user_id=None, limit=10)
+    assert result["created"] == 1
+    row = test_db.execute(
+        "SELECT suggested_action, target_qb_id FROM quality_issue WHERE issue_type='mismerge'"
+    ).fetchone()
+    assert row[0] == "merge"
+    assert row[1] == 2

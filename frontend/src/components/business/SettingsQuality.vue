@@ -44,12 +44,23 @@ const targetOf = (issue) => {
     return { label: '并入到 #' + issue.target_qb_id, text: issue.target_question }
   }
   if (action === 'refine_representative') {
-    return { label: '新题面', text: issue.suggested_value }
+    return { label: '新代表题', text: issue.suggested_value }
   }
   if (action === 'split') {
     return { label: '新独立题', text: issue.suggested_value || issue.variant }
   }
   return { label: '目标题', text: issue.question }
+}
+
+// 分类变化：操作后新题分类与当前不同才返回展示文本（相同则空 → 不显示）
+const catChange = (issue) => {
+  const action = issue.suggested_action
+  let newCat
+  if (action === 'split') newCat = issue.new_cat2
+  else if (action === 'merge') newCat = issue.target_cat2
+  if (!newCat) return ''
+  if (newCat === issue.cat2) return ''
+  return `分类：${issue.cat2 || '（无）'} → ${newCat}`
 }
 
 const loadIssues = async () => {
@@ -187,19 +198,17 @@ onMounted(loadIssues)
               </span>
             </div>
 
-            <!-- 前后对照：原代表题+原题目 → 目标题 -->
+            <!-- 前后对照：当前（代表题+面经原题） → 操作后（只显示被处理题） -->
             <div class="mt-2 grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
-              <!-- 原代表题 + 原题目 -->
+              <!-- 当前列：代表题 + 面经原题 -->
               <div class="min-w-0 rounded-md border border-border bg-muted/60 px-2.5 py-2">
-                <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">原代表题</div>
+                <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">当前</div>
                 <div class="text-xs font-medium leading-snug">{{ issue.question }}</div>
                 <div
                   v-if="issue.variant && issue.suggested_action !== 'refine_representative'"
                   class="mt-2 border-t border-border/70 pt-2"
                 >
-                  <div class="text-[10px] font-semibold text-destructive uppercase tracking-wide mb-0.5">
-                    原题目（要{{ issue.suggested_action === 'split' ? '拆出' : '并入' }}）
-                  </div>
+                  <div class="text-[10px] font-semibold text-destructive uppercase tracking-wide mb-0.5">面经原题</div>
                   <div class="text-[11px] text-destructive leading-snug">{{ issue.variant }}</div>
                 </div>
               </div>
@@ -207,13 +216,30 @@ onMounted(loadIssues)
               <div class="flex items-center justify-center text-muted-foreground">
                 <ArrowRight :size="14" />
               </div>
-              <!-- 目标题 -->
+              <!-- 操作后列：只显示被处理的那道题 -->
               <div class="min-w-0 rounded-md border border-primary/25 bg-primary/5 px-2.5 py-2">
                 <div class="text-[10px] font-semibold text-primary uppercase tracking-wide mb-1">
                   {{ targetOf(issue).label }}
                 </div>
                 <div class="text-xs font-medium leading-snug">
                   {{ targetOf(issue).text }}
+                </div>
+                <!-- 分类变化：有变化才显示 -->
+                <div
+                  v-if="catChange(issue)"
+                  class="mt-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+                >
+                  {{ catChange(issue) }}
+                </div>
+                <!-- 换成规范代表题：展示面经原题，供判断改写质量 -->
+                <div
+                  v-if="issue.suggested_action === 'refine_representative' && issue.original_questions?.length"
+                  class="mt-1.5 border-t border-primary/20 pt-1.5"
+                >
+                  <div class="text-[10px] font-semibold text-muted-foreground mb-0.5">面经原题（该聚类实际问过）</div>
+                  <div v-for="(oq, oi) in issue.original_questions" :key="oi" class="text-[11px] text-muted-foreground leading-snug truncate">
+                    · {{ oq }}
+                  </div>
                 </div>
               </div>
             </div>

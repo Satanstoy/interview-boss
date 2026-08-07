@@ -1,4 +1,4 @@
-"""审查清单操作函数测试：split_variant / dedupe_variant / refine_representative"""
+"""审查清单操作函数测试：split_variant / dedupe_variant / refine_representative / merge_variant"""
 import json
 
 
@@ -93,6 +93,48 @@ def test_split_variant_falls_back_to_original_without_rewrite(test_db):
         "SELECT question FROM question_bank WHERE id = ?", (new_id,)
     ).fetchone()
     assert new_row[0] == "关于研究生方向"
+
+
+def test_merge_variant_moves_question(test_db):
+    """并入：来源题移除该问法 + frequency-1，目标题加问法 + frequency+1"""
+    from app.services.clustering_maintenance import merge_variant
+
+    _seed_issue_cluster(test_db)
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, status, cat2, original_questions) VALUES "
+        "(2, '自我介绍和项目经历', 1, 'approved', 'G.个人规划', ?)",
+        (json.dumps(["自我介绍"], ensure_ascii=False),),
+    )
+    test_db.commit()
+
+    ok = merge_variant(test_db, source_qb_id=1, variant_index=2, target_qb_id=2)
+    assert ok is True
+
+    # 来源题移除该问法
+    src = test_db.execute(
+        "SELECT frequency, original_questions FROM question_bank WHERE id = 1"
+    ).fetchone()
+    assert "关于研究生方向" not in json.loads(src[1])
+    assert src[0] == 3  # frequency 4 → 3
+    # 目标题加该问法
+    tgt = test_db.execute(
+        "SELECT frequency, original_questions FROM question_bank WHERE id = 2"
+    ).fetchone()
+    assert "关于研究生方向" in json.loads(tgt[1])
+    assert tgt[0] == 2
+
+
+def test_merge_variant_target_missing_returns_false(test_db):
+    """目标题不存在 → 不操作返回 False"""
+    from app.services.clustering_maintenance import merge_variant
+
+    _seed_issue_cluster(test_db)
+    assert merge_variant(test_db, source_qb_id=1, variant_index=2, target_qb_id=999) is False
+    # 来源题未被改动
+    src = test_db.execute(
+        "SELECT frequency FROM question_bank WHERE id = 1"
+    ).fetchone()
+    assert src[0] == 3
 
 
 def test_refine_representative_swaps_and_keeps_original(test_db):
