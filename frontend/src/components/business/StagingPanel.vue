@@ -16,6 +16,7 @@ import {
 import { createSubmitJob } from '@/services/dataApi.js'
 import { useSubmitJobs, attachJob } from '@/composables/useSubmitJobs.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
+import { useConfirm } from '@/composables/useNotification.js'
 import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
 
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -33,7 +34,8 @@ const props = defineProps({
 
 const emit = defineEmits(['submitted'])
 
-const { activeJobs } = useSubmitJobs()
+const { activeJobs, removeJob } = useSubmitJobs()
+const { confirm: showConfirm } = useConfirm()
 
 const TEXT_MAX_LENGTH = 50000
 const MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -77,9 +79,8 @@ watch(() => props.activeSeason, (season) => {
   if (season) importConfig.season = season
 })
 
-watch(() => props.isAdmin, (isAdmin) => {
-  if (!isAdmin) importConfig.target = 'personal'
-}, { immediate: true })
+// 分享设置对所有用户一致：share → 公共审核队列（需管理员审核），private → 仅自己可见。
+// 不做非管理员强制改写，否则 select 会收到非法值（'personal' 不在选项里）导致显示空白。
 
 function onDragOver(e) {
   e.preventDefault()
@@ -116,7 +117,11 @@ function handleFiles(files) {
   submitError.value = ''
 
   for (const file of files) {
-    if (!file.type.startsWith('image/')) continue
+    if (!file.type.startsWith('image/')) {
+      // 拖入/粘贴非图片文件时给出反馈，避免用户以为功能没反应
+      toast.info(`已忽略非图片文件：${file.name}`)
+      continue
+    }
     if (images.value.length >= MAX_FILES) {
       submitError.value = `最多上传 ${MAX_FILES} 张图片`
       break
@@ -157,6 +162,23 @@ function resetForm() {
   clearImages()
   submitError.value = ''
   submitSuccess.value = false
+}
+
+/**
+ * 清空入口：有内容时先确认，防止误点清空掉粘贴的长文本
+ * （程序化清空 textarea 会破坏浏览器撤销栈，无法 Ctrl+Z 找回）
+ */
+async function onClearClick() {
+  if (isSubmitting.value) return
+  if (!rawText.value.trim() && images.value.length === 0) {
+    resetForm()
+    return
+  }
+  const ok = await showConfirm(
+    '将清空已输入的全部内容（文本 / 截图 / 来源链接），此操作不可恢复。',
+    { title: '确认清空', variant: 'warning', confirmLabel: '清空', cancelLabel: '取消' },
+  )
+  if (ok) resetForm()
 }
 
 async function onSubmit() {
@@ -232,6 +254,59 @@ defineExpose({ onSubmit, isSubmitting })
         <p class="text-xs text-muted-foreground">
           粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。
         </p>
+      </div>
+
+      <!-- 后台任务实时进度列表 -->
+      <div v-if="activeJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+        <div
+          v-for="job in activeJobs"
+          :key="job.id"
+          data-testid="import-job-item"
+          class="flex items-center gap-2.5"
+        >
+          <Loader2
+            v-if="job.status === 'pending' || job.status === 'running'"
+            class="h-4 w-4 shrink-0 animate-spin text-primary"
+          />
+          <CheckCircle2
+            v-else-if="job.status === 'completed'"
+            class="h-4 w-4 shrink-0 text-green-600 dark:text-green-400"
+          />
+          <AlertCircle v-else class="h-4 w-4 shrink-0 text-destructive" />
+
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span
+                class="truncate text-xs font-medium"
+                :class="job.status === 'failed' ? 'text-destructive' : 'text-foreground'"
+              >
+                {{ job.status === 'failed' ? (job.error || '处理失败') : (job.message || '等待中...') }}
+              </span>
+              <span
+                v-if="job.status !== 'failed'"
+                class="shrink-0 text-xs tabular-nums text-muted-foreground"
+              >
+                {{ job.percent }}%
+              </span>
+            </div>
+            <div v-if="job.status !== 'failed'" class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+              <div
+                class="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                :style="{ width: job.percent + '%' }"
+              />
+            </div>
+          </div>
+
+          <button
+            v-if="job.status === 'failed'"
+            type="button"
+            class="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            :disabled="isSubmitting"
+            @click="removeJob(job.id)"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
 
@@ -414,7 +489,7 @@ defineExpose({ onSubmit, isSubmitting })
           size="sm"
           class="flex-1 text-muted-foreground sm:flex-none"
           :disabled="isSubmitting"
-          @click="resetForm"
+          @click="onClearClick"
         >
           清空
         </Button>

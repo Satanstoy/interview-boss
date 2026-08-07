@@ -1,6 +1,15 @@
 /**
  * 导入/提交 E2E 测试 — 覆盖 StagingPanel 提交流程
  * 所有 API 均通过 page.route() mock，不依赖真实后端
+ *
+ * 覆盖：
+ * - 面板基本结构（文本/图片/来源链接/类型/季节）
+ * - 提交按钮禁用/可用状态
+ * - URL 前端校验错误
+ * - 后台 Job 实时进度列表（SSE）
+ * - 分享设置对所有用户可选（share/private）
+ * - 非图片文件忽略提示
+ * - 清空非空内容需确认
  */
 import { test, expect } from '@playwright/test'
 
@@ -110,13 +119,22 @@ async function mockAllAPIs(page) {
     }
   })
 
-  // Profile
+  // Profile — 先注册通用 profile，再覆盖更具体的 llm-status（后注册优先匹配）
   await page.route('**/api/profile**', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { id: 999, username: 'e2e_tester', email: 'test@example.com', current_position: '前端开发工程师', current_position_id: 1, positions: [{ id: 1, name: '前端开发工程师' }], llm_configured: true, categories: [] } })
     } else {
       await route.fulfill({ json: { status: 'success' } })
     }
+  })
+  // 模型预检守卫：configured + connected 都必须为 true，否则提交会被 ModelGuard 拦截
+  await page.route('**/api/profile/llm/status**', async (route) => {
+    await route.fulfill({ json: { configured: true, connected: true, model: 'mock-model' } })
+  })
+
+  // Submit jobs — 页面加载时 restoreActiveJobs 会请求 active 列表
+  await page.route('**/api/submit-jobs/active', async (route) => {
+    await route.fulfill({ json: [] })
   })
 
   // Interview
@@ -169,12 +187,13 @@ async function mockAllAPIs(page) {
   })
 }
 
-// ── Helper: 以已登录状态进入主页 ──
-async function gotoLoggedIn(page) {
+// ── Helper: 以已登录状态进入导入页 ──
+async function gotoImportTab(page) {
   await mockAllAPIs(page)
   await page.goto('/')
   await page.waitForSelector('main', { timeout: 15000 })
-  await page.waitForTimeout(1000)
+  await page.getByRole('button', { name: '导入' }).click()
+  await page.waitForTimeout(500)
 }
 
 // ═══════════════════════════════════════════════
@@ -182,112 +201,134 @@ async function gotoLoggedIn(page) {
 // ═══════════════════════════════════════════════
 test.describe('导入 Tab — StagingPanel 提交流程', () => {
   test.beforeEach(async ({ page }) => {
-    await gotoLoggedIn(page)
-    // 点击导入 Tab
-    await page.getByRole('button', { name: '导入' }).click()
-    await page.waitForTimeout(500)
+    await gotoImportTab(page)
   })
 
   test('导入 Tab 可点击并切换到提交面板', async ({ page }) => {
-    // StagingPanel 标题应出现
-    await expect(page.getByText('导入面经 / JD')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('提交后由后台任务完成提取和归档')).toBeVisible({ timeout: 5000 })
   })
 
   test('来源链接输入框存在', async ({ page }) => {
-    // 来源链接 label
-    await expect(page.getByText('来源链接')).toBeVisible({ timeout: 5000 })
-    // 输入框
-    const urlInput = page.locator('input[placeholder*="小红书"], input[placeholder*="牛客"]').first()
-    await expect(urlInput).toBeVisible()
+    await expect(page.getByText('来源链接（可选）')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('input[placeholder="https://..."]')).toBeVisible()
   })
 
   test('文本输入框存在', async ({ page }) => {
-    // 文本内容 label
     await expect(page.getByText('文本内容').first()).toBeVisible({ timeout: 5000 })
-    // textarea
-    const textarea = page.locator('textarea[placeholder*="粘贴面经"], textarea[placeholder*="纯文本"]').first()
-    await expect(textarea).toBeVisible()
+    await expect(page.locator('textarea[placeholder*="粘贴面经"]')).toBeVisible()
   })
 
   test('图片上传区域存在', async ({ page }) => {
-    // "+ 选择图片" 按钮
-    await expect(page.getByText('+ 选择图片').first()).toBeVisible({ timeout: 5000 })
-    // 图片计数标签
-    await expect(page.getByText('图片 (0 张)').first()).toBeVisible()
+    await expect(page.getByText('拖拽图片到此处，或点击选择')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('0 / 20')).toBeVisible()
   })
 
-  test('导入类型选择器存在', async ({ page }) => {
-    await expect(page.getByText('导入类型').first()).toBeVisible({ timeout: 5000 })
+  test('类型选择器存在', async ({ page }) => {
+    await expect(page.getByText('类型').first()).toBeVisible({ timeout: 5000 })
   })
 
-  test('招聘季节选择器存在', async ({ page }) => {
-    await expect(page.getByText('招聘季节').first()).toBeVisible({ timeout: 5000 })
+  test('季节选择器存在', async ({ page }) => {
+    await expect(page.getByText('季节').first()).toBeVisible({ timeout: 5000 })
+  })
+
+  test('分享设置对所有用户可选 — 非管理员默认仅自己可见', async ({ page }) => {
+    // 非管理员（MOCK_USER.is_admin=false）下拉不应显示为空值
+    await expect(page.getByText('仅自己可见').first()).toBeVisible({ timeout: 5000 })
+  })
+
+  test('分享设置对所有用户可选 — 非管理员可选择分享到公共题库', async ({ page }) => {
+    // reka-ui SelectTrigger 是 role="combobox"，直接点击 trigger 上的值文本打开下拉
+    await page.getByText('仅自己可见').first().click()
+    await page.waitForTimeout(300)
+    await expect(page.getByRole('option', { name: '分享到公共题库' })).toBeVisible()
+    await expect(page.getByRole('option', { name: '仅自己可见' })).toBeVisible()
+    await page.getByRole('option', { name: '分享到公共题库' }).click()
+    await page.waitForTimeout(300)
+    // 选中后 trigger 应显示新值（旧 bug：非 admin 被强制为非法值 'personal' 导致空白）
+    await expect(page.getByText('分享到公共题库').first()).toBeVisible()
   })
 
   test('空内容时提交按钮禁用', async ({ page }) => {
     const submitBtn = page.getByRole('button', { name: '提交解析' })
     await expect(submitBtn).toBeVisible({ timeout: 5000 })
-    // 没有文本内容时应禁用
     await expect(submitBtn).toBeDisabled()
   })
 
   test('输入文本后提交按钮可用', async ({ page }) => {
-    const textarea = page.locator('textarea[placeholder*="粘贴面经"], textarea[placeholder*="纯文本"]').first()
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
     await textarea.fill('这是一段面试经历的内容')
     await page.waitForTimeout(200)
-
     const submitBtn = page.getByRole('button', { name: '提交解析' })
     await expect(submitBtn).toBeEnabled()
   })
 
   test('无效 URL 提交显示错误提示', async ({ page }) => {
-    // 填入无效URL
-    const urlInput = page.locator('input[placeholder*="小红书"], input[placeholder*="牛客"]').first()
-    await urlInput.fill('not-a-valid-url')
-
-    // 填入文本内容
-    const textarea = page.locator('textarea[placeholder*="粘贴面经"], textarea[placeholder*="纯文本"]').first()
+    await page.locator('input[placeholder="https://..."]').fill('not-a-valid-url')
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
     await textarea.fill('测试内容')
-
-    // 点击提交
-    const submitBtn = page.getByRole('button', { name: '提交解析' })
-    await submitBtn.click()
+    await page.getByRole('button', { name: '提交解析' }).click()
     await page.waitForTimeout(500)
-
-    // 应显示错误信息
     const body = await page.locator('body').textContent()
     expect(body.includes('链接') || body.includes('URL') || body.includes('格式') || body.includes('错误')).toBeTruthy()
   })
 
-  test('提交后显示成功结果', async ({ page }) => {
-    // Mock SSE 提交接口
-    await page.route('**/api/submit-stream-v2', async (route) => {
-      const sseData = [
-        'data: {"step":"extract","message":"正在提取内容","data":{"question_count":3}}',
-        'data: {"step":"fill","message":"补全信息","data":{}}',
-        'data: {"step":"tag","message":"标注题目","data":{}}',
-        'data: {"step":"match","message":"匹配聚类","data":{"matched_count":1,"unmatched_count":2}}',
-        'data: {"step":"save","message":"保存入库","data":{"elapsed_seconds":2.5}}',
-      ].join('\n') + '\n'
-      // The final result is returned as a done-type event
+  test('提交后显示实时任务进度列表', async ({ page }) => {
+    // Mock 后台 Job 创建 + SSE 进度流
+    await page.route('**/api/submit-jobs', async (route) => {
+      await route.fulfill({ status: 200, json: { job_id: 321, status: 'pending', message: '上传任务已创建' } })
+    })
+    await page.route('**/api/jobs/321/stream', async (route) => {
+      // 不发送 done 事件，让任务停在 running 状态，进度中间态可稳定断言
+      const sseBody = [
+        'data: {"type":"progress","status":"running","current":1,"total":6,"message":"正在提取内容"}\n\n',
+        'data: {"type":"progress","status":"running","current":2,"total":6,"message":"正在提取面试题"}\n\n',
+      ].join('')
       await route.fulfill({
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
-        body: sseData + 'data: {"type":"done","doc_type":"interview","target":"personal","question_count":3}\n\n',
+        body: sseBody,
       })
     })
 
-    // 填入文本
-    const textarea = page.locator('textarea[placeholder*="粘贴面经"], textarea[placeholder*="纯文本"]').first()
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
     await textarea.fill('字节跳动一面：问了闭包、Promise、Vue响应式原理')
+    await page.getByRole('button', { name: '提交解析' }).click()
 
-    // 点击提交
-    const submitBtn = page.getByRole('button', { name: '提交解析' })
-    await submitBtn.click()
-    await page.waitForTimeout(3000)
+    // 任务进度条目出现，带阶段文案和百分比（SiteHeader 顶栏也有全局任务按钮，需在条目内精确定位）
+    await expect(page.locator('[data-testid="import-job-item"]')).toHaveCount(1, { timeout: 5000 })
+    await expect(page.getByTestId('import-job-item').getByText('正在提取面试题')).toBeVisible()
+    await expect(page.getByTestId('import-job-item').getByText('33%')).toBeVisible()
+    // 头部徽标显示处理中数量
+    await expect(page.getByText('1 个任务处理中')).toBeVisible()
+  })
 
-    // 应显示提交成功或进度信息
-    const body = await page.locator('body').textContent()
-    expect(body.includes('提交成功') || body.includes('提取') || body.includes('导入') || body.includes('完成')).toBeTruthy()
+  test('拖入非图片文件提示忽略', async ({ page }) => {
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('hello world'),
+    })
+    await page.waitForTimeout(500)
+    await expect(page.getByText('已忽略非图片文件：notes.txt')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('清空非空内容需确认', async ({ page }) => {
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
+    await textarea.fill('测试内容')
+
+    // 第一次点击清空 → 出现确认框，取消则内容保留
+    await page.getByRole('button', { name: '清空' }).click()
+    const dialog = page.getByRole('alertdialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await expect(dialog.getByText('确认清空')).toBeVisible()
+    await dialog.getByRole('button', { name: '取消' }).click()
+    await page.waitForTimeout(300)
+    await expect(textarea).toHaveValue('测试内容')
+
+    // 第二次点击清空 → 确认后清空
+    await page.getByRole('button', { name: '清空' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: '清空' }).click()
+    await page.waitForTimeout(300)
+    await expect(textarea).toHaveValue('')
   })
 })

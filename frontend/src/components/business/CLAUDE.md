@@ -45,9 +45,10 @@
 | `InterviewDistributionSettings.vue` | 五类模拟面试题型比例与主问题数；系统默认或用户自定义保存 |
 | `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数；保存/清除后失效模型缓存；「测试连接」实时探测模型可用性） |
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
-| `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；含「聚合质量」tab：审查清单审批 split/dedupe/精炼代表题） |
+| `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；含「聚合质量」tab：子分段切换「审查清单」|「AI 助手」；审查清单审批 split/dedupe/精炼代表题） |
 | `SettingsQuality.vue` | 设置 - 聚合质量审查清单（待审批/已处理/已拒绝三态；LLM 建议题面展示；批准/拒绝/批量高置信；记录永久保留） |
-| `StagingPanel.vue` | 暂存面板（导入时分享设置：分享到公共题库 / 仅自己可见，所有用户可见） |
+| `SettingsQualityAssistant.vue` | 设置 - 聚合质量 AI 助手（仅管理员）：自然语言筛选/批量处理清单；工具轨迹可折叠展示；写操作渲染「待确认操作」卡片（确认→`/confirm`→`{message:""}` 续接让 LLM 确认并提下一步）；session_id 存 localStorage |
+| `StagingPanel.vue` | 暂存面板（导入工作台）：文本/截图/来源链接三路输入 + 类型/季节/分享设置；分享设置（公共审核队列/仅自己可见）对所有用户可选；头部展示后台 Job 实时进度列表（阶段文案 + 进度条，失败红字可关闭）；非图片文件忽略时 toast 提示；清空非空内容需确认 |
 | `UserMenu.vue` | 用户菜单 |
 
 ## 核心规则
