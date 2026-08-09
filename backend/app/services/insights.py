@@ -136,7 +136,7 @@ def build_insights_snapshot(user: dict) -> dict:
         readiness_items = []
         proficiency_by_topic = {
             row["topic"]: row["proficiency"]
-            for row in _radar_topics(conn, user_id, limit=10000)
+            for row in _radar_topics(conn, user_id, position_name, limit=10000)
         }
         for topic_name, topic in topic_rows.items():
             practice = practice_by_topic[topic_name]
@@ -360,16 +360,19 @@ def _streak_stats(days: set[str], today: str) -> dict:
     return {"current": current, "longest": longest}
 
 
-def _radar_topics(conn, user_id: int, limit: int = 8) -> list[dict]:
-    """按 SRS 熟练度取前 N 个主题（cat2 fallback cat1）。"""
+def _radar_topics(
+    conn, user_id: int, position_name: str, limit: int = 8
+) -> list[dict]:
+    """取当前岗位最需要巩固的 N 个 SRS 主题（cat2 fallback cat1）。"""
     rows = conn.execute(
         "SELECT COALESCE(NULLIF(qb.cat2, ''), NULLIF(qb.cat1, ''), '未分类') AS topic, "
         "AVG(uqr.proficiency) AS prof "
         "FROM user_question_review uqr "
         "JOIN question_bank qb ON qb.id = uqr.question_bank_id "
         "WHERE uqr.user_id = ? AND qb.deleted_at IS NULL "
-        "GROUP BY topic ORDER BY prof DESC LIMIT ?",
-        (user_id, limit),
+        "AND (qb.job_position = ? OR qb.job_position = '' OR qb.job_position IS NULL) "
+        "GROUP BY topic ORDER BY prof ASC, topic ASC LIMIT ?",
+        (user_id, position_name, limit),
     ).fetchall()
     return [{"topic": row["topic"], "proficiency": round(row["prof"] or 0)} for row in rows]
 
@@ -393,6 +396,8 @@ def _difficulty_stats(conn, user_id: int) -> list[dict]:
             {
                 "difficulty": _difficulty_label(row["d"]),
                 "count": total,
+                "correct_count": correct,
+                "needs_work_count": total - correct,
                 "correct_rate": round(correct * 100 / total),
             }
         )
@@ -453,13 +458,14 @@ def build_practice_activity(user: dict) -> dict:
     """同步聚合当前用户的练习足迹数据（热力图/连击/趋势/雷达/难度/最近刷题）。"""
 
     user_id = int(user["id"])
+    _, position_name = get_user_job_position(user_id)
     with get_db_connection() as conn:
         today = datetime.now().date()
         heatmap = _build_daily_series(conn, user_id, 90, today)
         trend = _build_daily_series(conn, user_id, 30, today)
         days = _practice_days(conn, user_id)
         streak = _streak_stats(days, today.strftime("%Y-%m-%d"))
-        radar = _radar_topics(conn, user_id)
+        radar = _radar_topics(conn, user_id, position_name)
         difficulty = _difficulty_stats(conn, user_id)
         recent = _recent_activities(conn, user_id)
 

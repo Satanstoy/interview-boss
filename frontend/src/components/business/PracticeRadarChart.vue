@@ -1,10 +1,10 @@
 <template>
   <div class="flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
     <div>
-      <h3 class="text-sm font-semibold text-card-foreground">主题熟练度</h3>
-      <p class="mt-0.5 text-xs text-muted-foreground">按主题的间隔复习熟练度</p>
+      <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
+      <p class="mt-0.5 text-xs text-muted-foreground">当前目标岗位 · SRS 熟练度 · 最需要巩固的最多 8 个主题</p>
     </div>
-    <div v-if="props.data.length" ref="chartRef" class="mt-2 min-h-[240px] w-full flex-1" style="min-width: 0;" />
+    <div v-if="chartData.length" ref="chartRef" class="mt-2 min-h-[240px] w-full flex-1" style="min-width: 0;" />
     <div v-else class="flex flex-1 items-center justify-center py-10 text-sm text-muted-foreground">
       用闪卡复习后这里会生成熟练度雷达
     </div>
@@ -12,7 +12,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
@@ -27,6 +27,19 @@ const props = defineProps({
 })
 
 const chartRef = ref(null)
+const chartData = computed(() =>
+  [...props.data]
+    .filter((item) => Number.isFinite(Number(item.proficiency)))
+    .sort((a, b) => Number(a.proficiency) - Number(b.proficiency))
+    .slice(0, 8),
+)
+const weakestTopic = computed(() => chartData.value[0] || null)
+const headline = computed(() => {
+  const weakest = weakestTopic.value
+  if (!weakest) return '当前岗位的薄弱主题'
+  if (Number(weakest.proficiency) >= 80) return '已练主题整体稳定，可以扩展新的考点'
+  return `“${shortName(weakest.topic)}”熟练度最低，优先复习`
+})
 
 function shortName(name) {
   return name.length > 6 ? `${name.slice(0, 6)}…` : name
@@ -38,10 +51,13 @@ const buildOption = (dark) => {
     ...EASE,
     tooltip: {
       ...porcelainTooltip(dark),
-      formatter: (params) => `${params.name}: 熟练度 ${params.value}%`,
+      renderMode: 'richText',
+      formatter: () => chartData.value
+        .map((item) => `${item.topic}  ${Math.round(Number(item.proficiency))}%`)
+        .join('\n'),
     },
     radar: {
-      indicator: props.data.map((item) => ({ name: shortName(item.topic), max: 100 })),
+      indicator: chartData.value.map((item) => ({ name: shortName(item.topic), max: 100 })),
       radius: '68%',
       center: ['50%', '55%'],
       splitNumber: 3,
@@ -55,7 +71,7 @@ const buildOption = (dark) => {
         data: [
           {
             name: '熟练度',
-            value: props.data.map((item) => item.proficiency),
+            value: chartData.value.map((item) => item.proficiency),
             areaStyle: { color: dark ? 'rgba(237,239,241,.16)' : 'rgba(51,78,172,.16)' },
             lineStyle: { color: t.data, width: 2.5 },
             itemStyle: { color: t.data },
@@ -68,5 +84,5 @@ const buildOption = (dark) => {
 }
 
 const { refresh } = useEChart(chartRef, buildOption)
-watch(() => props.data, refresh)
+watch(() => props.data, refresh, { deep: true })
 </script>

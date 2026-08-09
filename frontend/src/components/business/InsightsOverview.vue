@@ -82,7 +82,7 @@ function goPractice() {
       <div class="flex items-center justify-between gap-4">
         <div>
           <h2 class="text-lg font-semibold tracking-tight text-foreground">我的练习足迹</h2>
-          <p class="mt-0.5 text-sm text-muted-foreground">坚持每天刷题，图表会见证你的成长。</p>
+          <p class="mt-0.5 text-sm text-muted-foreground">看练习动量、难度突破口和岗位薄弱主题，决定今天最值得补什么。</p>
         </div>
         <Button variant="outline" size="sm" @click="goPractice">去刷题 <ArrowRight class="h-4 w-4" /></Button>
       </div>

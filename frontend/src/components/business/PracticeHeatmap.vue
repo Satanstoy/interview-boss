@@ -8,13 +8,13 @@
       <div>
         <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          一根发丝 = 一天 · 实心为工作日 · 空心为周末 · 高度 = 当天练习量
+          {{ momentumSummary }} · 一根发丝 = 一天 · 高度 = 当天练习量
         </p>
       </div>
       <span
         v-if="totalCount > 0"
         class="shrink-0 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs font-semibold text-foreground"
-      >共 {{ totalCount }} 题</span>
+      >近 14 天 {{ recent14Count }} 题</span>
     </div>
 
     <div v-if="days.length && totalCount > 0" class="mt-3 min-h-[230px] w-full flex-1 overflow-x-auto custom-scrollbar">
@@ -28,6 +28,25 @@
         @click="onChartClick"
         >
           <rect x="0" y="0" width="800" height="250" fill="transparent" />
+          <g v-if="days.length > 14">
+            <line
+              :x1="recentWindowX"
+              y1="18"
+              :x2="recentWindowX"
+              y2="207"
+              :stroke="palette.label"
+              stroke-width="1"
+              stroke-dasharray="3 4"
+            />
+            <text
+              :x="recentWindowX + 5"
+              y="13"
+              font-size="8"
+              font-weight="700"
+              letter-spacing="0.8"
+              :fill="palette.label"
+            >最近 14 天</text>
+          </g>
           <g v-for="day in days" :key="day.date" class="day-mark">
           <line
             :x1="day.x"
@@ -143,6 +162,13 @@ let observer = null
 const palette = computed(() => porcelain(isDark.value))
 const totalCount = computed(() => props.data.reduce((sum, day) => sum + (Number(day.count) || 0), 0))
 const maxCount = computed(() => Math.max(...props.data.map((day) => Number(day.count) || 0), 1))
+const recent14Count = computed(() =>
+  props.data.slice(-14).reduce((sum, day) => sum + (Number(day.count) || 0), 0),
+)
+const previous14Count = computed(() =>
+  props.data.slice(-28, -14).reduce((sum, day) => sum + (Number(day.count) || 0), 0),
+)
+const momentumDelta = computed(() => recent14Count.value - previous14Count.value)
 
 function deterministic(index, salt) {
   return Math.abs(((index + 1) * 73856093) ^ (salt * 19349663)) % 1000 / 1000
@@ -200,6 +226,7 @@ const monthLabels = computed(() => {
   }
   return labels
 })
+const recentWindowX = computed(() => days.value[Math.max(0, days.value.length - 14)]?.x ?? 20)
 
 const activeIndex = computed(() => pinnedIndex.value ?? hoverIndex.value)
 const activeDay = computed(() => activeIndex.value == null ? null : days.value[activeIndex.value])
@@ -211,7 +238,19 @@ const tooltipStyle = computed(() => {
 })
 const headline = computed(() => {
   const activeDays = props.data.filter((day) => Number(day.count) > 0).length
-  return activeDays ? `近 90 天留下了 ${activeDays} 个练习日` : '九十天练习纹理'
+  if (!activeDays) return '从今天开始，留下第一条面试准备证据'
+  if (momentumDelta.value > 0) return `最近 14 天多练了 ${momentumDelta.value} 题，准备节奏在上升`
+  if (momentumDelta.value < 0) return `最近 14 天少练了 ${Math.abs(momentumDelta.value)} 题，今天把节奏接回来`
+  return recent14Count.value > 0
+    ? `最近 14 天完成 ${recent14Count.value} 题，准备节奏保持稳定`
+    : `近 90 天留下了 ${activeDays} 个练习日`
+})
+const momentumSummary = computed(() => {
+  if (previous14Count.value === 0 && recent14Count.value > 0) {
+    return `最近 14 天完成 ${recent14Count.value} 题，新的节奏已经开始`
+  }
+  const sign = momentumDelta.value > 0 ? '+' : ''
+  return `最近 14 天 ${recent14Count.value} 题 · 较前 14 天 ${sign}${momentumDelta.value}`
 })
 
 function showDay(index) {

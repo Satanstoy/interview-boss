@@ -237,7 +237,7 @@ def test_practice_activity_streak_zero_without_activity(test_db):
     assert data["heatmap"][-1]["count"] == 0
 
 
-def test_practice_activity_radar_topics_by_proficiency(test_db):
+def test_practice_activity_radar_topics_are_position_scoped_and_weakest_first(test_db):
     from app.services.insights import build_practice_activity
 
     _insert_user(test_db, 404)
@@ -260,8 +260,10 @@ def test_practice_activity_radar_topics_by_proficiency(test_db):
 
     data = build_practice_activity({"id": 404})
 
-    topics = {item["topic"]: item["proficiency"] for item in data["radar"]}
-    assert topics == {"前端工程": 90, "RAG系统设计": 80, "Agent编排": 40}
+    assert data["radar"] == [
+        {"topic": "Agent编排", "proficiency": 40},
+        {"topic": "RAG系统设计", "proficiency": 80},
+    ]
 
 
 def test_practice_activity_difficulty_correct_rate(test_db):
@@ -283,10 +285,22 @@ def test_practice_activity_difficulty_correct_rate(test_db):
     data = build_practice_activity({"id": 405})
 
     stats = {item["difficulty"]: item for item in data["difficulty"]}
-    assert stats["简单"] == {"difficulty": "简单", "count": 2, "correct_rate": 50}
-    assert stats["中等"] == {"difficulty": "中等", "count": 1, "correct_rate": 100}
-    assert stats["困难"] == {"difficulty": "困难", "count": 1, "correct_rate": 0}
-    assert stats["未标注"] == {"difficulty": "未标注", "count": 1, "correct_rate": 100}
+    assert stats["简单"] == {
+        "difficulty": "简单", "count": 2,
+        "correct_count": 1, "needs_work_count": 1, "correct_rate": 50,
+    }
+    assert stats["中等"] == {
+        "difficulty": "中等", "count": 1,
+        "correct_count": 1, "needs_work_count": 0, "correct_rate": 100,
+    }
+    assert stats["困难"] == {
+        "difficulty": "困难", "count": 1,
+        "correct_count": 0, "needs_work_count": 1, "correct_rate": 0,
+    }
+    assert stats["未标注"] == {
+        "difficulty": "未标注", "count": 1,
+        "correct_count": 1, "needs_work_count": 0, "correct_rate": 100,
+    }
 
 
 def test_practice_activity_recent_merges_and_limits(test_db):

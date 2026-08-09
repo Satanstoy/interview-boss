@@ -7,7 +7,7 @@
     <div>
       <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
       <p class="mt-0.5 text-xs text-muted-foreground">
-        每道横档代表 {{ rungUnit }} 题 · 深蓝 = 按汇总正确率估算答对 · 浅蓝 = 待加强
+        每道横档代表 {{ rungUnit }} 题 · 深蓝 = 答对 · 浅蓝 = 待加强 · 以 60 分为通过线
       </p>
     </div>
 
@@ -18,7 +18,7 @@
       aria-label="各难度正确与待加强题量堆叠横档，点击重播动画"
       @click="replay"
     >
-      <svg :key="replayKey" class="h-full w-full" viewBox="0 0 400 300" role="img">
+      <svg :key="replayKey" class="h-full w-full" viewBox="0 0 400 316" role="img">
         <line x1="32" y1="250" x2="368" y2="250" :stroke="palette.grid" stroke-width="1" />
         <g
           v-for="(column, columnIndex) in columns"
@@ -47,7 +47,7 @@
           >{{ column.count }}</text>
           <text
             :x="column.x"
-            y="271"
+            y="273"
             text-anchor="middle"
             font-size="11"
             font-weight="700"
@@ -55,11 +55,19 @@
           >{{ column.name }}</text>
           <text
             :x="column.x"
-            y="287"
+            y="291"
             text-anchor="middle"
             font-size="9"
             font-weight="600"
             :fill="palette.muted"
+          >答对 {{ column.correctCount }} · 待补 {{ column.needsWorkCount }}</text>
+          <text
+            :x="column.x"
+            y="307"
+            text-anchor="middle"
+            font-size="9"
+            font-weight="700"
+            :fill="palette.label"
           >正确率 {{ formatRate(column.correctRate) }}</text>
         </g>
       </svg>
@@ -99,6 +107,12 @@ const normalized = computed(() =>
       name: item.difficulty || '未标注',
       count: Number(item.count),
       correctRate: Math.min(100, Math.max(0, Number(item.correct_rate) || 0)),
+      correctCount: Number.isFinite(Number(item.correct_count))
+        ? Number(item.correct_count)
+        : Math.round(Number(item.count) * (Number(item.correct_rate) || 0) / 100),
+      needsWorkCount: Number.isFinite(Number(item.needs_work_count))
+        ? Number(item.needs_work_count)
+        : Number(item.count) - Math.round(Number(item.count) * (Number(item.correct_rate) || 0) / 100),
     }))
     .sort((a, b) => {
       const ai = ORDER.indexOf(a.name)
@@ -121,33 +135,43 @@ const rungUnit = computed(() => niceUnit(maxCount.value))
 const columns = computed(() => {
   const count = normalized.value.length
   const gap = count > 1 ? 300 / (count - 1) : 0
-  const stepY = Math.min(5.4, 176 / Math.ceil(maxCount.value / rungUnit.value))
+  const maxVisualRows = Math.max(...normalized.value.map((item) =>
+    Math.ceil(item.correctCount / rungUnit.value)
+      + Math.ceil(item.needsWorkCount / rungUnit.value)
+      + 1,
+  ), 1)
+  const stepY = Math.min(5.4, 176 / maxVisualRows)
 
   return normalized.value.map((item, index) => {
-    const correctCount = item.count * item.correctRate / 100
-    const exactRungs = item.count / rungUnit.value
-    const correctRungs = correctCount / rungUnit.value
-    const rungs = Array.from({ length: Math.ceil(exactRungs) }, (_, rungIndex) => {
-      const fraction = Math.min(1, exactRungs - rungIndex)
-      return {
-        index: rungIndex,
-        y: 244 - rungIndex * stepY,
-        fraction,
-        kind: rungIndex + fraction / 2 <= correctRungs ? 'correct' : 'needs-work',
-      }
-    })
+    const buildSegment = (value, offset, kind) => {
+      const exactRungs = value / rungUnit.value
+      return Array.from({ length: Math.ceil(exactRungs) }, (_, rungIndex) => ({
+        index: `${kind}-${rungIndex}`,
+        y: 244 - (offset + rungIndex) * stepY,
+        fraction: Math.min(1, exactRungs - rungIndex),
+        kind,
+      }))
+    }
+    const correctSlots = Math.ceil(item.correctCount / rungUnit.value)
+    const correctRungs = buildSegment(item.correctCount, 0, 'correct')
+    const needsWorkRungs = buildSegment(item.needsWorkCount, correctSlots + 1, 'needs-work')
+    const rungs = [...correctRungs, ...needsWorkRungs]
     return {
       ...item,
       x: count === 1 ? 200 : 50 + gap * index,
-      topY: 244 - Math.max(0, rungs.length - 1) * stepY,
+      topY: rungs.length ? Math.min(...rungs.map((rung) => rung.y)) : 244,
       rungs,
     }
   })
 })
 
 const headline = computed(() => {
-  const mostPracticed = [...normalized.value].sort((a, b) => b.count - a.count)[0]
-  return mostPracticed ? `${mostPracticed.name}难度积累了最多练习证据` : '难度练习分布'
+  const priority = [...normalized.value].sort((a, b) => a.correctRate - b.correctRate)[0]
+  if (!priority) return '不同难度的练习证据'
+  if (priority.count < 3) return `${priority.name}难度只有 ${priority.count} 次记录，先补足样本`
+  if (priority.correctRate < 60) return `${priority.name}难度正确率 ${formatRate(priority.correctRate)}，是当前突破口`
+  if (priority.correctRate < 80) return `${priority.name}难度正确率 ${formatRate(priority.correctRate)}，再巩固一轮`
+  return '各难度正确率都已达到 80%，可以继续提高题目强度'
 })
 
 function formatRate(value) {
