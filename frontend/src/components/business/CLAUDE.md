@@ -16,20 +16,20 @@
 | `ThinkingBlock.vue` | 旧版 AI 思维链展示组件（可展开/折叠） |
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
 | `ExamDistribution.vue` | 考点分布图表（ECharts 饼图） |
-| `KnowledgeGraph.vue` | 知识图谱可视化 |
+| `KnowledgeGraph.vue` | 知识图谱可视化（Lieflat B2 Dense Force Graph 骨架，porcelain 暗卡；节点面积按题目数开方，支持拖拽、缩放、邻接聚焦与空白处重播） |
 | `InsightsOverview.vue` | 洞察总览：证据状态、**岗位知识地图技能星图（置顶主角，`PracticeStarChart`）**、「我的练习足迹」图表区（热力图/连击/趋势/难度/雷达）与「本周最该做」行动清单；无统计卡/无高频横向条/无时间线，数据来自 `/api/insights` + `/api/insights/practice-activity` |
 | `InsightsReadiness.vue` | 岗位准备度：**双线雷达（`PracticeDualRadarChart`，热度 Top8 外圈 + 熟练度内圈）置顶 → 其余主题列表 → 能力矩阵（默认折叠）**；无知识图谱入口 |
 | `InsightsReviews.vue` | 面试复盘会话列表和无数据入口 |
-| `PracticeHeatmap.vue` | 练习足迹 - 打卡热力图（CSS grid 自绘 90 天，porcelain 蓝阶 4 档 + AppTooltip） |
+| `PracticeHeatmap.vue` | 练习足迹 - 90 天练习条码（Lieflat L3 Barcode Lollipop SVG；一根发丝=一天，高度=题量，工作日/周末实心空心区分，Top3 标注，支持 hover/点击固定） |
 | `PracticeStreakCard.vue` | 练习足迹 - 连续打卡卡片（当前/最长连击 + 激励文案 + 去刷题 CTA） |
 | `PracticeTrendChart.vue` | 练习足迹 - 近 30 天刷题趋势（ECharts 柱状次数 + 折线平均分双轴，porcelain：柱=#7096D1 线=#081F5C） |
-| `PracticeDifficultyChart.vue` | 练习足迹 - 难度分布环形图（ECharts 饼图 + 正确率 tooltip；难度为有序数据，蓝阶明度=难度：简单最浅→困难最深） |
+| `PracticeDifficultyChart.vue` | 练习足迹 - 难度证据堆叠横档（Lieflat F7 Stacked Rungs SVG；高度=练习量，深蓝=按汇总正确率估算答对，浅蓝=待加强） |
 | `PracticeRadarChart.vue` | 练习足迹 - 主题熟练度雷达图（ECharts 原生雷达 + porcelain 换肤，无 splitArea） |
 | `PracticeStarChart.vue` | 岗位知识地图 - 技能星图（手写 SVG，G11 Force Graph 骨架）：中心=岗位总热度，Top8 主题卫星，节点大小与连线粗细=热度（面积 sqrt 编码），颜色=掌握状态三档 porcelain 蓝阶，右上角「已练 X/8」徽标，点击节点 emit `select-topic` |
 | `PracticeDualRadarChart.vue` | 岗位准备度 - 双线雷达（ECharts 原生 RadarChart 双 series）：外圈=岗位热度（÷maxHeat×100 归一实线），内圈=熟练度（虚线），空当=差距；数据来自 `readiness.items`（含 `proficiency`） |
 | `PracticeRecentTimeline.vue` | 练习足迹 - 最近刷题时间线（**已不再被任何页面引用，保留待用**） |
 | `PracticeQuadChart.vue` | 岗位重点知识四象限决策图（ECharts Scatter + graphic 象限背景）：X=熟练度 Y=岗位热度，象限=重点突破/优势/可保持/不急；porcelain 蓝阶明度=紧迫度；**已不再被任何页面引用，保留待用** |
-| `PracticeHighFreqChart.vue` | 岗位高频待练横向条形图（ECharts BarChart 横向）：面经 questions_detail 按 cat2 被问频次降序 Top10，排名数据用蓝阶明度（第一名最深）；**已不再被任何页面引用，保留待用** |
+| `PracticeHighFreqChart.vue` | 岗位高频主题刻度队列（Lieflat F5 Tick Rows SVG；一根刻度对应动态整单位频次、每五根设读数点、第一名最深）；**已不再被任何页面引用，保留待用** |
 | `LoginModal.vue` | 登录弹窗（密码登录、邮箱验证码、忘记密码重置、老用户绑定邮箱） |
 | `LoginPage.vue` | 登录页面（全屏） |
 | `MasterBankList.vue` | 题库列表 |

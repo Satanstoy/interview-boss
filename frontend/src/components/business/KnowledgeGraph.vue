@@ -1,223 +1,248 @@
 <template>
-  <div class="flex flex-col gap-4">
-    <div class="flex items-center justify-between">
-      <p class="text-sm text-muted-foreground">
-        共 <span class="font-semibold text-foreground">{{ nodeCount }}</span> 个知识点，
-        <span class="font-semibold text-foreground">{{ linkCount }}</span> 条关联
-      </p>
-      <div class="flex gap-2 items-center">
-        <span class="text-xs text-muted-foreground">拖拽节点可调整布局 | 点击节点跳转题库</span>
-        <button @click="resetView" class="text-xs bg-muted dark:bg-card text-muted-foreground px-3 py-1.5 rounded-lg hover:bg-muted dark:hover:bg-muted transition">重置视图</button>
+  <div class="overflow-hidden rounded-3xl bg-[#081F5C] text-[#EDEFF1]">
+    <div class="flex flex-col gap-3 px-5 pt-5 sm:flex-row sm:items-start sm:justify-between sm:px-7 sm:pt-7">
+      <div>
+        <h2 class="text-lg font-bold tracking-tight">{{ graphHeadline }}</h2>
+        <p class="mt-1 text-xs text-[#9EB3CD]">
+          {{ categoryCount }} 个主题自组织 · 节点面积 = 题目数 · 拖拽探索 · 悬停聚焦邻接关系
+        </p>
       </div>
+      <Button
+        v-if="nodeCount > 0"
+        variant="outline"
+        size="sm"
+        class="self-start border-[#4D82C6] bg-transparent text-[#EDEFF1] hover:bg-[#0F2B66] hover:text-white"
+        @click="resetView"
+      >
+        <RotateCcw class="h-3.5 w-3.5" />
+        重播布局
+      </Button>
     </div>
 
-    <div v-if="isLoading" class="text-center py-16 text-muted-foreground border-2 border-dashed border-border rounded-xl">
-      <svg class="animate-spin h-8 w-8 text-violet-400 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-      <p>正在加载知识图谱...</p>
+    <div v-if="isLoading" class="flex min-h-[520px] flex-col items-center justify-center gap-3 text-[#9EB3CD]">
+      <LoaderCircle class="h-7 w-7 animate-spin" />
+      <p class="text-sm">正在组织知识关系…</p>
     </div>
 
-    <div v-else-if="nodeCount === 0" class="text-center py-16 text-muted-foreground border-2 border-dashed border-border rounded-xl">
-      <p class="text-lg mb-1">暂无数据</p>
+    <div v-else-if="nodeCount === 0" class="flex min-h-[520px] flex-col items-center justify-center gap-1 text-center text-[#9EB3CD]">
+      <p class="text-base font-semibold text-[#EDEFF1]">还没有形成知识网络</p>
       <p class="text-sm">请先导入面经数据并完成聚类。</p>
     </div>
 
-    <div v-show="nodeCount > 0" ref="chartRef" class="w-full bg-card rounded-xl border border-border shadow-sm" style="height: 640px;"></div>
+    <div
+      v-show="!isLoading && nodeCount > 0"
+      ref="chartRef"
+      class="w-full cursor-grab active:cursor-grabbing"
+      style="height: 640px"
+      aria-label="可拖拽的知识点力导向网络"
+    />
+
+    <div v-if="nodeCount > 0" class="flex flex-wrap items-center justify-between gap-2 px-5 pb-5 text-[10px] font-medium uppercase tracking-[0.1em] text-[#6C93C7] sm:px-7 sm:pb-6">
+      <span>Force Graph · B2 · Knowledge clusters · Porcelain</span>
+      <span>{{ nodeCount }} nodes · {{ linkCount }} links</span>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { LoaderCircle, RotateCcw } from '@lucide/vue'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
-import { TooltipComponent, LegendComponent } from 'echarts/components'
+import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-
-echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
+import { Button } from '@/components/ui/button'
 import { fetchKnowledgeGraph } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
-import { useTheme } from '@/composables/useTheme.js'
+import { RAMP_DARK } from '@/utils/chartTokens.js'
 
-const toast = useToast()
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
+
 const emit = defineEmits(['filter-by-tag', 'filter-by-category'])
-const { isDark } = useTheme()
-
+const toast = useToast()
 const chartRef = ref(null)
 const isLoading = ref(false)
 const nodeCount = ref(0)
 const linkCount = ref(0)
+const categoryCount = ref(0)
 let myChart = null
-let resizeHandler = null
+let resizeObserver = null
+let currentOption = null
+let emptyCanvasReplayBound = false
 
-const CATEGORY_COLORS = [
-  '#6366f1', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899'
-]
+const graphHeadline = computed(() => {
+  if (!nodeCount.value) return '知识点会在这里聚成星系'
+  return `${nodeCount.value} 个知识点，沿 ${categoryCount.value} 个主题聚成网络`
+})
 
-const loadGraph = async () => {
-  isLoading.value = true
-  try {
-    const data = await fetchKnowledgeGraph()
-    nodeCount.value = data.nodes.length
-    linkCount.value = data.links.length
-    await nextTick()
-    renderChart(data)
-  } catch (e) {
-    console.error('加载知识图谱失败', e)
-    toast.error('加载知识图谱失败')
-  } finally {
-    isLoading.value = false
-  }
+function rampByImportance(value, maxValue, isHub) {
+  if (isHub) return RAMP_DARK[4]
+  const level = Math.max(0, Math.min(3, Math.ceil((value / Math.max(maxValue, 1)) * 4) - 1))
+  return RAMP_DARK[level]
 }
 
-const renderChart = ({ nodes, links, categories }) => {
-  if (!chartRef.value) return
-  if (myChart) myChart.dispose()
-  myChart = echarts.init(chartRef.value)
+function buildOption({ nodes, links }) {
+  const maxSize = Math.max(...nodes.map((node) => Number(node.size) || 0), 1)
+  const dense = nodes.length > 80
+  const sparse = nodes.length < 40
 
-  myChart.setOption({
+  return {
+    animationDuration: 300,
+    animationEasing: 'quarticOut',
     tooltip: {
+      confine: true,
+      backgroundColor: '#F7F2EB',
+      borderWidth: 0,
+      padding: [10, 14],
+      textStyle: { color: '#081F5C', fontSize: 12 },
       formatter: (params) => {
         if (params.dataType === 'node') {
-          const d = params.data
-          const typeLabel = d._type === 'category' ? '分类' : '标签'
-          return `<strong>${d.name}</strong><br/>题目数: ${d._size}<br/>类型: ${typeLabel}`
+          const data = params.data
+          const typeLabel = data._type === 'category' ? '主题' : '知识点'
+          return `<strong>${data.name}</strong><br/>题目数：${data._size}<br/>类型：${typeLabel}`
         }
         if (params.dataType === 'edge') {
-          return `${params.data._sourceName || ''} - ${params.data._targetName || ''}<br/>关联强度: ${params.data.weight}`
+          return `${params.data._sourceName || ''} → ${params.data._targetName || ''}<br/>关联强度：${params.data.weight}`
         }
         return ''
-      }
-    },
-    legend: {
-      data: categories.map(c => c.name),
-      orient: 'vertical',
-      right: 16,
-      top: 16,
-      textStyle: { fontSize: 11 }
+      },
     },
     series: [{
       type: 'graph',
       layout: 'force',
       roam: true,
       draggable: true,
-      zoom: 0.85,
-      label: { show: true, formatter: '{b}' },
-      categories: categories.map((c, i) => ({
-        name: c.name,
-        itemStyle: { color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }
-      })),
-      data: nodes.map(n => ({
-        id: n.id,
-        name: n.name,
-        category: n.category,
-        symbolSize: n.type === 'category'
-          ? Math.max(50, Math.sqrt(n.size) * 10)
-          : Math.max(12, Math.sqrt(n.size) * 5),
-        itemStyle: {
-          borderColor: '#fff',
-          borderWidth: n.type === 'category' ? 3 : 1,
-          shadowBlur: n.type === 'category' ? 10 : 0,
-          shadowColor: CATEGORY_COLORS[n.category % CATEGORY_COLORS.length] + '40'
-        },
-        label: {
-          fontSize: n.type === 'category' ? 15 : 10,
-          fontWeight: n.type === 'category' ? 'bold' : 'normal',
-          show: n.type === 'category' || n.size >= 3
-        },
-        _type: n.type,
-        _size: n.size
-      })),
-      links: links.map(l => ({
-        source: l.source,
-        target: l.target,
-        weight: l.weight,
-        _sourceName: l.source.split(':')[1] || l.source,
-        _targetName: l.target.split(':')[1] || l.target,
-        lineStyle: {
-          width: Math.max(1, Math.sqrt(l.weight) * 1.2),
-          curveness: 0.15,
-          opacity: 0.5
-        }
-      })),
+      zoom: dense ? 0.72 : sparse ? 0.86 : 0.88,
+      left: sparse ? 40 : 10,
+      right: sparse ? 40 : 10,
+      top: sparse ? 40 : 10,
+      bottom: sparse ? 40 : 10,
       force: {
-        repulsion: [120, 400],
-        edgeLength: [60, 200],
-        gravity: 0.08,
-        friction: 0.6
+        repulsion: dense ? 52 : sparse ? 230 : 112,
+        edgeLength: dense ? [12, 54] : sparse ? [56, 128] : [32, 104],
+        gravity: sparse ? 0.08 : 0.14,
+        friction: sparse ? 0.34 : 0.24,
+        layoutAnimation: true,
       },
+      data: nodes.map((node) => {
+        const value = Number(node.size) || 0
+        const isHub = node.type === 'category'
+        return {
+          id: node.id,
+          name: node.name,
+          value,
+          symbolSize: isHub
+            ? Math.min(68, 18 + Math.sqrt(value) * 5.2)
+            : Math.min(30, 4 + Math.sqrt(value) * 4.2),
+          itemStyle: {
+            color: rampByImportance(value, maxSize, isHub),
+            borderColor: '#081F5C',
+            borderWidth: isHub ? 2 : 0,
+          },
+          label: {
+            show: isHub,
+            position: isHub ? 'inside' : 'right',
+            color: isHub ? '#081F5C' : '#EDEFF1',
+            fontSize: isHub ? 10 : 9,
+            fontWeight: isHub ? 800 : 600,
+            formatter: ({ name }) => name.length > 8 ? `${name.slice(0, 8)}…` : name,
+          },
+          _type: node.type,
+          _size: value,
+        }
+      }),
+      links: links.map((link) => ({
+        source: link.source,
+        target: link.target,
+        weight: Number(link.weight) || 0,
+        _sourceName: link.source.split(':')[1] || link.source,
+        _targetName: link.target.split(':')[1] || link.target,
+        lineStyle: {
+          width: Math.max(0.7, Math.sqrt(Number(link.weight) || 0) * 0.8),
+          color: '#4D82C6',
+          opacity: 0.42,
+          curveness: 0.08,
+        },
+      })),
       emphasis: {
         focus: 'adjacency',
-        lineStyle: { width: 5, opacity: 0.9 },
-        label: { fontSize: 14, fontWeight: 'bold' }
+        lineStyle: { color: '#EDEFF1', opacity: 0.95, width: 1.8 },
+        label: { show: true, color: '#EDEFF1', position: 'right', fontSize: 10, fontWeight: 700 },
       },
-      lineStyle: { color: '#aaa', curveness: 0.15 }
-    }]
-  })
+      blur: {
+        itemStyle: { opacity: 0.1 },
+        lineStyle: { opacity: 0.03 },
+        label: { show: false },
+      },
+      lineStyle: { color: '#4D82C6', opacity: 0.42, curveness: 0.08 },
+    }],
+  }
+}
 
+function bindChartEvents() {
+  if (!myChart) return
+  myChart.off('click')
   myChart.on('click', (params) => {
     if (params.dataType !== 'node') return
-    const d = params.data
-    if (d._type === 'category') {
-      emit('filter-by-category', d.name)
-    } else {
-      emit('filter-by-tag', d.name)
-    }
+    if (params.data._type === 'category') emit('filter-by-category', params.data.name)
+    else emit('filter-by-tag', params.data.name)
   })
-
-  updateChartTheme()
-}
-
-const updateChartTheme = () => {
-  if (!myChart) return
-  const dark = isDark.value
-  myChart.setOption({
-    tooltip: {
-      backgroundColor: dark ? '#1e293b' : '#fff',
-      borderColor: dark ? '#334155' : '#e5e7eb',
-      textStyle: { color: dark ? '#e2e8f0' : '#374151' }
-    },
-    legend: {
-      textStyle: { color: dark ? '#cbd5e1' : '#374151' }
-    },
-    series: [{
-      lineStyle: { color: dark ? '#64748b' : '#aaa' },
-      links: myChart.getOption()?.series?.[0]?.links
-        ? myChart.getOption().series[0].links.map(l => ({ ...l }))
-        : undefined
-    }]
-  })
-  // Update node border colors
-  const opt = myChart.getOption()
-  if (opt?.series?.[0]?.data) {
-    const updatedData = opt.series[0].data.map(n => ({
-      ...n,
-      itemStyle: {
-        ...n.itemStyle,
-        borderColor: dark ? '#1e293b' : '#fff'
-      }
-    }))
-    myChart.setOption({ series: [{ data: updatedData }] })
+  if (!emptyCanvasReplayBound) {
+    myChart.getZr().on('click', (event) => {
+      if (!event.target) resetView()
+    })
+    emptyCanvasReplayBound = true
   }
 }
 
-watch(isDark, () => updateChartTheme())
+function renderChart(data) {
+  if (!chartRef.value) return
+  if (!myChart) myChart = echarts.init(chartRef.value)
+  currentOption = buildOption(data)
+  myChart.clear()
+  myChart.setOption(currentOption)
+  bindChartEvents()
 
-const resetView = () => {
-  if (myChart) {
-    myChart.dispatchAction({ type: 'restore' })
+  if (!resizeObserver) {
+    resizeObserver = new ResizeObserver(() => myChart?.resize())
+    resizeObserver.observe(chartRef.value)
   }
 }
 
-onMounted(() => {
-  loadGraph()
-  resizeHandler = () => myChart?.resize()
-  window.addEventListener('resize', resizeHandler)
-})
+async function loadGraph() {
+  isLoading.value = true
+  try {
+    const data = await fetchKnowledgeGraph()
+    nodeCount.value = data.nodes.length
+    linkCount.value = data.links.length
+    categoryCount.value = data.categories.length
+    await nextTick()
+    if (nodeCount.value > 0) renderChart(data)
+  } catch (error) {
+    console.error('加载知识图谱失败', error)
+    toast.error('加载知识图谱失败')
+  } finally {
+    isLoading.value = false
+    await nextTick()
+    myChart?.resize()
+  }
+}
+
+function resetView() {
+  if (!myChart || !currentOption) return
+  myChart.clear()
+  myChart.setOption(currentOption)
+}
+
+onMounted(loadGraph)
 
 onUnmounted(() => {
-  window.removeEventListener('resize', resizeHandler)
+  resizeObserver?.disconnect()
+  resizeObserver = null
   if (myChart) {
     myChart.dispose()
     myChart = null
   }
+  emptyCanvasReplayBound = false
 })
 </script>

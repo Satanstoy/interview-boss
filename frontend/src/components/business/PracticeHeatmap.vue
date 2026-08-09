@@ -1,120 +1,299 @@
 <template>
-  <div class="flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
-    <div class="flex items-start justify-between gap-3">
+  <div
+    ref="rootRef"
+    class="lieflat-card flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm"
+    :class="{ 'is-visible': isVisible }"
+  >
+    <div class="flex items-start justify-between gap-4">
       <div>
-        <h3 class="text-sm font-semibold text-card-foreground">打卡热力图</h3>
-        <p class="mt-0.5 text-xs text-muted-foreground">近 90 天练习分布，每天点亮一格</p>
+        <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          一根发丝 = 一天 · 实心为工作日 · 空心为周末 · 高度 = 当天练习量
+        </p>
       </div>
-      <div v-if="totalCount > 0" class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-        <span>少</span>
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-muted/50" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#D0E3FF]" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#9EBFEA]" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#7096D1]" />
-        <span class="h-2.5 w-2.5 rounded-[3px] bg-[#334EAC]" />
-        <span>多</span>
-      </div>
+      <span
+        v-if="totalCount > 0"
+        class="shrink-0 rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs font-semibold text-foreground"
+      >共 {{ totalCount }} 题</span>
     </div>
 
-    <div v-if="totalCount > 0" class="mt-3 flex-1 overflow-x-auto custom-scrollbar">
-      <div class="flex flex-col gap-1">
-        <div class="flex gap-1 pl-6">
-          <span
-            v-for="(label, wi) in monthLabels"
-            :key="wi"
-            class="w-[14px] text-[9px] leading-3 text-muted-foreground"
-          >{{ label }}</span>
-        </div>
-        <div class="flex gap-1">
-          <div class="flex w-5 shrink-0 flex-col justify-between text-[9px] text-muted-foreground">
-            <span>一</span>
-            <span>三</span>
-            <span>五</span>
-            <span>日</span>
-          </div>
-          <div class="flex gap-1">
-            <div v-for="(week, wi) in weeks" :key="wi" class="flex flex-col gap-1">
-              <AppTooltip
-                v-for="cell in week"
-                :key="cell.date"
-                :text="cell.date ? `${cell.date} 练习 ${cell.count} 题${cell.avg_score ? `，平均 ${cell.avg_score} 分` : ''}` : ''"
-              >
-                <div class="h-2.5 w-2.5 rounded-[3px]" :class="cellClass(cell)" />
-              </AppTooltip>
-            </div>
-          </div>
+    <div v-if="days.length && totalCount > 0" class="mt-3 min-h-[230px] w-full flex-1 overflow-x-auto custom-scrollbar">
+      <div class="relative min-w-[720px]">
+        <svg
+          :key="replayKey"
+          class="h-full w-full overflow-visible"
+        viewBox="0 0 800 250"
+        role="img"
+        aria-label="近九十天每日练习量条码棒棒糖图"
+        @click="onChartClick"
+        >
+          <rect x="0" y="0" width="800" height="250" fill="transparent" />
+          <g v-for="day in days" :key="day.date" class="day-mark">
+          <line
+            :x1="day.x"
+            y1="18"
+            :x2="day.x"
+            y2="204"
+            :stroke="palette.grid"
+            stroke-width="0.75"
+          />
+          <line
+            :x1="day.x"
+            :y1="day.y"
+            :x2="day.x"
+            :y2="day.stemEnd"
+            :stroke="day.color"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            :style="{ animationDelay: `${day.index * 8}ms` }"
+          />
+          <circle
+            :cx="day.x"
+            :cy="day.y"
+            :r="day.isPeak ? 4.5 : 2.8"
+            :fill="day.weekend ? palette.card : day.color"
+            :stroke="day.isPeak ? palette.hero : day.color"
+            :stroke-width="day.weekend || day.isPeak ? 1.5 : 0"
+            tabindex="0"
+            class="cursor-pointer outline-none"
+            :aria-label="`${day.date}，练习 ${day.count} 题${day.avgScore ? `，平均 ${day.avgScore} 分` : ''}`"
+            @mouseenter="showDay(day.index)"
+            @mouseleave="hideDay(day.index)"
+            @focus="showDay(day.index)"
+            @blur="hideDay(day.index)"
+            @click.stop="pinDay(day.index)"
+          />
+          <text
+            v-if="day.isPeak"
+            :x="day.x"
+            :y="Math.max(12, day.y - 11)"
+            text-anchor="middle"
+            font-size="9"
+            font-weight="800"
+            :fill="palette.txt"
+          >{{ day.count }}</text>
+          </g>
+          <text
+            v-for="label in monthLabels"
+            :key="label.key"
+            :x="label.x"
+            y="226"
+            font-size="9"
+            font-weight="700"
+            letter-spacing="1"
+            :fill="palette.muted"
+          >{{ label.text }}</text>
+          <text
+            x="400"
+            y="246"
+            text-anchor="middle"
+            font-size="8"
+            font-weight="600"
+            letter-spacing="1.2"
+            :fill="palette.muted"
+          >ONE HAIRLINE = ONE CALENDAR DAY · TOP 3 LABELED</text>
+        </svg>
+
+        <div
+          v-if="activeDay"
+          class="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md"
+          :style="tooltipStyle"
+          role="status"
+        >
+          <p class="font-semibold">{{ activeDay.date }}</p>
+          <p class="mt-0.5 text-muted-foreground">
+            练习 {{ activeDay.count }} 题<span v-if="activeDay.avgScore"> · 平均 {{ activeDay.avgScore }} 分</span>
+          </p>
+          <p v-if="pinnedIndex === activeDay.index" class="mt-1 text-[10px] text-muted-foreground">已固定 · 点击空白处取消</p>
         </div>
       </div>
     </div>
 
     <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 py-8 text-center">
       <p class="text-sm text-muted-foreground">还没有练习记录</p>
-      <Button variant="outline" size="sm" @click="goPractice">去刷一题，点亮第一格</Button>
+      <Button variant="outline" size="sm" @click="goPractice">去刷一题，留下第一根刻度</Button>
     </div>
+
+    <p v-if="days.length && totalCount > 0" class="mt-1 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+      Barcode Lollipop · L3 · Daily practice · Porcelain
+    </p>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
-import AppTooltip from '@/components/common/AppTooltip.vue'
+import { useTheme } from '@/composables/useTheme.js'
+import { porcelain, RAMP, RAMP_DARK } from '@/utils/chartTokens.js'
 
 const props = defineProps({
   data: { type: Array, default: () => [] },
 })
 
 const router = useRouter()
-const totalCount = computed(() => props.data.reduce((sum, day) => sum + (day.count || 0), 0))
+const { isDark } = useTheme()
+const rootRef = ref(null)
+const isVisible = ref(false)
+const replayKey = ref(0)
+const hoverIndex = ref(null)
+const pinnedIndex = ref(null)
+let observer = null
 
-function cellClass(cell) {
-  if (!cell.date || cell.count === 0) return 'bg-muted/50'
-  if (cell.count <= 2) return 'bg-[#D0E3FF]'
-  if (cell.count <= 5) return 'bg-[#9EBFEA]'
-  if (cell.count <= 9) return 'bg-[#7096D1]'
-  return 'bg-[#334EAC]'
+const palette = computed(() => porcelain(isDark.value))
+const totalCount = computed(() => props.data.reduce((sum, day) => sum + (Number(day.count) || 0), 0))
+const maxCount = computed(() => Math.max(...props.data.map((day) => Number(day.count) || 0), 1))
+
+function deterministic(index, salt) {
+  return Math.abs(((index + 1) * 73856093) ^ (salt * 19349663)) % 1000 / 1000
 }
 
-const weeks = computed(() => {
-  const days = props.data
-  if (!days.length) return []
-  const today = new Date(`${days[days.length - 1].date}T00:00:00`)
-  const start = new Date(today)
-  start.setDate(today.getDate() - (days.length - 1))
-  while (start.getDay() !== 1) start.setDate(start.getDate() - 1)
-  const byDate = new Map(days.map((d) => [d.date, d]))
-  const weekRows = []
-  const col = start
-  for (let w = 0; w < 13; w += 1) {
-    const week = []
-    for (let r = 0; r < 7; r += 1) {
-      const date = new Date(col)
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-      const day = byDate.get(key)
-      week.push({ date: day ? key : '', count: day?.count || 0, avg_score: day?.avg_score || 0 })
-      col.setDate(col.getDate() + 1)
-    }
-    weekRows.push(week)
+function topPeakIndexes(values) {
+  const peaks = []
+  const ordered = [...values.keys()].sort((a, b) => values[b] - values[a])
+  for (const index of ordered) {
+    if (values[index] <= 0) break
+    if (peaks.every((peak) => Math.abs(peak - index) >= 6)) peaks.push(index)
+    if (peaks.length === 3) break
   }
-  return weekRows
+  return peaks
+}
+
+const days = computed(() => {
+  const source = props.data.slice(-90)
+  const values = source.map((day) => Number(day.count) || 0)
+  const peaks = topPeakIndexes(values)
+  const ramp = isDark.value ? RAMP_DARK : RAMP
+  const width = 760
+  const step = source.length > 1 ? width / (source.length - 1) : 0
+
+  return source.map((day, index) => {
+    const count = Number(day.count) || 0
+    const date = new Date(`${day.date}T00:00:00`)
+    const level = count === 0 ? 0 : Math.max(1, Math.min(4, Math.ceil(count / maxCount.value * 4)))
+    const y = 202 - count / maxCount.value * 158
+    return {
+      index,
+      date: day.date,
+      count,
+      avgScore: Number(day.avg_score) || 0,
+      weekend: date.getDay() === 0 || date.getDay() === 6,
+      isPeak: peaks.includes(index),
+      x: 20 + index * step,
+      y,
+      stemEnd: Math.min(205, y + 14 + deterministic(index, 9) * 25),
+      color: count === 0 ? palette.value.grid : ramp[level],
+    }
+  })
 })
 
 const monthLabels = computed(() => {
-  const labels = new Array(weeks.value.length).fill('')
-  weeks.value.forEach((week, wi) => {
-    for (const cell of week) {
-      if (!cell.date) continue
-      const d = new Date(`${cell.date}T00:00:00`)
-      if (d.getDate() === 1) {
-        labels[wi] = `${d.getMonth() + 1}月`
-        break
-      }
+  const labels = []
+  let lastMonth = null
+  for (const day of days.value) {
+    const date = new Date(`${day.date}T00:00:00`)
+    const month = date.getMonth()
+    if (month !== lastMonth) {
+      labels.push({ key: day.date, x: day.x, text: `${month + 1}月` })
+      lastMonth = month
     }
-  })
+  }
   return labels
 })
+
+const activeIndex = computed(() => pinnedIndex.value ?? hoverIndex.value)
+const activeDay = computed(() => activeIndex.value == null ? null : days.value[activeIndex.value])
+const tooltipStyle = computed(() => {
+  if (!activeDay.value) return {}
+  const left = Math.min(88, Math.max(12, activeDay.value.x / 8))
+  const top = Math.min(72, Math.max(4, activeDay.value.y / 2.5))
+  return { left: `${left}%`, top: `${top}%` }
+})
+const headline = computed(() => {
+  const activeDays = props.data.filter((day) => Number(day.count) > 0).length
+  return activeDays ? `近 90 天留下了 ${activeDays} 个练习日` : '九十天练习纹理'
+})
+
+function showDay(index) {
+  hoverIndex.value = index
+}
+
+function hideDay(index) {
+  if (hoverIndex.value === index) hoverIndex.value = null
+}
+
+function pinDay(index) {
+  pinnedIndex.value = pinnedIndex.value === index ? null : index
+}
+
+function onChartClick() {
+  if (pinnedIndex.value != null) {
+    pinnedIndex.value = null
+    return
+  }
+  isVisible.value = true
+  replayKey.value += 1
+}
+
+function replay() {
+  hoverIndex.value = null
+  pinnedIndex.value = null
+  isVisible.value = true
+  replayKey.value += 1
+}
 
 function goPractice() {
   router.push({ name: 'practice' })
 }
+
+watch(() => props.data, replay, { deep: true })
+
+onMounted(() => {
+  if (!('IntersectionObserver' in window)) {
+    isVisible.value = true
+    return
+  }
+  observer = new IntersectionObserver(([entry]) => {
+    if (entry.isIntersecting) {
+      isVisible.value = true
+      observer?.disconnect()
+    }
+  }, { threshold: 0.2 })
+  if (rootRef.value) observer.observe(rootRef.value)
+})
+
+onUnmounted(() => observer?.disconnect())
 </script>
+
+<style scoped>
+.day-mark > line:nth-of-type(2),
+.day-mark > circle,
+.day-mark > text {
+  opacity: 0;
+  transform: translateY(8px);
+  transform-origin: center;
+}
+
+.is-visible .day-mark > line:nth-of-type(2),
+.is-visible .day-mark > circle,
+.is-visible .day-mark > text {
+  animation: barcode-in 680ms cubic-bezier(0.165, 0.84, 0.44, 1) both;
+}
+
+@keyframes barcode-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .day-mark > line:nth-of-type(2),
+  .day-mark > circle,
+  .day-mark > text,
+  .is-visible .day-mark > line:nth-of-type(2),
+  .is-visible .day-mark > circle,
+  .is-visible .day-mark > text {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+</style>
