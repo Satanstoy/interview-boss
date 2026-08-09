@@ -2,12 +2,15 @@
   <div class="flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
     <div>
       <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
-      <p class="mt-0.5 text-xs text-muted-foreground">当前目标岗位 · SRS 熟练度 · 最需要巩固的最多 8 个主题</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">实线 = 我的熟练度 · 虚线 = 70% 稳定线 · 越靠中心越该优先补</p>
     </div>
     <div v-if="chartData.length" ref="chartRef" class="mt-2 min-h-[240px] w-full flex-1" style="min-width: 0;" />
     <div v-else class="flex flex-1 items-center justify-center py-10 text-sm text-muted-foreground">
       用闪卡复习后这里会生成熟练度雷达
     </div>
+    <p v-if="weakestTopic" class="mt-1 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+      Ability radar · current position · priority = lowest SRS proficiency
+    </p>
   </div>
 </template>
 
@@ -38,7 +41,7 @@ const headline = computed(() => {
   const weakest = weakestTopic.value
   if (!weakest) return '当前岗位的薄弱主题'
   if (Number(weakest.proficiency) >= 80) return '已练主题整体稳定，可以扩展新的考点'
-  return `“${shortName(weakest.topic)}”熟练度最低，优先复习`
+  return `“${weakest.topic}”熟练度最低，优先复习`
 })
 
 function shortName(name) {
@@ -52,16 +55,27 @@ const buildOption = (dark) => {
     tooltip: {
       ...porcelainTooltip(dark),
       renderMode: 'richText',
-      formatter: () => chartData.value
-        .map((item) => `${item.topic}  ${Math.round(Number(item.proficiency))}%`)
+      formatter: () => ['当前岗位能力证据', ...chartData.value
+        .map((item) => `${item.topic}  ${Math.round(Number(item.proficiency))}%`)]
         .join('\n'),
     },
     radar: {
       indicator: chartData.value.map((item) => ({ name: shortName(item.topic), max: 100 })),
       radius: '68%',
       center: ['50%', '55%'],
-      splitNumber: 3,
-      axisName: { color: t.label, fontSize: 10 },
+      splitNumber: 5,
+      axisName: {
+        color: t.label,
+        fontSize: 10,
+        formatter: (name) => {
+          const item = chartData.value.find((entry) => shortName(entry.topic) === name)
+          return item ? `{name|${name}}\n{value|${Math.round(Number(item.proficiency))}%}` : name
+        },
+        rich: {
+          name: { color: t.label, fontSize: 10, fontWeight: 600, lineHeight: 14 },
+          value: { color: t.hero, fontSize: 9, fontWeight: 800, lineHeight: 12 },
+        },
+      },
       splitLine: { lineStyle: { color: t.grid } },
       axisLine: { lineStyle: { color: t.grid } },
     },
@@ -76,6 +90,14 @@ const buildOption = (dark) => {
             lineStyle: { color: t.data, width: 2.5 },
             itemStyle: { color: t.data },
             symbolSize: 4,
+          },
+          {
+            name: '稳定线',
+            value: chartData.value.map(() => 70),
+            areaStyle: { color: 'transparent' },
+            lineStyle: { color: t.muted, width: 1.2, type: 'dashed' },
+            itemStyle: { color: t.muted },
+            symbol: 'none',
           },
         ],
       },

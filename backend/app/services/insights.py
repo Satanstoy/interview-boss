@@ -461,7 +461,7 @@ def build_practice_activity(user: dict) -> dict:
     _, position_name = get_user_job_position(user_id)
     with get_db_connection() as conn:
         today = datetime.now().date()
-        heatmap = _build_daily_series(conn, user_id, 90, today)
+        heatmap = _build_daily_series(conn, user_id, 365, today)
         trend = _build_daily_series(conn, user_id, 30, today)
         days = _practice_days(conn, user_id)
         streak = _streak_stats(days, today.strftime("%Y-%m-%d"))

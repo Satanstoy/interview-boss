@@ -187,7 +187,7 @@ def test_practice_activity_heatmap_trend_and_streak(test_db):
     data = build_practice_activity({"id": 401})
 
     assert data["streak"] == {"current": 2, "longest": 2}
-    assert len(data["heatmap"]) == 90
+    assert len(data["heatmap"]) == 365
     assert len(data["trend"]) == 30
     day_map = {d["date"]: d for d in data["heatmap"]}
     assert day_map[today]["count"] == 2
@@ -376,7 +376,7 @@ def test_practice_activity_endpoint_contract(client, test_db):
         "difficulty",
         "recent",
     }
-    assert len(body["heatmap"]) == 90
+    assert len(body["heatmap"]) == 365
     assert len(body["trend"]) == 30
     assert body["streak"] == {"current": 0, "longest": 0}
 
