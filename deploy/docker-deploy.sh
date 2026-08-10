@@ -332,7 +332,12 @@ do_update() {
   timestamp=$(date +%Y%m%d_%H%M%S)
   mkdir -p "$backup_dir"
   log "更新前备份数据库..."
-  cp "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db" 2>/dev/null || warn "数据库文件不存在（首次部署？）"
+  if [ -f "$PROJECT_DIR/backend/data/interview-boss.db" ]; then
+    backup_sqlite_wal "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db" \
+      || warn "数据库在线备份失败，继续更新前请确认备份策略"
+  else
+    warn "数据库文件不存在（首次部署？）"
+  fi
 
   # 3. 构建
   do_build
