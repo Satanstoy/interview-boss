@@ -434,6 +434,44 @@ async def submit_import_task(ctx, job_id: int):
     将进度写入 jobs 表，最终结果写入 jobs.result。
     """
     from app.db.connection import get_db_connection, run_db
+    from app.services.job_lifecycle import (
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+        touch_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim():
+        with get_db_connection() as conn:
+            task = claim_job(conn, job_id, worker_id)
+            conn.commit()
+            return dict(task) if task else None
+
+    claimed = await asyncio.to_thread(_claim)
+    if not claimed:
+        logger.info("上传任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    def _complete(result: str | None = None):
+        with get_db_connection() as conn:
+            completed = complete_job(conn, job_id, worker_id, result=result)
+            conn.commit()
+            return completed
+
+    def _fail(error: str, terminal: bool = False):
+        with get_db_connection() as conn:
+            outcome = fail_job(
+                conn,
+                job_id,
+                worker_id,
+                error,
+                max_attempts=0 if terminal else 3,
+            )
+            conn.commit()
+            return outcome
 
     def _load_payload():
         with get_db_connection() as conn:
@@ -444,7 +482,7 @@ async def submit_import_task(ctx, job_id: int):
 
     payload = await asyncio.to_thread(_load_payload)
     if not payload:
-        _mark_job_complete(job_id, 'failed', error='任务数据不存在')
+        _fail("任务数据不存在", terminal=True)
         return
 
     try:
@@ -478,10 +516,15 @@ async def submit_import_task(ctx, job_id: int):
         def _update_progress(phase, message=''):
             idx = phase_index.get(phase, 0)
             with get_db_connection() as conn:
-                conn.execute(
-                    "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, progress_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (idx + 1, len(PHASES), message, job_id)
-                )
+                if not touch_job(
+                    conn,
+                    job_id,
+                    worker_id,
+                    progress_current=idx + 1,
+                    progress_total=len(PHASES),
+                    progress_message=message,
+                ):
+                    raise RuntimeError(f"上传任务 lease 已失效: job_id={job_id}")
                 conn.commit()
 
         _update_progress("extract", "正在提取内容...")
@@ -523,18 +566,18 @@ async def submit_import_task(ctx, job_id: int):
 
         # 如果 graph yield 了 error 事件，立刻标记失败
         if emitted_error:
-            _mark_job_complete(job_id, 'failed', error=emitted_error)
+            _fail(emitted_error)
             return
 
         # 读取最终结果（从 result_collector 获取，避免 thread_id 不匹配）
         final_state_values = result_collector.get("final_state") or {}
 
         if final_state_values.get("error"):
-            _mark_job_complete(job_id, 'failed', error=final_state_values["error"])
+            _fail(final_state_values["error"])
             return
 
         if not final_state_values and not saw_done:
-            _mark_job_complete(job_id, 'failed', error="任务未返回有效结果")
+            _fail("任务未返回有效结果")
             return
 
         doc_type = final_state_values.get("doc_type", "Interview")
@@ -570,7 +613,7 @@ async def submit_import_task(ctx, job_id: int):
         if final_state_values.get("elapsed_seconds"):
             result_data["elapsed_seconds"] = final_state_values["elapsed_seconds"]
 
-        _mark_job_complete(job_id, 'completed', result=json.dumps(result_data, ensure_ascii=False))
+        _complete(result=json.dumps(result_data, ensure_ascii=False))
 
         # 派发后台答案生成
         answer_tasks = final_state_values.get("answer_tasks", [])
@@ -585,7 +628,7 @@ async def submit_import_task(ctx, job_id: int):
 
     except Exception as e:
         logger.exception(f"上传导入任务失败: job_id={job_id}")
-        _mark_job_complete(job_id, 'failed', error=str(e)[:500])
+        _fail(str(e)[:500])
 
 
 def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
@@ -671,6 +714,63 @@ async def scheduled_quality_audit_task(ctx):
     except Exception as e:
         logger.exception(f"[定时任务] 质量审查失败: {e}")
         raise
+
+
+async def scheduled_submit_job_dispatch_task(ctx):
+    """Recover and dispatch durable upload jobs that were not delivered."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        SUBMIT_IMPORT_JOB_TYPE,
+        claim_dispatch_batch,
+        mark_dispatch_failed,
+        mark_job_dispatched,
+    )
+
+    def _reserve():
+        with get_db_connection() as conn:
+            jobs = claim_dispatch_batch(
+                conn, job_type=SUBMIT_IMPORT_JOB_TYPE, limit=10
+            )
+            conn.commit()
+            return jobs
+
+    jobs = await asyncio.to_thread(_reserve)
+    dispatched = 0
+    failed = 0
+    for job_row in jobs:
+        job_id = job_row["id"]
+        try:
+            arq_job = await enqueue_submit_import_job(job_id)
+            arq_job_id = getattr(arq_job, "job_id", None)
+            if not arq_job_id:
+                raise RuntimeError("ARQ 未返回 job_id")
+
+            def _mark(job_id=job_id, arq_id=str(arq_job_id)):
+                with get_db_connection() as conn:
+                    if not mark_job_dispatched(conn, job_id, arq_id):
+                        raise RuntimeError(f"任务不可再投递: job_id={job_id}")
+                    conn.commit()
+
+            await asyncio.to_thread(_mark)
+            dispatched += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("[上传任务] ARQ 投递失败 job=%s: %s", job_id, exc)
+
+            def _reset(job_id=job_id, error=str(exc)):
+                with get_db_connection() as conn:
+                    mark_dispatch_failed(conn, job_id, error)
+                    conn.commit()
+
+            await asyncio.to_thread(_reset)
+
+    result = {
+        "reserved": len(jobs),
+        "dispatched": dispatched,
+        "failed": failed,
+    }
+    logger.info("[上传任务] dispatcher 完成: %s", result)
+    return result
 
 
 async def scheduled_cluster_review_dispatch_task(ctx):
@@ -786,6 +886,7 @@ class WorkerSettings:
         submit_import_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
+        scheduled_submit_job_dispatch_task,
         scheduled_cluster_review_dispatch_task,
         cluster_review_task,
         scheduled_source_health_task,
@@ -802,6 +903,7 @@ class WorkerSettings:
     # 定时任务：每天凌晨 3 点运行 compaction，每周日 3:30 质量审查、3:40 来源健康检查
     cron_jobs = [
         cron(scheduled_compaction_task, hour={3}, minute={0}),
+        cron(scheduled_submit_job_dispatch_task, minute=set(range(0, 60))),
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),

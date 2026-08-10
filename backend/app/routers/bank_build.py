@@ -41,11 +41,14 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 break
 
             update = {
-                "type": "progress" if job["status"] == "running" else job["status"],
+                "type": "progress"
+                if job["status"] in ("queued", "running")
+                else job["status"],
                 "status": job["status"],
                 "current": job["progress_current"],
                 "total": job["progress_total"],
-                "message": job["progress_message"],
+                "message": job["progress_message"]
+                or ("等待 worker 调度" if job["status"] == "queued" else ""),
             }
 
             current_update = json.dumps(update)

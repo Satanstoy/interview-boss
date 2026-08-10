@@ -97,6 +97,48 @@ def _migration_049_analysis_queue_owner(conn):
     logger.info("migration_049: analysis_queue.owner_id 列已就绪")
 
 
+def _migration_074_durable_job_lifecycle(conn):
+    """Add durable dispatch/lease fields for long-running application jobs.
+
+    ``jobs`` is the source of truth; ARQ only transports execution.  Existing
+    jobs retain their current status and gain safe defaults so this migration
+    does not replay or rewrite historical results.
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()
+    }
+    additions = {
+        "attempts": "INTEGER NOT NULL DEFAULT 0",
+        # SQLite does not allow a non-constant default in ALTER TABLE ADD COLUMN.
+        # We normalize the empty compatibility value immediately below.
+        "available_at": "TEXT NOT NULL DEFAULT ''",
+        "locked_until": "TEXT",
+        "arq_job_id": "TEXT",
+        "worker_id": "TEXT",
+        "last_error": "TEXT",
+        "started_at": "TEXT",
+        "idempotency_key": "TEXT",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
+    conn.execute(
+        "UPDATE jobs SET available_at = CURRENT_TIMESTAMP "
+        "WHERE available_at IS NULL OR available_at = ''"
+    )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_dispatch "
+        "ON jobs(job_type, status, available_at, locked_until)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_idempotency "
+        "ON jobs(job_type, idempotency_key) WHERE idempotency_key IS NOT NULL"
+    )
+    logger.info("migration_074: jobs durable dispatch/lease fields are ready")
+
+
 def _migration_050_pipeline_metrics(conn):
     """Create pipeline_metrics table for observability.
 

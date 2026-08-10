@@ -99,6 +99,7 @@ from app.db.migrations.jobs import (
     _migration_036_job_payloads,
     _migration_049_analysis_queue_owner,
     _migration_050_pipeline_metrics,
+    _migration_074_durable_job_lifecycle,
 )
 from app.db.migrations.interview_distribution import (
     _migration_042_interview_distribution,
@@ -192,6 +193,7 @@ _MIGRATIONS = [
     (71, "quality_issue_new_cat2", _migration_071_quality_issue_new_cat2),
     (72, "cluster_review_lifecycle", _migration_072_cluster_review_lifecycle),
     (73, "quality_issue_source_snapshot", _migration_073_quality_issue_source_snapshot),
+    (74, "durable_job_lifecycle", _migration_074_durable_job_lifecycle),
 ]
 
 

@@ -1,7 +1,5 @@
-import asyncio
 import json
 import logging
-import os
 import openai
 import magic as _magic
 import base64
@@ -32,6 +30,14 @@ from app.agents.submit.graph import stream_submit_graph
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
+
+
+def _mark_job_dispatched(job_id: int, arq_job_id: str, marker) -> None:
+    """Persist ARQ delivery on the same durable job row."""
+    with get_db_connection() as conn:
+        if not marker(conn, job_id, arq_job_id):
+            raise RuntimeError(f"上传任务不可再投递: job_id={job_id}")
+        conn.commit()
 
 
 # Backward-compatible re-exports — business logic moved to app.services.submit_service
@@ -273,25 +279,42 @@ async def create_submit_job(
     job_id = await run_db(_create_job)
 
     # ── 入队后台执行 ──
-    # 默认通过 ARQ Worker 消费；仅当显式关闭时回退到 asyncio.create_task。
+    # jobs 是事实源；ARQ 只负责投递。入队失败时保留 pending，交给
+    # worker dispatcher 重试，不能退回当前 FastAPI 进程内的临时 task。
     arq_scheduled = False
-    if os.environ.get("SUBMIT_JOBS_USE_ARQ", "1").lower() in ("1", "true", "yes"):
-        try:
-            from app.worker import enqueue_submit_import_job
+    dispatch_error = None
+    try:
+        from app.worker import enqueue_submit_import_job
+        from app.services.job_lifecycle import mark_job_dispatched
 
-            await enqueue_submit_import_job(job_id)
-            arq_scheduled = True
-            logger.info(f"上传导入任务已通过 ARQ 调度: job_id={job_id}")
-        except Exception as e:
-            logger.warning(f"ARQ 调度失败，回退到 asyncio.create_task: {e}")
+        arq_job = await enqueue_submit_import_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
 
-    if not arq_scheduled:
-        from app.worker import submit_import_task
+        await run_db(
+            lambda: _mark_job_dispatched(job_id, str(arq_job_id), mark_job_dispatched)
+        )
+        arq_scheduled = True
+        logger.info(
+            "上传导入任务已通过 ARQ 调度: job_id=%s arq_job_id=%s",
+            job_id,
+            arq_job_id,
+        )
+    except Exception as e:
+        dispatch_error = str(e)[:300]
+        logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
 
-        asyncio.create_task(submit_import_task({}, job_id))
-        logger.info(f"上传导入任务已在 backend 后台执行: job_id={job_id}")
-
-    return {"job_id": job_id, "status": "pending", "message": "上传任务已创建"}
+    return {
+        "job_id": job_id,
+        "status": "queued" if arq_scheduled else "pending",
+        "dispatch_error": dispatch_error,
+        "message": (
+            "上传任务已进入 ARQ 队列"
+            if arq_scheduled
+            else "上传任务已创建，等待后台 worker 调度"
+        ),
+    }
 
 
 @router.get("/api/submit-jobs/active")
@@ -302,7 +325,7 @@ async def get_active_submit_jobs(user: dict = Depends(get_current_user)):
         with get_db_connection() as conn:
             rows = conn.execute(
                 "SELECT id, job_type, status, progress_current, progress_total, progress_message, created_at, updated_at "
-                "FROM jobs WHERE created_by = ? AND job_type = 'submit_import' AND status IN ('pending', 'running') "
+                "FROM jobs WHERE created_by = ? AND job_type = 'submit_import' AND status IN ('pending', 'queued', 'running') "
                 "ORDER BY created_at DESC",
                 (user["id"],),
             ).fetchall()
