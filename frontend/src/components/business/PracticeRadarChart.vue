@@ -22,6 +22,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEChart } from '@/composables/useEChart.js'
 import { porcelain, porcelainTooltip, EASE } from '@/utils/chartTokens.js'
+import { isReferenceTopic } from '@/utils/insightTopics.js'
 
 echarts.use([RadarChart, TooltipComponent, CanvasRenderer])
 
@@ -32,7 +33,7 @@ const props = defineProps({
 const chartRef = ref(null)
 const chartData = computed(() =>
   [...props.data]
-    .filter((item) => Number.isFinite(Number(item.proficiency)))
+    .filter((item) => isReferenceTopic(item.topic) && Number.isFinite(Number(item.proficiency)))
     .sort((a, b) => Number(a.proficiency) - Number(b.proficiency))
     .slice(0, 8),
 )

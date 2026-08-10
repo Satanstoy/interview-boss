@@ -73,6 +73,56 @@ def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
     assert snapshot["data_quality"]["has_practice_evidence"] is True
 
 
+def test_insights_radar_excludes_fallback_topics_and_rebuilds_from_new_questions(test_db):
+    from app.services.insights import build_insights_snapshot, build_practice_activity
+
+    _insert_user(test_db, 102)
+    _insert_question(
+        test_db,
+        10,
+        "其他",
+        frequency=99,
+        sources='[{"url": "https://example.com/other"}]',
+    )
+    _insert_question(
+        test_db,
+        11,
+        "RAG系统设计",
+        frequency=2,
+        sources='[{"url": "https://example.com/rag"}]',
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency) VALUES (?, ?, ?)",
+        (102, 10, 95),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, proficiency) VALUES (?, ?, ?)",
+        (102, 11, 45),
+    )
+    test_db.commit()
+
+    initial_snapshot = build_insights_snapshot({"id": 102})
+    initial_activity = build_practice_activity({"id": 102})
+    assert [item["name"] for item in initial_snapshot["readiness"]["items"]] == ["RAG系统设计"]
+    assert initial_activity["radar"] == [{"topic": "RAG系统设计", "proficiency": 45}]
+
+    _insert_question(
+        test_db,
+        12,
+        "Agent编排",
+        frequency=4,
+        sources='[{"url": "https://example.com/agent"}]',
+    )
+    test_db.commit()
+
+    refreshed_snapshot = build_insights_snapshot({"id": 102})
+    assert {item["name"] for item in refreshed_snapshot["readiness"]["items"]} == {
+        "RAG系统设计",
+        "Agent编排",
+    }
+    assert "其他" not in {item["name"] for item in refreshed_snapshot["readiness"]["items"]}
+
+
 def test_insights_practice_and_reviews_are_user_scoped(test_db):
     from app.services.insights import build_insights_snapshot
 

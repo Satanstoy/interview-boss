@@ -31,6 +31,17 @@ def _count_unique_sources(sources_raw) -> int:
 
 API_VERSION = 1
 
+# 这些是导入/分类失败时的兜底值，没有稳定的岗位语义，不进入能力雷达。
+NON_REFERENCE_TOPIC_NAMES = ("其他", "未分类", "其他/未分类", "未分类(API漏标)")
+
+
+def _topic_name(cat2, cat1) -> str:
+    return str(cat2 or cat1 or "未分类").strip()
+
+
+def _is_reference_topic(topic_name: str) -> bool:
+    return topic_name not in NON_REFERENCE_TOPIC_NAMES
+
 
 def _status_for_practice(practice_count: int, average_score: float | None) -> tuple[str, str]:
     if practice_count == 0:
@@ -108,7 +119,9 @@ def build_insights_snapshot(user: dict) -> dict:
         )
         question_to_topic = {}
         for row in bank_rows:
-            topic_name = row["cat2"] or row["cat1"] or "未分类"
+            topic_name = _topic_name(row["cat2"], row["cat1"])
+            if not _is_reference_topic(topic_name):
+                continue
             topic = topic_rows[topic_name]
             topic["question_count"] += 1
             # 口径修复：洞察页"被问次数"用独立来源数（sources 按 url 去重），
@@ -364,6 +377,7 @@ def _radar_topics(
     conn, user_id: int, position_name: str, limit: int = 8
 ) -> list[dict]:
     """取当前岗位最需要巩固的 N 个 SRS 主题（cat2 fallback cat1）。"""
+    excluded_placeholders = ", ".join("?" for _ in NON_REFERENCE_TOPIC_NAMES)
     rows = conn.execute(
         "SELECT COALESCE(NULLIF(qb.cat2, ''), NULLIF(qb.cat1, ''), '未分类') AS topic, "
         "AVG(uqr.proficiency) AS prof "
@@ -371,8 +385,10 @@ def _radar_topics(
         "JOIN question_bank qb ON qb.id = uqr.question_bank_id "
         "WHERE uqr.user_id = ? AND qb.deleted_at IS NULL "
         "AND (qb.job_position = ? OR qb.job_position = '' OR qb.job_position IS NULL) "
+        f"AND COALESCE(NULLIF(qb.cat2, ''), NULLIF(qb.cat1, ''), '未分类') "
+        f"NOT IN ({excluded_placeholders}) "
         "GROUP BY topic ORDER BY prof ASC, topic ASC LIMIT ?",
-        (user_id, position_name, limit),
+        (user_id, position_name, *NON_REFERENCE_TOPIC_NAMES, limit),
     ).fetchall()
     return [{"topic": row["topic"], "proficiency": round(row["prof"] or 0)} for row in rows]
 

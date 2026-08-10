@@ -22,6 +22,7 @@ import { LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEChart } from '@/composables/useEChart.js'
 import { porcelain, EASE } from '@/utils/chartTokens.js'
+import { isReferenceTopic } from '@/utils/insightTopics.js'
 
 echarts.use([RadarChart, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -46,7 +47,7 @@ function wrapName(name, maxChars = 7) {
 // 热度 Top8（与技能星图同源，口径一致）
 const topItems = computed(() =>
   [...props.items]
-    .filter((i) => i.question_frequency > 0)
+    .filter((i) => isReferenceTopic(i.name) && i.question_frequency > 0)
     .sort((a, b) => (b.question_frequency || 0) - (a.question_frequency || 0))
     .slice(0, 8),
 )
