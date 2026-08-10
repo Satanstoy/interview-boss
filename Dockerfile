@@ -12,7 +12,7 @@ ARG APT_MIRROR=mirrors.aliyun.com
 ARG APK_MIRROR=mirrors.aliyun.com
 
 # ── 阶段 1：前端构建 ──
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 ARG NPM_MIRROR
 WORKDIR /app/frontend
 RUN npm config set registry ${NPM_MIRROR} && \
@@ -27,7 +27,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── 阶段 2：Python 基础层（系统依赖 + uv）──
-FROM python:3.10-slim-bookworm AS python-base
+FROM python:3.12-slim-bookworm AS python-base
 ARG APT_MIRROR
 ARG PYPI_MIRROR
 WORKDIR /app
@@ -142,7 +142,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 
 # ── 阶段 5：Nginx 运行时镜像（静态产物内置，部署不依赖宿主机 dist）──
-FROM nginx:1.27-alpine AS nginx-runtime
+FROM nginx:1.29-alpine AS nginx-runtime
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 RUN chmod -R a+rX /usr/share/nginx/html
