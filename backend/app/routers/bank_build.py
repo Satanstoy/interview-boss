@@ -555,6 +555,11 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                     )
                                 except Exception:
                                     pass
+                                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                                mark_cluster_review_pending(
+                                    conn, qb_id, "private_question_merged"
+                                )
                                 # 删除已合并的个人题目
                                 conn.execute(
                                     "DELETE FROM question_bank WHERE id = ?",

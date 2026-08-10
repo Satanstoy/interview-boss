@@ -422,3 +422,81 @@ def _migration_068_quality_issue(conn):
         ")"
     )
     logger.info("migration_068: quality_issue 表已就绪")
+
+
+def _migration_072_cluster_review_lifecycle(conn):
+    """Add durable, version-aware cluster quality review state.
+
+    ``quality_issue`` remains the human-review ledger.  The two new tables are
+    the database-backed state machine/outbox for AI evaluation, so an ARQ
+    enqueue failure cannot make a review disappear.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cluster_review_state (
+            cluster_id INTEGER PRIMARY KEY,
+            current_version TEXT NOT NULL,
+            reviewed_version TEXT,
+            status TEXT NOT NULL DEFAULT 'needs_review',
+            priority INTEGER NOT NULL DEFAULT 50,
+            last_trigger_reason TEXT,
+            last_reviewed_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (cluster_id) REFERENCES question_bank(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cluster_review_tasks (
+            id TEXT PRIMARY KEY,
+            cluster_id INTEGER NOT NULL,
+            review_version TEXT NOT NULL,
+            trigger_reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            locked_until TEXT,
+            arq_job_id TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            finished_at TEXT,
+            UNIQUE(cluster_id, review_version),
+            FOREIGN KEY (cluster_id) REFERENCES question_bank(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+    # These columns are intentionally nullable for old review rows.  A legacy
+    # issue has no provable cluster version and must not be retroactively
+    # presented as a versioned approval.
+    _ensure_column(conn, "quality_issue", "review_version", "TEXT")
+    _ensure_column(conn, "quality_issue", "review_task_id", "TEXT")
+    _ensure_column(conn, "quality_issue", "trigger_reason", "TEXT")
+    _ensure_column(conn, "quality_issue", "variant_key", "TEXT NOT NULL DEFAULT ''")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cluster_review_state_status "
+        "ON cluster_review_state(status, priority, updated_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cluster_review_tasks_dispatch "
+        "ON cluster_review_tasks(status, available_at, cluster_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cluster_review_tasks_lease "
+        "ON cluster_review_tasks(status, locked_until)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quality_issue_review_version "
+        "ON quality_issue(qb_id, review_version, status)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_quality_issue_review_version "
+        "ON quality_issue(qb_id, review_version, issue_type, variant_key) "
+        "WHERE review_version IS NOT NULL"
+    )
+    logger.info("migration_072: 聚类版本审核生命周期表与字段已就绪")

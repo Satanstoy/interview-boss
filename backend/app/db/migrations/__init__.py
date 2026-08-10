@@ -84,6 +84,7 @@ from app.db.migrations.clustering import (
     _migration_066_cluster_label,
     _migration_067_quality_audit,
     _migration_068_quality_issue,
+    _migration_072_cluster_review_lifecycle,
     _classify_e_question,
 )
 from app.db.migrations.admin_assistant import (
@@ -189,6 +190,7 @@ _MIGRATIONS = [
     (69, "admin_assistant_log", _migration_069_admin_assistant_log),
     (70, "quality_issue_target", _migration_070_quality_issue_target),
     (71, "quality_issue_new_cat2", _migration_071_quality_issue_new_cat2),
+    (72, "cluster_review_lifecycle", _migration_072_cluster_review_lifecycle),
     (73, "quality_issue_source_snapshot", _migration_073_quality_issue_source_snapshot),
 ]
 

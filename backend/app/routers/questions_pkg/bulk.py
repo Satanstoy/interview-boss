@@ -159,6 +159,11 @@ async def delete_original_question(
                     except Exception:
                         pass
 
+                if row["owner_id"] is None and len(new_orig) >= 1:
+                    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                    mark_cluster_review_pending(conn, question_id, "delete_variant")
+
                 conn.commit()
                 return new_orig, new_orig_src, question_id
             except Exception:
@@ -202,6 +207,9 @@ async def delete_original_question(
                                 "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (unified, old_id),
                             )
+                            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                            mark_cluster_review_pending(conn, old_id, "representative_changed")
                             conn.commit()
 
                     await run_db(_update_unified)
@@ -365,6 +373,10 @@ async def restore_master_question(
                 "UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (question_id,),
             )
+            if row["owner_id"] is None:
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(conn, question_id, "cluster_restored", force=True)
             conn.commit()
 
     await run_db(_restore)
@@ -409,6 +421,14 @@ async def batch_restore_master_bank(
                 f"UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN ({ph2})",
                 found_ids,
             )
+            public_ids = [row["id"] for row in rows if row["owner_id"] is None]
+            if public_ids:
+                from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+                for public_id in public_ids:
+                    mark_clusters_review_pending(
+                        conn, [public_id], "cluster_restored", priority=50, force=True
+                    )
             conn.commit()
             return len(found_ids)
 

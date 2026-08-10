@@ -318,6 +318,9 @@ def _execute_merge(conn, table, keep_id, keep_url, drop_pairs) -> dict:
                     "WHERE id = ? AND owner_id IS NULL",
                     (sources_json, oqs_json, qb_id),
                 )
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(conn, qb_id, "source_normalized")
                 actions["qb_json_updated"] += 1
 
         # 软删被合并的 interview

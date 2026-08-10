@@ -104,6 +104,13 @@ async def approve_question(question_id: int, admin: dict = Depends(get_admin_use
                 "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (question_id,),
             )
+            conn.execute(
+                "UPDATE question_bank SET cluster_id = ? WHERE id = ? AND cluster_id IS NULL",
+                (question_id, question_id),
+            )
+            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+            mark_cluster_review_pending(conn, question_id, "public_question_approved")
             # 分享链路：批准后删除分享者保留的私有副本
             if row["submitted_by"]:
                 _approve_cleanup_private_copy(conn, question_id)
@@ -320,6 +327,15 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                                 pre_snapshot.get("job_position", ""),
                             ),
                         )
+
+                from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+                mark_clusters_review_pending(
+                    conn,
+                    [survivor_id, *merged_ids],
+                    "merge_rollback",
+                    force=True,
+                )
 
                 # 标记已回滚
                 conn.execute(

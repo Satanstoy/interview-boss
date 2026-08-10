@@ -342,6 +342,10 @@ async def compact_singletons_in_db_v2(user_id: int = None) -> Dict:
                         ),
                     )
 
+                    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                    mark_cluster_review_pending(conn, s["id"], "merge:compaction_v2")
+
                     conn.execute("COMMIT")
                 except Exception:
                     conn.execute("ROLLBACK")

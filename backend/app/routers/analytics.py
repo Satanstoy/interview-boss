@@ -262,6 +262,11 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
                         "UPDATE question_bank SET cat1 = ?, cat2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (new_cat1, new_cat2, r["id"]),
                     )
+                    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                    mark_cluster_review_pending(
+                        conn, r["id"], "category_normalized"
+                    )
                     updated_master += 1
             conn.commit()
         return updated_detail, updated_master

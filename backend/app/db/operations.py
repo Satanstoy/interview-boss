@@ -411,6 +411,9 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
                     remove_original_items_by_url(cursor, url)
                 except Exception:
                     pass
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(cursor.connection, mr["id"], "source_removed")
 
     if ids_to_delete:
         placeholders = ",".join("?" * len(ids_to_delete))
@@ -554,6 +557,9 @@ def _apply_incremental_txn(
                     insert_original_item(cursor, qb_id, new_q_text, [new_source])
                 except Exception:
                     pass
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(cursor.connection, qb_id, "new_variant_matched")
 
     # Cache job_positions lookup before loop (current_pos doesn't change)
     pos_row_cache = cursor.execute(
@@ -620,6 +626,10 @@ def _apply_incremental_txn(
             )
         except Exception:
             pass
+        if status == "approved" and owner_id is None:
+            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+            mark_cluster_review_pending(cursor.connection, new_id, "new_cluster")
         if status == "approved":
             answer_tasks.append((new_id, q_text))
 

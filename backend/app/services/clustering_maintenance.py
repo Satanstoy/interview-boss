@@ -234,6 +234,9 @@ def _repair_row_metadata(conn, row: Dict) -> Dict:
         ),
     )
     _sync_normalized_tables(conn, row["id"], sources, original_sources)
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(conn, row["id"], "metadata_repaired")
     return {"id": row["id"], "frequency": frequency, "original_count": len(originals)}
 
 
@@ -612,7 +615,8 @@ def split_variant(
     Returns: 新题 id / None
     """
     row = conn.execute(
-        "SELECT id, question, cat1, cat2, tags, difficulty, job_position, original_questions, sources "
+        "SELECT id, question, cat1, cat2, tags, difficulty, job_position, owner_id, "
+        "original_questions, sources "
         "FROM question_bank WHERE id = ? AND deleted_at IS NULL",
         (qb_id,),
     ).fetchone()
@@ -649,7 +653,10 @@ def split_variant(
             row["sources"] or "[]",
         ),
     )
-    conn.commit()
+    conn.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (cur.lastrowid, cur.lastrowid))
+    from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+    mark_clusters_review_pending(conn, [qb_id, cur.lastrowid], "split_cluster")
     return cur.lastrowid
 
 
@@ -676,7 +683,9 @@ def dedupe_variant(conn, qb_id: int, variant_indices: list[int]) -> int:
         "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
         (json.dumps(new_oq, ensure_ascii=False), max(len(new_oq), 1), qb_id),
     )
-    conn.commit()
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(conn, qb_id, "dedupe_variant")
     return len(drop)
 
 
@@ -723,7 +732,9 @@ def merge_variant(conn, source_qb_id: int, variant_index: int, target_qb_id: int
             "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
             (json.dumps(tgt_oq, ensure_ascii=False), len(tgt_oq), target_qb_id),
         )
-    conn.commit()
+    from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+    mark_clusters_review_pending(conn, [source_qb_id, target_qb_id], "merge_variant")
     return True
 
 
@@ -751,7 +762,9 @@ def refine_representative(conn, qb_id: int, new_representative: str) -> bool:
         "UPDATE question_bank SET question = ?, original_questions = ?, frequency = ? WHERE id = ?",
         (new_rep, json.dumps(oq, ensure_ascii=False), len(oq), qb_id),
     )
-    conn.commit()
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(conn, qb_id, "representative_changed")
     return True
 
 
@@ -818,7 +831,14 @@ ISSUE_CONFIDENCE_HIGH = 0.85   # 高置信：可批量审批
 ISSUE_CONFIDENCE_LOW = 0.50    # 低于此置信度不进清单（丢弃记录）
 
 
-async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
+async def generate_quality_issues(
+    user_id: int = None,
+    limit: int = 20,
+    cluster_ids: list[int] | None = None,
+    review_version: str | None = None,
+    review_task_id: str | None = None,
+    trigger_reason: str | None = None,
+) -> dict:
     """审查发现的问题 → 两轮确认 → quality_issue 清单。
 
     两轮确认（验证层思想）：第一轮核验（run_quality_audit 的 inconsistent 变体）
@@ -829,11 +849,24 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
     from app.services.llm_judge import parse_json_object
 
     with get_db_connection() as conn:
+        where = (
+            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
+        )
+        params = []
+        if cluster_ids:
+            placeholders = ",".join("?" * len(cluster_ids))
+            where += f"AND id IN ({placeholders}) "
+            params.extend(cluster_ids)
+            order_limit = ""
+        else:
+            order_limit = " LIMIT ?"
+            params.append(limit)
         rows = conn.execute(
             "SELECT id, question, cat1, cat2, frequency, original_questions FROM question_bank "
-            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
-            "ORDER BY frequency DESC LIMIT ?",
-            (limit,),
+            + where
+            + "ORDER BY frequency DESC"
+            + order_limit,
+            params,
         ).fetchall()
 
     candidates = []
@@ -919,20 +952,34 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
             if merge_target is not None:
                 # 并入路径：来源题移除该问法，目标题加问法
                 with get_db_connection() as conn:
-                    dup = conn.execute(
-                        "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
-                        "AND status IN ('pending', 'approved')",
-                        (rep["id"], idx),
-                    ).fetchone()
+                    if review_version:
+                        from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+                        if get_current_cluster_version(conn, rep["id"]) != review_version:
+                            continue
+                    if review_version:
+                        dup = conn.execute(
+                            "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
+                            "AND issue_type = 'mismerge' AND variant_key = ?",
+                            (rep["id"], review_version, str(idx)),
+                        ).fetchone()
+                    else:
+                        dup = conn.execute(
+                            "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
+                            "AND status IN ('pending', 'approved')",
+                            (rep["id"], idx),
+                        ).fetchone()
                     if dup:
                         continue
                     conn.execute(
                         "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                        "suggested_action, reason, target_qb_id, confidence, status, created_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                        "suggested_action, reason, target_qb_id, confidence, status, created_at, "
+                        "review_version, review_task_id, trigger_reason, variant_key) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
                         (rep["id"], idx, "mismerge", "merge",
                          data.get("reason", "")[:300], merge_target,
-                         round(confidence, 2)),
+                         round(confidence, 2), review_version, review_task_id,
+                         trigger_reason, str(idx)),
                     )
                     conn.commit()
                 created += 1
@@ -960,20 +1007,34 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                 logger.warning(f"[清单生成] 拆出重写失败 qb={rep['id']} idx={idx}: {e}")
             # 已存在相同 issue → 跳过（幂等）
             with get_db_connection() as conn:
-                dup = conn.execute(
-                    "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
-                    "AND status IN ('pending', 'approved')",
-                    (rep["id"], idx),
-                ).fetchone()
+                if review_version:
+                    from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+                    if get_current_cluster_version(conn, rep["id"]) != review_version:
+                        continue
+                if review_version:
+                    dup = conn.execute(
+                        "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
+                        "AND issue_type = 'mismerge' AND variant_key = ?",
+                        (rep["id"], review_version, str(idx)),
+                    ).fetchone()
+                else:
+                    dup = conn.execute(
+                        "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
+                        "AND status IN ('pending', 'approved')",
+                        (rep["id"], idx),
+                    ).fetchone()
                 if dup:
                     continue
                 conn.execute(
                     "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                    "suggested_action, reason, suggested_value, new_cat2, confidence, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))",
+                    "suggested_action, reason, suggested_value, new_cat2, confidence, status, created_at, "
+                    "review_version, review_task_id, trigger_reason, variant_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
                     (rep["id"], idx, "mismerge", "split",
                      data.get("reason", "")[:300], rewritten, new_cat2,
-                     round(confidence, 2)),
+                     round(confidence, 2), review_version, review_task_id,
+                     trigger_reason, str(idx)),
                 )
                 conn.commit()
             created += 1
@@ -1000,7 +1061,14 @@ WEAK_REPRESENTATIVE_PROMPT = """你是面试题题库管理专家。以下是【
   "reason": "一句话原因"}}"""
 
 
-async def generate_weak_representative_issues(user_id: int = None, limit: int = 20) -> dict:
+async def generate_weak_representative_issues(
+    user_id: int = None,
+    limit: int = 20,
+    cluster_ids: list[int] | None = None,
+    review_version: str | None = None,
+    review_task_id: str | None = None,
+    trigger_reason: str | None = None,
+) -> dict:
     """检测代表题过弱的聚类 → 生成 weak_representative issue（含 LLM 建议题面）。
 
     幂等：已存在 pending/approved 的 weak_representative issue → 跳过。
@@ -1010,11 +1078,24 @@ async def generate_weak_representative_issues(user_id: int = None, limit: int = 
     from app.services.llm_judge import parse_json_object
 
     with get_db_connection() as conn:
+        where = (
+            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
+        )
+        params = []
+        if cluster_ids:
+            placeholders = ",".join("?" * len(cluster_ids))
+            where += f"AND id IN ({placeholders}) "
+            params.extend(cluster_ids)
+            order_limit = ""
+        else:
+            params.append(limit)
+            order_limit = " LIMIT ?"
         rows = conn.execute(
             "SELECT id, question, frequency, original_questions FROM question_bank "
-            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
-            "ORDER BY frequency DESC LIMIT ?",
-            (limit,),
+            + where
+            + "ORDER BY frequency DESC"
+            + order_limit,
+            params,
         ).fetchall()
 
     created = 0
@@ -1048,18 +1129,38 @@ async def generate_weak_representative_issues(user_id: int = None, limit: int = 
         if not suggested or suggested == r["question"]:
             continue
         with get_db_connection() as conn:
-            dup = conn.execute(
-                "SELECT id FROM quality_issue WHERE qb_id = ? AND issue_type = 'weak_representative' "
-                "AND status IN ('pending', 'approved')",
-                (r["id"],),
-            ).fetchone()
+            if review_version:
+                from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+                if get_current_cluster_version(conn, r["id"]) != review_version:
+                    continue
+            if review_version:
+                dup = conn.execute(
+                    "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
+                    "AND issue_type = 'weak_representative' AND variant_key = ''",
+                    (r["id"], review_version),
+                ).fetchone()
+            else:
+                dup = conn.execute(
+                    "SELECT id FROM quality_issue WHERE qb_id = ? AND issue_type = 'weak_representative' "
+                    "AND status IN ('pending', 'approved')",
+                    (r["id"],),
+                ).fetchone()
             if dup:
                 continue
             conn.execute(
                 "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                "suggested_action, reason, suggested_value, confidence, status, created_at) "
-                "VALUES (?, NULL, 'weak_representative', 'refine_representative', ?, ?, 0.7, 'pending', datetime('now'))",
-                (r["id"], data.get("reason", "")[:300], suggested),
+                "suggested_action, reason, suggested_value, confidence, status, created_at, "
+                "review_version, review_task_id, trigger_reason, variant_key) "
+                "VALUES (?, NULL, 'weak_representative', 'refine_representative', ?, ?, 0.7, 'pending', datetime('now'), ?, ?, ?, '')",
+                (
+                    r["id"],
+                    data.get("reason", "")[:300],
+                    suggested,
+                    review_version,
+                    review_task_id,
+                    trigger_reason,
+                ),
             )
             conn.commit()
         created += 1

@@ -107,13 +107,23 @@ def _load_public_cluster_data(conn, limit: int) -> tuple[list[dict], list[dict]]
     return clusters, singletons
 
 
-def _issue_exists(conn, source_id: int, target_id: int) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM quality_issue WHERE qb_id = ? AND variant_index IS NULL "
-        "AND issue_type = 'unmerged' AND suggested_action = 'merge' "
-        "AND target_qb_id = ? AND status IN ('pending', 'approved') LIMIT 1",
-        (source_id, target_id),
-    ).fetchone()
+def _issue_exists(
+    conn, source_id: int, target_id: int, review_version: str | None = None
+) -> bool:
+    if review_version:
+        row = conn.execute(
+            "SELECT 1 FROM quality_issue WHERE qb_id = ? AND review_version = ? "
+            "AND issue_type = 'unmerged' AND suggested_action = 'merge' "
+            "AND target_qb_id = ? AND variant_key = ? LIMIT 1",
+            (source_id, review_version, target_id, f"target:{target_id}"),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM quality_issue WHERE qb_id = ? AND variant_index IS NULL "
+            "AND issue_type = 'unmerged' AND suggested_action = 'merge' "
+            "AND target_qb_id = ? AND status IN ('pending', 'approved') LIMIT 1",
+            (source_id, target_id),
+        ).fetchone()
     return row is not None
 
 
@@ -202,14 +212,19 @@ async def generate_unmerged_quality_issues(
         reason = str(data.get("reason") or "判定为同一道面试题")[:300]
         reason = f"漏合并复核（预筛相似度 {sim:.2f}）：{reason}"
         with get_db_connection() as conn:
-            if _issue_exists(conn, singleton["qb_id"], target["qb_id"]):
+            from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+            review_version = get_current_cluster_version(conn, singleton["qb_id"])
+            if not review_version:
+                continue
+            if _issue_exists(conn, singleton["qb_id"], target["qb_id"], review_version):
                 continue
             conn.execute(
                 "INSERT INTO quality_issue "
                 "(qb_id, variant_index, issue_type, suggested_action, reason, "
                 "suggested_value, target_qb_id, confidence, source_question, source_cat2, "
-                "status, created_at) "
-                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'))",
+                "status, created_at, review_version, trigger_reason, variant_key) "
+                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'), ?, 'manual_unmerged_scan', ?)",
                 (
                     singleton["qb_id"],
                     reason,
@@ -217,6 +232,8 @@ async def generate_unmerged_quality_issues(
                     round(confidence, 2),
                     singleton["question"],
                     singleton["cat2"],
+                    review_version,
+                    f"target:{target['qb_id']}",
                 ),
             )
             conn.commit()

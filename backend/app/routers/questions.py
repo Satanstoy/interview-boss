@@ -396,6 +396,11 @@ async def edit_question(
                     conn.cursor(), [detail["id"] for detail in detail_rows]
                 )
 
+            if row["owner_id"] is None and {"question", "cat1", "cat2", "tags"} & set(updates):
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(conn, question_id, "representative_manually_edited")
+
             conn.commit()
 
             # 返回更新后的数据

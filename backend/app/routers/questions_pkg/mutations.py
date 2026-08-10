@@ -31,7 +31,7 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
             cursor.execute("BEGIN")
             try:
                 row = cursor.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, cat1, cat2, tags, difficulty, job_position FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, cat1, cat2, tags, difficulty, job_position, owner_id FROM question_bank WHERE id = ?",
                     (question_id,)
                 ).fetchone()
                 if not row:
@@ -74,7 +74,7 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 cursor.execute(
                     "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, ai_answer, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, '[]', '[]', NULL, ?, ?, 'approved', ?)",
                     (original_q, row['cat1'], row['cat2'], row['tags'], row['difficulty'],
-                     json.dumps(split_sources, ensure_ascii=False), admin_id, admin_id, orig_job_position)
+                     json.dumps(split_sources, ensure_ascii=False), row['owner_id'], admin_id, orig_job_position)
                 )
                 new_id = cursor.execute("SELECT last_insert_rowid()").fetchone()[0]
                 # 设置 cluster_id = 自身 id（拆分出的新题目自己就是聚类代表）
@@ -134,6 +134,10 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                     except Exception:
                         pass
 
+                from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+                mark_clusters_review_pending(conn, [question_id, new_id], "split_cluster")
+
                 conn.commit()
                 return new_id, new_orig, new_orig_src, question_id
             except Exception:
@@ -166,6 +170,9 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                                 "UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (unified, old_id)
                             )
+                            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                            mark_cluster_review_pending(conn, old_id, "representative_changed")
                             conn.commit()
                     await run_db(_update_unified)
                 except Exception as e:
@@ -195,11 +202,11 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             cursor.execute("BEGIN")
             try:
                 source = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id FROM question_bank WHERE id = ?",
                     (question_id,)
                 ).fetchone()
                 target = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id FROM question_bank WHERE id = ?",
                     (req.target_id,)
                 ).fetchone()
                 if not source:
@@ -341,6 +348,10 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                         except Exception:
                             pass
 
+                from app.services.cluster_review_lifecycle import mark_clusters_review_pending
+
+                mark_clusters_review_pending(conn, [question_id, req.target_id], "merge_variant")
+
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -379,6 +390,9 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     def _update_src():
                         with get_db_connection() as conn:
                             conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, src_id))
+                            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                            mark_cluster_review_pending(conn, src_id, "representative_changed")
                             conn.commit()
                     await run_db(_update_src)
                 except Exception as e:
@@ -395,6 +409,9 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     def _update_tgt():
                         with get_db_connection() as conn:
                             conn.execute("UPDATE question_bank SET question = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (unified, tgt_id))
+                            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                            mark_cluster_review_pending(conn, tgt_id, "representative_changed")
                             conn.commit()
                     await run_db(_update_tgt)
                 except Exception as e:
@@ -489,6 +506,9 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
                     (question_text,),
                 ).fetchall()
                 _retype_distribution_details_txn(conn.cursor(), [detail["id"] for detail in detail_rows])
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(conn, question_id, "category_changed")
                 conn.commit()
 
         await run_db(_update)

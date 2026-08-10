@@ -72,7 +72,7 @@ def apply_matched(conn, matched, job_position, saved_answers):
     for item in matched:
         cluster_id = item['cluster_id']
         existing = conn.execute(
-            "SELECT id, frequency, sources, original_questions, original_question_sources, ai_answer, answer_sources "
+            "SELECT id, owner_id, frequency, sources, original_questions, original_question_sources, ai_answer, answer_sources "
             "FROM question_bank WHERE id = ?",
             (cluster_id,)
         ).fetchone()
@@ -145,6 +145,11 @@ def apply_matched(conn, matched, job_position, saved_answers):
             except Exception:
                 pass
 
+        if existing["owner_id"] is None:
+            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+            mark_cluster_review_pending(conn, cluster_id, "new_variant_matched")
+
 
 def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
     """插入新聚类到 question_bank"""
@@ -209,6 +214,13 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
                 "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
                 (ai_answer, answer_sources, new_id),
             )
+
+        # The new cluster and its durable review outbox row are committed by
+        # the caller's single atomic cluster-batch transaction.
+        if entry.get("owner_id") is None:
+            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+            mark_cluster_review_pending(conn, new_id, "new_cluster")
 
     return new_qb_ids
 

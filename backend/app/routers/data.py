@@ -69,7 +69,7 @@ def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
 
     try:
         json_rows = cursor.execute(
-            "SELECT id, sources, original_questions, original_question_sources "
+            "SELECT id, owner_id, sources, original_questions, original_question_sources "
             "FROM question_bank WHERE (sources LIKE ? OR original_question_sources LIKE ?) "
             "AND owner_id IS ?",
             (f"%{url}%", f"%{url}%", owner_scope),
@@ -81,7 +81,7 @@ def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
     if affected_ids:
         placeholders = ",".join("?" * len(affected_ids))
         normalized_qb_rows = cursor.execute(
-            f"SELECT id, sources, original_questions, original_question_sources "
+            f"SELECT id, owner_id, sources, original_questions, original_question_sources "
             f"FROM question_bank WHERE id IN ({placeholders})",
             tuple(affected_ids),
         ).fetchall()
@@ -145,6 +145,10 @@ def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
                     delete_source(cursor, r["id"], url)
                 except Exception:
                     pass
+                if r["owner_id"] is None:
+                    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                    mark_cluster_review_pending(cursor.connection, r["id"], "source_removed")
 
     if ids_to_delete:
         placeholders = ",".join("?" * len(ids_to_delete))
@@ -261,7 +265,7 @@ def _restore_sources_for_url(cursor, url: str):
             placeholders = ",".join("?" * len(id_list))
             # 查询所有记录，包括被软删除的
             affected = cursor.execute(
-                f"SELECT id, sources, original_questions, original_question_sources, deleted_at FROM question_bank WHERE id IN ({placeholders})",
+                f"SELECT id, owner_id, sources, original_questions, original_question_sources, deleted_at FROM question_bank WHERE id IN ({placeholders})",
                 id_list,
             ).fetchall()
         else:
@@ -269,7 +273,7 @@ def _restore_sources_for_url(cursor, url: str):
     except Exception:
         # Fallback for tests / missing normalized tables
         affected = cursor.execute(
-            "SELECT id, sources, original_questions, original_question_sources, deleted_at FROM question_bank WHERE original_question_sources LIKE ?",
+            "SELECT id, owner_id, sources, original_questions, original_question_sources, deleted_at FROM question_bank WHERE original_question_sources LIKE ?",
             (f"%{url}%",),
         ).fetchall()
 
@@ -326,6 +330,12 @@ def _restore_sources_for_url(cursor, url: str):
                     r["id"],
                 ),
             )
+            if r["owner_id"] is None:
+                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+                mark_cluster_review_pending(
+                    cursor.connection, r["id"], "source_restored", force=True
+                )
 
     # Dual-write: restore into normalized source tables
     try:

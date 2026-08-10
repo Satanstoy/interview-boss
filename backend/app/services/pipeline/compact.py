@@ -200,7 +200,7 @@ def _do_merge_to_existing(
     """
     conn = get_db_connection()
     existing = conn.execute(
-        "SELECT question, sources, original_questions, original_question_sources, ai_answer, answer_sources "
+        "SELECT question, owner_id, sources, original_questions, original_question_sources, ai_answer, answer_sources "
         "FROM question_bank WHERE id = ?",
         (survivor_id,),
     ).fetchone()
@@ -322,6 +322,10 @@ def _do_merge_to_existing(
         cat2=cat2 or entry.get("cat2", ""),
         operator_id=operator_id,
     )
+    if existing["owner_id"] is None:
+        from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+        mark_cluster_review_pending(conn, survivor_id, f"merge:{operation_type}")
     logger.info(
         f"  [合并记录] survivor={survivor_id}, 删除={entry['id']}, "
         f"type={operation_type}, phase={phase}, confidence={confidence:.2f}"

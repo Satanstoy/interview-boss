@@ -99,6 +99,9 @@ def _merge_private_into_public(conn, public_id: int, private_row) -> None:
         "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (private_row["id"],),
     )
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(conn, public_id, "private_question_merged")
 
 
 def share_private_question(conn, question_id: int, user_id: int) -> dict:

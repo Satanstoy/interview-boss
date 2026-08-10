@@ -13,7 +13,12 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection
-from app.services.quality_issue_ops import execute_issue, serialize_issue
+from app.services.quality_issue_ops import (
+    approve_issue as approve_quality_issue,
+    batch_approve as batch_approve_quality_issues,
+    reject_issue as reject_quality_issue,
+    serialize_issue,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -68,20 +73,7 @@ async def approve_issue(
 
     def _approve():
         conn = get_db_connection()
-        issue = conn.execute(
-            "SELECT * FROM quality_issue WHERE id = ? AND status = 'pending'",
-            (issue_id,),
-        ).fetchone()
-        if not issue:
-            raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-        execute_issue(conn, issue, operator_id=admin["id"])
-        conn.execute(
-            "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
-            "reviewed_by = ? WHERE id = ?",
-            (admin["id"], issue_id),
-        )
-        conn.commit()
-        return {"id": issue_id, "status": "done"}
+        return approve_quality_issue(conn, admin["id"], issue_id)
 
     return await run_in_threadpool(_approve)
 
@@ -95,15 +87,9 @@ async def reject_issue(
 
     def _reject():
         conn = get_db_connection()
-        cur = conn.execute(
-            "UPDATE quality_issue SET status = 'rejected', reviewed_at = datetime('now'), "
-            "reviewed_by = ? WHERE id = ? AND status = 'pending'",
-            (admin["id"], issue_id),
-        )
+        result = reject_quality_issue(conn, admin["id"], issue_id)
         conn.commit()
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-        return {"id": issue_id, "status": "rejected"}
+        return result
 
     return await run_in_threadpool(_reject)
 
@@ -121,32 +107,8 @@ async def batch_approve_issues(
 
     def _batch():
         conn = get_db_connection()
-        done, failed = [], []
-        for iid in issue_ids:
-            issue = conn.execute(
-                "SELECT * FROM quality_issue WHERE id = ? AND status = 'pending' "
-                "AND confidence >= ?",
-                (iid, min_confidence),
-            ).fetchone()
-            if not issue:
-                failed.append({"id": iid, "reason": "不存在/已处理/置信度不足"})
-                continue
-            try:
-                execute_issue(conn, issue, operator_id=admin["id"])
-                conn.execute(
-                    "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
-                    "reviewed_by = ? WHERE id = ?",
-                    (admin["id"], iid),
-                )
-                conn.commit()
-                done.append(iid)
-            except HTTPException as e:
-                conn.rollback()
-                failed.append({"id": iid, "reason": e.detail})
-            except Exception as e:
-                conn.rollback()
-                logger.warning(f"[清单] 批量审批 {iid} 失败: {e}")
-                failed.append({"id": iid, "reason": str(e)[:100]})
-        return {"approved": done, "failed": failed}
+        return batch_approve_quality_issues(
+            conn, admin["id"], issue_ids, min_confidence=min_confidence
+        )
 
     return await run_in_threadpool(_batch)

@@ -80,11 +80,27 @@ async def enqueue_recompute_embedding_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_cluster_review_task(task_id: str):
+    """将数据库 outbox 中的一条聚类质量评估任务投递到 ARQ。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("cluster_review_task", task_id)
+    finally:
+        await pool.close()
+
+
 async def recompute_embedding_task(ctx, job_id: int):
     """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
     from app.services.embedding_recompute import run_recompute
 
     await run_recompute(job_id)
+
+
+async def cluster_review_task(ctx, task_id: str):
+    """ARQ worker：执行一个带 cluster_version 校验的 AI 质量评估。"""
+    from app.services.cluster_review_lifecycle import run_cluster_review_task
+
+    return await run_cluster_review_task(task_id)
 
 
 async def startup(ctx):
@@ -657,6 +673,69 @@ async def scheduled_quality_audit_task(ctx):
         raise
 
 
+async def scheduled_cluster_review_dispatch_task(ctx):
+    """定时补偿：回填活跃聚类状态，并将持久 outbox 投递到 ARQ。
+
+    回填是幂等的，因此进程长期停止后重新启动也能恢复遗漏的聚类；
+    ARQ 只是执行器，任务是否存在、是否过期和是否完成都以 SQLite 为准。
+    """
+    from app.db.connection import get_db_connection
+    from app.services.cluster_review_lifecycle import (
+        backfill_cluster_review_state,
+        claim_review_dispatch_batch,
+        mark_review_task_dispatched,
+    )
+
+    def _prepare():
+        conn = get_db_connection()
+        report = backfill_cluster_review_state(conn, dry_run=False)
+        tasks = claim_review_dispatch_batch(conn, limit=10)
+        conn.commit()
+        return report, tasks
+
+    report, tasks = await asyncio.to_thread(_prepare)
+    dispatched = 0
+    failed = 0
+    for task in tasks:
+        try:
+            job = await enqueue_cluster_review_task(task["id"])
+            arq_job_id = getattr(job, "job_id", None)
+
+            def _mark(task_id=task["id"], job_id=arq_job_id):
+                conn = get_db_connection()
+                mark_review_task_dispatched(conn, task_id, job_id)
+                conn.commit()
+
+            await asyncio.to_thread(_mark)
+            if arq_job_id:
+                dispatched += 1
+            else:
+                failed += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("[聚类质量] ARQ 投递失败 task=%s: %s", task["id"], exc)
+
+            def _reset(task_id=task["id"], error=str(exc)):
+                conn = get_db_connection()
+                mark_review_task_dispatched(conn, task_id, None)
+                conn.execute(
+                    "UPDATE cluster_review_tasks SET last_error = ? WHERE id = ?",
+                    (error[:500], task_id),
+                )
+                conn.commit()
+
+            await asyncio.to_thread(_reset)
+
+    result = {
+        "backfill": report,
+        "reserved": len(tasks),
+        "dispatched": dispatched,
+        "failed": failed,
+    }
+    logger.info("[聚类质量] dispatcher 完成: %s", result)
+    return result
+
+
 async def scheduled_source_health_task(ctx):
     """定时来源健康检查：每周日凌晨 3:40 扫同签名重复面经 / internal:// 增长 / JSON 双写不一致。
 
@@ -707,6 +786,8 @@ class WorkerSettings:
         submit_import_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
+        scheduled_cluster_review_dispatch_task,
+        cluster_review_task,
         scheduled_source_health_task,
         recompute_embedding_task
     ]
@@ -721,7 +802,9 @@ class WorkerSettings:
     # 定时任务：每天凌晨 3 点运行 compaction，每周日 3:30 质量审查、3:40 来源健康检查
     cron_jobs = [
         cron(scheduled_compaction_task, hour={3}, minute={0}),
-        cron(scheduled_quality_audit_task, hour={3}, minute={30}),
+        # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
+        # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
+        cron(scheduled_cluster_review_dispatch_task, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
     ]

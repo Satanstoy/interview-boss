@@ -19,6 +19,7 @@ ISSUE_TYPE_LABELS = {
     "unmerged": "漏合并",
     "duplicate": "重复问法",
     "weak_representative": "代表题不规范",
+    "new_representative": "代表题不规范",
 }
 ACTION_LABELS = {
     "split": "拆成独立题",
@@ -130,7 +131,24 @@ def serialize_issue(row, conn) -> dict:
         "target_cat2": target_qb["cat2"] if target_qb else None,
         "created_at": row["created_at"],
         "reviewed_at": row["reviewed_at"],
+        "review_version": row["review_version"] if "review_version" in row.keys() else None,
+        "review_task_id": row["review_task_id"] if "review_task_id" in row.keys() else None,
+        "trigger_reason": row["trigger_reason"] if "trigger_reason" in row.keys() else None,
     }
+
+
+def _assert_issue_version_current(conn, issue) -> None:
+    """Reject a versioned stale suggestion before any cluster mutation."""
+    review_version = issue["review_version"] if "review_version" in issue.keys() else None
+    if not review_version:
+        # Legacy rows predate version tracking.  They remain reviewable for
+        # backwards compatibility; their mutation itself creates a new version.
+        return
+    from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+    current = get_current_cluster_version(conn, issue["qb_id"])
+    if current != review_version:
+        raise HTTPException(status_code=409, detail="审核建议已过期，请刷新后重新审核")
 
 
 def execute_issue(conn, issue, operator_id: int | None = None) -> None:
@@ -142,6 +160,8 @@ def execute_issue(conn, issue, operator_id: int | None = None) -> None:
         merge_variant,
     )
     from app.services.unmerged_quality import merge_question
+
+    _assert_issue_version_current(conn, issue)
 
     action = issue["suggested_action"]
     if action == "split":
@@ -234,14 +254,41 @@ def approve_issue(conn, admin_id: int, issue_id: int, min_confidence: float | No
 
 def reject_issue(conn, admin_id: int, issue_id: int) -> dict:
     """拒绝 issue：记录拒绝（保留为负样本），不执行操作。"""
+    issue_before = conn.execute(
+        "SELECT * FROM quality_issue WHERE id = ? AND status = 'pending'",
+        (issue_id,),
+    ).fetchone()
+    if not issue_before:
+        raise HTTPException(status_code=404, detail="issue 不存在或已处理")
+    _assert_issue_version_current(conn, issue_before)
     cur = conn.execute(
         "UPDATE quality_issue SET status = 'rejected', reviewed_at = datetime('now'), "
         "reviewed_by = ? WHERE id = ? AND status = 'pending'",
         (admin_id, issue_id),
     )
-    conn.commit()
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="issue 不存在或已处理")
+    # 拒绝是对当前版本的人工作答复；只有该聚类没有其它待审建议时，
+    # 才把状态推进到 passed。若它仍有其他清单项，则继续 needs_human。
+    issue = conn.execute(
+        "SELECT qb_id, review_version FROM quality_issue WHERE id = ?", (issue_id,)
+    ).fetchone()
+    if issue:
+        from app.services.cluster_review_lifecycle import get_current_cluster_version
+
+        current = get_current_cluster_version(conn, issue["qb_id"])
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
+            "AND status IN ('pending', 'approved')",
+            (issue["qb_id"],),
+        ).fetchone()[0]
+        if current and not pending:
+            conn.execute(
+                "UPDATE cluster_review_state SET status = 'passed', reviewed_version = ?, "
+                "last_reviewed_at = datetime('now'), updated_at = datetime('now') "
+                "WHERE cluster_id = ? AND current_version = ?",
+                (current, issue["qb_id"], current),
+            )
     return {"id": issue_id, "status": "rejected"}
 
 
