@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.config import DB_PATH
 from app.core.auth import get_current_user, get_admin_user
+from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.db.question_bank_sources import insert_source, insert_original_item
 from app.services.clustering import match_new_questions
@@ -345,6 +346,7 @@ async def _run_build_inline(job_id: int, user_id: int):
             "completed",
             result=f"重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案",
         )
+        await invalidate_master_bank_cache()
 
     except Exception as e:
         logger.exception(f"全量重建失败(内联): job_id={job_id}")

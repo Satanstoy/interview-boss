@@ -25,8 +25,23 @@ MAX_TOTAL_UPLOAD_SIZE = (
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 
-# Redis 配置（ARQ 任务队列）
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+# Redis 配置
+#
+# REDIS_URL 保留为兼容旧部署配置的别名；新的部署应分别设置 queue/cache
+# 两个实例，避免 cache 的 LRU 淘汰影响 ARQ 的可靠任务投递。
+REDIS_QUEUE_URL = os.environ.get(
+    "REDIS_QUEUE_URL",
+    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+)
+REDIS_URL = REDIS_QUEUE_URL
+REDIS_CACHE_URL = os.environ.get("REDIS_CACHE_URL", "redis://localhost:6380/0")
+MASTER_BANK_CACHE_TTL_SECONDS = max(
+    1, int(os.environ.get("MASTER_BANK_CACHE_TTL_SECONDS", "15"))
+)
+MASTER_BANK_CACHE_MAX_BYTES = max(
+    64 * 1024,
+    int(os.environ.get("MASTER_BANK_CACHE_MAX_BYTES", str(1024 * 1024))),
+)
 
 # ── 聚类参数（env 可覆盖，启动加载，非热更新）─────────────────
 CLUSTER_BATCH_SIZE = int(os.environ.get("CLUSTER_BATCH_SIZE", "40"))

@@ -4,6 +4,7 @@ import logging
 import openai
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
+from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import build_tagging_prompt, TAGGING_PROMPT
 from app.db.question_bank_sources import insert_source, delete_original_item, insert_original_item
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
@@ -178,6 +179,7 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 except Exception as e:
                     logger.warning(f"拆分后重新生成统一问题失败: {e}")
 
+        await invalidate_master_bank_cache()
         return {"status": "success", "new_id": new_id, "message": "题目已拆分为独立题目"}
     except HTTPException:
         raise
@@ -417,6 +419,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 except Exception as e:
                     logger.warning(f"合并后重新生成目标聚类统一问题失败: {e}")
 
+        await invalidate_master_bank_cache()
         return {"status": "success", "message": "题目已移动到目标聚类"}
     except HTTPException:
         raise
@@ -512,6 +515,7 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
                 conn.commit()
 
         await run_db(_update)
+        await invalidate_master_bank_cache()
 
         return {
             "status": "success",

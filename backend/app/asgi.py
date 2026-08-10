@@ -235,13 +235,28 @@ async def startup_cleanup():
     # 初始化 Redis 连接池（ARQ 任务队列）
     try:
         from arq.connections import create_pool, RedisSettings
-        from app.core.config import REDIS_URL
+        from app.core.config import REDIS_QUEUE_URL
 
-        app.state.redis = await create_pool(RedisSettings.from_dsn(REDIS_URL))
-        logger.info(f"Redis 连接池已初始化: {REDIS_URL}")
+        app.state.redis = await create_pool(RedisSettings.from_dsn(REDIS_QUEUE_URL))
+        logger.info(f"Redis queue 连接池已初始化: {REDIS_QUEUE_URL}")
     except Exception as e:
         logger.warning(f"Redis 连接池初始化失败（ARQ 将不可用）: {e}")
         app.state.redis = None
+
+    # 初始化独立 Redis cache。缓存不可用时接口继续回退 SQLite。
+    try:
+        from redis.asyncio import from_url
+        from app.core.cache import set_cache_client
+        from app.core.config import REDIS_CACHE_URL
+
+        cache = from_url(REDIS_CACHE_URL, decode_responses=True)
+        await cache.ping()
+        set_cache_client(cache)
+        app.state.redis_cache = cache
+        logger.info(f"Redis cache 连接池已初始化: {REDIS_CACHE_URL}")
+    except Exception as e:
+        logger.warning(f"Redis cache 初始化失败（题库接口将回退 SQLite）: {e}")
+        app.state.redis_cache = None
 
 
 @app.on_event("shutdown")
@@ -269,3 +284,7 @@ async def shutdown_cleanup():
             logger.info("Redis 连接池已关闭")
         except Exception as e:
             logger.warning(f"关闭 Redis 连接池失败: {e}")
+
+    from app.core.cache import close_cache_client
+
+    await close_cache_client()

@@ -59,7 +59,7 @@ InterviewBoss 是一个 **AI 驱动的面试备战平台**：把**文本 + 截�
 | **多用户系统** | JWT 双 Token 认证（Access 15 分钟 + HttpOnly Refresh + 服务端 JTI 轮转），三种题库模式（公共/个人/混用），管理员审核机制 |
 | **系统配置热更新** | LLM / Embedding 参数在线修改并持久化，支持个人 LLM 配置独立管理 |
 | **数据安全** | 软删除 + 回收站（单条/批量恢复），防误删 |
-| **异步任务队列** | Redis + ARQ 后台处理耗时任务，Redis 不可用时自动降级为同步执行 |
+| **异步任务队列** | 独立 Redis queue + ARQ 后台处理耗时任务，queue 不可用时自动降级为同步执行；另有独立 Redis cache 承载短期读模型缓存 |
 
 ## 技术栈
 
@@ -67,7 +67,8 @@ InterviewBoss 是一个 **AI 驱动的面试备战平台**：把**文本 + 截�
 |------|------|
 | 后端框架 | FastAPI + Uvicorn |
 | 数据库 | SQLite（WAL 模式，自动迁移） |
-| 任务队列 | Redis + ARQ（异步任务处理，自动降级到同步） |
+| 任务队列 | Redis queue + ARQ（异步任务处理，自动降级到同步） |
+| 缓存 | 独立 Redis cache（master-bank 15 秒用户隔离缓存，故障自动回退 SQLite） |
 | LLM | OpenAI Compatible API（支持代理 / 国产模型） |
 | Embedding | ONNX Runtime + bge-small-zh-v1.5 + FAISS |
 | Agent 框架 | LangGraph（状态机 + 条件路由） |
@@ -143,7 +144,10 @@ cd frontend && npm install && npm run dev   # 打开 http://localhost:3000
 |------|------|--------|
 | `OPENAI_API_KEY` | LLM API 密钥 | *(必填)* |
 | `ADMIN_PASSWORD` | 种子管理员密码 | *(首次必填)* |
-| `REDIS_URL` | Redis 连接地址 | `redis://localhost:6379/0` |
+| `REDIS_URL` | Redis queue 连接地址（兼容旧配置） | `redis://localhost:6379/0` |
+| `REDIS_QUEUE_URL` | ARQ queue Redis 连接地址 | 回退到 `REDIS_URL` |
+| `REDIS_CACHE_URL` | 读模型 cache Redis 连接地址 | `redis://localhost:6380/0` |
+| `MASTER_BANK_CACHE_TTL_SECONDS` | master-bank 缓存有效期（秒） | `15` |
 | `OPENAI_BASE_URL` | LLM API 地址 | 空 |
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
 | `OPENAI_API_KEY_EMBEDDING` | Embedding API 密钥 | 回退到 LLM 密钥 |
@@ -180,7 +184,7 @@ sudo ./deploy/docker-deploy.sh down            # 停止所有服务
 
 **部署策略：** 仅改前端样式/组件 → `frontend`（几秒生效）；改后端代码/依赖 → `update`（完整构建）；两者都改 → 先 `frontend` 验证，再 `update`。
 
-**资源分配（2c4g 优化）：** Redis 128MB/0.25 CPU，Backend 512MB/0.75，Worker 384MB/0.75（按需启动），Nginx 64MB/0.25。HuggingFace 模型缓存通过只读 volume 挂载，配合 `HF_HUB_OFFLINE=1` 离线运行。
+**资源分配（2c4g 优化）：** Redis queue 128MB/0.25 CPU（`noeviction` + AOF），Redis cache 256MB/0.25 CPU（`allkeys-lru`、无持久化），Backend 512MB/0.75，Worker 384MB/0.75（按需启动），Nginx 64MB/0.25。HuggingFace 模型缓存通过只读 volume 挂载，配合 `HF_HUB_OFFLINE=1` 离线运行。
 
 ## 项目结构
 

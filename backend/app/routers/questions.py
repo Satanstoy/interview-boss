@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.auth import get_current_user
+from app.core.cache import get_master_bank_cache, set_master_bank_cache
 from app.db.question_bank_sources import build_api_shapes_batch_filtered
 from app.db.connection import get_db_connection, run_db, get_dynamic_frequency_sql
 from app.models.schemas import UpdateQuestionRequest
@@ -78,6 +79,18 @@ async def get_master_bank(
     user: dict = Depends(get_current_user),
 ):
     filter_mode = filter
+    cached_response = await get_master_bank_cache(
+        user,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+        cat1=cat1,
+        compact=compact,
+        filter_mode=filter_mode,
+    )
+    if cached_response is not None:
+        return cached_response
+
     dyn_freq_sql = get_dynamic_frequency_sql(filter_mode, user["id"])
     order_clause = (
         f"ORDER BY ({dyn_freq_sql}) DESC" if sort != "recent" else "ORDER BY qb.id DESC"
@@ -232,6 +245,16 @@ async def get_master_bank(
                 "filtered_tag_counts": filter_counts["filtered_tag_counts"],
             }
         )
+    await set_master_bank_cache(
+        user,
+        response,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+        cat1=cat1,
+        compact=compact,
+        filter_mode=filter_mode,
+    )
     return response
 
 
@@ -410,6 +433,9 @@ async def edit_question(
 
     try:
         result = await run_db(_edit)
+        from app.core.cache import invalidate_master_bank_cache
+
+        await invalidate_master_bank_cache()
         return {"status": "success", "data": result}
     except HTTPException:
         raise

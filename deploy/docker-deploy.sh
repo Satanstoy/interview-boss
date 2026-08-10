@@ -280,8 +280,8 @@ do_build() {
 
 # ── 启动核心服务 ──
 do_up() {
-  log "启动核心服务（redis/backend/nginx/oauth-gateway，不默认启动 worker）..."
-  docker compose up -d --wait --wait-timeout 60 redis backend nginx oauth-gateway
+  log "启动核心服务（redis queue/cache、backend/nginx/oauth-gateway，不默认启动 worker）..."
+  docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway
   do_status
 }
 
@@ -295,7 +295,7 @@ do_down() {
 # ── 重启核心服务 ──
 do_restart() {
   log "重启核心服务..."
-  docker compose restart --wait --wait-timeout 30 redis backend nginx oauth-gateway
+  docker compose restart --wait --wait-timeout 30 redis redis-cache backend nginx oauth-gateway
   do_status
 }
 
@@ -344,7 +344,7 @@ do_update() {
 
   # 4. 启动服务（等待健康检查）
   log "启动更新后的服务（等待健康检查）..."
-  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis backend nginx oauth-gateway; then
+  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway; then
     err "服务在 60s 内未通过健康检查"
     do_status
     rollback_backend
@@ -428,7 +428,7 @@ do_backup() {
   log "备份 SQLite 数据库（WAL 在线备份）..."
   backup_sqlite_wal "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db"
 
-  log "备份 Redis 数据..."
+  log "备份 Redis queue 数据（cache 为无持久化缓存，不备份）..."
   docker compose exec redis redis-cli BGSAVE >/dev/null 2>&1 || true
   sleep 1
   docker cp "$(docker compose ps -q redis):/data/dump.rdb"      "$backup_dir/redis_${timestamp}.rdb" 2>/dev/null || warn "Redis 备份跳过"

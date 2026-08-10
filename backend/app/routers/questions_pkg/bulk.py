@@ -4,6 +4,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
+from app.core.cache import invalidate_master_bank_cache
 from app.db.question_bank_sources import delete_original_item
 from app.db.connection import (
     get_db_connection,
@@ -172,6 +173,7 @@ async def delete_original_question(
 
     try:
         remaining_orig, remaining_orig_src, old_id = await run_db(_delete)
+        await invalidate_master_bank_cache()
 
         # 如果聚类还有多题，重新生成统一问题（跳过手动编辑过的）
         if len(remaining_orig) >= 2:
@@ -261,6 +263,7 @@ async def delete_master_question(
 
     try:
         await run_db(_delete)
+        await invalidate_master_bank_cache()
         return {"status": "success", "message": "题目已移入回收站"}
     except HTTPException:
         raise
@@ -315,6 +318,7 @@ async def batch_delete_master_bank(
 
     try:
         deleted = await run_db(_batch_delete)
+        await invalidate_master_bank_cache()
         return {"status": "success", "deleted": deleted}
     except HTTPException:
         raise
@@ -380,6 +384,7 @@ async def restore_master_question(
             conn.commit()
 
     await run_db(_restore)
+    await invalidate_master_bank_cache()
     return {"status": "success", "message": "题目已恢复"}
 
 
@@ -433,6 +438,7 @@ async def batch_restore_master_bank(
             return len(found_ids)
 
     restored = await run_db(_restore)
+    await invalidate_master_bank_cache()
     return {"status": "success", "restored": restored}
 
 
@@ -488,6 +494,7 @@ async def upload_to_bank(
             conn.commit()
 
     await run_db(_insert)
+    await invalidate_master_bank_cache()
     status_msg = (
         "已加入个人题库"
         if req.target == "personal"

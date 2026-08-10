@@ -17,7 +17,10 @@ from arq.cron import cron
 
 logger = logging.getLogger("interview-boss")
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.environ.get(
+    "REDIS_QUEUE_URL",
+    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+)
 
 
 async def _get_redis_pool():
@@ -120,11 +123,25 @@ async def startup(ctx):
     init_db()
     _reload_from_db()
     reload_embedding_config()
+    try:
+        from redis.asyncio import from_url
+        from app.core.cache import set_cache_client
+        from app.core.config import REDIS_CACHE_URL
+
+        cache = from_url(REDIS_CACHE_URL, decode_responses=True)
+        await cache.ping()
+        set_cache_client(cache)
+        ctx["redis_cache"] = cache
+    except Exception as exc:
+        logger.warning("ARQ Worker Redis cache 初始化失败: %s", exc)
     logger.info("ARQ Worker 已启动")
 
 
 async def shutdown(ctx):
     """Worker 关闭时清理"""
+    from app.core.cache import close_cache_client
+
+    await close_cache_client()
     logger.info("ARQ Worker 已关闭")
 
 
@@ -428,6 +445,9 @@ async def build_master_bank_task(ctx, job_id: int):
         restored = await asyncio.to_thread(_restore_answers)
         logger.info(f"全量重建完成(ARQ): {total_new} 个聚类，恢复 {restored} 个 AI 答案")
         _mark_complete('completed', result=f'重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案')
+        from app.core.cache import invalidate_master_bank_cache
+
+        await invalidate_master_bank_cache()
         return {"status": "completed", "total_new": total_new, "restored": restored}
 
     except Exception as e:

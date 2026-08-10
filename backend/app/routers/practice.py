@@ -4,6 +4,7 @@ import openai
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.auth import get_current_user
+from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import EVAL_PROMPT
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import (
@@ -228,7 +229,9 @@ async def review_practice_question(
             conn.commit()
             return result
 
-    return {"question_id": req.question_id, "review": await run_db(_review)}
+    result = await run_db(_review)
+    await invalidate_master_bank_cache()
+    return {"question_id": req.question_id, "review": result}
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")
@@ -272,6 +275,7 @@ async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
 
     try:
         new_val = await run_db(_toggle)
+        await invalidate_master_bank_cache()
         return {"status": "success", "is_starred": bool(new_val)}
     except HTTPException:
         raise
@@ -384,6 +388,7 @@ async def evaluate_answer(
 
             try:
                 await run_db(_record)
+                await invalidate_master_bank_cache()
             except PermissionError:
                 raise HTTPException(status_code=404, detail="题目不存在或无权访问")
             except Exception as e:

@@ -31,6 +31,8 @@ x-app-service: &app-service
   env_file: backend/.env
   environment:
     - REDIS_URL=redis://redis:6379/0
+    - REDIS_QUEUE_URL=redis://redis:6379/0
+    - REDIS_CACHE_URL=redis://redis-cache:6379/0
     - HF_HUB_OFFLINE=1
     - HF_HOME=/home/appuser/.cache/huggingface
     - ENV=production
@@ -48,6 +50,8 @@ x-app-service: &app-service
   depends_on:
     redis:
       condition: service_healthy
+    redis-cache:
+      condition: service_healthy
   logging: *default-logging
 
 services:
@@ -55,10 +59,32 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru --appendonly yes
+    # ARQ 的可靠任务队列：不允许用 LRU 淘汰任务数据。
+    # 128MB maxmemory + 64MB 容器余量，用于连接、AOF 和内存碎片。
+    command: redis-server --maxmemory 128mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
     volumes:
       - redis-data:/data
-    mem_limit: 128m
+    mem_limit: 192m
+    cpus: 0.25
+    networks:
+      - app-network
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging: *default-logging
+
+  # ── Redis Cache（可丢弃的用户读模型缓存）──
+  redis-cache:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # Cache 不需要持久化；达到上限时淘汰旧缓存，不影响 queue 实例。
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    mem_limit: 320m
     cpus: 0.25
     networks:
       - app-network
@@ -115,6 +141,8 @@ services:
     env_file: backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - REDIS_QUEUE_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis-cache:6379/0
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=test
@@ -126,6 +154,8 @@ services:
       - app-network
     depends_on:
       redis:
+        condition: service_healthy
+      redis-cache:
         condition: service_healthy
     logging: *default-logging
 
