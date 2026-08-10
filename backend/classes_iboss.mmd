@@ -1,0 +1,780 @@
+classDiagram
+  class AdaptiveSemaphore {
+    current_limit : int
+    record_rate_limit_error()
+    record_success()
+  }
+  class BatchDataDeleteRequest {
+    file_type : str
+    ids : List[int]
+  }
+  class BatchDeleteRequest {
+    ids : List[int]
+  }
+  class BatchGenerateAnswersRequest {
+    ids : List[int]
+  }
+  class BatchGenerateState {
+    answer_quality : float
+    current_answer : str
+    current_index : int
+    current_question : str
+    error : str
+    events : Annotated[list[dict], add]
+    fail_count : int
+    question_ids : list[int]
+    results : Annotated[list[dict], add]
+    retry_count : int
+    success_count : int
+    user_id : int
+  }
+  class BindEmailRequest {
+    code : str
+    email : str
+  }
+  class BindEmailWithTokenRequest {
+    code : str
+    email : str
+    email_format(v)
+  }
+  class Budget {
+    max_seconds : float
+    max_steps : int
+    max_tool_calls : int
+  }
+  class BudgetSnapshot {
+    available_chars : int
+    compressed_chars : int
+    compression_tier : str
+    current_msg_chars : int
+    memory_chars : int
+    recent_chars : int
+    retrieved_chars : int
+    system_chars : int
+    total_chars : int
+    utilization_pct : float
+  }
+  class BudgetSnapshotType {
+    available_chars : int
+    compressed_chars : int
+    compression_tier : str
+    current_msg_chars : int
+    memory_chars : int
+    recent_chars : int
+    retrieved_chars : int
+    system_chars : int
+    total_chars : int
+    utilization_pct : float
+  }
+  class BuildBankState {
+    backup_path : str
+    batch_quality_scores : list[float]
+    cluster_results : list[dict]
+    current_batch : list[dict]
+    error : str
+    events : Annotated[list[dict], add]
+    job_position : str
+    processed_count : int
+    progress_pct : float
+    total_questions : int
+    user_id : int
+  }
+  class CSRFMiddleware {
+    app
+  }
+  class CancelTurnRequest {
+    reason : str
+  }
+  class ChangePasswordRequest {
+    current_password : str
+    new_password : str
+    password_complexity(v)
+  }
+  class ChatState {
+    active_skill_instructions : list[dict]
+    active_skills : list[str]
+    answer_complete : bool
+    answer_quality : str
+    asked_counter_question : bool
+    asked_for_summary : bool
+    bank_mode : Optional[str]
+    basis_confidence : float
+    basis_question_ids : list[int]
+    basis_type : str
+    budget_snapshot : Optional[BudgetSnapshotType]
+    candidate_act : str | None
+    candidate_questions : list[dict]
+    candidate_set_id : Optional[str]
+    classify_result : dict
+    closing_stage : str
+    compressed_context : Optional[str]
+    confidence : float
+    conversation_id : str
+    counter_question : bool
+    counter_question_evidence : dict | None
+    counter_question_topic : str | None
+    coverage_events : list[dict]
+    decision_config
+    difficulty : Optional[str]
+    distribution_control : dict
+    distribution_plan : dict | None
+    distribution_primary_required : bool
+    escalation_level : int
+    evidence : str | None
+    exposed_question_ids : list[int]
+    generation_error : dict | None
+    intent : str
+    interview_config : dict
+    interview_context : str
+    interview_state : dict
+    interview_stop_decision : dict
+    jd_id : Optional[int]
+    jd_text : Optional[str]
+    job_position : Optional[str]
+    keywords : list[str]
+    memories : list[dict]
+    memory_summaries : list[dict]
+    message_history : list[dict]
+    metadata : dict
+    mode : str
+    model : Optional[str]
+    natural_question_text : str | None
+    needs_clarification : bool
+    needs_new_dimension : bool
+    off_topic_streak : int
+    question_intent : dict | None
+    question_source : Optional[str]
+    question_source_reason : Optional[str]
+    question_type : Optional[str]
+    recent_messages : list[dict]
+    repetition_streak : int
+    requested_end : bool
+    requires_bank_question : bool
+    rerank_metadata : dict
+    response : str
+    resume_summary : Optional[str]
+    resume_text : Optional[str]
+    retrieval_intent : Optional[str]
+    retrieved_questions : list[dict]
+    rhythm_profile : dict
+    search_negative_terms : list[str]
+    search_positive_terms : list[str]
+    search_query : Optional[str]
+    selected_question : Optional[dict]
+    selection_confidence : float
+    session_id : Optional[str]
+    session_notes : str
+    should_retrieve : bool
+    should_show_references : bool
+    strategy_preferred_question_type : Optional[str]
+    suggested_question_type : str | None
+    tool_steps : list[dict]
+    transition_style : Optional[str]
+    turn_action : Literal['natural_followup', 'bank_question', 'answer_counter_question', 'closing_summary', 'complex_open_task', 'error'] | None
+    turn_contract : dict | None
+    turn_fence : Optional[int]
+    turn_id : Optional[str]
+    turn_intent : dict | None
+    turn_reason : str | None
+    user_id : int
+    user_message : str
+  }
+  class ChatTurn {
+    assistant_message_id : Optional[int]
+    client_request_id : str
+    conversation_id : str
+    created : bool
+    fence : int
+    id : str
+    request_fingerprint : str
+    revision_of_message_id : Optional[int]
+    status : str
+    user_id : int
+    user_message_id : Optional[int]
+  }
+  class ClassifyResult {
+    answer_quality : Literal
+    asked_counter_question : bool
+    asked_for_summary : bool
+    candidate_act : Optional[str]
+    confidence : float
+    counter_question : Optional[dict[str, str]]
+    counter_question_topic : Optional[str]
+    escalation_level : int
+    evidence : Optional[str]
+    intent : Literal
+    needs_clarification : bool
+    needs_new_dimension : bool
+    off_topic_streak : int
+    question_type : Optional[QuestionType]
+    repetition_streak : int
+    requested_end : bool
+    requires_bank_question : bool
+    should_retrieve : bool
+    suggested_question_type : Optional[str]
+    transition_style : Optional[TransitionStyleType]
+    default() 'ClassifyResult'
+    from_dict(data: dict | None) 'ClassifyResult'
+    to_state() dict
+  }
+  class CodingProblemCreateRequest {
+    description : str
+    difficulty : str
+    expected_complexity : str
+    source : str
+    supported_languages : str
+    tags : str
+    title : str
+  }
+  class CodingSubmitRequest {
+    code : str
+    language : str
+    mode : str
+    parent_submission_id : Optional[int]
+    problem_id : int
+  }
+  class ConversationNotFound {
+  }
+  class ConversationNotWritable {
+  }
+  class CoverageFact {
+    confidence : Literal['none', 'low', 'medium', 'high']
+    counts_toward_target : bool
+    model_config
+    phase : str
+    question_id : int | None
+  }
+  class CreateConversationRequest {
+    difficulty : Optional[str]
+    distribution_override : Optional[DistributionPreferenceRequest]
+    experience_id : Optional[int]
+    jd_id : Optional[int]
+    mode : str
+    resume_text : Optional[str]
+    title : Optional[str]
+  }
+  class DecisionConfig {
+    algorithm_after_asked_count : int
+    answer_overlap_threshold : float
+    behavioral_after_asked_count : int
+    behavioral_after_message_count : int
+    candidate_repeat_close : int
+    candidate_repeat_degraded : int
+    dedup_jaccard_threshold : float
+    dedup_window_size : int
+    hard_stop_message_count : int
+    max_consecutive_same_question : int
+    min_algorithm_coding : int
+    min_behavioral : int
+    min_knowledge_probe : int
+    min_project_followup : int
+    min_system_design : int
+    phase_active_max : int
+    phase_opening_max : int
+    phase_soft_close_max : int
+    phase_strong_close_max : int
+    question_overlap_threshold : float
+    soft_close_message_count : int
+    strong_close_message_count : int
+    system_design_after_asked_count : int
+    topic_overlap_threshold : float
+    transition_min_length : int
+  }
+  class DeleteOriginalQuestionRequest {
+    original_question : str
+  }
+  class DistributionDecision {
+    allowed_types : list[str]
+    constraint_exception : str | None
+    forbidden_reasons : dict[str, list[str]]
+    preferred_type : str | None
+    selection_reason : str
+  }
+  class DistributionPreferenceRequest {
+    custom_distribution : Optional[Dict[str, float]]
+    mode : Literal['system_default', 'selected_experience', 'custom']
+    selected_experience_id : Optional[int]
+    style_strength : Literal['light', 'normal', 'strong']
+    target_question_count : Optional[int]
+    validate_distribution()
+  }
+  class DistributionStatsUnavailable {
+  }
+  class DrawQuestionsInput {
+    cat1 : str | None
+    cat2 : str | None
+    count : int
+    difficulty : Literal['easy', 'medium', 'hard'] | None
+    model_config
+    question_type : Literal['algorithm_coding', 'project_followup', 'knowledge_probe', 'system_design', 'behavioral', 'hr'] | None
+    topic : str | None
+    clean_optional_text(value: object) str | None
+  }
+  class EmailLoginRequest {
+    code : str
+    email : str
+    email_format(v)
+  }
+  class EmailRegisterRequest {
+    code : str
+    email : str
+    password : str
+    username : str
+    email_format(v)
+    password_complexity(v)
+    username_format(v)
+  }
+  class EvaluateAnswerRequest {
+    model : Optional[str]
+    question_id : int
+    question_text : str
+    reference_answer : str
+    user_answer : str
+  }
+  class EvidenceBundle {
+    candidate_set_ref : str | None
+    confidence : Literal['none', 'low', 'medium', 'high']
+    coverage_facts : list[CoverageFact]
+    model_config
+    schema_version : int
+    selected_question_ref : QuestionRef | None
+    source_refs : list[SourceRef]
+    tool_facts : list[ToolFact]
+    to_dict() dict[str, Any]
+  }
+  class FAISSIndexManager {
+    add_clusters(job_position: str, owner_id: Optional[int], cat2: str, entries: List[Dict]) None
+    get_all_by_cat2(job_position: str, owner_id: Optional[int], conn) Dict[str, List[Dict]]
+    get_centroids(job_position: str, owner_id: Optional[int], cat2: str, conn) List[Dict]
+    invalidate(job_position: Optional[str], owner_id: Optional[int]) None
+    remove_clusters(job_position: str, owner_id: Optional[int], cat2: str, ids: set) None
+    search(job_position: str, owner_id: int, cat2: str, query_embedding: np.ndarray, top_k: int, conn) List[Dict]
+  }
+  class GenerationError {
+    code : str
+    guard : str | None
+    message : str
+  }
+  class GenerationError {
+    code : str
+    guard : str | None
+    message : str
+  }
+  class GenericUpdateRequest {
+    record_id : int
+    table_name : str
+    update_data : Dict[str, Any]
+  }
+  class InterviewLedger {
+    asked_question_ids : set[int]
+    asked_question_texts : set[str]
+    cat1_counts : Counter[str]
+    cat2_counts : Counter[str]
+    question_type_counts : Counter[str]
+    recent_topic_tokens : list[set[str]]
+    record_question(question: dict | None, question_type: str | None) None
+  }
+  class InterviewPhase {
+    name
+  }
+  class InterviewStateSnapshot {
+    conversation_id : str
+    coverage : dict[str, dict[str, int | bool]]
+    current_phase : str
+    difficulty : str
+    generated_at : float
+    job_position : str
+    last_answer_evaluation : dict | None
+    next_focus : str | None
+    recent_decisions : list[dict]
+    rhythm_profile : dict
+    turn_count : int
+  }
+  class InterviewSummary {
+    coverage_note : str
+    key_suggestions : list[str]
+    not_assessed : list[str]
+    observed_strengths : list[str]
+    overall_comment : str
+  }
+  class LoadSkillInput {
+    model_config
+    skill_name : Literal['adaptive-difficulty', 'algorithm-coding', 'hr-soft-skills', 'interview-rhythm', 'project-deep-dive', 'theory-qa']
+  }
+  class LoginRequest {
+    password : str
+    remember_me : bool
+    username : str
+  }
+  class MCPAuthMiddleware {
+    app
+  }
+  class MCPPrincipal {
+    bank_mode : str
+    user_id : int
+  }
+  class MergeOriginalQuestionRequest {
+    original_question : str
+    target_cat1 : str
+    target_cat2 : str
+    target_id : int
+  }
+  class NodeTimer {
+    elapsed : float
+  }
+  class OutputDeduplicator {
+    hash_buffer : set[str]
+    jaccard_threshold : float
+    token_buffer : list[set[str]]
+    window_size : int
+    check(text: str) str
+    record(text: str)
+  }
+  class PasswordResetRequest {
+    code : str
+    email : str
+    new_password : str
+    email_format(v)
+    password_complexity(v)
+  }
+  class ProfileUpdateRequest {
+    settings : Dict[str, str]
+  }
+  class QuestionRef {
+    model_config
+    question_id : int
+    rank : int
+    source : str
+  }
+  class QuestionType {
+    name
+  }
+  class RegenerateMessageRequest {
+    client_request_id : Optional[str]
+    model : Optional[str]
+    model_config
+  }
+  class RegisterRequest {
+    email : str
+    password : str
+    username : str
+    email_format(v)
+    password_complexity(v)
+    username_format(v)
+  }
+  class SearchQuestionsInput {
+    keywords : list[str]
+    limit : int
+    model_config
+    question_type : Literal['project_followup', 'knowledge_probe', 'new_question'] | None
+    clean_keywords(value: object) list[str]
+  }
+  class SecurityHeadersMiddleware {
+    app
+  }
+  class SelectQuestionInput {
+    candidate_index : int
+    model_config
+  }
+  class SendBindCodeRequest {
+    email : str
+  }
+  class SendCodeRequest {
+    email : str
+    purpose : str
+    email_format(v)
+  }
+  class SendMessageRequest {
+    client_request_id : Optional[str]
+    content : str
+    model : Optional[str]
+    regenerate_message_id : Optional[int]
+  }
+  class ShareDefault {
+    name
+  }
+  class ShareDefaultRequest {
+    share_default
+  }
+  class SideEffectConflict {
+    current_version : int | None
+    resource : str
+  }
+  class Skill {
+    allowed_agents : list[str]
+    allowed_tools : list[str]
+    always_active : bool
+    compatibility : str | None
+    description : str
+    instruction_template : str | None
+    kind : str | None
+    license : str | None
+    metadata : dict
+    metadata_line : str
+    name : str
+    priority : int
+    prompt_role : str | None
+    resources
+    strategy_rules : dict | None
+    triggers : list[str]
+    get_instruction(context: dict | None) str
+    get_strategy_rules() dict
+    read_resource(relative_path: str) str
+  }
+  class SkillRegistry {
+    agent_name : str | None
+    get(name: str) Skill | None
+    get_all_metadata() str
+    match_skills(state: dict) list[Skill]
+    register(skill: Skill) None
+  }
+  class SkillResourceIndex {
+    assets : list[str]
+    references : list[str]
+    root : Path | None
+    scripts : list[str]
+    read_text(relative_path: str) str
+  }
+  class SourceRef {
+    model_config
+    source_id : str
+    source_type : str
+  }
+  class SplitQuestionRequest {
+    original_question : str
+  }
+  class StateTransition {
+    from_state : str
+    model_config
+    reason : str
+    to : str
+  }
+  class StopRun {
+    reason : str
+  }
+  class SubmitState {
+    answer_tasks : list[tuple[int, str]]
+    cluster_result : dict
+    completion_attempted : bool
+    content_type_hint : str
+    doc_type : str
+    error : str
+    extracted_data : dict
+    extraction_quality : float
+    extraction_retries : int
+    image_data : list[dict]
+    is_admin : bool
+    job_position : str
+    llm_call_count : int
+    match_result : dict
+    node_timings : dict
+    raw_text : str
+    record_owner_id : int
+    record_status : str
+    saved_interview_id : int
+    saved_url : str
+    season : str
+    tagged_rows : list[list[str]]
+    tagging_quality : float
+    tagging_retries : int
+    target : str
+    taxonomy_config : dict
+    total_tokens : int
+    url : str
+    user_id : int
+  }
+  class TokenBudgetManager {
+    compressed_budget : int
+    memory_budget : int
+    output_reserve : int
+    retrieved_budget : int
+    system_budget : int
+    system_overhead : int
+    total_budget : int
+    compress(messages: list[dict], session_notes: str, existing_compressed: Optional[str], user_id: Optional[int]) tuple[list[dict], Optional[str], str]
+    measure(state: dict) BudgetSnapshot
+    needs_compression(snapshot: BudgetSnapshot) bool
+  }
+  class ToolEnvelope {
+    error : ToolError | None
+    items : list[ToolQuestionItem]
+    metadata
+    ok : bool
+    tool : Literal
+  }
+  class ToolError {
+    error_code : str
+    message : str
+  }
+  class ToolFact {
+    confidence : Literal['low', 'medium', 'high']
+    fact_type : str
+    model_config
+    source : str
+    tool_name : str
+    value : dict[str, Any]
+  }
+  class ToolIntent {
+    requires_question_bank : bool
+  }
+  class ToolMetadata {
+    debug_reason : str
+    empty_reason : str | None
+    fallback_steps : list[str]
+    fallback_used : bool
+    metrics
+    result_count : int
+  }
+  class ToolMetrics {
+    cjk_like_ms : int | None
+    db_ms : int | None
+    fts_ms : int | None
+    rerank_ms : int | None
+    total_ms : int
+    vector_ms : int | None
+  }
+  class ToolPolicy {
+    allowed_skills : frozenset[str] | None
+    allowed_tools : frozenset[str]
+    bank_mode : str
+    conversation_id : str
+    policy_version : str
+    user_id : int
+    allows(tool_name: str) bool
+    allows_skill(skill_name: str) bool
+  }
+  class ToolPolicyViolation {
+    code : str
+  }
+  class ToolQuestionItem {
+    cat1 : str
+    cat2 : str
+    difficulty : str
+    id : int
+    model_config
+    question : str
+    reason : str
+    score : float | None
+    source : Literal
+    sources : list[dict]
+    tags : str
+  }
+  class ToolStrategy {
+    allow_draw : bool
+    allow_load_skill : bool
+    allow_search : bool
+    allowed_skills : list[str]
+    instruction : str
+    next_phase_hint : str
+    requires_retrieval : bool
+    to_prompt_text() str
+  }
+  class TranscribeResponse {
+    confidence : float
+    error : Optional[str]
+    language : str
+    model : str
+    success : bool
+    text : str
+    words : list[dict]
+  }
+  class TurnAction {
+    name
+  }
+  class TurnCancelled {
+  }
+  class TurnContract {
+    action
+    payload : dict[str, Any]
+    priority : str
+    reason : str
+    source_facts : dict[str, Any]
+    validation : list[str]
+    from_dict(data: dict | None) 'TurnContract'
+    to_metadata_dict() dict[str, Any]
+  }
+  class TurnContractAction {
+    name
+  }
+  class TurnContractV2 {
+    action
+    contract_hash : str
+    evidence_refs : list[str]
+    model_config
+    priority : int
+    question_ref : QuestionRef | None
+    schema_version : int
+    state_transition
+    writer_brief
+    to_dict() dict[str, Any]
+  }
+  class TurnIdempotencyConflict {
+    status : str
+    turn_id : str
+  }
+  class TurnInProgress {
+  }
+  class TurnIntent {
+    assessment_goal : str
+    drill_layer : str | None
+    reason : str
+    source_facts : dict[str, Any]
+    strategy
+    target_dimension : str | None
+    tool_intent
+    writer_brief
+    to_metadata_dict() dict[str, Any]
+  }
+  class TurnNotFound {
+  }
+  class TurnStrategy {
+    name
+  }
+  class UpdateQuestionRequest {
+    cat1 : str
+    cat2 : str
+    difficulty : str
+    question : str
+    tags : str
+  }
+  class UploadToBankRequest {
+    cat1 : str
+    cat2 : str
+    difficulty : str
+    question_text : str
+    tags : str
+    target : str
+  }
+  class WorkerSettings {
+    cron_jobs : list
+    functions : list
+    job_timeout : int
+    keep_result : int
+    max_tries : int
+    on_shutdown
+    on_startup
+    queue_read_limit : int
+    redis_settings
+  }
+  class WriterBrief {
+    anchor : str
+    assessment_goal : str
+  }
+  class WriterBrief {
+    constraints : list[str]
+    model_config
+    purpose : str
+    required_question_ref : QuestionRef | None
+  }
+  ChatState --> DecisionConfig : decision_config
+  TurnContractV2 --> StateTransition : state_transition
+  TurnContractV2 --> TurnAction : action
+  TurnContractV2 --> WriterBrief : writer_brief
+  ToolEnvelope --> ToolMetadata : metadata
+  ToolMetadata --> ToolMetrics : metrics
+  TurnContract --> TurnContractAction : action
+  TurnIntent --> ToolIntent : tool_intent
+  TurnIntent --> TurnStrategy : strategy
+  TurnIntent --> WriterBrief : writer_brief
+  Skill --> SkillResourceIndex : resources
+  ShareDefaultRequest --> ShareDefault : share_default
