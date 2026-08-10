@@ -8,9 +8,9 @@ import {
   Image as ImageIcon,
   Link,
   Loader2,
+  RefreshCw,
   Sparkles,
   Upload,
-  X,
 } from '@lucide/vue'
 
 import { createSubmitJob } from '@/services/dataApi.js'
@@ -34,7 +34,7 @@ const props = defineProps({
 
 const emit = defineEmits(['submitted'])
 
-const { activeJobs, removeJob } = useSubmitJobs()
+const { activeJobs, retryJob } = useSubmitJobs()
 const { confirm: showConfirm } = useConfirm()
 
 const TEXT_MAX_LENGTH = 50000
@@ -62,12 +62,27 @@ const seasonOptions = computed(() => {
 })
 
 const activeJobCount = computed(() =>
-  activeJobs.value.filter(j => j.status === 'pending' || j.status === 'running').length
+  activeJobs.value.filter(j => j.status === 'pending' || j.status === 'queued' || j.status === 'running').length
 )
+const visibleJobs = computed(() => activeJobs.value.filter(j => j.status !== 'completed'))
+const retryingJobId = ref(null)
 
 const textLineCount = computed(() =>
   rawText.value.split(/\r?\n/).filter(line => line.trim()).length
 )
+
+async function onRetryJob(job) {
+  if (retryingJobId.value) return
+  retryingJobId.value = job.id
+  try {
+    await retryJob(job.id)
+    toast.success('已重新加入处理队列')
+  } catch (error) {
+    toast.error(`重新处理失败：${error.message || '请稍后重试'}`)
+  } finally {
+    retryingJobId.value = null
+  }
+}
 
 const inputValid = computed(() =>
   rawText.value.trim().length > 0 || images.value.length > 0
@@ -257,15 +272,15 @@ defineExpose({ onSubmit, isSubmitting })
       </div>
 
       <!-- 后台任务实时进度列表 -->
-      <div v-if="activeJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+      <div v-if="visibleJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
         <div
-          v-for="job in activeJobs"
+          v-for="job in visibleJobs"
           :key="job.id"
           data-testid="import-job-item"
           class="flex items-center gap-2.5"
         >
           <Loader2
-            v-if="job.status === 'pending' || job.status === 'running'"
+            v-if="job.status === 'pending' || job.status === 'queued' || job.status === 'running'"
             class="h-4 w-4 shrink-0 animate-spin text-primary"
           />
           <CheckCircle2
@@ -297,15 +312,19 @@ defineExpose({ onSubmit, isSubmitting })
             </div>
           </div>
 
-          <button
+          <Button
             v-if="job.status === 'failed'"
             type="button"
-            class="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            :disabled="isSubmitting"
-            @click="removeJob(job.id)"
+            size="sm"
+            variant="outline"
+            class="shrink-0 gap-1 px-2 text-xs"
+            :disabled="retryingJobId !== null"
+            @click="onRetryJob(job)"
           >
-            <X class="h-3.5 w-3.5" />
-          </button>
+            <Loader2 v-if="retryingJobId === job.id" class="h-3.5 w-3.5 animate-spin" />
+            <RefreshCw v-else class="h-3.5 w-3.5" />
+            {{ retryingJobId === job.id ? '重新处理中' : '重新处理' }}
+          </Button>
         </div>
       </div>
     </div>

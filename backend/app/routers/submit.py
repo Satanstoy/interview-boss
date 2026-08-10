@@ -319,16 +319,138 @@ async def create_submit_job(
 
 @router.get("/api/submit-jobs/active")
 async def get_active_submit_jobs(user: dict = Depends(get_current_user)):
-    """查询当前用户未完成的上传导入任务。"""
+    """查询当前用户上传页需要展示的任务。
+
+    成功任务不再出现在这里；失败任务保留，直到用户重试。若失败任务
+    已经产生了新的重试尝试，只返回最新尝试，避免同一上传在界面重复出现。
+    """
 
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                "SELECT id, job_type, status, progress_current, progress_total, progress_message, created_at, updated_at "
-                "FROM jobs WHERE created_by = ? AND job_type = 'submit_import' AND status IN ('pending', 'queued', 'running') "
-                "ORDER BY created_at DESC",
+                "SELECT j.id, j.job_type, j.status, j.progress_current, "
+                "j.progress_total, j.progress_message, j.error, j.last_error, "
+                "j.created_at, j.updated_at, j.parent_job_id "
+                "FROM jobs j "
+                "WHERE j.created_by = ? "
+                "AND j.job_type = 'submit_import' "
+                "AND j.status IN ('pending', 'queued', 'running', 'failed') "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM jobs child "
+                "  WHERE child.parent_job_id = j.id "
+                "    AND child.job_type = 'submit_import'"
+                ") "
+                "ORDER BY CASE WHEN j.status = 'failed' THEN 0 ELSE 1 END, "
+                "j.created_at DESC",
                 (user["id"],),
             ).fetchall()
-            return [dict(r) for r in rows]
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["retryable"] = item["status"] == "failed"
+                item["error"] = item.get("error") or item.get("last_error")
+                item.pop("last_error", None)
+                result.append(item)
+            return result
 
     return await run_db(_query)
+
+
+@router.post("/api/submit-jobs/{job_id}/retry")
+async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
+    """创建一次新的上传尝试，保留原任务作为审计记录。"""
+
+    def _create_retry():
+        with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                original = conn.execute(
+                    "SELECT id, job_type, status, created_by, progress_total "
+                    "FROM jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                if not original or (
+                    original["created_by"] != user["id"]
+                    and not user.get("is_admin", False)
+                ):
+                    raise HTTPException(status_code=404, detail="任务不存在")
+                if original["job_type"] != "submit_import":
+                    raise HTTPException(status_code=400, detail="该任务不支持重新处理")
+                if original["status"] != "failed":
+                    raise HTTPException(status_code=409, detail="只有失败任务可以重新处理")
+
+                active_child = conn.execute(
+                    "SELECT id FROM jobs WHERE parent_job_id = ? "
+                    "AND job_type = 'submit_import' "
+                    "AND status IN ('pending', 'queued', 'running') "
+                    "ORDER BY id DESC LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+                if active_child:
+                    conn.commit()
+                    return {"job_id": int(active_child["id"]), "created": False}
+
+                payload_row = conn.execute(
+                    "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+                ).fetchone()
+                if not payload_row:
+                    raise HTTPException(status_code=409, detail="原任务数据已不存在，无法重试")
+
+                retry_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM jobs WHERE parent_job_id = ?",
+                    (job_id,),
+                ).fetchone()["count"]
+                idempotency_key = f"submit-retry:{job_id}:{int(retry_count) + 1}"
+                cursor = conn.execute(
+                    "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+                    "available_at, parent_job_id, idempotency_key) "
+                    "VALUES ('submit_import', 'pending', ?, ?, CURRENT_TIMESTAMP, ?, ?)",
+                    (
+                        original["progress_total"] or 6,
+                        original["created_by"],
+                        job_id,
+                        idempotency_key,
+                    ),
+                )
+                new_job_id = int(cursor.lastrowid)
+
+                payload = json.loads(payload_row["payload"])
+                payload["retry_of_job_id"] = job_id
+                payload["retry_attempt"] = int(retry_count) + 1
+                conn.execute(
+                    "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                    (new_job_id, json.dumps(payload, ensure_ascii=False)),
+                )
+                conn.commit()
+                return {"job_id": new_job_id, "created": True}
+            except Exception:
+                conn.rollback()
+                raise
+
+    retry = await run_db(_create_retry)
+    new_job_id = retry["job_id"]
+    if not retry["created"]:
+        return {"job_id": new_job_id, "status": "queued", "created": False}
+
+    dispatch_error = None
+    try:
+        from app.worker import enqueue_submit_import_job
+        from app.services.job_lifecycle import mark_job_dispatched
+
+        arq_job = await enqueue_submit_import_job(new_job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+        await run_db(
+            lambda: _mark_job_dispatched(new_job_id, str(arq_job_id), mark_job_dispatched)
+        )
+    except Exception as exc:
+        dispatch_error = str(exc)[:300]
+        logger.warning("重试上传任务暂未投递，等待 dispatcher: job_id=%s error=%s", new_job_id, exc)
+
+    return {
+        "job_id": new_job_id,
+        "status": "queued" if dispatch_error is None else "pending",
+        "created": True,
+        "dispatch_error": dispatch_error,
+    }

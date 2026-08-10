@@ -139,6 +139,24 @@ def _migration_074_durable_job_lifecycle(conn):
     logger.info("migration_074: jobs durable dispatch/lease fields are ready")
 
 
+def _migration_075_job_retry_lineage(conn):
+    """Track retry attempts without replacing the original job record.
+
+    A retry is a new durable job that reuses the original payload.  Keeping the
+    lineage lets contextual UIs show only the latest attempt while operators
+    retain the full audit trail.
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()
+    }
+    if "parent_job_id" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN parent_job_id INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id, created_at)"
+    )
+    logger.info("migration_075: jobs retry lineage is ready")
+
+
 def _migration_050_pipeline_metrics(conn):
     """Create pipeline_metrics table for observability.
 

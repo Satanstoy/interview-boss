@@ -27,6 +27,7 @@ export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-str
 // ── Submit jobs (后台任务模式) ──
 export const createSubmitJob = (formData) => upload(`${API}/submit-jobs`, formData, { timeout: 120_000, noRetry: true })
 export const fetchActiveSubmitJobs = () => get(`${API}/submit-jobs/active`, { noCache: true })
+export const retrySubmitJob = (jobId) => post(`${API}/submit-jobs/${jobId}/retry`, {})
 
 // ── Data mutations ──
 export const deleteRecord = (type, id) => del(`${API}/data/${type}/${id}`)

@@ -9,7 +9,7 @@
  * - 任务完成/失败时触发回调
  */
 import { ref, readonly } from 'vue'
-import { createSubmitJob, fetchActiveSubmitJobs } from '@/services/dataApi.js'
+import { createSubmitJob, fetchActiveSubmitJobs, retrySubmitJob } from '@/services/dataApi.js'
 import { getSSE } from '@/services/http.js'
 
 const STORAGE_KEY = 'interviewboss-submit-jobs'
@@ -41,7 +41,7 @@ function _loadStoredJobIds() {
  */
 function _persistJobIds() {
   const ids = activeJobs.value
-    .filter(j => j.status === 'pending' || j.status === 'running')
+    .filter(j => j.status === 'pending' || j.status === 'queued' || j.status === 'running' || j.status === 'failed')
     .map(j => j.id)
   if (ids.length > 0) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
@@ -151,9 +151,9 @@ function _subscribeJobSSE(jobId) {
         status: 'failed',
         message: event.message || '处理失败',
         error: event.message || '未知错误',
+        retryable: true,
       })
       _sseControllers.delete(jobId)
-      // failed 也不持久化到 localStorage
       _persistJobIds()
     }
   }, { signal: controller.signal }).catch((err) => {
@@ -164,7 +164,7 @@ function _subscribeJobSSE(jobId) {
     _sseControllers.delete(jobId)
     // 如果任务还在 pending/running，3 秒后尝试重连
     const currentJob = activeJobs.value.find(j => j.id === jobId)
-    if (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending')) {
+    if (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending' || currentJob.status === 'queued')) {
       setTimeout(() => _subscribeJobSSE(jobId), 3000)
     }
   })
@@ -196,6 +196,20 @@ export function attachJob(jobId) {
 }
 
 /**
+ * 重新处理失败的上传任务。
+ * 服务端会创建新的 attempt，原 job 只保留审计记录。
+ */
+export async function retryJob(jobId) {
+  const result = await retrySubmitJob(jobId)
+  const nextJobId = result.job_id
+  if (nextJobId !== jobId) {
+    _removeJob(jobId)
+  }
+  attachJob(nextJobId)
+  return result
+}
+
+/**
  * 恢复未完成的 jobs（页面加载时调用）
  * 1. 从 localStorage 读取 job ids
  * 2. 调服务端查询活跃任务
@@ -212,7 +226,7 @@ export async function restoreActiveJobs() {
     console.warn('[useSubmitJobs] 获取活跃任务失败:', err.message)
   }
 
-  // 服务端只返回 pending/running 的 jobs
+  // 服务端返回当前页面需要展示的 pending/queued/running/failed jobs
   const serverJobIds = new Set(serverJobs.map(j => j.id))
 
   // 本地存储但服务端已完成/失败的 id → 清理掉
@@ -230,6 +244,8 @@ export async function restoreActiveJobs() {
     job.current = sj.progress_current || 0
     job.total = sj.progress_total || 7
     job.message = sj.progress_message || ''
+    job.error = sj.error || null
+    job.retryable = Boolean(sj.retryable)
     if (job.total > 0) {
       job.percent = Math.round((job.current / job.total) * 100)
     }
@@ -271,6 +287,7 @@ export function useSubmitJobs() {
     attachJob,
     restoreActiveJobs,
     removeJob,
+    retryJob,
     setOnJobDone,
   }
 }
