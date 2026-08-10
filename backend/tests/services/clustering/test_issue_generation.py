@@ -113,6 +113,36 @@ async def test_generate_quality_issues_idempotent(test_db, monkeypatch):
     assert test_db.execute("SELECT COUNT(*) FROM quality_issue").fetchone()[0] == 1
 
 
+async def test_generate_quality_issues_ignores_private_clusters(test_db, monkeypatch):
+    """管理员清单生成不能读取个人题库的聚类。"""
+    from app.services.clustering_maintenance import generate_quality_issues
+
+    _seed_issue_source(test_db)
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (123, 'private-user', 'hash')"
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, status, owner_id, original_questions) "
+        "VALUES (2, '私有代表题', 2, 'approved', 123, ?)",
+        (json.dumps(["私有代表题", "私有变体题"], ensure_ascii=False),),
+    )
+    test_db.commit()
+
+    prompts = []
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        prompts.append(prompt)
+        return json.dumps({"confirm": False, "confidence": 0.9, "reason": "不是问题"})
+
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: test_db)
+    result = await generate_quality_issues(user_id=None, limit=10)
+
+    assert result["created"] == 0
+    assert all("私有" not in prompt for prompt in prompts)
+    assert test_db.execute("SELECT COUNT(*) FROM quality_issue").fetchone()[0] == 0
+
+
 async def test_generate_quality_issues_pre_generates_rewrite(test_db, monkeypatch):
     """拆成独立题：确认通过后 LLM 预生成重写题面，存 suggested_value"""
     from app.services.clustering_maintenance import generate_quality_issues

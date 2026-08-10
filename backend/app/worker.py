@@ -627,15 +627,29 @@ async def scheduled_compaction_task(ctx):
 
 
 async def scheduled_quality_audit_task(ctx):
-    """定时聚类质量审查：每周日凌晨 3:30 抽查公共题库聚类质量。
+    """定时聚类质量审查：抽查公共题库并生成管理员待审清单。
 
     误合并率超阈值（10%）时 triggered_cleanup=1，提示清洗（不自动执行）。
+    清单生成与代表题检查都只处理公共题库，避免把个人题暴露给管理员。
     """
-    from app.services.clustering_maintenance import run_quality_audit
+    from app.services.clustering_maintenance import (
+        generate_quality_issues,
+        generate_weak_representative_issues,
+        run_quality_audit,
+    )
 
     logger.info("[定时任务] 开始聚类质量审查...")
     try:
-        result = await run_quality_audit(user_id=None)
+        audit_result = await run_quality_audit(user_id=None)
+        issue_result = await generate_quality_issues(user_id=None, limit=20)
+        weak_issue_result = await generate_weak_representative_issues(
+            user_id=None, limit=20
+        )
+        result = {
+            "audit": audit_result,
+            "quality_issues": issue_result,
+            "weak_representative_issues": weak_issue_result,
+        }
         logger.info("[定时任务] 质量审查完成: %s", result)
         return result
     except Exception as e:

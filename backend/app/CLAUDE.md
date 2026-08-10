@@ -8,7 +8,7 @@ FastAPI 应用初始化、中间件、路由注册。
 |------|------|
 | `asgi.py` | FastAPI app 创建、中间件注册、路由注册、生命周期事件 |
 | `mcp_server/` | 后端内嵌 MCP 工具服务，承载稳定的搜索、抽题、选题执行边界 |
-| `worker.py` | ARQ 后台任务 worker；包括可重试的面试分布统计刷新和 durable chat side-effect 任务 |
+| `worker.py` | ARQ 后台任务 worker；包括面试分布统计刷新、durable chat side-effect 任务，以及定时聚类质量审查（审计 + 管理员待审清单生成） |
 | `__init__.py` | 包初始化 |
 
 ## asgi.py 中间件顺序

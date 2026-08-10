@@ -74,3 +74,42 @@ class TestSourceHealthCron:
         assert isinstance(cj, CronJob)
         assert cj.hour == {3}
         assert cj.minute == {40}
+
+
+async def test_quality_audit_cron_generates_admin_issue_lists(monkeypatch):
+    """质量审查定时任务应同时生成管理员待审清单。"""
+    from app.worker import scheduled_quality_audit_task
+
+    calls = []
+
+    async def fake_audit(user_id=None):
+        calls.append(("audit", user_id))
+        return {"triggered_cleanup": 1}
+
+    async def fake_issues(user_id=None, limit=20):
+        calls.append(("issues", user_id, limit))
+        return {"created": 2}
+
+    async def fake_weak_issues(user_id=None, limit=20):
+        calls.append(("weak", user_id, limit))
+        return {"created": 1}
+
+    monkeypatch.setattr("app.services.clustering_maintenance.run_quality_audit", fake_audit)
+    monkeypatch.setattr("app.services.clustering_maintenance.generate_quality_issues", fake_issues)
+    monkeypatch.setattr(
+        "app.services.clustering_maintenance.generate_weak_representative_issues",
+        fake_weak_issues,
+    )
+
+    result = await scheduled_quality_audit_task({})
+
+    assert calls == [
+        ("audit", None),
+        ("issues", None, 20),
+        ("weak", None, 20),
+    ]
+    assert result == {
+        "audit": {"triggered_cleanup": 1},
+        "quality_issues": {"created": 2},
+        "weak_representative_issues": {"created": 1},
+    }

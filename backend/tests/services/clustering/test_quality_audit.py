@@ -75,3 +75,42 @@ async def test_run_quality_audit_llm_failure_graceful(test_db, monkeypatch):
     result = await run_quality_audit(user_id=None, sample_size=10)
     assert result["total_variants"] == 0
     assert result["inconsistent_rate"] == 0.0
+
+
+async def test_run_quality_audit_ignores_private_clusters(test_db, monkeypatch):
+    """质量抽查不能把个人题库纳入管理员公共质量审查。"""
+    import json
+
+    _seed_audit_clusters(test_db)
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (123, 'private-user', 'hash')"
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, status, owner_id, original_questions) "
+        "VALUES (3, '私有聚类代表题', 2, 'approved', 123, ?)",
+        (json.dumps(["私有聚类代表题", "私有聚类变体"], ensure_ascii=False),),
+    )
+    test_db.execute(
+        "CREATE TABLE IF NOT EXISTS quality_audit ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, audited_at TEXT, sample_size INTEGER, "
+        "total_variants INTEGER, inconsistent_count INTEGER, duplicate_count INTEGER, "
+        "coverage_count INTEGER, inconsistent_rate REAL, duplicate_rate REAL, "
+        "coverage_rate REAL, report_path TEXT, triggered_cleanup INTEGER)"
+    )
+    test_db.commit()
+
+    prompts = []
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        prompts.append(prompt)
+        return '{"variants": [], "representative_covers_all": true, "duplicates": []}'
+
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: test_db)
+    from app.services.clustering_maintenance import run_quality_audit
+
+    result = await run_quality_audit(user_id=None, sample_size=10)
+
+    assert result["sample_size"] == 2
+    assert result["total_variants"] == 4
+    assert all("私有" not in prompt for prompt in prompts)

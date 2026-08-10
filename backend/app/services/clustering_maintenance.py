@@ -500,7 +500,7 @@ async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE
     with get_db_connection() as conn:
         rows = conn.execute(
             "SELECT id, question, frequency, original_questions FROM question_bank "
-            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
             "ORDER BY frequency DESC LIMIT ?",
             (sample_size,),
         ).fetchall()
@@ -831,7 +831,7 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
     with get_db_connection() as conn:
         rows = conn.execute(
             "SELECT id, question, cat1, cat2, frequency, original_questions FROM question_bank "
-            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
             "ORDER BY frequency DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -891,7 +891,8 @@ async def generate_quality_issues(user_id: int = None, limit: int = 20) -> dict:
                 with get_db_connection() as conn2:
                     merge_cands = conn2.execute(
                         "SELECT id, question, cat1, cat2 FROM question_bank "
-                        "WHERE deleted_at IS NULL AND id != ? AND frequency > 0 "
+                        "WHERE deleted_at IS NULL AND owner_id IS NULL AND id != ? "
+                        "AND frequency > 0 "
                         "ORDER BY (cat1 = ?) DESC, frequency DESC LIMIT 6",
                         (rep["id"], rep["cat1"]),
                     ).fetchall()
@@ -1011,7 +1012,7 @@ async def generate_weak_representative_issues(user_id: int = None, limit: int = 
     with get_db_connection() as conn:
         rows = conn.execute(
             "SELECT id, question, frequency, original_questions FROM question_bank "
-            "WHERE deleted_at IS NULL AND frequency > 1 "
+            "WHERE deleted_at IS NULL AND owner_id IS NULL AND frequency > 1 "
             "ORDER BY frequency DESC LIMIT ?",
             (limit,),
         ).fetchall()
