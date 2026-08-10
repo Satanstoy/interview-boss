@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/home/ubuntu/sj/interview-boss"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # 镜像源测速选源（source，不执行）
@@ -392,13 +392,36 @@ do_worker_restart() {
 }
 
 # ── 备份数据 ──
+# SQLite WAL 模式在线备份：裸 cp 会漏掉 -wal 中未 checkpoint 的已提交事务且可能撕裂文件，
+# 必须用 sqlite 在线备份 API（.backup / python backup）。
+backup_sqlite_wal() {
+  local src="$1" dest="$2"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$src" ".backup '$dest'"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "$src" "$dest" <<'PY'
+import sqlite3, sys
+src, dest = sys.argv[1], sys.argv[2]
+s = sqlite3.connect(src)
+d = sqlite3.connect(dest)
+try:
+    s.backup(d)
+finally:
+    d.close(); s.close()
+PY
+  else
+    err "备份失败：需要 sqlite3 或 python3 才能在线备份 WAL 数据库"
+    return 1
+  fi
+}
+
 do_backup() {
   local backup_dir="$PROJECT_DIR/backups"
   local timestamp=$(date +%Y%m%d_%H%M%S)
   mkdir -p "$backup_dir"
 
-  log "备份 SQLite 数据库..."
-  cp "$PROJECT_DIR/backend/data/interview-boss.db"      "$backup_dir/interview-boss_${timestamp}.db"
+  log "备份 SQLite 数据库（WAL 在线备份）..."
+  backup_sqlite_wal "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db"
 
   log "备份 Redis 数据..."
   docker compose exec redis redis-cli BGSAVE >/dev/null 2>&1 || true
