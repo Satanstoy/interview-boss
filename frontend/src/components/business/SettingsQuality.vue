@@ -1,9 +1,10 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { ClipboardCheck, ShieldCheck, ShieldX, Check, X, Sparkles, Loader2, ArrowRight } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   fetchQualityIssues,
   approveQualityIssue,
@@ -28,6 +29,22 @@ const statusTabs = [
 
 const pendingIssues = computed(() => issues.value.filter((i) => i.status === 'pending'))
 const highConfidencePending = computed(() => pendingIssues.value.filter((i) => i.confidence >= 0.85))
+const selectedIds = ref(new Set())
+const lastSelectedIndex = ref(null)
+const selectedPendingIssues = computed(() =>
+  pendingIssues.value.filter((issue) => selectedIds.value.has(issue.id)),
+)
+const selectedLowConfidenceIssues = computed(() =>
+  selectedPendingIssues.value.filter((issue) => issue.confidence < 0.85),
+)
+const allPendingSelected = computed(() =>
+  pendingIssues.value.length > 0 && pendingIssues.value.every((issue) => selectedIds.value.has(issue.id)),
+)
+const selectionState = computed(() => {
+  if (allPendingSelected.value) return true
+  if (selectedPendingIssues.value.length) return 'indeterminate'
+  return false
+})
 
 const issueTypeColor = (type) => {
   if (type === 'mismerge') return 'bg-red-500/15 text-red-600'
@@ -74,7 +91,72 @@ const loadIssues = async () => {
   }
 }
 
+const resetSelection = () => {
+  selectedIds.value = new Set()
+  lastSelectedIndex.value = null
+}
+
+const removeFromSelection = (issueId) => {
+  const next = new Set(selectedIds.value)
+  next.delete(issueId)
+  selectedIds.value = next
+  // 当前题目从清单消失后，旧索引不再可靠，下一次 Shift 点击从新锚点开始。
+  lastSelectedIndex.value = null
+}
+
+const toggleSelectAll = () => {
+  selectedIds.value = allPendingSelected.value
+    ? new Set()
+    : new Set(pendingIssues.value.map((issue) => issue.id))
+  lastSelectedIndex.value = null
+}
+
+// 支持 Shift 点击：从上一次点击的题目选到本次点击的题目。
+const toggleIssueSelection = (issue, index, event) => {
+  if (status.value !== 'pending' || busy.value || processing.value.has(issue.id)) return
+
+  const checked = !selectedIds.value.has(issue.id)
+  const next = new Set(selectedIds.value)
+  const hasRangeAnchor = event?.shiftKey && lastSelectedIndex.value !== null
+
+  if (hasRangeAnchor) {
+    const start = Math.min(lastSelectedIndex.value, index)
+    const end = Math.max(lastSelectedIndex.value, index)
+    issues.value.slice(start, end + 1).forEach((rangeIssue) => {
+      if (rangeIssue.status !== 'pending') return
+      if (checked) next.add(rangeIssue.id)
+      else next.delete(rangeIssue.id)
+    })
+  } else if (checked) {
+    next.add(issue.id)
+  } else {
+    next.delete(issue.id)
+  }
+
+  selectedIds.value = next
+  lastSelectedIndex.value = index
+}
+
+// 审批后列表会移除当前卡片，保留操作前的滚动位置，避免用户被带回页面顶部。
+const withScrollPreserved = async (action) => {
+  const scrollY = window.scrollY
+  try {
+    return await action()
+  } finally {
+    await nextTick()
+    window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
+  }
+}
+
+const setProcessing = (issueId, value) => {
+  const next = new Set(processing.value)
+  if (value) next.add(issueId)
+  else next.delete(issueId)
+  processing.value = next
+}
+
 const switchStatus = async (s) => {
+  resetSelection()
   status.value = s
   await loadIssues()
 }
@@ -89,49 +171,54 @@ const onApprove = async (issue) => {
       : `将执行「${issue.action_label}」`,
   )
   if (!ok) return
-  processing.value.add(issue.id)
+  setProcessing(issue.id, true)
   try {
-    await approveQualityIssue(issue.id)
-    toastSuccess('已执行：' + issue.action_label)
-    await loadIssues()
+    await withScrollPreserved(async () => {
+      await approveQualityIssue(issue.id)
+      toastSuccess('已执行：' + issue.action_label)
+      removeFromSelection(issue.id)
+      await loadIssues()
+    })
   } catch (e) {
     toastError('执行失败：' + (e?.message || e))
   } finally {
-    processing.value.delete(issue.id)
+    setProcessing(issue.id, false)
   }
 }
 
 const onReject = async (issue) => {
   const ok = await showConfirm('拒绝该建议？', '记录将保留为已拒绝（负样本），不会修改数据。')
   if (!ok) return
-  processing.value.add(issue.id)
+  setProcessing(issue.id, true)
   try {
-    await rejectQualityIssue(issue.id)
-    toastSuccess('已拒绝')
-    await loadIssues()
+    await withScrollPreserved(async () => {
+      await rejectQualityIssue(issue.id)
+      toastSuccess('已拒绝')
+      removeFromSelection(issue.id)
+      await loadIssues()
+    })
   } catch (e) {
     toastError('拒绝失败：' + (e?.message || e))
   } finally {
-    processing.value.delete(issue.id)
+    setProcessing(issue.id, false)
   }
 }
 
-const onBatchApprove = async () => {
-  const ids = highConfidencePending.value.map((i) => i.id)
+const runBatchApprove = async (ids, title, description) => {
   if (!ids.length) return
-  const ok = await showConfirm(
-    `批量批准 ${ids.length} 条高置信建议（≥0.85）？`,
-    '仅处理置信度足够高的建议，其余保持待审批。',
-  )
+  const ok = await showConfirm(title, description)
   if (!ok) return
   busy.value = true
   try {
-    const result = await batchApproveQualityIssues(ids)
-    toastSuccess(`已批准 ${result.approved?.length || 0} 条`)
-    if (result.failed?.length) {
-      toastError(`${result.failed.length} 条失败（可能已被处理）`)
-    }
-    await loadIssues()
+    await withScrollPreserved(async () => {
+      const result = await batchApproveQualityIssues(ids)
+      toastSuccess(`已批准 ${result.approved?.length || 0} 条`)
+      if (result.failed?.length) {
+        toastError(`${result.failed.length} 条未批准（置信度不足或已被处理）`)
+      }
+      resetSelection()
+      await loadIssues()
+    })
   } catch (e) {
     toastError('批量批准失败：' + (e?.message || e))
   } finally {
@@ -139,12 +226,30 @@ const onBatchApprove = async () => {
   }
 }
 
+const onBatchApprove = async () => {
+  const ids = highConfidencePending.value.map((i) => i.id)
+  await runBatchApprove(
+    ids,
+    `批量批准 ${ids.length} 条高置信建议（≥0.85）？`,
+    '仅处理置信度足够高的建议，其余保持待审批。',
+  )
+}
+
+const onBatchApproveSelected = async () => {
+  const ids = selectedPendingIssues.value.map((issue) => issue.id)
+  const lowConfidenceCount = selectedLowConfidenceIssues.value.length
+  const description = lowConfidenceCount
+    ? `其中 ${lowConfidenceCount} 条置信度低于 0.85，将由系统保留为待审批；其余符合条件的建议会被批准。`
+    : '将批准当前选中的建议。'
+  await runBatchApprove(ids, `批量批准选中的 ${ids.length} 条建议？`, description)
+}
+
 onMounted(loadIssues)
 </script>
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1.5 rounded-lg border border-border p-1">
         <button
           v-for="tab in statusTabs"
@@ -168,6 +273,38 @@ onMounted(loadIssues)
       </Button>
     </div>
 
+    <div
+      v-if="status === 'pending' && pendingIssues.length"
+      class="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3"
+    >
+      <Checkbox
+        :model-value="selectionState"
+        aria-label="选择当前清单中的全部待审批题目"
+        :disabled="busy"
+        @click.stop.prevent="toggleSelectAll"
+      />
+      <span class="text-xs text-muted-foreground">
+        已选 {{ selectedPendingIssues.length }} / {{ pendingIssues.length }} 条
+      </span>
+      <Button variant="ghost" size="sm" class="h-7 text-xs" :disabled="busy" @click="toggleSelectAll">
+        {{ allPendingSelected ? '取消全选' : '全选当前清单' }}
+      </Button>
+      <Button
+        v-if="selectedPendingIssues.length"
+        variant="default"
+        size="sm"
+        class="h-7 gap-1 text-xs"
+        :disabled="busy"
+        @click="onBatchApproveSelected"
+      >
+        <Check :size="13" />
+        批量批准选中（{{ selectedPendingIssues.length }}）
+      </Button>
+      <span v-if="selectedLowConfidenceIssues.length" class="text-[11px] text-muted-foreground">
+        {{ selectedLowConfidenceIssues.length }} 条低于 85%，会保留待审
+      </span>
+    </div>
+
     <div v-if="loading" class="flex justify-center py-10 text-muted-foreground">
       <Loader2 :size="20" class="animate-spin" />
     </div>
@@ -179,12 +316,24 @@ onMounted(loadIssues)
 
     <div v-else class="space-y-2.5">
       <div
-        v-for="issue in issues"
+        v-for="(issue, issueIndex) in issues"
         :key="issue.id"
-        class="rounded-lg border border-border bg-card p-3.5"
-        :class="{ 'opacity-60': status !== 'pending' }"
+        :id="`quality-issue-${issue.id}`"
+        class="rounded-lg border border-border bg-card p-3.5 transition-colors"
+        :class="{
+          'opacity-60': status !== 'pending',
+          'border-primary ring-1 ring-primary/20': selectedIds.has(issue.id),
+        }"
       >
         <div class="flex items-start justify-between gap-3">
+          <Checkbox
+            v-if="status === 'pending'"
+            :model-value="selectedIds.has(issue.id)"
+            :aria-label="`选择审查项：${issue.question}`"
+            :disabled="busy || processing.has(issue.id)"
+            class="mt-0.5"
+            @click.stop.prevent="toggleIssueSelection(issue, issueIndex, $event)"
+          />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5 mb-1">
               <Badge :class="issueTypeColor(issue.issue_type)" class="text-[11px]">
