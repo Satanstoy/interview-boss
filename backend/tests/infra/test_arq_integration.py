@@ -21,12 +21,11 @@ class TestPipelineARQIntegration:
              patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
              patch("app.services.pipeline.cluster_batch") as mock_cluster, \
              patch("app.services.pipeline.mark_batch_done") as mock_done, \
-             patch("app.worker.enqueue_cluster_task") as mock_arq:
+             patch("app.services.pipeline.queue._run_cluster_batch_in_background", new=AsyncMock(return_value=True)) as mock_arq:
 
             mock_tag.return_value = [["q1", "c1", "c2", "tags", "L2"]]
             mock_enqueue.return_value = 1
             mock_should.return_value = True
-            mock_arq.return_value = MagicMock(job_id="arq-job-123")
 
             result = await process_interview_tag_then_maybe_cluster(
                 interview_id=1, url="http://test.com", company="TestCo",
@@ -39,15 +38,15 @@ class TestPipelineARQIntegration:
             mock_enqueue.assert_called_once()
 
             # 聚类应通过 ARQ 调度（不直接调用 cluster_batch）
-            mock_arq.assert_called_once_with(1, 1)
+            mock_arq.assert_awaited_once_with(user_id=1)
             mock_cluster.assert_not_called()  # 不应直接调用聚类
             mock_dequeue.assert_not_called()  # 不应直接取出队列
 
             assert result["tagged_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_process_interview_falls_back_when_arq_unavailable(self):
-        """ARQ 不可用时应回退到内联聚类"""
+    async def test_process_interview_keeps_queue_when_arq_unavailable(self):
+        """攒批调度失败时不在 Web 进程内执行聚类。"""
         from app.services.pipeline import process_interview_tag_then_maybe_cluster
 
         with patch("app.services.pipeline.tag_interview") as mock_tag, \
@@ -56,13 +55,11 @@ class TestPipelineARQIntegration:
              patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
              patch("app.services.pipeline.cluster_batch") as mock_cluster, \
              patch("app.services.pipeline.mark_batch_done") as mock_done, \
-             patch("app.worker.enqueue_cluster_task", side_effect=Exception("Redis 连接失败")):
+             patch("app.services.pipeline.queue._run_cluster_batch_in_background", new=AsyncMock(side_effect=Exception("Redis 连接失败"))):
 
             mock_tag.return_value = [["q1", "c1", "c2", "tags", "L2"]]
             mock_enqueue.return_value = 1
             mock_should.return_value = True
-            mock_dequeue.return_value = [{"queue_id": 1, "qd_id": 10, "question": "test"}]
-            mock_cluster.return_value = 5
 
             result = await process_interview_tag_then_maybe_cluster(
                 interview_id=1, url="http://test.com", company="TestCo",
@@ -70,12 +67,12 @@ class TestPipelineARQIntegration:
                 user_id=1
             )
 
-            # ARQ 失败后应回退到内联聚类
-            mock_dequeue.assert_called_once()
-            mock_cluster.assert_called_once()
-            mock_done.assert_called_once()
-            assert result["clustered"] is True
-            assert result["new_qb_count"] == 5
+            # 题目仍留在 analysis_queue，等待后续 dispatcher 补偿
+            mock_dequeue.assert_not_called()
+            mock_cluster.assert_not_called()
+            mock_done.assert_not_called()
+            assert result["clustered"] is False
+            assert result["new_qb_count"] == 0
 
     @pytest.mark.asyncio
     async def test_force_cluster_uses_arq(self):

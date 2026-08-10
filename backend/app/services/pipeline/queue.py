@@ -2,9 +2,10 @@
 队列操作：enqueue / dequeue / mark_done / mark_failed / trigger 判断
 """
 
-import asyncio
 import logging
 import os
+import json
+from uuid import uuid4
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
@@ -165,69 +166,87 @@ def mark_batch_failed(queue_ids: List[int]):
 
 
 # ──────────────────────────────────────────────────────────────
-# 聚类异步化（实验结论 P3）：cluster_public_node 不再同步 await，
-# 改为调度后台任务；攒批触发（pending ≥ BATCH_SIZE 立即聚，否则延迟）
+# 聚类攒批：延迟窗口由 jobs.available_at 持久化，ARQ 只执行 job。
 # ──────────────────────────────────────────────────────────────
 
 # 攒批延迟窗口（秒）：pending < BATCH_SIZE 时延迟再聚，给连续导入留合并窗口。
 # 可用环境变量 CLUSTER_DELAY_SECONDS 覆盖。
 CLUSTER_DELAY_SECONDS = int(os.environ.get("CLUSTER_DELAY_SECONDS", "300"))
 
-# 模块级标志：同时只允许一个后台聚类任务在等/在跑（多 worker 进程各自维护，
-# dequeue_batch 原子取批兜底防重复）。
-_cluster_task_running = False
+async def _run_cluster_batch_in_background(user_id: int = None) -> bool:
+    """创建一个持久化攒批 Job，返回是否新建了任务。
 
-
-def _run_cluster_batch_in_background(user_id: int = None) -> bool:
-    """调度后台聚类任务（攒批语义），返回是否已调度。
-
-    - pending >= BATCH_SIZE → 立即执行
-    - pending < BATCH_SIZE → 延迟 CLUSTER_DELAY_SECONDS 再执行（期间新提交并入同一批）
-    - 已有任务在等/在跑 → 不重复调度（新题会被该任务处理）
+    pending 不足一批时使用 ``available_at`` 保留攒批窗口；达到阈值则
+    立即尝试入队。即使 Redis 或 Web 进程随后不可用，dispatcher 仍会
+    根据 jobs 表接管 pending 任务。
     """
-    global _cluster_task_running
-    if _cluster_task_running:
-        return False
-    _cluster_task_running = True
-
-    async def _run():
-        global _cluster_task_running
+    def _create():
+        conn = get_db_connection()
         try:
             _recover_stuck_processing()
-            pending = get_pending_count()
-            if pending >= BATCH_SIZE:
-                delay = 0
-            else:
-                delay = CLUSTER_DELAY_SECONDS
-            if delay:
-                logger.info(
-                    "[聚类后台] pending=%d < %d，延迟 %ds 后聚类（攒批窗口）",
-                    pending,
-                    BATCH_SIZE,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-                _recover_stuck_processing()
-                if get_pending_count() == 0:
-                    return
-            batch = dequeue_batch(BATCH_SIZE)
-            if not batch:
-                return
-            try:
-                new_count = await cluster_batch(batch, user_id=user_id)
-                mark_batch_done([item["queue_id"] for item in batch])
-                logger.info(
-                    "[聚类后台] 完成: %d 题 → %d 个新聚类", len(batch), new_count
-                )
-            except Exception as e:
-                logger.error("[聚类后台] 失败，回退队列状态: %s", e)
-                mark_batch_failed([item["queue_id"] for item in batch])
-        except Exception as e:
-            logger.error("[聚类后台] 任务异常: %s", e)
-        finally:
-            _cluster_task_running = False
+            existing = conn.execute(
+                "SELECT id FROM jobs WHERE job_type = 'cluster_batch' "
+                "AND status IN ('pending', 'queued', 'running') LIMIT 1"
+            ).fetchone()
+            if existing:
+                return None, None
 
-    from app.services.pipeline import cluster_batch, mark_batch_done, mark_batch_failed
+            pending = conn.execute(
+                "SELECT COUNT(*) AS c FROM analysis_queue WHERE status = 'pending'"
+            ).fetchone()["c"]
+            delay = 0 if pending >= BATCH_SIZE else CLUSTER_DELAY_SECONDS
+            cursor = conn.execute(
+                "INSERT INTO jobs "
+                "(job_type, status, progress_total, created_by, available_at, idempotency_key) "
+                "VALUES ('cluster_batch', 'pending', ?, ?, datetime('now', ?), ?)",
+                (
+                    max(int(pending), 1),
+                    user_id,
+                    f"+{delay} seconds",
+                    f"cluster-window:{user_id or 'public'}:{uuid4().hex}",
+                ),
+            )
+            job_id = int(cursor.lastrowid)
+            conn.execute(
+                "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                (job_id, json.dumps({"user_id": user_id}, ensure_ascii=False)),
+            )
+            conn.commit()
+            return job_id, delay
+        except Exception:
+            conn.rollback()
+            raise
 
-    asyncio.create_task(_run())
+    job_id, delay = _create()
+    if not job_id:
+        return False
+
+    if delay:
+        logger.info(
+            "[聚类后台] pending=%d < %d，创建 %ds 攒批窗口 job=%s",
+            get_pending_count(),
+            BATCH_SIZE,
+            delay,
+            job_id,
+        )
+        return True
+
+    try:
+        from app.services.job_lifecycle import mark_job_dispatched
+        from app.worker import enqueue_cluster_batch_job
+
+        arq_job = await enqueue_cluster_batch_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+        conn = get_db_connection()
+        if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+            raise RuntimeError(f"聚类攒批任务不可再投递: job_id={job_id}")
+        conn.commit()
+    except Exception as exc:
+        logger.warning(
+            "[聚类后台] ARQ 调度失败，job=%s 保留 pending 等待 dispatcher: %s",
+            job_id,
+            exc,
+        )
     return True

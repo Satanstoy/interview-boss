@@ -357,28 +357,13 @@ async def process_interview_tag_then_maybe_cluster(
     result = {"tagged_count": len(tagged_rows), "clustered": False, "new_qb_count": 0}
     if pipeline_api.should_trigger_clustering(batch_size):
         try:
-            from app.worker import enqueue_cluster_task
+            from app.services.pipeline.queue import _run_cluster_batch_in_background
 
-            job = await enqueue_cluster_task(interview_id, user_id)
-            logger.info(f"聚类任务已通过 ARQ 调度: job_id={job.job_id}")
+            scheduled = await _run_cluster_batch_in_background(user_id=user_id)
+            logger.info("聚类攒批任务已持久化: scheduled=%s", scheduled)
             return result
         except Exception as e:
-            logger.warning(f"ARQ 调度失败,回退到内联聚类: {e}")
-            batch = pipeline_api.dequeue_batch(batch_size)
-            if batch:
-                try:
-                    new_count = await _maybe_await(
-                        pipeline_api.cluster_batch(batch, user_id=user_id)
-                    )
-                    queue_ids = [item["queue_id"] for item in batch]
-                    pipeline_api.mark_batch_done(queue_ids)
-                    result["clustered"] = True
-                    result["new_qb_count"] = new_count
-                except Exception as e:
-                    logger.error(f"聚类失败,回退队列状态: {e}")
-                    queue_ids = [item["queue_id"] for item in batch]
-                    pipeline_api.mark_batch_failed(queue_ids)
-                    raise
+            logger.warning("聚类攒批任务创建失败，保留分析队列等待后续补偿: %s", e)
     return result
 
 

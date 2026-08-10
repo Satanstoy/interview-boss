@@ -818,7 +818,7 @@ class TestSubmitNodes:
         with (
             patch(
                 "app.services.pipeline.queue._run_cluster_batch_in_background",
-                return_value=True,
+                new=AsyncMock(return_value=True),
             ) as mock_schedule,
         ):
             state = {"user_id": 1}

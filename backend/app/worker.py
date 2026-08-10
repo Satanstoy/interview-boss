@@ -38,6 +38,15 @@ async def enqueue_cluster_task(interview_id: int, user_id: int = None):
         await pool.close()
 
 
+async def enqueue_cluster_batch_job(job_id: int):
+    """将一个持久化聚类攒批任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("cluster_batch_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_force_cluster_task(user_id: int = None):
     """将全量重建任务入队"""
     pool = await _get_redis_pool()
@@ -172,6 +181,81 @@ async def cluster_questions_task(ctx, interview_id: int, user_id: int = None):
         queue_ids = [item['queue_id'] for item in batch]
         mark_batch_failed(queue_ids)
         raise
+
+
+async def cluster_batch_task(ctx, job_id: int):
+    """ARQ task: claim and process one database-owned clustering batch."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        CLUSTER_BATCH_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+    from app.services.pipeline import (
+        BATCH_SIZE,
+        cluster_batch,
+        dequeue_batch,
+        mark_batch_done,
+        mark_batch_failed,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=CLUSTER_BATCH_JOB_TYPE,
+            )
+            if not task:
+                return None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            conn.commit()
+            payload = json.loads(payload_row["payload"]) if payload_row else {}
+            return payload
+
+    payload = await asyncio.to_thread(_claim_and_load)
+    if payload is None:
+        logger.info("聚类攒批任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    def _complete(result):
+        with get_db_connection() as conn:
+            complete_job(conn, job_id, worker_id, result=json.dumps(result, ensure_ascii=False))
+            conn.commit()
+
+    def _fail(error):
+        with get_db_connection() as conn:
+            outcome = fail_job(conn, job_id, worker_id, error)
+            conn.commit()
+            return outcome
+
+    batch = []
+    try:
+        batch = dequeue_batch(BATCH_SIZE)
+        if not batch:
+            result = {"status": "empty", "new_count": 0}
+            _complete(result)
+            return {"job_id": job_id, **result}
+
+        new_count = await cluster_batch(batch, user_id=payload.get("user_id"))
+        queue_ids = [item["queue_id"] for item in batch]
+        mark_batch_done(queue_ids)
+        result = {"status": "done", "new_count": new_count, "processed": len(batch)}
+        _complete(result)
+        return {"job_id": job_id, **result}
+    except Exception as exc:
+        queue_ids = [item["queue_id"] for item in batch]
+        mark_batch_failed(queue_ids)
+        outcome = _fail(str(exc)[:500])
+        logger.exception("聚类攒批任务失败: job_id=%s", job_id)
+        return {"status": outcome["status"], "job_id": job_id}
 
 
 async def refresh_interview_distribution_task(ctx, scope: str, job_position: str):
@@ -1037,6 +1121,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
     from app.services.job_lifecycle import (
         ANSWER_GENERATION_JOB_TYPE,
         BUILD_MASTER_BANK_JOB_TYPE,
+        CLUSTER_BATCH_JOB_TYPE,
         DISPATCHABLE_JOB_TYPES,
         RECITATION_GENERATION_JOB_TYPE,
         RECOMPUTE_EMBEDDING_JOB_TYPE,
@@ -1057,6 +1142,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
     enqueuers = {
         SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
         ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
+        CLUSTER_BATCH_JOB_TYPE: enqueue_cluster_batch_job,
         BUILD_MASTER_BANK_JOB_TYPE: enqueue_build_job,
         RECOMPUTE_EMBEDDING_JOB_TYPE: enqueue_recompute_embedding_job,
         RECITATION_GENERATION_JOB_TYPE: enqueue_generate_recitation_job,
@@ -1220,6 +1306,7 @@ async def scheduled_source_health_task(ctx):
 class WorkerSettings:
     functions = [
         cluster_questions_task,
+        cluster_batch_task,
         refresh_interview_distribution_task,
         process_chat_side_effects_task,
         force_cluster_all_task,

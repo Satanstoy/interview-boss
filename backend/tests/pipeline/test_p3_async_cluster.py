@@ -1,74 +1,90 @@
-import asyncio
+"""聚类攒批由数据库 Job + ARQ 负责调度，不依赖进程内 asyncio task。"""
 
-"""P3 聚类异步化：后台攒批任务调度与队列流转"""
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
-
-async def test_run_cluster_batch_immediate_when_pool_large(monkeypatch):
-    """pending >= BATCH_SIZE → 立即执行（delay=0）"""
-    import app.services.pipeline.queue as q
-
-    monkeypatch.setattr(q, "_cluster_task_running", False)
-    monkeypatch.setattr(q, "get_pending_count", lambda: q.BATCH_SIZE)
-    monkeypatch.setattr(q, "_recover_stuck_processing", lambda: None)
-    monkeypatch.setattr(q, "dequeue_batch", lambda *a, **k: [{"queue_id": 1}])
-    called = {"cluster": 0, "done": 0, "failed": 0}
-
-    async def fake_cluster(batch, user_id=None):
-        called["cluster"] += 1
-        return 3
-
-    def fake_done(ids):
-        called["done"] += 1
-
-    def fake_failed(ids):
-        called["failed"] += 1
-
-    monkeypatch.setattr("app.services.pipeline.cluster_batch", fake_cluster)
-    monkeypatch.setattr("app.services.pipeline.mark_batch_done", fake_done)
-    monkeypatch.setattr("app.services.pipeline.mark_batch_failed", fake_failed)
-    monkeypatch.setattr(q, "CLUSTER_DELAY_SECONDS", 0)
-
-    scheduled = q._run_cluster_batch_in_background(user_id=1)
-    assert scheduled is True
-    # 让后台任务跑完
-    await asyncio.sleep(0.2)
-    assert called["cluster"] == 1
-    assert called["done"] == 1
-    assert called["failed"] == 0
-    # 标志复位
-    assert q._cluster_task_running is False
+import pytest
 
 
-async def test_run_cluster_batch_dedupe_flag(monkeypatch):
-    """已有任务在跑 → 不重复调度"""
-    import app.services.pipeline.queue as q
+@pytest.mark.asyncio
+async def test_cluster_window_is_persisted_and_immediately_dispatched(test_db):
+    import app.services.pipeline.queue as queue
 
-    monkeypatch.setattr(q, "_cluster_task_running", True)
-    scheduled = q._run_cluster_batch_in_background(user_id=1)
-    assert scheduled is False
+    test_db.execute("INSERT INTO interview (id, url) VALUES (1, 'internal://1')")
+    test_db.execute(
+        "INSERT INTO analysis_queue (interview_id, question_detail_id, status) "
+        "VALUES (1, 1, 'pending')"
+    )
+    test_db.commit()
+
+    @contextmanager
+    def _connection():
+        yield test_db
+
+    with patch("app.db.connection.get_db_connection", _connection), \
+         patch.object(queue, "CLUSTER_DELAY_SECONDS", 0), \
+         patch(
+             "app.worker.enqueue_cluster_batch_job",
+             new=AsyncMock(return_value=MagicMock(job_id="arq-cluster-1")),
+         ) as mock_enqueue:
+        assert await queue._run_cluster_batch_in_background(user_id=1) is True
+
+    mock_enqueue.assert_awaited_once()
+    row = test_db.execute(
+        "SELECT job_type, status, arq_job_id FROM jobs WHERE job_type = 'cluster_batch'"
+    ).fetchone()
+    assert (row["job_type"], row["status"], row["arq_job_id"]) == (
+        "cluster_batch",
+        "queued",
+        "arq-cluster-1",
+    )
 
 
-async def test_run_cluster_batch_failure_marks_failed(monkeypatch):
-    """聚类失败 → mark_batch_failed（队列回滚 pending，下次提交/worker 补处理）"""
-    import app.services.pipeline.queue as q
+@pytest.mark.asyncio
+async def test_cluster_window_deduplicates_active_job(test_db):
+    import app.services.pipeline.queue as queue
 
-    monkeypatch.setattr(q, "_cluster_task_running", False)
-    monkeypatch.setattr(q, "get_pending_count", lambda: q.BATCH_SIZE)
-    monkeypatch.setattr(q, "_recover_stuck_processing", lambda: None)
-    monkeypatch.setattr(q, "dequeue_batch", lambda *a, **k: [{"queue_id": 1}])
-    called = {"failed": 0}
+    test_db.execute(
+        "INSERT INTO jobs (job_type, status, progress_total) "
+        "VALUES ('cluster_batch', 'pending', 1)"
+    )
+    test_db.commit()
 
-    async def broken_cluster(batch, user_id=None):
-        raise RuntimeError("llm down")
+    @contextmanager
+    def _connection():
+        yield test_db
 
-    def fake_failed(ids):
-        called["failed"] += 1
+    with patch("app.db.connection.get_db_connection", _connection), \
+         patch("app.worker.enqueue_cluster_batch_job", new=AsyncMock()) as mock_enqueue:
+        assert await queue._run_cluster_batch_in_background(user_id=1) is False
 
-    monkeypatch.setattr("app.services.pipeline.cluster_batch", broken_cluster)
-    monkeypatch.setattr("app.services.pipeline.mark_batch_failed", fake_failed)
-    monkeypatch.setattr(q, "CLUSTER_DELAY_SECONDS", 0)
+    mock_enqueue.assert_not_awaited()
 
-    q._run_cluster_batch_in_background(user_id=1)
-    await asyncio.sleep(0.2)
-    assert called["failed"] == 1
-    assert q._cluster_task_running is False
+
+@pytest.mark.asyncio
+async def test_cluster_window_dispatch_failure_keeps_job_pending(test_db):
+    import app.services.pipeline.queue as queue
+
+    test_db.execute("INSERT INTO interview (id, url) VALUES (1, 'internal://1')")
+    test_db.execute(
+        "INSERT INTO analysis_queue (interview_id, question_detail_id, status) "
+        "VALUES (1, 1, 'pending')"
+    )
+    test_db.commit()
+
+    @contextmanager
+    def _connection():
+        yield test_db
+
+    with patch("app.db.connection.get_db_connection", _connection), \
+         patch.object(queue, "CLUSTER_DELAY_SECONDS", 0), \
+         patch(
+             "app.worker.enqueue_cluster_batch_job",
+             new=AsyncMock(side_effect=RuntimeError("Redis down")),
+         ):
+        assert await queue._run_cluster_batch_in_background(user_id=1) is True
+
+    row = test_db.execute(
+        "SELECT status FROM jobs WHERE job_type = 'cluster_batch'"
+    ).fetchone()
+    assert row["status"] == "pending"

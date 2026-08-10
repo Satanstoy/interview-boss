@@ -63,7 +63,7 @@ async def cluster_public_node(state: SubmitState) -> dict:
     from app.services.pipeline.queue import _run_cluster_batch_in_background
 
     with NodeTimer() as timer:
-        scheduled = _run_cluster_batch_in_background(user_id=state.get("user_id"))
+        scheduled = await _run_cluster_batch_in_background(user_id=state.get("user_id"))
 
     emit_progress(
         state,

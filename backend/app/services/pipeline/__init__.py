@@ -20,6 +20,7 @@ from .queue import (
     dequeue_batch,
     mark_batch_done,
     mark_batch_failed,
+    _run_cluster_batch_in_background,
     STUCK_PROCESSING_THRESHOLD_MINUTES,
 )
 from .writer import (
@@ -49,5 +50,6 @@ __all__ = [
     "tag_and_write_details", "tag_interview", "apply_matched", "insert_new_clusters",
     # batch
     "cluster_batch", "process_interview_tag_then_maybe_cluster",
+    "_run_cluster_batch_in_background",
     "force_cluster_all_pending", "compact_singletons_in_db",
 ]
