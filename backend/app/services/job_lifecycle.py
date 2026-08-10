@@ -9,13 +9,61 @@ from __future__ import annotations
 
 import os
 import socket
+import json
 from datetime import datetime, timezone
 from typing import Any
 
 SUBMIT_IMPORT_JOB_TYPE = "submit_import"
+ANSWER_GENERATION_JOB_TYPE = "generate_answer"
+DISPATCHABLE_JOB_TYPES = (SUBMIT_IMPORT_JOB_TYPE, ANSWER_GENERATION_JOB_TYPE)
 DISPATCH_LEASE_SECONDS = 300
 WORKER_LEASE_SECONDS = 1800
 MAX_JOB_ATTEMPTS = 3
+
+
+def create_answer_generation_jobs(
+    conn,
+    parent_job_id: int,
+    answer_tasks: list[tuple[int, str]],
+    user_id: int | None,
+) -> list[int]:
+    """Persist one idempotent answer job per newly imported question."""
+    job_ids: list[int] = []
+    for question_id, question_text in answer_tasks:
+        idempotency_key = f"submit:{parent_job_id}:answer:{question_id}"
+        conn.execute(
+            "INSERT OR IGNORE INTO jobs "
+            "(job_type, status, progress_total, created_by, idempotency_key) "
+            "VALUES (?, 'pending', 1, ?, ?)",
+            (ANSWER_GENERATION_JOB_TYPE, user_id, idempotency_key),
+        )
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE job_type = ? AND idempotency_key = ?",
+            (ANSWER_GENERATION_JOB_TYPE, idempotency_key),
+        ).fetchone()
+        if not row:
+            raise RuntimeError(
+                f"答案任务创建失败: parent_job_id={parent_job_id}, "
+                f"question_id={question_id}"
+            )
+        answer_job_id = int(row["id"])
+        conn.execute(
+            "INSERT OR IGNORE INTO job_payloads (job_id, payload) VALUES (?, ?)",
+            (
+                answer_job_id,
+                json.dumps(
+                    {
+                        "question_id": question_id,
+                        "question_text": question_text,
+                        "user_id": user_id,
+                        "parent_job_id": parent_job_id,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        job_ids.append(answer_job_id)
+    return job_ids
 
 
 def _now() -> str:

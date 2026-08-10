@@ -88,3 +88,37 @@ def test_submit_job_idempotency_key_is_unique(test_db):
     _new_job(test_db, "same-request")
     with pytest.raises(Exception):
         _new_job(test_db, "same-request")
+
+
+def test_answer_jobs_are_idempotent_per_import_question(test_db):
+    from app.services.job_lifecycle import create_answer_generation_jobs
+
+    parent_id = _new_job(test_db, "submit-request")
+    first = create_answer_generation_jobs(
+        test_db,
+        parent_id,
+        [(101, "什么是幂等性？"), (102, "解释事务隔离级别")],
+        user_id=None,
+    )
+    second = create_answer_generation_jobs(
+        test_db,
+        parent_id,
+        [(101, "什么是幂等性？"), (102, "解释事务隔离级别")],
+        user_id=None,
+    )
+    test_db.commit()
+
+    assert second == first
+    rows = test_db.execute(
+        "SELECT job_type, status, created_by FROM jobs "
+        "WHERE id IN (?, ?) ORDER BY id",
+        first,
+    ).fetchall()
+    assert [dict(row) for row in rows] == [
+        {"job_type": "generate_answer", "status": "pending", "created_by": None},
+        {"job_type": "generate_answer", "status": "pending", "created_by": None},
+    ]
+    payload = test_db.execute(
+        "SELECT payload FROM job_payloads WHERE job_id = ?", (first[0],)
+    ).fetchone()[0]
+    assert "什么是幂等性？" in payload

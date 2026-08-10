@@ -62,6 +62,15 @@ async def enqueue_submit_import_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_generate_answer_job(job_id: int):
+    """将单道题的答案生成任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("generate_answer_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_interview_distribution_refresh(scope: str, job_position: str):
     """Queue a durable materialized-statistics refresh."""
     pool = await _get_redis_pool()
@@ -613,22 +622,105 @@ async def submit_import_task(ctx, job_id: int):
         if final_state_values.get("elapsed_seconds"):
             result_data["elapsed_seconds"] = final_state_values["elapsed_seconds"]
 
-        _complete(result=json.dumps(result_data, ensure_ascii=False))
-
-        # 派发后台答案生成
         answer_tasks = final_state_values.get("answer_tasks", [])
         uid = result_collector.get("user_id") or payload.get("user_id")
-        if answer_tasks and uid:
-            from app.services.submit_service import background_generate_answer
-            for qid, qtext in answer_tasks:
-                try:
-                    await background_generate_answer(qid, qtext, uid)
-                except Exception as e:
-                    logger.warning(f"后台答案生成失败 [ID:{qid}]: {e}")
+        answer_job_ids = []
+        if answer_tasks and uid is not None:
+            from app.services.job_lifecycle import create_answer_generation_jobs
+
+            def _create_answer_jobs():
+                with get_db_connection() as conn:
+                    ids = create_answer_generation_jobs(
+                        conn, job_id, answer_tasks, uid
+                    )
+                    conn.commit()
+                    return ids
+
+            answer_job_ids = await asyncio.to_thread(_create_answer_jobs)
+        result_data["answer_job_count"] = len(answer_job_ids)
+        _complete(result=json.dumps(result_data, ensure_ascii=False))
 
     except Exception as e:
         logger.exception(f"上传导入任务失败: job_id={job_id}")
         _fail(str(e)[:500])
+
+
+async def generate_answer_task(ctx, job_id: int):
+    """ARQ task: generate one answer with durable claim/retry semantics."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        ANSWER_GENERATION_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=ANSWER_GENERATION_JOB_TYPE,
+            )
+            if not task:
+                return None, None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            conn.commit()
+            return dict(task), json.loads(payload_row["payload"]) if payload_row else None
+
+    claimed, payload = await asyncio.to_thread(_claim_and_load)
+    if not claimed:
+        logger.info("答案任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    def _finish(result=None):
+        with get_db_connection() as conn:
+            completed = complete_job(conn, job_id, worker_id, result=result)
+            conn.commit()
+            return completed
+
+    def _fail(error: str, terminal: bool = False):
+        with get_db_connection() as conn:
+            outcome = fail_job(
+                conn,
+                job_id,
+                worker_id,
+                error,
+                max_attempts=0 if terminal else 3,
+            )
+            conn.commit()
+            return outcome
+
+    if not payload:
+        _fail("答案任务数据不存在", terminal=True)
+        return {"status": "failed", "job_id": job_id}
+
+    try:
+        from app.services.submit_service import background_generate_answer
+
+        await background_generate_answer(
+            int(payload["question_id"]),
+            payload["question_text"],
+            payload.get("user_id"),
+            raise_on_error=True,
+        )
+        _finish(
+            json.dumps(
+                {"question_id": int(payload["question_id"])},
+                ensure_ascii=False,
+            )
+        )
+        return {"status": "completed", "job_id": job_id}
+    except Exception as exc:
+        logger.exception("答案生成任务失败: job_id=%s", job_id)
+        outcome = _fail(str(exc)[:500])
+        return {"status": outcome["status"], "job_id": job_id}
 
 
 def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
@@ -717,57 +809,77 @@ async def scheduled_quality_audit_task(ctx):
 
 
 async def scheduled_submit_job_dispatch_task(ctx):
-    """Recover and dispatch durable upload jobs that were not delivered."""
+    """Recover and dispatch durable application jobs that were not delivered."""
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
+        ANSWER_GENERATION_JOB_TYPE,
+        DISPATCHABLE_JOB_TYPES,
         SUBMIT_IMPORT_JOB_TYPE,
         claim_dispatch_batch,
         mark_dispatch_failed,
         mark_job_dispatched,
     )
 
-    def _reserve():
+    def _reserve(job_type):
         with get_db_connection() as conn:
             jobs = claim_dispatch_batch(
-                conn, job_type=SUBMIT_IMPORT_JOB_TYPE, limit=10
+                conn, job_type=job_type, limit=10
             )
             conn.commit()
             return jobs
 
-    jobs = await asyncio.to_thread(_reserve)
+    enqueuers = {
+        SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
+        ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
+    }
     dispatched = 0
     failed = 0
-    for job_row in jobs:
-        job_id = job_row["id"]
-        try:
-            arq_job = await enqueue_submit_import_job(job_id)
-            arq_job_id = getattr(arq_job, "job_id", None)
-            if not arq_job_id:
-                raise RuntimeError("ARQ 未返回 job_id")
+    reserved = 0
+    per_type = {}
+    for job_type in DISPATCHABLE_JOB_TYPES:
+        jobs = await asyncio.to_thread(_reserve, job_type)
+        type_dispatched = 0
+        type_failed = 0
+        reserved += len(jobs)
+        for job_row in jobs:
+            job_id = job_row["id"]
+            try:
+                arq_job = await enqueuers[job_type](job_id)
+                arq_job_id = getattr(arq_job, "job_id", None)
+                if not arq_job_id:
+                    raise RuntimeError("ARQ 未返回 job_id")
 
-            def _mark(job_id=job_id, arq_id=str(arq_job_id)):
-                with get_db_connection() as conn:
-                    if not mark_job_dispatched(conn, job_id, arq_id):
-                        raise RuntimeError(f"任务不可再投递: job_id={job_id}")
-                    conn.commit()
+                def _mark(job_id=job_id, arq_id=str(arq_job_id)):
+                    with get_db_connection() as conn:
+                        if not mark_job_dispatched(conn, job_id, arq_id):
+                            raise RuntimeError(f"任务不可再投递: job_id={job_id}")
+                        conn.commit()
 
-            await asyncio.to_thread(_mark)
-            dispatched += 1
-        except Exception as exc:
-            failed += 1
-            logger.warning("[上传任务] ARQ 投递失败 job=%s: %s", job_id, exc)
+                await asyncio.to_thread(_mark)
+                dispatched += 1
+                type_dispatched += 1
+            except Exception as exc:
+                failed += 1
+                type_failed += 1
+                logger.warning("[任务] ARQ 投递失败 type=%s job=%s: %s", job_type, job_id, exc)
 
-            def _reset(job_id=job_id, error=str(exc)):
-                with get_db_connection() as conn:
-                    mark_dispatch_failed(conn, job_id, error)
-                    conn.commit()
+                def _reset(job_id=job_id, error=str(exc)):
+                    with get_db_connection() as conn:
+                        mark_dispatch_failed(conn, job_id, error)
+                        conn.commit()
 
-            await asyncio.to_thread(_reset)
+                await asyncio.to_thread(_reset)
+        per_type[job_type] = {
+            "reserved": len(jobs),
+            "dispatched": type_dispatched,
+            "failed": type_failed,
+        }
 
     result = {
-        "reserved": len(jobs),
+        "reserved": reserved,
         "dispatched": dispatched,
         "failed": failed,
+        "by_type": per_type,
     }
     logger.info("[上传任务] dispatcher 完成: %s", result)
     return result
@@ -884,6 +996,7 @@ class WorkerSettings:
         force_cluster_all_task,
         build_master_bank_task,
         submit_import_task,
+        generate_answer_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
         scheduled_submit_job_dispatch_task,

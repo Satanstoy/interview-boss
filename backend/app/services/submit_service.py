@@ -25,7 +25,12 @@ def _get_current_position_for_user(user_id: int) -> str:
     return current_pos or get_current_job_position()
 
 
-async def background_generate_answer(question_id: int, question_text: str, user_id: int = None):
+async def background_generate_answer(
+    question_id: int,
+    question_text: str,
+    user_id: int = None,
+    raise_on_error: bool = False,
+):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
     from app.services.llm import _call_llm_with_retry
@@ -59,6 +64,8 @@ async def background_generate_answer(question_id: int, question_text: str, user_
             await run_db(_mark_failed)
         except Exception:
             pass
+        if raise_on_error:
+            raise
 
 
 async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None) -> List[List[str]]:
