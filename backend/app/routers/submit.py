@@ -11,7 +11,6 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    BackgroundTasks,
     Depends,
 )
 from fastapi.responses import StreamingResponse
@@ -45,13 +44,13 @@ from app.services.submit_service import (
     tag_questions_batch,
     incremental_update_master_bank,
     background_generate_answer,
+    persist_answer_generation_jobs,
     _get_current_position_for_user,
 )
 
 
 @router.post("/api/submit-stream-v2")
 async def submit_data_stream_v2(
-    bg_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
@@ -151,14 +150,22 @@ async def submit_data_stream_v2(
             logger.exception("LangGraph 流式提交处理失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)[:200]}'})}\n\n"
         finally:
-            # 派发后台 AI 答案生成
-            for qid, qtext in result_collector.get("answer_tasks", []):
-                bg_tasks.add_task(
-                    background_generate_answer,
-                    qid,
-                    qtext,
-                    result_collector.get("user_id"),
-                )
+            # 旧 SSE 上传路径也必须使用 durable child jobs；请求结束、断线或
+            # FastAPI 重启都不能让已入库的个人题目丢失答案生成。
+            answer_tasks = result_collector.get("answer_tasks", [])
+            uid = result_collector.get("user_id") or user["id"]
+            if answer_tasks and uid is not None:
+                try:
+                    parent_id, child_ids = await persist_answer_generation_jobs(
+                        answer_tasks, uid, source="legacy-submit-answer"
+                    )
+                    logger.info(
+                        "旧上传路径已持久化答案任务: parent=%s children=%s",
+                        parent_id,
+                        len(child_ids),
+                    )
+                except Exception:
+                    logger.exception("旧上传路径持久化答案任务失败，未执行进程内 fallback")
 
     return StreamingResponse(
         event_stream(),

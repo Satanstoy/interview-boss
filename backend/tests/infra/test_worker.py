@@ -98,115 +98,117 @@ class TestTaskEnqueue:
     """T-004: 任务入队测试"""
 
     @pytest.mark.asyncio
-    async def test_enqueue_cluster_task(self):
-        """应能将聚类任务入队"""
-        from app.worker import enqueue_cluster_task
+    async def test_enqueue_cluster_batch_job(self):
+        """应能将持久化聚类攒批任务入队"""
+        from app.worker import enqueue_cluster_batch_job
         with patch("app.worker._get_redis_pool") as mock_pool_fn:
             mock_pool = AsyncMock()
             mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job-123"))
             mock_pool_fn.return_value = mock_pool
 
-            job = await enqueue_cluster_task(interview_id=1, user_id=1)
+            job = await enqueue_cluster_batch_job(job_id=1)
             assert job is not None
             mock_pool.enqueue_job.assert_called_once_with(
-                "cluster_questions_task", 1, 1
+                "cluster_batch_task", 1
             )
 
     @pytest.mark.asyncio
-    async def test_enqueue_force_cluster_task(self):
-        """应能将全量重建任务入队"""
-        from app.worker import enqueue_force_cluster_task
+    async def test_enqueue_cluster_rebuild_job(self):
+        """应能将持久化全量重建任务入队"""
+        from app.worker import enqueue_cluster_rebuild_job
         with patch("app.worker._get_redis_pool") as mock_pool_fn:
             mock_pool = AsyncMock()
             mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job-456"))
             mock_pool_fn.return_value = mock_pool
 
-            job = await enqueue_force_cluster_task(user_id=1)
+            job = await enqueue_cluster_rebuild_job(job_id=1)
             assert job is not None
             mock_pool.enqueue_job.assert_called_once_with(
-                "force_cluster_all_task", 1
+                "cluster_rebuild_task", 1
             )
 
 
 class TestTaskExecution:
-    """T-005 + T-006: 任务执行测试"""
+    """持久化 worker 任务执行测试"""
 
     @pytest.mark.asyncio
-    async def test_cluster_task_with_batch(self):
-        """T-005: 有 pending 任务时应执行聚类"""
-        from app.worker import cluster_questions_task
-        mock_ctx = MagicMock()
+    async def test_cluster_rebuild_task_claims_and_completes_durable_job(self, test_db):
+        """全量重建 worker 必须 claim/进度/完成同一条 jobs 记录。"""
+        from contextlib import contextmanager
+        from app.worker import cluster_rebuild_task
 
-        with patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
-             patch("app.services.pipeline.cluster_batch") as mock_cluster, \
-             patch("app.services.pipeline.mark_batch_done") as mock_done, \
-             patch("app.services.pipeline.mark_batch_failed") as mock_failed:
+        cursor = test_db.execute(
+            "INSERT INTO jobs (job_type, status, progress_total) "
+            "VALUES ('cluster_rebuild', 'pending', 1)"
+        )
+        job_id = cursor.lastrowid
+        test_db.execute(
+            "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+            (job_id, '{"user_id": 1}'),
+        )
+        test_db.commit()
 
-            mock_dequeue.return_value = [
-                {"queue_id": 1, "qd_id": 10, "question": "test", "url": "http://test.com"}
-            ]
-            mock_cluster.return_value = 5  # new_count
+        @contextmanager
+        def _test_connection():
+            yield test_db
 
-            result = await cluster_questions_task(mock_ctx, interview_id=1, user_id=1)
-            assert result["status"] == "done"
-            assert result["new_count"] == 5
-            mock_done.assert_called_once()
+        # Load modules that bind get_db_connection before replacing the app
+        # connector with this test-only context manager.
+        import app.services.pipeline  # noqa: F401
 
-    @pytest.mark.asyncio
-    async def test_cluster_task_empty_queue(self):
-        """T-006: 队列为空时应返回 empty 状态"""
-        from app.worker import cluster_questions_task
-        mock_ctx = MagicMock()
-
-        with patch("app.services.pipeline.dequeue_batch") as mock_dequeue:
-            mock_dequeue.return_value = []
-
-            result = await cluster_questions_task(mock_ctx, interview_id=1, user_id=1)
-            assert result["status"] == "empty"
-            assert result["new_count"] == 0
-
-    @pytest.mark.asyncio
-    async def test_cluster_task_failure_marks_pending(self):
-        """T-007: 聚类失败时应将队列状态重置为 pending"""
-        from app.worker import cluster_questions_task
-        mock_ctx = MagicMock()
-
-        with patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
-             patch("app.services.pipeline.cluster_batch") as mock_cluster, \
-             patch("app.services.pipeline.mark_batch_failed") as mock_failed:
-
-            mock_dequeue.return_value = [
-                {"queue_id": 1, "qd_id": 10, "question": "test"}
-            ]
-            mock_cluster.side_effect = Exception("LLM API 超时")
-
-            with pytest.raises(Exception, match="LLM API 超时"):
-                await cluster_questions_task(mock_ctx, interview_id=1, user_id=1)
-
-            mock_failed.assert_called_once_with([1])
-
-    @pytest.mark.asyncio
-    async def test_force_cluster_all_task(self):
-        """T-009: 全量重建任务应处理所有 pending 队列"""
-        from app.worker import force_cluster_all_task
-        mock_ctx = MagicMock()
-
-        with patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
-             patch("app.services.pipeline.cluster_batch") as mock_cluster, \
+        with patch("app.db.connection.get_db_connection", _test_connection), \
+             patch("app.services.pipeline.dequeue_batch", side_effect=[
+                 [{"queue_id": 1, "qd_id": 10, "question": "test"}], []
+             ]), \
+             patch("app.services.pipeline.cluster_batch", new=AsyncMock(return_value=5)) as mock_cluster, \
              patch("app.services.pipeline.mark_batch_done") as mock_done:
-            mock_dequeue.side_effect = [
-                [{"queue_id": 1, "qd_id": 10, "question": "test"}],
-                [{"queue_id": 2, "qd_id": 11, "question": "test2"}],
-                [{"queue_id": 3, "qd_id": 12, "question": "test3"}],
-                [],
-            ]
-            mock_cluster.return_value = 5
+            result = await cluster_rebuild_task({}, job_id)
 
-            result = await force_cluster_all_task(mock_ctx, user_id=1)
-            assert result["batches"] == 3
-            assert result["new_qb_count"] == 15
-            assert mock_cluster.call_count == 3
-            assert mock_done.call_count == 3
+        assert result["status"] == "done"
+        assert result["processed"] == 1
+        assert mock_cluster.await_count == 1
+        mock_done.assert_called_once_with([1])
+        assert test_db.execute(
+            "SELECT status FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()[0] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_interview_reprocess_task_is_durable(self, test_db):
+        """面经重分析的 LLM 阶段也必须由 durable worker 执行。"""
+        from contextlib import contextmanager
+        from app.services.job_lifecycle import create_interview_reprocess_job
+        from app.worker import interview_reprocess_task
+
+        test_db.execute(
+            "INSERT INTO interview (id, url, company, round, questions_list, job_position) "
+            "VALUES (1, 'internal://1', '测试公司', '一面', '1. 什么是幂等？', '后端')"
+        )
+        job_id, _ = create_interview_reprocess_job(test_db, 1, user_id=None)
+        test_db.commit()
+
+        @contextmanager
+        def _test_connection():
+            yield test_db
+
+        import app.services.pipeline  # noqa: F401
+
+        tagged_rows = [[
+            "internal://1", "测试公司", "一面", "什么是幂等？",
+            "后端", "基础", "幂等", "简单",
+        ]]
+        with patch("app.db.connection.get_db_connection", _test_connection), \
+             patch("app.services.pipeline.tag_interview", new=AsyncMock(return_value=tagged_rows)) as mock_tag, \
+             patch("app.services.pipeline.enqueue_questions", return_value=1), \
+             patch("app.services.pipeline._run_cluster_batch_in_background", new=AsyncMock(return_value=True)):
+            result = await interview_reprocess_task({}, job_id)
+
+        assert result["status"] == "completed"
+        mock_tag.assert_awaited_once()
+        row = test_db.execute(
+            "SELECT status, result FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        assert row["status"] == "completed"
+        assert '"tagged_count": 1' in row["result"]
 
 
 class TestDurableJobDispatcher:
@@ -217,7 +219,11 @@ class TestDurableJobDispatcher:
 
         test_db.executemany(
             "INSERT INTO jobs (job_type, status, created_by) VALUES (?, 'pending', ?)",
-            [("build_master_bank", 1), ("recompute_embedding", 1)],
+            [
+                ("build_master_bank", 1),
+                ("recompute_embedding", 1),
+                ("reprocess_interview", 1),
+            ],
         )
         test_db.commit()
 
@@ -232,17 +238,23 @@ class TestDurableJobDispatcher:
             "app.worker.enqueue_recompute_embedding_job",
             new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-1")),
         ) as mock_embedding:
-            result = await scheduled_submit_job_dispatch_task({})
+            with patch(
+                "app.worker.enqueue_interview_reprocess_job",
+                new=AsyncMock(return_value=MagicMock(job_id="arq-reprocess-1")),
+            ) as mock_reprocess:
+                result = await scheduled_submit_job_dispatch_task({})
 
-        assert result["dispatched"] == 2
+        assert result["dispatched"] == 3
         mock_build.assert_awaited_once()
         mock_embedding.assert_awaited_once()
+        mock_reprocess.assert_awaited_once()
         rows = test_db.execute(
             "SELECT job_type, status, arq_job_id FROM jobs "
-            "WHERE job_type IN ('build_master_bank', 'recompute_embedding') "
+            "WHERE job_type IN ('build_master_bank', 'recompute_embedding', 'reprocess_interview') "
             "ORDER BY job_type"
         ).fetchall()
         assert [(row["job_type"], row["status"]) for row in rows] == [
             ("build_master_bank", "queued"),
             ("recompute_embedding", "queued"),
+            ("reprocess_interview", "queued"),
         ]

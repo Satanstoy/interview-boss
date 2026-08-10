@@ -2,7 +2,7 @@ import json
 import re
 import logging
 import sqlite3
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
 from app.core.validation import validate_source_url
@@ -768,7 +768,6 @@ async def get_trash(
 @router.put("/api/data/update")
 async def update_generic_data(
     req: GenericUpdateRequest,
-    bg_tasks: BackgroundTasks,
     user: dict = Depends(get_admin_user),
 ):
     try:
@@ -876,70 +875,19 @@ async def update_generic_data(
     try:
         await run_db(_update)
 
-        # ── 面经 questions_list 变更时，自动同步 questions_detail ──
+        reprocess_job = None
+        # ── 面经 questions_list 变更时，创建 durable 重分析任务 ──
         if req.table_name == "interview" and "questions_list" in req.update_data:
+            from app.services.interview_reprocess import submit_interview_reprocess_job
 
-            async def _sync_details():
-                try:
-                    from app.services.submit_service import tag_questions_batch
-                    from app.db.operations import _replace_details_txn
+            reprocess_job = await submit_interview_reprocess_job(
+                req.record_id, user_id=user["id"]
+            )
 
-                    def _load_interview():
-                        with get_db_connection() as conn:
-                            return conn.execute(
-                                "SELECT * FROM interview WHERE id = ?", (req.record_id,)
-                            ).fetchone()
-
-                    row = await run_db(_load_interview)
-                    if not row:
-                        return
-
-                    questions_str = row["questions_list"] or ""
-                    raw_lines = [
-                        line.strip()
-                        for line in questions_str.split("\n")
-                        if line.strip()
-                    ]
-                    q_list = [
-                        re.sub(r"^\d+[\.\)\]、-]\s*", "", line).strip()
-                        for line in raw_lines
-                    ]
-                    q_list = [q for q in q_list if q]
-                    if not q_list:
-                        return
-
-                    url = row["url"] or f"internal://{row['id']}"
-                    company = row["company"] or "未提供"
-                    round_ = row["round"] or "未提供"
-                    current_pos = row["job_position"] or get_current_job_position()
-
-                    # LLM 打标（事务外）
-                    tagged_rows = await tag_questions_batch(
-                        url, company, round_, q_list
-                    )
-
-                    # 单事务：只替换 questions_detail，不碰 question_bank
-                    def _txn():
-                        with get_db_connection() as conn:
-                            cursor = conn.cursor()
-                            cursor.execute("BEGIN")
-                            _replace_details_txn(
-                                cursor, req.record_id, url, tagged_rows, current_pos
-                            )
-                            conn.commit()
-
-                    await run_db(_txn)
-                    logger.info(
-                        f"面经 ID={req.record_id} questions_list 变更，已同步 {len(tagged_rows)} 道题目到 questions_detail"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"面经 questions_list 同步失败 (ID={req.record_id}): {e}"
-                    )
-
-            bg_tasks.add_task(_sync_details)
-
-        return {"status": "success", "message": f"{req.table_name} 表数据更新成功"}
+        response = {"status": "success", "message": f"{req.table_name} 表数据更新成功"}
+        if reprocess_job:
+            response["reprocess_job"] = reprocess_job
+        return response
     except HTTPException:
         raise
     except Exception as e:

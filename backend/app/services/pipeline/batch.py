@@ -355,51 +355,57 @@ async def process_interview_tag_then_maybe_cluster(
     pipeline_api.enqueue_questions(interview_id)
 
     result = {"tagged_count": len(tagged_rows), "clustered": False, "new_qb_count": 0}
-    if pipeline_api.should_trigger_clustering(batch_size):
-        try:
-            from app.services.pipeline.queue import _run_cluster_batch_in_background
+    try:
+        from app.services.pipeline.queue import _run_cluster_batch_in_background
 
-            scheduled = await _run_cluster_batch_in_background(user_id=user_id)
-            logger.info("聚类攒批任务已持久化: scheduled=%s", scheduled)
-            return result
-        except Exception as e:
-            logger.warning("聚类攒批任务创建失败，保留分析队列等待后续补偿: %s", e)
+        # 每次入队都创建/复用持久化攒批窗口；即使当前不足一批，
+        # 也必须留下 available_at，避免少量新题永远没人处理。
+        scheduled = await _run_cluster_batch_in_background(user_id=user_id)
+        logger.info("聚类攒批任务已持久化: scheduled=%s", scheduled)
+    except Exception as e:
+        logger.warning("聚类攒批任务创建失败，保留分析队列等待后续补偿: %s", e)
     return result
 
 
 async def force_cluster_all_pending(user_id: int = None) -> Dict:
-    """强制处理所有 pending 队列(用于手动触发重建)"""
+    """创建一个持久化全量聚类任务，不在 API/SSE 进程内执行。"""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        CLUSTER_REBUILD_JOB_TYPE,
+        create_cluster_rebuild_job,
+        mark_job_dispatched,
+    )
+
+    def _create():
+        with get_db_connection() as conn:
+            job_id, status = create_cluster_rebuild_job(conn, user_id=user_id)
+            conn.commit()
+            return job_id, status
+
+    # This transaction is intentionally small; keeping it on the request
+    # thread also preserves the connection-local test/database context.
+    job_id, existing_status = _create()
+    if existing_status in {"queued", "running"}:
+        return {"status": existing_status, "job_id": job_id}
+
     try:
-        from app.worker import enqueue_force_cluster_task
+        from app.worker import enqueue_cluster_rebuild_job
 
-        job = await enqueue_force_cluster_task(user_id)
-        logger.info(f"全量重建任务已通过 ARQ 调度: job_id={job.job_id}")
-        return {"status": "queued", "job_id": job.job_id}
+        arq_job = await enqueue_cluster_rebuild_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+
+        def _mark_dispatched():
+            with get_db_connection() as conn:
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"全量重建任务不可再投递: job_id={job_id}")
+                conn.commit()
+
+        _mark_dispatched()
+        logger.info("全量聚类重建任务已通过 ARQ 调度: job_id=%s", job_id)
+        return {"status": "queued", "job_id": job_id, "arq_job_id": str(arq_job_id)}
     except Exception as e:
-        logger.warning(f"ARQ 调度失败,回退到内联执行: {e}")
-
-    total_new = 0
-    total_batches = 0
-    from app.services import pipeline as pipeline_api
-
-    while True:
-        batch = pipeline_api.dequeue_batch(BATCH_SIZE)
-        if not batch:
-            break
-        total_batches += 1
-        try:
-            new_count = await _maybe_await(
-                pipeline_api.cluster_batch(batch, user_id=user_id, skip_clean=True)
-            )
-            queue_ids = [item["queue_id"] for item in batch]
-            pipeline_api.mark_batch_done(queue_ids)
-            total_new += new_count
-        except Exception as e:
-            logger.error(f"聚类批次 {total_batches} 失败: {e}")
-            queue_ids = [item["queue_id"] for item in batch]
-            pipeline_api.mark_batch_failed(queue_ids)
-            raise
-
-        await asyncio.sleep(0.5)
-
-    return {"batches": total_batches, "new_qb_count": total_new}
+        # jobs.pending 是事实源，dispatcher 会在 Redis 恢复后补投。
+        logger.warning("ARQ 调度失败，全量重建任务保留 pending: job_id=%s, %s", job_id, e)
+        return {"status": "pending", "job_id": job_id, "error": str(e)[:200]}

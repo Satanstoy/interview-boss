@@ -122,3 +122,27 @@ def test_answer_jobs_are_idempotent_per_import_question(test_db):
         "SELECT payload FROM job_payloads WHERE job_id = ?", (first[0],)
     ).fetchone()[0]
     assert "什么是幂等性？" in payload
+
+
+def test_interview_reprocess_job_is_idempotent_while_active(test_db):
+    from app.services.job_lifecycle import create_interview_reprocess_job
+
+    first_id, first_status = create_interview_reprocess_job(
+        test_db, interview_id=77, user_id=None
+    )
+    test_db.commit()
+    second_id, second_status = create_interview_reprocess_job(
+        test_db, interview_id=77, user_id=None
+    )
+
+    assert (second_id, second_status) == (first_id, first_status)
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'reprocess_interview'"
+    ).fetchone()[0] == 1
+
+    test_db.execute("UPDATE jobs SET status = 'completed' WHERE id = ?", (first_id,))
+    third_id, third_status = create_interview_reprocess_job(
+        test_db, interview_id=77, user_id=None
+    )
+    assert third_id != first_id
+    assert third_status == "pending"

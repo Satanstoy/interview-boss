@@ -77,8 +77,8 @@ class TestWorkerSettings:
 
         # 执行：添加函数
         settings.functions = [
-            "cluster_questions_task",
-            "force_cluster_all_task",
+            "cluster_batch_task",
+            "cluster_rebuild_task",
             "build_master_bank_task",
             "scheduled_compaction_task"
         ]
@@ -126,8 +126,8 @@ class TestIntegration:
 
         # 执行：配置所有任务
         settings.functions = [
-            "cluster_questions_task",
-            "force_cluster_all_task",
+            "cluster_batch_task",
+            "cluster_rebuild_task",
             "build_master_bank_task",
             "scheduled_compaction_task"
         ]

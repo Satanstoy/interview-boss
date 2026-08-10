@@ -79,9 +79,9 @@ class TestBug003SSEEventsIncludeDetails:
     def test_bug003_tag_event_has_details_field(self):
         """修复后：标注完成事件应包含 details 字段"""
         import inspect
-        from app.routers.interview import reprocess_interview_stream
+        from app.worker import interview_reprocess_task
 
-        source = inspect.getsource(reprocess_interview_stream)
+        source = inspect.getsource(interview_reprocess_task)
 
         # 检查标注完成事件包含 details
         assert "'details'" in source or '"details"' in source, (
@@ -92,9 +92,9 @@ class TestBug003SSEEventsIncludeDetails:
     def test_bug003_tag_event_has_details_field(self):
         """修复后：标注完成事件应包含 details 字段（新架构保留了此特性）"""
         import inspect
-        from app.routers.interview import reprocess_interview_stream
+        from app.worker import interview_reprocess_task
 
-        source = inspect.getsource(reprocess_interview_stream)
+        source = inspect.getsource(interview_reprocess_task)
 
         # 检查标注完成事件包含 details
         assert "'details'" in source or '"details"' in source, (
@@ -248,10 +248,9 @@ class TestBug001ResumeLogic:
         source = inspect.getsource(reprocess_interview_stream)
 
         has_resume = (
-            "analysis_status" in source
-            or "analysis_stage" in source
-            or "恢复" in source
-            or "resume" in source.lower()
+            "job_id" in source
+            and "status" in source
+            and "result" in source
         )
         assert has_resume, (
             "BUG-001: reprocess_interview_stream 中没有检查已有分析状态的逻辑，"
@@ -262,15 +261,15 @@ class TestBug001ResumeLogic:
     async def test_bug001_state_saved_after_tagging(self):
         """修复后：标注完成后应保存中间状态"""
         import inspect
-        from app.routers.interview import reprocess_interview_stream
+        from app.worker import interview_reprocess_task
 
-        source = inspect.getsource(reprocess_interview_stream)
+        source = inspect.getsource(interview_reprocess_task)
 
         # 标注完成后应有保存状态的操作
         has_state_save = (
-            "analysis_result" in source
-            or "analysis_status" in source
-            or "tagged_rows" in source
+            "analysis_status" in source
+            and "complete_job" in source
+            and "tagged_rows" in source
         )
         assert has_state_save, (
             "BUG-001: 标注阶段完成后没有保存中间状态，中断后需要重新进行 LLM 标注"

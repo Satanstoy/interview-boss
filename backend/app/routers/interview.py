@@ -1,17 +1,10 @@
-import re
 import json
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_admin_user, get_current_user
-from app.db.connection import get_db_connection, run_db, get_current_job_position
-from app.services.submit_service import background_generate_answer
-from app.services.pipeline import (
-    tag_interview, enqueue_questions, should_trigger_clustering,
-    dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed,
-    process_interview_tag_then_maybe_cluster
-)
+from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
 
@@ -61,8 +54,8 @@ def _has_column(conn, table: str, column: str) -> bool:
 
 
 @router.post("/api/interview/{interview_id}/re-process")
-async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user: dict = Depends(get_admin_user)):
-    """重新分析单条面经：打标签 → 入队 → 触发聚类（如果条件满足）。"""
+async def reprocess_interview(interview_id: int, user: dict = Depends(get_admin_user)):
+    """创建单条面经重分析任务，由 ARQ worker 执行耗时 AI 处理。"""
     def _load():
         with get_db_connection() as conn:
             return conn.execute("SELECT * FROM interview WHERE id = ?", (interview_id,)).fetchone()
@@ -75,38 +68,20 @@ async def reprocess_interview(interview_id: int, bg_tasks: BackgroundTasks, user
     if not questions_str or not questions_str.strip():
         raise HTTPException(status_code=400, detail="该面经没有具体的题目清单可以分析")
 
-    try:
-        url = row['url'] or f"internal://{row['id']}"
-        company = row['company'] or "未提供"
-        round_ = row['round'] or "未提供"
-        job_position = row['job_position'] or get_current_job_position()
+    from app.services.interview_reprocess import submit_interview_reprocess_job
 
-        result = await process_interview_tag_then_maybe_cluster(
-            interview_id=interview_id,
-            url=url,
-            company=company,
-            round_=round_,
-            questions_list=questions_str,
-            job_position=job_position,
-            user_id=user['id'],
-        )
-
-        msg = f"成功标记 {result['tagged_count']} 道题目"
-        if result['clustered']:
-            msg += f"，并已触发聚类（新增 {result['new_qb_count']} 个聚类）"
-        else:
-            msg += "，已入队等待聚类"
-
-        return {"status": "success", "message": msg, **result}
-
-    except Exception as e:
-        logger.exception("重新分析失败")
-        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+    job = await submit_interview_reprocess_job(interview_id, user_id=user["id"])
+    return {
+        "status": "success",
+        "message": "重分析任务已进入后台队列",
+        "job_id": job["job_id"],
+        "job_status": job["status"],
+    }
 
 
 @router.post("/api/interview/{interview_id}/re-process-stream")
 async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get_admin_user)):
-    """SSE 版重新分析单条面经，带阶段进度推送。"""
+    """SSE 版重新分析单条面经；SSE 只订阅 durable job 状态。"""
 
     def _load():
         with get_db_connection() as conn:
@@ -120,91 +95,69 @@ async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get
     if not questions_str or not questions_str.strip():
         raise HTTPException(status_code=400, detail="该面经没有具体的题目清单可以分析")
 
-    raw_lines = [line.strip() for line in questions_str.split('\n') if line.strip()]
-    q_list = [re.sub(r'^\d+[\.\)\]、-]\s*', '', line).strip() for line in raw_lines]
-    q_list = [q for q in q_list if q]
-    # 过滤非面试题目
-    _EXTRACT_BLACKLIST = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职", "优缺点"]
-    q_list = [q for q in q_list if not any(b in q for b in _EXTRACT_BLACKLIST)]
+    from app.services.interview_reprocess import submit_interview_reprocess_job
 
-    if not q_list:
-        raise HTTPException(status_code=400, detail="解析题目清单失败，未能提取到有效题目")
+    submitted = await submit_interview_reprocess_job(interview_id, user_id=user["id"])
+    job_id = submitted["job_id"]
 
     async def event_stream():
-        try:
-            url = row['url'] or f"internal://{row['id']}"
-            company = row['company'] or "未提供"
-            round_ = row['round'] or "未提供"
-            job_position = row['job_position'] or get_current_job_position()
+        last_update = None
+        last_heartbeat = 0.0
+        import time
 
-            # ── 阶段 1：打标签（只写 questions_detail） ──
-            yield f"data: {json.dumps({'step': 'tag', 'message': f'正在标注 {len(q_list)} 道题目...', 'type': 'progress'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'step': 'queued', 'message': '重分析任务已持久化，等待 ARQ worker', 'type': 'progress', **submitted}, ensure_ascii=False)}\n\n"
+        while True:
+            def _read_job():
+                with get_db_connection() as conn:
+                    return conn.execute(
+                        "SELECT status, progress_current, progress_total, progress_message, result, error "
+                        "FROM jobs WHERE id = ? AND job_type = 'reprocess_interview'",
+                        (job_id,),
+                    ).fetchone()
 
-            tagged_rows = await tag_interview(
-                url, company, round_, questions_str,
-                job_position=job_position, user_id=user['id'], interview_id=interview_id,
-            )
+            job = await run_db(_read_job)
+            if not job:
+                yield f"data: {json.dumps({'type': 'error', 'message': '重分析任务不存在'}, ensure_ascii=False)}\n\n"
+                break
 
-            tag_details = [
-                {"question": r[3], "cat1": r[4], "cat2": r[5], "tags": r[6], "difficulty": r[7]}
-                for r in tagged_rows
-            ]
-            yield f"data: {json.dumps({'step': 'tag', 'message': f'标注完成，共 {len(tagged_rows)} 道题', 'type': 'progress', 'details': tag_details}, ensure_ascii=False)}\n\n"
+            status = job["status"]
+            update = {
+                "step": "tag" if status == "running" else "queued",
+                "message": job["progress_message"] or "等待 worker 调度",
+                "type": "progress",
+                "status": status,
+                "job_id": job_id,
+                "current": job["progress_current"],
+                "total": job["progress_total"],
+            }
+            serialized = json.dumps(update, ensure_ascii=False)
+            now = time.monotonic()
+            if serialized != last_update or now - last_heartbeat >= 15:
+                yield f"data: {serialized}\n\n"
+                last_update = serialized
+                last_heartbeat = now
 
-            # ── 入队 ──
-            enqueue_questions(interview_id)
-            yield f"data: {json.dumps({'step': 'queue', 'message': '已加入聚类队列', 'type': 'progress'}, ensure_ascii=False)}\n\n"
-
-            # ── 检查是否触发聚类 ──
-            if should_trigger_clustering():
-                yield f"data: {json.dumps({'step': 'cluster', 'message': '触发批量聚类...', 'type': 'progress'}, ensure_ascii=False)}\n\n"
-
-                batch = dequeue_batch()
-                if batch:
+            if status == "completed":
+                result = {}
+                if job["result"]:
                     try:
-                        new_count = await cluster_batch(batch, user_id=user['id'])
-                        queue_ids = [item['queue_id'] for item in batch]
-                        mark_batch_done(queue_ids)
-                        yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类完成，新增 {new_count} 个聚类', 'type': 'progress', 'new_qb_count': new_count}, ensure_ascii=False)}\n\n"
-                    except Exception as e:
-                        logger.error(f"聚类失败，回退队列状态: {e}")
-                        queue_ids = [item['queue_id'] for item in batch]
-                        mark_batch_failed(queue_ids)
-                        yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类失败: {str(e)}', 'type': 'error'}, ensure_ascii=False)}\n\n"
-
-            # ── 更新面经分析状态 ──
-            def _mark_done():
-                with get_db_connection() as conn:
-                    conn.execute(
-                        "UPDATE interview SET analysis_status = 'completed', analysis_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (interview_id,)
-                    )
-                    conn.commit()
-            await run_db(_mark_done)
-
-            yield f"data: {json.dumps({'step': 'done', 'message': f'分析完成，共 {len(tagged_rows)} 道题已入队', 'type': 'done', 'extracted_count': len(tagged_rows)}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            logger.exception("SSE 重新分析失败")
-            def _mark_failed():
-                with get_db_connection() as conn:
-                    conn.execute(
-                        "UPDATE interview SET analysis_status = 'failed', analysis_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (interview_id,)
-                    )
-                    conn.commit()
-            try:
-                await run_db(_mark_failed)
-            except Exception:
-                pass
-            yield f"data: {json.dumps({'type': 'error', 'message': f'分析失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                        result = json.loads(job["result"])
+                    except (TypeError, json.JSONDecodeError):
+                        result = {}
+                yield f"data: {json.dumps({'step': 'tag', 'message': f'标注完成，共 {result.get("tagged_count", 0)} 道题', 'type': 'progress', **result}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'step': 'done', 'message': '重分析完成，聚类任务后台处理中', 'type': 'done', 'job_id': job_id, **result}, ensure_ascii=False)}\n\n"
+                break
+            if status == "failed":
+                yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['error'] or '重分析失败'}, ensure_ascii=False)}\n\n"
+                break
+            await asyncio.sleep(2)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
 
 @router.post("/api/interview/batch-reprocess-stream")
 async def batch_reprocess_stream(user: dict = Depends(get_admin_user)):
-    """SSE 版批量分析：逐条打标签，最后触发一次聚类。"""
+    """SSE 版批量分析：逐条创建 durable job 并订阅完成状态。"""
     def _load_all():
         with get_db_connection() as conn:
             return conn.execute(
@@ -220,40 +173,53 @@ async def batch_reprocess_stream(user: dict = Depends(get_admin_user)):
     async def event_stream():
         total = len(interviews)
         tagged_total = 0
+        from app.services.interview_reprocess import submit_interview_reprocess_job
 
         yield f"data: {json.dumps({'step': 'init', 'message': f'开始批量分析 {total} 条面经...', 'total': total, 'type': 'progress'}, ensure_ascii=False)}\n\n"
 
-        # 阶段1：逐条打标签（可并发，但为稳定性先串行）
+        # 逐条创建并等待 durable job；浏览器断开不会取消 worker 任务。
         for idx, iv in enumerate(interviews):
             iv = dict(iv)
-            url = iv['url'] or f"internal://{iv['id']}"
             try:
-                tagged_rows = await tag_interview(
-                    url, iv['company'] or '未提供', iv['round'] or '未提供',
-                    iv['questions_list'], job_position=iv.get('job_position', ''),
-                    user_id=user['id'], interview_id=iv['id'],
+                submitted = await submit_interview_reprocess_job(
+                    iv["id"], user_id=user["id"]
                 )
-                enqueue_questions(iv['id'])
-                tagged_total += len(tagged_rows)
+                job_id = submitted["job_id"]
+                yield f"data: {json.dumps({'step': 'queued', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'message': '任务已进入持久化队列', 'type': 'progress', **submitted}, ensure_ascii=False)}\n\n"
 
-                yield f"data: {json.dumps({'step': 'tag', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'tagged_count': len(tagged_rows), 'type': 'progress'}, ensure_ascii=False)}\n\n"
+                last_status = None
+                while True:
+                    def _read_job():
+                        with get_db_connection() as conn:
+                            return conn.execute(
+                                "SELECT status, progress_message, result, error "
+                                "FROM jobs WHERE id = ? AND job_type = 'reprocess_interview'",
+                                (job_id,),
+                            ).fetchone()
+
+                    job = await run_db(_read_job)
+                    if not job:
+                        raise RuntimeError("重分析任务不存在")
+                    if job["status"] != last_status:
+                        yield f"data: {json.dumps({'step': 'tag', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'message': job['progress_message'] or '等待 worker 调度', 'status': job['status'], 'type': 'progress'}, ensure_ascii=False)}\n\n"
+                        last_status = job["status"]
+                    if job["status"] == "completed":
+                        result = {}
+                        if job["result"]:
+                            try:
+                                result = json.loads(job["result"])
+                            except (TypeError, json.JSONDecodeError):
+                                pass
+                        tagged_total += int(result.get("tagged_count", 0))
+                        break
+                    if job["status"] == "failed":
+                        yield f"data: {json.dumps({'step': 'tag', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'message': job['error'] or '分析失败', 'type': 'error'}, ensure_ascii=False)}\n\n"
+                        break
+                    await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"面经 {iv['id']} 打标签失败: {e}")
                 yield f"data: {json.dumps({'step': 'tag', 'current': idx + 1, 'total': total, 'interview_id': iv['id'], 'error': str(e), 'type': 'error'}, ensure_ascii=False)}\n\n"
 
-        # 阶段2：一次性聚类所有 pending
-        yield f"data: {json.dumps({'step': 'cluster', 'message': '打标签完成，开始批量聚类...', 'type': 'progress'}, ensure_ascii=False)}\n\n"
-
-        try:
-            from app.services.pipeline import force_cluster_all_pending
-            cluster_result = await force_cluster_all_pending(user_id=user['id'])
-            batches = cluster_result['batches']
-            new_qb = cluster_result['new_qb_count']
-            yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类完成，处理 {batches} 个批次，新增 {new_qb} 个聚类', 'type': 'progress', **cluster_result}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error(f"批量聚类失败: {e}")
-            yield f"data: {json.dumps({'step': 'cluster', 'message': f'聚类失败: {str(e)}', 'type': 'error'}, ensure_ascii=False)}\n\n"
-
-        yield f"data: {json.dumps({'step': 'done', 'message': f'批量分析完成，共 {total} 条面经，{tagged_total} 道题', 'type': 'done', 'total': total, 'tagged_total': tagged_total}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'step': 'done', 'message': f'标注完成，共 {total} 条面经，{tagged_total} 道题；聚类任务后台处理中', 'type': 'done', 'total': total, 'tagged_total': tagged_total, 'cluster_pending': True}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})

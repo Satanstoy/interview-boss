@@ -12,11 +12,14 @@ import socket
 import json
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 SUBMIT_IMPORT_JOB_TYPE = "submit_import"
 ANSWER_GENERATION_JOB_TYPE = "generate_answer"
 ANSWER_BATCH_JOB_TYPE = "generate_answer_batch"
 CLUSTER_BATCH_JOB_TYPE = "cluster_batch"
+CLUSTER_REBUILD_JOB_TYPE = "cluster_rebuild"
+INTERVIEW_REPROCESS_JOB_TYPE = "reprocess_interview"
 BUILD_MASTER_BANK_JOB_TYPE = "build_master_bank"
 RECOMPUTE_EMBEDDING_JOB_TYPE = "recompute_embedding"
 RECITATION_GENERATION_JOB_TYPE = "generate_recitation"
@@ -24,10 +27,88 @@ DISPATCHABLE_JOB_TYPES = (
     SUBMIT_IMPORT_JOB_TYPE,
     ANSWER_GENERATION_JOB_TYPE,
     CLUSTER_BATCH_JOB_TYPE,
+    CLUSTER_REBUILD_JOB_TYPE,
+    INTERVIEW_REPROCESS_JOB_TYPE,
     BUILD_MASTER_BANK_JOB_TYPE,
     RECOMPUTE_EMBEDDING_JOB_TYPE,
     RECITATION_GENERATION_JOB_TYPE,
 )
+
+
+def create_cluster_rebuild_job(conn, user_id: int | None = None) -> tuple[int, str]:
+    """Create or reuse the single durable full-cluster rebuild job.
+
+    A rebuild consumes the shared analysis queue, so overlapping rebuilds would
+    compete for the same rows and make progress difficult to explain.  Keep one
+    active job globally and let the dispatcher recover it when Redis is down.
+    """
+    existing = conn.execute(
+        "SELECT id, status FROM jobs WHERE job_type = ? "
+        "AND status IN ('pending', 'queued', 'running') ORDER BY id LIMIT 1",
+        (CLUSTER_REBUILD_JOB_TYPE,),
+    ).fetchone()
+    if existing:
+        return int(existing["id"]), str(existing["status"])
+
+    pending = conn.execute(
+        "SELECT COUNT(*) AS c FROM analysis_queue WHERE status IN ('pending', 'processing')"
+    ).fetchone()["c"]
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, progress_total, created_by, idempotency_key) "
+        "VALUES (?, 'pending', ?, ?, ?)",
+        (
+            CLUSTER_REBUILD_JOB_TYPE,
+            max(int(pending), 1),
+            user_id,
+            f"cluster-rebuild:{uuid4().hex}",
+        ),
+    )
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, json.dumps({"user_id": user_id}, ensure_ascii=False)),
+    )
+    return job_id, "pending"
+
+
+def create_interview_reprocess_job(
+    conn,
+    interview_id: int,
+    user_id: int | None = None,
+) -> tuple[int, str]:
+    """Create or reuse a durable job for reprocessing one interview."""
+    existing = conn.execute(
+        "SELECT j.id, j.status FROM jobs j "
+        "JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.job_type = ? AND j.status IN ('pending', 'queued', 'running') "
+        "AND json_extract(p.payload, '$.interview_id') = ? "
+        "ORDER BY j.id DESC LIMIT 1",
+        (INTERVIEW_REPROCESS_JOB_TYPE, interview_id),
+    ).fetchone()
+    if existing:
+        return int(existing["id"]), str(existing["status"])
+
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, progress_total, created_by, idempotency_key) "
+        "VALUES (?, 'pending', 1, ?, ?)",
+        (
+            INTERVIEW_REPROCESS_JOB_TYPE,
+            user_id,
+            f"reprocess-interview:{interview_id}:{uuid4().hex}",
+        ),
+    )
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (
+            job_id,
+            json.dumps(
+                {"interview_id": interview_id, "user_id": user_id},
+                ensure_ascii=False,
+            ),
+        ),
+    )
+    return job_id, "pending"
 DISPATCH_LEASE_SECONDS = 300
 WORKER_LEASE_SECONDS = 1800
 MAX_JOB_ATTEMPTS = 3

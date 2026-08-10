@@ -5,9 +5,9 @@ Submit 业务逻辑：题目标签化、答案生成、增量更新题库。
 """
 import json
 import logging
+from uuid import uuid4
 
 from typing import List
-from fastapi import BackgroundTasks
 
 from app.core.config import LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, build_tagging_prompt
@@ -17,6 +17,32 @@ from app.services.llm import client, _should_use_response_format, _extract_json,
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
+
+
+async def persist_answer_generation_jobs(
+    answer_tasks: list[tuple[int, str]],
+    user_id: int,
+    source: str = "submit",
+) -> tuple[int, list[int]]:
+    """Persist answer child jobs for legacy and current upload paths."""
+    from app.services.job_lifecycle import create_answer_generation_jobs
+
+    def _persist():
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO jobs "
+                "(job_type, status, progress_total, created_by, idempotency_key) "
+                "VALUES ('generate_answer_batch', 'pending', ?, ?, ?)",
+                (len(answer_tasks), user_id, f"{source}:{user_id}:{uuid4().hex}"),
+            )
+            parent_id = int(cursor.lastrowid)
+            child_ids = create_answer_generation_jobs(
+                conn, parent_id, answer_tasks, user_id
+            )
+            conn.commit()
+            return parent_id, child_ids
+
+    return await run_db(_persist)
 
 
 def _get_current_position_for_user(user_id: int) -> str:
@@ -126,7 +152,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
     return standardized
 
 
-async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: BackgroundTasks, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False, interview_id: int = None, job_position: str = None):
+async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks=None, submitter_is_admin: bool = True, user_id: int = None, is_personal: bool = False, interview_id: int = None, job_position: str = None):
     """对一批已打标题目做处理。
 
     个人题库：直接插入 question_bank。
@@ -144,29 +170,20 @@ async def incremental_update_master_bank(new_tagged_rows: list, bg_tasks: Backgr
     # ── 个人题库：直接插入，不做聚类 ──
     if is_personal:
         answer_tasks = await run_db(lambda: insert_personal_questions_txn(valid_rows, user_id, current_pos))
-        for qid, qtext in answer_tasks:
-            bg_tasks.add_task(background_generate_answer, qid, qtext, user_id)
+        if answer_tasks:
+            await persist_answer_generation_jobs(
+                answer_tasks, user_id, source="incremental-personal"
+            )
         logger.info(f"个人题库新增 {len(valid_rows)} 题")
         return
 
     # ── 公共题库：入队等待聚类 ──
     if interview_id:
-        from app.services.pipeline import enqueue_questions, should_trigger_clustering, dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed
-        enqueue_questions(interview_id)
-        logger.info(f"面经 {interview_id} 已入队等待聚类")
+        from app.services.pipeline import enqueue_questions
+        from app.services.pipeline.queue import _run_cluster_batch_in_background
 
-        # 检查是否触发聚类
-        if should_trigger_clustering():
-            batch = dequeue_batch()
-            if batch:
-                try:
-                    new_count = await cluster_batch(batch, user_id=user_id)
-                    queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_done(queue_ids)
-                    logger.info(f"触发聚类完成，新增 {new_count} 个聚类")
-                except Exception as e:
-                    logger.error(f"聚类失败，回退队列状态: {e}")
-                    queue_ids = [item['queue_id'] for item in batch]
-                    mark_batch_failed(queue_ids)
+        enqueue_questions(interview_id)
+        scheduled = await _run_cluster_batch_in_background(user_id=user_id)
+        logger.info(f"面经 {interview_id} 已入队等待聚类攒批: scheduled={scheduled}")
     else:
         logger.warning("公共题库提交但无 interview_id，跳过入队")

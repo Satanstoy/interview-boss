@@ -29,15 +29,6 @@ async def _get_redis_pool():
     return await create_pool(RedisSettings.from_dsn(REDIS_URL))
 
 
-async def enqueue_cluster_task(interview_id: int, user_id: int = None):
-    """将聚类任务入队"""
-    pool = await _get_redis_pool()
-    try:
-        return await pool.enqueue_job("cluster_questions_task", interview_id, user_id)
-    finally:
-        await pool.close()
-
-
 async def enqueue_cluster_batch_job(job_id: int):
     """将一个持久化聚类攒批任务入队。"""
     pool = await _get_redis_pool()
@@ -47,11 +38,11 @@ async def enqueue_cluster_batch_job(job_id: int):
         await pool.close()
 
 
-async def enqueue_force_cluster_task(user_id: int = None):
-    """将全量重建任务入队"""
+async def enqueue_cluster_rebuild_job(job_id: int):
+    """将一个持久化全量聚类重建任务入队。"""
     pool = await _get_redis_pool()
     try:
-        return await pool.enqueue_job("force_cluster_all_task", user_id)
+        return await pool.enqueue_job("cluster_rebuild_task", job_id)
     finally:
         await pool.close()
 
@@ -88,6 +79,15 @@ async def enqueue_generate_recitation_job(job_id: int):
     pool = await _get_redis_pool()
     try:
         return await pool.enqueue_job("generate_recitation_task", job_id)
+    finally:
+        await pool.close()
+
+
+async def enqueue_interview_reprocess_job(job_id: int):
+    """将面经重分析任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("interview_reprocess_task", job_id)
     finally:
         await pool.close()
 
@@ -161,26 +161,6 @@ async def shutdown(ctx):
 
     await close_cache_client()
     logger.info("ARQ Worker 已关闭")
-
-
-async def cluster_questions_task(ctx, interview_id: int, user_id: int = None):
-    """聚类任务：从队列取出一批问题，执行增量聚类"""
-    from app.services.pipeline import (
-        dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
-    )
-    batch = dequeue_batch(BATCH_SIZE)
-    if not batch:
-        return {"status": "empty", "new_count": 0}
-
-    try:
-        new_count = await cluster_batch(batch, user_id=user_id)
-        queue_ids = [item['queue_id'] for item in batch]
-        mark_batch_done(queue_ids)
-        return {"status": "done", "new_count": new_count}
-    except Exception as e:
-        queue_ids = [item['queue_id'] for item in batch]
-        mark_batch_failed(queue_ids)
-        raise
 
 
 async def cluster_batch_task(ctx, job_id: int):
@@ -258,6 +238,254 @@ async def cluster_batch_task(ctx, job_id: int):
         return {"status": outcome["status"], "job_id": job_id}
 
 
+async def cluster_rebuild_task(ctx, job_id: int):
+    """ARQ task: durably process every queued question for a full rebuild."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        CLUSTER_REBUILD_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+        touch_job,
+    )
+    from app.services.pipeline import (
+        BATCH_SIZE,
+        cluster_batch,
+        dequeue_batch,
+        mark_batch_done,
+        mark_batch_failed,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=CLUSTER_REBUILD_JOB_TYPE,
+            )
+            if not task:
+                return None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            conn.commit()
+            payload = json.loads(payload_row["payload"]) if payload_row else {}
+            return payload, int(task["progress_total"] or 1)
+
+    claimed = await asyncio.to_thread(_claim_and_load)
+    if claimed is None:
+        logger.info("全量聚类重建任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    payload, progress_total = claimed
+    processed = 0
+    total_new = 0
+    total_batches = 0
+    batch = []
+
+    def _touch(message: str):
+        with get_db_connection() as conn:
+            touch_job(
+                conn,
+                job_id,
+                worker_id,
+                progress_current=processed,
+                progress_total=max(progress_total, processed, 1),
+                progress_message=message,
+            )
+            conn.commit()
+
+    def _complete(result):
+        with get_db_connection() as conn:
+            complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps(result, ensure_ascii=False),
+            )
+            conn.commit()
+
+    def _fail(error):
+        with get_db_connection() as conn:
+            outcome = fail_job(conn, job_id, worker_id, error)
+            conn.commit()
+            return outcome
+
+    try:
+        while True:
+            batch = dequeue_batch(BATCH_SIZE)
+            if not batch:
+                result = {
+                    "status": "done",
+                    "batches": total_batches,
+                    "new_qb_count": total_new,
+                    "processed": processed,
+                }
+                _complete(result)
+                return {"job_id": job_id, **result}
+
+            total_batches += 1
+            new_count = await cluster_batch(
+                batch,
+                user_id=payload.get("user_id"),
+                skip_clean=True,
+            )
+            queue_ids = [item["queue_id"] for item in batch]
+            mark_batch_done(queue_ids)
+            processed += len(batch)
+            total_new += new_count
+            _touch(f"已完成 {processed} 道题，处理 {total_batches} 个批次")
+            await asyncio.sleep(0.5)
+    except Exception as exc:
+        if batch:
+            mark_batch_failed([item["queue_id"] for item in batch])
+        outcome = _fail(str(exc)[:500])
+        logger.exception("全量聚类重建任务失败: job_id=%s", job_id)
+        return {"status": outcome["status"], "job_id": job_id}
+
+
+async def interview_reprocess_task(ctx, job_id: int):
+    """ARQ task: tag one interview, enqueue its questions and open clustering."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        INTERVIEW_REPROCESS_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+        touch_job,
+    )
+    from app.services.pipeline import (
+        _run_cluster_batch_in_background,
+        enqueue_questions,
+        tag_interview,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=INTERVIEW_REPROCESS_JOB_TYPE,
+            )
+            if not task:
+                return None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            payload = json.loads(payload_row["payload"]) if payload_row else {}
+            interview = conn.execute(
+                "SELECT id, url, company, round, questions_list, job_position "
+                "FROM interview WHERE id = ?",
+                (payload.get("interview_id"),),
+            ).fetchone()
+            conn.commit()
+            return payload, dict(interview) if interview else None
+
+    claimed = await asyncio.to_thread(_claim_and_load)
+    if claimed is None:
+        logger.info("面经重分析任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    payload, interview = claimed
+
+    def _set_analysis_status(status: str):
+        with get_db_connection() as conn:
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(interview)").fetchall()
+            }
+            if "analysis_status" in columns:
+                conn.execute(
+                    "UPDATE interview SET analysis_status = ?, "
+                    "analysis_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (status, payload.get("interview_id")),
+                )
+                conn.commit()
+
+    def _touch(message: str):
+        with get_db_connection() as conn:
+            touch_job(
+                conn,
+                job_id,
+                worker_id,
+                progress_current=0,
+                progress_total=1,
+                progress_message=message,
+            )
+            conn.commit()
+
+    def _complete(result):
+        with get_db_connection() as conn:
+            complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps(result, ensure_ascii=False),
+            )
+            conn.commit()
+
+    def _fail(error):
+        with get_db_connection() as conn:
+            outcome = fail_job(conn, job_id, worker_id, error)
+            conn.commit()
+            return outcome
+
+    try:
+        if not interview:
+            raise ValueError("未找到待重分析的面经")
+        questions_list = str(interview.get("questions_list") or "")
+        if not questions_list.strip():
+            raise ValueError("该面经没有可分析的题目清单")
+
+        _set_analysis_status("processing")
+        _touch("正在调用 AI 标注题目")
+        user_id = payload.get("user_id")
+        tagged_rows = await tag_interview(
+            interview.get("url") or f"internal://{interview['id']}",
+            interview.get("company") or "未提供",
+            interview.get("round") or "未提供",
+            questions_list,
+            job_position=interview.get("job_position") or "",
+            user_id=user_id,
+            interview_id=interview["id"],
+        )
+        enqueue_questions(interview["id"])
+        scheduled = await _run_cluster_batch_in_background(user_id=user_id)
+
+        details = [
+            {
+                "question": row[3],
+                "cat1": row[4],
+                "cat2": row[5],
+                "tags": row[6],
+                "difficulty": row[7],
+            }
+            for row in tagged_rows
+        ]
+        result = {
+            "interview_id": interview["id"],
+            "tagged_count": len(tagged_rows),
+            "details": details,
+            "cluster_pending": True,
+            "cluster_scheduled": scheduled,
+        }
+        _set_analysis_status("completed")
+        _complete(result)
+        return {"job_id": job_id, "status": "completed", **result}
+    except Exception as exc:
+        _set_analysis_status("failed")
+        outcome = _fail(str(exc)[:500])
+        logger.exception("面经重分析任务失败: job_id=%s", job_id)
+        return {"job_id": job_id, "status": outcome["status"]}
+
+
 async def refresh_interview_distribution_task(ctx, scope: str, job_position: str):
     """Recompute one distribution hierarchy after its facts were marked stale."""
     from app.db.connection import get_db_connection
@@ -323,34 +551,6 @@ async def process_chat_side_effects_task(ctx, limit: int = 10):
             await asyncio.to_thread(chat_service.fail_side_effect_job, job["id"], str(exc), retry=True)
             logger.warning("chat side-effect job failed: %s (%s)", job["id"], exc)
     return {"status": "completed", "processed": processed}
-
-
-async def force_cluster_all_task(ctx, user_id: int = None):
-    """全量重建任务 — 直接处理队列，不通过 ARQ 再次调度"""
-    from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
-    import asyncio
-
-    total_new = 0
-    total_batches = 0
-
-    while True:
-        batch = dequeue_batch(BATCH_SIZE)
-        if not batch:
-            break
-        total_batches += 1
-        try:
-            new_count = await cluster_batch(batch, user_id=user_id, skip_clean=True)
-            queue_ids = [item['queue_id'] for item in batch]
-            mark_batch_done(queue_ids)
-            total_new += new_count
-        except Exception as e:
-            logger.error(f"聚类批次 {total_batches} 失败: {e}")
-            queue_ids = [item['queue_id'] for item in batch]
-            mark_batch_failed(queue_ids)
-            raise
-        await asyncio.sleep(0.5)
-
-    return {"batches": total_batches, "new_qb_count": total_new}
 
 
 async def build_master_bank_task(ctx, job_id: int):
@@ -1122,6 +1322,8 @@ async def scheduled_submit_job_dispatch_task(ctx):
         ANSWER_GENERATION_JOB_TYPE,
         BUILD_MASTER_BANK_JOB_TYPE,
         CLUSTER_BATCH_JOB_TYPE,
+        CLUSTER_REBUILD_JOB_TYPE,
+        INTERVIEW_REPROCESS_JOB_TYPE,
         DISPATCHABLE_JOB_TYPES,
         RECITATION_GENERATION_JOB_TYPE,
         RECOMPUTE_EMBEDDING_JOB_TYPE,
@@ -1143,6 +1345,8 @@ async def scheduled_submit_job_dispatch_task(ctx):
         SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
         ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
         CLUSTER_BATCH_JOB_TYPE: enqueue_cluster_batch_job,
+        CLUSTER_REBUILD_JOB_TYPE: enqueue_cluster_rebuild_job,
+        INTERVIEW_REPROCESS_JOB_TYPE: enqueue_interview_reprocess_job,
         BUILD_MASTER_BANK_JOB_TYPE: enqueue_build_job,
         RECOMPUTE_EMBEDDING_JOB_TYPE: enqueue_recompute_embedding_job,
         RECITATION_GENERATION_JOB_TYPE: enqueue_generate_recitation_job,
@@ -1305,11 +1509,11 @@ async def scheduled_source_health_task(ctx):
 
 class WorkerSettings:
     functions = [
-        cluster_questions_task,
         cluster_batch_task,
+        cluster_rebuild_task,
+        interview_reprocess_task,
         refresh_interview_distribution_task,
         process_chat_side_effects_task,
-        force_cluster_all_task,
         build_master_bank_task,
         submit_import_task,
         generate_answer_task,

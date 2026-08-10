@@ -75,37 +75,38 @@ class TestPipelineARQIntegration:
             assert result["new_qb_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_force_cluster_uses_arq(self):
-        """全量重建应通过 ARQ 调度"""
+    async def test_force_cluster_uses_durable_arq_job(self, test_db):
+        """全量重建应先落库，再通过 ARQ 调度"""
         from app.services.pipeline import force_cluster_all_pending
 
-        with patch("app.worker.enqueue_force_cluster_task") as mock_arq:
-            mock_arq.return_value = MagicMock(job_id="arq-force-456")
-
+        with patch("app.worker.enqueue_cluster_rebuild_job", new=AsyncMock(
+            return_value=MagicMock(job_id="arq-force-456")
+        )) as mock_arq:
             result = await force_cluster_all_pending(user_id=1)
 
-            mock_arq.assert_called_once_with(1)
+            mock_arq.assert_awaited_once_with(1)
             assert result["status"] == "queued"
-            assert result["job_id"] == "arq-force-456"
+            assert result["arq_job_id"] == "arq-force-456"
+            row = test_db.execute(
+                "SELECT job_type, status FROM jobs WHERE id = ?", (result["job_id"],)
+            ).fetchone()
+            assert tuple(row) == ("cluster_rebuild", "queued")
 
     @pytest.mark.asyncio
-    async def test_force_cluster_falls_back_when_arq_unavailable(self):
-        """ARQ 不可用时全量重建应回退到内联执行"""
+    async def test_force_cluster_remains_pending_when_arq_unavailable(self, test_db):
+        """ARQ 不可用时全量重建应保留 pending，等待 dispatcher 补偿"""
         from app.services.pipeline import force_cluster_all_pending
 
-        with patch("app.worker.enqueue_force_cluster_task", side_effect=Exception("Redis 连接失败")), \
+        with patch("app.worker.enqueue_cluster_rebuild_job", new=AsyncMock(
+            side_effect=Exception("Redis 连接失败")
+        )), \
              patch("app.services.pipeline.dequeue_batch") as mock_dequeue, \
-             patch("app.services.pipeline.cluster_batch") as mock_cluster, \
-             patch("app.services.pipeline.mark_batch_done") as mock_done:
-
-            mock_dequeue.side_effect = [
-                [{"queue_id": 1, "qd_id": 10, "question": "test"}],
-                []  # 第二次调用返回空，结束循环
-            ]
-            mock_cluster.return_value = 5
-
+             patch("app.services.pipeline.cluster_batch") as mock_cluster:
             result = await force_cluster_all_pending(user_id=1)
 
-            # 应回退到内联执行
-            assert result["batches"] == 1
-            assert result["new_qb_count"] == 5
+            assert result["status"] == "pending"
+            assert test_db.execute(
+                "SELECT status FROM jobs WHERE id = ?", (result["job_id"],)
+            ).fetchone()[0] == "pending"
+            mock_dequeue.assert_not_called()
+            mock_cluster.assert_not_called()

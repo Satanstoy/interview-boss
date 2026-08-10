@@ -130,6 +130,65 @@ def create_test_db():
             UNIQUE(question_detail_id),
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress_current INTEGER DEFAULT 0,
+            progress_total INTEGER DEFAULT 0,
+            progress_message TEXT,
+            result TEXT,
+            error TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            locked_until TEXT,
+            arq_job_id TEXT,
+            worker_id TEXT,
+            last_error TEXT,
+            started_at TEXT,
+            idempotency_key TEXT,
+            parent_job_id INTEGER
+        );
+        CREATE UNIQUE INDEX uq_test_jobs_idempotency
+            ON jobs(job_type, idempotency_key)
+            WHERE idempotency_key IS NOT NULL;
+        CREATE TABLE job_payloads (
+            job_id INTEGER PRIMARY KEY,
+            payload TEXT NOT NULL,
+            FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE cluster_review_state (
+            cluster_id INTEGER PRIMARY KEY,
+            current_version TEXT NOT NULL,
+            reviewed_version TEXT,
+            status TEXT NOT NULL DEFAULT 'needs_review',
+            priority INTEGER NOT NULL DEFAULT 50,
+            last_trigger_reason TEXT,
+            last_reviewed_at TEXT,
+            last_error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE cluster_review_tasks (
+            id TEXT PRIMARY KEY,
+            cluster_id INTEGER NOT NULL,
+            review_version TEXT NOT NULL,
+            trigger_reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            locked_until TEXT,
+            arq_job_id TEXT,
+            last_error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            finished_at TEXT,
+            UNIQUE(cluster_id, review_version)
+        );
         CREATE TABLE user_practice_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -547,11 +606,14 @@ class TestRebuildFlow:
             conn.commit()
 
             # 聚类
+            from app.worker import cluster_rebuild_task
+
             with patch(
-                "app.worker.enqueue_force_cluster_task",
-                AsyncMock(side_effect=RuntimeError("no worker")),
+                "app.worker.enqueue_cluster_rebuild_job",
+                new=AsyncMock(return_value=MagicMock(job_id="arq-rebuild-1")),
             ):
-                result = await force_cluster_all_pending(user_id=1)
+                queued = await force_cluster_all_pending(user_id=1)
+                result = await cluster_rebuild_task({}, queued["job_id"])
 
             qb_rows = conn.execute(
                 "SELECT * FROM question_bank WHERE owner_id IS NULL"
@@ -1045,11 +1107,14 @@ class TestFullRebuildSimulation:
             conn.commit()
 
             # 聚类
+            from app.worker import cluster_rebuild_task
+
             with patch(
-                "app.worker.enqueue_force_cluster_task",
-                AsyncMock(side_effect=RuntimeError("no worker")),
+                "app.worker.enqueue_cluster_rebuild_job",
+                new=AsyncMock(return_value=MagicMock(job_id="arq-rebuild-2")),
             ):
-                result = await force_cluster_all_pending(user_id=1)
+                queued = await force_cluster_all_pending(user_id=1)
+                result = await cluster_rebuild_task({}, queued["job_id"])
 
             # 验证
             qb_rows = conn.execute(
