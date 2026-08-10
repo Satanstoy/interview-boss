@@ -63,3 +63,22 @@ def _migration_071_quality_issue_new_cat2(conn):
         )
     logger.info("migration_071: quality_issue.new_cat2 已就绪")
 
+
+def _migration_073_quality_issue_source_snapshot(conn):
+    """保存质量审查项创建时的来源题快照。
+
+    漏合并审批会删除来源题，已处理清单仍需要显示审批前的原题内容，
+    因此不能只依赖 quality_issue.qb_id 回查 question_bank。
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info('quality_issue')")
+    columns = {info[1] for info in cursor.fetchall()}
+    if "source_question" not in columns:
+        conn.execute(
+            "ALTER TABLE quality_issue ADD COLUMN source_question TEXT DEFAULT NULL"
+        )
+    if "source_cat2" not in columns:
+        conn.execute(
+            "ALTER TABLE quality_issue ADD COLUMN source_cat2 TEXT DEFAULT NULL"
+        )
+    logger.info("migration_073: quality_issue 原题快照字段已就绪")

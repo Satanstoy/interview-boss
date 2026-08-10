@@ -207,13 +207,16 @@ async def generate_unmerged_quality_issues(
             conn.execute(
                 "INSERT INTO quality_issue "
                 "(qb_id, variant_index, issue_type, suggested_action, reason, "
-                "suggested_value, target_qb_id, confidence, status, created_at) "
-                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, 'pending', datetime('now'))",
+                "suggested_value, target_qb_id, confidence, source_question, source_cat2, "
+                "status, created_at) "
+                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'))",
                 (
                     singleton["qb_id"],
                     reason,
                     target["qb_id"],
                     round(confidence, 2),
+                    singleton["question"],
+                    singleton["cat2"],
                 ),
             )
             conn.commit()

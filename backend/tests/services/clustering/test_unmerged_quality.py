@@ -10,7 +10,7 @@ def _ensure_quality_issue_table(conn):
         "variant_index INTEGER, issue_type TEXT NOT NULL, suggested_action TEXT NOT NULL, "
         "reason TEXT, suggested_value TEXT, confidence REAL, status TEXT DEFAULT 'pending', "
         "created_at TEXT, reviewed_at TEXT, reviewed_by INTEGER, "
-        "target_qb_id INTEGER, new_cat2 TEXT)"
+        "target_qb_id INTEGER, new_cat2 TEXT, source_question TEXT, source_cat2 TEXT)"
     )
     columns = {r[1] for r in conn.execute("PRAGMA table_info('quality_issue')").fetchall()}
     if "target_qb_id" not in columns:
@@ -102,9 +102,19 @@ async def test_generate_unmerged_issues_uses_island_logic_and_is_idempotent(
     assert second["created"] == 0
     issue = test_db.execute(
         "SELECT qb_id, variant_index, issue_type, suggested_action, "
-        "target_qb_id, confidence, status FROM quality_issue"
+        "target_qb_id, confidence, source_question, source_cat2, status FROM quality_issue"
     ).fetchone()
-    assert tuple(issue) == (200, None, "unmerged", "merge", 100, 0.94, "pending")
+    assert tuple(issue) == (
+        200,
+        None,
+        "unmerged",
+        "merge",
+        100,
+        0.94,
+        "缓存穿透击穿雪崩分别怎么处理",
+        "D1.缓存设计与优化",
+        "pending",
+    )
     assert test_db.execute("SELECT id FROM question_bank WHERE id = 200").fetchone()
 
 
@@ -133,6 +143,36 @@ def test_execute_unmerged_issue_merges_source_and_records_history(test_db, monke
     ).fetchone()
     assert target[0] == 3
     assert "缓存穿透击穿雪崩分别怎么处理" in json.loads(target[1])
+
+
+def test_serialize_old_done_unmerged_issue_recovers_deleted_source_from_history(
+    test_db, monkeypatch
+):
+    """迁移前创建的已处理漏合并记录也能从 merge_history 显示原题。"""
+    _ensure_quality_issue_table(test_db)
+    _seed_questions(test_db)
+    test_db.commit()
+    monkeypatch.setattr(
+        "app.services.pipeline.compact.get_db_connection", lambda: test_db
+    )
+
+    from app.services.quality_issue_ops import execute_issue, serialize_issue
+
+    issue = test_db.execute(
+        "INSERT INTO quality_issue "
+        "(qb_id, variant_index, issue_type, suggested_action, reason, confidence, "
+        "status, target_qb_id, created_at) VALUES (200, NULL, 'unmerged', 'merge', "
+        "'同一道题', 0.94, 'done', 100, datetime('now')) RETURNING *"
+    ).fetchone()
+    execute_issue(test_db, issue)
+
+    serialized = serialize_issue(
+        test_db.execute("SELECT * FROM quality_issue WHERE id = ?", (issue["id"],)).fetchone(),
+        test_db,
+    )
+
+    assert serialized["question"] == "缓存穿透击穿雪崩分别怎么处理"
+    assert serialized["target_question"] == "Redis 缓存穿透、击穿、雪崩怎么解决？"
 
 
 def test_generate_unmerged_endpoint_requires_admin(client):

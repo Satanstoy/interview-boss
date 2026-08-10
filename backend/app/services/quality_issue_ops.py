@@ -35,6 +35,38 @@ def json_loads(raw):
         return []
 
 
+def _historical_merged_question(
+    conn, source_qb_id: int, target_qb_id: int | None
+) -> str | None:
+    """从合并历史恢复旧 issue 的来源题文本。
+
+    migration 073 之前的 issue 没有保存原题快照；漏合并执行时，
+    ``merge_history.merged_questions`` 仍保留被删除来源题的文本。
+    """
+    if target_qb_id is None:
+        return None
+    try:
+        rows = conn.execute(
+            "SELECT merged_ids, merged_questions FROM merge_history "
+            "WHERE survivor_id = ? ORDER BY id DESC",
+            (target_qb_id,),
+        ).fetchall()
+    except Exception:
+        return None
+
+    for history in rows:
+        merged_ids = json_loads(history["merged_ids"])
+        merged_questions = json_loads(history["merged_questions"])
+        if not isinstance(merged_ids, list) or not isinstance(merged_questions, list):
+            continue
+        for index, merged_id in enumerate(merged_ids):
+            if str(merged_id) == str(source_qb_id) and index < len(merged_questions):
+                question = str(merged_questions[index] or "").strip()
+                if question:
+                    return question
+    return None
+
+
 def serialize_issue(row, conn) -> dict:
     qb = conn.execute(
         "SELECT question, cat2, original_questions FROM question_bank WHERE id = ?",
@@ -46,11 +78,31 @@ def serialize_issue(row, conn) -> dict:
         target_qb = conn.execute(
             "SELECT question, cat2 FROM question_bank WHERE id = ?", (row["target_qb_id"],)
         ).fetchone()
+    source_question = (
+        row["source_question"]
+        if "source_question" in row.keys() and row["source_question"]
+        else None
+    )
+    source_cat2 = (
+        row["source_cat2"]
+        if "source_cat2" in row.keys() and row["source_cat2"] is not None
+        else None
+    )
+    historical_question = None
+    if not qb:
+        historical_question = _historical_merged_question(
+            conn, row["qb_id"], row["target_qb_id"]
+        )
+
     return {
         "id": row["id"],
         "qb_id": row["qb_id"],
-        "question": qb["question"] if qb else "",
-        "cat2": qb["cat2"] if qb else "",
+        "question": (
+            qb["question"] if qb else (source_question or historical_question or "")
+        ),
+        "cat2": qb["cat2"] if qb else (source_cat2 or ""),
+        "source_question": source_question or historical_question,
+        "source_cat2": source_cat2,
         "new_cat2": row["new_cat2"] if "new_cat2" in row.keys() else None,
         "original_questions": (
             json_loads(qb["original_questions"]) if qb and qb["original_questions"] else []

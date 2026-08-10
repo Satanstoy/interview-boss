@@ -90,6 +90,7 @@ from app.db.migrations.admin_assistant import (
     _migration_069_admin_assistant_log,
     _migration_070_quality_issue_target,
     _migration_071_quality_issue_new_cat2,
+    _migration_073_quality_issue_source_snapshot,
 )
 from app.db.migrations.jobs import (
     _migration_009_analysis_queue,
@@ -188,6 +189,7 @@ _MIGRATIONS = [
     (69, "admin_assistant_log", _migration_069_admin_assistant_log),
     (70, "quality_issue_target", _migration_070_quality_issue_target),
     (71, "quality_issue_new_cat2", _migration_071_quality_issue_new_cat2),
+    (73, "quality_issue_source_snapshot", _migration_073_quality_issue_source_snapshot),
 ]
 
 
