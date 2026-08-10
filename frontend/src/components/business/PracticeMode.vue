@@ -24,7 +24,7 @@
           </Button>
         </AppTooltip>
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar sidebar-content">
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2 custom-scrollbar sidebar-content" @scroll.passive="handleQueueScroll">
         <button
           v-for="(question, questionIndex) in sessionQuestions"
           :key="question.id"
@@ -40,6 +40,17 @@
           </span>
         </button>
         <p v-if="!sessionQuestions.length" class="px-2 py-8 text-center text-xs leading-5 text-muted-foreground">这个题单还没有可复习的题</p>
+        <button
+          v-if="hasMoreQuestions"
+          type="button"
+          class="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs text-primary transition hover:bg-primary/5 disabled:cursor-wait disabled:opacity-60"
+          :disabled="loadingMoreQuestions"
+          @click="requestMoreQuestions"
+        >
+          <Loader2 v-if="loadingMoreQuestions" class="size-3.5 animate-spin" />
+          {{ loadingMoreQuestions ? '正在加载更多...' : '加载更多题目' }}
+        </button>
+        <p v-else-if="sessionQuestions.length" class="px-2 py-2 text-center text-[10px] text-muted-foreground">已加载全部 {{ sessionQuestions.length }} 道题</p>
       </div>
     </aside>
 
@@ -358,12 +369,14 @@ const props = defineProps({
   selectedDeckKey: { type: String, default: '' },
   reviewLoading: { type: Boolean, default: false },
   deckLoading: { type: Boolean, default: false },
+  hasMoreQuestions: { type: Boolean, default: false },
+  loadingMoreQuestions: { type: Boolean, default: false },
   startIndex: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
   practicedQuestions: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'review', 'add-to-deck', 'manage-decks'])
+const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'load-more', 'review', 'add-to-deck', 'manage-decks'])
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
@@ -464,6 +477,13 @@ function selectFromSidebar(questionIndex) {
   resetState()
   mobileSidebarOpen.value = false
 }
+function requestMoreQuestions() {
+  if (props.hasMoreQuestions && !props.loadingMoreQuestions) emit('load-more')
+}
+function handleQueueScroll(event) {
+  const target = event.currentTarget
+  if (target.scrollTop + target.clientHeight >= target.scrollHeight - 120) requestMoreQuestions()
+}
 // 模式切换：quiz（算法刷题）↔ browse（列表看题，默认全部题）
 function switchToBrowse() {
   viewMode.value = 'browse'
@@ -477,7 +497,13 @@ function goPrev() { if (queueSwitchBlocked()) return; if (currentIndex.value > 0
 function goNext() {
   if (queueSwitchBlocked()) return
   if (!sessionQuestions.value.length) return
-  if (isLastQuestion.value) { currentIndex.value = 0; resetState(); toast.info('这一轮完成了，已回到第 1 题'); return }
+  if (isLastQuestion.value) {
+    if (props.hasMoreQuestions) {
+      requestMoreQuestions()
+      return
+    }
+    currentIndex.value = 0; resetState(); toast.info('这一轮完成了，已回到第 1 题'); return
+  }
   currentIndex.value += 1
   resetState()
 }

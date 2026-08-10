@@ -20,10 +20,13 @@
       :selected-deck-key="selectedDeckKey"
       :review-loading="isReviewing"
       :deck-loading="isLoading"
+      :has-more-questions="serverReady && hasMoreQuestions"
+      :loading-more-questions="isLoadingMoreQuestions"
       :is-admin="currentUser?.is_admin"
       class="w-full min-w-0"
       @close="closePractice"
       @select-deck="selectDeck"
+      @load-more="loadMoreQuestions"
       @review="submitReview"
       @toggle-star="toggleStar"
       @manage-decks="openDeckManager"
@@ -52,7 +55,7 @@ const router = useRouter()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, isLoading, isReviewing, serverReady,
-  loadQuestions, submitReview, addItem,
+  hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, addItem,
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 

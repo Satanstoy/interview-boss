@@ -110,7 +110,7 @@ const MOCK_RECOMMENDATIONS = [
 ]
 
 // ── Helper: 注册所有必要的 API mock ──
-async function mockAllAPIs(page, { studyPlans = true } = {}) {
+async function mockAllAPIs(page, { studyPlans = true, paginatedPractice = false } = {}) {
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
@@ -173,11 +173,12 @@ async function mockAllAPIs(page, { studyPlans = true } = {}) {
       return
     }
     if (!isQuestions) {
+      const allDeckTotal = paginatedPractice ? 101 : 3
       await route.fulfill({
         json: {
           algorithm: 'sm2_lite',
           items: [
-            { key: 'all', name: '全部题', description: '按复习状态和面试频率安排顺序', total: 3, reviewed: 0, due: 3, progress: 0 },
+            { key: 'all', name: '全部题', description: '按复习状态和面试频率安排顺序', total: allDeckTotal, reviewed: 0, due: allDeckTotal, progress: 0 },
             { key: 'starred', name: '我的收藏', description: '收藏题', total: 1, reviewed: 0, due: 1, progress: 0 },
             { key: 'custom-999-java', name: '我的 Java 题单', description: 'Java 面试冲刺', visibility: 'private', kind: 'custom', total: 1, reviewed: 0, due: 1, progress: 0 },
           ],
@@ -185,13 +186,28 @@ async function mockAllAPIs(page, { studyPlans = true } = {}) {
       })
       return
     }
-    const items = deckKey === 'custom-999-java'
+    const baseItems = deckKey === 'custom-999-java'
       ? [MOCK_MASTER_BANK[0]]
       : deckKey === 'starred'
         ? MOCK_MASTER_BANK.filter(item => item.is_starred)
         : MOCK_MASTER_BANK
+    const allItems = paginatedPractice && deckKey === 'all'
+      ? [
+          ...baseItems,
+          ...Array.from({ length: 98 }, (_, index) => ({
+            ...MOCK_MASTER_BANK[index % MOCK_MASTER_BANK.length],
+            id: 100 + index,
+            title: `分页题目 ${index + 1}`,
+            question: `分页题目 ${index + 1}`,
+            is_starred: false,
+          })),
+        ]
+      : baseItems
+    const offset = Number(url.searchParams.get('offset') || 0)
+    const limit = Number(url.searchParams.get('limit') || 100)
+    const items = allItems.slice(offset, offset + limit)
     const deckName = deckKey === 'all' ? '全部题' : deckKey === 'starred' ? '我的收藏' : deckKey
-    await route.fulfill({ json: { deck: { key: deckKey, name: deckName, total: items.length }, items, total: items.length, page_size: 100, offset: 0 } })
+    await route.fulfill({ json: { deck: { key: deckKey, name: deckName, total: allItems.length }, items, total: allItems.length, page_size: limit, offset } })
   })
   await page.route('**/api/practice/review', async (route) => {
     await route.fulfill({ json: { question_id: 1, review: { state: 'learning', proficiency: 1, review_count: 1, has_been_practiced: true, next_review_at: '2026-08-07 09:00:00' } } })
@@ -678,5 +694,34 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await customCard.getByRole('button').first().click()
     await expect(page.getByText('请介绍一下 Vue 的响应式原理').last()).toBeVisible()
     await expect(page.getByTestId('practice-deck-question-select')).toBeVisible()
+  })
+})
+
+test.describe('刷题题单分页', () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoLoggedIn(page, { paginatedPractice: true })
+  })
+
+  test('全部题超过首屏后可以继续加载剩余题目', async ({ page }) => {
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await expect(page.getByTestId('practice-card')).toContainText('请介绍一下 Vue 的响应式原理')
+
+    const questionList = page.locator('[data-testid="practice-queue-sidebar"] .overflow-y-auto')
+    await expect(questionList.locator('button')).toHaveCount(101) // 100 道题 +「加载更多」
+
+    const nextPage = page.waitForRequest(request => {
+      const url = new URL(request.url())
+      return url.pathname.endsWith('/api/practice/decks/all/questions')
+        && url.searchParams.get('offset') === '100'
+    })
+    await questionList.evaluate(element => {
+      element.scrollTop = element.scrollHeight
+      element.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    await nextPage
+
+    await expect(questionList.locator('button')).toHaveCount(101)
+    await expect(questionList).toContainText('分页题目 98')
+    await expect(questionList).toContainText('已加载全部 101 道题')
   })
 })

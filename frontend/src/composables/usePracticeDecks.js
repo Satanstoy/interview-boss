@@ -5,6 +5,7 @@ import { useToast, useConfirm } from './useNotification.js'
 
 /** Loads named study plans and owns the server-backed review queue. */
 export function usePracticeDecks(filter = 'all') {
+  const QUESTION_PAGE_SIZE = 100
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
   const decks = ref([])
@@ -16,7 +17,15 @@ export function usePracticeDecks(filter = 'all') {
   const serverReady = ref(false)
   const error = ref(null)
   const loadedDeckKey = ref(null)
+  const questionTotal = ref(0)
+  const isLoadingMoreQuestions = ref(false)
   const questionCache = new Map()
+
+  // 今日复习的 items 可能因为每日新题容量少于 total，这是有意设计，不能
+  // 用普通分页把被容量策略排除的新题重新加载回来。
+  const hasMoreQuestions = computed(() => (
+    selectedDeckKey.value !== 'due' && questions.value.length < questionTotal.value
+  ))
 
   const selectedDeckSummary = computed(() => selectedDeck.value || decks.value.find(deck => deck.key === selectedDeckKey.value) || null)
 
@@ -43,15 +52,19 @@ export function usePracticeDecks(filter = 'all') {
     const cached = questionCache.get(cacheKey)
     if (cached) {
       questions.value = cached.items || []
+      questionTotal.value = Number(cached.total ?? questions.value.length)
       selectedDeck.value = cached.deck || decks.value.find(deck => deck.key === deckKey) || null
       loadedDeckKey.value = deckKey
       isLoading.value = false
       return cached
     }
     try {
-      const response = await api.fetchPracticeDeckQuestions(deckKey, { filter: unref(filter), limit: 100 })
+      const response = await api.fetchPracticeDeckQuestions(deckKey, {
+        filter: unref(filter), limit: QUESTION_PAGE_SIZE, offset: 0,
+      })
       questionCache.set(cacheKey, response)
       questions.value = response.items || []
+      questionTotal.value = Number(response.total ?? questions.value.length)
       selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
       loadedDeckKey.value = deckKey
       return response
@@ -62,6 +75,56 @@ export function usePracticeDecks(filter = 'all') {
       loadedDeckKey.value = null
       return null
     } finally { isLoading.value = false }
+  }
+
+  async function loadMoreQuestions(deckKey = selectedDeckKey.value) {
+    if (
+      deckKey === 'due'
+      || isLoadingMoreQuestions.value
+      || deckKey !== selectedDeckKey.value
+      || !hasMoreQuestions.value
+    ) return null
+
+    const cacheKey = `${unref(filter)}:${deckKey}`
+    const cached = questionCache.get(cacheKey)
+    const currentItems = cached?.items || questions.value
+    const total = Number(cached?.total ?? questionTotal.value ?? currentItems.length)
+    if (currentItems.length >= total) return cached || null
+
+    isLoadingMoreQuestions.value = true
+    try {
+      const response = await api.fetchPracticeDeckQuestions(deckKey, {
+        filter: unref(filter),
+        limit: QUESTION_PAGE_SIZE,
+        offset: currentItems.length,
+      })
+      const seenIds = new Set(currentItems.map(item => item.id))
+      const nextItems = [
+        ...currentItems,
+        ...(response.items || []).filter(item => !seenIds.has(item.id)),
+      ]
+      const mergedResponse = {
+        ...response,
+        items: nextItems,
+        total: Number(response.total ?? total),
+        page_size: QUESTION_PAGE_SIZE,
+        offset: 0,
+      }
+      questionCache.set(cacheKey, mergedResponse)
+      // 如果切换题单发生在请求期间，不要把旧题单的结果写进当前队列；缓存仍然保留，
+      // 下次切回该题单时可以直接使用。
+      if (deckKey === selectedDeckKey.value) {
+        questionTotal.value = mergedResponse.total
+        questions.value = nextItems
+        selectedDeck.value = response.deck || selectedDeck.value
+      }
+      return mergedResponse
+    } catch (err) {
+      toast.error(getFriendlyError(err, '加载更多题目失败'))
+      return null
+    } finally {
+      isLoadingMoreQuestions.value = false
+    }
   }
 
   async function submitReview({ questionId, rating, score = null }) {
@@ -169,10 +232,14 @@ export function usePracticeDecks(filter = 'all') {
     loadedDeckKey,
     isLoading,
     isReviewing,
+    questionTotal,
+    hasMoreQuestions,
+    isLoadingMoreQuestions,
     serverReady,
     error,
     loadDecks,
     loadQuestions,
+    loadMoreQuestions,
     submitReview,
     createDeck,
     updateDeck,
