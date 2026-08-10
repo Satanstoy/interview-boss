@@ -4,7 +4,7 @@
       <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
       <p class="mt-0.5 text-xs text-muted-foreground">实线 = 岗位热度 · 虚线 = 我的熟练度 · 空当同时编码重要性与能力缺口</p>
     </div>
-    <div v-if="topItems.length" ref="chartRef" class="dual-radar-canvas mt-2 min-h-[260px] w-full flex-1" style="min-width: 0;" />
+    <div v-if="topItems.length" ref="chartRef" class="dual-radar-canvas mt-2 min-h-[300px] w-full flex-1" style="min-width: 0;" />
     <div v-else class="flex flex-1 items-center justify-center py-10 text-sm text-muted-foreground">
       题库还没有主题数据
     </div>
@@ -62,10 +62,12 @@ const headline = computed(() => {
 const buildOption = (dark) => {
   const t = porcelain(dark)
   const items = topItems.value
+  const heatColor = dark ? t.faint : t.data2
+  const proficiencyColor = t.hero
   // 双线同轴：热度 ÷ maxHeat ×100 归一，熟练度 0-100 天然同轴
   return {
     ...EASE,
-    color: [dark ? '#BCC7D7' : '#7096D1', t.hero],
+    color: [heatColor, proficiencyColor],
     tooltip: {
       trigger: 'item',
       confine: true,
@@ -79,14 +81,17 @@ const buildOption = (dark) => {
       })].join('\n'),
     },
     legend: {
-      top: 0,
+      top: 4,
+      itemWidth: 20,
+      itemHeight: 8,
+      itemGap: 18,
       textStyle: { color: t.label, fontSize: 11 },
       data: ['岗位热度', '我的熟练度'],
     },
     radar: {
       indicator: items.map((item) => ({ name: shortName(item.name), max: 100 })),
-      radius: '68%',
-      center: ['50%', '55%'],
+      radius: '58%',
+      center: ['50%', '61%'],
       splitNumber: 5,
       splitArea: { show: false },
       axisName: {
@@ -94,11 +99,13 @@ const buildOption = (dark) => {
         fontSize: 10,
         formatter: (name) => {
           const item = items.find((entry) => shortName(entry.name) === name)
+          const heat = item ? Math.round(((Number(item.question_frequency) || 0) / maxHeat.value) * 100) : 0
           const proficiency = item?.proficiency == null ? 0 : Number(item.proficiency)
-          return item ? `{name|${name}}\n{value|${Math.round(proficiency)}%}` : name
+          return item ? `{name|${name}}\n{heat|热度 ${heat}%} · {value|熟练 ${Math.round(proficiency)}%}` : name
         },
         rich: {
           name: { color: t.label, fontSize: 10, fontWeight: 600, lineHeight: 14 },
+          heat: { color: heatColor, fontSize: 9, fontWeight: 800, lineHeight: 12 },
           value: { color: t.hero, fontSize: 9, fontWeight: 800, lineHeight: 12 },
         },
       },
@@ -112,9 +119,9 @@ const buildOption = (dark) => {
         data: [
           {
             value: items.map((item) => Math.round((item.question_frequency / maxHeat.value) * 100)),
-            areaStyle: { color: dark ? 'rgba(112,150,209,.24)' : 'rgba(112,150,209,.14)' },
-            lineStyle: { color: dark ? '#BCC7D7' : '#7096D1', width: 2.5 },
-            itemStyle: { color: dark ? '#BCC7D7' : '#7096D1' },
+            areaStyle: { color: dark ? 'rgba(108,147,199,.28)' : 'rgba(112,150,209,.14)' },
+            lineStyle: { color: heatColor, width: 2.5 },
+            itemStyle: { color: heatColor },
             symbolSize: 4,
           },
         ],
@@ -125,9 +132,9 @@ const buildOption = (dark) => {
         data: [
           {
             value: items.map((item) => item.proficiency ?? 0),
-            areaStyle: { color: dark ? 'rgba(237,239,241,.08)' : 'rgba(8,31,92,.06)' },
-            lineStyle: { color: t.hero, width: 2.5, type: 'dashed' },
-            itemStyle: { color: t.hero },
+            areaStyle: { color: dark ? 'rgba(237,239,241,.10)' : 'rgba(8,31,92,.06)' },
+            lineStyle: { color: proficiencyColor, width: 2.5, type: 'dashed' },
+            itemStyle: { color: proficiencyColor },
             symbolSize: 4,
           },
         ],
