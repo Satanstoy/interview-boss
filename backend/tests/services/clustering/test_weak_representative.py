@@ -76,6 +76,34 @@ async def test_generate_weak_representative_skips_good(test_db, monkeypatch):
     assert test_db.execute("SELECT COUNT(*) FROM quality_issue").fetchone()[0] == 0
 
 
+async def test_generate_weak_representative_includes_all_variants(test_db, monkeypatch):
+    """代表题评估必须把聚类的全部变体交给模型，不能截断长尾问法。"""
+    from app.services.clustering_maintenance import generate_weak_representative_issues
+
+    _seed_weak_cluster(test_db)
+    variants = [f"变体问法{i}" for i in range(9)]
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, status, cat2, original_questions) "
+        "VALUES (3, '代表题', 9, 'approved', 'B1.Agent架构与范式', ?)",
+        (json.dumps(variants, ensure_ascii=False),),
+    )
+    test_db.commit()
+
+    prompts = []
+
+    async def fake_llm(prompt, system_msg, response_format, user_id, model):
+        prompts.append(prompt)
+        return json.dumps({"weak": False, "suggested": None, "reason": "规范"})
+
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", fake_llm)
+    monkeypatch.setattr("app.db.connection.get_db_connection", lambda: test_db)
+
+    await generate_weak_representative_issues(user_id=None, limit=10)
+
+    prompt = next(p for p in prompts if "代表题" in p)
+    assert all(variant in prompt for variant in variants)
+
+
 async def test_generate_weak_representative_idempotent(test_db, monkeypatch):
     """已有 pending issue → 跳过"""
     from app.services.clustering_maintenance import generate_weak_representative_issues

@@ -1026,7 +1026,10 @@ async def generate_weak_representative_issues(user_id: int = None, limit: int = 
         oq = [str(q).strip() for q in oq if str(q).strip()]
         if not oq:
             continue
-        variants_text = "\n".join(f"{i}. {v}" for i, v in enumerate(oq[:8]))
+        # 代表题是否覆盖完整，必须基于该聚类的全部原始变体判断。
+        # 这里不能像展示列表一样截断，否则遗漏的长尾变体可能正是
+        # 代表题没有覆盖的考察点。
+        variants_text = "\n".join(f"{i}. {v}" for i, v in enumerate(oq))
         prompt = WEAK_REPRESENTATIVE_PROMPT.format(
             representative=r["question"], variants=variants_text
         )
