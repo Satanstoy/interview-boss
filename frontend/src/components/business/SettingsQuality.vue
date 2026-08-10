@@ -137,14 +137,24 @@ const toggleIssueSelection = (issue, index, event) => {
   lastSelectedIndex.value = index
 }
 
-// 审批后列表会移除当前卡片，保留操作前的滚动位置，避免用户被带回页面顶部。
+const qualityRoot = ref(null)
+
+const getScrollContainer = () => qualityRoot.value?.closest('.overflow-y-auto.custom-scrollbar')
+
+// 审批后列表会移除当前卡片，保留设置页内部滚动容器的位置，避免用户被带回页面顶部。
 const withScrollPreserved = async (action) => {
-  const scrollY = window.scrollY
+  const scrollContainer = getScrollContainer()
+  const scrollTop = scrollContainer ? scrollContainer.scrollTop : window.scrollY
+  const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : window.scrollX
   try {
     return await action()
   } finally {
     await nextTick()
-    window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' })
+    if (scrollContainer) {
+      scrollContainer.scrollTo({ top: scrollTop, left: scrollLeft, behavior: 'auto' })
+    } else {
+      window.scrollTo({ top: scrollTop, left: scrollLeft, behavior: 'auto' })
+    }
   }
 }
 
@@ -248,7 +258,7 @@ onMounted(loadIssues)
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div ref="qualityRoot" class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1.5 rounded-lg border border-border p-1">
         <button
