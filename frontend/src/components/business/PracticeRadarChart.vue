@@ -64,6 +64,7 @@ const buildOption = (dark) => {
       radius: '68%',
       center: ['50%', '55%'],
       splitNumber: 5,
+      splitArea: { show: false },
       axisName: {
         color: t.label,
         fontSize: 10,
@@ -86,7 +87,7 @@ const buildOption = (dark) => {
           {
             name: '熟练度',
             value: chartData.value.map((item) => item.proficiency),
-            areaStyle: { color: dark ? 'rgba(237,239,241,.16)' : 'rgba(51,78,172,.16)' },
+            areaStyle: { color: dark ? 'rgba(112,150,209,.24)' : 'rgba(51,78,172,.16)' },
             lineStyle: { color: t.data, width: 2.5 },
             itemStyle: { color: t.data },
             symbolSize: 4,

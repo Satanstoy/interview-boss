@@ -88,6 +88,7 @@ const buildOption = (dark) => {
       radius: '68%',
       center: ['50%', '55%'],
       splitNumber: 5,
+      splitArea: { show: false },
       axisName: {
         color: t.label,
         fontSize: 10,
@@ -111,7 +112,7 @@ const buildOption = (dark) => {
         data: [
           {
             value: items.map((item) => Math.round((item.question_frequency / maxHeat.value) * 100)),
-            areaStyle: { color: dark ? 'rgba(188,199,215,.14)' : 'rgba(112,150,209,.14)' },
+            areaStyle: { color: dark ? 'rgba(112,150,209,.24)' : 'rgba(112,150,209,.14)' },
             lineStyle: { color: dark ? '#BCC7D7' : '#7096D1', width: 2.5 },
             itemStyle: { color: dark ? '#BCC7D7' : '#7096D1' },
             symbolSize: 4,
