@@ -20,6 +20,27 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/admin/quality-issues", tags=["admin-quality"])
 
 
+@router.post("/generate-unmerged")
+async def generate_unmerged_issues(
+    limit: int = Query(200, ge=1, le=1000),
+    candidate_limit: int = Query(3, ge=1, le=10),
+    similarity_threshold: float = Query(0.30, ge=0, le=1),
+    admin: dict = Depends(get_admin_user),
+):
+    """扫描公共孤岛题，将 LLM 判定应合并的候选放入 pending 清单。
+
+    该端点只生成 `quality_issue`，不直接修改题库；管理员仍需在清单中审批。
+    """
+    from app.services.unmerged_quality import generate_unmerged_quality_issues
+
+    return await generate_unmerged_quality_issues(
+        user_id=admin["id"],
+        limit=limit,
+        candidate_limit=candidate_limit,
+        similarity_threshold=similarity_threshold,
+    )
+
+
 @router.get("")
 async def list_issues(
     status: str = Query("pending", pattern="^(pending|approved|rejected|done)$"),
@@ -53,7 +74,7 @@ async def approve_issue(
         ).fetchone()
         if not issue:
             raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-        execute_issue(conn, issue)
+        execute_issue(conn, issue, operator_id=admin["id"])
         conn.execute(
             "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
             "reviewed_by = ? WHERE id = ?",
@@ -111,7 +132,7 @@ async def batch_approve_issues(
                 failed.append({"id": iid, "reason": "不存在/已处理/置信度不足"})
                 continue
             try:
-                execute_issue(conn, issue)
+                execute_issue(conn, issue, operator_id=admin["id"])
                 conn.execute(
                     "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
                     "reviewed_by = ? WHERE id = ?",

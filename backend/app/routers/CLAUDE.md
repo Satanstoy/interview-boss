@@ -19,7 +19,7 @@
 | `profile.py` | `/api/profile/*` | 用户配置（公共+管理员）。`active-season` 为全局配置仅 admin 可写（user_profile 是全局单例）。`/api/profile/recruitment`（GET/PUT，任意登录用户）读写 per-user `user_recruitment_pref`（届次+批次+每日容量+pace 节奏），返回全年机会窗口、当前/下一窗口与紧迫度（机会脉冲模型），供刷题「今日复习」调度与前端状态行使用 |
 | `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent）。`build-personal` 合并：管理员可并入公共题（现有行为），非管理员只落个人题（个人题吸收公共题来源，公共题数据绝不改动，防审核旁路） |
-| `admin_quality.py` | `/api/admin/quality-issues/*` | 聚合质量审查清单审批（列表/单条 approve·reject/batch-approve）。业务逻辑在 `app.services.quality_issue_ops`，本路由只做 HTTP 感知（不重复实现序列化/执行） |
+| `admin_quality.py` | `/api/admin/quality-issues/*` | 聚合质量审查清单生成与审批（`generate-unmerged` 只扫描公共孤岛题并写入 pending；列表/单条 approve·reject/batch-approve）。业务逻辑在 `app.services.quality_issue_ops` / `app.services.unmerged_quality`，本路由只做 HTTP 感知 |
 | `admin_assistant.py` | `/api/admin/assistant/*` | 管理员 AI 助手（聚合质量审查）：`POST /chat`（LLM tool-calling，读工具即时执行，写工具只暂存为待确认）、`POST /confirm`（确认并执行写操作，重新校验 + reviewed_by 留痕）、`GET /history`（会话日志）。全部 `Depends(get_admin_user)`；工具 schema 只在后端，前端从不持有 |
 | `admin_source_health.py` | `/api/admin/source-health/*` | 来源健康（同签名重复公共面经）：`GET /duplicate-groups`（列表，`table=interview|jd`）、`POST /duplicate-groups/merge`（body `{signature, table, dry_run}`，默认 dry_run 预览；真实执行保留 MIN id 软删其余）。业务逻辑在 `services/interview_merge_service`，只处理公共面经（`owner_id IS NULL`） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |

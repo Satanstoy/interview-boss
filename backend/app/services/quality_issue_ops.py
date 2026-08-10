@@ -16,6 +16,7 @@ logger = logging.getLogger("interview-boss")
 # issue_type → 操作名映射（供前端/助手展示，人话命名，避免内部术语）
 ISSUE_TYPE_LABELS = {
     "mismerge": "误合并",
+    "unmerged": "漏合并",
     "duplicate": "重复问法",
     "weak_representative": "代表题不规范",
 }
@@ -80,7 +81,7 @@ def serialize_issue(row, conn) -> dict:
     }
 
 
-def execute_issue(conn, issue) -> None:
+def execute_issue(conn, issue, operator_id: int | None = None) -> None:
     """按 issue 建议执行操作（执行前重检：数据可能已被其他审批修改）。"""
     from app.services.clustering_maintenance import (
         split_variant,
@@ -88,6 +89,7 @@ def execute_issue(conn, issue) -> None:
         refine_representative,
         merge_variant,
     )
+    from app.services.unmerged_quality import merge_question
 
     action = issue["suggested_action"]
     if action == "split":
@@ -101,10 +103,20 @@ def execute_issue(conn, issue) -> None:
         if new_id is None:
             raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
     elif action == "merge":
-        # 并入目标题（target_qb_id）：来源题移除该问法，目标题加问法
-        ok = merge_variant(
-            conn, issue["qb_id"], issue["variant_index"], issue["target_qb_id"]
-        )
+        # variant_index 为空表示漏合并清单：整道来源题并入目标题；
+        # 有 index 则保持原有误合并变体迁移语义。
+        if issue["variant_index"] is None:
+            ok = merge_question(
+                conn,
+                issue["qb_id"],
+                issue["target_qb_id"],
+                confidence=issue["confidence"] or 0,
+                operator_id=operator_id,
+            )
+        else:
+            ok = merge_variant(
+                conn, issue["qb_id"], issue["variant_index"], issue["target_qb_id"]
+            )
         if not ok:
             raise HTTPException(status_code=409, detail="变体/目标题不存在（可能已被处理）")
     elif action == "dedupe":
@@ -152,7 +164,7 @@ def approve_issue(conn, admin_id: int, issue_id: int, min_confidence: float | No
     issue = conn.execute(sql, params).fetchone()
     if not issue:
         raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-    execute_issue(conn, issue)
+    execute_issue(conn, issue, operator_id=admin_id)
     conn.execute(
         "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
         "reviewed_by = ? WHERE id = ?",
@@ -195,7 +207,7 @@ def batch_approve(conn, admin_id: int, issue_ids: list[int], min_confidence: flo
             failed.append({"id": iid, "reason": "不存在/已处理/置信度不足"})
             continue
         try:
-            execute_issue(conn, issue)
+            execute_issue(conn, issue, operator_id=admin_id)
             conn.execute(
                 "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
                 "reviewed_by = ? WHERE id = ?",

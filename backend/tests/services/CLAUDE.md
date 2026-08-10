@@ -29,6 +29,7 @@
 | `test_source_display.py` | 来源展示 |
 | `test_title_service.py` | 标题生成 |
 | `test_admin_assistant_api.py` | 管理员 AI 助手：鉴权（401/403）、读工具即时执行、写操作内联确认门（staging 不改 DB + 批量置信度下限 0.85）、确认端点执行与审计（reviewed_by + action 日志）、会话持久化与 `[已执行操作]` 续接回执；mock `app.services.admin_assistant_service.llm_with_tools` |
+| `clustering/test_unmerged_quality.py` | 漏合并质量清单：孤岛预筛、LLM 判定、pending 幂等入列与管理员审批合并 |
 | `clustering/` | 聚类相关测试子目录（质量、稳定性、频率、来源、压缩、v2、孤岛修复等 20+ 文件） |
 
 ## 运行

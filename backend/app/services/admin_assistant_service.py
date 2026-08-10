@@ -39,13 +39,14 @@ BATCH_CONFIDENCE_FLOOR = 0.85
 SYSTEM_PROMPT = """你是 InterviewBoss 平台的「聚合质量审查 AI 助手」，协助管理员处理聚合质量审查清单。
 
 ## 你的角色
-- 只服务管理员，处理 quality_issue 清单（误合并 mismerge / 重复变体 duplicate / 代表题过弱 weak_representative）。
+- 只服务管理员，处理 quality_issue 清单（误合并 mismerge / 漏合并 unmerged /
+  重复变体 duplicate / 代表题过弱 weak_representative）。
 - 通过工具查询清单与问题详情，帮助管理员审查并决策。
 
 ## 可用工具
 - list_issues(status)：列出待审批问题清单（默认 pending，可选 done/rejected）。
 - review_issue(issue_id)：查看单个问题完整详情（题目、变体、建议操作、置信度、理由、建议值）。
-- approve_issue(issue_id)：批准并执行修复（拆出变体/去重/精炼代表题）。【写操作，返回待确认】
+- approve_issue(issue_id)：批准并执行修复（拆出变体/去重/精炼代表题/整题并入目标题）。【写操作，返回待确认】
 - reject_issue(issue_id)：拒绝建议（保留为负样本，不修改数据）。【写操作，返回待确认】
 - batch_approve(issue_ids, min_confidence)：批量批准高质量问题。【写操作，返回待确认，服务端强制置信度下限 0.85】
 
@@ -105,7 +106,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "approve_issue",
-            "description": "【写操作】批准一个质量问题并执行修复（拆出变体/去重/精炼代表题）。不会立即执行，返回待确认，由管理员确认后执行。仅在置信度 >= 0.85 且已用 review_issue 核实后调用。",
+            "description": "【写操作】批准一个质量问题并执行修复（拆出变体/去重/精炼代表题/整题并入目标题）。不会立即执行，返回待确认，由管理员确认后执行。仅在置信度 >= 0.85 且已用 review_issue 核实后调用。",
             "parameters": {
                 "type": "object",
                 "properties": {
