@@ -44,8 +44,16 @@ const headline = computed(() => {
   return `“${weakest.topic}”熟练度最低，优先复习`
 })
 
-function shortName(name) {
-  return name.length > 6 ? `${name.slice(0, 6)}…` : name
+function wrapName(name, maxChars = 7) {
+  const chars = Array.from(name)
+  if (chars.length <= maxChars) return name
+  const lineCount = Math.ceil(chars.length / maxChars)
+  const lineLength = Math.ceil(chars.length / lineCount)
+  const lines = []
+  for (let index = 0; index < chars.length; index += lineLength) {
+    lines.push(chars.slice(index, index + lineLength).join(''))
+  }
+  return lines.join('\n')
 }
 
 const buildOption = (dark) => {
@@ -60,7 +68,7 @@ const buildOption = (dark) => {
         .join('\n'),
     },
     radar: {
-      indicator: chartData.value.map((item) => ({ name: shortName(item.topic), max: 100 })),
+      indicator: chartData.value.map((item) => ({ name: item.topic, max: 100 })),
       radius: '68%',
       center: ['50%', '55%'],
       splitNumber: 5,
@@ -69,8 +77,8 @@ const buildOption = (dark) => {
         color: t.label,
         fontSize: 10,
         formatter: (name) => {
-          const item = chartData.value.find((entry) => shortName(entry.topic) === name)
-          return item ? `{name|${name}}\n{value|${Math.round(Number(item.proficiency))}%}` : name
+          const item = chartData.value.find((entry) => entry.topic === name)
+          return item ? `{name|${wrapName(name)}}\n{value|${Math.round(Number(item.proficiency))}%}` : wrapName(name)
         },
         rich: {
           name: { color: t.label, fontSize: 10, fontWeight: 600, lineHeight: 14 },

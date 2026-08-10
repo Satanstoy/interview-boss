@@ -4,7 +4,7 @@
       <h3 class="text-sm font-semibold text-card-foreground">{{ headline }}</h3>
       <p class="mt-0.5 text-xs text-muted-foreground">实线 = 岗位热度 · 虚线 = 我的熟练度 · 空当同时编码重要性与能力缺口</p>
     </div>
-    <div v-if="topItems.length" ref="chartRef" class="dual-radar-canvas mt-2 min-h-[300px] w-full flex-1" style="min-width: 0;" />
+    <div v-if="topItems.length" ref="chartRef" class="dual-radar-canvas mt-2 min-h-[330px] w-full flex-1" style="min-width: 0;" />
     <div v-else class="flex flex-1 items-center justify-center py-10 text-sm text-muted-foreground">
       题库还没有主题数据
     </div>
@@ -31,8 +31,16 @@ const props = defineProps({
 
 const chartRef = ref(null)
 
-function shortName(name) {
-  return name.length > 6 ? `${name.slice(0, 6)}…` : name
+function wrapName(name, maxChars = 7) {
+  const chars = Array.from(name)
+  if (chars.length <= maxChars) return name
+  const lineCount = Math.ceil(chars.length / maxChars)
+  const lineLength = Math.ceil(chars.length / lineCount)
+  const lines = []
+  for (let index = 0; index < chars.length; index += lineLength) {
+    lines.push(chars.slice(index, index + lineLength).join(''))
+  }
+  return lines.join('\n')
 }
 
 // 热度 Top8（与技能星图同源，口径一致）
@@ -89,19 +97,19 @@ const buildOption = (dark) => {
       data: ['岗位热度', '我的熟练度'],
     },
     radar: {
-      indicator: items.map((item) => ({ name: shortName(item.name), max: 100 })),
+      indicator: items.map((item) => ({ name: item.name, max: 100 })),
       radius: '58%',
-      center: ['50%', '61%'],
+      center: ['50%', '57%'],
       splitNumber: 5,
       splitArea: { show: false },
       axisName: {
         color: t.label,
         fontSize: 10,
         formatter: (name) => {
-          const item = items.find((entry) => shortName(entry.name) === name)
+          const item = items.find((entry) => entry.name === name)
           const heat = item ? Math.round(((Number(item.question_frequency) || 0) / maxHeat.value) * 100) : 0
           const proficiency = item?.proficiency == null ? 0 : Number(item.proficiency)
-          return item ? `{name|${name}}\n{heat|热度 ${heat}%} · {value|熟练 ${Math.round(proficiency)}%}` : name
+          return item ? `{name|${wrapName(name)}}\n{heat|热度 ${heat}%} · {value|熟练 ${Math.round(proficiency)}%}` : wrapName(name)
         },
         rich: {
           name: { color: t.label, fontSize: 10, fontWeight: 600, lineHeight: 14 },
