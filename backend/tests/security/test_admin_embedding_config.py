@@ -1,6 +1,6 @@
 """管理员 embedding 配置端点：权限、校验、掩码、热加载。"""
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.core.auth import create_access_token
 from app.db.connection import get_db_connection
@@ -43,7 +43,8 @@ def test_embedding_config_requires_admin_user(client, test_db, seed_admin_users)
 
 
 def test_embedding_config_roundtrip_with_mask(client, test_db, seed_admin_users):
-    with patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
+    with patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()), \
+         patch("app.worker.enqueue_recompute_embedding_job", new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-1"))):
         resp = client.put(
             "/api/profile/embedding",
             json={
@@ -87,7 +88,8 @@ def test_embedding_config_siliconflow_requires_model(client, test_db, seed_admin
 
 def test_embedding_config_put_calls_reload(client, test_db, seed_admin_users):
     with patch("app.services.embedding_service.reload_embedding_config") as mock_reload, \
-         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
+         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()), \
+         patch("app.worker.enqueue_recompute_embedding_job", new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-3"))):
         resp = client.put(
             "/api/profile/embedding",
             json={"backend": "onnx", "dimension": 512},
@@ -99,7 +101,8 @@ def test_embedding_config_put_calls_reload(client, test_db, seed_admin_users):
 
 def test_embedding_config_put_preserves_api_key_when_blank(client, test_db, seed_admin_users):
     with patch("app.services.embedding_service.reload_embedding_config"), \
-         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
+         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()), \
+         patch("app.worker.enqueue_recompute_embedding_job", new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-4"))):
         client.put(
             "/api/profile/embedding",
             json={"backend": "siliconflow", "api_key": "sk-secret-1234", "api_model": "BAAI/bge-m3", "dimension": 1024},

@@ -1,4 +1,4 @@
-import { generateAnswer as apiGenerateAnswer, generateRecitation as apiGenerateRecitation, evaluateAnswer, fetchPracticeHistory, updateRecord, saveUserAnswer as apiSaveUserAnswer } from '../api/index.js'
+import { generateAnswer as apiGenerateAnswer, generateRecitation as apiGenerateRecitation, streamJobProgress, evaluateAnswer, fetchPracticeHistory, updateRecord, saveUserAnswer as apiSaveUserAnswer } from '../api/index.js'
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { sanitizeAgainstInjection } from '../utils/validate.js'
 import { useToast } from './useNotification.js'
@@ -18,6 +18,14 @@ export function isFailedAnswer(answer) {
 
 export function renderMarkdown(text) {
   return renderSafeMarkdown(text)
+}
+
+async function resolveQueuedJob(data) {
+  if (!data?.job_id) return data
+  const finalEvent = await streamJobProgress(data.job_id, (event) => {
+    if (event.type === 'error') throw new Error(event.message || '任务失败')
+  })
+  return { ...data, ...(finalEvent?.result || {}) }
 }
 
 export function scoreColor(score) {
@@ -57,7 +65,7 @@ export async function generateAnswerForQuestion(question, qState) {
   if (!await ensureModelReady({ action: 'AI 生成答案' })) return
   qState._isLoadingAnswer = true
   try {
-    const data = await apiGenerateAnswer(question.id)
+    const data = await resolveQueuedJob(apiGenerateAnswer(question.id))
     question.ai_answer = data.answer
     toast.success('答案已生成')
   } catch (e) {
@@ -94,7 +102,7 @@ export async function generateRecitationForQuestion(question, qState) {
   if (!await ensureModelReady({ action: '生成背诵稿' })) return
   qState._isGeneratingRecitation = true
   try {
-    const data = await apiGenerateRecitation(question.id)
+    const data = await resolveQueuedJob(await apiGenerateRecitation(question.id))
     qState._recitation = data.answer
     qState._recitationSources = data.search_sources || []
     qState._isEditingRecitation = false

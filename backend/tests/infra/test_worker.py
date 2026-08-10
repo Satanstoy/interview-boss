@@ -6,6 +6,7 @@ TDD 测试：ARQ Worker 模块
 """
 import os
 import pytest
+from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
@@ -206,3 +207,42 @@ class TestTaskExecution:
             assert result["new_qb_count"] == 15
             assert mock_cluster.call_count == 3
             assert mock_done.call_count == 3
+
+
+class TestDurableJobDispatcher:
+    @pytest.mark.asyncio
+    async def test_dispatcher_includes_rebuild_and_embedding_jobs(self, test_db):
+        """Redis 短暂不可用后，dispatcher 也应接管重建类任务。"""
+        from app.worker import scheduled_submit_job_dispatch_task
+
+        test_db.executemany(
+            "INSERT INTO jobs (job_type, status, created_by) VALUES (?, 'pending', ?)",
+            [("build_master_bank", 1), ("recompute_embedding", 1)],
+        )
+        test_db.commit()
+
+        @contextmanager
+        def _test_connection():
+            yield test_db
+
+        with patch("app.db.connection.get_db_connection", _test_connection), patch(
+            "app.worker.enqueue_build_job",
+            new=AsyncMock(return_value=MagicMock(job_id="arq-build-1")),
+        ) as mock_build, patch(
+            "app.worker.enqueue_recompute_embedding_job",
+            new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-1")),
+        ) as mock_embedding:
+            result = await scheduled_submit_job_dispatch_task({})
+
+        assert result["dispatched"] == 2
+        mock_build.assert_awaited_once()
+        mock_embedding.assert_awaited_once()
+        rows = test_db.execute(
+            "SELECT job_type, status, arq_job_id FROM jobs "
+            "WHERE job_type IN ('build_master_bank', 'recompute_embedding') "
+            "ORDER BY job_type"
+        ).fetchall()
+        assert [(row["job_type"], row["status"]) for row in rows] == [
+            ("build_master_bank", "queued"),
+            ("recompute_embedding", "queued"),
+        ]

@@ -1,16 +1,11 @@
-import os
 import json
-import time
 import logging
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
-from app.core.config import DB_PATH
 from app.core.auth import get_current_user, get_admin_user
-from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import get_db_connection, run_db, get_current_job_position
 from app.db.question_bank_sources import insert_source, insert_original_item
-from app.services.clustering import match_new_questions
 
 logger = logging.getLogger("interview-boss")
 router = (
@@ -111,7 +106,7 @@ async def build_master_bank(user: dict = Depends(get_admin_user)):
             try:
                 # Check for existing running build
                 existing = cursor.execute(
-                    "SELECT id FROM jobs WHERE job_type = 'build_master_bank' AND status IN ('pending', 'running') AND created_by = ?",
+                    "SELECT id FROM jobs WHERE job_type = 'build_master_bank' AND status IN ('pending', 'queued', 'running') AND created_by = ?",
                     (user["id"],),
                 ).fetchone()
                 if existing:
@@ -132,226 +127,39 @@ async def build_master_bank(user: dict = Depends(get_admin_user)):
     if job_id is None:
         raise HTTPException(status_code=409, detail="已有重建任务在执行中，请等待完成")
 
-    # Schedule via ARQ
+    # Schedule via ARQ.  If Redis is temporarily unavailable, keep the durable
+    # job pending and let the worker dispatcher retry it; never execute a long
+    # rebuild inside the FastAPI process.
     arq_scheduled = False
+    dispatch_error = None
     try:
         from app.worker import enqueue_build_job
+        from app.services.job_lifecycle import mark_job_dispatched
 
-        await enqueue_build_job(job_id)
+        arq_job = await enqueue_build_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+
+        def _mark():
+            with get_db_connection() as conn:
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"题库重建任务不可再投递: job_id={job_id}")
+                conn.commit()
+
+        await run_db(_mark)
         arq_scheduled = True
-        logger.info(f"重建任务已通过 ARQ 调度: job_id={job_id}")
+        logger.info("重建任务已通过 ARQ 调度: job_id=%s arq_job_id=%s", job_id, arq_job_id)
     except Exception as e:
-        logger.warning(f"ARQ 调度失败，回退到内联执行: {e}")
-
-    if not arq_scheduled:
-        # Fallback: run inline in background task
-        async def _fallback():
-            await _run_build_inline(job_id, user["id"])
-
-        asyncio.create_task(_fallback())
+        dispatch_error = str(e)[:300]
+        logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
 
     return {
         "job_id": job_id,
-        "status": "pending",
+        "status": "queued" if arq_scheduled else "pending",
+        "dispatch_error": dispatch_error,
         "message": "重建任务已提交，请通过 SSE 监听进度",
     }
-
-
-async def _run_build_inline(job_id: int, user_id: int):
-    """Fallback inline build logic (used when ARQ is unavailable).
-
-    Same logic as the ARQ task but runs in the FastAPI process.
-    Updates the jobs table with progress for SSE monitoring.
-    """
-    import shutil as _shutil
-
-    def _update_progress(current, total, message=""):
-        with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, progress_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (current, total, message, job_id),
-            )
-            conn.commit()
-
-    def _mark_complete(status, result=None, error=None):
-        with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (status, result, error, job_id),
-            )
-            conn.commit()
-
-    try:
-        # Step 1: 备份
-        _update_progress(0, 0, "正在备份数据库...")
-        backup_path = f"{DB_PATH}.bak.build.{int(time.time())}"
-        try:
-            _shutil.copy2(DB_PATH, backup_path)
-        except Exception as e:
-            logger.warning(f"创建备份失败: {e}")
-        try:
-            import glob
-
-            backups = sorted(
-                glob.glob(f"{DB_PATH}.bak.build.*"), key=os.path.getmtime, reverse=True
-            )
-            for old in backups[3:]:
-                os.remove(old)
-        except Exception:
-            pass
-
-        current_pos = get_current_job_position()
-
-        # Step 2: 加载数据
-        _update_progress(0, 0, "加载题目数据...")
-
-        def _load():
-            with get_db_connection() as conn:
-                raw = conn.execute(
-                    "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
-                    "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL AND qd.job_position = ?",
-                    (current_pos,),
-                ).fetchall()
-                existing = conn.execute(
-                    "SELECT question, ai_answer, answer_sources FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
-                    (current_pos,),
-                ).fetchall()
-                return raw, {
-                    r["question"]: {"answer": r["ai_answer"], "sources": r["answer_sources"]}
-                    for r in existing
-                }
-
-        raw_questions, existing_answers_map = await run_db(_load)
-        if not raw_questions:
-            _mark_complete("completed", result="没有数据")
-            return
-
-        total = len(raw_questions)
-        _update_progress(0, total, f"共 {total} 道题目，准备聚类...")
-
-        # Step 3: 清空公共题库
-        _update_progress(0, total, "清空旧题库...")
-
-        def _clear_bank():
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("BEGIN")
-                try:
-                    cursor.execute(
-                        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                        "WHERE job_position = ? AND owner_id IS NULL AND deleted_at IS NULL",
-                        (current_pos,),
-                    )
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-
-        await run_db(_clear_bank)
-
-        # Step 4: 入队所有问题
-        def _enqueue_all():
-            with get_db_connection() as conn:
-                conn.execute("DELETE FROM analysis_queue")
-                qd_rows = conn.execute(
-                    "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
-                    "JOIN interview i ON qd.url = i.url "
-                    "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL AND qd.job_position = ?",
-                    (current_pos,),
-                ).fetchall()
-                for row in qd_rows:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status) VALUES (?, ?, 'pending')",
-                        (row["interview_id"], row["id"]),
-                    )
-                conn.commit()
-                return len(qd_rows)
-
-        enqueued = await run_db(_enqueue_all)
-        _update_progress(0, enqueued, f"已入队 {enqueued} 道题目，开始批量聚类...")
-        logger.info(f"重建题库(内联): 已入队 {enqueued} 道题目")
-
-        # Step 5: 分批聚类
-        from app.services.pipeline import (
-            dequeue_batch,
-            cluster_batch,
-            mark_batch_done,
-            mark_batch_failed,
-            BATCH_SIZE,
-        )
-
-        total_new = 0
-        batch_num = 0
-        while True:
-            batch = dequeue_batch(BATCH_SIZE)
-            if not batch:
-                break
-            batch_num += 1
-            try:
-                new_count = await cluster_batch(batch, user_id=user_id, skip_clean=True)
-                queue_ids = [item["queue_id"] for item in batch]
-                mark_batch_done(queue_ids)
-                total_new += new_count
-                _update_progress(
-                    batch_num * BATCH_SIZE,
-                    enqueued,
-                    f"批次 {batch_num}: 新增 {new_count} 个聚类（累计 {total_new}）",
-                )
-            except Exception as e:
-                logger.error(f"重建聚类批次 {batch_num} 失败: {e}")
-                queue_ids = [item["queue_id"] for item in batch]
-                mark_batch_failed(queue_ids)
-                raise
-
-        # Step 6: 恢复 AI 答案
-        _update_progress(enqueued, enqueued, "恢复 AI 答案...")
-
-        def _restore_answers():
-            with get_db_connection() as conn:
-                restored = 0
-                rows = conn.execute(
-                    "SELECT id, question, original_questions FROM question_bank "
-                    "WHERE job_position = ? AND owner_id IS NULL AND (ai_answer IS NULL OR ai_answer = '')",
-                    (current_pos,),
-                ).fetchall()
-                for r in rows:
-                    saved = existing_answers_map.get(r["question"])
-                    ai_answer = saved["answer"] if saved else None
-                    answer_sources = saved["sources"] if saved else None
-                    if not ai_answer:
-                        try:
-                            oqs = json.loads(r["original_questions"] or "[]")
-                            for oq in oqs:
-                                saved = existing_answers_map.get(oq)
-                                if saved and saved["answer"]:
-                                    ai_answer = saved["answer"]
-                                    answer_sources = saved["sources"]
-                                    break
-                        except Exception:
-                            pass
-                    if ai_answer:
-                        conn.execute(
-                            "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
-                            (ai_answer, answer_sources, r["id"]),
-                        )
-                        restored += 1
-                conn.commit()
-                return restored
-
-        restored = await run_db(_restore_answers)
-        logger.info(
-            f"全量重建完成(内联): {total_new} 个聚类，恢复 {restored} 个 AI 答案"
-        )
-        _mark_complete(
-            "completed",
-            result=f"重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案",
-        )
-        await invalidate_master_bank_cache()
-
-    except Exception as e:
-        logger.exception(f"全量重建失败(内联): job_id={job_id}")
-        _mark_complete("failed", error=str(e)[:500])
-
 
 @router.post("/api/master-bank/compact")
 async def compact_singletons(

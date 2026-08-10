@@ -17,12 +17,19 @@ _BATCH = 32
 
 
 def _update_job(job_id: int, status: str, current: int, total: int,
-                message: str = "", result: str = None, error: str = None):
+                message: str = "", result: str = None, error: str = None,
+                worker_id: str = None):
     with get_db_connection() as conn:
+        where = "WHERE id = ?"
+        params = [status, current, total, message, result, error, job_id]
+        if worker_id:
+            where += " AND worker_id = ?"
+            params.append(worker_id)
         conn.execute(
             "UPDATE jobs SET status = ?, progress_current = ?, progress_total = ?, "
-            "progress_message = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (status, current, total, message, result, error, job_id),
+            "progress_message = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP "
+            + where,
+            params,
         )
         conn.commit()
 
@@ -57,7 +64,32 @@ def _persist(updates):
 
 
 async def run_recompute(job_id: int):
-    """主入口：供 ARQ task / 内联调用。失败回滚已更新行。"""
+    """主入口：由 ARQ 执行，数据库负责 claim、重试和最终失败状态。"""
+    from app.services.job_lifecycle import (
+        RECOMPUTE_EMBEDDING_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim():
+        with get_db_connection() as conn:
+            claimed = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=RECOMPUTE_EMBEDDING_JOB_TYPE,
+            )
+            conn.commit()
+            return bool(claimed)
+
+    if not await run_db(_claim):
+        logger.info("Embedding 重算任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
     # worker 进程可能未加载管理员保存的配置，先从 DB 同步
     es.reload_embedding_config()
 
@@ -66,7 +98,10 @@ async def run_recompute(job_id: int):
     try:
         rows = await run_db(_load_questions)
         total = len(rows)
-        _update_job(job_id, "running", 0, max(total, 1), "开始重算 embedding")
+        _update_job(
+            job_id, "running", 0, max(total, 1), "开始重算 embedding",
+            worker_id=worker_id,
+        )
 
         current_model = (
             es._EMBEDDING_API_MODEL if es._BACKEND == "siliconflow" else es._MODEL_REPO
@@ -87,14 +122,26 @@ async def run_recompute(job_id: int):
             for row_id in ids:
                 updated[row_id] = old[row_id]
             done = min(start + len(batch_rows), total)
-            _update_job(job_id, "running", done, max(total, 1), f"已重算 {done}/{total}")
+            _update_job(
+                job_id, "running", done, max(total, 1), f"已重算 {done}/{total}",
+                worker_id=worker_id,
+            )
 
         get_index_manager().invalidate()
         _update_job(
-            job_id, "completed", total, max(total, 1),
-            f"重算完成 {total} 题", result=json.dumps({"total": total}),
+            job_id, "running", total, max(total, 1),
+            f"重算完成 {total} 题", worker_id=worker_id,
         )
+        with get_db_connection() as conn:
+            complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps({"total": total}),
+            )
+            conn.commit()
         logger.info("embedding 重算完成 job=%s total=%d", job_id, total)
+        return {"status": "completed", "job_id": job_id, "total": total}
     except Exception as e:
         logger.exception("embedding 重算失败 job=%s", job_id)
         if updated:
@@ -109,4 +156,7 @@ async def run_recompute(job_id: int):
                 logger.info("embedding 重算失败已回滚 %d 行 job=%s", len(updated), job_id)
             except Exception as rollback_err:
                 logger.exception("embedding 重算回滚失败 job=%s: %s", job_id, rollback_err)
-        _update_job(job_id, "failed", 0, max(total, 1), error=str(e)[:500])
+        with get_db_connection() as conn:
+            fail_job(conn, job_id, worker_id, str(e)[:500])
+            conn.commit()
+        return {"status": "failed", "job_id": job_id, "error": str(e)[:500]}

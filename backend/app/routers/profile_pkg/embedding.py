@@ -1,5 +1,4 @@
 """全局 Embedding 配置管理端点（仅管理员）"""
-import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -146,8 +145,11 @@ async def update_embedding_config(req: dict, admin: dict = Depends(get_admin_use
 
 
 async def _create_recompute_job(admin_id: int) -> int:
-    """创建全量 embedding 重算 job 并入队（复用 jobs 表 + SSE 机制）。"""
-    import os
+    """创建全量 embedding 重算 job 并尝试入队。
+
+    jobs 是事实源；Redis/ARQ 不可用时只保留 pending，由周期 dispatcher
+    补偿投递，不能在 FastAPI 进程内启动一个不可恢复的临时 task。
+    """
 
     def _create():
         with get_db_connection() as conn:
@@ -155,7 +157,7 @@ async def _create_recompute_job(admin_id: int) -> int:
             cursor.execute("BEGIN")
             try:
                 existing = cursor.execute(
-                    "SELECT id FROM jobs WHERE job_type = 'recompute_embedding' AND status IN ('pending', 'running')",
+                    "SELECT id FROM jobs WHERE job_type = 'recompute_embedding' AND status IN ('pending', 'queued', 'running')",
                 ).fetchone()
                 if existing:
                     conn.commit()
@@ -173,23 +175,29 @@ async def _create_recompute_job(admin_id: int) -> int:
 
     job_id = await run_db(_create)
 
-    # 默认内联执行（全量重算是低频操作，不依赖 ARQ worker 常驻）；
-    # 显式设 EMBEDDING_RECOMPUTE_USE_ARQ=1 时优先 ARQ，失败再回退内联
-    if os.environ.get("EMBEDDING_RECOMPUTE_USE_ARQ", "0").lower() in ("1", "true", "yes"):
-        try:
-            from app.worker import enqueue_recompute_embedding_job
-
-            await enqueue_recompute_embedding_job(job_id)
-            return job_id
-        except Exception as e:
-            logger.warning("ARQ 调度 embedding 重算失败，回退内联: %s", e)
-
     try:
-        from app.services.embedding_recompute import run_recompute
+        from app.worker import enqueue_recompute_embedding_job
+        from app.services.job_lifecycle import mark_job_dispatched
 
-        asyncio.create_task(run_recompute(job_id))
+        arq_job = await enqueue_recompute_embedding_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+
+        def _mark():
+            with get_db_connection() as conn:
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"Embedding 重算任务不可再投递: job_id={job_id}")
+                conn.commit()
+
+        await run_db(_mark)
+        logger.info(
+            "Embedding 重算任务已通过 ARQ 调度: job_id=%s arq_job_id=%s",
+            job_id,
+            arq_job_id,
+        )
     except Exception as e:
-        logger.warning("内联调度 embedding 重算失败: %s", e)
+        logger.warning("ARQ 调度 embedding 重算失败，任务保留 pending 等待 dispatcher: %s", e)
     return job_id
 
 

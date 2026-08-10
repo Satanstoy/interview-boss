@@ -9,6 +9,14 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
   const { confirm: showConfirm } = useConfirm()
   const { ensureModelReady } = useModelGuard()
 
+  const resolveQueuedJob = async (data) => {
+    if (!data?.job_id) return data
+    const finalEvent = await api.streamJobProgress(data.job_id, (event) => {
+      if (event.type === 'error') throw new Error(event.message || '任务失败')
+    })
+    return { ...data, ...(finalEvent?.result || {}) }
+  }
+
   const reprocessingIds = ref({})
   const reprocessProgress = ref({})
 
@@ -136,7 +144,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     if (!await ensureModelReady({ action: 'AI 生成答案' })) return
     question._isLoadingAnswer = true
     try {
-      const data = await api.generateAnswer(question.id)
+      const data = await resolveQueuedJob(await api.generateAnswer(question.id))
       if (currentUser.value?.is_admin) {
         question.ai_answer = data.answer
       } else {

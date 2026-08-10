@@ -34,12 +34,15 @@ class TestBug010GenerateAnswerFix:
             with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
                 mock_run_db.return_value = mock_row
 
-                with patch("app.routers.answers._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
-                    mock_llm.return_value = "mock answer"
+                with patch(
+                    "app.routers.answers._queue_answer_job",
+                    new_callable=AsyncMock,
+                ) as mock_queue:
+                    mock_queue.return_value = {"status": "queued", "job_id": 1}
 
                     # 应该不抛出404错误，也不能依赖真实 LLM 服务
                     result = await generate_master_answer(100, user)
-                    assert result is not None
+                    assert result == {"status": "queued", "job_id": 1}
 
     @pytest.mark.asyncio
     async def test_generate_answer_should_reject_invisible_question(self):

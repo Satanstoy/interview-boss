@@ -1,7 +1,7 @@
 import json
 import logging
 import asyncio
-import openai
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user, get_admin_user
@@ -16,8 +16,6 @@ from app.services.answer_enrichment import (
     prepare_answer_prompt,
     prepare_recitation_prompt,
 )
-from app.db.queries import get_user_job_position
-from app.services.resume_service import get_resume_text
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
@@ -26,6 +24,116 @@ router = APIRouter(prefix="/api/master-bank")
 # SSE 长时间没有任何字节；单题超时后继续处理其他题，确保流最终能收尾。
 _BATCH_SSE_HEARTBEAT_SECONDS = 15
 _BATCH_ANSWER_TIMEOUT_SECONDS = 300
+
+
+async def _queue_answer_job(job_type: str, question_id: int, question_text: str,
+                            user_id: int, **payload_extra):
+    """Create one durable answer job and try immediate ARQ delivery.
+
+    A failed Redis enqueue only leaves the job pending.  The worker dispatcher
+    will retry it later, so an HTTP process restart cannot lose the request.
+    """
+    def _create():
+        with get_db_connection() as conn:
+            active_params = [job_type, question_id]
+            active_sql = (
+                "SELECT j.id, j.status FROM jobs j "
+                "JOIN job_payloads p ON p.job_id = j.id "
+                "WHERE j.job_type = ? AND j.status IN ('pending', 'queued', 'running') "
+                "AND json_extract(p.payload, '$.question_id') = ?"
+            )
+            if job_type == "generate_recitation":
+                active_sql += " AND j.created_by = ?"
+                active_params.append(user_id)
+            active_sql += " ORDER BY j.id DESC LIMIT 1"
+            active = conn.execute(active_sql, active_params).fetchone()
+            if active:
+                conn.commit()
+                return int(active["id"]), active["status"]
+
+            payload = {
+                "question_id": question_id,
+                "question_text": question_text,
+                "user_id": user_id,
+                **payload_extra,
+            }
+            cursor = conn.execute(
+                "INSERT INTO jobs "
+                "(job_type, status, progress_total, created_by, idempotency_key) "
+                "VALUES (?, 'pending', 1, ?, ?)",
+                (
+                    job_type,
+                    user_id,
+                    f"manual:{job_type}:{user_id}:{question_id}:{uuid4().hex}",
+                ),
+            )
+            job_id = cursor.lastrowid
+            conn.execute(
+                "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                (job_id, json.dumps(payload, ensure_ascii=False)),
+            )
+            conn.commit()
+            return int(job_id), "pending"
+
+    job_id, status = await run_db(_create)
+    if status != "pending":
+        return {"job_id": job_id, "status": status}
+
+    try:
+        from app.services.job_lifecycle import mark_job_dispatched
+        if job_type == "generate_recitation":
+            from app.worker import enqueue_generate_recitation_job as enqueue
+        else:
+            from app.worker import enqueue_generate_answer_job as enqueue
+
+        arq_job = await enqueue(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+
+        def _mark():
+            with get_db_connection() as conn:
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"答案任务不可再投递: job_id={job_id}")
+                conn.commit()
+
+        await run_db(_mark)
+        return {"job_id": job_id, "status": "queued"}
+    except Exception as exc:
+        logger.warning(
+            "答案任务 ARQ 调度失败，保留 pending 等待 dispatcher: job_id=%s error=%s",
+            job_id,
+            exc,
+        )
+        return {"job_id": job_id, "status": "pending", "dispatch_error": str(exc)[:300]}
+
+
+async def _dispatch_persisted_answer_job(job_id: int) -> bool:
+    """Try to deliver an already-created answer child job to ARQ."""
+    try:
+        from app.services.job_lifecycle import mark_job_dispatched
+        from app.worker import enqueue_generate_answer_job
+
+        arq_job = await enqueue_generate_answer_job(job_id)
+        arq_job_id = getattr(arq_job, "job_id", None)
+        if not arq_job_id:
+            raise RuntimeError("ARQ 未返回 job_id")
+
+        def _mark():
+            with get_db_connection() as conn:
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"批量答案任务不可再投递: job_id={job_id}")
+                conn.commit()
+
+        await run_db(_mark)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "批量答案任务 ARQ 调度失败，保留 pending 等待 dispatcher: job_id=%s error=%s",
+            job_id,
+            exc,
+        )
+        return False
 
 
 @router.put("/save-user-answer/{question_id}")
@@ -93,57 +201,12 @@ async def generate_master_answer(
     if is_admin and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
         return {"status": "success", "answer": row["ai_answer"]}
 
-    try:
-        prompt, search_sources = await prepare_answer_prompt(
-            row["question"], user_id=user["id"]
-        )
-        answer = await _call_llm_with_retry(prompt, user_id=user["id"])
-        answer, _ = await refine_answer(
-            prompt, answer, search_sources, user_id=user["id"], max_rounds=2
-        )
-
-        if is_admin:
-            # 管理员：存入 question_bank.ai_answer（全局）
-            def _update():
-                with get_db_connection() as conn:
-                    conn.execute(
-                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (answer, sources_json(search_sources), question_id),
-                    )
-                    conn.commit()
-
-            await run_db(_update)
-        else:
-            # 普通用户：存入 user_question_view.user_answer（个人）
-            def _upsert():
-                with get_db_connection() as conn:
-                    conn.execute(
-                        "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
-                        "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                        "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
-                        (user["id"], question_id, answer, answer),
-                    )
-                    conn.commit()
-
-            await run_db(_upsert)
-
-        await invalidate_master_bank_cache()
-        return {"status": "success", "answer": answer, "search_sources": search_sources}
-    except openai.AuthenticationError:
-        raise HTTPException(
-            status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。"
-        )
-    except openai.APIConnectionError:
-        raise HTTPException(
-            status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL。"
-        )
-    except openai.APITimeoutError:
-        raise HTTPException(
-            status_code=500, detail="LLM 服务响应超时，请增大超时时间或稍后重试。"
-        )
-    except Exception as e:
-        logger.error(f"手动生成答案失败（已重试3次）[ID:{question_id}]: {e}")
-        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+    return await _queue_answer_job(
+        "generate_answer",
+        question_id,
+        row["question"],
+        user["id"],
+    )
 
 
 @router.post("/generate-recitation/{question_id}")
@@ -167,47 +230,12 @@ async def generate_recitation(question_id: int, user: dict = Depends(get_current
             status_code=404, detail="该题目暂无公共参考答案，请等待管理员生成"
         )
 
-    _, job_position = get_user_job_position(user["id"])
-    resume_text = get_resume_text(user["id"])
-
-    try:
-        prompt, search_sources = await prepare_recitation_prompt(
-            question=row["question"],
-            reference_answer=row["ai_answer"],
-            job_position=job_position or "",
-            resume_text=resume_text,
-            user_id=user["id"],
-        )
-        answer = await _call_llm_with_retry(prompt, user_id=user["id"])
-
-        def _upsert():
-            with get_db_connection() as conn:
-                conn.execute(
-                    "INSERT INTO user_question_view (user_id, question_bank_id, user_answer, updated_at) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET user_answer = ?, updated_at = CURRENT_TIMESTAMP",
-                    (user["id"], question_id, answer, answer),
-                )
-                conn.commit()
-
-        await run_db(_upsert)
-        await invalidate_master_bank_cache()
-        return {"status": "success", "answer": answer, "search_sources": search_sources}
-    except openai.AuthenticationError:
-        raise HTTPException(
-            status_code=500, detail="API Key 无效，请在系统配置中更新 API Key。"
-        )
-    except openai.APIConnectionError:
-        raise HTTPException(
-            status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL。"
-        )
-    except openai.APITimeoutError:
-        raise HTTPException(
-            status_code=500, detail="LLM 服务响应超时，请增大超时时间或稍后重试。"
-        )
-    except Exception as e:
-        logger.error(f"背诵稿生成失败 [ID:{question_id}]: {e}")
-        raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
+    return await _queue_answer_job(
+        "generate_recitation",
+        question_id,
+        row["question"],
+        user["id"],
+    )
 
 
 @router.post("/batch-generate-answers")
@@ -241,130 +269,104 @@ async def batch_generate_answers(
     ]
     skipped = len(rows) - len(questions)
 
+    if not questions:
+        async def empty_stream():
+            yield f"data: {json.dumps({'type': 'done', 'generated': 0, 'failed': 0, 'skipped': skipped})}\n\n"
+
+        return StreamingResponse(
+            empty_stream(),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    def _create_batch_jobs():
+        from app.services.job_lifecycle import (
+            ANSWER_BATCH_JOB_TYPE,
+            create_answer_generation_jobs,
+        )
+
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO jobs "
+                "(job_type, status, progress_total, created_by, idempotency_key) "
+                "VALUES (?, 'pending', ?, ?, ?)",
+                (
+                    ANSWER_BATCH_JOB_TYPE,
+                    len(questions),
+                    user["id"],
+                    f"batch-answer:{user['id']}:{uuid4().hex}",
+                ),
+            )
+            parent_job_id = int(cursor.lastrowid)
+            child_job_ids = create_answer_generation_jobs(
+                conn, parent_job_id, questions, user["id"]
+            )
+            conn.commit()
+            return parent_job_id, child_job_ids
+
+    parent_job_id, child_job_ids = await run_db(_create_batch_jobs)
+    await asyncio.gather(
+        *(_dispatch_persisted_answer_job(job_id) for job_id in child_job_ids)
+    )
+
     async def event_stream():
-        pending_tasks: set[asyncio.Task] = set()
+        total = len(child_job_ids)
+        last_progress = None
+        last_heartbeat = asyncio.get_running_loop().time()
+        sent_events = set()
+        yield f"data: {json.dumps({'type': 'init', 'job_id': parent_job_id, 'total': total, 'skipped': skipped})}\n\n"
         try:
-            if not questions:
-                yield f"data: {json.dumps({'type': 'done', 'generated': 0, 'failed': 0, 'skipped': skipped})}\n\n"
-                return
-
-            total = len(questions)
-            generated = 0
-            failed = 0
-            done_count = 0
-            results_lock = asyncio.Lock()
-
-            # 先发送 init 事件
-            yield f"data: {json.dumps({'type': 'init', 'total': total, 'skipped': skipped})}\n\n"
-
-            semaphore = asyncio.Semaphore(3)
-
-            async def _build_answer(question_text):
-                prompt, search_sources = await prepare_answer_prompt(
-                    question_text, user_id=user["id"]
-                )
-                answer = await _call_llm_with_retry(prompt, user_id=user["id"])
-                answer, _ = await refine_answer(
-                    prompt, answer, search_sources, user_id=user["id"], max_rounds=1
-                )
-                return answer, search_sources
-
-            async def _build_answer_with_limit(question_text):
-                async with semaphore:
-                    return await _build_answer(question_text)
-
-            async def _mark_failed(qid):
-                def _update():
+            while True:
+                def _read_children():
                     with get_db_connection() as conn:
-                        conn.execute(
-                            "UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (qid,),
-                        )
-                        conn.commit()
-
-                await run_db(_update)
-
-            async def _gen_one(qid, question_text):
-                nonlocal generated, failed, done_count
-                try:
-                    # 只包住外部生成阶段，避免超时取消正在执行的数据库写入；
-                    # 信号量也放在 wait_for 内，排队等待时间同样受单题超时约束。
-                    answer, search_sources = await asyncio.wait_for(
-                        _build_answer_with_limit(question_text),
-                        timeout=_BATCH_ANSWER_TIMEOUT_SECONDS,
-                    )
-
-                    def _update():
-                        with get_db_connection() as conn:
-                            conn.execute(
-                                "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                (answer, sources_json(search_sources), qid),
-                            )
-                            conn.commit()
-
-                    await run_db(_update)
-                    async with results_lock:
-                        generated += 1
-                        done_count += 1
-                        yield_event = json.dumps(
+                        rows_by_id = {
+                            row["id"]: dict(row)
+                            for row in conn.execute(
+                                "SELECT id, status, error FROM jobs WHERE id IN ({})".format(
+                                    ",".join("?" * len(child_job_ids))
+                                ),
+                                child_job_ids,
+                            ).fetchall()
+                        }
+                        return [
                             {
-                                "type": "progress",
-                                "current": done_count,
-                                "total": total,
                                 "id": qid,
-                                "success": True,
+                                "status": rows_by_id.get(job_id, {}).get("status", "pending"),
+                                "error": rows_by_id.get(job_id, {}).get("error"),
                             }
-                        )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error(f"批量生成答案失败 [ID:{qid}]: {e}")
-                    try:
-                        await _mark_failed(qid)
-                    except Exception:
-                        logger.exception(f"批量生成答案失败后标记失败状态异常 [ID:{qid}]")
-                    async with results_lock:
-                        failed += 1
-                        done_count += 1
-                        yield_event = json.dumps(
-                            {
-                                "type": "progress",
-                                "current": done_count,
-                                "total": total,
-                                "id": qid,
-                                "success": False,
-                            }
-                        )
-                return yield_event
+                            for (qid, _), job_id in zip(questions, child_job_ids)
+                        ]
 
-            # 用显式 Task + asyncio.wait，定期发 heartbeat，避免代理或前端误判连接断开。
-            pending_tasks = {
-                asyncio.create_task(_gen_one(qid, qtext))
-                for qid, qtext in questions
-            }
-            while pending_tasks:
-                completed, pending_tasks = await asyncio.wait(
-                    pending_tasks,
-                    timeout=_BATCH_SSE_HEARTBEAT_SECONDS,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if not completed:
-                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-                    continue
-                for task in completed:
-                    event_data = task.result()
-                    yield f"data: {event_data}\n\n"
+                states = await run_db(_read_children)
+                completed = sum(item["status"] == "completed" for item in states)
+                failed = sum(item["status"] == "failed" for item in states)
+                done_count = completed + failed
+                progress = (done_count, completed, failed)
+                if progress != last_progress:
+                    for item in states:
+                        if item["status"] in ("completed", "failed"):
+                            event_key = (item["id"], item["status"])
+                            if event_key not in sent_events:
+                                sent_events.add(event_key)
+                                yield f"data: {json.dumps({'type': 'progress', 'current': done_count, 'total': total, 'id': item['id'], 'success': item['status'] == 'completed', 'error': item['error']}, ensure_ascii=False)}\n\n"
+                    last_progress = progress
 
-            yield f"data: {json.dumps({'type': 'done', 'generated': generated, 'failed': failed, 'skipped': skipped})}\n\n"
-        except Exception as e:
-            logger.exception("批量生成答案失败")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'生成失败: {str(e)[:200]}'})}\n\n"
-        finally:
-            # 客户端主动断开时及时取消未完成任务，避免后台继续消耗 LLM/搜索配额。
-            for task in pending_tasks:
-                task.cancel()
-            if pending_tasks:
-                await asyncio.gather(*pending_tasks, return_exceptions=True)
+                if done_count == total:
+                    yield f"data: {json.dumps({'type': 'done', 'job_id': parent_job_id, 'generated': completed, 'failed': failed, 'skipped': skipped})}\n\n"
+                    return
+
+                now = asyncio.get_running_loop().time()
+                if now - last_heartbeat >= _BATCH_SSE_HEARTBEAT_SECONDS:
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'job_id': parent_job_id})}\n\n"
+                    last_heartbeat = now
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            # Child jobs intentionally continue in ARQ after the browser closes;
+            # reconnecting to the same job can still observe the final result.
+            raise
+        except Exception as exc:
+            logger.exception("批量答案进度流失败")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'生成失败: {str(exc)[:200]}'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),

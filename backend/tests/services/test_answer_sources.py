@@ -42,7 +42,7 @@ def _executing_run_db(mock_run_db, mock_question):
 
 @pytest.mark.asyncio
 async def test_generate_answer_admin_writes_answer_sources():
-    """管理员单题生成：有搜索结果时 answer_sources 落库为 JSON"""
+    """管理员单题生成改为持久化 ARQ 任务，结果由 worker 写入 answer_sources。"""
     from app.routers.answers import generate_master_answer
 
     user = {"id": 1, "is_admin": True}
@@ -51,64 +51,31 @@ async def test_generate_answer_admin_writes_answer_sources():
         {"title": "Redis 官方文档", "url": "https://redis.io/docs", "snippet": "官方文档"}
     ]
 
-    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-        _executing_run_db(mock_run_db, mock_question)
-        with patch("app.routers.answers.get_db_connection") as mock_get_conn:
-            mock_conn = MagicMock()
-            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-            mock_conn.__exit__ = MagicMock(return_value=False)
-            mock_get_conn.return_value = mock_conn
-            with patch(
-                "app.routers.answers._call_llm_with_retry", new_callable=AsyncMock
-            ) as mock_llm:
-                mock_llm.return_value = "微服务是一种架构风格..."
-                with patch(
-                    "app.routers.answers.prepare_answer_prompt",
-                    new_callable=AsyncMock,
-                ) as mock_prep:
-                    mock_prep.return_value = ("prompt", sources)
-                    with patch(
-                        "app.routers.answers.refine_answer", new_callable=AsyncMock
-                    ) as mock_refine:
-                        mock_refine.return_value = ("微服务是一种架构风格...", [])
-                        result = await generate_master_answer(10, user)
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+         patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
+        mock_run_db.return_value = mock_question
+        mock_queue.return_value = {"status": "queued", "job_id": 7}
+        result = await generate_master_answer(10, user)
 
-    assert result["search_sources"] == sources
-    sql, params = mock_conn.execute.call_args[0]
-    assert "answer_sources" in sql
-    assert json.loads(params[1]) == sources
+    assert result == {"status": "queued", "job_id": 7}
+    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1)
 
 
 @pytest.mark.asyncio
 async def test_generate_answer_writes_null_when_no_sources():
-    """无搜索结果（未配置搜索/搜索失败）时 answer_sources 写 NULL"""
+    """答案来源由 ARQ worker 结果负责写入，接口只创建 durable job。"""
     from app.routers.answers import generate_master_answer
 
     user = {"id": 1, "is_admin": True}
     mock_question = {"id": 10, "question": "什么是微服务？", "ai_answer": None}
 
-    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-        _executing_run_db(mock_run_db, mock_question)
-        with patch("app.routers.answers.get_db_connection") as mock_get_conn:
-            mock_conn = MagicMock()
-            mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-            mock_conn.__exit__ = MagicMock(return_value=False)
-            mock_get_conn.return_value = mock_conn
-            with patch(
-                "app.routers.answers._call_llm_with_retry", new_callable=AsyncMock
-            ) as mock_llm:
-                mock_llm.return_value = "微服务是一种架构风格..."
-                with patch(
-                    "app.routers.answers.prepare_answer_prompt",
-                    new_callable=AsyncMock,
-                ) as mock_prep:
-                    mock_prep.return_value = ("prompt", [])
-                    result = await generate_master_answer(10, user)
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+         patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
+        mock_run_db.return_value = mock_question
+        mock_queue.return_value = {"status": "pending", "job_id": 8}
+        result = await generate_master_answer(10, user)
 
-    assert result["search_sources"] == []
-    sql, params = mock_conn.execute.call_args[0]
-    assert "answer_sources" in sql
-    assert params[1] is None
+    assert result == {"status": "pending", "job_id": 8}
 
 
 def _exec(fn):
@@ -212,69 +179,43 @@ async def test_background_generate_answer_writes_answer_sources():
 
 @pytest.mark.asyncio
 async def test_batch_generate_writes_answer_sources():
-    """批量生成：_gen_one 的 UPDATE 落库 answer_sources（SSE 流驱动）"""
+    """批量生成通过 durable child jobs 派发，不在 SSE 请求内调用 LLM。"""
     from app.models.schemas import BatchGenerateAnswersRequest
     from app.routers.answers import batch_generate_answers
 
     user = {"id": 1, "is_admin": True}
     rows = [{"id": 10, "question": "什么是微服务？", "ai_answer": None}]
-    sources = [
-        {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
-    ]
+    async def _consume(resp):
+        chunks = []
+        async for chunk in resp.body_iterator:
+            chunks.append(chunk)
+        return "".join(chunks)
 
-    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-        mock_run_db.side_effect = _exec
-        with patch("app.routers.answers.get_db_connection") as mock_get_conn:
-            mock_conn = MagicMock()
-            mock_conn.__enter__.return_value = mock_conn
-            mock_conn.__exit__.return_value = None
-            # _load 阶段：conn.execute(...).fetchall() 返回待生成题目行
-            mock_conn.execute.return_value.fetchall.return_value = rows
-            mock_get_conn.return_value = mock_conn
-            with patch(
-                "app.routers.answers._call_llm_with_retry", new_callable=AsyncMock
-            ) as mock_llm:
-                mock_llm.return_value = "答案内容"
-                with patch(
-                    "app.routers.answers.prepare_answer_prompt",
-                    new_callable=AsyncMock,
-                ) as mock_prep:
-                    mock_prep.return_value = ("prompt", sources)
-                    with patch(
-                        "app.routers.answers.refine_answer", new_callable=AsyncMock
-                    ) as mock_refine:
-                        mock_refine.return_value = ("答案内容", [])
-                        req = BatchGenerateAnswersRequest(ids=[10])
-                        resp = await batch_generate_answers(req, user)
-                        # SSE StreamingResponse：驱动 event_stream 生成器消费事件
-                        chunks = []
-                        async for chunk in resp.body_iterator:
-                            chunks.append(chunk)
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+         patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock) as mock_dispatch:
+        mock_run_db.side_effect = [
+            rows,
+            (99, [100]),
+            [{"id": 10, "status": "completed", "error": None}],
+        ]
+        response = await batch_generate_answers(
+            BatchGenerateAnswersRequest(ids=[10]), user
+        )
+        body = await _consume(response)
 
-    assert "".join(chunks)  # SSE 流正常产出事件
-    update_calls = [
-        call
-        for call in mock_conn.execute.call_args_list
-        if call.args and "answer_sources" in call.args[0]
-    ]
-    assert len(update_calls) == 1
-    assert json.loads(update_calls[0].args[1][1]) == sources
+    assert '"type": "init"' in body
+    assert '"type": "done"' in body
+    mock_dispatch.assert_awaited_once_with(100)
 
 
 @pytest.mark.asyncio
-async def test_batch_generate_emits_heartbeat_and_done_for_slow_question():
-    """长耗时题目期间应保持 SSE 活跃，并在完成后发送 done。"""
+async def test_batch_generate_emits_init_and_done_from_durable_status():
+    """批量 SSE 根据 durable child job 状态收尾。"""
     from app.models.schemas import BatchGenerateAnswersRequest
     from app.routers import answers as answers_router
 
     user = {"id": 1, "is_admin": True}
     rows = [{"id": 11, "question": "慢题", "ai_answer": None}]
-    sources = []
-
-    async def slow_prepare(*args, **kwargs):
-        await asyncio.sleep(0.02)
-        return "prompt", sources
-
     async def consume(resp):
         chunks = []
         async for chunk in resp.body_iterator:
@@ -286,18 +227,13 @@ async def test_batch_generate_emits_heartbeat_and_done_for_slow_question():
             if line.startswith("data: ")
         ]
 
-    with patch.object(answers_router, "_BATCH_SSE_HEARTBEAT_SECONDS", 0.001), \
-        patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
-        patch("app.routers.answers.get_db_connection") as mock_get_conn, \
-        patch("app.routers.answers.prepare_answer_prompt", side_effect=slow_prepare), \
-        patch("app.routers.answers._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
-        mock_run_db.side_effect = _exec
-        mock_llm.return_value = "答案内容"
-        mock_conn = MagicMock()
-        mock_conn.__enter__.return_value = mock_conn
-        mock_conn.__exit__.return_value = None
-        mock_conn.execute.return_value.fetchall.return_value = rows
-        mock_get_conn.return_value = mock_conn
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+        patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock):
+        mock_run_db.side_effect = [
+            rows,
+            (101, [111]),
+            [{"id": 11, "status": "completed", "error": None}],
+        ]
 
         response = await answers_router.batch_generate_answers(
             BatchGenerateAnswersRequest(ids=[11]), user
@@ -305,36 +241,26 @@ async def test_batch_generate_emits_heartbeat_and_done_for_slow_question():
         events = await consume(response)
 
     assert events[0]["type"] == "init"
-    assert any(event["type"] == "heartbeat" for event in events)
     assert events[-1]["type"] == "done"
     assert events[-1]["generated"] == 1
 
 
 @pytest.mark.asyncio
-async def test_batch_generate_marks_timed_out_question_failed_and_sends_done():
-    """单题生成卡死时应转为失败进度，不能阻塞整个 SSE 收尾。"""
+async def test_batch_generate_reports_terminal_child_failure():
+    """子任务最终失败时，批量 SSE 返回失败统计。"""
     from app.models.schemas import BatchGenerateAnswersRequest
     from app.routers import answers as answers_router
 
     user = {"id": 1, "is_admin": True}
     rows = [{"id": 12, "question": "超时题", "ai_answer": None}]
 
-    async def hanging_llm(*args, **kwargs):
-        await asyncio.sleep(0.05)
-        return "不应落库的答案"
-
-    with patch.object(answers_router, "_BATCH_ANSWER_TIMEOUT_SECONDS", 0.001), \
-        patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
-        patch("app.routers.answers.get_db_connection") as mock_get_conn, \
-        patch("app.routers.answers.prepare_answer_prompt", new_callable=AsyncMock) as mock_prep, \
-        patch("app.routers.answers._call_llm_with_retry", side_effect=hanging_llm):
-        mock_run_db.side_effect = _exec
-        mock_prep.return_value = ("prompt", [])
-        mock_conn = MagicMock()
-        mock_conn.__enter__.return_value = mock_conn
-        mock_conn.__exit__.return_value = None
-        mock_conn.execute.return_value.fetchall.return_value = rows
-        mock_get_conn.return_value = mock_conn
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+        patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock):
+        mock_run_db.side_effect = [
+            rows,
+            (102, [112]),
+            [{"id": 12, "status": "failed", "error": "API 限流"}],
+        ]
 
         response = await answers_router.batch_generate_answers(
             BatchGenerateAnswersRequest(ids=[12]), user
@@ -353,6 +279,7 @@ async def test_batch_generate_marks_timed_out_question_failed_and_sends_done():
     assert events[-2]["success"] is False
     assert events[-1] == {
         "type": "done",
+        "job_id": 102,
         "generated": 0,
         "failed": 1,
         "skipped": 0,

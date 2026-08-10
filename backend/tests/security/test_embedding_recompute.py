@@ -1,16 +1,11 @@
 """embedding 重算 job：模型变化触发、执行、失败回滚。"""
-import asyncio
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import numpy as np
 
 from app.core.auth import create_access_token
 from app.db.connection import get_db_connection
-
-# 默认已内联执行；显式设 ARQ=0 保持测试确定性（不依赖 redis）
-ARQ_OFF = {"EMBEDDING_RECOMPUTE_USE_ARQ": "0"}
-
 
 @pytest.fixture(autouse=True)
 def reset_embedding_module():
@@ -76,9 +71,9 @@ def _save_embedding(client, **overrides):
         "dimension": 1024,
     }
     payload.update(overrides)
-    # mock reload 与 inline 调度：PUT 只负责保存 + 创建 job，执行由测试显式驱动
+    # mock reload 与 ARQ 调度：PUT 只负责保存 + 创建 job，执行由测试显式驱动
     with patch("app.services.embedding_service.reload_embedding_config"), \
-         patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()):
+         patch("app.worker.enqueue_recompute_embedding_job", new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-1"))):
         return client.put("/api/profile/embedding", json=payload, headers=_admin_headers())
 
 
@@ -96,7 +91,7 @@ def test_put_embedding_model_change_creates_recompute_job(client, test_db, seed_
             (body["recompute_job_id"],),
         ).fetchone()
     assert row["job_type"] == "recompute_embedding"
-    assert row["status"] == "pending"
+    assert row["status"] == "queued"
 
 
 def test_put_embedding_same_config_skips_recompute(client, test_db, seed_admin_users, monkeypatch):
@@ -107,18 +102,22 @@ def test_put_embedding_same_config_skips_recompute(client, test_db, seed_admin_u
     assert r2.json()["recompute_triggered"] is False
 
 
-async def test_create_recompute_job_defaults_to_inline(client, test_db, seed_admin_users, monkeypatch):
-    """默认（未设 EMBEDDING_RECOMPUTE_USE_ARQ）内联执行，不依赖 ARQ worker 常驻。"""
+async def test_create_recompute_job_uses_arq_without_inline_fallback(client, test_db, seed_admin_users, monkeypatch):
+    """Embedding 重算始终进入 ARQ，不能在 Web 进程内执行。"""
     monkeypatch.delenv("EMBEDDING_RECOMPUTE_USE_ARQ", raising=False)
 
     from app.routers.profile_pkg.embedding import _create_recompute_job
 
-    with patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()) as mock_run:
+    with patch(
+        "app.worker.enqueue_recompute_embedding_job",
+        new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-2")),
+    ) as mock_enqueue, patch("app.services.embedding_recompute.run_recompute", new=AsyncMock()) as mock_run:
         job_id = await _create_recompute_job(1)
-        await asyncio.sleep(0.1)  # 让 create_task 调度执行
 
     assert job_id is not None
-    assert mock_run.called
+    mock_enqueue.assert_awaited_once_with(job_id)
+    mock_run.assert_not_awaited()
+    assert _job_status(job_id) == "queued"
 
 
 async def test_recompute_updates_vectors_and_completes(client, test_db, seed_admin_users, monkeypatch):
@@ -182,11 +181,16 @@ async def test_recompute_failure_rolls_back_updated_rows(client, test_db, seed_a
 
         await run_recompute(job_id)
 
-    assert _job_status(job_id) == "failed"
+    # 第一次 worker 执行失败后回到 pending，由 dispatcher 按退避策略重试。
+    assert _job_status(job_id) == "pending"
     with get_db_connection() as conn:
+        job = conn.execute(
+            "SELECT last_error FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
         rows = conn.execute(
             "SELECT id, embedding, embedding_model FROM question_bank WHERE id >= 100 ORDER BY id"
         ).fetchall()
     for r in rows:
         assert r["embedding"] == old[r["id"]]
         assert r["embedding_model"] == "old"
+    assert job["last_error"] == "API 限流"

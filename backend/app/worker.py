@@ -74,6 +74,15 @@ async def enqueue_generate_answer_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_generate_recitation_job(job_id: int):
+    """将单道题的个人背诵稿任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("generate_recitation_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_interview_distribution_refresh(scope: str, job_position: str):
     """Queue a durable materialized-statistics refresh."""
     pool = await _get_redis_pool()
@@ -265,6 +274,30 @@ async def build_master_bank_task(ctx, job_id: int):
     from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
     from app.db.connection import get_db_connection
     from app.core.config import DB_PATH
+    from app.services.job_lifecycle import (
+        BUILD_MASTER_BANK_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim():
+        with get_db_connection() as conn:
+            claimed = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=BUILD_MASTER_BANK_JOB_TYPE,
+            )
+            conn.commit()
+            return bool(claimed)
+
+    if not await asyncio.to_thread(_claim):
+        logger.info("题库重建任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
 
     def _update_progress(current, total, message=''):
         with get_db_connection() as conn:
@@ -276,10 +309,10 @@ async def build_master_bank_task(ctx, job_id: int):
 
     def _mark_complete(status, result=None, error=None):
         with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (status, result, error, job_id)
-            )
+            if status == "completed":
+                complete_job(conn, job_id, worker_id, result=result)
+            else:
+                fail_job(conn, job_id, worker_id, error or "题库重建失败")
             conn.commit()
 
     try:
@@ -665,6 +698,60 @@ async def submit_import_task(ctx, job_id: int):
         _fail(str(e)[:500])
 
 
+async def _refresh_answer_batch_parent(parent_job_id: int):
+    """Finalize a batch parent after one child answer job changes state."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import ANSWER_BATCH_JOB_TYPE
+
+    def _refresh():
+        with get_db_connection() as conn:
+            parent = conn.execute(
+                "SELECT id FROM jobs WHERE id = ? AND job_type = ?",
+                (parent_job_id, ANSWER_BATCH_JOB_TYPE),
+            ).fetchone()
+            if not parent:
+                return
+            counts = conn.execute(
+                "SELECT "
+                "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, "
+                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed, "
+                "COUNT(*) AS total "
+                "FROM jobs WHERE parent_job_id = ?",
+                (parent_job_id,),
+            ).fetchone()
+            completed = int(counts["completed"] or 0)
+            failed = int(counts["failed"] or 0)
+            total = int(counts["total"] or 0)
+            if total and completed + failed == total:
+                status = "failed" if failed else "completed"
+                result = json.dumps(
+                    {"generated": completed, "failed": failed, "total": total},
+                    ensure_ascii=False,
+                )
+                conn.execute(
+                    "UPDATE jobs SET status = ?, progress_current = ?, progress_total = ?, "
+                    "result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('completed', 'failed')",
+                    (
+                        status,
+                        completed + failed,
+                        total,
+                        result,
+                        "批量答案生成存在失败题目" if failed else None,
+                        parent_job_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending', 'running')",
+                    (completed + failed, total, parent_job_id),
+                )
+            conn.commit()
+
+    await asyncio.to_thread(_refresh)
+
+
 async def generate_answer_task(ctx, job_id: int):
     """ARQ task: generate one answer with durable claim/retry semantics."""
     from app.db.connection import get_db_connection
@@ -687,7 +774,7 @@ async def generate_answer_task(ctx, job_id: int):
                 job_type=ANSWER_GENERATION_JOB_TYPE,
             )
             if not task:
-                return None, None
+                return None, None, None
             payload_row = conn.execute(
                 "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
             ).fetchone()
@@ -724,7 +811,7 @@ async def generate_answer_task(ctx, job_id: int):
     try:
         from app.services.submit_service import background_generate_answer
 
-        await background_generate_answer(
+        answer_result = await background_generate_answer(
             int(payload["question_id"]),
             payload["question_text"],
             payload.get("user_id"),
@@ -732,13 +819,129 @@ async def generate_answer_task(ctx, job_id: int):
         )
         _finish(
             json.dumps(
-                {"question_id": int(payload["question_id"])},
+                {
+                    "question_id": int(payload["question_id"]),
+                    **(answer_result or {}),
+                },
+                ensure_ascii=False,
+            )
+        )
+        if payload.get("parent_job_id"):
+            await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
+        return {"status": "completed", "job_id": job_id}
+    except Exception as exc:
+        logger.exception("答案生成任务失败: job_id=%s", job_id)
+        outcome = _fail(str(exc)[:500])
+        if payload.get("parent_job_id"):
+            await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
+        return {"status": outcome["status"], "job_id": job_id}
+
+
+async def generate_recitation_task(ctx, job_id: int):
+    """ARQ task: generate and persist one user's recitation answer."""
+    from app.db.connection import get_db_connection, run_db
+    from app.db.queries import get_user_job_position
+    from app.services.answer_enrichment import (
+        prepare_recitation_prompt,
+    )
+    from app.services.job_lifecycle import (
+        RECITATION_GENERATION_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+    from app.services.llm import _call_llm_with_retry
+    from app.services.resume_service import get_resume_text
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=RECITATION_GENERATION_JOB_TYPE,
+            )
+            if not task:
+                return None, None, None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            question = conn.execute(
+                "SELECT question, ai_answer FROM question_bank WHERE id = ?",
+                (int(json.loads(payload_row["payload"])["question_id"]),),
+            ).fetchone() if payload_row else None
+            conn.commit()
+            return (
+                dict(task),
+                json.loads(payload_row["payload"]) if payload_row else None,
+                dict(question) if question else None,
+            )
+
+    claimed, payload, question = await asyncio.to_thread(_claim_and_load)
+    if not claimed:
+        logger.info("背诵稿任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    def _finish(result=None):
+        with get_db_connection() as conn:
+            complete_job(conn, job_id, worker_id, result=result)
+            conn.commit()
+
+    def _fail(error):
+        with get_db_connection() as conn:
+            outcome = fail_job(conn, job_id, worker_id, error)
+            conn.commit()
+            return outcome
+
+    if not payload or not question or not question["ai_answer"]:
+        _fail("背诵稿任务数据不存在或公共答案为空")
+        return {"status": "failed", "job_id": job_id}
+
+    try:
+        user_id = int(payload["user_id"])
+        _, job_position = get_user_job_position(user_id)
+        resume_text = get_resume_text(user_id)
+        prompt, search_sources = await prepare_recitation_prompt(
+            question=question["question"],
+            reference_answer=question["ai_answer"],
+            job_position=job_position or "",
+            resume_text=resume_text,
+            user_id=user_id,
+        )
+        answer = await _call_llm_with_retry(prompt, user_id=user_id)
+
+        def _upsert():
+            with get_db_connection() as conn:
+                conn.execute(
+                    "INSERT INTO user_question_view "
+                    "(user_id, question_bank_id, user_answer, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET "
+                    "user_answer = ?, updated_at = CURRENT_TIMESTAMP",
+                    (user_id, int(payload["question_id"]), answer, answer),
+                )
+                conn.commit()
+
+        await run_db(_upsert)
+        from app.core.cache import invalidate_master_bank_cache
+
+        await invalidate_master_bank_cache()
+        _finish(
+            json.dumps(
+                {
+                    "question_id": int(payload["question_id"]),
+                    "answer": answer,
+                    "search_sources": search_sources,
+                },
                 ensure_ascii=False,
             )
         )
         return {"status": "completed", "job_id": job_id}
     except Exception as exc:
-        logger.exception("答案生成任务失败: job_id=%s", job_id)
+        logger.exception("背诵稿任务失败: job_id=%s", job_id)
         outcome = _fail(str(exc)[:500])
         return {"status": outcome["status"], "job_id": job_id}
 
@@ -833,7 +1036,10 @@ async def scheduled_submit_job_dispatch_task(ctx):
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
         ANSWER_GENERATION_JOB_TYPE,
+        BUILD_MASTER_BANK_JOB_TYPE,
         DISPATCHABLE_JOB_TYPES,
+        RECITATION_GENERATION_JOB_TYPE,
+        RECOMPUTE_EMBEDDING_JOB_TYPE,
         SUBMIT_IMPORT_JOB_TYPE,
         claim_dispatch_batch,
         mark_dispatch_failed,
@@ -851,6 +1057,9 @@ async def scheduled_submit_job_dispatch_task(ctx):
     enqueuers = {
         SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
         ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
+        BUILD_MASTER_BANK_JOB_TYPE: enqueue_build_job,
+        RECOMPUTE_EMBEDDING_JOB_TYPE: enqueue_recompute_embedding_job,
+        RECITATION_GENERATION_JOB_TYPE: enqueue_generate_recitation_job,
     }
     dispatched = 0
     failed = 0
@@ -1017,6 +1226,7 @@ class WorkerSettings:
         build_master_bank_task,
         submit_import_task,
         generate_answer_task,
+        generate_recitation_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
         scheduled_submit_job_dispatch_task,

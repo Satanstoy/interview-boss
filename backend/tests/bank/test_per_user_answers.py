@@ -123,25 +123,19 @@ class TestGenerateAnswerPerUser:
 
     @pytest.mark.asyncio
     async def test_generate_answer_admin_stores_in_global_table(self):
-        """管理员生成答案应存入 question_bank.ai_answer"""
+        """管理员生成答案应创建公共答案 ARQ 任务"""
         from app.routers.answers import generate_master_answer
 
         user = _mock_user(user_id=1, is_admin=True)
         mock_question = {"id": 10, "question": "什么是微服务？", "ai_answer": None}
 
-        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-            mock_run_db.side_effect = [mock_question, None]
-
-            with patch(
-                "app.routers.answers._call_llm_with_retry", new_callable=AsyncMock
-            ) as mock_llm:
-                mock_llm.return_value = "微服务是一种架构风格..."
-
-                result = await generate_master_answer(10, user)
-                assert result["status"] == "success"
-
-                # 验证 run_db 被调用了2次（get question, update question_bank）
-                assert mock_run_db.call_count == 2
+        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+             patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
+            mock_run_db.return_value = mock_question
+            mock_queue.return_value = {"status": "queued", "job_id": 11}
+            result = await generate_master_answer(10, user)
+            assert result == {"status": "queued", "job_id": 11}
+            mock_queue.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -154,7 +148,7 @@ class TestGenerateRecitation:
 
     @pytest.mark.asyncio
     async def test_recitation_normal_user_success(self):
-        """普通用户定制背诵稿应写入 user_question_view.user_answer"""
+        """普通用户定制背诵稿应创建个人 ARQ 任务"""
         from app.routers.answers import generate_recitation
 
         user = _mock_user(user_id=2, is_admin=False)
@@ -164,41 +158,15 @@ class TestGenerateRecitation:
             "ai_answer": "微服务是一种架构风格，将单体应用拆分为一组小型服务...",
         }
 
-        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
-            # get question, upsert uqv
-            mock_run_db.side_effect = [mock_question, None]
-
-            with patch(
-                "app.routers.answers.get_user_job_position",
-                return_value=(None, "后端开发"),
-            ):
-                with patch(
-                    "app.routers.answers.get_resume_text",
-                    return_value="做过支付系统项目",
-                ):
-                    with patch(
-                        "app.routers.answers.prepare_recitation_prompt",
-                        new_callable=AsyncMock,
-                    ) as mock_prompt:
-                        mock_prompt.return_value = ("recitation prompt", [])
-                        with patch(
-                            "app.routers.answers._call_llm_with_retry",
-                            new_callable=AsyncMock,
-                        ) as mock_llm:
-                            mock_llm.return_value = "结合我的项目经历，微服务架构..."
-
-                            result = await generate_recitation(10, user)
-                            assert result["status"] == "success"
-                            assert result["answer"] == "结合我的项目经历，微服务架构..."
-
-                            # 提示词必须基于公共参考答案构建，且携带用户岗位
-                            mock_prompt.assert_called_once()
-                            prompt_args = mock_prompt.call_args
-                            assert (
-                                prompt_args.kwargs.get("reference_answer")
-                                == mock_question["ai_answer"]
-                            )
-                            assert prompt_args.kwargs.get("job_position") == "后端开发"
+        with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+             patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
+            mock_run_db.return_value = mock_question
+            mock_queue.return_value = {"status": "queued", "job_id": 12}
+            result = await generate_recitation(10, user)
+            assert result == {"status": "queued", "job_id": 12}
+            mock_queue.assert_awaited_once_with(
+                "generate_recitation", 10, mock_question["question"], 2
+            )
 
     @pytest.mark.asyncio
     async def test_recitation_no_reference_answer_404(self):

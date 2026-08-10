@@ -53,6 +53,10 @@ async def background_generate_answer(
 
         await run_db(_update)
         logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
+        return {
+            "answer": answer,
+            "search_sources": search_sources,
+        }
     except Exception as e:
         logger.error(f"自动解答生成失败: [ID:{question_id}]: {e}")
 
