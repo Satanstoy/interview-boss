@@ -21,6 +21,11 @@ from app.services.resume_service import get_resume_text
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
 
+# 批量生成可能包含联网搜索、答案生成和质量修订，多次外部调用期间不能让
+# SSE 长时间没有任何字节；单题超时后继续处理其他题，确保流最终能收尾。
+_BATCH_SSE_HEARTBEAT_SECONDS = 15
+_BATCH_ANSWER_TIMEOUT_SECONDS = 300
+
 
 @router.put("/save-user-answer/{question_id}")
 async def save_user_answer(
@@ -233,6 +238,7 @@ async def batch_generate_answers(
     skipped = len(rows) - len(questions)
 
     async def event_stream():
+        pending_tasks: set[asyncio.Task] = set()
         try:
             if not questions:
                 yield f"data: {json.dumps({'type': 'done', 'generated': 0, 'failed': 0, 'skipped': skipped})}\n\n"
@@ -249,81 +255,119 @@ async def batch_generate_answers(
 
             semaphore = asyncio.Semaphore(3)
 
-            async def _gen_one(idx, qid, question_text):
-                nonlocal generated, failed, done_count
+            async def _build_answer(question_text):
+                prompt, search_sources = await prepare_answer_prompt(
+                    question_text, user_id=user["id"]
+                )
+                answer = await _call_llm_with_retry(prompt, user_id=user["id"])
+                answer, _ = await refine_answer(
+                    prompt, answer, search_sources, user_id=user["id"], max_rounds=1
+                )
+                return answer, search_sources
+
+            async def _build_answer_with_limit(question_text):
                 async with semaphore:
+                    return await _build_answer(question_text)
+
+            async def _mark_failed(qid):
+                def _update():
+                    with get_db_connection() as conn:
+                        conn.execute(
+                            "UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (qid,),
+                        )
+                        conn.commit()
+
+                await run_db(_update)
+
+            async def _gen_one(qid, question_text):
+                nonlocal generated, failed, done_count
+                try:
+                    # 只包住外部生成阶段，避免超时取消正在执行的数据库写入；
+                    # 信号量也放在 wait_for 内，排队等待时间同样受单题超时约束。
+                    answer, search_sources = await asyncio.wait_for(
+                        _build_answer_with_limit(question_text),
+                        timeout=_BATCH_ANSWER_TIMEOUT_SECONDS,
+                    )
+
+                    def _update():
+                        with get_db_connection() as conn:
+                            conn.execute(
+                                "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (answer, sources_json(search_sources), qid),
+                            )
+                            conn.commit()
+
+                    await run_db(_update)
+                    async with results_lock:
+                        generated += 1
+                        done_count += 1
+                        yield_event = json.dumps(
+                            {
+                                "type": "progress",
+                                "current": done_count,
+                                "total": total,
+                                "id": qid,
+                                "success": True,
+                            }
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"批量生成答案失败 [ID:{qid}]: {e}")
                     try:
-                        prompt, search_sources = await prepare_answer_prompt(
-                            question_text, user_id=user["id"]
+                        await _mark_failed(qid)
+                    except Exception:
+                        logger.exception(f"批量生成答案失败后标记失败状态异常 [ID:{qid}]")
+                    async with results_lock:
+                        failed += 1
+                        done_count += 1
+                        yield_event = json.dumps(
+                            {
+                                "type": "progress",
+                                "current": done_count,
+                                "total": total,
+                                "id": qid,
+                                "success": False,
+                            }
                         )
-                        answer = await _call_llm_with_retry(prompt, user_id=user["id"])
-                        answer, _ = await refine_answer(
-                            prompt, answer, search_sources, user_id=user["id"], max_rounds=1
-                        )
-
-                        def _update():
-                            with get_db_connection() as conn:
-                                conn.execute(
-                                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (answer, sources_json(search_sources), qid),
-                                )
-                                conn.commit()
-
-                        await run_db(_update)
-                        async with results_lock:
-                            generated += 1
-                            done_count += 1
-                            yield_event = json.dumps(
-                                {
-                                    "type": "progress",
-                                    "current": done_count,
-                                    "total": total,
-                                    "id": qid,
-                                    "success": True,
-                                }
-                            )
-                    except Exception as e:
-                        logger.error(f"批量生成答案失败 [ID:{qid}]: {e}")
-
-                        def _mark_failed():
-                            with get_db_connection() as conn:
-                                conn.execute(
-                                    "UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (qid,),
-                                )
-                                conn.commit()
-
-                        await run_db(_mark_failed)
-                        async with results_lock:
-                            failed += 1
-                            done_count += 1
-                            yield_event = json.dumps(
-                                {
-                                    "type": "progress",
-                                    "current": done_count,
-                                    "total": total,
-                                    "id": qid,
-                                    "success": False,
-                                }
-                            )
                 return yield_event
 
-            # 并发执行但按完成顺序收集事件
-            tasks = [
-                _gen_one(i, qid, qtext) for i, (qid, qtext) in enumerate(questions)
-            ]
-
-            for coro in asyncio.as_completed(tasks):
-                event_data = await coro
-                yield f"data: {event_data}\n\n"
+            # 用显式 Task + asyncio.wait，定期发 heartbeat，避免代理或前端误判连接断开。
+            pending_tasks = {
+                asyncio.create_task(_gen_one(qid, qtext))
+                for qid, qtext in questions
+            }
+            while pending_tasks:
+                completed, pending_tasks = await asyncio.wait(
+                    pending_tasks,
+                    timeout=_BATCH_SSE_HEARTBEAT_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not completed:
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    continue
+                for task in completed:
+                    event_data = task.result()
+                    yield f"data: {event_data}\n\n"
 
             yield f"data: {json.dumps({'type': 'done', 'generated': generated, 'failed': failed, 'skipped': skipped})}\n\n"
         except Exception as e:
             logger.exception("批量生成答案失败")
             yield f"data: {json.dumps({'type': 'error', 'message': f'生成失败: {str(e)[:200]}'})}\n\n"
+        finally:
+            # 客户端主动断开时及时取消未完成任务，避免后台继续消耗 LLM/搜索配额。
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={"X-Accel-Buffering": "no"},
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+        },
     )

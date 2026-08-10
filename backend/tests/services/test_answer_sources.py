@@ -1,3 +1,4 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,7 +67,11 @@ async def test_generate_answer_admin_writes_answer_sources():
                     new_callable=AsyncMock,
                 ) as mock_prep:
                     mock_prep.return_value = ("prompt", sources)
-                    result = await generate_master_answer(10, user)
+                    with patch(
+                        "app.routers.answers.refine_answer", new_callable=AsyncMock
+                    ) as mock_refine:
+                        mock_refine.return_value = ("微服务是一种架构风格...", [])
+                        result = await generate_master_answer(10, user)
 
     assert result["search_sources"] == sources
     sql, params = mock_conn.execute.call_args[0]
@@ -193,7 +198,12 @@ async def test_background_generate_answer_writes_answer_sources():
                     mock_conn.__enter__.return_value = mock_conn
                     mock_conn.__exit__.return_value = None
                     mock_get_conn.return_value = mock_conn
-                    await background_generate_answer(10, "什么是微服务？", user_id=1)
+                    with patch(
+                        "app.services.answer_enrichment.refine_answer",
+                        new_callable=AsyncMock,
+                    ) as mock_refine:
+                        mock_refine.return_value = ("答案内容", [])
+                        await background_generate_answer(10, "什么是微服务？", user_id=1)
 
     sql, params = mock_conn.execute.call_args[0]
     assert "answer_sources" in sql
@@ -230,12 +240,16 @@ async def test_batch_generate_writes_answer_sources():
                     new_callable=AsyncMock,
                 ) as mock_prep:
                     mock_prep.return_value = ("prompt", sources)
-                    req = BatchGenerateAnswersRequest(ids=[10])
-                    resp = await batch_generate_answers(req, user)
-                    # SSE StreamingResponse：驱动 event_stream 生成器消费事件
-                    chunks = []
-                    async for chunk in resp.body_iterator:
-                        chunks.append(chunk)
+                    with patch(
+                        "app.routers.answers.refine_answer", new_callable=AsyncMock
+                    ) as mock_refine:
+                        mock_refine.return_value = ("答案内容", [])
+                        req = BatchGenerateAnswersRequest(ids=[10])
+                        resp = await batch_generate_answers(req, user)
+                        # SSE StreamingResponse：驱动 event_stream 生成器消费事件
+                        chunks = []
+                        async for chunk in resp.body_iterator:
+                            chunks.append(chunk)
 
     assert "".join(chunks)  # SSE 流正常产出事件
     update_calls = [
@@ -245,6 +259,104 @@ async def test_batch_generate_writes_answer_sources():
     ]
     assert len(update_calls) == 1
     assert json.loads(update_calls[0].args[1][1]) == sources
+
+
+@pytest.mark.asyncio
+async def test_batch_generate_emits_heartbeat_and_done_for_slow_question():
+    """长耗时题目期间应保持 SSE 活跃，并在完成后发送 done。"""
+    from app.models.schemas import BatchGenerateAnswersRequest
+    from app.routers import answers as answers_router
+
+    user = {"id": 1, "is_admin": True}
+    rows = [{"id": 11, "question": "慢题", "ai_answer": None}]
+    sources = []
+
+    async def slow_prepare(*args, **kwargs):
+        await asyncio.sleep(0.02)
+        return "prompt", sources
+
+    async def consume(resp):
+        chunks = []
+        async for chunk in resp.body_iterator:
+            chunks.append(chunk)
+        return [
+            json.loads(line[6:])
+            for chunk in chunks
+            for line in (chunk.decode() if isinstance(chunk, bytes) else chunk).splitlines()
+            if line.startswith("data: ")
+        ]
+
+    with patch.object(answers_router, "_BATCH_SSE_HEARTBEAT_SECONDS", 0.001), \
+        patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+        patch("app.routers.answers.get_db_connection") as mock_get_conn, \
+        patch("app.routers.answers.prepare_answer_prompt", side_effect=slow_prepare), \
+        patch("app.routers.answers._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+        mock_run_db.side_effect = _exec
+        mock_llm.return_value = "答案内容"
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = None
+        mock_conn.execute.return_value.fetchall.return_value = rows
+        mock_get_conn.return_value = mock_conn
+
+        response = await answers_router.batch_generate_answers(
+            BatchGenerateAnswersRequest(ids=[11]), user
+        )
+        events = await consume(response)
+
+    assert events[0]["type"] == "init"
+    assert any(event["type"] == "heartbeat" for event in events)
+    assert events[-1]["type"] == "done"
+    assert events[-1]["generated"] == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_generate_marks_timed_out_question_failed_and_sends_done():
+    """单题生成卡死时应转为失败进度，不能阻塞整个 SSE 收尾。"""
+    from app.models.schemas import BatchGenerateAnswersRequest
+    from app.routers import answers as answers_router
+
+    user = {"id": 1, "is_admin": True}
+    rows = [{"id": 12, "question": "超时题", "ai_answer": None}]
+
+    async def hanging_llm(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return "不应落库的答案"
+
+    with patch.object(answers_router, "_BATCH_ANSWER_TIMEOUT_SECONDS", 0.001), \
+        patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+        patch("app.routers.answers.get_db_connection") as mock_get_conn, \
+        patch("app.routers.answers.prepare_answer_prompt", new_callable=AsyncMock) as mock_prep, \
+        patch("app.routers.answers._call_llm_with_retry", side_effect=hanging_llm):
+        mock_run_db.side_effect = _exec
+        mock_prep.return_value = ("prompt", [])
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = None
+        mock_conn.execute.return_value.fetchall.return_value = rows
+        mock_get_conn.return_value = mock_conn
+
+        response = await answers_router.batch_generate_answers(
+            BatchGenerateAnswersRequest(ids=[12]), user
+        )
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk)
+
+    events = [
+        json.loads(line[6:])
+        for chunk in chunks
+        for line in (chunk.decode() if isinstance(chunk, bytes) else chunk).splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events[-2]["type"] == "progress"
+    assert events[-2]["success"] is False
+    assert events[-1] == {
+        "type": "done",
+        "generated": 0,
+        "failed": 1,
+        "skipped": 0,
+    }
 
 
 @pytest.mark.asyncio
