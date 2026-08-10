@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洞察总览 · 趣味图候选对比 v2</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #1a1816; --fg-soft: #4a4540; --muted: #8f8881;
+    --accent: #6366f1; --accent-soft: #a5b4fc;
+    --green: #10b981; --amber: #f59e0b; --rose: #f43f5e; --slate: #94a3b8;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #e7e5e2; --fg-soft: #cfcac5; --muted: #8f8881;
+    --accent: #818cf8; --accent-soft: #6366f1;
+    --green: #34d399; --amber: #fbbf24; --rose: #fb7185; --slate: #64748b;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head .pos { font-size: 13px; color: var(--muted); }
+  .page-head h1 { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 640px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft);
+    cursor: pointer; font-family: inherit;
+  }
+  .theme-toggle:hover { border-color: var(--accent-soft); color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .cand {
+    border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+    box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 18px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .cand-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .cand-title { font-size: 16px; font-weight: 600; }
+  .cand-tag { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+  .cand-why { font-size: 12px; color: var(--muted); }
+  .cand-why b { color: var(--fg-soft); font-weight: 600; }
+  .cand-plot {
+    border: 1px solid var(--border); border-radius: 10px; background: var(--surface, var(--bg));
+    padding: 12px; display: flex; align-items: center; justify-content: center; min-height: 250px;
+  }
+  .cand-note { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+  .cand-note .lg { display: flex; align-items: center; gap: 5px; }
+  .cand-note .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .card-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+  .card-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .card-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <p class="pos">目标岗位：agent开发/大模型应用开发/大模型开发</p>
+      <h1>趣味图候选 · 对比挑选</h1>
+      <p class="sub">上一版（横向条形 + 双条对比）不够直观、占空间大。这里把 4 种更紧凑、更有趣的图用真实数据画出来并排对比，你挑一个（或组合）放进洞察总览。数据：岗位热度真实，熟练度为演示值。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <div class="grid">
+
+    <!-- ═══════════ 候选 1：技能星图 ═══════════ -->
+    <section class="cand">
+      <div class="cand-head">
+        <div class="cand-title">① 技能星图</div>
+        <span class="cand-tag">游戏化 · 最紧凑</span>
+      </div>
+      <p class="cand-why"><b>岗位为中心</b>，周围 8 个主题，<b>节点大小=被问热度，颜色=掌握状态</b>，右上角「已练 6/8」。一眼看懂岗位知识地图 + 自己覆盖了多少。</p>
+      <div class="cand-plot" id="starPlot"></div>
+      <div class="cand-note">
+        <span class="lg"><span class="dot" style="background:var(--green)"></span>熟练</span>
+        <span class="lg"><span class="dot" style="background:var(--amber)"></span>发展中</span>
+        <span class="lg"><span class="dot" style="background:var(--slate)"></span>未练</span>
+        <span>大小 = 被问热度</span>
+      </div>
+    </section>
+
+    <!-- ═══════════ 候选 2：四象限决策图 ═══════════ -->
+    <section class="cand">
+      <div class="cand-head">
+        <div class="cand-title">② 四象限决策图</div>
+        <span class="cand-tag">一张图做决策</span>
+      </div>
+      <p class="cand-why"><b>X=熟练度 Y=岗位热度</b>，气泡大小=题目数。左上「<b>重点突破</b>」= 高热度没练，是最该补的；右上「优势区」= 高热度又熟练。</p>
+      <div class="cand-plot" id="quadPlot"></div>
+      <div class="cand-note">
+        <span class="lg"><span class="dot" style="background:var(--rose)"></span>重点突破</span>
+        <span class="lg"><span class="dot" style="background:var(--green)"></span>优势</span>
+        <span class="lg"><span class="dot" style="background:var(--amber)"></span>可保持</span>
+        <span class="lg"><span class="dot" style="background:var(--slate)"></span>不急</span>
+      </div>
+    </section>
+
+    <!-- ═══════════ 候选 3：岗位知识词云 ═══════════ -->
+    <section class="cand">
+      <div class="cand-head">
+        <div class="cand-title">③ 岗位知识词云</div>
+        <span class="cand-tag">最直观</span>
+      </div>
+      <p class="cand-why">从 <b>JD 技术栈 + 高频主题</b> 提取关键词，字号=出现权重。一眼看到这个岗位到底要什么技术。</p>
+      <div class="cand-plot" id="cloudPlot"></div>
+      <div class="cand-note"><span>字号 = 岗位要求权重</span></div>
+    </section>
+
+    <!-- ═══════════ 候选 4：主题气泡 ═══════════ -->
+    <section class="cand">
+      <div class="cand-head">
+        <div class="cand-title">④ 主题气泡墙</div>
+        <span class="cand-tag">视觉冲击</span>
+      </div>
+      <p class="cand-why">每个主题一个<b>气泡，大小=被问热度，颜色=状态</b>。比条形图直观、比雷达图有趣，还能同时看十几个主题。</p>
+      <div class="cand-plot" id="bubblePlot"></div>
+      <div class="cand-note">
+        <span class="lg"><span class="dot" style="background:var(--green)"></span>熟练</span>
+        <span class="lg"><span class="dot" style="background:var(--amber)"></span>发展中</span>
+        <span class="lg"><span class="dot" style="background:var(--slate)"></span>未练</span>
+      </div>
+    </section>
+
+  </div>
+
+</div>
+
+<script>
+  /* ============ 真实数据（岗位热度真实；熟练度为演示值） ============ */
+  const themes = [
+    { name: "RAG系统设计",      heat: 42, skill: 62, q: 23 },
+    { name: "Agent架构与范式",  heat: 37, skill: 78, q: 19 },
+    { name: "评估安全与优化",   heat: 31, skill: null, q: 19 },
+    { name: "框架与中间件",     heat: 21, skill: 70, q: 18 },
+    { name: "数据库基础",       heat: 20, skill: 85, q: 15 },
+    { name: "缓存设计与优化",   heat: 17, skill: 50, q: 13 },
+    { name: "工具调用与协议",   heat: 16, skill: 75, q: 12 },
+    { name: "模型与框架选型",   heat: 15, skill: null, q: 13 },
+    { name: "记忆与上下文管理", heat: 13, skill: 58, q: 3 },
+    { name: "编程语言基础",     heat: 12, skill: 88, q: 16 },
+    { name: "AI Coding",        heat: 11, skill: 60, q: 6 },
+    { name: "Prompt工程",       heat: 10, skill: null, q: 3 },
+    { name: "算法手撕",         heat: 9,  skill: 82, q: 9 },
+    { name: "操作系统与网络",   heat: 8,  skill: 66, q: 7 },
+  ];
+  const maxHeat = 42;
+
+  function stateColor(skill) {
+    if (skill == null) return "var(--slate)";
+    if (skill >= 80) return "var(--green)";
+    if (skill >= 60) return "var(--amber)";
+    return "var(--rose)";
+  }
+  function stateLabel(skill) {
+    if (skill == null) return "未练";
+    if (skill >= 80) return "熟练";
+    if (skill >= 60) return "发展中";
+    return "待加强";
+  }
+
+  /* ---------- 候选 1：技能星图（SVG 中心 + 轨道节点） ---------- */
+  (function () {
+    const el = document.getElementById("starPlot");
+    const top = themes.slice(0, 8);
+    const done = top.filter(t => t.skill != null).length;
+    const S = 300, cx = 150, cy = 150, R = 88, n = top.length;
+    const pt = (i, r) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    };
+    let dots = "";
+    top.forEach((t, i) => {
+      const [x, y] = pt(i, R);
+      const r = 10 + (t.heat / maxHeat) * 14;  // 8~24
+      const short = t.name.length > 6 ? t.name.slice(0, 6) : t.name;
+      dots += '<g>' +
+        '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + stateColor(t.skill) + '" opacity=".9" stroke="var(--card)" stroke-width="2">' +
+        '<title>' + t.name + ' · 被问 ' + t.heat + ' 次 · ' + stateLabel(t.skill) + '</title></circle>' +
+        '<text x="' + x + '" y="' + (y + 3) + '" text-anchor="middle" font-size="8.5" fill="#fff" font-weight="600">' + short + '</text>' +
+        '</g>';
+    });
+    el.innerHTML =
+      '<svg viewBox="0 0 300 300" style="width:100%;max-width:270px">' +
+      '<circle cx="150" cy="150" r="100" fill="none" stroke="var(--grid)" stroke-width="1" stroke-dasharray="3 3"></circle>' +
+      '<circle cx="150" cy="150" r="64" fill="none" stroke="var(--grid)" stroke-width="1" stroke-dasharray="3 3"></circle>' +
+      top.map((t, i) => { const [x, y] = pt(i, R); return '<line x1="150" y1="150" x2="' + x + '" y2="' + y + '" stroke="var(--grid)" stroke-width="1"></line>'; }).join("") +
+      dots +
+      '<circle cx="150" cy="150" r="34" fill="var(--accent)" opacity=".12"></circle>' +
+      '<text x="150" y="144" text-anchor="middle" font-size="10" fill="var(--fg-soft)" font-weight="600">Agent开发</text>' +
+      '<text x="150" y="158" text-anchor="middle" font-size="8" fill="var(--muted)">' + done + '/8 已练</text>' +
+      '</svg>';
+  })();
+
+  /* ---------- 候选 2：四象限决策图 ---------- */
+  (function () {
+    const el = document.getElementById("quadPlot");
+    const W = 300, H = 300, pad = 34, innerW = W - pad * 2, innerH = H - pad * 2;
+    const skillMid = 65, heatMid = 20;
+    const X = s => pad + (s / 100) * innerW;             // 熟练度 0→100
+    const Y = h => pad + innerH - (h / maxHeat) * innerH; // 热度 高在上
+    // 象限底色
+    const quads = [
+      { x: X(0),     y: pad,              w: X(skillMid) - pad, h: Y(heatMid) - pad, c: "var(--rose)",  t: "重点突破" },
+      { x: X(skillMid), y: pad,           w: W - pad - X(skillMid), h: Y(heatMid) - pad, c: "var(--green)", t: "优势" },
+      { x: X(0),     y: Y(heatMid),       w: X(skillMid) - pad, h: H - pad - Y(heatMid), c: "var(--slate)", t: "不急" },
+      { x: X(skillMid), y: Y(heatMid),    w: W - pad - X(skillMid), h: H - pad - Y(heatMid), c: "var(--amber)", t: "可保持" },
+    ];
+    let svg = '';
+    quads.forEach(q => {
+      svg += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '" fill="' + q.c + '" opacity=".07" rx="6"></rect>' +
+        '<text x="' + (q.x + 6) + '" y="' + (q.y + 14) + '" font-size="9" fill="' + q.c + '" font-weight="600">' + q.t + '</text>';
+    });
+    // 分隔线
+    svg += '<line x1="' + X(skillMid) + '" y1="' + pad + '" x2="' + X(skillMid) + '" y2="' + (H - pad) + '" stroke="var(--grid)" stroke-dasharray="3 3"></line>';
+    svg += '<line x1="' + pad + '" y1="' + Y(heatMid) + '" x2="' + (W - pad) + '" y2="' + Y(heatMid) + '" stroke="var(--grid)" stroke-dasharray="3 3"></line>';
+    // 轴标签
+    svg += '<text x="' + (W / 2) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="var(--muted)">熟练度 →</text>';
+    svg += '<text x="14" y="' + (H / 2) + '" text-anchor="middle" font-size="10" fill="var(--muted)" transform="rotate(-90 14 ' + (H / 2) + ')">岗位热度 →</text>';
+    // 点
+    themes.forEach(t => {
+      const r = 5 + (t.q / 23) * 7;
+      svg += '<circle cx="' + X(t.skill == null ? 0 : t.skill) + '" cy="' + Y(t.heat) + '" r="' + r + '" fill="' + stateColor(t.skill) + '" stroke="var(--card)" stroke-width="1.5">' +
+        '<title>' + t.name + ' · 热度 ' + t.heat + ' · 熟练 ' + (t.skill == null ? "未练" : t.skill) + '</title></circle>';
+    });
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:270px">' + svg + '</svg>';
+  })();
+
+  /* ---------- 候选 3：词云（JD tech_stack + 主题） ---------- */
+  (function () {
+    const el = document.getElementById("cloudPlot");
+    const words = [
+      { t: "LangChain", w: 34 }, { t: "RAG", w: 30 }, { t: "Agent", w: 28 },
+      { t: "LangGraph", w: 24 }, { t: "Python", w: 26 }, { t: "多路召回", w: 20 },
+      { t: "Prompt工程", w: 22 }, { t: "记忆与上下文", w: 18 }, { t: "Re-ranking", w: 16 },
+      { t: "分布式", w: 15 }, { t: "MySQL", w: 14 }, { t: "Redis", w: 13 },
+      { t: "知识库", w: 15 }, { t: "工具调用", w: 17 }, { t: "API开发", w: 12 },
+      { t: "后端工程", w: 13 }, { t: "评估安全", w: 11 }, { t: "服务化部署", w: 11 },
+      { t: "工程化落地", w: 12 }, { t: "Neo4j", w: 9 }, { t: "MongoDB", w: 9 },
+      { t: "混合检索", w: 13 }, { t: "框架选型", w: 10 }, { t: "缓存", w: 8 },
+      { t: "算法", w: 8 },
+    ];
+    const accent = [ "var(--accent)", "var(--green)", "var(--amber)", "var(--rose)", "var(--slate)", "var(--fg-soft)" ];
+    const sorted = words.slice().sort((a, b) => b.w - a.w);
+    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 10px;padding:6px;max-width:320px">' +
+      sorted.map((w, i) => {
+        const size = Math.round(12 + (w.w / 34) * 16);
+        const color = i < 3 ? "var(--accent)" : accent[(i) % accent.length];
+        return '<span style="font-size:' + size + 'px;font-weight:' + (i < 4 ? 700 : 500) + ';color:' + color + ';line-height:1.5" title="权重 ' + w.w + '">' + w.t + '</span>';
+      }).join("") + '</div>';
+  })();
+
+  /* ---------- 候选 4：主题气泡墙 ---------- */
+  (function () {
+    const el = document.getElementById("bubblePlot");
+    // 按热度降序
+    const sorted = themes.slice().sort((a, b) => b.heat - a.heat);
+    const maxQ = 23;
+    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;padding:8px;max-width:320px">' +
+      sorted.map(t => {
+        const d = Math.round(44 + (t.heat / maxHeat) * 52);  // 44~96
+        const fs = t.name.length > 7 ? 9 : 11;
+        const short = t.name.length > 8 ? t.name.slice(0, 7) + "…" : t.name;
+        return '<div style="width:' + d + 'px;height:' + d + 'px;border-radius:50%;background:' + stateColor(t.skill) + ';display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:.92;position:relative" title="' + t.name + ' · 被问 ' + t.heat + ' 次 · ' + stateLabel(t.skill) + '">' +
+          '<span style="font-size:' + fs + 'px;color:#fff;font-weight:600;line-height:1.15;text-align:center;padding:0 4px">' + short + '</span>' +
+          '<span style="font-size:9px;color:rgba(255,255,255,.85);margin-top:1px">' + t.heat + '</span>' +
+          '</div>';
+      }).join("") + '</div>';
+  })();
+
+  /* ---------- 深浅色切换 ---------- */
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+  });
+</script>
+</body>
+</html>

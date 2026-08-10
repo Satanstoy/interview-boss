@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位准备度 · 双线雷达 v11</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #111111; --fg-soft: #333333; --muted: #8f8881;
+    --accent: #6366f1; --accent-strong: #4f46e5; --green: #10b981; --amber: #f59e0b;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #ffffff; --fg-soft: #e0e0e0; --muted: #8f8881;
+    --accent: #818cf8; --accent-strong: #a5b4fc; --green: #34d399; --amber: #fbbf24;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 700px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .guide {
+    display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 11px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent);
+    font-size: 13px; color: var(--fg-soft); line-height: 1.7;
+  }
+  .guide strong { color: var(--amber); font-weight: 600; }
+
+  .chart-wrap { margin-top: 12px; display: flex; justify-content: center; }
+  .legend { display: flex; gap: 18px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; justify-content: center; }
+  .legend .swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .line { width: 22px; height: 3px; border-radius: 2px; }
+
+  /* 下方补充列表（雷达只画 Top 8，其余主题列表） */
+  .rest-list { margin-top: 16px; }
+  .rest-head { font-size: 13px; font-weight: 600; color: var(--fg-soft); }
+  .rest-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .rest-row:last-child { border-bottom: 0; }
+  .rest-name { flex: 1; color: var(--fg); font-weight: 500; }
+  .rest-heat { color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位准备度 · 双线雷达 v11</h1>
+      <p class="sub">能力矩阵改为<b>双线雷达</b>：每根轴一个主题，外层「面经热度」（岗位要什么）+ 内层「我的熟练度」（你掌握什么），两条线之间的空当就是差距。数据为 sj 真实岗位热度，熟练度为演示。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">岗位准备度</div>
+    <p class="card-sub">Top 8 主题 · 外层 = 面经热度 · 内层 = 我的熟练度 · 空当越大越该补</p>
+
+    <!-- 无练习提示（真实当前状态） -->
+    <div class="guide">🎯 <strong>你还没有练习记录</strong>，所以「我的熟练度」线是空的。开始刷题后，内层会出现你的能力轮廓，两条线一对比就能看出哪根轴最该补。</div>
+
+    <div class="chart-wrap" id="radarPlot"></div>
+    <div class="legend">
+      <span class="swatch"><span class="line" style="background:#4f46e5"></span>岗位热度</span>
+      <span class="swatch"><span class="line" style="background:#10b981"></span>我的熟练度</span>
+    </div>
+
+    <!-- 其余主题列表 -->
+    <div class="rest-list">
+      <div class="rest-head">其余主题（面经热度）</div>
+      <div id="restList"></div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实数据（Top 8 主题：面经热度真实，熟练度演示） ============ */
+  const top8 = [
+    { name: "Agent架构", heat: 62, skill: 82 },
+    { name: "RAG系统设计", heat: 53, skill: 68 },
+    { name: "评估安全", heat: 41, skill: 0 },   // 演示：某轴没练 = 内层缩到 0
+    { name: "记忆管理", heat: 31, skill: 55 },
+    { name: "编程语言", heat: 30, skill: 90 },
+    { name: "数据库", heat: 29, skill: 85 },
+    { name: "项目介绍", heat: 28, skill: 40 },
+    { name: "工具调用", heat: 28, skill: 75 },
+  ];
+  const rest = [
+    { name: "框架与中间件", heat: 25 },
+    { name: "模型与框架选型", heat: 26 },
+    { name: "AI Coding", heat: 21 },
+    { name: "缓存与优化", heat: 21 },
+    { name: "高并发与限流", heat: 19 },
+    { name: "算法手撕", heat: 15 },
+  ];
+  const maxVal = 100;
+
+  function drawRadar() {
+    const el = document.getElementById("radarPlot");
+    const dark = document.body.getAttribute("data-theme") === "dark";
+    const grid = dark ? "#2e2a27" : "#f1efe9";
+    const muted = dark ? "#8f8881" : "#a8a29e";
+    const heatColor = dark ? "#a5b4fc" : "#4f46e5";
+    const skillColor = dark ? "#34d399" : "#10b981";
+    const n = top8.length;
+    const cx = 220, cy = 200, R = 150;
+    const pt = (i, r) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    };
+
+    let svg = '';
+    // 同心网格（25/50/75/100）
+    for (const f of [0.25, 0.5, 0.75, 1]) {
+      const pts = Array.from({ length: n }, (_, i) => pt(i, R * f).join(',')).join(' ');
+      svg += '<polygon points="' + pts + '" fill="none" stroke="' + grid + '" stroke-width="1"></polygon>';
+      svg += '<text x="' + (cx + R * f * Math.cos(-Math.PI/4)) + '" y="' + (cy + R * f * Math.sin(-Math.PI/4)) + '" font-size="8" fill="' + muted + '">' + Math.round(f * 100) + '</text>';
+    }
+    // 轴线 + 主题名
+    top8.forEach((d, i) => {
+      const [x, y] = pt(i, R);
+      svg += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x + '" y2="' + y + '" stroke="' + grid + '" stroke-width="1"></line>';
+      const [lx, ly] = pt(i, R + 18);
+      svg += '<text x="' + lx + '" y="' + (ly + 3) + '" text-anchor="middle" font-size="9" font-weight="600" fill="' + (dark ? '#e7e5e2' : '#111') + '">' + d.name + '</text>';
+    });
+    // 岗位热度线（外层）
+    const heatPts = top8.map((d, i) => pt(i, R * d.heat / maxVal).join(',')).join(' ');
+    svg += '<polygon points="' + heatPts + '" fill="' + heatColor + '" opacity=".12" stroke="' + heatColor + '" stroke-width="2"></polygon>';
+    // 我的熟练度线（内层）
+    const skillPts = top8.map((d, i) => pt(i, R * d.skill / maxVal).join(',')).join(' ');
+    svg += '<polygon points="' + skillPts + '" fill="' + skillColor + '" opacity=".12" stroke="' + skillColor + '" stroke-width="2" stroke-dasharray="4 2"></polygon>';
+
+    el.innerHTML = '<svg viewBox="0 0 440 400" style="width:100%;max-width:460px">' + svg + '</svg>';
+  }
+
+  function drawRest() {
+    const el = document.getElementById("restList");
+    el.innerHTML = rest.map(d =>
+      '<div class="rest-row"><span class="rest-name">' + d.name + '</span><span class="rest-heat">面经 ' + d.heat + ' 次</span></div>'
+    ).join("");
+  }
+
+  drawRadar();
+  drawRest();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+    drawRadar();
+  });
+</script>
+</body>
+</html>

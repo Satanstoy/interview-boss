@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洞察 v12 · 技能星图 + 双线雷达（porcelain）</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@6/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #F7F2EB; --card: #FFFFFF; --border: rgba(8,31,92,.10);
+    --fg: #081F5C; --muted: rgba(8,31,92,.60); --grid: rgba(8,31,92,.14);
+    --data: #334EAC; --data2: #7096D1; --faint: #BAD6EB; --quiet: rgba(8,31,92,.15);
+    --track: rgba(8,31,92,.12); --hero: #081F5C; --ok: #334EAC;
+    --dark-bg: #12306E; --dk1: #EDEFF1; --dk2: #D5DBE2; --dk3: #BCC7D7; --dk4: #9EB3CD;
+  }
+  body.dark {
+    --bg: #081F5C; --card: #0F2B66; --border: rgba(237,239,241,.16);
+    --fg: #EDEFF1; --muted: #BCC7D7; --grid: rgba(237,239,241,.14);
+    --data: #D5DBE2; --data2: #9EB3CD; --faint: #6C93C7; --quiet: rgba(237,239,241,.12);
+    --dark-bg: #12306E;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 32px 24px 60px; transition: background .3s; }
+  .wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+  .pagehead { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
+  .pagehead h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  .pagehead p { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .switch { font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; user-select: none; border: 1px solid var(--border); padding: 6px 12px; border-radius: 999px; background: var(--card); }
+  .card { background: var(--card); border-radius: 24px; padding: 24px; border: 1px solid var(--border); }
+  .card h2 { font-size: 16px; font-weight: 700; }
+  .card .sub { margin-top: 4px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .card .src { margin-top: 12px; font-size: 10px; letter-spacing: .12em; color: var(--muted); opacity: .75; }
+  .card.dark { background: var(--dark-bg); border: 1px solid rgba(237,239,241,.14); color: var(--dk1); }
+  .card.dark h2 { color: var(--dk1); }
+  .card.dark .sub { color: #C6D2E8; }
+  .card.dark .src { color: #8FA6C9; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .wide { grid-column: 1 / -1; }
+  .banner { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); background: rgba(51,78,172,.06); border: 1px solid rgba(51,78,172,.18); border-radius: 14px; padding: 10px 14px; }
+  .banner b { color: var(--data); }
+  .legend { display: flex; align-items: center; gap: 14px; font-size: 11px; color: var(--muted); }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .act { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
+  .act .tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: rgba(51,78,172,.12); color: var(--data); }
+  .act h3 { font-size: 13.5px; font-weight: 700; margin: 10px 0 6px; }
+  .act p { font-size: 12px; color: var(--muted); line-height: 1.65; }
+  .act a { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--data); text-decoration: none; }
+  .restlist { display: flex; flex-wrap: wrap; gap: 10px; }
+  .restitem { font-size: 12px; color: var(--muted); background: rgba(51,78,172,.06); border-radius: 999px; padding: 6px 14px; }
+  .restitem b { color: var(--data); font-weight: 700; }
+  .collapse { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px; font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 9px 10px; border-bottom: 1px solid rgba(8,31,92,.07); }
+  .status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .status.stable { background: rgba(51,78,172,.16); color: var(--data); }
+  .status.developing { background: rgba(112,150,209,.22); color: var(--data); }
+  .status.not_started, .status.needs_work { background: rgba(8,31,92,.08); color: var(--muted); }
+  .heatchart { display: flex; flex-direction: column; gap: 5px; overflow-x: auto; }
+  .heatrow { display: flex; gap: 5px; }
+  .heatcell { width: 13px; height: 13px; border-radius: 3px; }
+  .heatcell.h0 { background: rgba(8,31,92,.08); }
+  .heatcell.h1 { background: #D0E3FF; }
+  .heatcell.h2 { background: #9EBFEA; }
+  .heatcell.h3 { background: var(--data2); }
+  .heatcell.h4 { background: var(--data); }
+  .heatcell.h5 { background: var(--hero); }
+  .starchart { display: flex; justify-content: center; align-items: center; position: relative; }
+  .starchart svg { width: 100%; max-width: 720px; height: auto; }
+  .cover { position: absolute; top: 20px; right: 24px; font-size: 12px; font-weight: 700; color: var(--hero); background: rgba(51,78,172,.10); border: 1px solid rgba(51,78,172,.18); border-radius: 999px; padding: 4px 12px; }
+  .guide { font-size: 12.5px; color: var(--muted); text-align: center; margin-top: 8px; }
+  .radar-wrap { display: flex; justify-content: center; }
+  #starMap text, #radarSvg text { font-family: Inter, -apple-system, "PingFang SC", sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ═══════════════ 页头 ═══════════════ -->
+  <div class="pagehead">
+    <div>
+      <h1>洞察总览</h1>
+      <p>目标岗位：agent开发 / 大模型应用开发 / 大模型开发 · 236 题 · 9 JD · 42 面经</p>
+    </div>
+    <span class="switch" onclick="toggleDark()">切换深浅色</span>
+  </div>
+
+  <!-- ═══════════════ 技能星图（浅卡） ═══════════════ -->
+  <div class="card wide" data-testid="star-map">
+    <h2>岗位知识地图 — 你覆盖了多少</h2>
+    <div class="sub">节点大小与连线粗细 = 岗位被问热度 · 颜色 = 掌握状态（浅 = 未练 → 深 = 熟练）· 点击节点进入准备度详情</div>
+    <div class="cover">已练 6/8</div>
+    <div class="starchart" id="starMap"></div>
+    <div class="guide">先刷高热度主题命中率最高 —— RAG 系统设计被问 42 次，是当前第一大考点</div>
+    <div class="src">技能星图 · 节点大小与连线粗细 = 被问热度 · 颜色 = 掌握状态 · 数据：面经来源数（演示值）</div>
+  </div>
+
+  <!-- ═══════════════ 练习足迹 ═══════════════ -->
+  <div class="card wide" data-testid="footprint">
+    <h2>我的练习足迹</h2>
+    <div class="sub">近 90 天打卡分布 · 坚持每天刷题，图表会见证你的成长</div>
+    <div style="margin-top:16px; display:flex; flex-direction:column; gap:16px;">
+      <div class="heatchart" id="heatmap" data-testid="heatmap"></div>
+      <div class="legend"><span>少</span><span class="sw" style="background:rgba(8,31,92,.08)"></span><span class="sw" style="background:#D0E3FF"></span><span class="sw" style="background:#BAD6EB"></span><span class="sw" style="background:#7096D1"></span><span class="sw" style="background:#334EAC"></span><span class="sw" style="background:#081F5C"></span><span>多</span></div>
+    </div>
+    <div class="src">打卡热力图 · 近 90 天 · 数据：练习足迹（演示值）</div>
+  </div>
+
+  <div class="grid2">
+    <div class="card wide" data-testid="trend">
+      <h2>刷题趋势 — 量在涨，分在稳</h2>
+      <div class="sub">近 30 天 · 柱 = 练习次数 · 线 = 平均分</div>
+      <div id="trendChart" style="width:100%;height:220px;margin-top:8px;"></div>
+      <div class="src">柱 = 练习次数 · 线 = 平均分 · 数据：练习足迹（演示值）</div>
+    </div>
+    <div class="card" data-testid="difficulty">
+      <h2>难度分布 — 困难题是下一个突破口</h2>
+      <div class="sub">简单 → 困难 · 颜色深浅 = 难度</div>
+      <div id="difficultyChart" style="width:100%;height:220px;margin-top:8px;"></div>
+      <div class="src">环形 · 蓝阶明度 = 难度 · 数据：练习足迹（演示值）</div>
+    </div>
+    <div class="card" data-testid="radar">
+      <h2>主题熟练度 — 基础扎实，深度待补</h2>
+      <div class="sub">SRS 间隔复习熟练度 · Top 8 主题</div>
+      <div id="radarChart" style="width:100%;height:220px;margin-top:8px;"></div>
+      <div class="src">雷达 · 单线熟练度 · 数据：SRS 熟练度（演示值）</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 本周最该做 ═══════════════ -->
+  <div class="actions" data-testid="actions">
+    <div class="act"><span class="tag">优先</span><h3>D1. 缓存设计与优化</h3><p>已有练习记录，但平均分偏低（55 分），建议优先复练。</p><a href="#">去刷题 →</a></div>
+    <div class="act"><span class="tag">优先</span><h3>B6. 评估安全与优化</h3><p>岗位热度 31，尚未开始练习，从基础题开始建立覆盖。</p><a href="#">去刷题 →</a></div>
+    <div class="act"><span class="tag">可巩固</span><h3>B2. RAG 系统设计</h3><p>热度 42 全岗位最高，熟练度 62 还有提升空间。</p><a href="#">去刷题 →</a></div>
+  </div>
+
+  <div class="pagehead" style="margin-top:16px;">
+    <div>
+      <h1>岗位准备度</h1>
+      <p>岗位要什么（热度）× 你掌握什么（熟练度）· 空当越大越该补</p>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 双线雷达 ═══════════════ -->
+  <div class="card wide" data-testid="dual-radar">
+    <h2>能力差距 — 评估安全、模型选型是最大空当</h2>
+    <div class="sub">外圈 = 岗位热度（面经被问次数归一）· 内圈 = 我的熟练度（SRS，演示值）</div>
+    <div class="radar-wrap" id="radarSvg" style="margin-top:8px;"></div>
+    <div class="collapse" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'table' : 'none'">▸ 能力矩阵（22 主题全量明细）</div>
+    <table style="display:none;" data-testid="matrix">
+      <thead><tr><th>主题</th><th>题目</th><th>岗位热度</th><th>练习次数</th><th>平均分</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td>D1. 缓存设计与优化</td><td>13</td><td>17</td><td>5</td><td>55</td><td><span class="status needs_work">需要加强</span></td></tr>
+        <tr><td>B6. 评估安全与优化</td><td>8</td><td>31</td><td>0</td><td>—</td><td><span class="status not_started">未开始</span></td></tr>
+        <tr><td>B8. 模型与框架选型</td><td>6</td><td>15</td><td>0</td><td>—</td><td><span class="status not_started">未开始</span></td></tr>
+        <tr><td>B5. Prompt 工程</td><td>5</td><td>10</td><td>0</td><td>—</td><td><span class="status not_started">未开始</span></td></tr>
+        <tr><td>B2. RAG 系统设计</td><td>18</td><td>42</td><td>8</td><td>68</td><td><span class="status developing">进行中</span></td></tr>
+        <tr><td>C2. 框架与中间件</td><td>10</td><td>21</td><td>15</td><td>74</td><td><span class="status developing">进行中</span></td></tr>
+        <tr><td>B3. 工具调用与协议集成</td><td>9</td><td>16</td><td>9</td><td>78</td><td><span class="status developing">进行中</span></td></tr>
+        <tr><td>B1. Agent 架构与范式</td><td>16</td><td>37</td><td>12</td><td>82</td><td><span class="status stable">稳定</span></td></tr>
+      </tbody>
+    </table>
+    <div class="src" style="margin-top:12px;">双线雷达 · ECharts 原生雷达 · 热度 = 面经来源数 ÷ max ×100 · 数据：演示值</div>
+  </div>
+
+  <!-- ═══════════════ 其余主题 ═══════════════ -->
+  <div class="card" data-testid="rest-topics">
+    <h2>其余主题</h2>
+    <div class="sub">雷达只画热度 Top 8，其余 6 个主题不丢</div>
+    <div class="restlist" style="margin-top:14px;">
+      <span class="restitem">B4. 记忆与上下文管理 <b>13</b></span>
+      <span class="restitem">C1. 编程语言基础 <b>12</b></span>
+      <span class="restitem">B7. AI Coding 与代码智能 <b>11</b></span>
+      <span class="restitem">B5. Prompt 工程 <b>10</b></span>
+      <span class="restitem">E2. 算法手撕 <b>9</b></span>
+      <span class="restitem">C4. 操作系统与网络 <b>8</b></span>
+    </div>
+    <div class="src">数字 = 岗位热度（面经来源数）</div>
+  </div>
+
+</div>
+
+<script>
+const TOP8 = [
+  { name: "RAG系统设计", heat: 42, skill: 62, status: "developing" },
+  { name: "Agent架构", heat: 37, skill: 78, status: "stable" },
+  { name: "评估安全", heat: 31, skill: 0,  status: "not_started" },
+  { name: "框架中间件", heat: 21, skill: 70, status: "developing" },
+  { name: "数据库基础", heat: 20, skill: 85, status: "stable" },
+  { name: "缓存优化", heat: 17, skill: 50, status: "needs_work" },
+  { name: "工具调用", heat: 16, skill: 75, status: "developing" },
+  { name: "模型选型", heat: 15, skill: 0,  status: "not_started" },
+];
+const STYLE = {
+  hub: { dk: '#EDEFF1', light: '#081F5C', label: '#081F5C', labelDk: '#EDEFF1' },
+  statusColor: (st, dark) => ({
+    not_started: dark ? '#6C93C7' : '#BAD6EB',
+    developing: dark ? '#BCC7D7' : '#7096D1',
+    needs_work: dark ? '#D5DBE2' : '#7096D1',
+    stable: dark ? '#EDEFF1' : '#334EAC',
+  })[st],
+  statusBorder: (st, dark) => ({ not_started: dark ? '#9EB3CD' : '#334EAC', stable: dark ? '#EDEFF1' : '#081F5C' })[st] || '',
+};
+
+function dark() { return document.body.classList.contains('dark') }
+function toggleDark() { document.body.classList.toggle('dark'); renderAll(); }
+/* 默认浅色（与生产 shadcn 主题一致），深色仅作预览切换 */
+
+/* ════ 技能星图：手写 SVG，面积编码 = sqrt ════ */
+function renderStar() {
+  const isDark = dark();
+  const hub = TOP8.reduce((a, b) => a + b.heat, 0);
+  const R = 250, cx = 360, cy = 235;
+  const maxH = Math.max(...TOP8.map(t => t.heat));
+  const lw = t => 0.8 + t.heat / maxH * 1.8;
+  const nodeR = t => 8 + Math.sqrt(t.heat) * 3.2;
+  let s = `<svg viewBox="0 0 720 470" data-testid="star-svg">`;
+  s += `<circle cx="${cx}" cy="${cy}" r="74" fill="${isDark ? '#3472C2' : '#334EAC'}" opacity="${isDark ? 0.35 : 0.12}"></circle>`;
+  TOP8.forEach((t, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / TOP8.length;
+    const r = R * 0.82;
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    const col = STYLE.statusColor(t.status, isDark);
+    const stroke = STYLE.statusBorder(t.status, isDark) || (isDark ? 'rgba(237,239,241,.5)' : 'rgba(8,31,92,.25)');
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${isDark ? 'rgba(237,239,241,.22)' : 'rgba(8,31,92,.15)'}" stroke-width="${lw(t)}"></line>`;
+    s += `<circle cx="${x}" cy="${y}" r="${nodeR(t)}" fill="${col}" stroke="${stroke}" stroke-width="1.5" style="cursor:pointer"><title>${t.name} · 热度 ${t.heat} · ${t.status}</title></circle>`;
+    const lx = x + (x > cx ? nodeR(t) + 8 : x < cx ? -nodeR(t) - 8 : 0);
+    const tx = x > cx ? lx : x < cx ? lx : x;
+    const ty = y + 3.5;
+    s += `<text x="${tx}" y="${ty}" text-anchor="${x > cx ? 'start' : x < cx ? 'end' : 'middle'}" font-size="11" font-weight="700" fill="${isDark ? '#EDEFF1' : '#081F5C'}">${t.name}</text>`;
+    s += `<text x="${tx}" y="${ty + 12}" text-anchor="${x > cx ? 'start' : x < cx ? 'end' : 'middle'}" font-size="9" fill="${isDark ? '#9EB3CD' : 'rgba(8,31,92,.6)'}">${t.heat} 次</text>`;
+  });
+  s += `<circle cx="${cx}" cy="${cy}" r="56" fill="${isDark ? '#EDEFF1' : '#081F5C'}"></circle>`;
+  s += `<text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="14" font-weight="800" fill="${isDark ? '#081F5C' : '#EDEFF1'}">${hub} 次</text>`;
+  s += `<text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="9.5" fill="${isDark ? '#081F5C' : 'rgba(237,239,241,.85)'}">岗位总热度</text>`;
+  s += '</svg>';
+  document.getElementById('starMap').innerHTML = s;
+}
+
+/* ════ 打卡热力图：CSS grid，porcelain 5 档 ════ */
+function renderHeat() {
+  const days = 90, end = new Date('2026-08-07T00:00:00');
+  const counts = []; let seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  for (let i = 0; i < days; i++) { const p = rnd(); counts.push(p < .34 ? 0 : p < .58 ? 1 : p < .76 ? 2 : p < .9 ? 3 : 4 + (p > .965 ? 1 : 0)); }
+  let html = '';
+  for (let w = 0; w < 13; w++) {
+    html += '<div class="heatrow">';
+    for (let d = 0; d < 7; d++) {
+      const idx = days - 13 * 7 + w * 7 + d;
+      const c = idx >= 0 && idx < days ? counts[idx] : 0;
+      html += `<div class="heatcell h${c}"></div>`;
+    }
+    html += '</div>';
+  }
+  document.getElementById('heatmap').innerHTML = html;
+}
+
+/* ════ ECharts 共通 token（porcelain） ════ */
+function echBase(d) {
+  return {
+    tooltip: { confine: true, backgroundColor: d ? 'rgba(8,31,92,.95)' : 'rgba(255,255,255,.95)', borderColor: d ? '#3472C2' : 'rgba(8,31,92,.2)', textStyle: { color: d ? '#D5DBE2' : '#081F5C', fontSize: 12 } },
+    textStyle: { fontFamily: 'Inter, -apple-system, "PingFang SC", sans-serif' },
+  };
+}
+
+/* ════ 刷题趋势：柱(浅蓝) + 线(深蓝) ════ */
+function renderTrend() {
+  const d = dark();
+  const counts = [0,0,0,1,0,2,1,0,3,2,1,0,4,2,2,1,0,5,3,2,4,6,3,2,5,4,7,5,3,6];
+  const scores = [null,null,null,88,null,72,80,null,65,70,null,null,60,75,78,null,null,55,68,72,66,58,74,70,62,65,52,58,72,55];
+  const chart = echarts.init(document.getElementById('trendChart'));
+  chart.setOption({
+    ...echBase(d),
+    grid: { left: 8, right: 8, top: 24, bottom: 0, containLabel: true },
+    legend: { top: 0, textStyle: { color: d ? '#D5DBE2' : 'rgba(8,31,92,.6)', fontSize: 11 } },
+    xAxis: { type: 'category', data: Array.from({length:30},(_,i)=>`${i+1}日`), axisLine: { lineStyle: { color: d ? '#3472C2' : 'rgba(8,31,92,.25)' } }, axisLabel: { color: d ? '#9EB3CD' : 'rgba(8,31,92,.5)', fontSize: 10, interval: 6 }, axisTick: { show: false } },
+    yAxis: [
+      { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: d ? 'rgba(237,239,241,.12)' : 'rgba(8,31,92,.08)' } }, axisLabel: { color: d ? '#9EB3CD' : 'rgba(8,31,92,.5)', fontSize: 10 } },
+      { type: 'value', min: 0, max: 100, splitLine: { show: false }, axisLabel: { color: d ? '#9EB3CD' : 'rgba(8,31,92,.5)', fontSize: 10 } },
+    ],
+    series: [
+      { name: '练习次数', type: 'bar', data: counts, itemStyle: { color: d ? '#6C93C7' : '#7096D1', borderRadius: [3,3,0,0] }, barMaxWidth: 14 },
+      { name: '平均分', type: 'line', yAxisIndex: 1, smooth: true, data: scores, itemStyle: { color: d ? '#EDEFF1' : '#081F5C' }, lineStyle: { color: d ? '#EDEFF1' : '#081F5C', width: 2.5 }, symbolSize: 5, connectNulls: false },
+    ],
+    animationDuration: 900, animationEasing: 'quarticOut',
+  });
+}
+
+/* ════ 难度环形：蓝阶明度 = 难度 ════ */
+function renderDifficulty() {
+  const d = dark();
+  const data = [
+    { name: '简单', value: 35, color: d ? '#6C93C7' : '#D0E3FF' },
+    { name: '中等', value: 28, color: d ? '#9EB3CD' : '#7096D1' },
+    { name: '困难', value: 12, color: d ? '#EDEFF1' : '#081F5C' },
+    { name: '未标注', value: 5, color: d ? 'rgba(237,239,241,.22)' : 'rgba(51,78,172,.20)' },
+  ];
+  const total = data.reduce((a, b) => a + b.value, 0);
+  const chart = echarts.init(document.getElementById('difficultyChart'));
+  chart.setOption({
+    ...echBase(d),
+    tooltip: { ...echBase(d).tooltip, trigger: 'item', formatter: p => `${p.name}：${p.value} 次 · 正确率 ${[88,71,45,80][p.dataIndex]}%` },
+    series: [{
+      type: 'pie', radius: ['40%', '68%'], center: ['50%', '54%'], avoidLabelOverlap: true,
+      itemStyle: { borderRadius: 6, borderColor: d ? '#0F2B66' : '#FFFFFF', borderWidth: 2 },
+      label: { show: true, fontSize: 11, fontWeight: 700, color: d ? '#EDEFF1' : '#081F5C', formatter: '{b} {c} 次' },
+      labelLine: { show: true, length: 12, length2: 12 },
+      data,
+      animationDuration: 900, animationEasing: 'quarticOut',
+    }],
+  });
+}
+
+/* ════ 熟练度雷达：单线 porcelain ════ */
+function renderRadar() {
+  const d = dark();
+  const items = [
+    { name: '编程语言', v: 88 }, { name: '数据库', v: 85 }, { name: '算法手撕', v: 82 },
+    { name: 'Agent架构', v: 78 }, { name: '工具调用', v: 75 }, { name: '框架中间件', v: 70 },
+    { name: '操作系统', v: 66 }, { name: 'RAG系统', v: 62 },
+  ];
+  const chart = echarts.init(document.getElementById('radarChart'));
+  chart.setOption({
+    ...echBase(d),
+    radar: {
+      indicator: items.map(i => ({ name: i.name, max: 100 })),
+      radius: '68%', center: ['50%', '55%'],
+      splitNumber: 3,
+      axisName: { color: d ? '#D5DBE2' : 'rgba(8,31,92,.72)', fontSize: 10 },
+      splitLine: { lineStyle: { color: d ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.12)' } },
+      axisLine: { lineStyle: { color: d ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.12)' } },
+    },
+    series: [{
+      type: 'radar',
+      data: [{ name: '熟练度', value: items.map(i => i.v), areaStyle: { color: d ? 'rgba(237,239,241,.16)' : 'rgba(51,78,172,.16)' }, lineStyle: { color: d ? '#EDEFF1' : '#334EAC', width: 2.5 }, itemStyle: { color: d ? '#EDEFF1' : '#334EAC' }, symbolSize: 4 }],
+    }],
+    animationDuration: 900, animationEasing: 'quarticOut',
+  });
+}
+
+/* ════ 双线雷达：手写 SVG，热度/熟练度 ÷100 同轴 ════ */
+function renderDual() {
+  const isDark = dark();
+  const n = TOP8.length, cx = 300, cy = 235, R = 175;
+  const pt = (i, r) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+  const heatCol = isDark ? '#BCC7D7' : '#7096D1';
+  const skillCol = isDark ? '#EDEFF1' : '#081F5C';
+  let s = `<svg viewBox="0 0 600 470" id="dualRadarSvg" data-testid="dual-radar-svg">`;
+  for (const f of [0.25, 0.5, 0.75, 1]) {
+    const pts = Array.from({ length: n }, (_, i) => pt(i, R * f).join(',')).join(' ');
+    s += `<polygon points="${pts}" fill="none" stroke="${isDark ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.10)'}" stroke-width="1"></polygon>`;
+  }
+  TOP8.forEach((t, i) => {
+    const [x, y] = pt(i, R);
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${isDark ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.10)'}" stroke-width="1"></line>`;
+    const [lx, ly] = pt(i, R + 22);
+    s += `<text x="${lx}" y="${ly + 3}" text-anchor="middle" font-size="10" font-weight="700" fill="${isDark ? '#EDEFF1' : '#081F5C'}">${t.name}</text>`;
+    const [hx, hy] = pt(i, R * t.heat / 100);
+    s += `<text x="${hx + 6}" y="${hy - 6}" font-size="8.5" fill="${isDark ? '#9EB3CD' : 'rgba(8,31,92,.5)'}">${t.heat}</text>`;
+  });
+  const hp = TOP8.map((t, i) => pt(i, R * t.heat / 100).join(',')).join(' ');
+  s += `<polygon points="${hp}" fill="${heatCol}" fill-opacity=".12" stroke="${heatCol}" stroke-width="2.5" stroke-dasharray="none"></polygon>`;
+  const sp = TOP8.map((t, i) => pt(i, R * t.skill / 100).join(',')).join(' ');
+  s += `<polygon points="${sp}" fill="${skillCol}" fill-opacity=".06" stroke="${skillCol}" stroke-width="2.5" stroke-dasharray="5 4"></polygon>`;
+  s += '</svg>';
+  document.getElementById('radarSvg').innerHTML = s;
+}
+
+function renderAll() { renderStar(); renderHeat(); renderTrend(); renderDifficulty(); renderRadar(); renderDual(); }
+renderAll();
+window.addEventListener('resize', () => { if (window.__trend) window.__trend.resize(); });
+</script>
+</body>
+</html>

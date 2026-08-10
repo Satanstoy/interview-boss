@@ -1,0 +1,890 @@
+{
+  "snapshot": {
+    "version": 1,
+    "target_position": {
+      "name": "agent开发/大模型应用开发/大模型开发",
+      "source": "user_position"
+    },
+    "summary": {
+      "question_count": 236,
+      "jd_count": 9,
+      "interview_count": 42,
+      "practiced_question_count": 0,
+      "evaluated_answer_count": 0,
+      "evidence_state": "insufficient"
+    },
+    "actions": [
+      {
+        "id": "topic:B2.RAG系统设计",
+        "title": "B2.RAG系统设计",
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "question_count": 23,
+        "priority": "high",
+        "action": "开始练习"
+      },
+      {
+        "id": "topic:B1.Agent架构与范式",
+        "title": "B1.Agent架构与范式",
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "question_count": 19,
+        "priority": "high",
+        "action": "开始练习"
+      },
+      {
+        "id": "topic:B6.评估安全与优化",
+        "title": "B6.评估安全与优化",
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "question_count": 19,
+        "priority": "high",
+        "action": "开始练习"
+      }
+    ],
+    "readiness": {
+      "items": [
+        {
+          "id": "B2.RAG系统设计",
+          "name": "B2.RAG系统设计",
+          "question_count": 23,
+          "question_frequency": 42,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B1.Agent架构与范式",
+          "name": "B1.Agent架构与范式",
+          "question_count": 19,
+          "question_frequency": 37,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B6.评估安全与优化",
+          "name": "B6.评估安全与优化",
+          "question_count": 19,
+          "question_frequency": 31,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "其他",
+          "name": "其他",
+          "question_count": 18,
+          "question_frequency": 26,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "C2.框架与中间件",
+          "name": "C2.框架与中间件",
+          "question_count": 18,
+          "question_frequency": 21,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "C3.数据库基础",
+          "name": "C3.数据库基础",
+          "question_count": 15,
+          "question_frequency": 20,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B3.工具调用与协议集成",
+          "name": "B3.工具调用与协议集成",
+          "question_count": 12,
+          "question_frequency": 17,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B8.模型与框架选型",
+          "name": "B8.模型与框架选型",
+          "question_count": 13,
+          "question_frequency": 17,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "C1.编程语言基础",
+          "name": "C1.编程语言基础",
+          "question_count": 16,
+          "question_frequency": 17,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "D1.缓存设计与优化",
+          "name": "D1.缓存设计与优化",
+          "question_count": 13,
+          "question_frequency": 17,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "D2.高并发与限流",
+          "name": "D2.高并发与限流",
+          "question_count": 8,
+          "question_frequency": 13,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B4.记忆与上下文管理",
+          "name": "B4.记忆与上下文管理",
+          "question_count": 3,
+          "question_frequency": 11,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "A1.项目介绍与背景",
+          "name": "A1.项目介绍与背景",
+          "question_count": 8,
+          "question_frequency": 10,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "E1.数据结构",
+          "name": "E1.数据结构",
+          "question_count": 10,
+          "question_frequency": 10,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "E2.算法手撕",
+          "name": "E2.算法手撕",
+          "question_count": 9,
+          "question_frequency": 10,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B7.AI Coding与代码智能",
+          "name": "B7.AI Coding与代码智能",
+          "question_count": 6,
+          "question_frequency": 9,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "C4.操作系统与网络",
+          "name": "C4.操作系统与网络",
+          "question_count": 7,
+          "question_frequency": 9,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "A3.难点攻关与优化",
+          "name": "A3.难点攻关与优化",
+          "question_count": 4,
+          "question_frequency": 8,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "D3.分布式事务与一致性",
+          "name": "D3.分布式事务与一致性",
+          "question_count": 6,
+          "question_frequency": 6,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "A4.反思与改进",
+          "name": "A4.反思与改进",
+          "question_count": 3,
+          "question_frequency": 5,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "A2.系统架构设计",
+          "name": "A2.系统架构设计",
+          "question_count": 3,
+          "question_frequency": 4,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        },
+        {
+          "id": "B5.Prompt工程",
+          "name": "B5.Prompt工程",
+          "question_count": 3,
+          "question_frequency": 3,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "尚无个人练习记录"
+        }
+      ]
+    },
+    "reviews": {
+      "total": 0,
+      "items": []
+    },
+    "data_quality": {
+      "unassigned_question_count": 53,
+      "has_practice_evidence": false,
+      "message": "当前没有结构化练习评分，准备度仅基于岗位和题库事实。"
+    }
+  },
+  "practice_activity": {
+    "version": 1,
+    "heatmap": [
+      {
+        "date": "2026-05-10",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-11",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-12",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-13",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-14",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-15",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-16",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-17",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-18",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-19",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-20",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-21",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-22",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-23",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-24",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-25",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-26",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-27",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-28",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-29",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-30",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-05-31",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-01",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-02",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-03",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-04",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-05",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-06",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-07",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-08",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-09",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-10",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-11",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-12",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-13",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-14",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-15",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-16",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-17",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-18",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-19",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-20",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-21",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-22",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-23",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-24",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-25",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-26",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-27",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-28",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-29",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-06-30",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-01",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-02",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-03",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-04",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-05",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-06",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-07",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-08",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-09",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-10",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-11",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-12",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-13",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-14",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-15",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-16",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-17",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-18",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-19",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-20",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-21",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-22",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-23",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-24",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-25",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-26",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-27",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-28",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-29",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-30",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-31",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-01",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-02",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-03",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-04",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-05",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-06",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-07",
+        "count": 0,
+        "avg_score": 0
+      }
+    ],
+    "streak": {
+      "current": 0,
+      "longest": 0
+    },
+    "trend": [
+      {
+        "date": "2026-07-09",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-10",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-11",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-12",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-13",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-14",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-15",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-16",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-17",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-18",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-19",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-20",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-21",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-22",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-23",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-24",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-25",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-26",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-27",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-28",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-29",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-30",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-07-31",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-01",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-02",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-03",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-04",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-05",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-06",
+        "count": 0,
+        "avg_score": 0
+      },
+      {
+        "date": "2026-08-07",
+        "count": 0,
+        "avg_score": 0
+      }
+    ],
+    "radar": [],
+    "difficulty": [],
+    "recent": []
+  }
+}

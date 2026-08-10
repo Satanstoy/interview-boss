@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位重点知识 · 蜜蜂图优化 v4</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #1a1816; --fg-soft: #4a4540; --muted: #8f8881;
+    --accent: #6366f1; --green: #10b981; --amber: #f59e0b; --rose: #f43f5e; --slate: #94a3b8;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #e7e5e2; --fg-soft: #cfcac5; --muted: #8f8881;
+    --accent: #818cf8; --green: #34d399; --amber: #fbbf24; --rose: #fb7185; --slate: #64748b;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 680px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .guide {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+    font-size: 13px; color: var(--fg-soft);
+  }
+  .guide strong { color: var(--amber); font-weight: 600; }
+
+  .chart-wrap { margin-top: 14px; display: flex; justify-content: center; }
+  .legend { display: flex; gap: 16px; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+  .legend .dot.hollow { background: transparent; border: 2px solid var(--slate); }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位重点知识 · 蜜蜂图 v4</h1>
+      <p class="sub">无熟练度数据时四象限必然堆叠。方案：降级为 <b>beeswarm 蜜蜂图</b> —— 主题沿热度轴排布，副轴做确定性打包，点像蜜蜂群聚在一起但不重叠。等有练习数据后自动平滑切回四象限。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </section>
+
+  <section class="card">
+    <div class="card-title">岗位重点知识</div>
+    <p class="card-sub">热度越靠右越常被问 · 圆点越大题目越多 · 练过的主题会变绿并进入右上</p>
+
+    <div class="guide">🎯 <strong>你还没练习</strong>——现在这只看岗位热度分布。挑最右边的（RAG / Agent）开始练，练过的点会变实心绿点。</div>
+
+    <div class="chart-wrap" id="swarmPlot"></div>
+
+    <div class="legend">
+      <span><span class="dot hollow"></span>未练</span>
+      <span><span class="dot" style="background:var(--green)"></span>熟练</span>
+      <span>圆点大小 = 该主题题目数</span>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实 sj 数据（22 主题，全部未练） ============ */
+  const data = [
+    { name: "RAG系统设计", heat: 42, q: 23 }, { name: "Agent架构与范式", heat: 37, q: 19 },
+    { name: "评估安全与优化", heat: 31, q: 19 }, { name: "其他", heat: 26, q: 18 },
+    { name: "框架与中间件", heat: 21, q: 18 }, { name: "数据库基础", heat: 20, q: 15 },
+    { name: "工具调用与协议集成", heat: 17, q: 12 }, { name: "模型与框架选型", heat: 17, q: 13 },
+    { name: "编程语言基础", heat: 17, q: 16 }, { name: "缓存设计与优化", heat: 17, q: 13 },
+    { name: "高并发与限流", heat: 13, q: 9 }, { name: "记忆与上下文管理", heat: 11, q: 3 },
+    { name: "项目介绍与背景", heat: 10, q: 9 }, { name: "数据结构", heat: 10, q: 10 },
+    { name: "算法手撕", heat: 10, q: 9 }, { name: "AI Coding与代码智能", heat: 9, q: 6 },
+    { name: "操作系统与网络", heat: 9, q: 7 }, { name: "难点攻关与优化", heat: 8, q: 4 },
+    { name: "分布式事务与一致性", heat: 6, q: 6 }, { name: "反思与改进", heat: 5, q: 4 },
+    { name: "系统架构设计", heat: 4, q: 3 }, { name: "Prompt工程", heat: 3, q: 3 },
+  ];
+  const maxHeat = 42, maxQ = 23;
+
+  /* ---------- 确定性 strip 打包（同热度堆叠，必无重叠、必终止） ---------- */
+  const plot = { W: 640, H: 300, padL: 46, padR: 46, padT: 30, padB: 36 };
+  const plotW = plot.W - plot.padL - plot.padR, plotH = plot.H - plot.padT - plot.padB;
+  const rowH = 46;
+  const xOf = h => plot.padL + (h / maxHeat) * plotW;
+  const rOf = q => 12 + (q / maxQ) * 12;
+
+  function layout() {
+    const sorted = data.slice().sort((a, b) => b.heat - a.heat);
+    const placed = [];
+    for (const d of sorted) {
+      const r = rOf(d.q), x = xOf(d.heat);
+      let y = null;
+      for (let ri = 0; ri < 12; ri++) {
+        const yy = plot.padT + ri * rowH;
+        const clash = placed.some(p => Math.abs(p.x - x) < p.r + r + 2 && Math.abs(p.y - yy) < p.r + r + 2);
+        if (!clash) { y = yy; break; }
+      }
+      if (y === null) y = plot.padT;
+      placed.push({ x, y, r, d });
+    }
+    return placed;
+  }
+
+  function draw() {
+    const el = document.getElementById("swarmPlot");
+    const dark = document.body.getAttribute("data-theme") === "dark";
+    const grid = dark ? "#2e2a27" : "#f1efe9";
+    const muted = dark ? "#8f8881" : "#a8a29e";
+    const soft = dark ? "#cfcac5" : "#4a4540";
+    const W = plot.W, H = plot.H;
+
+    const pts = layout();
+
+    let svg = '';
+    // 背景网格（纵向热度刻度）
+    for (let h = 0; h <= 40; h += 10) {
+      const x = plot.padL + (h / maxHeat) * plotW;
+      svg += '<line x1="' + x + '" y1="' + plot.padT + '" x2="' + x + '" y2="' + (H - plot.padB) + '" stroke="' + grid + '" stroke-width="1"></line>';
+      svg += '<text x="' + x + '" y="' + (H - plot.padB + 14) + '" text-anchor="middle" font-size="9" fill="' + muted + '">' + h + '</text>';
+    }
+    svg += '<text x="' + (W / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" fill="' + muted + '">被问次数 →</text>';
+
+    // 点
+    pts.forEach(p => {
+      // 未练 = 空心灰；已练 = 实心绿（演示占位用透明度）
+      const practiced = p.d.practiced;
+      const fill = practiced ? "var(--green)" : "none";
+      const stroke = practiced ? "var(--green)" : "var(--slate)";
+      svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + p.r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (practiced ? 0 : 1.8) + '" opacity=".92">' +
+        '<title>' + p.d.name + ' · 被问 ' + p.d.heat + ' 次 · ' + p.d.q + ' 题</title></circle>';
+      // 主题短名（只给 top 6 标名，避免拥挤）
+      if (p.d.heat >= 17) {
+        const short = p.d.name.length > 8 ? p.d.name.slice(0, 7) + '…' : p.d.name;
+        svg += '<text x="' + p.x + '" y="' + (p.y - p.r - 4) + '" text-anchor="middle" font-size="8.5" font-weight="600" fill="' + soft + '">' + short + '</text>';
+      }
+    });
+
+    // 热度中位线标注
+    svg += '<text x="' + (plot.padL + (13 / maxHeat) * plotW) + '" y="' + (plot.padT + 10) + '" font-size="8.5" fill="' + muted + '">← 中位热度 13</text>';
+
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:700px">' + svg + '</svg>';
+  }
+
+  draw();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+    draw();
+  });
+</script>
+</body>
+</html>

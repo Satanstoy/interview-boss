@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位高频待练 v10</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #111111; --fg-soft: #333333; --muted: #8f8881;
+    --accent: #6366f1; --accent-strong: #4f46e5; --amber: #f59e0b; --green: #10b981;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #ffffff; --fg-soft: #e0e0e0; --muted: #8f8881;
+    --accent: #818cf8; --accent-strong: #a5b4fc; --amber: #fbbf24; --green: #34d399;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 680px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .insight {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    font-size: 13.5px; color: var(--fg); line-height: 1.7;
+  }
+  .insight .ic { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .insight strong { color: var(--accent-strong); font-weight: 700; }
+
+  /* 高频待练横向条形图 */
+  .hbar-list { margin-top: 14px; display: flex; flex-direction: column; }
+  .hbar-row { display: grid; grid-template-columns: 150px 1fr 56px; align-items: center; gap: 12px; padding: 9px 4px; }
+  .hbar-name { font-size: 13.5px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hbar-track { background: var(--chip); border-radius: 6px; height: 16px; overflow: hidden; }
+  .hbar-fill { height: 100%; border-radius: 6px; background: var(--accent); }
+  .hbar-fill.top1 { background: var(--accent-strong); }
+  .hbar-heat { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; text-align: right; }
+  .hbar-heat small { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  /* 今日该刷 */
+  .today-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+  .today-head .tt { font-size: 14px; font-weight: 600; }
+  .today-head .ts { font-size: 12px; color: var(--muted); }
+  .today-cta-btn { flex-shrink: 0; font-size: 12px; padding: 6px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--accent-strong); font-weight: 500; font-family: inherit; }
+  .today-list { margin-top: 8px; display: flex; flex-direction: column; }
+  .today-item { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+  .today-item:last-child { border-bottom: 0; }
+  .today-rank { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-strong); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .today-body { flex: 1; min-width: 0; }
+  .today-q { font-size: 13.5px; color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .today-tag { display: inline-block; font-size: 10px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-strong); margin-top: 2px; }
+  .today-heat { flex-shrink: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位高频待练 v10</h1>
+      <p class="sub">逻辑修正：该关注的是「<b>岗位高频考点</b>」—— 面经问得最多、你却还没练的，从这些开始刷。数据全为 sj 真实数据。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">岗位高频待练</div>
+    <p class="card-sub">面经里被问得最多的主题 · 你还没开始练，从这些优先开始</p>
+
+    <!-- 一句话洞察 -->
+    <div class="insight">
+      <span class="ic">🎯</span>
+      <div>你还没有练习记录。岗位面经最常考 <strong>Agent架构与范式(62次)</strong>、<strong>RAG系统设计(53次)</strong>、<strong>评估安全与优化(41次)</strong> —— 从这些开始刷，命中面试的概率最高。</div>
+    </div>
+
+    <!-- 高频待练横向条形图 -->
+    <div class="hbar-list" id="hbarList"></div>
+
+    <!-- 今日该刷：due 队列入口 -->
+    <div class="today-head">
+      <div class="tt">今日该刷 <span class="ts">来自「今日复习」队列 · 共 236 道待复习</span></div>
+      <button class="today-cta-btn">进入今日复习 →</button>
+    </div>
+    <div class="today-list" id="todayList"></div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实数据（面经 questions_detail 按 cat2 频次，降序） ============ */
+  const topics = [
+    { name: "Agent架构与范式", heat: 62 },
+    { name: "RAG系统设计", heat: 53 },
+    { name: "评估安全与优化", heat: 41 },
+    { name: "记忆与上下文管理", heat: 31 },
+    { name: "编程语言基础", heat: 30 },
+    { name: "数据库基础", heat: 29 },
+    { name: "工具调用与协议集成", heat: 28 },
+    { name: "框架与中间件", heat: 25 },
+    { name: "模型与框架选型", heat: 26 },
+    { name: "AI Coding与代码智能", heat: 21 },
+  ];
+  const TOP_N = 8;
+  const maxHeat = topics[0].heat;
+
+  function drawHbar() {
+    const el = document.getElementById("hbarList");
+    const top = topics.slice(0, TOP_N);
+    el.innerHTML = top.map((t, i) => {
+      const pct = (t.heat / maxHeat * 100).toFixed(1);
+      return '<div class="hbar-row">' +
+        '<div class="hbar-name" title="' + t.name + '">' + t.name + '</div>' +
+        '<div class="hbar-track"><div class="hbar-fill' + (i === 0 ? ' top1' : '') + '" style="width:' + pct + '%"></div></div>' +
+        '<div class="hbar-heat">' + t.heat + '<small> 次</small></div>' +
+      '</div>';
+    }).join("");
+  }
+
+  /* ============ 今日该刷（due 队列 top） ============ */
+  const todayQueue = [
+    { q: "Agent开发，记忆怎么进行管理，用什么结构", cat2: "记忆与上下文管理", freq: 6 },
+    { q: "详细介绍一下RAG的具体流程", cat2: "RAG系统设计", freq: 5 },
+    { q: "介绍一下React模式，它和CoT还有Plan模式的区别", cat2: "Agent架构与范式", freq: 4 },
+    { q: "为什么要有multi agent，与单agent对比", cat2: "Agent架构与范式", freq: 4 },
+    { q: "如何对Agent的产出做一个评估？", cat2: "评估安全与优化", freq: 4 },
+  ];
+  function drawToday() {
+    const el = document.getElementById("todayList");
+    el.innerHTML = todayQueue.map((t, i) => {
+      return '<div class="today-item">' +
+        '<div class="today-rank">' + (i + 1) + '</div>' +
+        '<div class="today-body">' +
+          '<div class="today-q">' + t.q + '</div>' +
+          '<span class="today-tag">' + t.cat2 + '</span>' +
+        '</div>' +
+        '<div class="today-heat">被问 ' + t.freq + '</div>' +
+        '<button class="today-cta-btn">去刷</button>' +
+      '</div>';
+    }).join("");
+  }
+
+  drawHbar();
+  drawToday();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+  });
+</script>
+</body>
+</html>

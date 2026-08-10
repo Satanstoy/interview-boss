@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聚合质量 · 确认表单 v4</title>
+<style>
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.457 0.24 277.023);
+    --primary-foreground: oklch(0.962 0.018 272.314);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --amber-500: oklch(0.769 0.188 70.08);
+    --radius: 0.625rem;
+    --radius-lg: calc(var(--radius) * 1.4);
+    --radius-xl: calc(var(--radius) * 1.8);
+    font-family: 'Figtree Variable', -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  }
+  [data-theme="dark"] {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.398 0.195 277.366);
+    --primary-foreground: oklch(0.962 0.018 272.314);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --amber-500: oklch(0.795 0.187 70.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--background); color: var(--foreground); min-height: 100vh; padding: 36px 24px 80px; transition: background .2s, color .2s; }
+  .page { max-width: 940px; margin: 0 auto; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 6px; }
+  .page-head h1 { font-size: 18px; font-weight: 650; }
+  .page-head p { font-size: 13px; color: var(--muted-foreground); margin-top: 4px; line-height: 1.6; }
+  .theme-toggle { background: var(--secondary); color: var(--secondary-foreground); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .section-label { display: flex; align-items: center; gap: 8px; margin: 40px 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--primary); }
+  .section-label .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+  .section-desc { font-size: 12px; color: var(--muted-foreground); margin: 0 0 14px; line-height: 1.6; }
+  .stage { position: relative; background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 36px 20px; }
+  .stage-note { position: absolute; top: 10px; left: 16px; font-size: 11px; color: var(--muted-foreground); opacity: .7; }
+
+  .list { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .row { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .row-main { min-width: 0; flex: 1; }
+  .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 500; }
+  .b-mismerge { background: color-mix(in oklch, var(--destructive) 15%, transparent); color: var(--destructive); }
+  .b-weak { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+  .b-action { background: var(--secondary); color: var(--secondary-foreground); }
+  .b-conf { color: var(--muted-foreground); font-size: 11px; padding: 0; }
+
+  /* 前后对照：操作前 → 操作后（只显示被处理的那道题） */
+  .cmp { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 10px; }
+  .cmp-side { min-width: 0; border-radius: 8px; padding: 10px 12px; }
+  .cmp-side .side-title { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; }
+  .cmp-before { background: var(--muted); border: 1px solid var(--border); }
+  .cmp-before .side-title { color: var(--muted-foreground); }
+  .cmp-after { background: color-mix(in oklch, var(--primary) 6%, transparent); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); }
+  .cmp-after .side-title { color: var(--primary); }
+  .cmp-arrow { display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-weight: 600; }
+
+  .item { padding-top: 6px; }
+  .item + .item { border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); margin-top: 6px; }
+  .item .ilbl { font-size: 10px; font-weight: 600; letter-spacing: .04em; margin-bottom: 2px; }
+  .item .itxt { font-size: 12px; line-height: 1.5; }
+  .item.rep .ilbl { color: var(--muted-foreground); }
+  .item.rep .itxt { font-weight: 550; color: var(--card-foreground); }
+  .item.q .itxt { color: var(--muted-foreground); font-size: 11px; }
+  .item.src .ilbl { color: var(--destructive); }
+  .item.src .itxt { color: var(--destructive); }
+  .note-tag { font-size: 10px; color: var(--muted-foreground); margin-top: 2px; }
+  .cmp-after .note-tag { color: color-mix(in oklch, var(--primary) 55%, var(--muted-foreground)); }
+
+  /* 操作后列：面经原题列表（供判断改写质量） */
+  .orig-list { border-top: 1px dashed color-mix(in oklch, var(--border) 70%, transparent); margin-top: 6px; padding-top: 6px; }
+  .orig-list .ol-title { font-size: 10px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 3px; }
+  .orig-list .ol-item { font-size: 11px; color: var(--muted-foreground); line-height: 1.45; padding-left: 10px; position: relative; }
+  .orig-list .ol-item::before { content: ''; position: absolute; left: 2px; top: 7px; width: 3px; height: 3px; border-radius: 50%; background: var(--muted-foreground); opacity: .5; }
+  .orig-list .ol-item + .ol-item { margin-top: 2px; }
+
+  .row-reason { margin-top: 10px; font-size: 11px; color: var(--muted-foreground); line-height: 1.5; }
+  .row-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .btn { font-size: 12px; padding: 6px 14px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; font-weight: 500; font-family: inherit; }
+  .btn-primary { background: var(--primary); color: var(--primary-foreground); }
+  .btn-outline { background: var(--background); border-color: var(--border); color: var(--card-foreground); }
+  .btn-outline:hover { background: var(--muted); }
+
+  .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .dialog { width: 100%; max-width: 480px; background: var(--popover); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 20px 25px -5px rgb(0 0 0 / .12); padding: 20px 22px; }
+  .dialog-title { font-size: 16px; font-weight: 600; }
+  .dialog-msg { margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+  .dialog-msg b { color: var(--card-foreground); font-weight: 550; }
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+  .assistant-bubble { max-width: 700px; margin: 0 auto; border-radius: var(--radius-xl); border-bottom-left-radius: 4px; border: 1px solid var(--border); background: var(--card); padding: 12px 14px; font-size: 14px; }
+  .assistant-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: var(--muted-foreground); }
+  .assistant-head svg { width: 13px; height: 13px; color: var(--primary); }
+  .assistant-text { line-height: 1.65; color: var(--card-foreground); }
+  .confirm-card { margin-top: 10px; padding: 12px; border-radius: var(--radius-lg); border: 1px solid color-mix(in oklch, var(--amber-500) 30%, transparent); background: color-mix(in oklch, var(--amber-500) 5%, transparent); }
+  .confirm-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .confirm-head svg { width: 13px; height: 13px; color: var(--amber-500); }
+  .confirm-label { font-size: 12px; font-weight: 600; color: var(--amber-500); }
+  .confirm-badges { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .confirm-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-sm { font-size: 11px; padding: 4px 12px; height: 24px; display: inline-flex; align-items: center; gap: 4px; }
+
+  .footer-note { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); line-height: 1.7; }
+  .footer-note code { font-family: ui-monospace, monospace; background: var(--muted); padding: 0 4px; border-radius: 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <h1>聚合质量 · 确认表单 v4</h1>
+        <p>操作后只显示被处理的那道题，不显示原代表题状态</p>
+      </div>
+      <button class="theme-toggle" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换深浅色</button>
+    </div>
+
+    <!-- ══ 入口 ① 审查清单 ══ -->
+    <div class="section-label"><span class="dot"></span> 审查清单</div>
+    <div class="section-desc">操作后列只显示被拆出/被并入的那道题去哪了，不重复原代表题。</div>
+
+    <div class="stage" style="padding-top: 44px;">
+      <span class="stage-note">设置 → 聚合质量 → 审查清单</span>
+      <div class="list">
+
+        <!-- 行 1：拆成独立题 -->
+        <div class="row">
+          <div class="row-top">
+            <div class="row-main">
+              <div class="badges">
+                <span class="badge b-mismerge">误合并</span>
+                <span class="badge b-action">拆成独立题</span>
+                <span class="badge b-conf">置信度 100%</span>
+              </div>
+              <div class="cmp">
+                <div class="cmp-side cmp-before">
+                  <div class="side-title">当前</div>
+                  <div class="item rep">
+                    <div class="ilbl">代表题</div>
+                    <div class="itxt">高并发的场景下，怎样做限流？</div>
+                  </div>
+                  <div class="item src">
+                    <div class="ilbl">面经原题</div>
+                    <div class="itxt">关于研究生方向，搞模型的吗？为什么没有延续该方向学习就业？</div>
+                  </div>
+                </div>
+                <div class="cmp-arrow">→</div>
+                <div class="cmp-side cmp-after">
+                  <div class="side-title">拆出后</div>
+                  <div class="item rep">
+                    <div class="ilbl">新独立题</div>
+                    <div class="itxt">结合你的研究生方向，为什么没有延续该方向学习就业？</div>
+                  </div>
+                </div>
+              </div>
+              <div class="row-reason">代表题考察技术方案（限流），该题考察个人学术/职业选择，考察点完全不同。</div>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-primary" onclick="openDialog('split')">批准</button>
+              <button class="btn btn-outline">拒绝</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 2：并入到其他题 -->
+        <div class="row">
+          <div class="row-top">
+            <div class="row-main">
+              <div class="badges">
+                <span class="badge b-mismerge">误合并</span>
+                <span class="badge b-action">并入到其他题</span>
+                <span class="badge b-conf">置信度 90%</span>
+              </div>
+              <div class="cmp">
+                <div class="cmp-side cmp-before">
+                  <div class="side-title">当前</div>
+                  <div class="item rep">
+                    <div class="ilbl">代表题</div>
+                    <div class="itxt">SDD和skills的区别</div>
+                  </div>
+                  <div class="item src">
+                    <div class="ilbl">面经原题</div>
+                    <div class="itxt">skill 和 prompt 区别</div>
+                  </div>
+                </div>
+                <div class="cmp-arrow">→</div>
+                <div class="cmp-side cmp-after">
+                  <div class="side-title">并入后</div>
+                  <div class="item rep">
+                    <div class="ilbl">并入目标题 #142</div>
+                    <div class="itxt">skill 与 prompt 的区别</div>
+                  </div>
+                </div>
+              </div>
+              <div class="row-reason">代表题考察软件开发方法论（SDD）与技能的区别，该题考察提示工程（prompt）与技能的区别，并入 #142 更合适。</div>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-primary" onclick="openDialog('merge')">批准</button>
+              <button class="btn btn-outline">拒绝</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 3：换成规范代表题 -->
+        <div class="row">
+          <div class="row-top">
+            <div class="row-main">
+              <div class="badges">
+                <span class="badge b-weak">代表题不规范</span>
+                <span class="badge b-action">换成规范代表题</span>
+                <span class="badge b-conf">置信度 70%</span>
+              </div>
+              <div class="cmp">
+                <div class="cmp-side cmp-before">
+                  <div class="side-title">当前</div>
+                  <div class="item rep">
+                    <div class="ilbl">代表题</div>
+                    <div class="itxt">上下文过长（上下文爆炸）要怎么处理，请你给出合理的解决方法</div>
+                  </div>
+                </div>
+                <div class="cmp-arrow">→</div>
+                <div class="cmp-side cmp-after">
+                  <div class="side-title">操作后</div>
+                  <div class="item rep">
+                    <div class="ilbl">代表题（新）</div>
+                    <div class="itxt">在 Agent 或 LLM 应用中，当输入上下文长度超过模型限制（token 溢出）时，有哪些常见的处理策略？请说明其原理与适用场景。</div>
+                    <div class="orig-list">
+                      <div class="ol-title">面经原题（该聚类实际问过）</div>
+                      <div class="ol-item">上下文过长（上下文爆炸）要怎么处理，请你给出合理的解决方法</div>
+                      <div class="ol-item">比如说滑动窗口设为7，这个是怎么进行压缩？是1-6轮对话压缩吗？还是第7轮对话压缩？</div>
+                      <div class="ol-item">摘要压缩总结是谁给总结的？每次调用都需要压缩吗？</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="row-reason">原题过于口语化且笼统，未能明确限定在 Agent/LLM 应用的技术场景。</div>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-primary" onclick="openDialog('refine')">批准</button>
+              <button class="btn btn-outline">拒绝</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ══ 入口 ② AI 助手 ══ -->
+    <div class="section-label"><span class="dot"></span> AI 助手 · 待确认操作卡片</div>
+    <div class="section-desc">同款结构：操作后只显示被处理的那道题。</div>
+
+    <div class="stage" style="padding-top: 44px;">
+      <span class="stage-note">设置 → 聚合质量 → AI 助手</span>
+      <div class="assistant-bubble">
+        <div class="assistant-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          AI 助手
+        </div>
+        <div class="assistant-text">我核查了 #14 的详情：代表题考察「限流技术方案」，该题聚焦个人学术/职业选择，考察点不同。建议把「关于研究生方向…」拆成独立题，请确认：</div>
+        <div class="confirm-card">
+          <div class="confirm-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span class="confirm-label">待确认操作</span>
+            <div class="confirm-badges">
+              <span class="badge b-mismerge">误合并</span>
+              <span class="badge b-action">拆成独立题</span>
+              <span class="badge b-conf">置信度 100%</span>
+            </div>
+          </div>
+          <div class="cmp">
+            <div class="cmp-side cmp-before">
+              <div class="side-title">当前</div>
+              <div class="item rep">
+                <div class="ilbl">代表题</div>
+                <div class="itxt">高并发的场景下，怎样做限流？</div>
+              </div>
+              <div class="item src">
+                <div class="ilbl">面经原题</div>
+                <div class="itxt">关于研究生方向，搞模型的吗？</div>
+              </div>
+            </div>
+            <div class="cmp-arrow">→</div>
+            <div class="cmp-side cmp-after">
+              <div class="side-title">拆出后</div>
+              <div class="item rep">
+                <div class="ilbl">新独立题</div>
+                <div class="itxt">结合你的研究生方向，为什么没有延续该方向学习就业？</div>
+              </div>
+            </div>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn btn-primary btn-sm">确认执行</button>
+            <button class="btn btn-outline btn-sm">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      <b>术语（全站统一）：</b>代表题 = 一道题最核心的题面；面经原题 = 从面经提取的原始问题。操作后列不显示原代表题状态，只显示被处理的那道题。<br>
+      <b>拆出：</b>右侧 = 新独立题（LLM 重写代表题）。<br>
+      <b>并入：</b>右侧 = 并入目标题 #142。<br>
+      <b>换代表题：</b>右侧 = 同一道题的新代表题。
+    </div>
+  </div>
+
+  <!-- ══ 纯确认门弹窗 ══ -->
+  <div class="overlay" id="dialogOverlay" style="display:none">
+    <div class="dialog" id="dialogBox"></div>
+  </div>
+
+<script>
+const ACTIONS = {
+  split: { title: '确认拆成独立题？', msg: '新独立题「结合你的研究生方向，为什么没有延续该方向学习就业？」（LLM 重写代表题）' },
+  merge: { title: '确认并入到其他题？', msg: '并入到目标题 #142「skill 与 prompt 的区别」' },
+  refine: { title: '确认换成规范代表题？', msg: '代表题换成「在 Agent 或 LLM 应用中…」' },
+}
+function openDialog(key) {
+  const a = ACTIONS[key]
+  document.getElementById('dialogBox').innerHTML = `
+    <div class="dialog-title">${a.title}</div>
+    <div class="dialog-msg">${a.msg}</div>
+    <div class="dialog-foot">
+      <button class="btn btn-outline" onclick="closeDialog()">取消</button>
+      <button class="btn btn-primary" onclick="closeDialog()">确认执行</button>
+    </div>`
+  document.getElementById('dialogOverlay').style.display = 'flex'
+}
+function closeDialog() { document.getElementById('dialogOverlay').style.display = 'none' }
+document.getElementById('dialogOverlay').addEventListener('click', e => { if (e.target.id === 'dialogOverlay') closeDialog() })
+</script>
+</body>
+</html>

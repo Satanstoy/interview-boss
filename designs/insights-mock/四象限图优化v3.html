@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洞察总览 · 四象限图优化 v3</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #1a1816; --fg-soft: #4a4540; --muted: #8f8881;
+    --accent: #6366f1; --accent-soft: #a5b4fc;
+    --green: #10b981; --amber: #f59e0b; --rose: #f43f5e; --slate: #94a3b8;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #e7e5e2; --fg-soft: #cfcac5; --muted: #8f8881;
+    --accent: #818cf8; --accent-soft: #6366f1;
+    --green: #34d399; --amber: #fbbf24; --rose: #fb7185; --slate: #64748b;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 640px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* 引导条 */
+  .guide {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+    font-size: 13px; color: var(--fg-soft);
+  }
+  .guide strong { color: var(--amber); font-weight: 600; }
+
+  /* 象限计数徽章 */
+  .quad-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+  .qstat { border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; }
+  .qstat .name { font-size: 12px; font-weight: 600; }
+  .qstat .num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .qstat.breakthrough { background: color-mix(in srgb, var(--rose) 10%, transparent); color: var(--rose); }
+  .qstat.advantage { background: color-mix(in srgb, var(--green) 10%, transparent); color: var(--green); }
+  .qstat.maintain { background: color-mix(in srgb, var(--amber) 10%, transparent); color: var(--amber); }
+  .qstat.low { background: color-mix(in srgb, var(--slate) 12%, transparent); color: var(--muted); }
+
+  .legend { display: flex; gap: 16px; align-items: center; margin-top: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+  .legend .dot.hollow { background: transparent; border: 2px solid var(--slate); }
+
+  .chart-wrap { display: flex; justify-content: center; margin-top: 8px; }
+  .bubble-note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>四象限图 · 优化版 v3</h1>
+      <p class="sub">解决「未练主题全部堆叠在左边」的问题。优化：未练主题在低熟练度区稳定散布（不重叠）、象限计数徽章、无练习引导条。数据为 sj 真实岗位（22 主题，尚未练习）。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <!-- ═══════ 优化后四象限图 ═══════ -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">岗位重点知识</h2>
+        <p class="card-sub">横轴 = 熟练度 · 纵轴 = 岗位热度 · 越靠右上越该优先攻下</p>
+      </div>
+    </div>
+
+    <!-- 无练习引导条（当 has_practice_evidence = false 时显示） -->
+    <div class="guide">🎯 <strong>你还没有练习记录</strong>，所以主题都堆在左侧未练区。先挑热度最高的练起来，「优势」区会慢慢出现你的强项。</div>
+
+    <!-- 象限计数徽章 -->
+    <div class="quad-stats">
+      <div class="qstat breakthrough"><span class="name">重点突破</span><span class="num">10</span></div>
+      <div class="qstat advantage"><span class="name">优势</span><span class="num">0</span></div>
+      <div class="qstat maintain"><span class="name">可保持</span><span class="num">0</span></div>
+      <div class="qstat low"><span class="name">不急</span><span class="num">12</span></div>
+    </div>
+
+    <!-- 四象限图（未练主题 jitter 散布，不堆叠） -->
+    <div class="chart-wrap" id="quadPlot" style="margin-top:6px"></div>
+    <div class="bubble-note">每个圆点是一个主题 · 未练 = 空心 · 熟练 = 实心</div>
+
+    <div class="legend">
+      <span><span class="dot hollow"></span>未练（12）</span>
+      <span><span class="dot" style="background:var(--green)"></span>熟练（0）</span>
+      <span>大小 = 被问热度</span>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实 sj 数据（22 主题，全部未练） ============ */
+  const data = [
+    { name: "RAG系统设计", heat: 42 }, { name: "Agent架构与范式", heat: 37 },
+    { name: "评估安全与优化", heat: 31 }, { name: "其他", heat: 26 },
+    { name: "框架与中间件", heat: 21 }, { name: "数据库基础", heat: 20 },
+    { name: "工具调用与协议集成", heat: 17 }, { name: "模型与框架选型", heat: 17 },
+    { name: "编程语言基础", heat: 17 }, { name: "缓存设计与优化", heat: 17 },
+    { name: "高并发与限流", heat: 13 }, { name: "记忆与上下文管理", heat: 11 },
+    { name: "项目介绍与背景", heat: 10 }, { name: "数据结构", heat: 10 },
+    { name: "算法手撕", heat: 10 }, { name: "AI Coding与代码智能", heat: 9 },
+    { name: "操作系统与网络", heat: 9 }, { name: "难点攻关与优化", heat: 8 },
+    { name: "分布式事务与一致性", heat: 6 }, { name: "反思与改进", heat: 5 },
+    { name: "系统架构设计", heat: 4 }, { name: "Prompt工程", heat: 3 },
+  ];
+  const maxHeat = 42;
+  const heatMid = 13;  // 热度中位数
+  const SKILL_LO = 8, SKILL_HI = 30;  // 未练主题的 jitter 范围（低熟练度区）
+
+  /* 稳定伪随机（不重叠）——按 name hash 生成 x 偏移，保证每次一致 */
+  function hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 997; return h; }
+
+  const W = 560, H = 400, padL = 48, padB = 40, padT = 16, padR = 16;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const X = s => padL + (s / 100) * plotW;
+  const Y = h => padT + plotH - (h / maxHeat) * plotH;
+  const skillMidX = X(50), heatMidY = Y(heatMid);
+
+  // 未练主题 jitter：按热度降序，在 x=8~30 区间均匀铺开（hash 微调防重叠）
+  const unstarted = data.slice().sort((a, b) => b.heat - a.heat);
+  const step = (SKILL_HI - SKILL_LO) / unstarted.length;
+
+  function drawQuad() {
+    const el = document.getElementById("quadPlot");
+    const dark = document.body.getAttribute("data-theme") === "dark";
+    const grid = dark ? "#2e2a27" : "#f1efe9";
+    const muted = dark ? "#8f8881" : "#a8a29e";
+    const soft = dark ? "#8f8881" : "#4a4540";
+
+    let svg = '';
+    // 象限底色
+    const quads = [
+      { x: padL, y: padT, w: skillMidX - padL, h: heatMidY - padT, c: "var(--rose)", label: "重点突破", sub: "高热度 · 还没练" },
+      { x: skillMidX, y: padT, w: W - padR - skillMidX, h: heatMidY - padT, c: "var(--green)", label: "优势", sub: "高热度 · 已掌握" },
+      { x: padL, y: heatMidY, w: skillMidX - padL, h: H - padB - heatMidY, c: "var(--slate)", label: "不急", sub: "低热度 · 还没练" },
+      { x: skillMidX, y: heatMidY, w: W - padR - skillMidX, h: H - padB - heatMidY, c: "var(--amber)", label: "可保持", sub: "低热度 · 已掌握" },
+    ];
+    quads.forEach(q => {
+      svg += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '" fill="' + q.c + '" opacity=".07" rx="8"></rect>' +
+        '<text x="' + (q.x + 8) + '" y="' + (q.y + 16) + '" font-size="10.5" font-weight="700" fill="' + q.c + '">' + q.label + '</text>' +
+        '<text x="' + (q.x + 8) + '" y="' + (q.y + 28) + '" font-size="9" fill="' + muted + '">' + q.sub + '</text>';
+    });
+    // 分隔线
+    svg += '<line x1="' + skillMidX + '" y1="' + padT + '" x2="' + skillMidX + '" y2="' + (H - padB) + '" stroke="' + grid + '" stroke-dasharray="3 3"></line>';
+    svg += '<line x1="' + padL + '" y1="' + heatMidY + '" x2="' + (W - padR) + '" y2="' + heatMidY + '" stroke="' + grid + '" stroke-dasharray="3 3"></line>';
+    // 轴标签
+    svg += '<text x="' + (W / 2) + '" y="' + (H - 14) + '" text-anchor="middle" font-size="10" fill="' + muted + '">熟练度 →</text>';
+    svg += '<text x="16" y="' + (H / 2) + '" text-anchor="middle" font-size="10" fill="' + muted + '" transform="rotate(-90 16 ' + (H / 2) + ')">岗位热度 →</text>';
+
+    // 未练主题（空心灰点，jitter 散布，按热度排）
+    unstarted.forEach((t, i) => {
+      const x = padL + (SKILL_LO + i * step) + (hash(t.name) % 5) - 2;
+      const y = Y(t.heat);
+      const r = 8 + (t.heat / maxHeat) * 10;
+      svg += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="none" stroke="var(--slate)" stroke-width="1.8" opacity=".85">' +
+        '<title>' + t.name + ' · 被问 ' + t.heat + ' 次 · 未练</title></circle>';
+      // 主题短名
+      const short = t.name.length > 8 ? t.name.slice(0, 7) + '…' : t.name;
+      svg += '<text x="' + x + '" y="' + (y - r - 3) + '" text-anchor="middle" font-size="8" fill="' + soft + '">' + short + '</text>';
+    });
+
+    // 熟练区（演示：若已练，实心彩色点）——这里无数据，放一个「+ 练习后这里会出现」占位
+    svg += '<circle cx="' + (W - 70) + '" cy="' + (padT + 26) + '" r="16" fill="var(--green)" opacity=".15"></circle>' +
+      '<text x="' + (W - 70) + '" y="' + (padT + 34) + '" text-anchor="middle" font-size="8.5" fill="var(--green)">练起来!</text>';
+
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:620px">' + svg + '</svg>';
+  }
+
+  drawQuad();
+
+  /* 深浅色切换 */
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+    drawQuad();
+  });
+</script>
+</body>
+</html>

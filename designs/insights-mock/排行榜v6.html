@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位重点知识 · 排行榜 v6</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #111111; --fg-soft: #333333; --muted: #8f8881;
+    --accent: #6366f1; --accent-strong: #4f46e5;
+    --amber: #f59e0b; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #ffffff; --fg-soft: #e0e0e0; --muted: #8f8881;
+    --accent: #818cf8; --accent-strong: #a5b4fc;
+    --amber: #fbbf24; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 660px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .guide {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--amber) 10%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+    font-size: 13px; color: var(--fg-soft);
+  }
+  .guide strong { color: var(--amber); font-weight: 600; }
+
+  /* ── 排行榜 ── */
+  .rank-list { margin-top: 14px; display: flex; flex-direction: column; }
+  .rank-row {
+    display: flex; align-items: center; gap: 14px; padding: 11px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .rank-row:last-child { border-bottom: 0; }
+  .rank-no { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; background: var(--chip); color: var(--muted); font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .rank-no.top1 { background: var(--accent-strong); color: #fff; }
+  .rank-no.top23 { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-strong); }
+  .rank-name { flex-shrink: 0; width: 150px; font-size: 14px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rank-bar-wrap { flex: 1; min-width: 0; }
+  .rank-bar { height: 16px; border-radius: 8px; background: var(--chip); overflow: hidden; }
+  .rank-bar-fill { height: 100%; border-radius: 8px; background: var(--accent); }
+  .rank-bar-fill.top1 { background: var(--accent-strong); }
+  .rank-heat { flex-shrink: 0; width: 78px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; }
+  .rank-heat small { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .rank-count { flex-shrink: 0; width: 52px; text-align: right; font-size: 12px; color: var(--muted); }
+
+  /* ── 今日该刷 ── */
+  .today-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+  .today-head .tt { font-size: 14px; font-weight: 600; }
+  .today-head .ts { font-size: 12px; color: var(--muted); }
+  .today-cta-btn { flex-shrink: 0; font-size: 12px; padding: 6px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--accent-strong); font-weight: 500; font-family: inherit; }
+  .today-list { margin-top: 8px; display: flex; flex-direction: column; }
+  .today-item { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+  .today-item:last-child { border-bottom: 0; }
+  .today-rank { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; background: var(--chip); color: var(--muted); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .today-rank.top { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-strong); }
+  .today-body { flex: 1; min-width: 0; }
+  .today-q { font-size: 13.5px; color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .today-tag { display: inline-block; font-size: 10px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-strong); margin-top: 2px; }
+  .today-heat { flex-shrink: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位重点知识 · 排行榜 v6</h1>
+      <p class="sub">不再用圆点图——「岗位最重要的知识」本质是排序，用最清晰的榜单表达。Top 6 主题按被问热度，每行一个，大字号、主题色进度条、高对比文字。数据全为 sj 真实数据。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">岗位重点知识</div>
+    <p class="card-sub">面经里出现越多的主题，面试越可能考 · 按被问次数排序</p>
+
+    <div class="guide">🎯 <strong>你还没练习</strong>——现在只看到岗位热度排名。从第一名开始刷，练过的会进入「优势区」。</div>
+
+    <div class="rank-list" id="rankList"></div>
+
+    <!-- 今日该刷：来自 due 队列 -->
+    <div class="today-head">
+      <div class="tt">今日该刷 <span class="ts">来自「今日复习」队列 · 共 236 道待复习</span></div>
+      <button class="today-cta-btn">进入今日复习 →</button>
+    </div>
+    <div class="today-list" id="todayList"></div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实 sj 数据（按被问热度降序） ============ */
+  const topics = [
+    { name: "RAG系统设计", heat: 42, q: 23 },
+    { name: "Agent架构与范式", heat: 37, q: 19 },
+    { name: "评估安全与优化", heat: 31, q: 19 },
+    { name: "框架与中间件", heat: 21, q: 18 },
+    { name: "数据库基础", heat: 20, q: 15 },
+    { name: "缓存设计与优化", heat: 17, q: 13 },
+    { name: "工具调用与协议集成", heat: 17, q: 12 },
+    { name: "编程语言基础", heat: 17, q: 16 },
+    { name: "模型与框架选型", heat: 17, q: 13 },
+  ];
+  const TOP_N = 6;
+  const maxHeat = topics[0].heat;
+
+  function drawRank() {
+    const el = document.getElementById("rankList");
+    const top = topics.slice(0, TOP_N);
+    el.innerHTML = top.map((t, i) => {
+      const pct = (t.heat / maxHeat * 100).toFixed(1);
+      const cls = i === 0 ? 'top1' : (i < 3 ? 'top23' : '');
+      return '<div class="rank-row">' +
+        '<div class="rank-no ' + cls + '">' + (i + 1) + '</div>' +
+        '<div class="rank-name">' + t.name + '</div>' +
+        '<div class="rank-bar-wrap"><div class="rank-bar"><div class="rank-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div></div>' +
+        '<div class="rank-heat">' + t.heat + '<small> 次</small></div>' +
+        '<div class="rank-count">' + t.q + '题</div>' +
+      '</div>';
+    }).join("");
+  }
+
+  /* ============ 今日该刷（due 队列 top） ============ */
+  const todayQueue = [
+    { q: "Agent开发，记忆怎么进行管理，用什么结构", cat2: "记忆与上下文管理", freq: 6 },
+    { q: "详细介绍一下RAG的具体流程", cat2: "RAG系统设计", freq: 5 },
+    { q: "介绍一下React模式，它和CoT还有Plan模式的区别", cat2: "Agent架构与范式", freq: 4 },
+    { q: "为什么要有multi agent，与单agent对比", cat2: "Agent架构与范式", freq: 4 },
+    { q: "如何对Agent的产出做一个评估？", cat2: "评估安全与优化", freq: 4 },
+  ];
+  function drawToday() {
+    const el = document.getElementById("todayList");
+    el.innerHTML = todayQueue.map((t, i) => {
+      return '<div class="today-item">' +
+        '<div class="today-rank' + (i < 2 ? ' top' : '') + '">' + (i + 1) + '</div>' +
+        '<div class="today-body">' +
+          '<div class="today-q">' + t.q + '</div>' +
+          '<span class="today-tag">' + t.cat2 + '</span>' +
+        '</div>' +
+        '<div class="today-heat">被问 ' + t.freq + '</div>' +
+        '<button class="today-cta-btn">去刷</button>' +
+      '</div>';
+    }).join("");
+  }
+
+  drawRank();
+  drawToday();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+  });
+</script>
+</body>
+</html>

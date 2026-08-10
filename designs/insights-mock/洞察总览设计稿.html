@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>洞察总览 · 设计稿 v1</title>
+<style>
+  /* ============ 设计 token（浅色默认，data-theme=dark 覆盖） ============ */
+  :root {
+    --bg: #faf9f7;
+    --card: #ffffff;
+    --border: #e8e4dd;
+    --fg: #1a1816;
+    --fg-soft: #4a4540;
+    --muted: #8f8881;
+    --accent: #6366f1;      /* 主题熟练度/主品牌 */
+    --accent-soft: #a5b4fc;
+    --green: #10b981;       /* 练习次数/稳定 */
+    --amber: #f59e0b;       /* 可巩固 */
+    --rose: #f43f5e;        /* 高优先/短板 */
+    --slate: #94a3b8;       /* 中性 */
+    --grid: #f1efe9;        /* 图表网格 */
+    --surface-soft: #f5f3ef;
+    --chip: #f1efe9;
+    --shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816;
+    --card: #221f1c;
+    --border: #2e2a27;
+    --fg: #e7e5e2;
+    --fg-soft: #cfcac5;
+    --muted: #8f8881;
+    --accent: #818cf8;
+    --accent-soft: #6366f1;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --rose: #fb7185;
+    --slate: #64748b;
+    --grid: #2e2a27;
+    --surface-soft: #26221f;
+    --chip: #2e2a27;
+    --shadow: 0 1px 2px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1200px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 24px; }
+
+  /* ============ header ============ */
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head .pos { font-size: 13px; color: var(--muted); }
+  .page-head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 560px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft);
+    cursor: pointer; font-family: inherit;
+  }
+  .theme-toggle:hover { border-color: var(--accent-soft); color: var(--accent); }
+
+  /* ============ 统计卡 ============ */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat {
+    border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+    padding: 16px; box-shadow: var(--shadow);
+  }
+  .stat .label { font-size: 12px; color: var(--muted); }
+  .stat .num { font-size: 26px; font-weight: 600; margin-top: 6px; }
+  .stat .num small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+
+  /* ============ 通用卡片 ============ */
+  .card { border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); padding: 20px; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+  .card-title { font-size: 16px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .section-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .section-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  /* ============ 一句话洞察条 ============ */
+  .insight-line {
+    display: flex; align-items: center; gap: 8px; margin-top: 14px;
+    border-radius: 10px; padding: 10px 14px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    font-size: 13px; color: var(--fg-soft);
+  }
+  .insight-line strong { color: var(--accent); font-weight: 600; }
+
+  /* ============ 图表公共 ============ */
+  .chart { margin-top: 16px; }
+  .legend { display: flex; gap: 16px; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+
+  /* ============ 横向条形图（岗位重点知识） ============ */
+  .hbar-row { display: grid; grid-template-columns: 190px 1fr 40px; align-items: center; gap: 10px; padding: 5px 0; }
+  .hbar-name { font-size: 12px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hbar-track { background: var(--grid); border-radius: 4px; height: 16px; overflow: hidden; position: relative; }
+  .hbar-fill { height: 100%; border-radius: 4px; transition: width .4s ease; }
+  .hbar-val { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; }
+  .top3 { color: var(--accent); font-weight: 600; }
+
+  /* ============ 热度 vs 熟练度 对比图 ============ */
+  .gap-row { display: grid; grid-template-columns: 170px 1fr 52px 1fr 44px; align-items: center; gap: 10px; padding: 7px 0; }
+  .gap-name { font-size: 12px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gap-track { background: var(--grid); border-radius: 4px; height: 13px; overflow: hidden; }
+  .gap-fill-heat { background: var(--accent-soft); height: 100%; }
+  .gap-fill-skill { background: var(--green); height: 100%; }
+  .gap-fill-none { background: var(--chip); height: 100%; }
+  .gap-label { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .gap-gap { font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .gap-badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; }
+  .gap-badge-prio { background: color-mix(in srgb, var(--rose) 14%, transparent); color: var(--rose); }
+  .gap-badge-none { background: var(--chip); color: var(--muted); }
+
+  /* ============ 练习足迹：热力图 ============ */
+  .heatmap { display: grid; grid-template-columns: repeat(26, 1fr); gap: 3px; margin-top: 8px; }
+  .hm-cell { aspect-ratio: 1; border-radius: 3px; background: var(--grid); }
+  .hm-0 { background: var(--grid); }
+  .hm-1 { background: #dcfce7; }
+  .hm-2 { background: #6ee7b7; }
+  .hm-3 { background: #34d399; }
+  .hm-4 { background: var(--green); }
+  [data-theme="dark"] .hm-1 { background: #14532d; }
+  [data-theme="dark"] .hm-2 { background: #166534; }
+  [data-theme="dark"] .hm-3 { background: #047857; }
+  [data-theme="dark"] .hm-4 { background: var(--green); }
+
+  /* ============ 连击卡 ============ */
+  .streak-card { display: flex; flex-direction: column; justify-content: center; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); padding: 20px; }
+  .streak-big { font-size: 34px; font-weight: 700; color: var(--green); line-height: 1.1; }
+  .streak-sub { font-size: 12px; color: var(--muted); }
+  .streak-cta { margin-top: 10px; font-size: 13px; color: var(--accent); font-weight: 500; }
+
+  /* ============ 难度环形 ============ */
+  .donut-wrap { display: flex; align-items: center; gap: 20px; }
+  .donut { width: 128px; height: 128px; border-radius: 50%; flex-shrink: 0; }
+  .donut-legend { font-size: 12px; color: var(--fg-soft); display: flex; flex-direction: column; gap: 6px; }
+  .donut-legend .row { display: flex; align-items: center; gap: 6px; }
+  .donut-legend .val { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ============ 雷达 ============ */
+  .radar-wrap { display: flex; align-items: center; justify-content: center; }
+
+  /* ============ 趋势（柱 + 线） ============ */
+  .trend { position: relative; margin-top: 8px; }
+  .trend-bars { display: flex; align-items: flex-end; gap: 2px; height: 150px; }
+  .trend-bar { flex: 1; background: color-mix(in srgb, var(--green) 75%, transparent); border-radius: 3px 3px 0 0; }
+  .trend-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  /* ============ 时间线 ============ */
+  .tl-item { display: flex; align-items: flex-start; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .tl-item:last-child { border-bottom: 0; }
+  .tl-badge { flex-shrink: 0; font-size: 10px; padding: 2px 8px; border-radius: 6px; margin-top: 1px; }
+  .tl-badge-answer { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .tl-badge-review { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+  .tl-body { min-width: 0; flex: 1; }
+  .tl-q { font-size: 13px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .tl-score { flex-shrink: 0; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 500; }
+
+  /* ============ 行动卡 ============ */
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .action { border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--card) 85%, var(--bg)); padding: 16px; }
+  .action-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .action-title { font-size: 14px; font-weight: 500; }
+  .action-desc { font-size: 13px; line-height: 1.7; color: var(--muted); margin-top: 8px; min-height: 44px; }
+  .action-cta { margin-top: 10px; font-size: 13px; color: var(--accent); font-weight: 500; }
+  .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; flex-shrink: 0; }
+  .pill-prio { background: color-mix(in srgb, var(--rose) 14%, transparent); color: var(--rose); }
+  .pill-keep { background: var(--chip); color: var(--muted); }
+
+  /* ============ 响应式 ============ */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  @media (max-width: 900px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .actions { grid-template-columns: 1fr; }
+    .gap-row { grid-template-columns: 110px 1fr; }
+    .hbar-row { grid-template-columns: 120px 1fr 36px; }
+  }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <!-- ============ 顶部 ============ -->
+  <header class="page-head">
+    <div>
+      <p class="pos">目标岗位：agent开发/大模型应用开发/大模型开发</p>
+      <h1>洞察总览</h1>
+      <p class="sub">把岗位、题库和个人练习证据整理成下一步准备任务。先看岗位要什么，再看差距在哪，最后落地行动。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <!-- ============ 统计卡 ============ -->
+  <div class="stats">
+    <div class="stat"><div class="label">岗位 JD</div><div class="num">9<small>份</small></div></div>
+    <div class="stat"><div class="label">面经题目</div><div class="num">42<small>条</small></div></div>
+    <div class="stat"><div class="label">题库覆盖</div><div class="num">236<small>题</small></div></div>
+    <div class="stat"><div class="label">已练题目</div><div class="num">106<small>题</small></div></div>
+  </div>
+
+  <!-- ============ ① 岗位重点知识（新趣味图） ============ -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">岗位重点知识</h2>
+        <p class="card-sub">按「被问次数」排序 —— 面经里出现越多的主题，面试越可能考。</p>
+      </div>
+    </div>
+    <div class="chart" id="importanceChart"><!-- 由 JS 注入 --></div>
+    <div class="insight-line">💡 <strong>B2.RAG系统设计</strong> 是你岗位最常被问的主题（42 次），其次是 <strong>Agent架构与范式</strong>（37 次）和 <strong>评估安全与优化</strong>（31 次）。</div>
+    <div class="legend"><span><span class="dot" style="background:var(--accent)"></span>最常被问（TOP 3）</span><span><span class="dot" style="background:var(--accent-soft)"></span>高频主题</span></div>
+  </section>
+
+  <!-- ============ ② 热度 vs 熟练度 对比图（新） ============ -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">能力差距</h2>
+        <p class="card-sub">上面是岗位对你的期望（被问热度），下面是你目前的熟练度 —— 中间的空当就是最该补的地方。</p>
+      </div>
+    </div>
+    <div class="chart" id="gapChart"><!-- 由 JS 注入 --></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--accent-soft)"></span>岗位热度</span>
+      <span><span class="dot" style="background:var(--green)"></span>我的熟练度</span>
+      <span><span class="dot" style="background:var(--chip)"></span>未开始</span>
+    </div>
+    <div class="insight-line">🎯 高热度但还没练的：<strong>评估安全与优化</strong>（31 次被问，未练）、<strong>模型与框架选型</strong>（15 次，未练）。已练但分偏低的：<strong>缓存设计与优化</strong>（55 分）。</div>
+  </section>
+
+  <!-- ============ ③ 我的练习足迹（原图区整体前移） ============ -->
+  <section style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px">
+      <div>
+        <h2 class="section-title">我的练习足迹</h2>
+        <p class="section-sub">坚持每天刷题，图表会见证你的成长。</p>
+      </div>
+      <button class="theme-toggle" type="button">去刷题 →</button>
+    </div>
+
+    <div class="grid-3">
+      <!-- 热力图 -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:14px">打卡热力图</h3>
+        <p class="card-sub">近 90 天</p>
+        <div class="heatmap" id="heatmap"><!-- JS --></div>
+      </div>
+      <!-- 连击卡 -->
+      <div class="streak-card">
+        <div class="card-sub">当前连续打卡</div>
+        <div class="streak-big">3 <span style="font-size:16px;color:var(--muted)">天</span></div>
+        <div class="streak-sub">最长连击 9 天 · 今天已打卡</div>
+        <div class="streak-cta">去刷题保持手感 →</div>
+      </div>
+
+      <!-- 趋势 -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:14px">刷题趋势</h3>
+        <p class="card-sub">近 30 天练习量与平均分</p>
+        <div class="trend" id="trendChart"><!-- JS --></div>
+      </div>
+      <!-- 难度 -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:14px">难度分布</h3>
+        <p class="card-sub">各难度练习次数与正确率</p>
+        <div class="donut-wrap" style="margin-top:12px">
+          <div class="donut" id="donut" style="background:conic-gradient(#10b981 0 43.75%, #f59e0b 43.75% 78.75%, #f43f5e 78.75% 93.75%, #94a3b8 93.75% 100%)"></div>
+          <div class="donut-legend">
+            <div class="row"><span class="dot" style="background:#10b981"></span>简单 <span class="val">35 · 88%</span></div>
+            <div class="row"><span class="dot" style="background:#f59e0b"></span>中等 <span class="val">28 · 71%</span></div>
+            <div class="row"><span class="dot" style="background:#f43f5e"></span>困难 <span class="val">12 · 45%</span></div>
+            <div class="row"><span class="dot" style="background:#94a3b8"></span>未标注 <span class="val">5 · 80%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 雷达 -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:14px">主题熟练度</h3>
+        <p class="card-sub">按主题的间隔复习熟练度</p>
+        <div class="radar-wrap" id="radarChart" style="margin-top:8px"><!-- JS --></div>
+      </div>
+      <!-- 最近刷题 -->
+      <div class="card">
+        <h3 class="card-title" style="font-size:14px">最近刷题</h3>
+        <p class="card-sub">答题与复习记录</p>
+        <div class="chart" id="recentChart" style="margin-top:4px"><!-- JS --></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ④ 本周最该做（行动清单后置） ============ -->
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">本周最该做</h2>
+        <p class="card-sub">优先处理岗位热度高、个人证据不足的主题。</p>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:14px">
+      <div class="action">
+        <div class="action-head">
+          <div class="action-title">D1.缓存设计与优化</div>
+          <span class="pill pill-prio">优先</span>
+        </div>
+        <p class="action-desc">已有练习记录，但平均分偏低，建议优先复练。</p>
+        <div class="action-cta">继续练习 →</div>
+      </div>
+      <div class="action">
+        <div class="action-head">
+          <div class="action-title">B6.评估安全与优化</div>
+          <span class="pill pill-prio">优先</span>
+        </div>
+        <p class="action-desc">题库覆盖充分，但还没有个人练习证据。</p>
+        <div class="action-cta">开始练习 →</div>
+      </div>
+      <div class="action">
+        <div class="action-head">
+          <div class="action-title">B8.模型与框架选型</div>
+          <span class="pill pill-prio">优先</span>
+        </div>
+        <p class="action-desc">题库覆盖充分，但还没有个人练习证据。</p>
+        <div class="action-cta">开始练习 →</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 数据（来自 insights.demo.json：岗位真实 + 练习合成演示） ============ */
+  const importance = [
+    { name: "B2.RAG系统设计",   v: 42 },
+    { name: "B1.Agent架构与范式", v: 37 },
+    { name: "B6.评估安全与优化", v: 31 },
+    { name: "C2.框架与中间件",   v: 21 },
+    { name: "C3.数据库基础",    v: 20 },
+    { name: "D1.缓存设计与优化", v: 17 },
+    { name: "B3.工具调用与协议集成", v: 16 },
+    { name: "B8.模型与框架选型", v: 15 },
+    { name: "B4.记忆与上下文管理", v: 13 },
+    { name: "C1.编程语言基础",  v: 12 },
+  ];
+  const gaps = [
+    { name: "B2.RAG系统设计", heat: 42, skill: 62 },
+    { name: "B1.Agent架构与范式", heat: 37, skill: 78 },
+    { name: "B6.评估安全与优化", heat: 31, skill: null },
+    { name: "C2.框架与中间件", heat: 21, skill: 70 },
+    { name: "C3.数据库基础", heat: 20, skill: 85 },
+    { name: "D1.缓存设计与优化", heat: 17, skill: 50 },
+    { name: "B3.工具调用与协议集成", heat: 16, skill: 75 },
+    { name: "B4.记忆与上下文管理", heat: 13, skill: 58 },
+  ];
+  const maxFreq = importance[0].v;
+  const maxSkill = 100;
+
+  /* ---------- ① 岗位重点知识：横向条形图 ---------- */
+  const impEl = document.getElementById("importanceChart");
+  impEl.innerHTML = importance.map(function (d, i) {
+    const w = (d.v / maxFreq * 100).toFixed(1);
+    const isTop = i < 3;
+    return '<div class="hbar-row" title="' + d.name + ' · 被问 ' + d.v + ' 次">' +
+      '<div class="hbar-name' + (isTop ? ' top3' : '') + '">' + d.name + '</div>' +
+      '<div class="hbar-track"><div class="hbar-fill" style="width:' + w + '%;background:' + (isTop ? 'var(--accent)' : 'var(--accent-soft)') + '"></div></div>' +
+      '<div class="hbar-val">' + d.v + '</div></div>';
+  }).join("");
+
+  /* ---------- ② 热度 vs 熟练度 对比 ---------- */
+  const gapEl = document.getElementById("gapChart");
+  gapEl.innerHTML = gaps.map(function (d) {
+    const hw = (d.heat / maxFreq * 100).toFixed(1);
+    let skillCell, badge;
+    if (d.skill == null) {
+      skillCell = '<div class="gap-track"><div class="gap-fill-none" style="width:100%"></div></div>';
+      badge = '<span class="gap-badge gap-badge-none">未练</span>';
+    } else {
+      const sw = (d.skill / maxSkill * 100).toFixed(1);
+      skillCell = '<div class="gap-track"><div class="gap-fill-skill" style="width:' + sw + '%"></div></div>';
+      badge = '<span class="gap-badge ' + (d.heat - d.skill > 15 ? 'gap-badge-prio' : 'gap-badge-none') + '">差 ' + (d.heat - d.skill) + '</span>';
+    }
+    return '<div class="gap-row" title="' + d.name + ' 热度' + d.heat + ' 熟练度' + (d.skill == null ? '未练' : d.skill) + '">' +
+      '<div class="gap-name">' + d.name + '</div>' +
+      '<div class="gap-track"><div class="gap-fill-heat" style="width:' + hw + '%"></div></div>' +
+      '<div class="gap-label">' + d.heat + '</div>' +
+      skillCell +
+      badge + '</div>';
+  }).join("");
+
+  /* ---------- ③ 热力图（近 90 天，演示模式） ---------- */
+  const hmEl = document.getElementById("heatmap");
+  let hmHtml = "";
+  for (let i = 0; i < 90; i++) {
+    const dayFromEnd = 89 - i;           // 0 = 今天
+    let level = 0;
+    if (dayFromEnd <= 2) level = 4;      // 近 3 天活跃（连击尾巴）
+    else if (dayFromEnd <= 8 && i % 3 !== 0) level = 3;
+    else if (dayFromEnd <= 20 && i % 2 === 0) level = 2;
+    else if (i % 7 === 0) level = 1;
+    hmHtml += '<div class="hm-cell hm-' + level + '" title="' + (level ? '打卡 ' + level * 2 + ' 次' : '未打卡') + '"></div>';
+  }
+  hmEl.innerHTML = hmHtml;
+
+  /* ---------- ③ 趋势：柱状 + 平均分 ---------- */
+  const trendEl = document.getElementById("trendChart");
+  const counts = [1,0,2,3,1,0,2,4,2,1,3,2,0,1,2,3,1,2,4,2,1,3,2,2,1,2,3,2,1,3];
+  const maxC = Math.max.apply(null, counts);
+  trendEl.innerHTML =
+    '<div class="trend-bars">' + counts.map(function (c) {
+      return '<div class="trend-bar" style="height:' + (c / maxC * 100).toFixed(1) + '%" title="' + c + ' 次"></div>';
+    }).join("") + '</div>' +
+    '<div class="trend-axis"><span>30 天前</span><span>平均分</span><span>今天</span></div>';
+
+  /* ---------- ③ 雷达：SVG ---------- */
+  const radarData = [
+    { name: "编程语言", v: 88 }, { name: "数据库", v: 85 }, { name: "算法手撕", v: 82 },
+    { name: "Agent架构", v: 78 }, { name: "工具调用", v: 75 }, { name: "框架中间件", v: 70 },
+  ];
+  const radarEl = document.getElementById("radarChart");
+  const cx = 100, cy = 100, R = 68, n = radarData.length;
+  function pt(i, r) { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return [cx + r * Math.cos(a), cy + r * Math.sin(a)].map(Math.round).join(","); }
+  let polys = "";
+  for (const frac of [0.25, 0.5, 0.75, 1]) {
+    polys += '<polygon points="' + Array.from({ length: n }, function (_, i) { return pt(i, R * frac); }).join(" ") + '" fill="none" stroke="var(--grid)" stroke-width="1"></polygon>';
+  }
+  const dataPoly = radarData.map(function (d, i) { return pt(i, R * d.v / 100); }).join(" ");
+  const labels = radarData.map(function (d, i) {
+    const [x, y] = pt(i, R + 18);
+    return '<text x="' + x + '" y="' + y + '" text-anchor="middle" font-size="9" fill="var(--muted)">' + d.name + '</text>';
+  }).join("");
+  radarEl.innerHTML =
+    '<svg viewBox="0 0 200 200" width="220" height="220">' + polys +
+    '<polygon points="' + dataPoly + '" fill="rgba(99,102,241,.25)" stroke="#6366f1" stroke-width="2"></polygon>' +
+    labels + '</svg>';
+
+  /* ---------- ③ 最近刷题 ---------- */
+  const recent = [
+    { type: "answer", q: "如何设计 Agent 的记忆与上下文管理？", meta: "困难 · B4.记忆与上下文管理 · 今天 09:40", score: 82 },
+    { type: "review", q: "请描述 RAG 检索阶段的 rerank 策略", meta: "中等 · B2.RAG系统设计 · 今天 10:24", score: null, rating: "熟练" },
+    { type: "answer", q: "高并发场景下缓存与数据库一致性怎么保证？", meta: "困难 · D1.缓存设计与优化 · 昨天 20:30", score: 55 },
+    { type: "answer", q: "MySQL 的索引失效场景有哪些？", meta: "中等 · C3.数据库基础 · 昨天 19:50", score: 88 },
+    { type: "review", q: "LangGraph 的 StateGraph 与普通 chain 区别", meta: "中等 · B1.Agent架构与范式 · 昨天 21:12", score: null, rating: "熟练" },
+  ];
+  const recentEl = document.getElementById("recentChart");
+  recentEl.innerHTML = recent.map(function (r) {
+    const badge = r.type === "answer"
+      ? '<span class="tl-badge tl-badge-answer">答题</span>'
+      : '<span class="tl-badge tl-badge-review">复习</span>';
+    const score = r.score != null
+      ? '<div class="tl-score">' + r.score + ' 分</div>'
+      : '<div class="tl-score" style="color:var(--muted);font-weight:400">' + (r.rating || "") + '</div>';
+    return '<div class="tl-item">' + badge + '<div class="tl-body"><div class="tl-q">' + r.q + '</div><div class="tl-meta">' + r.meta + '</div></div>' + score + '</div>';
+  }).join("");
+
+  /* ---------- 深浅色切换 ---------- */
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+  });
+</script>
+</body>
+</html>

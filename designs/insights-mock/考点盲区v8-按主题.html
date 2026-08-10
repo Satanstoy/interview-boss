@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位考点盲区 · 按主题 v8</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #111111; --fg-soft: #333333; --muted: #8f8881;
+    --accent: #6366f1; --accent-strong: #4f46e5; --amber: #f59e0b; --rose: #f43f5e; --green: #10b981; --slate: #94a3b8;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #ffffff; --fg-soft: #e0e0e0; --muted: #8f8881;
+    --accent: #818cf8; --accent-strong: #a5b4fc; --amber: #fbbf24; --rose: #fb7185; --green: #34d399; --slate: #64748b;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 700px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .insight {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--rose) 9%, transparent); border: 1px solid color-mix(in srgb, var(--rose) 28%, transparent);
+    font-size: 13.5px; color: var(--fg); line-height: 1.7;
+  }
+  .insight .ic { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .insight strong { color: var(--rose); font-weight: 700; }
+  .insight .ok { color: var(--green); font-weight: 600; }
+
+  .chart-wrap { margin-top: 14px; display: flex; justify-content: center; }
+  .legend { display: flex; gap: 16px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+
+  .gap-list { margin-top: 18px; }
+  .gap-head { font-size: 14px; font-weight: 600; }
+  .gap-head .gh { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .gap-item { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--border); }
+  .gap-item:last-child { border-bottom: 0; }
+  .gap-rank { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; background: color-mix(in srgb, var(--rose) 13%, transparent); color: var(--rose); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .gap-body { flex: 1; min-width: 0; }
+  .gap-name { font-size: 14px; font-weight: 600; color: var(--fg); }
+  .gap-desc { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .gap-note { flex-shrink: 0; font-size: 12px; color: var(--rose); font-weight: 600; white-space: nowrap; }
+
+  /* 自定义 hover tooltip 浮层：fixed 跟随鼠标 */
+  .chart-tip {
+    position: fixed; z-index: 50; pointer-events: none; display: none;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; color: var(--fg); box-shadow: 0 4px 12px rgba(0,0,0,.12);
+    max-width: 240px; line-height: 1.5;
+  }
+  .chart-tip .tt-name { font-weight: 700; font-size: 12.5px; }
+  .chart-tip .tt-row { color: var(--muted); font-size: 11.5px; }
+  .chart-tip .tt-badge { display: inline-block; font-size: 10px; padding: 0 6px; border-radius: 999px; margin-left: 4px; }
+  .chart-tip .tt-badge.gap { background: color-mix(in srgb, var(--rose) 14%, transparent); color: var(--rose); }
+  .chart-tip .tt-badge.watch { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber); }
+  .chart-tip .tt-badge.good { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位考点盲区 · 按主题 v8</h1>
+      <p class="sub">按<b>主题（分类）</b>聚合，不是单题 —— 「记忆与上下文管理」面经被问 31 次、题库只有 6 题，这才是真正的盲区。数据全为 sj 真实数据。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">岗位考点盲区</div>
+    <p class="card-sub">横轴 = 该主题在面经里被问次数 · 纵轴 = 题库里该主题的题数 · 越靠右下越是「考得多但题少」的盲区</p>
+
+    <!-- 核心洞察 -->
+    <div class="insight">
+      <span class="ic">🎯</span>
+      <div>最该补的是 <strong>记忆与上下文管理</strong>：面经被问 <strong>31 次</strong>，题库只有 <strong>6 题</strong> —— 高频考点，你刷到的题却少。<span class="ok">Agent架构(62次)、RAG(53次) 题库覆盖充足 ✓</span></div>
+    </div>
+
+    <!-- 精炼图：主题级面经提及 vs 题库覆盖 -->
+    <div class="chart-wrap" id="gapPlot"></div>
+    <!-- hover tooltip（独立于 #gapPlot，避免被 innerHTML 覆盖） -->
+    <div class="chart-tip" id="gapTip"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--rose)"></span>盲区（考得多·题少）</span>
+      <span><span class="dot" style="background:var(--green)"></span>覆盖好</span>
+      <span><span class="dot" style="background:var(--amber)"></span>关注</span>
+      <span>圆点大小 = 面经被问次数 · 名称被遮住的点，鼠标放上去可查看</span>
+    </div>
+
+    <!-- 行动：盲区主题 -->
+    <div class="gap-list">
+      <div class="gap-head">最该补的主题 <span class="gh">面经高频但题库覆盖不足</span></div>
+      <div class="gap-item">
+        <div class="gap-rank">1</div>
+        <div class="gap-body">
+          <div class="gap-name">记忆与上下文管理</div>
+          <div class="gap-desc">面经被问 31 次 · 题库仅 6 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+      <div class="gap-item">
+        <div class="gap-rank">2</div>
+        <div class="gap-body">
+          <div class="gap-name">难点攻关与优化</div>
+          <div class="gap-desc">面经被问 14 次 · 题库仅 4 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+      <div class="gap-item">
+        <div class="gap-rank">3</div>
+        <div class="gap-body">
+          <div class="gap-name">系统架构设计</div>
+          <div class="gap-desc">面经被问 9 次 · 题库仅 3 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实数据（按主题 cat2 聚合） ============ */
+  const data = [
+    { name: "记忆与上下文管理", interview: 31, bank: 6, status: "gap" },
+    { name: "难点攻关与优化", interview: 14, bank: 4, status: "gap" },
+    { name: "系统架构设计", interview: 9, bank: 3, status: "watch" },
+    { name: "分布式事务与一致性", interview: 11, bank: 6, status: "watch" },
+    { name: "Prompt工程", interview: 7, bank: 4, status: "watch" },
+    { name: "Agent架构与范式", interview: 62, bank: 40, status: "good" },
+    { name: "RAG系统设计", interview: 53, bank: 28, status: "good" },
+    { name: "评估安全与优化", interview: 41, bank: 26, status: "good" },
+    { name: "编程语言基础", interview: 30, bank: 16, status: "good" },
+    { name: "数据库基础", interview: 29, bank: 18, status: "good" },
+    { name: "工具调用与协议集成", interview: 28, bank: 15, status: "good" },
+    { name: "框架与中间件", interview: 25, bank: 18, status: "good" },
+  ];
+  const maxI = 62, maxB = 40;
+  const colorOf = (s, dark) => {
+    if (s === "gap") return dark ? "#fb7185" : "#f43f5e";
+    if (s === "watch") return dark ? "#fbbf24" : "#f59e0b";
+    return dark ? "#34d399" : "#10b981";
+  };
+
+  function draw() {
+    const el = document.getElementById("gapPlot");
+    const dark = document.body.getAttribute("data-theme") === "dark";
+    const grid = dark ? "#2e2a27" : "#f1efe9";
+    const muted = dark ? "#8f8881" : "#a8a29e";
+    const ink = dark ? "#ffffff" : "#111111";
+    const W = 680, H = 360, padL = 50, padR = 160, padT = 24, padB = 46;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const X = i => padL + (i / maxI) * plotW;
+    const Y = b => padT + plotH - (b / maxB) * plotH;
+
+    let svg = '';
+    // 网格
+    for (let i = 0; i <= 60; i += 20) {
+      const x = X(i);
+      svg += '<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="' + grid + '" stroke-width="1"></line>';
+      svg += '<text x="' + x + '" y="' + (H - padB + 16) + '" text-anchor="middle" font-size="9" fill="' + muted + '">' + i + '</text>';
+    }
+    for (let b = 0; b <= 40; b += 10) {
+      const y = Y(b);
+      svg += '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + grid + '" stroke-width="1"></line>';
+      svg += '<text x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end" font-size="9" fill="' + muted + '">' + b + '</text>';
+    }
+    svg += '<text x="' + ((padL + W - padR) / 2) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="' + muted + '">面经里被问次数 →</text>';
+    svg += '<text x="14" y="' + (H / 2) + '" text-anchor="middle" font-size="10" fill="' + muted + '" transform="rotate(-90 14 ' + (H / 2) + ')">题库题数 →</text>';
+
+    // 盲区参考线（题库 ≤ 6 视为覆盖不足）
+    const gapY = Y(6);
+    svg += '<line x1="' + padL + '" y1="' + gapY + '" x2="' + (W - padR) + '" y2="' + gapY + '" stroke="' + (dark ? "#fb7185" : "#f43f5e") + '" stroke-dasharray="4 3" stroke-width="1.2"></line>';
+    svg += '<text x="' + (padL + 6) + '" y="' + (gapY - 4) + '" font-size="8.5" fill="' + (dark ? "#fb7185" : "#f43f5e") + '">题库 ≤6 题 = 覆盖不足</text>';
+
+    // 点（带 hover tooltip）
+    data.forEach(d => {
+      const x = X(d.interview), y = Y(d.bank);
+      const r = 9 + (d.interview / maxI) * 11;
+      const color = colorOf(d.status, dark);
+      const statusLabel = d.status === 'gap' ? '盲区' : (d.status === 'watch' ? '关注' : '覆盖好');
+      const statusBadge = d.status === 'gap' ? 'gap' : (d.status === 'watch' ? 'watch' : 'good');
+      svg += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + color + '" opacity=".78" stroke="' + (dark ? "#1a1816" : "#ffffff") + '" stroke-width="1.5" data-name="' + d.name + '" data-status="' + statusLabel + '" data-badge="' + statusBadge + '" data-tip="' + d.name + ' · 面经问 ' + d.interview + ' 次 · 题库 ' + d.bank + ' 题"></circle>';
+    });
+    // 绑定 hover 事件（每点显示/隐藏 tooltip）
+    requestAnimationFrame(() => {
+      const svgEl = document.querySelector('#gapPlot svg');
+      const tip = document.getElementById('gapTip');
+      if (!svgEl) return;
+      svgEl.querySelectorAll('circle').forEach(c => {
+        c.addEventListener('mousemove', e => {
+          tip.style.display = 'block';
+          tip.innerHTML = '<div class="tt-name">' + c.getAttribute('data-name') +
+            '<span class="tt-badge ' + c.getAttribute('data-badge') + '">' + c.getAttribute('data-status') + '</span></div>' +
+            '<div class="tt-row">面经被问 ' + c.getAttribute('data-tip').split(' · ')[1] + ' · ' + c.getAttribute('data-tip').split(' · ')[2] + '</div>';
+          // fixed 定位：气泡跟随鼠标，放鼠标右下方；靠近右/下边缘时翻到左上方
+          const tipW = 240, tipH = 60;
+          let left = e.clientX + 14;
+          let top = e.clientY + 12;
+          if (left + tipW > window.innerWidth - 8) left = e.clientX - tipW - 14;
+          if (top + tipH > window.innerHeight - 8) top = e.clientY - tipH - 12;
+          tip.style.left = left + 'px';
+          tip.style.top = top + 'px';
+        });
+        c.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      });
+    });
+    // 标签：碰撞检测 —— 不重叠的点显示名称，重叠的点隐藏（hover 时 tooltip 显示）
+    // 按被问次数降序处理，大点优先标；标签与所有圆点、已放置标签检测碰撞
+    const placedLabels = [];
+    function labelWidth(name) { return name.length * 6.5 + 8; }
+    function rectsOverlap(r1, r2) { return !(r1.x1 <= r2.x0 || r1.x0 >= r2.x1 || r1.y1 <= r2.y0 || r1.y0 >= r2.y1); }
+    const circleRects = data.map(d => ({
+      x0: X(d.interview) - (9 + (d.interview / maxI) * 11),
+      x1: X(d.interview) + (9 + (d.interview / maxI) * 11),
+      y0: Y(d.bank) - (9 + (d.interview / maxI) * 11),
+      y1: Y(d.bank) + (9 + (d.interview / maxI) * 11),
+      d,
+    }));
+    data.slice().sort((a, b) => b.interview - a.interview).forEach(d => {
+      const x = X(d.interview), y = Y(d.bank);
+      const r = 9 + (d.interview / maxI) * 11;
+      const lw = labelWidth(d.name);
+      const lh = 16;
+      // 标签矩形（点右侧）
+      const lrect = { x0: x + r + 6, x1: x + r + 6 + lw, y0: y - lh / 2, y1: y + lh / 2 };
+      // 超出右边界 → 不显示
+      if (lrect.x1 > W - 4) return;
+      // 与任何圆点重叠？
+      const hitCircle = circleRects.some(c => c.d !== d && rectsOverlap(lrect, c));
+      // 与已放置标签重叠？
+      const hitLabel = placedLabels.some(p => rectsOverlap(lrect, p));
+      if (hitCircle || hitLabel) return;  // 重叠 → 隐藏，hover tooltip 兜底
+      placedLabels.push(lrect);
+      svg += '<text x="' + lrect.x0 + '" y="' + (y + 4) + '" font-size="11" font-weight="600" fill="' + ink + '">' + d.name + '</text>';
+    });
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:700px">' + svg + '</svg>';
+  }
+
+  draw();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+    draw();
+  });
+</script>
+</body>
+</html>

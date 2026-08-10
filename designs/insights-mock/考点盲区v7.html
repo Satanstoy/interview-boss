@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位考点盲区 · 洞察 v7</title>
+<style>
+  :root {
+    --bg: #faf9f7; --card: #ffffff; --border: #e8e4dd;
+    --fg: #111111; --fg-soft: #333333; --muted: #8f8881;
+    --accent: #6366f1; --accent-strong: #4f46e5; --amber: #f59e0b; --rose: #f43f5e; --green: #10b981; --slate: #94a3b8;
+    --grid: #f1efe9; --chip: #f1efe9;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1816; --card: #221f1c; --border: #2e2a27;
+    --fg: #ffffff; --fg-soft: #e0e0e0; --muted: #8f8881;
+    --accent: #818cf8; --accent-strong: #a5b4fc; --amber: #fbbf24; --rose: #fb7185; --green: #34d399; --slate: #64748b;
+    --grid: #2e2a27; --chip: #2e2a27;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-head .sub { font-size: 13px; color: var(--muted); max-width: 680px; margin-top: 4px; }
+  .theme-toggle {
+    flex-shrink: 0; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg-soft); cursor: pointer; font-family: inherit;
+  }
+  .card { border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 20px; }
+  .card-title { font-size: 17px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* 核心洞察条（一句话，图上方） */
+  .insight {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+    background: color-mix(in srgb, var(--rose) 9%, transparent); border: 1px solid color-mix(in srgb, var(--rose) 28%, transparent);
+    font-size: 13.5px; color: var(--fg); line-height: 1.7;
+  }
+  .insight .ic { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .insight strong { color: var(--rose); font-weight: 700; }
+  .insight .ok { color: var(--green); font-weight: 600; }
+
+  .chart-wrap { margin-top: 14px; display: flex; justify-content: center; }
+  .legend { display: flex; gap: 16px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+
+  /* 考点盲区清单（图下方的「行动」） */
+  .gap-list { margin-top: 18px; }
+  .gap-head { font-size: 14px; font-weight: 600; }
+  .gap-head .gh { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .gap-item { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--border); }
+  .gap-item:last-child { border-bottom: 0; }
+  .gap-rank { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; background: color-mix(in srgb, var(--rose) 13%, transparent); color: var(--rose); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .gap-body { flex: 1; min-width: 0; }
+  .gap-q { font-size: 13.5px; color: var(--fg); font-weight: 500; }
+  .gap-src { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .gap-note { flex-shrink: 0; font-size: 11px; color: var(--rose); font-weight: 600; white-space: nowrap; }
+</style>
+</head>
+<body data-theme="light">
+<div class="page">
+
+  <header class="page-head">
+    <div>
+      <h1>岗位考点盲区 · 洞察 v7</h1>
+      <p class="sub">不是再给你看「排名」，而是从 42 份面经里挖出<b>「面试反复考、但题库几乎没覆盖」的盲区</b>——这些才是值得你补的。数据全为 sj 真实面经+题库。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切换深色 / 浅色</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">岗位考点盲区</div>
+    <p class="card-sub">横轴 = 面经里被问的次数 · 纵轴 = 题库覆盖的题数 · 越靠右下越是「考得多但没题」的盲区</p>
+
+    <!-- 核心洞察：一句话 -->
+    <div class="insight">
+      <span class="ic">🎯</span>
+      <div>你的岗位面经里，<strong>React 模式被问了 6 次、function calling 5 次，但题库里分别只有 1 题</strong> —— 面试官爱考，你可能没充分准备。沙盒、chunk切分、监控甚至题库里 0 题。<span class="ok">RAG(47次)、Agent(41次) 题库覆盖充足 ✓</span></div>
+    </div>
+
+    <!-- 精炼图：面经提及 vs 题库覆盖 -->
+    <div class="chart-wrap" id="gapPlot"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--rose)"></span>盲区（考得多没题）</span>
+      <span><span class="dot" style="background:var(--green)"></span>覆盖好</span>
+      <span>圆点大小 = 面经提及次数</span>
+    </div>
+
+    <!-- 行动：盲区里最该补的具体题目 -->
+    <div class="gap-list">
+      <div class="gap-head">最该补的盲区考点 <span class="gh">来自面经原题 · 点击去刷</span></div>
+      <div class="gap-item">
+        <div class="gap-rank">1</div>
+        <div class="gap-body">
+          <div class="gap-q">React模式 和 CoT 还有 Plan 模式的区别</div>
+          <div class="gap-src">淘天 一面 · 被问 6 次 · 题库仅 1 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+      <div class="gap-item">
+        <div class="gap-rank">2</div>
+        <div class="gap-body">
+          <div class="gap-q">MCP 和 Function Calling 的优势 / 如何选</div>
+          <div class="gap-src">腾讯 一面 · function calling 被问 5 次 · 题库仅 1 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+      <div class="gap-item">
+        <div class="gap-rank">3</div>
+        <div class="gap-body">
+          <div class="gap-q">Agent 执行死循环如何自动恢复 / 沙盒与监控怎么实现</div>
+          <div class="gap-src">淘天 一面 · 面经问过 · 题库 0 题</div>
+        </div>
+        <div class="gap-note">去刷 →</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  /* ============ 真实数据（面经提及 vs 题库覆盖） ============ */
+  const data = [
+    { name: "React模式", interview: 6, bank: 1, gap: true },
+    { name: "function calling", interview: 5, bank: 1, gap: true },
+    { name: "Skill/Harness", interview: 22, bank: 9, gap: false },
+    { name: "MCP", interview: 14, bank: 5, gap: false },
+    { name: "记忆与上下文", interview: 11, bank: 3, gap: false },
+    { name: "评估/安全", interview: 6, bank: 7, gap: false },
+    { name: "微调", interview: 5, bank: 3, gap: false },
+    { name: "RAG", interview: 47, bank: 28, gap: false },
+    { name: "Agent架构", interview: 41, bank: 40, gap: false },
+    { name: "沙盒", interview: 1, bank: 0, gap: true },
+    { name: "chunk切分", interview: 1, bank: 0, gap: true },
+    { name: "监控", interview: 1, bank: 0, gap: true },
+  ];
+  const maxI = 47, maxB = 40;
+
+  function draw() {
+    const el = document.getElementById("gapPlot");
+    const dark = document.body.getAttribute("data-theme") === "dark";
+    const grid = dark ? "#2e2a27" : "#f1efe9";
+    const muted = dark ? "#8f8881" : "#a8a29e";
+    const ink = dark ? "#ffffff" : "#111111";
+    const W = 660, H = 340, padL = 48, padR = 150, padT = 20, padB = 44;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const X = i => padL + (i / maxI) * plotW;          // x = 面经提及
+    const Y = b => padT + plotH - (b / maxB) * plotH;   // y = 题库覆盖（高在上）
+
+    let svg = '';
+    // 网格
+    for (let i = 0; i <= 40; i += 10) {
+      const x = X(i);
+      svg += '<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="' + grid + '" stroke-width="1"></line>';
+      svg += '<text x="' + x + '" y="' + (H - padB + 16) + '" text-anchor="middle" font-size="9" fill="' + muted + '">' + i + '</text>';
+    }
+    for (let b = 0; b <= 40; b += 10) {
+      const y = Y(b);
+      svg += '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + grid + '" stroke-width="1"></line>';
+      svg += '<text x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end" font-size="9" fill="' + muted + '">' + b + '</text>';
+    }
+    svg += '<text x="' + (W / 2) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="10" fill="' + muted + '">面经里被问次数 →</text>';
+    svg += '<text x="14" y="' + (H / 2) + '" text-anchor="middle" font-size="10" fill="' + muted + '" transform="rotate(-90 14 ' + (H / 2) + ')">题库题数 →</text>';
+
+    // 盲区参考线（题库 ≤ 1 视为覆盖不足）
+    const gapY = Y(1.5);
+    svg += '<line x1="' + padL + '" y1="' + gapY + '" x2="' + (W - padR) + '" y2="' + gapY + '" stroke="' + (dark ? "#fb7185" : "#f43f5e") + '" stroke-dasharray="4 3" stroke-width="1.2"></line>';
+    svg += '<text x="' + (W - padR - 4) + '" y="' + (gapY - 4) + '" text-anchor="end" font-size="8.5" fill="' + (dark ? "#fb7185" : "#f43f5e") + '">覆盖不足线</text>';
+
+    // 点
+    data.forEach(d => {
+      const x = X(d.interview), y = Y(d.bank);
+      const r = 8 + (d.interview / maxI) * 10;
+      const color = d.gap ? (dark ? "#fb7185" : "#f43f5e") : (dark ? "#34d399" : "#10b981");
+      svg += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + color + '" opacity=".75" stroke="' + (dark ? "#1a1816" : "#ffffff") + '" stroke-width="1.5">' +
+        '<title>' + d.name + ' · 面经问 ' + d.interview + ' 次 · 题库 ' + d.bank + ' 题' + (d.gap ? ' · 盲区!' : '') + '</title></circle>';
+      // 只标盲区点 + 大点；标签放点右侧左对齐，右界=画布宽
+      if (d.gap || d.interview >= 20) {
+        const lx = x + r + 6;
+        if (lx < W - 6) {
+          svg += '<text x="' + lx + '" y="' + (y + 4) + '" font-size="10.5" font-weight="600" fill="' + ink + '">' + d.name + '</text>';
+        }
+      }
+    });
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:680px">' + svg + '</svg>';
+  }
+
+  draw();
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    const body = document.body;
+    body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+    draw();
+  });
+</script>
+</body>
+</html>

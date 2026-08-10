@@ -1,0 +1,978 @@
+{
+  "_meta": {
+    "说明": "设计稿演示数据：target_position/summary.question_count/JD/面经/reviews 为真实数据（sj 用户，agent开发岗位），练习足迹与主题练习证据为合成演示数据，用于展示图表形态。",
+    "source_user": "sj (id=1)",
+    "generated_at": "2026-08-07T11:56:12.856619"
+  },
+  "snapshot": {
+    "version": 1,
+    "target_position": {
+      "name": "agent开发/大模型应用开发/大模型开发",
+      "source": "user_position"
+    },
+    "summary": {
+      "question_count": 236,
+      "jd_count": 9,
+      "interview_count": 42,
+      "practiced_question_count": 106,
+      "evaluated_answer_count": 60,
+      "evidence_state": "available"
+    },
+    "actions": [
+      {
+        "id": "topic:D1.缓存设计与优化",
+        "title": "D1.缓存设计与优化",
+        "question_count": 13,
+        "description": "已有练习记录，但平均分偏低，建议优先复练。",
+        "action": "继续练习",
+        "priority": "high"
+      },
+      {
+        "id": "topic:B6.评估安全与优化",
+        "title": "B6.评估安全与优化",
+        "question_count": 19,
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "action": "开始练习",
+        "priority": "high"
+      },
+      {
+        "id": "topic:B8.模型与框架选型",
+        "title": "B8.模型与框架选型",
+        "question_count": 13,
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "action": "开始练习",
+        "priority": "high"
+      },
+      {
+        "id": "topic:B5.Prompt工程",
+        "title": "B5.Prompt工程",
+        "question_count": 3,
+        "description": "题库覆盖充分，但还没有个人练习证据。",
+        "action": "开始练习",
+        "priority": "high"
+      }
+    ],
+    "readiness": {
+      "items": [
+        {
+          "id": "D1.缓存设计与优化",
+          "name": "D1.缓存设计与优化",
+          "question_count": 13,
+          "question_frequency": 17,
+          "practice_count": 5,
+          "average_score": 55,
+          "status": "needs_work",
+          "reason": "已有练习记录，但平均分偏低，建议优先复练。"
+        },
+        {
+          "id": "B6.评估安全与优化",
+          "name": "B6.评估安全与优化",
+          "question_count": 19,
+          "question_frequency": 31,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "题库覆盖充分，但还没有个人练习证据。"
+        },
+        {
+          "id": "B8.模型与框架选型",
+          "name": "B8.模型与框架选型",
+          "question_count": 13,
+          "question_frequency": 15,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "题库覆盖充分，但还没有个人练习证据。"
+        },
+        {
+          "id": "B5.Prompt工程",
+          "name": "B5.Prompt工程",
+          "question_count": 3,
+          "question_frequency": 10,
+          "practice_count": 0,
+          "average_score": null,
+          "status": "not_started",
+          "reason": "题库覆盖充分，但还没有个人练习证据。"
+        },
+        {
+          "id": "B2.RAG系统设计",
+          "name": "B2.RAG系统设计",
+          "question_count": 23,
+          "question_frequency": 42,
+          "practice_count": 8,
+          "average_score": 68,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "C2.框架与中间件",
+          "name": "C2.框架与中间件",
+          "question_count": 18,
+          "question_frequency": 21,
+          "practice_count": 15,
+          "average_score": 74,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "B3.工具调用与协议集成",
+          "name": "B3.工具调用与协议集成",
+          "question_count": 12,
+          "question_frequency": 16,
+          "practice_count": 9,
+          "average_score": 78,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "B4.记忆与上下文管理",
+          "name": "B4.记忆与上下文管理",
+          "question_count": 3,
+          "question_frequency": 13,
+          "practice_count": 6,
+          "average_score": 63,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "B7.AI Coding与代码智能",
+          "name": "B7.AI Coding与代码智能",
+          "question_count": 6,
+          "question_frequency": 11,
+          "practice_count": 3,
+          "average_score": 70,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "C4.操作系统与网络",
+          "name": "C4.操作系统与网络",
+          "question_count": 7,
+          "question_frequency": 8,
+          "practice_count": 4,
+          "average_score": 72,
+          "status": "developing",
+          "reason": "已经开始练习，建议再做一轮巩固。"
+        },
+        {
+          "id": "B1.Agent架构与范式",
+          "name": "B1.Agent架构与范式",
+          "question_count": 19,
+          "question_frequency": 37,
+          "practice_count": 12,
+          "average_score": 82,
+          "status": "stable",
+          "reason": "当前练习表现稳定，可转向其他薄弱主题。"
+        },
+        {
+          "id": "C3.数据库基础",
+          "name": "C3.数据库基础",
+          "question_count": 15,
+          "question_frequency": 20,
+          "practice_count": 10,
+          "average_score": 88,
+          "status": "stable",
+          "reason": "当前练习表现稳定，可转向其他薄弱主题。"
+        },
+        {
+          "id": "C1.编程语言基础",
+          "name": "C1.编程语言基础",
+          "question_count": 16,
+          "question_frequency": 12,
+          "practice_count": 20,
+          "average_score": 90,
+          "status": "stable",
+          "reason": "当前练习表现稳定，可转向其他薄弱主题。"
+        },
+        {
+          "id": "E2.算法手撕",
+          "name": "E2.算法手撕",
+          "question_count": 9,
+          "question_frequency": 9,
+          "practice_count": 14,
+          "average_score": 85,
+          "status": "stable",
+          "reason": "当前练习表现稳定，可转向其他薄弱主题。"
+        }
+      ]
+    },
+    "reviews": {
+      "total": 0,
+      "items": []
+    },
+    "data_quality": {
+      "unassigned_question_count": 53,
+      "has_practice_evidence": true,
+      "message": "准备度包含个人练习评分证据。"
+    }
+  },
+  "practice_activity": {
+    "version": 1,
+    "heatmap": [
+      {
+        "date": "2026-05-10",
+        "count": 1,
+        "avg_score": 90
+      },
+      {
+        "date": "2026-05-11",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-12",
+        "count": 1,
+        "avg_score": 68
+      },
+      {
+        "date": "2026-05-13",
+        "count": 1,
+        "avg_score": 92
+      },
+      {
+        "date": "2026-05-14",
+        "count": 1,
+        "avg_score": 62
+      },
+      {
+        "date": "2026-05-15",
+        "count": 1,
+        "avg_score": 73
+      },
+      {
+        "date": "2026-05-16",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-17",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-18",
+        "count": 1,
+        "avg_score": 56
+      },
+      {
+        "date": "2026-05-19",
+        "count": 1,
+        "avg_score": 92
+      },
+      {
+        "date": "2026-05-20",
+        "count": 2,
+        "avg_score": 66
+      },
+      {
+        "date": "2026-05-21",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-22",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-23",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-24",
+        "count": 1,
+        "avg_score": 57
+      },
+      {
+        "date": "2026-05-25",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-26",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-27",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-28",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-29",
+        "count": 1,
+        "avg_score": 58
+      },
+      {
+        "date": "2026-05-30",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-05-31",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-01",
+        "count": 1,
+        "avg_score": 80
+      },
+      {
+        "date": "2026-06-02",
+        "count": 1,
+        "avg_score": 71
+      },
+      {
+        "date": "2026-06-03",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-04",
+        "count": 2,
+        "avg_score": 75
+      },
+      {
+        "date": "2026-06-05",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-06",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-07",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-08",
+        "count": 2,
+        "avg_score": 60
+      },
+      {
+        "date": "2026-06-09",
+        "count": 2,
+        "avg_score": 75
+      },
+      {
+        "date": "2026-06-10",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-11",
+        "count": 1,
+        "avg_score": 62
+      },
+      {
+        "date": "2026-06-12",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-13",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-14",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-15",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-16",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-17",
+        "count": 1,
+        "avg_score": 72
+      },
+      {
+        "date": "2026-06-18",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-19",
+        "count": 1,
+        "avg_score": 60
+      },
+      {
+        "date": "2026-06-20",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-21",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-22",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-23",
+        "count": 1,
+        "avg_score": 57
+      },
+      {
+        "date": "2026-06-24",
+        "count": 2,
+        "avg_score": 53
+      },
+      {
+        "date": "2026-06-25",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-26",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-27",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-28",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-06-29",
+        "count": 1,
+        "avg_score": 87
+      },
+      {
+        "date": "2026-06-30",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-01",
+        "count": 1,
+        "avg_score": 82
+      },
+      {
+        "date": "2026-07-02",
+        "count": 1,
+        "avg_score": 73
+      },
+      {
+        "date": "2026-07-03",
+        "count": 2,
+        "avg_score": 74
+      },
+      {
+        "date": "2026-07-04",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-05",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-06",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-07",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-08",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-09",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-10",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-11",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-12",
+        "count": 1,
+        "avg_score": 58
+      },
+      {
+        "date": "2026-07-13",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-14",
+        "count": 2,
+        "avg_score": 57
+      },
+      {
+        "date": "2026-07-15",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-16",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-17",
+        "count": 1,
+        "avg_score": 88
+      },
+      {
+        "date": "2026-07-18",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-19",
+        "count": 2,
+        "avg_score": 70
+      },
+      {
+        "date": "2026-07-20",
+        "count": 1,
+        "avg_score": 72
+      },
+      {
+        "date": "2026-07-21",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-22",
+        "count": 1,
+        "avg_score": 82
+      },
+      {
+        "date": "2026-07-23",
+        "count": 1,
+        "avg_score": 83
+      },
+      {
+        "date": "2026-07-24",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-25",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-26",
+        "count": 1,
+        "avg_score": 72
+      },
+      {
+        "date": "2026-07-27",
+        "count": 1,
+        "avg_score": 65
+      },
+      {
+        "date": "2026-07-28",
+        "count": 2,
+        "avg_score": 57
+      },
+      {
+        "date": "2026-07-29",
+        "count": 1,
+        "avg_score": 70
+      },
+      {
+        "date": "2026-07-30",
+        "count": 1,
+        "avg_score": 58
+      },
+      {
+        "date": "2026-07-31",
+        "count": 2,
+        "avg_score": 83
+      },
+      {
+        "date": "2026-08-01",
+        "count": 2,
+        "avg_score": 82
+      },
+      {
+        "date": "2026-08-02",
+        "count": 2,
+        "avg_score": 58
+      },
+      {
+        "date": "2026-08-03",
+        "count": 3,
+        "avg_score": 67
+      },
+      {
+        "date": "2026-08-04",
+        "count": 3,
+        "avg_score": 79
+      },
+      {
+        "date": "2026-08-05",
+        "count": 3,
+        "avg_score": 88
+      },
+      {
+        "date": "2026-08-06",
+        "count": 3,
+        "avg_score": 93
+      },
+      {
+        "date": "2026-08-07",
+        "count": 3,
+        "avg_score": 82
+      }
+    ],
+    "streak": {
+      "current": 3,
+      "longest": 9
+    },
+    "trend": [
+      {
+        "date": "2026-07-09",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-10",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-11",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-12",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-13",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-14",
+        "count": 1,
+        "avg_score": 88
+      },
+      {
+        "date": "2026-07-15",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-16",
+        "count": 2,
+        "avg_score": 62
+      },
+      {
+        "date": "2026-07-17",
+        "count": 2,
+        "avg_score": 83
+      },
+      {
+        "date": "2026-07-18",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-19",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-20",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-21",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-22",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-23",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-24",
+        "count": 1,
+        "avg_score": 66
+      },
+      {
+        "date": "2026-07-25",
+        "count": 0,
+        "avg_score": null
+      },
+      {
+        "date": "2026-07-26",
+        "count": 3,
+        "avg_score": 87
+      },
+      {
+        "date": "2026-07-27",
+        "count": 1,
+        "avg_score": 56
+      },
+      {
+        "date": "2026-07-28",
+        "count": 1,
+        "avg_score": 75
+      },
+      {
+        "date": "2026-07-29",
+        "count": 1,
+        "avg_score": 68
+      },
+      {
+        "date": "2026-07-30",
+        "count": 1,
+        "avg_score": 57
+      },
+      {
+        "date": "2026-07-31",
+        "count": 1,
+        "avg_score": 79
+      },
+      {
+        "date": "2026-08-01",
+        "count": 2,
+        "avg_score": 84
+      },
+      {
+        "date": "2026-08-02",
+        "count": 4,
+        "avg_score": 64
+      },
+      {
+        "date": "2026-08-03",
+        "count": 2,
+        "avg_score": 65
+      },
+      {
+        "date": "2026-08-04",
+        "count": 2,
+        "avg_score": 81
+      },
+      {
+        "date": "2026-08-05",
+        "count": 2,
+        "avg_score": 84
+      },
+      {
+        "date": "2026-08-06",
+        "count": 3,
+        "avg_score": 76
+      },
+      {
+        "date": "2026-08-07",
+        "count": 3,
+        "avg_score": 82
+      }
+    ],
+    "radar": [
+      {
+        "topic": "C1.编程语言基础",
+        "proficiency": 88
+      },
+      {
+        "topic": "C3.数据库基础",
+        "proficiency": 85
+      },
+      {
+        "topic": "E2.算法手撕",
+        "proficiency": 82
+      },
+      {
+        "topic": "B1.Agent架构与范式",
+        "proficiency": 78
+      },
+      {
+        "topic": "B3.工具调用与协议集成",
+        "proficiency": 75
+      },
+      {
+        "topic": "C2.框架与中间件",
+        "proficiency": 70
+      },
+      {
+        "topic": "C4.操作系统与网络",
+        "proficiency": 66
+      },
+      {
+        "topic": "B2.RAG系统设计",
+        "proficiency": 62
+      }
+    ],
+    "difficulty": [
+      {
+        "difficulty": "简单",
+        "count": 35,
+        "correct_rate": 88
+      },
+      {
+        "difficulty": "中等",
+        "count": 28,
+        "correct_rate": 71
+      },
+      {
+        "difficulty": "困难",
+        "count": 12,
+        "correct_rate": 45
+      },
+      {
+        "difficulty": "未标注",
+        "count": 5,
+        "correct_rate": 80
+      }
+    ],
+    "recent": [
+      {
+        "id": "r1",
+        "type": "review",
+        "question": "请描述 RAG 检索阶段的 rerank 策略",
+        "difficulty": "中等",
+        "topic": "B2.RAG系统设计",
+        "score": null,
+        "rating": "good",
+        "created_at": "今天 10:24"
+      },
+      {
+        "id": "a1",
+        "type": "answer",
+        "question": "如何设计 Agent 的记忆与上下文管理？",
+        "difficulty": "困难",
+        "topic": "B4.记忆与上下文管理",
+        "score": 82,
+        "rating": null,
+        "created_at": "今天 09:40"
+      },
+      {
+        "id": "r2",
+        "type": "review",
+        "question": "LangGraph 的 StateGraph 与普通 chain 区别",
+        "difficulty": "中等",
+        "topic": "B1.Agent架构与范式",
+        "score": null,
+        "rating": "easy",
+        "created_at": "昨天 21:12"
+      },
+      {
+        "id": "a2",
+        "type": "answer",
+        "question": "高并发场景下缓存与数据库一致性怎么保证？",
+        "difficulty": "困难",
+        "topic": "D1.缓存设计与优化",
+        "score": 55,
+        "rating": null,
+        "created_at": "昨天 20:30"
+      },
+      {
+        "id": "a3",
+        "type": "answer",
+        "question": "MySQL 的索引失效场景有哪些？",
+        "difficulty": "中等",
+        "topic": "C3.数据库基础",
+        "score": 88,
+        "rating": null,
+        "created_at": "昨天 19:50"
+      },
+      {
+        "id": "r3",
+        "type": "review",
+        "question": "多路召回 + 精排的 RAG 架构",
+        "difficulty": "中等",
+        "topic": "B2.RAG系统设计",
+        "score": null,
+        "rating": "good",
+        "created_at": "前天 22:05"
+      },
+      {
+        "id": "a4",
+        "type": "answer",
+        "question": "函数调用的工具 schema 如何设计容错",
+        "difficulty": "中等",
+        "topic": "B3.工具调用与协议集成",
+        "score": 78,
+        "rating": null,
+        "created_at": "前天 20:15"
+      },
+      {
+        "id": "r4",
+        "type": "review",
+        "question": "HTTP/1.1 与 HTTP/2 的区别",
+        "difficulty": "简单",
+        "topic": "C4.操作系统与网络",
+        "score": null,
+        "rating": "good",
+        "created_at": "3天前 18:40"
+      },
+      {
+        "id": "a5",
+        "type": "answer",
+        "question": "手写一个 LRU 缓存",
+        "difficulty": "中等",
+        "topic": "E2.算法手撕",
+        "score": 85,
+        "rating": null,
+        "created_at": "3天前 17:00"
+      },
+      {
+        "id": "r5",
+        "type": "review",
+        "question": "Python 的 GIL 对并发的影响",
+        "difficulty": "简单",
+        "topic": "C1.编程语言基础",
+        "score": null,
+        "rating": "easy",
+        "created_at": "4天前 22:30"
+      }
+    ]
+  }
+}
