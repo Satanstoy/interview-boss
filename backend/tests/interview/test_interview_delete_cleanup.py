@@ -25,7 +25,7 @@ class TestCleanupSourcesForUrl:
             {"url": "https://example.com/interview/2", "company": "阿里", "round": "二面"},
         ]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps(existing_sources),
+            {"id": 1, "owner_id": None, "sources": json.dumps(existing_sources),
              "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
@@ -38,8 +38,8 @@ class TestCleanupSourcesForUrl:
         assert 'frequency' in update_sql
         assert 'sources' in update_sql
 
-    def test_cleanup_updates_frequency_to_match_sources(self):
-        """frequency 应等于 sources 的新长度"""
+    def test_cleanup_keeps_frequency_as_variant_count(self):
+        """frequency 保持「原题变体数」语义：oqs 缺失时保守为 1，来源数不冒充频率"""
         from app.routers.data import _cleanup_sources_for_url
 
         cursor = MagicMock()
@@ -50,7 +50,7 @@ class TestCleanupSourcesForUrl:
             {"url": "https://example.com/interview/3", "company": "百度", "round": "三面"},
         ]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps(sources),
+            {"id": 1, "owner_id": None, "sources": json.dumps(sources),
              "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
@@ -58,10 +58,10 @@ class TestCleanupSourcesForUrl:
 
         update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE' in str(c)]
         assert len(update_calls) >= 1
-        # frequency 参数应该是 2（3 条 sources 减去 1 条被删除的）
+        # oqs 为空时 frequency 应为 1（变体数下限），而不是 2（剩余来源数）
         args = update_calls[0][0]
         params = args[1] if len(args) > 1 else update_calls[0][1]
-        assert params[0] == 2
+        assert params[0] == 1
 
     def test_cleanup_deletes_question_with_zero_frequency(self):
         """frequency<=0 的公共题目应被删除"""
@@ -71,7 +71,7 @@ class TestCleanupSourcesForUrl:
         url = "https://example.com/interview/1"
         sources = [{"url": url, "company": "腾讯", "round": "一面"}]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps(sources),
+            {"id": 1, "owner_id": None, "sources": json.dumps(sources),
              "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
@@ -89,11 +89,11 @@ class TestCleanupSourcesForUrl:
         cursor = MagicMock()
         url = "https://example.com/interview/1"
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps([{"url": url}]),
+            {"id": 1, "owner_id": None, "sources": json.dumps([{"url": url}]),
              "original_questions": "[]", "original_question_sources": "[]"},
-            {"id": 2, "sources": json.dumps([{"url": url}, {"url": "https://other.com"}]),
+            {"id": 2, "owner_id": None, "sources": json.dumps([{"url": url}, {"url": "https://other.com"}]),
              "original_questions": "[]", "original_question_sources": "[]"},
-            {"id": 3, "sources": json.dumps([{"url": "https://other.com"}]),
+            {"id": 3, "owner_id": None, "sources": json.dumps([{"url": "https://other.com"}]),
              "original_questions": "[]", "original_question_sources": "[]"},
         ]
 
@@ -110,7 +110,7 @@ class TestCleanupSourcesForUrl:
         cursor = MagicMock()
         url = "https://example.com/interview/1"
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps([{"url": "https://other.com"}]),
+            {"id": 1, "owner_id": None, "sources": json.dumps([{"url": "https://other.com"}]),
              "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
@@ -127,7 +127,7 @@ class TestCleanupSourcesForUrl:
         cursor = MagicMock()
         url = "https://example.com/interview/1"
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": "", "original_questions": "[]", "original_question_sources": "[]"}
+            {"id": 1, "owner_id": None, "sources": "", "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
         # 不应抛出异常
@@ -140,7 +140,7 @@ class TestCleanupSourcesForUrl:
         cursor = MagicMock()
         url = "https://example.com/interview/1"
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": "invalid json",
+            {"id": 1, "owner_id": None, "sources": "invalid json",
              "original_questions": "[]", "original_question_sources": "[]"}
         ]
 
@@ -176,7 +176,7 @@ class TestDeleteEndpointTransactionConsistency:
         """删除 JD 时应清理关联面经的 question_bank sources"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-        assert '_cleanup_sources_best_effort(cursor, iu["url"])' in content
+        assert '_cleanup_sources_best_effort(cursor, iu["url"], owner_scope)' in content
 
     def test_delete_commits_after_cleanup(self):
         """主删除与来源清理应在同一个外层事务中提交。"""
@@ -234,7 +234,7 @@ class TestRestoreSourcesForUrl:
         url = "https://example.com/interview/1"
         oqs = [{"question": "什么是RAG", "sources": [{"url": url, "company": "腾讯", "round": "一面"}]}]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps([]), "original_question_sources": json.dumps(oqs), "deleted_at": None}
+            {"id": 1, "owner_id": None, "sources": json.dumps([]), "original_question_sources": json.dumps(oqs), "deleted_at": None}
         ]
 
         _restore_sources_for_url(cursor, url)
@@ -255,14 +255,36 @@ class TestRestoreSourcesForUrl:
         sources = [{"url": url, "company": "腾讯", "round": "一面"}]
         oqs = [{"question": "什么是RAG", "sources": [{"url": url}]}]
         cursor.execute.return_value.fetchall.return_value = [
-            {"id": 1, "sources": json.dumps(sources), "original_question_sources": json.dumps(oqs), "deleted_at": None}
+            {"id": 1, "owner_id": None, "sources": json.dumps(sources), "original_question_sources": json.dumps(oqs), "deleted_at": None}
         ]
 
         _restore_sources_for_url(cursor, url)
 
-        update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE' in str(c)]
+        update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE question_bank' in str(c)]
         assert not any('UPDATE question_bank' in str(c) for c in update_calls), \
             "URL 已存在时不应重复添加 question_bank.source"
+
+    def test_restore_keeps_frequency_as_variant_count_when_oqs_missing(self):
+        """恢复面经时 oqs 缺失，frequency 保守为 1（变体数下限），来源数不冒充频率"""
+        from app.routers.data import _restore_sources_for_url
+
+        cursor = MagicMock()
+        url = "https://example.com/interview/1"
+        sources = [{"url": "https://other.com", "company": "X", "round": "一面"}]
+        oqs_src = [{"question": "什么是RAG", "sources": [{"url": url, "company": "腾讯", "round": "一面"}]}]
+        cursor.execute.return_value.fetchall.return_value = [
+            {"id": 1, "owner_id": None, "sources": json.dumps(sources),
+             "original_question_sources": json.dumps(oqs_src), "deleted_at": None}
+        ]
+
+        _restore_sources_for_url(cursor, url)
+
+        update_calls = [c for c in cursor.execute.call_args_list if 'UPDATE question_bank' in str(c)]
+        assert update_calls, "恢复时应有 UPDATE"
+        args = update_calls[0][0]
+        params = args[1] if len(args) > 1 else update_calls[0][1]
+        # 恢复后 sources=2，但 frequency 应为 1（oqs 缺失时的变体数下限）
+        assert params[0] == 1
 
 
 # ============================================================
@@ -289,6 +311,34 @@ def _create_test_db():
         CREATE TABLE question_position (
             question_id INTEGER NOT NULL, position_id INTEGER NOT NULL,
             PRIMARY KEY (question_id, position_id)
+        );
+        CREATE TABLE cluster_review_state (
+            cluster_id INTEGER PRIMARY KEY,
+            current_version TEXT NOT NULL,
+            reviewed_version TEXT,
+            status TEXT NOT NULL DEFAULT 'needs_review',
+            priority INTEGER NOT NULL DEFAULT 50,
+            last_trigger_reason TEXT,
+            last_reviewed_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE cluster_review_tasks (
+            id TEXT PRIMARY KEY,
+            cluster_id INTEGER NOT NULL,
+            review_version TEXT NOT NULL,
+            trigger_reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            locked_until TEXT,
+            arq_job_id TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            finished_at TEXT,
+            UNIQUE(cluster_id, review_version)
         );
     """)
     conn.commit()

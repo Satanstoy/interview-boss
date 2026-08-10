@@ -93,12 +93,34 @@ def test_all_deck_orders_due_then_new_then_future(test_db):
     assert [item["id"] for item in items] == [1, 3, 2]
 
 
-def test_due_queue_high_frequency_new_first(test_db):
+def test_due_queue_new_questions_ordered_by_active_sources(test_db):
+    """新题预算内排序使用活跃面经来源数（动态频率），静态变体数不参与"""
+    with get_db_connection() as conn:
+        _seed(conn)  # 静态 frequency: Q1=5, Q2=1, Q3=2
+        for i in range(4):
+            url = f"http://q3-source-{i}.com"
+            conn.execute(
+                "INSERT INTO interview (url, company, round, owner_id, status) "
+                "VALUES (?, '公司C', '一面', NULL, 'approved')",
+                (url,),
+            )
+            conn.execute(
+                "INSERT INTO question_sources (question_bank_id, url, company, round) "
+                "VALUES (3, ?, '公司C', '一面')",
+                (url,),
+            )
+        conn.commit()
+        _, items, _ = list_deck_questions(conn, 1, "due")
+    # 动态来源数: Q3=4, Q1=0, Q2=0 → Q3 最前，同为 0 的按 id
+    assert [item["id"] for item in items] == [3, 1, 2]
+
+
+def test_due_queue_new_questions_without_sources_order_by_id(test_db):
+    """无活跃来源的新题按 id 升序，静态变体数不再决定新题顺序"""
     with get_db_connection() as conn:
         _seed(conn)
         _, items, _ = list_deck_questions(conn, 1, "due")
-    # 全部是新题，按 frequency DESC（5, 2, 1）
-    assert [item["id"] for item in items] == [1, 3, 2]
+    assert [item["id"] for item in items] == [1, 2, 3]
 
 
 def test_due_queue_risk_weight_orders_due_reviews(test_db):
@@ -107,18 +129,32 @@ def test_due_queue_risk_weight_orders_due_reviews(test_db):
         _review(
             conn,
             1,
-            proficiency=4,  # 5 * (5 - 4) = 5
+            proficiency=4,  # 静态 5 但无活跃来源 → 风险 0 × (5-4) = 0
             next_review_at=_fmt(datetime.utcnow() - timedelta(days=2)),
         )
         _review(
             conn,
             2,
-            proficiency=1,  # 1 * (5 - 1) = 4 < 5
+            proficiency=1,  # 静态 1 但有 4 个活跃来源 → 风险 4 × (5-1) = 16
             next_review_at=_fmt(datetime.utcnow() - timedelta(days=1)),
         )
+        for i in range(4):
+            url = f"http://q2-review-{i}.com"
+            conn.execute(
+                "INSERT INTO interview (url, company, round, owner_id, status) "
+                "VALUES (?, '公司C', '一面', NULL, 'approved')",
+                (url,),
+            )
+            conn.execute(
+                "INSERT INTO question_sources (question_bank_id, url, company, round) "
+                "VALUES (2, ?, '公司C', '一面')",
+                (url,),
+            )
+        conn.commit()
         _, items, _ = list_deck_questions(conn, 1, "due")
-    # 低熟练度高风险排在前面，即使到期更晚；新题(3) 兜底
-    assert [item["id"] for item in items] == [1, 2, 3]
+    # 真实出现频率（动态来源数）驱动风险权重：静态变体数 5 不再占优；
+    # 低熟练度 + 真实高频排在前面，即使到期更晚；新题(3) 兜底
+    assert [item["id"] for item in items] == [2, 1, 3]
 
 
 def test_due_queue_max_new_budget(test_db):
@@ -154,8 +190,9 @@ def test_due_queue_max_new_ignored_when_offset(test_db):
             next_review_at=_fmt(datetime.utcnow() - timedelta(days=2)),
         )
         _, items, _ = list_deck_questions(conn, 1, "due", max_new=0, offset=1)
-    # offset>0 时预算不生效：走通用分页路径，新题(3) 依然返回（max_new=0 被忽略）
-    assert [item["id"] for item in items] == [3, 2]
+    # offset>0 时预算不生效：走通用分页路径，新题(3) 依然返回（max_new=0 被忽略）；
+    # 无活跃来源的新题按 id 升序
+    assert [item["id"] for item in items] == [2, 3]
 
 
 def _seed_mastered(conn):
@@ -196,9 +233,9 @@ def test_due_queue_checkin_after_future_review(test_db):
         _, due_items, _ = list_deck_questions(conn, 1, "due")
         _, all_items, _ = list_deck_questions(conn, 1, "all")
     # mastered 但未来到期：不进今日复习的抽查桶（due 队列本身不含未来题），
-    # 全部题队列中排在最后（新题 → 未来）
-    assert [i["id"] for i in due_items] == [3, 2]
-    assert [i["id"] for i in all_items] == [3, 2, 1]
+    # 全部题队列中排在最后（新题 → 未来）；无活跃来源的新题按 id 升序
+    assert [i["id"] for i in due_items] == [2, 3]
+    assert [i["id"] for i in all_items] == [2, 3, 1]
     assert all_items[-1]["id"] == 1
 
 
