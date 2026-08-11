@@ -143,3 +143,66 @@ def test_versioned_approval_rejects_stale_issue(test_db):
         approve_issue(test_db, admin_id=1, issue_id=1)
     assert exc.value.status_code == 409
     assert test_db.execute("SELECT question FROM question_bank WHERE id = 1").fetchone()[0] == "介绍 RAG 流程"
+
+
+def test_approve_rolls_back_partial_cluster_mutation(test_db, monkeypatch):
+    """审批执行失败时，题库和 quality_issue 都回滚，不污染线程连接。"""
+    from app.services.quality_issue_ops import approve_issue
+
+    _seed_clusters(test_db)
+    test_db.execute(
+        "INSERT INTO quality_issue "
+        "(qb_id, issue_type, suggested_action, reason, suggested_value, confidence, status, created_at) "
+        "VALUES (1, 'weak_representative', 'refine_representative', '失败演练', '新代表题', 0.9, 'pending', datetime('now'))"
+    )
+    test_db.commit()
+
+    def fail_after_mutation(conn, issue, operator_id=None):
+        conn.execute(
+            "UPDATE question_bank SET question = '不应持久化的中间值' WHERE id = 1"
+        )
+        raise RuntimeError("模拟审批失败")
+
+    monkeypatch.setattr(
+        "app.services.quality_issue_ops.execute_issue", fail_after_mutation
+    )
+
+    with pytest.raises(RuntimeError, match="模拟审批失败"):
+        approve_issue(test_db, admin_id=1, issue_id=1)
+
+    assert test_db.execute(
+        "SELECT question FROM question_bank WHERE id = 1"
+    ).fetchone()[0] == "介绍 RAG 流程"
+    assert test_db.execute(
+        "SELECT status FROM quality_issue WHERE id = 1"
+    ).fetchone()[0] == "pending"
+
+
+def test_manual_scan_state_tracks_versioned_pending_issue(test_db):
+    """通用扫描完成后，状态表按当前版本反映是否需要人工处理。"""
+    from app.services.cluster_review_lifecycle import (
+        cluster_version_from_row,
+        sync_review_state_after_scan,
+    )
+
+    _seed_clusters(test_db)
+    test_db.execute(
+        "INSERT INTO quality_issue "
+        "(qb_id, issue_type, suggested_action, reason, confidence, status, created_at) "
+        "VALUES (1, 'mismerge', 'split', '需要人工确认', 0.9, 'pending', datetime('now'))"
+    )
+    test_db.commit()
+
+    result = sync_review_state_after_scan(test_db, [1, 2])
+    test_db.commit()
+
+    assert result == {"clusters": 2, "passed": 1, "needs_human": 1}
+    state = test_db.execute(
+        "SELECT current_version, reviewed_version, status FROM cluster_review_state WHERE cluster_id = 1"
+    ).fetchone()
+    current = cluster_version_from_row(
+        test_db.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
+    )
+    assert state[0] == current
+    assert state[1] is None
+    assert state[2] == "needs_human"

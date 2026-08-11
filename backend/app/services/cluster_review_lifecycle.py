@@ -459,6 +459,66 @@ def fail_review_task(
     return {"status": status, "task_id": task["id"], "attempts": attempts}
 
 
+def sync_review_state_after_scan(
+    conn, cluster_ids: list[int], trigger_reason: str = "manual_full_scan"
+) -> dict:
+    """Align review state with versioned issues produced by a direct scan.
+
+    Manual scans use the generic jobs lifecycle instead of one ARQ task per
+    cluster.  Their issue rows are still versioned, so this helper keeps the
+    cluster read model truthful after the scan commits its findings.
+    """
+    now = _now()
+    passed = needs_human = 0
+    seen: set[int] = set()
+    for cluster_id in cluster_ids:
+        cluster_id = int(cluster_id)
+        if cluster_id in seen:
+            continue
+        seen.add(cluster_id)
+        cluster = get_active_cluster(conn, cluster_id)
+        if not cluster:
+            continue
+        version = cluster_version_from_row(cluster)
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
+            "AND status IN ('pending', 'approved')",
+            (cluster_id,),
+        ).fetchone()[0]
+        status = "needs_human" if pending else "passed"
+        reviewed_version = None if pending else version
+        conn.execute(
+            "INSERT INTO cluster_review_state "
+            "(cluster_id, current_version, reviewed_version, status, priority, "
+            "last_trigger_reason, last_reviewed_at, last_error, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 70, ?, ?, NULL, ?, ?) "
+            "ON CONFLICT(cluster_id) DO UPDATE SET current_version = excluded.current_version, "
+            "reviewed_version = excluded.reviewed_version, status = excluded.status, "
+            "last_trigger_reason = excluded.last_trigger_reason, "
+            "last_reviewed_at = excluded.last_reviewed_at, last_error = NULL, "
+            "updated_at = excluded.updated_at",
+            (
+                cluster_id,
+                version,
+                reviewed_version,
+                status,
+                trigger_reason,
+                now,
+                now,
+                now,
+            ),
+        )
+        if pending:
+            needs_human += 1
+        else:
+            passed += 1
+    return {
+        "clusters": passed + needs_human,
+        "passed": passed,
+        "needs_human": needs_human,
+    }
+
+
 def review_state_summary(conn) -> dict:
     rows = conn.execute(
         "SELECT status, COUNT(*) AS count FROM cluster_review_state GROUP BY status"

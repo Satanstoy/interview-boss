@@ -952,23 +952,21 @@ async def generate_quality_issues(
             if merge_target is not None:
                 # 并入路径：来源题移除该问法，目标题加问法
                 with get_db_connection() as conn:
-                    if review_version:
-                        from app.services.cluster_review_lifecycle import get_current_cluster_version
+                    from app.services.cluster_review_lifecycle import get_current_cluster_version
 
-                        if get_current_cluster_version(conn, rep["id"]) != review_version:
-                            continue
-                    if review_version:
-                        dup = conn.execute(
-                            "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
-                            "AND issue_type = 'mismerge' AND variant_key = ?",
-                            (rep["id"], review_version, str(idx)),
-                        ).fetchone()
-                    else:
-                        dup = conn.execute(
-                            "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
-                            "AND status IN ('pending', 'approved')",
-                            (rep["id"], idx),
-                        ).fetchone()
+                    current_review_version = get_current_cluster_version(conn, rep["id"])
+                    if not current_review_version:
+                        continue
+                    if review_version and current_review_version != review_version:
+                        continue
+                    dup = conn.execute(
+                        "SELECT id FROM quality_issue WHERE qb_id = ? "
+                        "AND issue_type = 'mismerge' AND "
+                        "(variant_key = ? AND review_version = ? OR "
+                        "variant_index = ? AND review_version IS NULL "
+                        "AND status IN ('pending', 'approved'))",
+                        (rep["id"], str(idx), current_review_version, idx),
+                    ).fetchone()
                     if dup:
                         continue
                     conn.execute(
@@ -978,8 +976,8 @@ async def generate_quality_issues(
                         "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
                         (rep["id"], idx, "mismerge", "merge",
                          data.get("reason", "")[:300], merge_target,
-                         round(confidence, 2), review_version, review_task_id,
-                         trigger_reason, str(idx)),
+                         round(confidence, 2), current_review_version, review_task_id,
+                         trigger_reason or "manual_quality_scan", str(idx)),
                     )
                     conn.commit()
                 created += 1
@@ -1007,23 +1005,21 @@ async def generate_quality_issues(
                 logger.warning(f"[清单生成] 拆出重写失败 qb={rep['id']} idx={idx}: {e}")
             # 已存在相同 issue → 跳过（幂等）
             with get_db_connection() as conn:
-                if review_version:
-                    from app.services.cluster_review_lifecycle import get_current_cluster_version
+                from app.services.cluster_review_lifecycle import get_current_cluster_version
 
-                    if get_current_cluster_version(conn, rep["id"]) != review_version:
-                        continue
-                if review_version:
-                    dup = conn.execute(
-                        "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
-                        "AND issue_type = 'mismerge' AND variant_key = ?",
-                        (rep["id"], review_version, str(idx)),
-                    ).fetchone()
-                else:
-                    dup = conn.execute(
-                        "SELECT id FROM quality_issue WHERE qb_id = ? AND variant_index = ? "
-                        "AND status IN ('pending', 'approved')",
-                        (rep["id"], idx),
-                    ).fetchone()
+                current_review_version = get_current_cluster_version(conn, rep["id"])
+                if not current_review_version:
+                    continue
+                if review_version and current_review_version != review_version:
+                    continue
+                dup = conn.execute(
+                    "SELECT id FROM quality_issue WHERE qb_id = ? "
+                    "AND issue_type = 'mismerge' AND "
+                    "(variant_key = ? AND review_version = ? OR "
+                    "variant_index = ? AND review_version IS NULL "
+                    "AND status IN ('pending', 'approved'))",
+                    (rep["id"], str(idx), current_review_version, idx),
+                ).fetchone()
                 if dup:
                     continue
                 conn.execute(
@@ -1033,13 +1029,13 @@ async def generate_quality_issues(
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
                     (rep["id"], idx, "mismerge", "split",
                      data.get("reason", "")[:300], rewritten, new_cat2,
-                     round(confidence, 2), review_version, review_task_id,
-                     trigger_reason, str(idx)),
+                     round(confidence, 2), current_review_version, review_task_id,
+                     trigger_reason or "manual_quality_scan", str(idx)),
                 )
                 conn.commit()
             created += 1
     logger.info("[清单生成] 新增 issue: %d 条", created)
-    return {"created": created}
+    return {"created": created, "scanned_cluster_ids": [c["id"] for c in candidates]}
 
 
 # ── weak_representative 检测 + 规范题面建议（LLM 生成）──
@@ -1129,23 +1125,20 @@ async def generate_weak_representative_issues(
         if not suggested or suggested == r["question"]:
             continue
         with get_db_connection() as conn:
-            if review_version:
-                from app.services.cluster_review_lifecycle import get_current_cluster_version
+            from app.services.cluster_review_lifecycle import get_current_cluster_version
 
-                if get_current_cluster_version(conn, r["id"]) != review_version:
-                    continue
-            if review_version:
-                dup = conn.execute(
-                    "SELECT id FROM quality_issue WHERE qb_id = ? AND review_version = ? "
-                    "AND issue_type = 'weak_representative' AND variant_key = ''",
-                    (r["id"], review_version),
-                ).fetchone()
-            else:
-                dup = conn.execute(
-                    "SELECT id FROM quality_issue WHERE qb_id = ? AND issue_type = 'weak_representative' "
-                    "AND status IN ('pending', 'approved')",
-                    (r["id"],),
-                ).fetchone()
+            current_review_version = get_current_cluster_version(conn, r["id"])
+            if not current_review_version:
+                continue
+            if review_version and current_review_version != review_version:
+                continue
+            dup = conn.execute(
+                "SELECT id FROM quality_issue WHERE qb_id = ? "
+                "AND issue_type = 'weak_representative' AND "
+                "(variant_key = '' AND review_version = ? OR "
+                "review_version IS NULL AND status IN ('pending', 'approved'))",
+                (r["id"], current_review_version),
+            ).fetchone()
             if dup:
                 continue
             conn.execute(
@@ -1157,9 +1150,9 @@ async def generate_weak_representative_issues(
                     r["id"],
                     data.get("reason", "")[:300],
                     suggested,
-                    review_version,
+                    current_review_version,
                     review_task_id,
-                    trigger_reason,
+                    trigger_reason or "manual_quality_scan",
                 ),
             )
             conn.commit()

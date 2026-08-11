@@ -51,6 +51,55 @@ def test_list_issues_requires_admin(client, test_db, monkeypatch):
     assert resp.status_code == 401
 
 
+def test_generate_all_quality_issues_creates_durable_job(client, test_db, monkeypatch):
+    """管理员全量扫描入口创建 job，并尝试立即投递 ARQ。"""
+    _ensure_admin_user(test_db)
+
+    class FakeArqJob:
+        job_id = "arq-quality-1"
+
+    async def fake_enqueue(job_id):
+        assert job_id == 1
+        return FakeArqJob()
+
+    monkeypatch.setattr("app.worker.enqueue_quality_review_scan_job", fake_enqueue)
+    response = client.post(
+        "/api/admin/quality-issues/generate-all",
+        headers=_admin_headers(user_id=1),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert response.json()["reused"] is False
+    row = test_db.execute(
+        "SELECT job_type, status, arq_job_id FROM jobs WHERE id = 1"
+    ).fetchone()
+    assert tuple(row) == ("quality_review_scan", "queued", "arq-quality-1")
+
+
+def test_generate_all_quality_issues_reuses_active_job(client, test_db, monkeypatch):
+    """重复点击不能创建并发的全量扫描。"""
+    _ensure_admin_user(test_db)
+
+    class FakeArqJob:
+        job_id = "arq-quality-1"
+
+    async def fake_enqueue(job_id):
+        return FakeArqJob()
+
+    monkeypatch.setattr("app.worker.enqueue_quality_review_scan_job", fake_enqueue)
+    headers = _admin_headers(user_id=1)
+    first = client.post("/api/admin/quality-issues/generate-all", headers=headers)
+    second = client.post("/api/admin/quality-issues/generate-all", headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert second.json()["reused"] is True
+    assert second.json()["job_id"] == first.json()["job_id"]
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'quality_review_scan'"
+    ).fetchone()[0] == 1
+
+
 def test_list_issues_pending(client, test_db, monkeypatch):
     """管理员列出 pending 清单（含建议值/置信度）"""
     _seed_quality_issue_db(test_db)

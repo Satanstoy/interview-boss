@@ -132,6 +132,8 @@ async def generate_unmerged_quality_issues(
     limit: int = 200,
     candidate_limit: int = ISLAND_TOP_CANDIDATES,
     similarity_threshold: float = ISLAND_SIM_THRESHOLD,
+    review_task_id: str | None = None,
+    trigger_reason: str = "manual_unmerged_scan",
 ) -> dict:
     """把 LLM 判定应合并的孤岛题写入管理员 pending 清单。
 
@@ -155,6 +157,7 @@ async def generate_unmerged_quality_issues(
             "clusters": len(clusters),
             "candidate_pairs": 0,
             "reviewed_pairs": 0,
+            "scanned_singleton_ids": [s["qb_id"] for s in singletons],
         }
 
     # 直接复用现有实验代码的聚类标签生成逻辑；失败时该逻辑会回退代表题。
@@ -223,8 +226,8 @@ async def generate_unmerged_quality_issues(
                 "INSERT INTO quality_issue "
                 "(qb_id, variant_index, issue_type, suggested_action, reason, "
                 "suggested_value, target_qb_id, confidence, source_question, source_cat2, "
-                "status, created_at, review_version, trigger_reason, variant_key) "
-                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'), ?, 'manual_unmerged_scan', ?)",
+                "status, created_at, review_version, review_task_id, trigger_reason, variant_key) "
+                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
                 (
                     singleton["qb_id"],
                     reason,
@@ -233,6 +236,8 @@ async def generate_unmerged_quality_issues(
                     singleton["question"],
                     singleton["cat2"],
                     review_version,
+                    review_task_id,
+                    trigger_reason,
                     f"target:{target['qb_id']}",
                 ),
             )
@@ -253,6 +258,7 @@ async def generate_unmerged_quality_issues(
         "clusters": len(clusters),
         "candidate_pairs": len(candidates),
         "reviewed_pairs": reviewed,
+        "scanned_singleton_ids": [s["qb_id"] for s in singletons],
     }
 
 

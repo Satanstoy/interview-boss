@@ -110,6 +110,15 @@ async def enqueue_recompute_embedding_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_quality_review_scan_job(job_id: int):
+    """将管理员触发的全量聚合质量审查任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("quality_review_scan_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_cluster_review_task(task_id: str):
     """将数据库 outbox 中的一条聚类质量评估任务投递到 ARQ。"""
     pool = await _get_redis_pool()
@@ -131,6 +140,118 @@ async def cluster_review_task(ctx, task_id: str):
     from app.services.cluster_review_lifecycle import run_cluster_review_task
 
     return await run_cluster_review_task(task_id)
+
+
+async def quality_review_scan_task(ctx, job_id: int):
+    """ARQ worker：执行管理员触发的误合并 + 漏合并全量扫描。"""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        QUALITY_REVIEW_SCAN_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+        touch_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=QUALITY_REVIEW_SCAN_JOB_TYPE,
+            )
+            if not task:
+                return None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            conn.commit()
+            return dict(task), json.loads(payload_row["payload"]) if payload_row else {}
+
+    claimed = await asyncio.to_thread(_claim_and_load)
+    if claimed is None:
+        logger.info("聚合质量扫描已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    task, payload = claimed
+
+    def _progress(current: int, message: str):
+        with get_db_connection() as conn:
+            touch_job(
+                conn,
+                job_id,
+                worker_id,
+                progress_current=current,
+                progress_message=message,
+            )
+            conn.commit()
+
+    def _complete(result):
+        with get_db_connection() as conn:
+            complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps(result, ensure_ascii=False),
+            )
+            conn.commit()
+
+    def _fail(error):
+        with get_db_connection() as conn:
+            outcome = fail_job(conn, job_id, worker_id, error)
+            conn.commit()
+            return outcome
+
+    try:
+        from app.services.clustering_maintenance import generate_quality_issues
+        from app.services.unmerged_quality import generate_unmerged_quality_issues
+
+        await asyncio.to_thread(_progress, 0, "正在分析聚类内误合并")
+        mismerge = await generate_quality_issues(
+            user_id=payload.get("user_id"),
+            limit=payload.get("mismerge_limit", 1000),
+            review_task_id=str(job_id),
+            trigger_reason="manual_full_scan",
+        )
+        await asyncio.to_thread(_progress, 1, "正在分析孤岛题漏合并")
+        unmerged = await generate_unmerged_quality_issues(
+            user_id=payload.get("user_id"),
+            limit=payload.get("singleton_limit", 1000),
+            candidate_limit=payload.get("candidate_limit", 3),
+            similarity_threshold=payload.get("similarity_threshold", 0.30),
+            review_task_id=str(job_id),
+            trigger_reason="manual_full_scan",
+        )
+        from app.services.cluster_review_lifecycle import sync_review_state_after_scan
+
+        def _sync_review_state():
+            with get_db_connection() as conn:
+                state = sync_review_state_after_scan(
+                    conn,
+                    (mismerge.get("scanned_cluster_ids") or [])
+                    + (unmerged.get("scanned_singleton_ids") or []),
+                    trigger_reason="manual_full_scan",
+                )
+                conn.commit()
+                return state
+
+        state = await asyncio.to_thread(_sync_review_state)
+        result = {
+            "status": "completed",
+            "mismerge": mismerge,
+            "unmerged": unmerged,
+            "review_state": state,
+        }
+        _complete(result)
+        return {"job_id": job_id, **result}
+    except Exception as exc:
+        outcome = _fail(str(exc)[:500])
+        logger.exception("聚合质量扫描失败: job_id=%s", job_id)
+        return {"status": outcome["status"], "job_id": job_id}
 
 
 async def startup(ctx):
@@ -1328,6 +1449,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
         RECITATION_GENERATION_JOB_TYPE,
         RECOMPUTE_EMBEDDING_JOB_TYPE,
         SUBMIT_IMPORT_JOB_TYPE,
+        QUALITY_REVIEW_SCAN_JOB_TYPE,
         claim_dispatch_batch,
         mark_dispatch_failed,
         mark_job_dispatched,
@@ -1350,6 +1472,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
         BUILD_MASTER_BANK_JOB_TYPE: enqueue_build_job,
         RECOMPUTE_EMBEDDING_JOB_TYPE: enqueue_recompute_embedding_job,
         RECITATION_GENERATION_JOB_TYPE: enqueue_generate_recitation_job,
+        QUALITY_REVIEW_SCAN_JOB_TYPE: enqueue_quality_review_scan_job,
     }
     dispatched = 0
     failed = 0
@@ -1518,6 +1641,7 @@ class WorkerSettings:
         submit_import_task,
         generate_answer_task,
         generate_recitation_task,
+        quality_review_scan_task,
         scheduled_compaction_task,
         scheduled_quality_audit_task,
         scheduled_submit_job_dispatch_task,

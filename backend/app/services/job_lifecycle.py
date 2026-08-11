@@ -23,6 +23,7 @@ INTERVIEW_REPROCESS_JOB_TYPE = "reprocess_interview"
 BUILD_MASTER_BANK_JOB_TYPE = "build_master_bank"
 RECOMPUTE_EMBEDDING_JOB_TYPE = "recompute_embedding"
 RECITATION_GENERATION_JOB_TYPE = "generate_recitation"
+QUALITY_REVIEW_SCAN_JOB_TYPE = "quality_review_scan"
 DISPATCHABLE_JOB_TYPES = (
     SUBMIT_IMPORT_JOB_TYPE,
     ANSWER_GENERATION_JOB_TYPE,
@@ -32,6 +33,7 @@ DISPATCHABLE_JOB_TYPES = (
     BUILD_MASTER_BANK_JOB_TYPE,
     RECOMPUTE_EMBEDDING_JOB_TYPE,
     RECITATION_GENERATION_JOB_TYPE,
+    QUALITY_REVIEW_SCAN_JOB_TYPE,
 )
 
 
@@ -69,6 +71,49 @@ def create_cluster_rebuild_job(conn, user_id: int | None = None) -> tuple[int, s
         (job_id, json.dumps({"user_id": user_id}, ensure_ascii=False)),
     )
     return job_id, "pending"
+
+
+def create_quality_review_scan_job(
+    conn,
+    user_id: int | None = None,
+    mismerge_limit: int = 1000,
+    singleton_limit: int = 1000,
+    candidate_limit: int = 3,
+    similarity_threshold: float = 0.30,
+) -> tuple[int, str, bool]:
+    """Create or reuse one durable full quality-review scan.
+
+    The scan is intentionally global: it only evaluates the public question
+    bank, so an active scan is shared by administrators.  A completed scan
+    does not block the next manual run; only pending/queued/running scans are
+    reused.
+    """
+    existing = conn.execute(
+        "SELECT id, status FROM jobs WHERE job_type = ? "
+        "AND status IN ('pending', 'queued', 'running') ORDER BY id DESC LIMIT 1",
+        (QUALITY_REVIEW_SCAN_JOB_TYPE,),
+    ).fetchone()
+    if existing:
+        return int(existing["id"]), str(existing["status"]), True
+
+    payload = {
+        "user_id": user_id,
+        "mismerge_limit": max(1, min(int(mismerge_limit), 5000)),
+        "singleton_limit": max(1, min(int(singleton_limit), 5000)),
+        "candidate_limit": max(1, min(int(candidate_limit), 10)),
+        "similarity_threshold": max(0.0, min(float(similarity_threshold), 1.0)),
+    }
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, progress_total, created_by, idempotency_key) "
+        "VALUES (?, 'pending', 2, ?, ?)",
+        (QUALITY_REVIEW_SCAN_JOB_TYPE, user_id, f"quality-review:{uuid4().hex}"),
+    )
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, json.dumps(payload, ensure_ascii=False)),
+    )
+    return job_id, "pending", False
 
 
 def create_interview_reprocess_job(

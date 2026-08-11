@@ -51,7 +51,7 @@
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
 | `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；「聚合质量」tab：子分段切换「审查清单」|「AI 助手」|「来源健康」；「模型配置」tab：`SettingsGlobalModel` 管理全局 LLM 与 embedding） |
 | `SettingsGlobalModel.vue` | 设置 - 管理员模型配置：全局 LLM 表单（Base URL/模型名/API Key 掩码/超时 + 测试连接，复用 `GET/PUT /api/profile`）+ Embedding 表单（后端模式 onnx/siliconflow/auto、模型名、API Key、维度 + 测试连接；保存后若 `recompute_triggered` 用 `getSSE` 订阅 `/api/jobs/{id}/stream` 显示重算进度） |
-| `SettingsQuality.vue` | 设置 - 聚合质量审查清单（待审批/已处理/已拒绝三态；卡片「原题 → 目标题」左右对照展示操作前后变化，含目标题语义 targetOf/movedText；批准弹窗为纯确认门不再重复对照；批准/拒绝/批量高置信；记录永久保留） |
+| `SettingsQuality.vue` | 设置 - 聚合质量审查清单（待审批/已处理/已拒绝三态；支持启动持久化 AI 全量扫描并轮询 Job；卡片「原题 → 目标题」左右对照展示操作前后变化，含目标题语义 targetOf/movedText；批准弹窗为纯确认门不再重复对照；批准/拒绝/批量高置信；记录永久保留） |
 | `SettingsSourceHealth.vue` | 设置 - 来源健康（同签名重复公共面经）：面经/JD 子分段、重复组列表（签名/计数/保留 id/成员 URL）、「合并」按钮（确认后调用 merge，软删可恢复） |
 | `SettingsQualityAssistant.vue` | 设置 - 聚合质量 AI 助手（仅管理员）：自然语言筛选/批量处理清单；工具轨迹可折叠展示；写操作渲染「待确认操作」卡片（同款「原题→目标题」左右对照 + 确认→`/confirm`→`{message:""}` 续接让 LLM 确认并提下一步）；session_id 存 localStorage |
 | `StagingPanel.vue` | 暂存面板（导入工作台）：文本/截图/来源链接三路输入 + 类型/季节/分享设置；分享设置（公共审核队列/仅自己可见）对所有用户可选；头部展示后台 Job 实时进度列表（阶段文案 + 进度条，失败红字可关闭）；非图片文件忽略时 toast 提示；清空非空内容需确认 |

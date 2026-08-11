@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { ClipboardCheck, ShieldCheck, ShieldX, Check, X, Sparkles, Loader2, ArrowRight } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   fetchQualityIssues,
+  startQualityScan,
+  fetchQualityScanJob,
   approveQualityIssue,
   rejectQualityIssue,
   batchApproveQualityIssues,
@@ -20,6 +22,9 @@ const issues = ref([])
 const loading = ref(false)
 const processing = ref(new Set())
 const busy = ref(false)
+const scanLoading = ref(false)
+const scanStatus = ref('')
+let scanTimer = null
 
 const statusTabs = [
   { id: 'pending', label: '待审批' },
@@ -88,6 +93,60 @@ const loadIssues = async () => {
     toastError('加载清单失败：' + (e?.message || e))
   } finally {
     loading.value = false
+  }
+}
+
+const stopScanPolling = () => {
+  if (scanTimer) {
+    clearTimeout(scanTimer)
+    scanTimer = null
+  }
+}
+
+const pollQualityScan = async (jobId) => {
+  stopScanPolling()
+  try {
+    const job = await fetchQualityScanJob(jobId)
+    scanStatus.value = job.progress_message || (
+      job.status === 'queued' || job.status === 'pending' ? '等待后台 worker 调度' : 'AI 正在分析题库'
+    )
+    if (job.status === 'completed') {
+      scanLoading.value = false
+      scanStatus.value = '扫描完成，已刷新审查清单'
+      toastSuccess('AI 质量扫描完成')
+      await loadIssues()
+      return
+    }
+    if (job.status === 'failed') {
+      scanLoading.value = false
+      scanStatus.value = '扫描失败'
+      toastError('AI 质量扫描失败：' + (job.error || '请查看后台日志'))
+      return
+    }
+    scanTimer = setTimeout(() => pollQualityScan(jobId), 2000)
+  } catch (e) {
+    scanLoading.value = false
+    scanStatus.value = ''
+    toastError('读取扫描进度失败：' + (e?.message || e))
+  }
+}
+
+const onRunQualityScan = async () => {
+  const ok = await showConfirm(
+    '开始 AI 全量扫描？',
+    '系统会分析公共题库中的误合并和漏合并，只生成待审建议，不会自动修改题库。',
+  )
+  if (!ok) return
+  scanLoading.value = true
+  scanStatus.value = '正在创建扫描任务'
+  try {
+    const result = await startQualityScan()
+    scanStatus.value = result.status === 'queued' ? 'AI 扫描已进入后台' : '等待后台 worker 调度'
+    await pollQualityScan(result.job_id)
+  } catch (e) {
+    scanLoading.value = false
+    scanStatus.value = ''
+    toastError('启动 AI 扫描失败：' + (e?.message || e))
   }
 }
 
@@ -255,6 +314,7 @@ const onBatchApproveSelected = async () => {
 }
 
 onMounted(loadIssues)
+onUnmounted(stopScanPolling)
 </script>
 
 <template>
@@ -271,16 +331,30 @@ onMounted(loadIssues)
           {{ tab.label }}
         </button>
       </div>
-      <Button
-        v-if="status === 'pending' && highConfidencePending.length"
-        variant="outline"
-        size="sm"
-        :disabled="busy"
-        @click="onBatchApprove"
-      >
-        <Sparkles :size="14" class="mr-1" />
-        批量批准高置信（{{ highConfidencePending.length }}）
-      </Button>
+      <div class="flex flex-wrap items-center gap-2">
+        <span v-if="scanStatus" class="text-[11px] text-muted-foreground">{{ scanStatus }}</span>
+        <Button
+          v-if="status === 'pending'"
+          variant="default"
+          size="sm"
+          :disabled="busy || scanLoading"
+          @click="onRunQualityScan"
+        >
+          <Loader2 v-if="scanLoading" :size="14" class="mr-1 animate-spin" />
+          <Sparkles v-else :size="14" class="mr-1" />
+          {{ scanLoading ? 'AI 扫描中...' : 'AI 全量扫描' }}
+        </Button>
+        <Button
+          v-if="status === 'pending' && highConfidencePending.length"
+          variant="outline"
+          size="sm"
+          :disabled="busy || scanLoading"
+          @click="onBatchApprove"
+        >
+          <Sparkles :size="14" class="mr-1" />
+          批量批准高置信（{{ highConfidencePending.length }}）
+        </Button>
+      </div>
     </div>
 
     <div

@@ -236,13 +236,19 @@ def approve_issue(conn, admin_id: int, issue_id: int, min_confidence: float | No
     issue = conn.execute(sql, params).fetchone()
     if not issue:
         raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-    execute_issue(conn, issue, operator_id=admin_id)
-    conn.execute(
-        "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
-        "reviewed_by = ? WHERE id = ?",
-        (admin_id, issue_id),
-    )
-    conn.commit()
+    try:
+        execute_issue(conn, issue, operator_id=admin_id)
+        conn.execute(
+            "UPDATE quality_issue SET status = 'done', reviewed_at = datetime('now'), "
+            "reviewed_by = ? WHERE id = ?",
+            (admin_id, issue_id),
+        )
+        conn.commit()
+    except Exception:
+        # Approval is one logical mutation: a partial split/merge must never
+        # remain open on the thread-local SQLite connection for the next task.
+        conn.rollback()
+        raise
     return {
         "id": issue_id,
         "status": "done",
@@ -261,34 +267,38 @@ def reject_issue(conn, admin_id: int, issue_id: int) -> dict:
     if not issue_before:
         raise HTTPException(status_code=404, detail="issue 不存在或已处理")
     _assert_issue_version_current(conn, issue_before)
-    cur = conn.execute(
-        "UPDATE quality_issue SET status = 'rejected', reviewed_at = datetime('now'), "
-        "reviewed_by = ? WHERE id = ? AND status = 'pending'",
-        (admin_id, issue_id),
-    )
-    if cur.rowcount == 0:
-        raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-    # 拒绝是对当前版本的人工作答复；只有该聚类没有其它待审建议时，
-    # 才把状态推进到 passed。若它仍有其他清单项，则继续 needs_human。
-    issue = conn.execute(
-        "SELECT qb_id, review_version FROM quality_issue WHERE id = ?", (issue_id,)
-    ).fetchone()
-    if issue:
-        from app.services.cluster_review_lifecycle import get_current_cluster_version
+    try:
+        cur = conn.execute(
+            "UPDATE quality_issue SET status = 'rejected', reviewed_at = datetime('now'), "
+            "reviewed_by = ? WHERE id = ? AND status = 'pending'",
+            (admin_id, issue_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="issue 不存在或已处理")
+        # 拒绝是对当前版本的人工作答复；只有该聚类没有其它待审建议时，
+        # 才把状态推进到 passed。若它仍有其他清单项，则继续 needs_human。
+        issue = conn.execute(
+            "SELECT qb_id, review_version FROM quality_issue WHERE id = ?", (issue_id,)
+        ).fetchone()
+        if issue:
+            from app.services.cluster_review_lifecycle import get_current_cluster_version
 
-        current = get_current_cluster_version(conn, issue["qb_id"])
-        pending = conn.execute(
-            "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
-            "AND status IN ('pending', 'approved')",
-            (issue["qb_id"],),
-        ).fetchone()[0]
-        if current and not pending:
-            conn.execute(
-                "UPDATE cluster_review_state SET status = 'passed', reviewed_version = ?, "
-                "last_reviewed_at = datetime('now'), updated_at = datetime('now') "
-                "WHERE cluster_id = ? AND current_version = ?",
-                (current, issue["qb_id"], current),
-            )
+            current = get_current_cluster_version(conn, issue["qb_id"])
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
+                "AND status IN ('pending', 'approved')",
+                (issue["qb_id"],),
+            ).fetchone()[0]
+            if current and not pending:
+                conn.execute(
+                    "UPDATE cluster_review_state SET status = 'passed', reviewed_version = ?, "
+                    "last_reviewed_at = datetime('now'), updated_at = datetime('now') "
+                    "WHERE cluster_id = ? AND current_version = ?",
+                    (current, issue["qb_id"], current),
+                )
+    except Exception:
+        conn.rollback()
+        raise
     return {"id": issue_id, "status": "rejected"}
 
 
