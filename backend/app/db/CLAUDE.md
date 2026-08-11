@@ -27,7 +27,8 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `migrations/practice_defaults.py` | 清理旧的今日复习/高频/未刷分类，仅保留全部题和我的收藏系统题单的 migration 057 |
 | `migrations/practice_performance.py` | 刷题队列切换查询的覆盖索引 migration 059 |
 | `migrations/admin_assistant.py` | 管理员 AI 助手对话/操作审计日志表 migration 069：`admin_assistant_log`（session_id + admin_id 隔离，role: user/assistant/action）；migration 070：`quality_issue.target_qb_id`（误合并「并入到其他题」的目标题 ID）；migration 071：`quality_issue.new_cat2`（拆出后新题分类，LLM 判定）；migration 073：`quality_issue.source_question/source_cat2`（质量审查项原题快照，兼容已删除来源题的历史展示） |
-| `migrations/clustering.py` | 聚类基础字段与质量审核迁移；migration 072 创建 `cluster_review_state`、`cluster_review_tasks`，并为 `quality_issue` 增加版本/任务/outbox 幂等字段 |
+| `migrations/clustering.py` | 聚类基础字段与质量审核迁移；migration 072 创建 `cluster_review_state`、`cluster_review_tasks`，并为 `quality_issue` 增加版本/任务/outbox 幂等字段；migration 076 创建原始题目全局 ownership claim 表 |
+| `migrations/sources.py` | 来源规范化表 migration 016/023/047，以及公共面经/JD `url_signature` 唯一索引的安全启用 |
 | `migrations/jobs.py` | jobs/analysis_queue/job_payloads 以及 migration 074 durable job lifecycle：ARQ 投递记录、lease、worker claim、重试与幂等键 |
 
 ## 关键模式

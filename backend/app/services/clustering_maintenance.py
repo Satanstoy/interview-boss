@@ -629,6 +629,14 @@ def split_variant(
     if not (0 <= variant_index < len(oq)):
         return None
     variant = oq[variant_index]
+    from app.services.question_variant_reconciliation import (
+        assert_no_other_variant_owner,
+        claim_original_question_owner,
+    )
+
+    # A legacy pending split can outlive another repair that already created
+    # the independent cluster. Do not create a second one from the stale card.
+    assert_no_other_variant_owner(conn, variant, {qb_id})
     new_rep = (new_representative or "").strip() or variant
     new_cat2_val = (new_cat2 or "").strip() or row["cat2"] or ""
 
@@ -654,6 +662,7 @@ def split_variant(
         ),
     )
     conn.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (cur.lastrowid, cur.lastrowid))
+    claim_original_question_owner(conn, variant, cur.lastrowid)
     from app.services.cluster_review_lifecycle import mark_clusters_review_pending
 
     mark_clusters_review_pending(conn, [qb_id, cur.lastrowid], "split_cluster")

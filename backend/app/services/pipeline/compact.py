@@ -236,6 +236,16 @@ def _do_merge_to_existing(
     o_oqs, o_oqs_src = _canonicalize_originals(
         entry.get("question", ""), o_src, o_oqs, o_oqs_src
     )
+    public_survivor = "owner_id" not in existing.keys() or existing["owner_id"] is None
+    if public_survivor:
+        from app.services.question_variant_reconciliation import (
+            transfer_original_question_owner,
+        )
+
+        for original_question in o_oqs:
+            transfer_original_question_owner(
+                conn, original_question, entry["id"], survivor_id
+            )
     for oq in o_oqs:
         if oq and oq not in s_oqs:
             s_oqs.append(oq)
@@ -322,7 +332,7 @@ def _do_merge_to_existing(
         cat2=cat2 or entry.get("cat2", ""),
         operator_id=operator_id,
     )
-    if existing["owner_id"] is None:
+    if public_survivor:
         from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
         mark_cluster_review_pending(conn, survivor_id, f"merge:{operation_type}")
@@ -405,7 +415,6 @@ async def _match_singletons_to_existing(
                 if not raw_matches:
                     return merge_ops
 
-                direct_matches = []
                 matches_to_validate = []
                 for m in raw_matches:
                     nid = _extract_id(m.get("new_id", ""))
@@ -433,16 +442,12 @@ async def _match_singletons_to_existing(
                         and conf >= DIRECT_ACCEPT_CONFIDENCE_THRESHOLD
                         and entry_cat2 not in ("", "其他")
                     ):
-                        direct_matches.append(normalized)
+                        # High confidence is a candidate threshold, not a
+                        # semantic decision. It must use the same independent
+                        # validator as every other compaction match.
+                        matches_to_validate.append(normalized)
                     elif conf is None or conf >= VALIDATION_CONFIDENCE_THRESHOLD:
                         matches_to_validate.append(normalized)
-
-                for m in direct_matches:
-                    nid = str(m.get("new_id", ""))
-                    cid = m.get("cluster_id")
-                    entry = new_q_map.get(nid)
-                    if entry:
-                        merge_ops.append((cid, entry, float(m.get("confidence", 0.9))))
 
                 if matches_to_validate:
                     all_existing_flat = []

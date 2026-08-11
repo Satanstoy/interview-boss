@@ -18,7 +18,6 @@
 """
 import json
 import os
-import shutil
 import sqlite3
 import sys
 import time
@@ -52,7 +51,7 @@ def _sig_for(url):
 
 
 def backfill_url_signatures(conn, dry_run):
-    """回填 interview / jd 表空 url_signature。dry_run 时仍写入，由调用方回滚/提交。"""
+    """回填 interview / jd 表空 url_signature。dry-run 纯只读。"""
     fixed = 0
     for table in ("interview", "jd"):
         rows = conn.execute(
@@ -62,11 +61,29 @@ def backfill_url_signatures(conn, dry_run):
             sig = _sig_for(row[1])
             if sig:
                 fixed += 1
-                conn.execute(
-                    f"UPDATE {table} SET url_signature = ? WHERE id = ?",
-                    (sig, row[0]),
-                )
+                if not dry_run:
+                    conn.execute(
+                        f"UPDATE {table} SET url_signature = ? WHERE id = ?",
+                        (sig, row[0]),
+                    )
     return fixed
+
+
+def _safe_backup(db_path):
+    """使用 SQLite backup API，确保 WAL 中的最新页也进入备份。"""
+    backup = f"{db_path}.bak.source-consistency-{int(time.time())}"
+    source = sqlite3.connect(db_path, timeout=30)
+    target = sqlite3.connect(backup)
+    try:
+        source.backup(target)
+        target.commit()
+        integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise RuntimeError(f"备份完整性检查失败: {integrity}")
+    finally:
+        target.close()
+        source.close()
+    return backup
 
 
 def report_internal_sources(conn):
@@ -94,8 +111,7 @@ def main():
     conn.row_factory = sqlite3.Row
 
     if not dry_run:
-        backup = f"{DB_PATH}.bak.source-consistency-{int(time.time())}"
-        shutil.copy2(DB_PATH, backup)
+        backup = _safe_backup(DB_PATH)
         print(f"已备份: {backup}")
 
     sig_n = backfill_url_signatures(conn, dry_run)

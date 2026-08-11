@@ -44,6 +44,9 @@ def init_db():
         conn.row_factory = sqlite3.Row
         from app.db.migrations import run_migrations
         run_migrations(conn)
+        from app.db.migrations.sources import ensure_public_url_signature_unique_indexes
+
+        ensure_public_url_signature_unique_indexes(conn)
 
 
 async def run_db(func):

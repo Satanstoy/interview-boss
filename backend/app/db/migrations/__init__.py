@@ -41,6 +41,7 @@ from app.db.migrations.sources import (
     _migration_016_normalized_source_tables,
     _migration_023_duplicate_of,
     _migration_047_soft_delete_sources,
+    ensure_public_url_signature_unique_indexes,
 )
 from app.db.migrations.view import (
     _migration_008_user_question_view,
@@ -85,6 +86,7 @@ from app.db.migrations.clustering import (
     _migration_067_quality_audit,
     _migration_068_quality_issue,
     _migration_072_cluster_review_lifecycle,
+    _migration_076_question_variant_ownership,
     _classify_e_question,
 )
 from app.db.migrations.admin_assistant import (
@@ -196,6 +198,7 @@ _MIGRATIONS = [
     (73, "quality_issue_source_snapshot", _migration_073_quality_issue_source_snapshot),
     (74, "durable_job_lifecycle", _migration_074_durable_job_lifecycle),
     (75, "job_retry_lineage", _migration_075_job_retry_lineage),
+    (76, "question_variant_ownership", _migration_076_question_variant_ownership),
 ]
 
 

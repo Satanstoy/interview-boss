@@ -5,6 +5,37 @@ import logging
 logger = logging.getLogger("interview-boss")
 
 
+def ensure_public_url_signature_unique_indexes(conn) -> dict:
+    """Install race-proof public-source uniqueness when legacy data is clean.
+
+    Existing dirty databases are deliberately left bootable: the index is
+    skipped with a warning until ``fix_question_data_quality.py`` removes the
+    duplicates. The repair command calls this again after its transaction.
+    """
+
+    result = {"interview": False, "jd": False, "skipped": []}
+    for table in ("interview", "jd"):
+        duplicate = conn.execute(
+            f"SELECT 1 FROM {table} WHERE owner_id IS NULL "
+            "AND deleted_at IS NULL AND url_signature != '' "
+            "GROUP BY url_signature HAVING COUNT(*) > 1 LIMIT 1"
+        ).fetchone()
+        if duplicate:
+            result["skipped"].append(table)
+            logger.warning(
+                "public %s has duplicate url_signature; unique index deferred until data repair",
+                table,
+            )
+            continue
+        conn.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS uq_{table}_public_url_signature "
+            f"ON {table}(url_signature) WHERE owner_id IS NULL "
+            "AND deleted_at IS NULL AND url_signature != ''"
+        )
+        result[table] = True
+    return result
+
+
 def _migration_016_normalized_source_tables(conn):
     """Create normalized tables to replace JSON TEXT columns in question_bank."""
     conn.execute("""

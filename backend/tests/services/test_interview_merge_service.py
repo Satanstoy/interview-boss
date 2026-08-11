@@ -230,3 +230,17 @@ def test_merge_all_count(test_db):
     result = merge_all_duplicate_groups(test_db, "interview", dry_run=False)
     assert result["merged_count"] == 2
     assert len(result["results"]) == 2
+
+
+def test_public_url_signature_unique_indexes_are_safe_to_enable(test_db):
+    from app.db.migrations.sources import ensure_public_url_signature_unique_indexes
+
+    result = ensure_public_url_signature_unique_indexes(test_db)
+
+    assert result["skipped"] == []
+    assert result["interview"] is True
+    assert result["jd"] is True
+    interview_indexes = {
+        row[1] for row in test_db.execute("PRAGMA index_list('interview')").fetchall()
+    }
+    assert "uq_interview_public_url_signature" in interview_indexes

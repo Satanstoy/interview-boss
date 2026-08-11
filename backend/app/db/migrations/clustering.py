@@ -500,3 +500,29 @@ def _migration_072_cluster_review_lifecycle(conn):
         "WHERE review_version IS NOT NULL"
     )
     logger.info("migration_072: 聚类版本审核生命周期表与字段已就绪")
+
+
+def _migration_076_question_variant_ownership(conn):
+    """Create the global original-question ownership registry.
+
+    ``question_original_items`` is intentionally scoped to one question bank
+    row, so it cannot prevent the same normalized original question from being
+    written to two public clusters.  This registry is the atomic claim table
+    used by the pipeline writer; the repair command rebuilds it after the
+    historical duplicates have been reconciled.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS question_variant_owners (
+            normalized_question TEXT PRIMARY KEY,
+            question_bank_id INTEGER NOT NULL REFERENCES question_bank(id) ON DELETE CASCADE,
+            question_text TEXT NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_question_variant_owners_qb "
+        "ON question_variant_owners(question_bank_id)"
+    )
+    logger.info("migration_076: 原始题目全局归属表已就绪")

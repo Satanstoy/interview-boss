@@ -34,6 +34,7 @@
 | `rescore_with_judge.py` | 用 judge 模型对已有评测结果重新评分 |
 | `fix_sources_frequency.py` | 来源数量/frequency 修复脚本 |
 | `fix_source_consistency.py` | 面经/来源一致性修复：回填缺失 url_signature（旧数据缺口导致 xsec_token 变体重复上传）、合并同签名重复公共面经（委托 `app.services.interview_merge_service`，与 admin 来源健康界面共用实现，**仅处理公共面经 `owner_id IS NULL`**；detail 重挂去重 + 来源表 URL 归一 + JSON 双写列同步）、报告 internal:// 现状（展示层降级）。`--dry-run` 预览（只读不写入，与实际执行一致） |
+| `fix_question_data_quality.py` | 公共题库脏数据总修复编排：安全备份、URL signature 来源去重、跨题簇原始题目显式 canonical 归属修复、待审卡统一关闭、ownership 重建与验收；默认 dry-run，执行必须为每个重复组传 `--canonical QUESTION=QB_ID` |
 | `fix_duplicate_of_mirrors.py` | 清理历史 duplicate_of 镜像题（软删除，--dry-run 预览） |
 | `eval_framework/` | Interview Agent 评测框架内部模块（candidate、scenarios、rubrics、scoring、reports、metrics、http_client、runner、types）；由 `eval_interview_agent.py` 调用；每轮请求必须携带 `client_request_id`，并用 turn status 对账 SSE terminal |
 

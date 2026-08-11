@@ -12,7 +12,7 @@
 | `compact.py` | 孤岛碎片整理（frequency=1 题目合并），共享 `batch.py` 辅助函数 |
 | `queue.py` | 队列操作：enqueue（支持 owner_id）/ dequeue（按 owner_id 分桶）/ mark_done / mark_failed / trigger 判断 |
 | `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE` 由 `core/config.CLUSTER_BATCH_SIZE` 控制） |
-| `writer.py` | 数据库写入：将聚类结果写入 question_bank；面经打标必须传已知 `interview_id`，以替换同一场面试的 typed details |
+| `writer.py` | 数据库写入：将聚类结果写入 question_bank；面经打标必须传已知 `interview_id`，以替换同一场面试的 typed details；公共原始题写入必须先通过全局 ownership claim |
 
 ## 核心规则
 

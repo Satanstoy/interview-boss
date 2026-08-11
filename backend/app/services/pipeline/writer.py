@@ -101,6 +101,15 @@ def apply_matched(conn, matched, job_position, saved_answers):
         q = item.get('question', '')
         q_is_new = bool(q and q not in oqs)
         if q_is_new:
+            # question_original_items has only a per-cluster UNIQUE key.  The
+            # global claim prevents a malformed matcher result from writing the
+            # same normalized original question into a second public cluster.
+            from app.services.question_variant_reconciliation import (
+                claim_original_question_owner,
+            )
+
+            if existing["owner_id"] is None:
+                claim_original_question_owner(conn, q, cluster_id)
             oqs.append(q)
             oqs_src.append({
                 "question": q,
@@ -194,6 +203,14 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
                 insert_original_item(conn, new_id, oqs.get('question', ''), oqs.get('sources', []))
             except Exception:
                 pass
+
+        from app.services.question_variant_reconciliation import (
+            claim_original_question_owner,
+        )
+
+        if entry.get("owner_id") is None:
+            for original_question in entry["original_questions"]:
+                claim_original_question_owner(conn, original_question, new_id)
 
         for pr in pos_rows_cache:
             conn.execute(

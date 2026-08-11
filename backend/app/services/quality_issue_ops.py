@@ -167,11 +167,23 @@ def execute_issue(conn, issue, operator_id: int | None = None) -> None:
     if action == "split":
         # split 时新题代表题用 LLM 预生成的重写题面（suggested_value），原问法降为新题问法；
         # 新题分类用 LLM 判定的 new_cat2（不继承原题，误合并常因跨领域）
-        new_id = split_variant(
-            conn, issue["qb_id"], issue["variant_index"],
-            new_representative=issue["suggested_value"],
-            new_cat2=issue["new_cat2"],
-        )
+        try:
+            new_id = split_variant(
+                conn, issue["qb_id"], issue["variant_index"],
+                new_representative=issue["suggested_value"],
+                new_cat2=issue["new_cat2"],
+            )
+        except Exception as exc:
+            from app.services.question_variant_reconciliation import (
+                VariantOwnershipConflict,
+            )
+
+            if isinstance(exc, VariantOwnershipConflict):
+                raise HTTPException(
+                    status_code=409,
+                    detail="该原始题目已存在其他独立题簇，请使用归属修复而不是再次拆分",
+                ) from exc
+            raise
         if new_id is None:
             raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
     elif action == "merge":

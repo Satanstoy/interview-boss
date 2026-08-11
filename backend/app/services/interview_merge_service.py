@@ -85,11 +85,19 @@ def list_duplicate_groups(conn, table: str = "interview") -> list:
     return groups
 
 
-def merge_duplicate_group(conn, signature: str, table: str = "interview", dry_run: bool = True) -> dict:
+def merge_duplicate_group(
+    conn,
+    signature: str,
+    table: str = "interview",
+    dry_run: bool = True,
+    *,
+    commit: bool = True,
+) -> dict:
     """合并指定签名的重复公共记录组（保留最早，软删其余）。
 
     dry_run=True 时只计算预览（不执行任何写入，纯只读）；
-    dry_run=False 时真实执行并 commit。软删可恢复。
+    dry_run=False 时真实执行。默认 commit；批量数据修复编排器可传
+    ``commit=False``，把来源合并与题簇修复放在同一事务中。
 
     Returns: {signature, table, dry_run, keep_id, keep_url, drop, merged_count, actions}
     """
@@ -132,7 +140,8 @@ def merge_duplicate_group(conn, signature: str, table: str = "interview", dry_ru
         }
 
     actions = _execute_merge(conn, table, keep_id, keep_url, drop_pairs)
-    conn.commit()
+    if commit:
+        conn.commit()
     return {**base, "actions": actions}
 
 
@@ -343,12 +352,24 @@ def _execute_merge(conn, table, keep_id, keep_url, drop_pairs) -> dict:
     return actions
 
 
-def merge_all_duplicate_groups(conn, table: str = "interview", dry_run: bool = True) -> dict:
+def merge_all_duplicate_groups(
+    conn,
+    table: str = "interview",
+    dry_run: bool = True,
+    *,
+    commit: bool = True,
+) -> dict:
     """合并所有同签名重复的公共记录组（运维脚本复用）。"""
     results = []
     merged_count = 0
     for group in list_duplicate_groups(conn, table):
-        result = merge_duplicate_group(conn, group["signature"], table=table, dry_run=dry_run)
+        result = merge_duplicate_group(
+            conn,
+            group["signature"],
+            table=table,
+            dry_run=dry_run,
+            commit=commit,
+        )
         results.append(result)
         merged_count += result["merged_count"]
     return {"results": results, "merged_count": merged_count}
