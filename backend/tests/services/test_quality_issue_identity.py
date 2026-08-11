@@ -89,6 +89,30 @@ def test_resolved_finding_is_not_reopened_by_a_later_scan(test_db):
     assert test_db.execute("SELECT COUNT(*) FROM quality_issue").fetchone()[0] == 1
 
 
+def test_approved_old_snapshot_is_reopened_in_the_same_row(test_db):
+    from app.db.quality_issue_identity import build_issue_fingerprint, upsert_quality_issue
+
+    _seed_question(test_db)
+    fingerprint = build_issue_fingerprint("mismerge", "研究生阶段研究方向是什么")
+    issue_id, _ = upsert_quality_issue(
+        test_db, _issue_values(fingerprint, "version-1")
+    )
+    test_db.execute(
+        "UPDATE quality_issue SET status = 'approved' WHERE id = ?", (issue_id,)
+    )
+    test_db.commit()
+
+    reused_id, reopened = upsert_quality_issue(
+        test_db, _issue_values(fingerprint, "version-2")
+    )
+    test_db.commit()
+
+    assert (reused_id, reopened) == (issue_id, True)
+    assert test_db.execute(
+        "SELECT status, review_version FROM quality_issue WHERE id = ?", (issue_id,)
+    ).fetchone()[0:] == ("pending", "version-2")
+
+
 def test_quality_issue_migration_backfills_legacy_fingerprint(test_db):
     from app.db.migrations.clustering import _migration_077_quality_issue_identity
     from app.db.quality_issue_identity import build_issue_fingerprint

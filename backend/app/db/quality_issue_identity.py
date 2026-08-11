@@ -175,8 +175,17 @@ def upsert_quality_issue(conn, values: dict[str, Any]) -> tuple[int | None, bool
 
     existing = find_existing_issue(conn, values["issue_fingerprint"])
     if existing:
-        if existing["status"] in ("done", "rejected", "approved"):
+        if existing["status"] in ("done", "rejected"):
             return existing["id"], False
+        if existing["status"] == "approved":
+            # An approval belongs to one evidence snapshot.  A newer scan
+            # must reopen that same row for fresh evidence; an identical scan
+            # must leave the human decision untouched.
+            if (
+                not values.get("review_version")
+                or existing["review_version"] == values["review_version"]
+            ):
+                return existing["id"], False
         was_pending = existing["status"] == "pending"
         update_issue_from_observation(conn, existing["id"], values)
         return existing["id"], not was_pending
