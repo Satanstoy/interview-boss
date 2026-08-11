@@ -208,7 +208,19 @@ def execute_issue(conn, issue, operator_id: int | None = None) -> None:
         if removed == 0:
             raise HTTPException(status_code=409, detail="变体已不存在（可能已被处理）")
     elif action == "refine_representative":
-        ok = refine_representative(conn, issue["qb_id"], issue["suggested_value"])
+        try:
+            ok = refine_representative(conn, issue["qb_id"], issue["suggested_value"])
+        except Exception as exc:
+            from app.services.question_variant_reconciliation import (
+                VariantOwnershipConflict,
+            )
+
+            if isinstance(exc, VariantOwnershipConflict):
+                raise HTTPException(
+                    status_code=409,
+                    detail="代表题修订会重新占用已归属其他题簇的原始题目，请先执行归属修复",
+                ) from exc
+            raise
         if not ok:
             raise HTTPException(status_code=409, detail="代表题已变更（可能已被处理）")
     else:

@@ -368,6 +368,22 @@ def _sync_normalized_tables(conn, qb_id: int) -> None:
     sources = _dedupe_sources(_json_list(row["sources"]))
     originals = [str(item).strip() for item in _json_list(row["original_questions"]) if str(item or "").strip()]
     source_entries = _json_list(row["original_question_sources"])
+    # A merge can remove an original question while leaving its provenance
+    # entry behind.  Normalize the JSON side before syncing the relational
+    # side so orphaned source URLs cannot keep the two representations apart.
+    original_set = set(originals)
+    cleaned_source_entries = [
+        item
+        for item in source_entries
+        if isinstance(item, dict) and item.get("question") in original_set
+    ]
+    if cleaned_source_entries != source_entries:
+        conn.execute(
+            "UPDATE question_bank SET original_question_sources = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(cleaned_source_entries, ensure_ascii=False), qb_id),
+        )
+        source_entries = cleaned_source_entries
     entry_by_question = {
         str(item.get("question")): item
         for item in source_entries

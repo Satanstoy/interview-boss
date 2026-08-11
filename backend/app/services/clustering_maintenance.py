@@ -39,6 +39,18 @@ def _json_list(value) -> list:
         return []
 
 
+def _sync_question_cluster_normalized_tables(conn, qb_id: int) -> None:
+    """Keep normalized question tables aligned after a review mutation.
+
+    Review operations update the JSON columns on ``question_bank`` directly.
+    The normalized tables are part of the same read model, so every mutation
+    path must refresh them before the enclosing approval transaction commits.
+    """
+    from app.services.question_variant_reconciliation import _sync_normalized_tables
+
+    _sync_normalized_tables(conn, qb_id)
+
+
 def _append_unique(items: list, value: str) -> bool:
     value = (value or "").strip()
     if not value or value in items:
@@ -663,6 +675,8 @@ def split_variant(
     )
     conn.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (cur.lastrowid, cur.lastrowid))
     claim_original_question_owner(conn, variant, cur.lastrowid)
+    _sync_question_cluster_normalized_tables(conn, qb_id)
+    _sync_question_cluster_normalized_tables(conn, cur.lastrowid)
     from app.services.cluster_review_lifecycle import mark_clusters_review_pending
 
     mark_clusters_review_pending(conn, [qb_id, cur.lastrowid], "split_cluster")
@@ -692,6 +706,10 @@ def dedupe_variant(conn, qb_id: int, variant_indices: list[int]) -> int:
         "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
         (json.dumps(new_oq, ensure_ascii=False), max(len(new_oq), 1), qb_id),
     )
+    _sync_question_cluster_normalized_tables(conn, qb_id)
+    from app.services.question_variant_reconciliation import rebuild_variant_ownership
+
+    rebuild_variant_ownership(conn)
     from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
     mark_cluster_review_pending(conn, qb_id, "dedupe_variant")
@@ -741,6 +759,11 @@ def merge_variant(conn, source_qb_id: int, variant_index: int, target_qb_id: int
             "UPDATE question_bank SET original_questions = ?, frequency = ? WHERE id = ?",
             (json.dumps(tgt_oq, ensure_ascii=False), len(tgt_oq), target_qb_id),
         )
+    from app.services.question_variant_reconciliation import transfer_original_question_owner
+
+    transfer_original_question_owner(conn, variant, source_qb_id, target_qb_id)
+    _sync_question_cluster_normalized_tables(conn, source_qb_id)
+    _sync_question_cluster_normalized_tables(conn, target_qb_id)
     from app.services.cluster_review_lifecycle import mark_clusters_review_pending
 
     mark_clusters_review_pending(conn, [source_qb_id, target_qb_id], "merge_variant")
@@ -767,10 +790,14 @@ def refine_representative(conn, qb_id: int, new_representative: str) -> bool:
         oq = []
     if row["question"] not in oq:
         oq.insert(0, row["question"])
+    from app.services.question_variant_reconciliation import claim_original_question_owner
+
+    claim_original_question_owner(conn, row["question"], qb_id)
     conn.execute(
         "UPDATE question_bank SET question = ?, original_questions = ?, frequency = ? WHERE id = ?",
         (new_rep, json.dumps(oq, ensure_ascii=False), len(oq), qb_id),
     )
+    _sync_question_cluster_normalized_tables(conn, qb_id)
     from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
     mark_cluster_review_pending(conn, qb_id, "representative_changed")

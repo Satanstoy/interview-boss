@@ -196,3 +196,30 @@ def test_apply_matched_rejects_cross_cluster_duplicate(test_db):
             "后端开发",
             {},
         )
+
+
+def test_sync_normalized_tables_removes_orphaned_provenance_entries(test_db):
+    """归并移除原题后，遗留的 JSON 来源条目也必须被清掉。"""
+    from app.services.question_variant_reconciliation import _sync_normalized_tables
+
+    _insert_qb(
+        test_db,
+        50,
+        "规范题",
+        ["保留题"],
+        original_sources=[
+            {"question": "保留题", "sources": []},
+            {"question": "已移除题", "sources": [{"url": "https://orphan.example"}]},
+        ],
+    )
+    test_db.commit()
+
+    _sync_normalized_tables(test_db, 50)
+
+    row = test_db.execute(
+        "SELECT original_question_sources FROM question_bank WHERE id = 50"
+    ).fetchone()
+    assert json.loads(row[0]) == [{"question": "保留题", "sources": []}]
+    assert test_db.execute(
+        "SELECT 1 FROM question_original_item_sources WHERE url = 'https://orphan.example'"
+    ).fetchone() is None

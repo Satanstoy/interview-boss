@@ -1,6 +1,8 @@
 """审查清单操作函数测试：split_variant / dedupe_variant / refine_representative / merge_variant"""
 import json
 
+import pytest
+
 
 def _seed_issue_cluster(conn):
     conn.execute(
@@ -122,6 +124,16 @@ def test_merge_variant_moves_question(test_db):
     ).fetchone()
     assert "关于研究生方向" in json.loads(tgt[1])
     assert tgt[0] == 2
+    assert test_db.execute(
+        "SELECT 1 FROM question_original_items "
+        "WHERE question_bank_id = 1 AND question_text = '关于研究生方向' "
+        "AND deleted_at IS NULL"
+    ).fetchone() is None
+    assert test_db.execute(
+        "SELECT 1 FROM question_original_items "
+        "WHERE question_bank_id = 2 AND question_text = '关于研究生方向' "
+        "AND deleted_at IS NULL"
+    ).fetchone() is not None
 
 
 def test_merge_variant_target_missing_returns_false(test_db):
@@ -153,3 +165,35 @@ def test_refine_representative_swaps_and_keeps_original(test_db):
     oq = json.loads(row[2])
     assert "介绍RAG流程" in oq  # 原代表题进 oq
     assert row[1] == 5  # frequency +1（原代表题成为变体）
+    assert test_db.execute(
+        "SELECT 1 FROM question_original_items "
+        "WHERE question_bank_id = 1 AND question_text = '介绍RAG流程' "
+        "AND deleted_at IS NULL"
+    ).fetchone() is not None
+    assert test_db.execute(
+        "SELECT question_bank_id FROM question_variant_owners "
+        "WHERE normalized_question = '介绍rag流程'"
+    ).fetchone()[0] == 1
+
+
+def test_refine_representative_rejects_original_owned_by_other_cluster(test_db):
+    """修订代表题不能把已归属其他题簇的原始题重新抢回来。"""
+    from app.services.clustering_maintenance import refine_representative
+    from app.services.question_variant_reconciliation import (
+        VariantOwnershipConflict,
+        rebuild_variant_ownership,
+    )
+
+    _seed_issue_cluster(test_db)
+    test_db.execute(
+        "INSERT INTO question_bank "
+        "(id, question, frequency, status, owner_id, original_questions) "
+        "VALUES (2, 'RAG独立题', 1, 'approved', NULL, ?)",
+        (json.dumps(["介绍RAG流程"], ensure_ascii=False),),
+    )
+    rebuild_variant_ownership(test_db)
+
+    with pytest.raises(VariantOwnershipConflict):
+        refine_representative(
+            test_db, qb_id=1, new_representative="新的规范代表题"
+        )
