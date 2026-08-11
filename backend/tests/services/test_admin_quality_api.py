@@ -117,6 +117,27 @@ def test_list_issues_pending(client, test_db, monkeypatch):
     assert first["confidence"] == 0.9
 
 
+def test_list_issues_tolerates_stale_variant_index(client, test_db, monkeypatch):
+    """题簇变更后旧卡片下标失效，列表仍应可加载并标记过期。"""
+    _seed_quality_issue_db(test_db)
+    test_db.execute(
+        "INSERT INTO quality_issue (qb_id, variant_index, issue_type, suggested_action, "
+        "reason, confidence, status, created_at) VALUES "
+        "(1, 99, 'mismerge', 'split', '旧卡片', 0.9, 'pending', 'now')"
+    )
+    test_db.commit()
+    _ensure_admin_user(test_db)
+
+    resp = client.get(
+        "/api/admin/quality-issues?status=pending", headers=_admin_headers(user_id=1)
+    )
+
+    assert resp.status_code == 200
+    stale = next(item for item in resp.json() if item["variant_index"] == 99)
+    assert stale["variant"] is None
+    assert stale["variant_stale"] is True
+
+
 def test_approve_issue_executes_split(client, test_db, monkeypatch):
     """批准 mismerge → 执行拆出 + 状态 done + 记录审批人"""
     _seed_quality_issue_db(test_db)

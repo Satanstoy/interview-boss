@@ -94,6 +94,13 @@ def serialize_issue(row, conn) -> dict:
         historical_question = _historical_merged_question(
             conn, row["qb_id"], row["target_qb_id"]
         )
+    variants = json_loads(qb["original_questions"]) if qb and qb["original_questions"] else []
+    variant_index = row["variant_index"]
+    variant_stale = bool(
+        qb
+        and variant_index is not None
+        and not (0 <= variant_index < len(variants))
+    )
 
     return {
         "id": row["id"],
@@ -111,13 +118,10 @@ def serialize_issue(row, conn) -> dict:
         "variant_index": row["variant_index"],
         "variant": (
             None
-            if (not qb or row["variant_index"] is None)
-            else (
-                json_loads(qb["original_questions"])[row["variant_index"]]
-                if qb["original_questions"]
-                else None
-            )
+            if (not qb or variant_index is None or variant_stale)
+            else (variants[variant_index] if variants else None)
         ),
+        "variant_stale": variant_stale,
         "issue_type": row["issue_type"],
         "issue_type_label": ISSUE_TYPE_LABELS.get(row["issue_type"], row["issue_type"]),
         "suggested_action": row["suggested_action"],
