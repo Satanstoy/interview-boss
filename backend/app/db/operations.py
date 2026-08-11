@@ -14,6 +14,12 @@ from app.services.interview_distribution import (
     map_question_type,
     mark_distribution_refresh,
 )
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
+from app.services.question_variant_reconciliation import normalize_original_question
 
 logger = logging.getLogger("interview-boss")
 
@@ -521,7 +527,8 @@ def _apply_incremental_txn(
         new_q_text = row[3] if len(row) > 3 else ""
         new_source = {"url": url, "company": company, "round": round_}
         existing = cursor.execute(
-            "SELECT sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+            "SELECT sources, original_questions, original_question_sources, owner_id, status "
+            "FROM question_bank WHERE id = ?",
             (qb_id,),
         ).fetchone()
         if existing:
@@ -529,74 +536,61 @@ def _apply_incremental_txn(
                 sources = json.loads(existing["sources"]) if existing["sources"] else []
             except Exception:
                 sources = []
-            existing_urls = {s.get("url") for s in sources}
-            if url not in existing_urls:
-                sources.append(new_source)
-                # 回写 original_questions
-                try:
-                    orig_qs = (
-                        json.loads(existing["original_questions"])
-                        if existing["original_questions"]
-                        else []
-                    )
-                    orig_qs_src = (
-                        json.loads(existing["original_question_sources"])
-                        if existing["original_question_sources"]
-                        else []
-                    )
-                except Exception:
-                    orig_qs, orig_qs_src = [], []
-                if new_q_text and new_q_text not in orig_qs:
-                    orig_qs.append(new_q_text)
-                    orig_qs_src.append(
-                        {"question": new_q_text, "sources": [new_source]}
-                    )
-                elif new_q_text:
-                    # 问题文本已存在：将新 URL 合并到对应条目的 sources 中
-                    _merged = False
-                    for _oqs_item in orig_qs_src:
-                        if _oqs_item.get("question") == new_q_text:
-                            _oqs_urls = {
-                                s.get("url") for s in _oqs_item.get("sources", [])
-                            }
-                            if url not in _oqs_urls:
-                                _oqs_item.setdefault("sources", []).append(new_source)
-                            _merged = True
-                            break
-                    if not _merged:
-                        # question text 匹配但 oqs 中没有对应条目，新建一个
-                        orig_qs_src.append(
-                            {"question": new_q_text, "sources": [new_source]}
-                        )
-                # 安全网：确保每个 source URL 至少在 oqs 中有一个条目
-                _oqs_all_urls = {
-                    s.get("url")
-                    for item in orig_qs_src
-                    for s in item.get("sources", [])
-                }
-                if url not in _oqs_all_urls:
-                    orig_qs_src.append(
-                        {"question": new_q_text or "", "sources": [new_source]}
-                    )
-                cursor.execute(
-                    "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (
-                        len(orig_qs),
-                        json.dumps(sources, ensure_ascii=False),
-                        json.dumps(orig_qs, ensure_ascii=False),
-                        json.dumps(orig_qs_src, ensure_ascii=False),
-                        qb_id,
-                    ),
+            try:
+                orig_qs = (
+                    json.loads(existing["original_questions"])
+                    if existing["original_questions"]
+                    else []
                 )
-                # Dual-write: also insert into normalized tables
-                try:
-                    insert_source(cursor, qb_id, url, company, round_)
-                except Exception:
-                    pass
-                try:
-                    insert_original_item(cursor, qb_id, new_q_text, [new_source])
-                except Exception:
-                    pass
+                orig_qs_src = (
+                    json.loads(existing["original_question_sources"])
+                    if existing["original_question_sources"]
+                    else []
+                )
+            except Exception:
+                orig_qs, orig_qs_src = [], []
+            old_urls = {
+                source.get("url")
+                for source in sources
+                if isinstance(source, dict) and source.get("url")
+            }
+            old_questions = {
+                normalize_original_question(question) for question in orig_qs
+            }
+            sources.append(new_source)
+            if new_q_text:
+                orig_qs.append(new_q_text)
+                orig_qs_src.append({"question": new_q_text, "sources": [new_source]})
+            sources, orig_qs, orig_qs_src = canonicalize_question_bank_payload(
+                sources, orig_qs, orig_qs_src
+            )
+            url_is_new = bool(url and url not in old_urls)
+            q_is_new = bool(
+                new_q_text
+                and normalize_original_question(new_q_text) not in old_questions
+            )
+            cursor.execute(
+                "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, "
+                "original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    len(orig_qs),
+                    json.dumps(sources, ensure_ascii=False),
+                    json.dumps(orig_qs, ensure_ascii=False),
+                    json.dumps(orig_qs_src, ensure_ascii=False),
+                    qb_id,
+                ),
+            )
+            claim_public_original_questions(
+                cursor.connection,
+                qb_id,
+                existing["owner_id"],
+                existing["status"],
+                orig_qs,
+            )
+            sync_question_bank_projections(
+                cursor, qb_id, sources, orig_qs, orig_qs_src
+            )
+            if url_is_new or q_is_new:
                 from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
                 mark_cluster_review_pending(cursor.connection, qb_id, "new_variant_matched")
@@ -616,25 +610,31 @@ def _apply_incremental_txn(
         sources_json = json.dumps(
             [{"url": url, "company": company, "round": round_}], ensure_ascii=False
         )
-        oqs_json = json.dumps(
-            [
-                {
-                    "question": q_text,
-                    "sources": [{"url": url, "company": company, "round": round_}],
-                }
-            ],
-            ensure_ascii=False,
+        sources, original_questions, original_question_sources = (
+            canonicalize_question_bank_payload(
+                [{"url": url, "company": company, "round": round_}],
+                [q_text],
+                [
+                    {
+                        "question": q_text,
+                        "sources": [
+                            {"url": url, "company": company, "round": round_}
+                        ],
+                    }
+                ],
+            )
         )
         cursor.execute(
-            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_question_sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 q_text,
                 cat1,
                 cat2,
                 tags,
                 diff_tag,
-                sources_json,
-                oqs_json,
+                json.dumps(sources, ensure_ascii=False),
+                json.dumps(original_questions, ensure_ascii=False),
+                json.dumps(original_question_sources, ensure_ascii=False),
                 owner_id,
                 submitter_id,
                 status,
@@ -652,20 +652,16 @@ def _apply_incremental_txn(
                 "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
                 (new_id, pos_row_cache[0]),
             )
-        # Dual-write: also insert into normalized tables
-        try:
-            insert_source(cursor, new_id, url, company, round_)
-        except Exception:
-            pass
-        try:
-            insert_original_item(
-                cursor,
-                new_id,
-                q_text,
-                [{"url": url, "company": company, "round": round_}],
-            )
-        except Exception:
-            pass
+        claim_public_original_questions(
+            cursor.connection, new_id, owner_id, status, original_questions
+        )
+        sync_question_bank_projections(
+            cursor,
+            new_id,
+            sources,
+            original_questions,
+            original_question_sources,
+        )
         if status == "approved" and owner_id is None:
             from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
@@ -862,11 +858,13 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
                         "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
                         (new_id, pos_row_cache[0]),
                     )
-                # Dual-write: also insert into normalized tables
-                try:
-                    insert_source(cursor, new_id, url, company, round_)
-                except Exception:
-                    pass
+                sync_question_bank_projections(
+                    cursor,
+                    new_id,
+                    [{"url": url, "company": company, "round": round_}],
+                    [],
+                    [],
+                )
                 answer_tasks.append((new_id, q_text))
             conn.commit()
             return answer_tasks

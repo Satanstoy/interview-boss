@@ -3,6 +3,11 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
@@ -85,6 +90,7 @@ def _approve_cleanup_private_copy(conn, pending_id: int) -> None:
                 "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (r["id"],),
             )
+            sync_question_bank_projections(conn.cursor(), r["id"], [], [], [])
             break
 
 
@@ -95,18 +101,85 @@ async def approve_question(question_id: int, admin: dict = Depends(get_admin_use
     def _approve():
         with get_db_connection() as conn:
             row = conn.execute(
-                "SELECT id, status, cat2, job_position, submitted_by FROM question_bank WHERE id = ? AND owner_id IS NULL",
+                "SELECT id, question, status, cat2, job_position, submitted_by, sources, "
+                "original_questions, original_question_sources, owner_id "
+                "FROM question_bank WHERE id = ? AND owner_id IS NULL",
                 (question_id,),
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到该待审核题目")
+
+            # Idempotent approval: do not re-merge an already approved row into
+            # itself when an administrator retries the request.
+            if row["status"] == "approved":
+                return dict(row)
+
+            from app.routers.questions_pkg.share import find_matching_public_question
+
+            matching_id = find_matching_public_question(
+                conn, row["question"], row["cat2"], row["job_position"]
+            )
+            if matching_id and matching_id != question_id:
+                # A second pending contribution for an already approved
+                # question is a source contribution, not a new question card.
+                from app.routers.questions_pkg.share import _merge_private_into_public
+
+                _merge_private_into_public(conn, matching_id, row)
+                conn.execute(
+                    "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (question_id,),
+                )
+                if row["submitted_by"]:
+                    _approve_cleanup_private_copy(conn, question_id)
+                conn.commit()
+                return dict(row)
+
+            sources, original_questions, original_question_sources = (
+                canonicalize_question_bank_payload(
+                    json.loads(row["sources"] or "[]"),
+                    json.loads(row["original_questions"] or "[]"),
+                    json.loads(row["original_question_sources"] or "[]"),
+                )
+            )
+            if row["question"] and not original_questions:
+                original_questions = [row["question"]]
+                original_question_sources = [
+                    {"question": row["question"], "sources": sources}
+                ]
+                sources, original_questions, original_question_sources = (
+                    canonicalize_question_bank_payload(
+                        sources, original_questions, original_question_sources
+                    )
+                )
             conn.execute(
-                "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (question_id,),
+                "UPDATE question_bank SET status = 'approved', frequency = ?, sources = ?, "
+                "original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (
+                    len(original_questions),
+                    json.dumps(sources, ensure_ascii=False),
+                    json.dumps(original_questions, ensure_ascii=False),
+                    json.dumps(original_question_sources, ensure_ascii=False),
+                    question_id,
+                ),
             )
             conn.execute(
                 "UPDATE question_bank SET cluster_id = ? WHERE id = ? AND cluster_id IS NULL",
                 (question_id, question_id),
+            )
+            claim_public_original_questions(
+                conn,
+                question_id,
+                row["owner_id"],
+                "approved",
+                original_questions,
+            )
+            sync_question_bank_projections(
+                conn.cursor(),
+                question_id,
+                sources,
+                original_questions,
+                original_question_sources,
             )
             from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 

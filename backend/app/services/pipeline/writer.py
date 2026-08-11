@@ -6,9 +6,31 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection, run_db
-from app.db.question_bank_sources import insert_source, insert_original_item
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
+from app.services.question_variant_reconciliation import normalize_original_question
 
 logger = logging.getLogger("interview-boss")
+
+
+def _mark_review_pending_if_available(conn, cluster_id: int, reason: str) -> None:
+    """Keep the writer usable on legacy/lightweight schemas."""
+
+    required = {"quality_issue", "cluster_review_state", "cluster_review_tasks"}
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if not required.issubset(tables):
+        return
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(conn, cluster_id, reason)
 
 
 async def _run_db(func):
@@ -93,36 +115,38 @@ def apply_matched(conn, matched, job_position, saved_answers):
             oqs_src = []
 
         url = item.get('url', '')
-        existing_urls = {s.get('url') for s in sources}
-        url_is_new = bool(url and url not in existing_urls)
-        if url_is_new:
-            sources.append({"url": url, "company": item.get('company', ''), "round": item.get('round', '')})
+        source = {
+            "url": url,
+            "company": item.get('company', ''),
+            "round": item.get('round', ''),
+        }
+        old_urls = {
+            source.get("url")
+            for source in sources
+            if isinstance(source, dict) and source.get("url")
+        }
+        old_questions = {
+            normalize_original_question(question) for question in oqs
+        }
+        sources.append(source)
 
         q = item.get('question', '')
-        q_is_new = bool(q and q not in oqs)
-        if q_is_new:
-            # question_original_items has only a per-cluster UNIQUE key.  The
-            # global claim prevents a malformed matcher result from writing the
-            # same normalized original question into a second public cluster.
-            from app.services.question_variant_reconciliation import (
-                claim_original_question_owner,
-            )
-
-            if existing["owner_id"] is None:
-                claim_original_question_owner(conn, q, cluster_id)
+        if q:
+            # Add the raw occurrence first.  Canonicalization below merges only
+            # exact normalized variants and unions their source URLs.
             oqs.append(q)
-            oqs_src.append({
-                "question": q,
-                "sources": [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}]
-            })
-        elif q and url_is_new:
-            # 原题文本已存在但来源 URL 是新的 → 追加来源到已有原题的 sources 映射
-            for oqs_entry in oqs_src:
-                if oqs_entry.get('question') == q:
-                    oqs_entry.setdefault('sources', []).append({
-                        "url": url, "company": item.get('company', ''), "round": item.get('round', '')
-                    })
-                    break
+            oqs_src.append({"question": q, "sources": [source]})
+
+        sources, oqs, oqs_src = canonicalize_question_bank_payload(
+            sources, oqs, oqs_src
+        )
+        url_is_new = bool(url and url not in old_urls)
+        q_is_new = bool(
+            q and normalize_original_question(q) not in old_questions
+        )
+        claim_public_original_questions(
+            conn, cluster_id, existing["owner_id"], "approved", oqs
+        )
 
         ai_answer = existing['ai_answer']
         answer_sources = existing['answer_sources']
@@ -143,21 +167,12 @@ def apply_matched(conn, matched, job_position, saved_answers):
              ai_answer, answer_sources, cluster_id)
         )
 
-        if url_is_new:
-            try:
-                insert_source(conn, cluster_id, url, item.get('company', ''), item.get('round', ''))
-            except Exception:
-                pass
-        if q_is_new:
-            try:
-                insert_original_item(conn, cluster_id, q, [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}])
-            except Exception:
-                pass
+        sync_question_bank_projections(
+            conn.cursor(), cluster_id, sources, oqs, oqs_src
+        )
 
         if existing["owner_id"] is None:
-            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-            mark_cluster_review_pending(conn, cluster_id, "new_variant_matched")
+            _mark_review_pending_if_available(conn, cluster_id, "new_variant_matched")
 
 
 def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
@@ -193,24 +208,16 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
             logger.warning(f"[写入] embedding 编码失败 (id={new_id}): {e}")
         new_qb_ids.append(new_id)
 
-        for s in entry['sources']:
-            try:
-                insert_source(conn, new_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
-            except Exception:
-                pass
-        for oqs in entry['original_question_sources']:
-            try:
-                insert_original_item(conn, new_id, oqs.get('question', ''), oqs.get('sources', []))
-            except Exception:
-                pass
-
-        from app.services.question_variant_reconciliation import (
-            claim_original_question_owner,
+        claim_public_original_questions(
+            conn, new_id, entry.get("owner_id"), "approved", entry["original_questions"]
         )
-
-        if entry.get("owner_id") is None:
-            for original_question in entry["original_questions"]:
-                claim_original_question_owner(conn, original_question, new_id)
+        sync_question_bank_projections(
+            conn.cursor(),
+            new_id,
+            entry["sources"],
+            entry["original_questions"],
+            entry["original_question_sources"],
+        )
 
         for pr in pos_rows_cache:
             conn.execute(
@@ -235,9 +242,7 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
         # The new cluster and its durable review outbox row are committed by
         # the caller's single atomic cluster-batch transaction.
         if entry.get("owner_id") is None:
-            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-            mark_cluster_review_pending(conn, new_id, "new_cluster")
+            _mark_review_pending_if_available(conn, new_id, "new_cluster")
 
     return new_qb_ids
 
@@ -293,30 +298,24 @@ def _build_new_entry(cluster, job_position):
     sources = []
     original_questions = []
     original_question_sources = []
-    seen_urls = set()
 
     for item in items:
         url = item.get('url', '')
-        if url and url not in seen_urls:
+        if url:
             sources.append({"url": url, "company": item.get('company', ''), "round": item.get('round', '')})
-            seen_urls.add(url)
         q = item.get('question', '')
-        if q and q not in original_questions:
+        if q:
             original_questions.append(q)
             original_question_sources.append({
                 "question": q,
                 "sources": [{"url": url, "company": item.get('company', ''), "round": item.get('round', '')}]
             })
 
-    # 变体归一化（根因 #2）：文本规则去重，frequency 与去重后 oq 一致
-    if len(original_questions) > 1:
-        deduped = _dedupe_variants(original_questions)
-        if len(deduped) < len(original_questions):
-            original_questions = deduped
-            oq_set = set(original_questions)
-            original_question_sources = [
-                s for s in original_question_sources if s["question"] in oq_set
-            ]
+    sources, original_questions, original_question_sources = (
+        canonicalize_question_bank_payload(
+            sources, original_questions, original_question_sources
+        )
+    )
 
     return {
         'question': cluster['representative'],

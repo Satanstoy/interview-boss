@@ -6,12 +6,21 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
 from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import build_tagging_prompt, TAGGING_PROMPT
-from app.db.question_bank_sources import insert_source, delete_original_item, insert_original_item
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.models.schemas import SplitQuestionRequest, MergeOriginalQuestionRequest
 from app.services.llm import _extract_json, get_llm_client_for_user, raw_llm_call
 from app.services.clustering import generate_unified_question
 from app.services.utils import normalize_category
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
+from app.services.question_variant_reconciliation import (
+    assert_no_other_variant_owner,
+    normalize_original_question,
+    transfer_original_question_owner,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -81,16 +90,12 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 # 设置 cluster_id = 自身 id（拆分出的新题目自己就是聚类代表）
                 cursor.execute("UPDATE question_bank SET cluster_id = ? WHERE id = ?", (new_id, new_id))
 
-                # Dual-write: insert sources into normalized tables
-                for s in split_sources:
-                    try:
-                        insert_source(cursor, new_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                    except Exception:
-                        pass
-                try:
-                    insert_original_item(cursor, new_id, original_q, split_sources)
-                except Exception:
-                    pass
+                split_sources, _, _ = canonicalize_question_bank_payload(
+                    split_sources, [], []
+                )
+                sync_question_bank_projections(
+                    cursor, new_id, split_sources, [], []
+                )
 
                 # 同步 question_position 关联表
                 pos_row = cursor.execute("SELECT id FROM job_positions WHERE name = ?", (orig_job_position,)).fetchone()
@@ -114,9 +119,19 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                             seen.add(key)
                             remaining_sources.append(s)
 
+                remaining_sources, new_orig, new_orig_src = (
+                    canonicalize_question_bank_payload(
+                        remaining_sources, new_orig, new_orig_src
+                    )
+                )
+
+                parent_sync_orig = new_orig
+                parent_sync_orig_src = new_orig_src
                 if len(new_orig) == 0:
                     cursor.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
                 elif len(new_orig) == 1:
+                    parent_sync_orig = []
+                    parent_sync_orig_src = []
                     cursor.execute(
                         "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (new_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
@@ -128,12 +143,10 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                          len(new_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
 
-                # Dual-write: delete moved item from parent cluster's normalized tables
                 if len(new_orig) >= 1:
-                    try:
-                        delete_original_item(cursor, question_id, original_q)
-                    except Exception:
-                        pass
+                    sync_question_bank_projections(
+                        cursor, question_id, remaining_sources, parent_sync_orig, parent_sync_orig_src
+                    )
 
                 from app.services.cluster_review_lifecycle import mark_clusters_review_pending
 
@@ -197,6 +210,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
         raise HTTPException(status_code=400, detail="original_question 不能为空")
     if question_id == req.target_id:
         raise HTTPException(status_code=400, detail="不能合并到同一个聚类")
+    requested_original_q = original_q
 
     def _merge():
         with get_db_connection() as conn:
@@ -204,11 +218,11 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             cursor.execute("BEGIN")
             try:
                 source = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id, status FROM question_bank WHERE id = ?",
                     (question_id,)
                 ).fetchone()
                 target = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id, status FROM question_bank WHERE id = ?",
                     (req.target_id,)
                 ).fetchone()
                 if not source:
@@ -219,8 +233,23 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
                 src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []
 
-                is_standalone_merge = not src_orig and original_q == source['question']
-                if not is_standalone_merge and original_q not in src_orig:
+                source_original_q = next(
+                    (
+                        question
+                        for question in src_orig
+                        if normalize_original_question(question)
+                        == normalize_original_question(requested_original_q)
+                    ),
+                    None,
+                )
+                is_standalone_merge = (
+                    not src_orig
+                    and normalize_original_question(requested_original_q)
+                    == normalize_original_question(source['question'])
+                )
+                if source_original_q:
+                    original_q = source_original_q
+                if not is_standalone_merge and not source_original_q:
                     raise HTTPException(status_code=400, detail="该原始题目不在源聚类中")
 
                 # 找到要移动的题目的来源
@@ -229,7 +258,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     moving_src = json.loads(source['sources']) if source['sources'] else []
                 else:
                     for item in src_orig_src:
-                        if item.get('question') == original_q:
+                        if normalize_original_question(item.get('question')) == normalize_original_question(original_q):
                             moving_src = item.get('sources', [])
                             break
 
@@ -249,6 +278,14 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                         seen.add(key)
                         tgt_sources.append(s)
 
+                tgt_sources, tgt_orig, tgt_orig_src = canonicalize_question_bank_payload(
+                    tgt_sources, tgt_orig, tgt_orig_src
+                )
+                if target["owner_id"] is None and target["status"] == "approved":
+                    assert_no_other_variant_owner(
+                        conn, original_q, {question_id, req.target_id}
+                    )
+
                 # 可选：更新目标聚类类别
                 cat_set = ""
                 cat_params = []
@@ -265,16 +302,22 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                      json.dumps(tgt_sources, ensure_ascii=False), len(tgt_orig), *cat_params, req.target_id]
                 )
 
-                # Dual-write: insert moved item into target's normalized tables
-                for s in moving_src:
-                    try:
-                        insert_source(conn, req.target_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                    except Exception:
-                        pass
-                try:
-                    insert_original_item(conn, req.target_id, original_q, moving_src)
-                except Exception:
-                    pass
+                if target["owner_id"] is None and target["status"] == "approved":
+                    if source["owner_id"] is None and source["status"] == "approved":
+                        transfer_original_question_owner(
+                            conn, original_q, question_id, req.target_id
+                        )
+                    else:
+                        claim_public_original_questions(
+                            conn,
+                            req.target_id,
+                            target["owner_id"],
+                            target["status"],
+                            tgt_orig,
+                        )
+                sync_question_bank_projections(
+                    cursor, req.target_id, tgt_sources, tgt_orig, tgt_orig_src
+                )
 
                 # 转移 ai_answer（目标没有答案时才转移）
                 if source['ai_answer'] and not target['ai_answer']:
@@ -302,8 +345,15 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 )
 
                 # 从源聚类中移除
-                new_src_orig = [q for q in src_orig if q != original_q]
-                new_src_orig_src = [item for item in src_orig_src if item.get('question') != original_q]
+                original_norm = normalize_original_question(original_q)
+                new_src_orig = [
+                    q for q in src_orig
+                    if normalize_original_question(q) != original_norm
+                ]
+                new_src_orig_src = [
+                    item for item in src_orig_src
+                    if normalize_original_question(item.get('question')) != original_norm
+                ]
 
                 remaining_sources = []
                 seen2 = set()
@@ -314,6 +364,14 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                             seen2.add(key)
                             remaining_sources.append(s)
 
+                remaining_sources, new_src_orig, new_src_orig_src = (
+                    canonicalize_question_bank_payload(
+                        remaining_sources, new_src_orig, new_src_orig_src
+                    )
+                )
+
+                source_sync_orig = new_src_orig
+                source_sync_orig_src = new_src_orig_src
                 if is_standalone_merge:
                     # 独立题合并后删除源（已完整并入目标）
                     conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
@@ -322,6 +380,8 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     conn.execute("DELETE FROM question_bank WHERE id = ?", (question_id,))
                     conn.execute("DELETE FROM question_position WHERE question_id = ?", (question_id,))
                 elif len(new_src_orig) == 1:
+                    source_sync_orig = []
+                    source_sync_orig_src = []
                     conn.execute(
                         "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = ?, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (new_src_orig[0], 1, json.dumps(remaining_sources, ensure_ascii=False), question_id)
@@ -333,22 +393,14 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                          len(new_src_orig), json.dumps(remaining_sources, ensure_ascii=False), question_id)
                     )
 
-                # Dual-write: cleanup source's normalized tables
-                if is_standalone_merge or len(new_src_orig) == 0:
-                    # CASCADE handles cleanup when entire row is deleted
-                    pass
-                else:
-                    # Delete the moved item, then rebuild source's normalized sources
-                    try:
-                        delete_original_item(conn, question_id, original_q)
-                    except Exception:
-                        pass
-                    conn.execute("DELETE FROM question_sources WHERE question_bank_id = ?", (question_id,))
-                    for s in remaining_sources:
-                        try:
-                            insert_source(conn, question_id, s.get('url', ''), s.get('company', ''), s.get('round', ''))
-                        except Exception:
-                            pass
+                if not is_standalone_merge and len(new_src_orig) >= 1:
+                    sync_question_bank_projections(
+                        cursor,
+                        question_id,
+                        remaining_sources,
+                        source_sync_orig,
+                        source_sync_orig_src,
+                    )
 
                 from app.services.cluster_review_lifecycle import mark_clusters_review_pending
 

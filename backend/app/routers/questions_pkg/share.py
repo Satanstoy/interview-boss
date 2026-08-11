@@ -3,10 +3,16 @@
 import json
 import logging
 import re
+import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -20,6 +26,14 @@ def _normalize_question_text(text: str) -> str:
     return re.sub(r"[\W_]+", "", (text or "").strip().lower())
 
 
+def _loads(value):
+    try:
+        parsed = json.loads(value or "[]")
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
 def find_matching_public_question(
     conn, question: str, cat2: str, job_position: str = None
 ) -> int | None:
@@ -31,14 +45,28 @@ def find_matching_public_question(
     normalized = _normalize_question_text(question)
     if not normalized:
         return None
-    rows = conn.execute(
-        "SELECT id, question FROM question_bank "
-        "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
-        "AND (job_position = ? OR job_position = '' OR job_position IS NULL)",
-        (job_position or "",),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT id, question, original_questions FROM question_bank "
+            "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
+            "AND (job_position = ? OR job_position = '' OR job_position IS NULL)",
+            (job_position or "",),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # Lightweight callers may expose only the representative question.
+        rows = conn.execute(
+            "SELECT id, question FROM question_bank "
+            "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
+            "AND (job_position = ? OR job_position = '' OR job_position IS NULL)",
+            (job_position or "",),
+        ).fetchall()
     for r in rows:
-        if _normalize_question_text(r["question"]) == normalized:
+        candidates = [r["question"]]
+        try:
+            candidates.extend(json.loads(r["original_questions"] or "[]"))
+        except (IndexError, KeyError, TypeError, ValueError):
+            pass
+        if any(_normalize_question_text(candidate) == normalized for candidate in candidates):
             return r["id"]
     return None
 
@@ -46,42 +74,35 @@ def find_matching_public_question(
 def _merge_private_into_public(conn, public_id: int, private_row) -> None:
     """把私有题合并进公共题：sources 去重追加、original_questions 合并、frequency 更新、软删私有副本。"""
     public = conn.execute(
-        "SELECT sources, original_questions, original_question_sources, ai_answer, frequency "
+        "SELECT sources, original_questions, original_question_sources, ai_answer, frequency, owner_id, status "
         "FROM question_bank WHERE id = ?",
         (public_id,),
     ).fetchone()
     if not public:
         return
 
-    def _loads(val):
-        try:
-            parsed = json.loads(val or "[]")
-            return parsed if isinstance(parsed, list) else []
-        except Exception:
-            return []
-
     p_src = _loads(public["sources"])
     p_oqs = _loads(public["original_questions"])
     p_oqs_src = _loads(public["original_question_sources"])
+    private_src = _loads(private_row["sources"])
+    private_oqs = _loads(private_row["original_questions"])
+    private_oqs_src = _loads(private_row["original_question_sources"])
+    if private_row["question"] and not private_oqs:
+        private_oqs = [private_row["question"]]
+    if private_row["question"] and not any(
+        isinstance(item, dict) and item.get("question") == private_row["question"]
+        for item in private_oqs_src
+    ):
+        private_oqs_src.append(
+            {"question": private_row["question"], "sources": private_src}
+        )
 
-    # sources 去重追加（URL 维度）
-    seen_urls = {s.get("url") for s in p_src if isinstance(s, dict)}
-    for s in _loads(private_row["sources"]):
-        if isinstance(s, dict) and s.get("url") and s["url"] not in seen_urls:
-            p_src.append(s)
-            seen_urls.add(s["url"])
-
-    # original_questions 合并
-    for oq in _loads(private_row["original_questions"]):
-        if oq and oq not in p_oqs:
-            p_oqs.append(oq)
-    if private_row["question"] not in p_oqs:
-        p_oqs.append(private_row["question"])
-
-    # original_question_sources 合并
-    for item in _loads(private_row["original_question_sources"]):
-        if isinstance(item, dict) and item not in p_oqs_src:
-            p_oqs_src.append(item)
+    p_src.extend(private_src)
+    p_oqs.extend(private_oqs)
+    p_oqs_src.extend(private_oqs_src)
+    p_src, p_oqs, p_oqs_src = canonicalize_question_bank_payload(
+        p_src, p_oqs, p_oqs_src
+    )
 
     conn.execute(
         "UPDATE question_bank SET sources = ?, original_questions = ?, "
@@ -95,9 +116,18 @@ def _merge_private_into_public(conn, public_id: int, private_row) -> None:
             public_id,
         ),
     )
+    claim_public_original_questions(
+        conn, public_id, public["owner_id"], public["status"], p_oqs
+    )
+    sync_question_bank_projections(
+        conn.cursor(), public_id, p_src, p_oqs, p_oqs_src
+    )
     conn.execute(
         "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (private_row["id"],),
+    )
+    sync_question_bank_projections(
+        conn.cursor(), private_row["id"], [], [], []
     )
     from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
@@ -131,6 +161,23 @@ def share_private_question(conn, question_id: int, user_id: int) -> dict:
         logger.info("分享命中公共题 %s，合并并删除私有副本 %s", match_id, question_id)
         return {"result": "merged", "target_id": match_id}
 
+    private_sources = _loads(row["sources"])
+    private_questions = _loads(row["original_questions"])
+    private_question_sources = _loads(row["original_question_sources"])
+    if row["question"] and not private_questions:
+        private_questions = [row["question"]]
+    if row["question"] and not any(
+        isinstance(item, dict) and item.get("question") == row["question"]
+        for item in private_question_sources
+    ):
+        private_question_sources.append(
+            {"question": row["question"], "sources": private_sources}
+        )
+    private_sources, private_questions, private_question_sources = (
+        canonicalize_question_bank_payload(
+            private_sources, private_questions, private_question_sources
+        )
+    )
     cur = conn.execute(
         "INSERT INTO question_bank "
         "(question, cat1, cat2, tags, difficulty, frequency, sources, "
@@ -143,14 +190,21 @@ def share_private_question(conn, question_id: int, user_id: int) -> dict:
             row["cat2"],
             row["tags"],
             row["difficulty"],
-            row["sources"],
-            row["original_questions"],
-            row["original_question_sources"],
+            json.dumps(private_sources, ensure_ascii=False),
+            json.dumps(private_questions, ensure_ascii=False),
+            json.dumps(private_question_sources, ensure_ascii=False),
             row["ai_answer"],
             row["answer_sources"],
             user_id,
             row["job_position"],
         ),
+    )
+    sync_question_bank_projections(
+        conn.cursor(),
+        cur.lastrowid,
+        private_sources,
+        private_questions,
+        private_question_sources,
     )
     conn.commit()
     logger.info(

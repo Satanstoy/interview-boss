@@ -5,7 +5,6 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.core.cache import invalidate_master_bank_cache
-from app.db.question_bank_sources import delete_original_item
 from app.db.connection import (
     get_db_connection,
     run_db,
@@ -18,6 +17,11 @@ from app.models.schemas import (
     UploadToBankRequest,
 )
 from app.services.clustering import generate_unified_question
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    sync_question_bank_projections,
+)
+from app.services.question_variant_reconciliation import normalize_original_question
 
 logger = logging.getLogger("interview-boss")
 
@@ -72,10 +76,20 @@ async def delete_original_question(
                     else []
                 )
 
-                if original_q not in orig_qs:
+                source_original_q = next(
+                    (
+                        question
+                        for question in orig_qs
+                        if normalize_original_question(question)
+                        == normalize_original_question(original_q)
+                    ),
+                    None,
+                )
+                if not source_original_q:
                     raise HTTPException(
                         status_code=400, detail="该原始题目不在此聚类中"
                     )
+                original_q = source_original_q
 
                 # 从聚类中移除
                 new_orig = [q for q in orig_qs if q != original_q]
@@ -96,6 +110,14 @@ async def delete_original_question(
                         if key not in seen:
                             seen.add(key)
                             remaining_sources.append(s)
+
+                remaining_sources, new_orig, new_orig_src = (
+                    canonicalize_question_bank_payload(
+                        remaining_sources, new_orig, new_orig_src
+                    )
+                )
+                parent_sync_orig = new_orig
+                parent_sync_orig_src = new_orig_src
 
                 # 删除 questions_detail 中对应的记录
                 from app.db.operations import (
@@ -132,6 +154,8 @@ async def delete_original_question(
                         (question_id,),
                     )
                 elif len(new_orig) == 1:
+                    parent_sync_orig = []
+                    parent_sync_orig_src = []
                     # 只剩一个，简化为独立题目
                     cursor.execute(
                         "UPDATE question_bank SET question = ?, original_questions = '[]', original_question_sources = '[]', frequency = 1, sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -153,12 +177,14 @@ async def delete_original_question(
                         ),
                     )
 
-                # Dual-write: delete removed item from normalized tables (if cluster not fully deleted)
                 if len(new_orig) >= 1:
-                    try:
-                        delete_original_item(cursor, question_id, original_q)
-                    except Exception:
-                        pass
+                    sync_question_bank_projections(
+                        cursor,
+                        question_id,
+                        remaining_sources,
+                        parent_sync_orig,
+                        parent_sync_orig_src,
+                    )
 
                 if row["owner_id"] is None and len(new_orig) >= 1:
                     from app.services.cluster_review_lifecycle import mark_cluster_review_pending

@@ -5,7 +5,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
-from app.db.question_bank_sources import insert_source, insert_original_item
+from app.services.question_bank_integrity import (
+    canonicalize_question_bank_payload,
+    claim_public_original_questions,
+    sync_question_bank_projections,
+)
 
 logger = logging.getLogger("interview-boss")
 router = (
@@ -212,7 +216,8 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                 with get_db_connection() as conn:
                     # 加载用户的个人题目
                     personal = conn.execute(
-                        "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, job_position "
+                        "SELECT id, question, cat1, cat2, tags, difficulty, frequency, sources, "
+                        "original_questions, original_question_sources, job_position "
                         "FROM question_bank WHERE owner_id = ? AND job_position = ?",
                         (uid, current_pos),
                     ).fetchall()
@@ -287,7 +292,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                         qb_id = m["question_bank_id"]
                         personal_row = personal_rows[new_id]
                         existing = conn.execute(
-                            "SELECT sources, original_questions, original_question_sources FROM question_bank WHERE id = ?",
+                            "SELECT sources, original_questions, original_question_sources, owner_id, status FROM question_bank WHERE id = ?",
                             (qb_id,),
                         ).fetchone()
                         if existing:
@@ -329,14 +334,14 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                             except (json.JSONDecodeError, TypeError):
                                 orig_qs, orig_qs_src = [], []
                             personal_q_text = personal_row["question"]
-                            if personal_q_text and personal_q_text not in orig_qs:
+                            if personal_q_text:
                                 orig_qs.append(personal_q_text)
                                 orig_qs_src.append(
-                                    {
-                                        "question": personal_q_text,
-                                        "sources": personal_sources,
-                                    }
+                                    {"question": personal_q_text, "sources": personal_sources}
                                 )
+                            sources, orig_qs, orig_qs_src = canonicalize_question_bank_payload(
+                                sources, orig_qs, orig_qs_src
+                            )
                             if is_admin:
                                 # 管理员：个人题并入公共题（现有行为）
                                 conn.execute(
@@ -349,25 +354,16 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                         qb_id,
                                     ),
                                 )
-                                # Dual-write: insert personal question's sources into target's normalized tables
-                                # INSERT OR IGNORE handles dedup with existing sources
-                                for s in personal_sources:
-                                    try:
-                                        insert_source(
-                                            conn,
-                                            qb_id,
-                                            s.get("url", ""),
-                                            s.get("company", ""),
-                                            s.get("round", ""),
-                                        )
-                                    except Exception:
-                                        pass
-                                try:
-                                    insert_original_item(
-                                        conn, qb_id, personal_q_text, personal_sources
-                                    )
-                                except Exception:
-                                    pass
+                                claim_public_original_questions(
+                                    conn,
+                                    qb_id,
+                                    existing["owner_id"],
+                                    existing["status"],
+                                    orig_qs,
+                                )
+                                sync_question_bank_projections(
+                                    conn.cursor(), qb_id, sources, orig_qs, orig_qs_src
+                                )
                                 from app.services.cluster_review_lifecycle import mark_cluster_review_pending
 
                                 mark_cluster_review_pending(
@@ -387,6 +383,19 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                         json.dumps(sources, ensure_ascii=False),
                                         personal_row["id"],
                                     ),
+                                )
+                                personal_oqs = personal_row.get("original_questions") or []
+                                personal_oqs_src = personal_row.get("original_question_sources") or []
+                                if isinstance(personal_oqs, str):
+                                    personal_oqs = json.loads(personal_oqs or "[]")
+                                if isinstance(personal_oqs_src, str):
+                                    personal_oqs_src = json.loads(personal_oqs_src or "[]")
+                                sync_question_bank_projections(
+                                    conn.cursor(),
+                                    personal_row["id"],
+                                    sources,
+                                    personal_oqs,
+                                    personal_oqs_src,
                                 )
                         merged_count += 1
                     conn.commit()
