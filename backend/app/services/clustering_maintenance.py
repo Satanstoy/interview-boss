@@ -17,6 +17,10 @@ from app.db.question_bank_sources import (
     insert_original_item,
     insert_source,
 )
+from app.db.quality_issue_identity import (
+    build_issue_fingerprint,
+    upsert_quality_issue,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -1005,18 +1009,27 @@ async def generate_quality_issues(
                     ).fetchone()
                     if dup:
                         continue
-                    conn.execute(
-                        "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                        "suggested_action, reason, target_qb_id, confidence, status, created_at, "
-                        "review_version, review_task_id, trigger_reason, variant_key) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
-                        (rep["id"], idx, "mismerge", "merge",
-                         data.get("reason", "")[:300], merge_target,
-                         round(confidence, 2), current_review_version, review_task_id,
-                         trigger_reason or "manual_quality_scan", str(idx)),
-                    )
+                    _, inserted = upsert_quality_issue(conn, {
+                        "qb_id": rep["id"],
+                        "variant_index": idx,
+                        "issue_type": "mismerge",
+                        "suggested_action": "merge",
+                        "reason": data.get("reason", "")[:300],
+                        "suggested_value": None,
+                        "confidence": round(confidence, 2),
+                        "status": "pending",
+                        "target_qb_id": merge_target,
+                        "new_cat2": None,
+                        "source_question": variant,
+                        "source_cat2": rep["cat2"],
+                        "review_version": current_review_version,
+                        "review_task_id": review_task_id,
+                        "trigger_reason": trigger_reason or "manual_quality_scan",
+                        "variant_key": str(idx),
+                        "issue_fingerprint": build_issue_fingerprint("mismerge", variant),
+                    })
                     conn.commit()
-                created += 1
+                created += int(inserted)
                 continue
 
             # 拆成独立题：预生成重写题面（原题目脱离上下文可能不自明，需补偿）
@@ -1058,18 +1071,27 @@ async def generate_quality_issues(
                 ).fetchone()
                 if dup:
                     continue
-                conn.execute(
-                    "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                    "suggested_action, reason, suggested_value, new_cat2, confidence, status, created_at, "
-                    "review_version, review_task_id, trigger_reason, variant_key) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
-                    (rep["id"], idx, "mismerge", "split",
-                     data.get("reason", "")[:300], rewritten, new_cat2,
-                     round(confidence, 2), current_review_version, review_task_id,
-                     trigger_reason or "manual_quality_scan", str(idx)),
-                )
+                _, inserted = upsert_quality_issue(conn, {
+                    "qb_id": rep["id"],
+                    "variant_index": idx,
+                    "issue_type": "mismerge",
+                    "suggested_action": "split",
+                    "reason": data.get("reason", "")[:300],
+                    "suggested_value": rewritten,
+                    "confidence": round(confidence, 2),
+                    "status": "pending",
+                    "target_qb_id": None,
+                    "new_cat2": new_cat2,
+                    "source_question": variant,
+                    "source_cat2": rep["cat2"],
+                    "review_version": current_review_version,
+                    "review_task_id": review_task_id,
+                    "trigger_reason": trigger_reason or "manual_quality_scan",
+                    "variant_key": str(idx),
+                    "issue_fingerprint": build_issue_fingerprint("mismerge", variant),
+                })
                 conn.commit()
-            created += 1
+            created += int(inserted)
     logger.info("[清单生成] 新增 issue: %d 条", created)
     return {"created": created, "scanned_cluster_ids": [c["id"] for c in candidates]}
 
@@ -1177,21 +1199,28 @@ async def generate_weak_representative_issues(
             ).fetchone()
             if dup:
                 continue
-            conn.execute(
-                "INSERT INTO quality_issue (qb_id, variant_index, issue_type, "
-                "suggested_action, reason, suggested_value, confidence, status, created_at, "
-                "review_version, review_task_id, trigger_reason, variant_key) "
-                "VALUES (?, NULL, 'weak_representative', 'refine_representative', ?, ?, 0.7, 'pending', datetime('now'), ?, ?, ?, '')",
-                (
-                    r["id"],
-                    data.get("reason", "")[:300],
-                    suggested,
-                    current_review_version,
-                    review_task_id,
-                    trigger_reason or "manual_quality_scan",
+            _, inserted = upsert_quality_issue(conn, {
+                "qb_id": r["id"],
+                "variant_index": None,
+                "issue_type": "weak_representative",
+                "suggested_action": "refine_representative",
+                "reason": data.get("reason", "")[:300],
+                "suggested_value": suggested,
+                "confidence": 0.7,
+                "status": "pending",
+                "target_qb_id": None,
+                "new_cat2": None,
+                "source_question": None,
+                "source_cat2": None,
+                "review_version": current_review_version,
+                "review_task_id": review_task_id,
+                "trigger_reason": trigger_reason or "manual_quality_scan",
+                "variant_key": "",
+                "issue_fingerprint": build_issue_fingerprint(
+                    "weak_representative", r["question"], qb_id=r["id"]
                 ),
-            )
+            })
             conn.commit()
-        created += 1
+        created += int(inserted)
     logger.info("[代表题评估] 新增 weak_representative issue: %d 条", created)
     return {"created": created}

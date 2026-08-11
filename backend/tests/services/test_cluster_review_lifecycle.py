@@ -145,6 +145,28 @@ def test_versioned_approval_rejects_stale_issue(test_db):
     assert test_db.execute("SELECT question FROM question_bank WHERE id = 1").fetchone()[0] == "介绍 RAG 流程"
 
 
+def test_stale_rejection_closes_card_as_superseded(test_db):
+    from app.services.quality_issue_ops import reject_issue
+
+    _seed_clusters(test_db)
+    test_db.execute(
+        "INSERT INTO quality_issue "
+        "(qb_id, issue_type, suggested_action, reason, suggested_value, confidence, status, "
+        "created_at, review_version, variant_key) VALUES "
+        "(1, 'weak_representative', 'refine_representative', 'stale', '新代表题', 0.9, 'pending', "
+        "datetime('now'), 'stale-version', '')"
+    )
+    test_db.commit()
+
+    result = reject_issue(test_db, admin_id=1, issue_id=1)
+    test_db.commit()
+
+    assert result == {"id": 1, "status": "superseded"}
+    assert test_db.execute(
+        "SELECT status, reviewed_by FROM quality_issue WHERE id = 1"
+    ).fetchone()[0:] == ("superseded", 1)
+
+
 def test_approve_rolls_back_partial_cluster_mutation(test_db, monkeypatch):
     """审批执行失败时，题库和 quality_issue 都回滚，不污染线程连接。"""
     from app.services.quality_issue_ops import approve_issue

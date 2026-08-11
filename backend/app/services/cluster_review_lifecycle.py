@@ -93,6 +93,27 @@ def get_current_cluster_version(conn, cluster_id: int) -> str | None:
     return cluster_version_from_row(row) if row else None
 
 
+def supersede_stale_quality_issues(conn, cluster_id: int, current_version: str) -> int:
+    """Close active findings from older snapshots for one cluster.
+
+    The finding may be reactivated in-place by the next scan when its stable
+    fingerprint is still present.  This keeps one human-review row per logical
+    finding while ensuring a removed finding cannot remain pending forever.
+    """
+
+    now = _now()
+    cur = conn.execute(
+        "UPDATE quality_issue SET status = 'superseded', superseded_at = ?, "
+        "superseded_by = NULL WHERE qb_id = ? AND status IN ('pending', 'approved') "
+        # A legacy row without a review_version has no trustworthy snapshot
+        # to compare.  Preserve it until a new scan can refresh it in-place;
+        # silently closing it would risk losing existing human-review work.
+        "AND review_version IS NOT NULL AND review_version != ?",
+        (now, cluster_id, current_version),
+    )
+    return cur.rowcount
+
+
 def _insert_or_reset_task(
     conn,
     cluster_id: int,
@@ -167,6 +188,9 @@ def mark_cluster_review_pending(
     state_status = _row_value(state, "status", None) if state else None
     version_changed = not state or state_version != version
     review_reset = version_changed or force
+
+    if version_changed:
+        supersede_stale_quality_issues(conn, cluster_id, version)
 
     if not state:
         conn.execute(
@@ -390,12 +414,16 @@ def finish_review_task(conn, task: Any, outcome: str = "completed") -> dict:
     now = _now()
     current_version = get_current_cluster_version(conn, task["cluster_id"])
     if current_version != task["review_version"]:
+        if current_version:
+            supersede_stale_quality_issues(conn, task["cluster_id"], current_version)
         conn.execute(
             "UPDATE cluster_review_tasks SET status = 'superseded', locked_until = NULL, "
             "finished_at = ?, last_error = 'review version superseded' WHERE id = ?",
             (now, task["id"]),
         )
         return {"status": "superseded", "cluster_id": task["cluster_id"]}
+
+    supersede_stale_quality_issues(conn, task["cluster_id"], current_version)
 
     pending = conn.execute(
         "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
@@ -480,6 +508,7 @@ def sync_review_state_after_scan(
         if not cluster:
             continue
         version = cluster_version_from_row(cluster)
+        supersede_stale_quality_issues(conn, cluster_id, version)
         pending = conn.execute(
             "SELECT COUNT(*) FROM quality_issue WHERE qb_id = ? "
             "AND status IN ('pending', 'approved')",
@@ -587,25 +616,34 @@ async def _evaluate_singleton(
             # The task may have become stale while the model was running.
             if get_current_cluster_version(conn, cluster_id) != review_version:
                 return False
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO quality_issue "
-                "(qb_id, variant_index, issue_type, suggested_action, reason, "
-                "suggested_value, confidence, status, created_at, review_version, "
-                "review_task_id, trigger_reason, variant_key) "
-                "VALUES (?, NULL, 'new_representative', 'refine_representative', ?, ?, ?, "
-                "'pending', datetime('now'), ?, ?, ?, '')",
-                (
-                    cluster_id,
-                    str(data.get("reason") or "")[:300],
-                    suggested,
-                    max(0.0, min(confidence, 1.0)),
-                    review_version,
-                    review_task_id,
-                    trigger_reason,
-                ),
+            from app.db.quality_issue_identity import (
+                build_issue_fingerprint,
+                upsert_quality_issue,
             )
+
+            _, created = upsert_quality_issue(conn, {
+                "qb_id": cluster_id,
+                "variant_index": None,
+                "issue_type": "new_representative",
+                "suggested_action": "refine_representative",
+                "reason": str(data.get("reason") or "")[:300],
+                "suggested_value": suggested,
+                "confidence": max(0.0, min(confidence, 1.0)),
+                "status": "pending",
+                "target_qb_id": None,
+                "new_cat2": None,
+                "source_question": row["question"],
+                "source_cat2": None,
+                "review_version": review_version,
+                "review_task_id": review_task_id,
+                "trigger_reason": trigger_reason,
+                "variant_key": "",
+                "issue_fingerprint": build_issue_fingerprint(
+                    "new_representative", row["question"], qb_id=cluster_id
+                ),
+            })
             conn.commit()
-            return bool(cur.rowcount)
+            return created
 
     return int(await asyncio.to_thread(_insert))
 

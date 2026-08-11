@@ -9,6 +9,10 @@ import logging
 import re
 
 from app.db.connection import get_db_connection
+from app.db.quality_issue_identity import (
+    build_issue_fingerprint,
+    upsert_quality_issue,
+)
 from app.services.llm import _call_llm_with_retry
 from app.services.clustering.experiments.memory_labels import generate_cluster_labels
 
@@ -108,8 +112,22 @@ def _load_public_cluster_data(conn, limit: int) -> tuple[list[dict], list[dict]]
 
 
 def _issue_exists(
-    conn, source_id: int, target_id: int, review_version: str | None = None
+    conn,
+    source_id: int,
+    target_id: int,
+    source_question: str,
+    review_version: str | None = None,
 ) -> bool:
+    fingerprint = build_issue_fingerprint("unmerged", source_question)
+    row = conn.execute(
+        "SELECT 1 FROM quality_issue WHERE issue_fingerprint = ? LIMIT 1",
+        (fingerprint,),
+    ).fetchone()
+    if row:
+        return True
+
+    # Compatibility fallback for rows created before migration 077 (or by a
+    # lightweight external importer that has not populated the fingerprint).
     if review_version:
         row = conn.execute(
             "SELECT 1 FROM quality_issue WHERE qb_id = ? AND review_version = ? "
@@ -220,29 +238,37 @@ async def generate_unmerged_quality_issues(
             review_version = get_current_cluster_version(conn, singleton["qb_id"])
             if not review_version:
                 continue
-            if _issue_exists(conn, singleton["qb_id"], target["qb_id"], review_version):
+            if _issue_exists(
+                conn,
+                singleton["qb_id"],
+                target["qb_id"],
+                singleton["question"],
+                review_version,
+            ):
                 continue
-            conn.execute(
-                "INSERT INTO quality_issue "
-                "(qb_id, variant_index, issue_type, suggested_action, reason, "
-                "suggested_value, target_qb_id, confidence, source_question, source_cat2, "
-                "status, created_at, review_version, review_task_id, trigger_reason, variant_key) "
-                "VALUES (?, NULL, 'unmerged', 'merge', ?, NULL, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?, ?)",
-                (
-                    singleton["qb_id"],
-                    reason,
-                    target["qb_id"],
-                    round(confidence, 2),
-                    singleton["question"],
-                    singleton["cat2"],
-                    review_version,
-                    review_task_id,
-                    trigger_reason,
-                    f"target:{target['qb_id']}",
+            _, inserted = upsert_quality_issue(conn, {
+                "qb_id": singleton["qb_id"],
+                "variant_index": None,
+                "issue_type": "unmerged",
+                "suggested_action": "merge",
+                "reason": reason,
+                "suggested_value": None,
+                "confidence": round(confidence, 2),
+                "status": "pending",
+                "target_qb_id": target["qb_id"],
+                "new_cat2": None,
+                "source_question": singleton["question"],
+                "source_cat2": singleton["cat2"],
+                "review_version": review_version,
+                "review_task_id": review_task_id,
+                "trigger_reason": trigger_reason,
+                "variant_key": f"target:{target['qb_id']}",
+                "issue_fingerprint": build_issue_fingerprint(
+                    "unmerged", singleton["question"]
                 ),
-            )
+            })
             conn.commit()
-        created += 1
+        created += int(inserted)
 
     logger.info(
         "[漏合并清单] 完成: 孤岛=%d 聚类=%d 候选=%d 复核=%d 新增=%d",

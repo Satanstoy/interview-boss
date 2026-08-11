@@ -87,6 +87,7 @@ from app.db.migrations.clustering import (
     _migration_068_quality_issue,
     _migration_072_cluster_review_lifecycle,
     _migration_076_question_variant_ownership,
+    _migration_077_quality_issue_identity,
     _classify_e_question,
 )
 from app.db.migrations.admin_assistant import (
@@ -199,6 +200,7 @@ _MIGRATIONS = [
     (74, "durable_job_lifecycle", _migration_074_durable_job_lifecycle),
     (75, "job_retry_lineage", _migration_075_job_retry_lineage),
     (76, "question_variant_ownership", _migration_076_question_variant_ownership),
+    (77, "quality_issue_identity", _migration_077_quality_issue_identity),
 ]
 
 

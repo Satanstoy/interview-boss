@@ -129,7 +129,9 @@ async def generate_unmerged_issues(
 
 @router.get("")
 async def list_issues(
-    status: str = Query("pending", pattern="^(pending|approved|rejected|done)$"),
+    status: str = Query(
+        "pending", pattern="^(pending|approved|rejected|done|superseded)$"
+    ),
     admin: dict = Depends(get_admin_user),
 ):
     """查询审查清单（默认 pending 待审批；done/rejected 历史审计）"""

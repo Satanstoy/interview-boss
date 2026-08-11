@@ -526,3 +526,69 @@ def _migration_076_question_variant_ownership(conn):
         "ON question_variant_owners(question_bank_id)"
     )
     logger.info("migration_076: 原始题目全局归属表已就绪")
+
+
+def _migration_077_quality_issue_identity(conn):
+    """Give review findings a stable identity independent of scan versions.
+
+    Older rows are backfilled before the active-fingerprint index is created.
+    If historical active rows describe the same finding, the oldest row stays
+    canonical and the rest become ``superseded`` audit records.
+    """
+
+    from app.db.quality_issue_identity import issue_fingerprint_from_row
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('quality_issue')")}
+    if "issue_fingerprint" not in columns:
+        conn.execute("ALTER TABLE quality_issue ADD COLUMN issue_fingerprint TEXT")
+    if "superseded_at" not in columns:
+        conn.execute("ALTER TABLE quality_issue ADD COLUMN superseded_at TEXT")
+    if "superseded_by" not in columns:
+        conn.execute("ALTER TABLE quality_issue ADD COLUMN superseded_by INTEGER")
+
+    rows = conn.execute("SELECT * FROM quality_issue ORDER BY id").fetchall()
+    backfilled = 0
+    for row in rows:
+        fingerprint = issue_fingerprint_from_row(row, conn)
+        updated = conn.execute(
+            "UPDATE quality_issue SET issue_fingerprint = ? "
+            "WHERE id = ? AND (issue_fingerprint IS NULL OR issue_fingerprint = '')",
+            (fingerprint, row["id"]),
+        )
+        backfilled += updated.rowcount
+
+    canonical: dict[str, int] = {}
+    superseded = 0
+    active_rows = conn.execute(
+        "SELECT id, issue_fingerprint FROM quality_issue "
+        "WHERE status IN ('pending', 'approved') AND issue_fingerprint IS NOT NULL "
+        "ORDER BY id"
+    ).fetchall()
+    for row in active_rows:
+        fingerprint = row["issue_fingerprint"]
+        keeper = canonical.get(fingerprint)
+        if keeper is None:
+            canonical[fingerprint] = row["id"]
+            continue
+        conn.execute(
+            "UPDATE quality_issue SET status = 'superseded', "
+            "superseded_at = datetime('now'), superseded_by = ? WHERE id = ?",
+            (keeper, row["id"]),
+        )
+        superseded += 1
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quality_issue_fingerprint "
+        "ON quality_issue(issue_fingerprint)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_quality_issue_active_fingerprint "
+        "ON quality_issue(issue_fingerprint) "
+        "WHERE issue_fingerprint IS NOT NULL AND status IN ('pending', 'approved')"
+    )
+    logger.info(
+        "migration_077: quality_issue 稳定指纹与活动项唯一约束已就绪，"
+        "回填 %d 条，历史活动重复归档 %d 条",
+        backfilled,
+        superseded,
+    )

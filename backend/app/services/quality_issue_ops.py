@@ -138,6 +138,15 @@ def serialize_issue(row, conn) -> dict:
         "review_version": row["review_version"] if "review_version" in row.keys() else None,
         "review_task_id": row["review_task_id"] if "review_task_id" in row.keys() else None,
         "trigger_reason": row["trigger_reason"] if "trigger_reason" in row.keys() else None,
+        "issue_fingerprint": (
+            row["issue_fingerprint"] if "issue_fingerprint" in row.keys() else None
+        ),
+        "superseded_at": (
+            row["superseded_at"] if "superseded_at" in row.keys() else None
+        ),
+        "superseded_by": (
+            row["superseded_by"] if "superseded_by" in row.keys() else None
+        ),
     }
 
 
@@ -294,7 +303,25 @@ def reject_issue(conn, admin_id: int, issue_id: int) -> dict:
     ).fetchone()
     if not issue_before:
         raise HTTPException(status_code=404, detail="issue 不存在或已处理")
-    _assert_issue_version_current(conn, issue_before)
+    try:
+        _assert_issue_version_current(conn, issue_before)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        # A stale card cannot safely mutate the question bank, but it should
+        # not remain pending forever or be shown as an actionable duplicate.
+        # Close it as superseded and retain the audit trail instead of forcing
+        # an operator to repair the database manually.
+        cur = conn.execute(
+            "UPDATE quality_issue SET status = 'superseded', "
+            "superseded_at = datetime('now'), superseded_by = NULL, "
+            "reviewed_at = datetime('now'), reviewed_by = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (admin_id, issue_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="issue 不存在或已处理")
+        return {"id": issue_id, "status": "superseded"}
     try:
         cur = conn.execute(
             "UPDATE quality_issue SET status = 'rejected', reviewed_at = datetime('now'), "
