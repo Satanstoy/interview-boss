@@ -45,7 +45,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const interviewSortOrder = ref('desc')
 
   const decorateQuestion = (q) => ({
-    ...q, _showAnswer: false, _showSources: false,
+    ...q, _showAnswer: false, _showSources: false, _showAnswerSources: false,
     _isLoadingAnswer: false, _isRetagging: false, _isEditingAnswer: false, _editAnswer: ''
   })
 

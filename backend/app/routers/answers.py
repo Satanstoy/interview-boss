@@ -2,7 +2,7 @@ import json
 import logging
 import asyncio
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user, get_admin_user
 from app.core.cache import invalidate_master_bank_cache
@@ -177,7 +177,9 @@ async def save_user_answer(
 
 @router.post("/generate-answer/{question_id}")
 async def generate_master_answer(
-    question_id: int, user: dict = Depends(get_current_user)
+    question_id: int,
+    user: dict = Depends(get_current_user),
+    force: bool = Query(False, description="管理员重新生成时忽略已有答案"),
 ):
     """生成公共参考答案（仅管理员，全局共享）"""
     if not user.get("is_admin", False):
@@ -198,7 +200,7 @@ async def generate_master_answer(
     is_admin = user.get("is_admin", False)
 
     # 管理员：如果已有有效答案，直接返回（兼容旧行为）
-    if is_admin and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
+    if is_admin and not force and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
         return {"status": "success", "answer": row["ai_answer"]}
 
     return await _queue_answer_job(
@@ -252,9 +254,13 @@ async def batch_generate_answers(
         with get_db_connection() as conn:
             placeholders = ",".join("?" * len(req.ids))
             from_clause, where_clause, params = _build_bank_where_clause(user)
+            from app.db.queries import get_dynamic_frequency_sql
+
+            frequency_sql = get_dynamic_frequency_sql("all", user["id"])
             return conn.execute(
                 f"SELECT qb.id, qb.question, qb.ai_answer {from_clause} "
-                f"{where_clause} AND qb.id IN ({placeholders})",
+                f"{where_clause} AND qb.id IN ({placeholders}) "
+                f"ORDER BY ({frequency_sql}) DESC, qb.id ASC",
                 params + req.ids,
             ).fetchall()
 
@@ -265,7 +271,12 @@ async def batch_generate_answers(
     questions = [
         (r["id"], r["question"])
         for r in rows
-        if r["question"] and (not r["ai_answer"] or "生成失败" in r["ai_answer"])
+        if r["question"]
+        and (
+            req.force
+            or not r["ai_answer"]
+            or "生成失败" in r["ai_answer"]
+        )
     ]
     skipped = len(rows) - len(questions)
 
@@ -305,9 +316,15 @@ async def batch_generate_answers(
             return parent_job_id, child_job_ids
 
     parent_job_id, child_job_ids = await run_db(_create_batch_jobs)
-    await asyncio.gather(
-        *(_dispatch_persisted_answer_job(job_id) for job_id in child_job_ids)
-    )
+    if req.force:
+        # 强制刷新按频率顺序投递，确保高频题先进入最新答案链路；普通补全
+        # 仍可并发投递，避免影响历史上传流程的吞吐。
+        for child_job_id in child_job_ids:
+            await _dispatch_persisted_answer_job(child_job_id)
+    else:
+        await asyncio.gather(
+            *(_dispatch_persisted_answer_job(job_id) for job_id in child_job_ids)
+        )
 
     async def event_stream():
         total = len(child_job_ids)

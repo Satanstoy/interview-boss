@@ -78,6 +78,28 @@ async def test_generate_answer_writes_null_when_no_sources():
     assert result == {"status": "pending", "job_id": 8}
 
 
+@pytest.mark.asyncio
+async def test_generate_answer_force_requeues_existing_answer():
+    """管理员强制刷新时，已有旧答案也必须进入最新生成接口。"""
+    from app.routers.answers import generate_master_answer
+
+    user = {"id": 1, "is_admin": True}
+    mock_question = {
+        "id": 10,
+        "question": "什么是微服务？",
+        "ai_answer": "旧答案（没有 Exa 来源）",
+    }
+
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+         patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
+        mock_run_db.return_value = mock_question
+        mock_queue.return_value = {"status": "queued", "job_id": 9}
+        result = await generate_master_answer(10, user, force=True)
+
+    assert result == {"status": "queued", "job_id": 9}
+    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1)
+
+
 def _exec(fn):
     return fn()
 
@@ -205,6 +227,37 @@ async def test_batch_generate_writes_answer_sources():
 
     assert '"type": "init"' in body
     assert '"type": "done"' in body
+    mock_dispatch.assert_awaited_once_with(100)
+
+
+@pytest.mark.asyncio
+async def test_batch_generate_force_includes_existing_answers():
+    """批量强制刷新不得把已有旧答案计入 skipped。"""
+    from app.models.schemas import BatchGenerateAnswersRequest
+    from app.routers.answers import batch_generate_answers
+
+    user = {"id": 1, "is_admin": True}
+    rows = [{"id": 10, "question": "什么是微服务？", "ai_answer": "旧答案"}]
+
+    async def _consume(resp):
+        chunks = []
+        async for chunk in resp.body_iterator:
+            chunks.append(chunk)
+        return "".join(chunks)
+
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db, \
+         patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock) as mock_dispatch:
+        mock_run_db.side_effect = [
+            rows,
+            (99, [100]),
+            [{"id": 10, "status": "completed", "error": None}],
+        ]
+        response = await batch_generate_answers(
+            BatchGenerateAnswersRequest(ids=[10], force=True), user
+        )
+        body = await _consume(response)
+
+    assert '"skipped": 0' in body
     mock_dispatch.assert_awaited_once_with(100)
 
 

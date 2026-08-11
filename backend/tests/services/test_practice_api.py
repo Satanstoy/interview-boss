@@ -1,3 +1,6 @@
+import json
+
+
 USER = {"id": 1, "username": "practice-user", "is_admin": 0, "bank_mode": "public"}
 POSITION = "agent开发/大模型应用开发/大模型开发"
 
@@ -26,6 +29,11 @@ def _insert_question(conn, text, frequency=1):
 def test_decks_link_high_frequency_bank_and_review_state(client, test_db):
     question_id = _insert_question(test_db, "什么是连接池？", frequency=8)
     second_id = _insert_question(test_db, "什么是幂等？", frequency=1)
+    answer_sources = [{"title": "Exa 官方资料", "url": "https://exa.ai/docs", "snippet": "来源摘要"}]
+    test_db.execute(
+        "UPDATE question_bank SET answer_sources = ? WHERE id = ?",
+        (json.dumps(answer_sources, ensure_ascii=False), question_id),
+    )
     test_db.execute(
         "INSERT INTO user_question_view (user_id, question_bank_id, is_starred) VALUES (1, ?, 1)",
         (question_id,),
@@ -45,6 +53,7 @@ def test_decks_link_high_frequency_bank_and_review_state(client, test_db):
         assert queue.status_code == 200, queue.text
         assert queue.json()["total"] == 2
         assert queue.json()["items"][0]["id"] == question_id
+        assert queue.json()["items"][0]["answer_sources"] == answer_sources
 
         review = client.post(
             "/api/practice/review",

@@ -98,37 +98,47 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
     ]
   })
 
-  const masterBatchActions = computed(() => [
-    {
+  const masterBatchActions = computed(() => {
+    if (!currentUser.value?.is_admin) return []
+
+    const generateSelectedAnswers = async (onProgress, force) => {
+      const ids = [...masterSelection.selectedIds.value]
+      const actionLabel = force ? '批量重新生成答案' : '批量生成答案'
+      if (!await showConfirm(`确定要${force ? '重新生成' : '为'}选中的 ${ids.length} 道题目${force ? '的答案' : '生成答案'}？`)) return
+      if (!await ensureModelReady({ action: actionLabel })) return
+      try {
+        const result = await api.batchGenerateAnswers(ids, (event) => {
+          if (event.type === 'init') {
+            if (event.total === 0) {
+              toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
+            } else {
+              onProgress(0, event.total)
+            }
+          } else if (event.type === 'progress') {
+            onProgress(event.current, event.total)
+          }
+        }, { force })
+        if (result) {
+          const parts = []
+          if (result.generated) parts.push(`成功 ${result.generated} 题`)
+          if (result.failed) parts.push(`失败 ${result.failed} 题`)
+          if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
+          toast.success(parts.length ? `${actionLabel}完成：${parts.join('，')}` : `${actionLabel}完成`)
+        }
+        fetchTableData()
+      } catch (e) { toast.error(`${actionLabel}失败：` + getFriendlyError(e)) }
+    }
+
+    return [{
       key: 'batch-generate',
       label: '批量生成答案',
       color: 'blue',
-      handler: async (onProgress) => {
-        const ids = [...masterSelection.selectedIds.value]
-        if (!await showConfirm(`确定要为选中的 ${ids.length} 道题目生成答案？`)) return
-        if (!await ensureModelReady({ action: '批量生成答案' })) return
-        try {
-          const result = await api.batchGenerateAnswers(ids, (event) => {
-            if (event.type === 'init') {
-              if (event.total === 0) {
-                toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
-              } else {
-                onProgress(0, event.total)
-              }
-            } else if (event.type === 'progress') {
-              onProgress(event.current, event.total)
-            }
-          })
-          if (result) {
-            const parts = []
-            if (result.generated) parts.push(`成功 ${result.generated} 题`)
-            if (result.failed) parts.push(`失败 ${result.failed} 题`)
-            if (result.skipped) parts.push(`跳过 ${result.skipped} 题`)
-            toast.success(parts.length ? `生成完成：${parts.join('，')}` : '生成完成')
-          }
-          fetchTableData()
-        } catch (e) { toast.error('批量生成答案失败：' + getFriendlyError(e)) }
-      }
+      handler: (onProgress) => generateSelectedAnswers(onProgress, false),
+    }, {
+      key: 'batch-regenerate',
+      label: '批量重新生成答案',
+      color: 'purple',
+      handler: (onProgress) => generateSelectedAnswers(onProgress, true),
     },
     {
       key: 'batch-delete',
@@ -146,8 +156,8 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
           fetchTableData()
         } catch (e) { toast.error('批量删除失败：' + getFriendlyError(e)) }
       }
-    }
-  ])
+    }]
+  })
 
   return { jdBatchActions, interviewBatchActions, masterBatchActions }
 }

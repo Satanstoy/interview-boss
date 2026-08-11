@@ -295,8 +295,13 @@ async function loadFullAnswer() {
   try {
     const detail = await get(`/api/master-bank/${props.question.id}/detail`)
     fullAnswer.value = detail.ai_answer || ''
+    if (Array.isArray(detail.answer_sources)) props.question.answer_sources = detail.answer_sources
     // Emit to parent so it updates the question object too
-    emit('update-answer', { id: props.question.id, ai_answer: detail.ai_answer })
+    emit('update-answer', {
+      id: props.question.id,
+      ai_answer: detail.ai_answer,
+      answer_sources: detail.answer_sources,
+    })
   } catch (e) {
     console.warn('Failed to load answer detail:', e)
     detailError.value = true

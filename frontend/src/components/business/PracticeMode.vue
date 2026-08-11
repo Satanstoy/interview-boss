@@ -141,6 +141,25 @@
               <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
               <Button v-if="isAdmin" size="sm" class="mt-4 gap-1.5" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><Sparkles class="size-4" />AI 生成答案</Button>
             </div>
+            <div v-if="referenceAnswerSources.length" class="mt-3 rounded-lg border border-border/70 bg-card">
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+                @click="qState._showAnswerSources = !qState._showAnswerSources"
+              >
+                <ChevronDown class="size-3.5 transition-transform" :class="qState._showAnswerSources ? 'rotate-180' : ''" />
+                <span>参考来源（{{ referenceAnswerSources.length }}）</span>
+              </button>
+              <div v-if="qState._showAnswerSources" class="flex flex-col gap-2 border-t border-border/70 px-3 pb-3 pt-2">
+                <div v-for="(src, idx) in referenceAnswerSources" :key="src.url || idx" class="flex items-start gap-2 text-xs">
+                  <span class="shrink-0 font-mono text-muted-foreground">{{ idx + 1 }}.</span>
+                  <div class="min-w-0">
+                    <a :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="break-all font-medium text-primary hover:underline">{{ src.title || src.url }}</a>
+                    <p v-if="src.snippet" class="mt-0.5 line-clamp-2 text-muted-foreground">{{ src.snippet }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- 背诵稿（普通用户）：基于公共参考答案结合个人背景定制 -->
             <div v-if="!isAdmin && currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="mt-6 rounded-xl border border-border/80 bg-muted/30 p-4 md:p-5">
@@ -398,7 +417,7 @@ const practicedLoading = ref(false)
 const viewMode = ref(props.selectedDeckKey === 'due' ? 'quiz' : 'browse')
 const isAlgorithmQueue = computed(() => viewMode.value === 'quiz')
 const selfRating = ref(null)
-const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
+const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
   const info = props.practicedQuestions?.[question?.id] || {}
@@ -443,6 +462,9 @@ const sessionQuestions = computed(() => {
   return sessionSource.value.filter(question => [question.question, question.cat1, question.cat2, question.tags].some(value => String(value || '').toLowerCase().includes(query)))
 })
 const currentQ = computed(() => sessionQuestions.value[currentIndex.value] || null)
+const referenceAnswerSources = computed(() => (
+  Array.isArray(currentQ.value?.answer_sources) ? currentQ.value.answer_sources : []
+))
 const isLastQuestion = computed(() => currentIndex.value >= sessionQuestions.value.length - 1)
 
 const difficultyClass = (difficulty) => {

@@ -8,7 +8,7 @@ export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build
 export const streamJobProgress = (jobId, onEvent) => getSSE(`${API}/jobs/${jobId}/stream`, onEvent)
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
-export const generateAnswer = (id) => post(`${API}/master-bank/generate-answer/${id}`, null, { timeout: 180_000 })
+export const generateAnswer = (id, { force = false } = {}) => post(`${API}/master-bank/generate-answer/${id}${force ? '?force=true' : ''}`, null, { timeout: 180_000 })
 export const saveUserAnswer = (id, answer) => put(`${API}/master-bank/save-user-answer/${id}`, { answer })
 export const generateRecitation = (id) => post(`${API}/master-bank/generate-recitation/${id}`, null, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
@@ -33,7 +33,7 @@ export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 
 // ── Batch operations ──
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
-export const batchGenerateAnswers = (ids, onEvent) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids }, onEvent)
+export const batchGenerateAnswers = (ids, onEvent, { force = false } = {}) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids, force }, onEvent)
 
 // ── Trash & Restore ──
 export const fetchMasterBankTrash = (page = 1, pageSize = 50) => get(`${API}/master-bank/trash?page=${page}&page_size=${pageSize}`)

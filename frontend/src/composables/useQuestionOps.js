@@ -144,7 +144,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     if (!await ensureModelReady({ action: 'AI 生成答案' })) return
     question._isLoadingAnswer = true
     try {
-      const data = await resolveQueuedJob(await api.generateAnswer(question.id))
+      const data = await resolveQueuedJob(await api.generateAnswer(question.id, { force: true }))
       if (currentUser.value?.is_admin) {
         question.ai_answer = data.answer
       } else {
@@ -197,11 +197,12 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     } catch (e) { toast.error('编辑失败：' + getFriendlyError(e)) }
   }
 
-  const onUpdateAnswer = ({ id, ai_answer, user_answer }) => {
+  const onUpdateAnswer = ({ id, ai_answer, user_answer, answer_sources }) => {
     const q = masterBank.value.find(item => item.id === id)
     if (q) {
       if (ai_answer !== undefined) q.ai_answer = ai_answer
       if (user_answer !== undefined) q.user_answer = user_answer
+      if (answer_sources !== undefined) q.answer_sources = answer_sources
     }
   }
 

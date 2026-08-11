@@ -135,7 +135,7 @@ def _select_sql(from_clause: str, where_clause: str, frequency_sql: str) -> str:
     # 静态变体数不参与展示/排序。
     return (
         "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, "
-        f"({frequency_sql}) AS frequency, qb.ai_answer, qb.sources, "
+        f"({frequency_sql}) AS frequency, qb.ai_answer, qb.answer_sources, qb.sources, "
         "qb.original_questions, qb.original_question_sources, qb.owner_id, "
         "COALESCE(uqv.is_starred, 0) AS is_starred, "
         "COALESCE(uqv.user_answer, '') AS user_answer, "
@@ -165,6 +165,7 @@ def _normalise_question(row) -> dict:
     item["ease_factor"] = float(item.get("ease_factor") or 2.3)
     item["tags"] = _json_or_default(item.get("tags"), item.get("tags") or "")
     item["sources"] = _json_or_default(item.get("sources"), [])
+    item["answer_sources"] = _json_or_default(item.get("answer_sources"), None)
     item["original_questions"] = _json_or_default(item.get("original_questions"), [])
     item["original_question_sources"] = _json_or_default(
         item.get("original_question_sources"), []

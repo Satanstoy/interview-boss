@@ -50,6 +50,7 @@ export function resetQState(qState) {
   qState._isEditingAnswer = false
   qState._editAnswer = ''
   qState._isSavingAnswer = false
+  qState._showAnswerSources = false
   qState._recitation = ''
   qState._recitationSources = []
   qState._showRecitationSources = false
@@ -65,8 +66,9 @@ export async function generateAnswerForQuestion(question, qState) {
   if (!await ensureModelReady({ action: 'AI 生成答案' })) return
   qState._isLoadingAnswer = true
   try {
-    const data = await resolveQueuedJob(apiGenerateAnswer(question.id))
+    const data = await resolveQueuedJob(apiGenerateAnswer(question.id, { force: true }))
     question.ai_answer = data.answer
+    if (Array.isArray(data.search_sources)) question.answer_sources = data.search_sources
     toast.success('答案已生成')
   } catch (e) {
     toast.error(`生成失败: ${e.message}`)
