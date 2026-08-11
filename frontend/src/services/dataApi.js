@@ -30,7 +30,7 @@ export const fetchActiveSubmitJobs = () => get(`${API}/submit-jobs/active`, { no
 export const retrySubmitJob = (jobId) => post(`${API}/submit-jobs/${jobId}/retry`, {})
 
 // ── Data mutations ──
-export const deleteRecord = (type, id) => del(`${API}/data/${type}/${id}`)
+export const deleteRecord = (type, id, options = {}) => del(`${API}/data/${type}/${id}`, options)
 export const updateRecord = (data) => put(`${API}/data/update`, data)
 export const restoreRecord = (type, id) => post(`${API}/data/restore/${type}/${id}`)
 export const fetchTrash = (type, page = 1, pageSize = 100) => get(`${API}/data/${type}/trash?page=${page}&page_size=${pageSize}`)

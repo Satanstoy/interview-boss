@@ -413,6 +413,7 @@ const applyPreviewData = () => {
 // ── Question operations ──
 const {
   reprocessingIds, reprocessProgress, activeReprocessing,
+  deletingIds,
   deleteDataRow, reprocessInterview, retagQuestion,
   saveField, saveFieldFromEvent, toggleStar,
   generateAnswer, saveUserAnswer,
@@ -556,6 +557,7 @@ provide('appData', {
   isMasterSelected, jdBatchActions, interviewBatchActions, masterBatchActions,
   // Question ops
   reprocessingIds, reprocessProgress, activeReprocessing,
+  deletingIds,
   deleteDataRow, reprocessInterview, retagQuestion,
   saveField, saveFieldFromEvent, toggleStar,
   generateAnswer, saveUserAnswer,

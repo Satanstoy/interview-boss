@@ -34,6 +34,8 @@ SQLite 数据库层，线程安全，WAL 模式。
 ## 关键模式
 
 - **Dual-write**：`question_bank` 的 JSON 字段和 `question_sources`/`question_original_items` 表同步写入
+- **来源清理必须原子**：删除/恢复面经时，先在同一个外层事务内更新 JSON 投影和规范化来源表；禁止用吞异常的 best-effort savepoint，否则会产生“面经已删、来源仍在”的半删除状态。恢复也必须以规范化来源表重建 JSON 投影。
+- **来源关系按 owner 隔离**：来源 URL 不是唯一业务关系键；清理题库来源时必须同时限定 `question_bank.owner_id`，只有同一 owner 下最后一个活跃面经仍不存在时才可将题簇软删除。
 - **软删除**：`deleted_at` 列，查询时加 `WHERE deleted_at IS NULL`
 - **岗位过滤**：通过 `question_position` 关联表，fallback 到 `job_position` 列
 - **模拟面试历史**：`chat_conversations.job_position` 记录会话所属岗位，列表和详情必须按用户当前岗位过滤。

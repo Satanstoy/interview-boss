@@ -8,8 +8,100 @@ All read helpers accept a cursor for consistency.
 """
 
 import logging
+import sqlite3
 
 logger = logging.getLogger("interview-boss")
+
+
+# ``None`` is a valid scope: it means public rows.  The sentinel keeps the
+# legacy callers that intentionally operate on every owner distinguishable.
+_OWNER_SCOPE_UNSET = object()
+
+
+def _table_exists(cursor, table_name: str) -> bool:
+    return bool(
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+    )
+
+
+def _has_column(cursor, table_name: str, column_name: str) -> bool:
+    return any(
+        row[1] == column_name
+        for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+    )
+
+
+def _owner_scope_clause(owner_scope):
+    if owner_scope is _OWNER_SCOPE_UNSET:
+        return "", ()
+    return " AND qb.owner_id IS ?", (owner_scope,)
+
+
+def _upsert_source(cursor, qb_id: int, source: dict, *, restore: bool = True):
+    if not _table_exists(cursor, "question_sources"):
+        return
+    url = source.get("url", "")
+    if not url:
+        return
+    row = cursor.execute(
+        "SELECT id FROM question_sources WHERE question_bank_id = ? AND url = ?",
+        (qb_id, url),
+    ).fetchone()
+    if row:
+        if _has_column(cursor, "question_sources", "deleted_at") and restore:
+            cursor.execute(
+                "UPDATE question_sources SET company = ?, round = ?, deleted_at = NULL "
+                "WHERE question_bank_id = ? AND url = ?",
+                (source.get("company", ""), source.get("round", ""), qb_id, url),
+            )
+        else:
+            cursor.execute(
+                "UPDATE question_sources SET company = ?, round = ? "
+                "WHERE question_bank_id = ? AND url = ?",
+                (source.get("company", ""), source.get("round", ""), qb_id, url),
+            )
+        return
+    cursor.execute(
+        "INSERT INTO question_sources (question_bank_id, url, company, round) VALUES (?, ?, ?, ?)",
+        (qb_id, url, source.get("company", ""), source.get("round", "")),
+    )
+
+
+def _upsert_original_item_source(
+    cursor, item_id: int, source: dict, *, restore: bool = True
+):
+    if not _table_exists(cursor, "question_original_item_sources"):
+        return
+    url = source.get("url", "")
+    if not url:
+        return
+    row = cursor.execute(
+        "SELECT id FROM question_original_item_sources "
+        "WHERE original_item_id = ? AND url = ?",
+        (item_id, url),
+    ).fetchone()
+    if row:
+        if _has_column(cursor, "question_original_item_sources", "deleted_at") and restore:
+            cursor.execute(
+                "UPDATE question_original_item_sources SET company = ?, round = ?, deleted_at = NULL "
+                "WHERE original_item_id = ? AND url = ?",
+                (source.get("company", ""), source.get("round", ""), item_id, url),
+            )
+        else:
+            cursor.execute(
+                "UPDATE question_original_item_sources SET company = ?, round = ? "
+                "WHERE original_item_id = ? AND url = ?",
+                (source.get("company", ""), source.get("round", ""), item_id, url),
+            )
+        return
+    cursor.execute(
+        "INSERT INTO question_original_item_sources "
+        "(original_item_id, url, company, round) VALUES (?, ?, ?, ?)",
+        (item_id, url, source.get("company", ""), source.get("round", "")),
+    )
 
 
 # ═══════════════════════════════════════════════════
@@ -34,14 +126,37 @@ def delete_source(cursor, qb_id: int, url: str):
 
 
 def delete_sources_by_url(cursor, url: str):
-    """Soft delete source entries from question_sources table only.
+    """Soft delete source entries from every owner (legacy helper)."""
+    if not _table_exists(cursor, "question_sources"):
+        return
+    if _has_column(cursor, "question_sources", "deleted_at"):
+        cursor.execute(
+            "UPDATE question_sources SET deleted_at = CURRENT_TIMESTAMP "
+            "WHERE url = ? AND deleted_at IS NULL",
+            (url,),
+        )
+    else:
+        cursor.execute("DELETE FROM question_sources WHERE url = ?", (url,))
 
-    Note: We preserve question_original_item_sources for restoration.
-    """
-    cursor.execute(
-        "UPDATE question_sources SET deleted_at = CURRENT_TIMESTAMP WHERE url = ? AND deleted_at IS NULL",
-        (url,),
-    )
+
+def delete_sources_by_url_scoped(cursor, url: str, owner_scope):
+    """Soft delete sources for one owner scope, including public ``None``."""
+    if not _table_exists(cursor, "question_sources"):
+        return
+    clause, params = _owner_scope_clause(owner_scope)
+    if _has_column(cursor, "question_sources", "deleted_at"):
+        cursor.execute(
+            "UPDATE question_sources SET deleted_at = CURRENT_TIMESTAMP "
+            "WHERE url = ? AND deleted_at IS NULL AND question_bank_id IN "
+            "(SELECT id FROM question_bank qb WHERE 1 = 1" + clause + ")",
+            (url, *params),
+        )
+    else:
+        cursor.execute(
+            "DELETE FROM question_sources WHERE url = ? AND question_bank_id IN "
+            "(SELECT id FROM question_bank qb WHERE 1 = 1" + clause + ")",
+            (url, *params),
+        )
 
 
 def delete_all_sources(cursor, qb_id: int):
@@ -126,6 +241,160 @@ def delete_all_for_qb(cursor, qb_id: int):
     delete_all_original_items(cursor, qb_id)
 
 
+def sync_question_bank_sources(
+    cursor,
+    qb_id: int,
+    sources: list,
+    original_questions: list,
+    original_question_sources: list,
+):
+    """Make normalized source tables match the JSON compatibility columns.
+
+    This function is deliberately transactional: callers must invoke it with
+    the same cursor that updates ``question_bank``.  It repairs legacy
+    half-dual-writes while deleting/restoring a source, instead of silently
+    leaving one representation stale.
+    """
+    if not isinstance(getattr(cursor, "connection", None), sqlite3.Connection):
+        # Keep lightweight unit-test cursors on the legacy JSON path.
+        return
+    desired_sources = {
+        item.get("url"): item
+        for item in (sources or [])
+        if isinstance(item, dict) and item.get("url")
+    }
+    if _table_exists(cursor, "question_sources"):
+        has_deleted = _has_column(cursor, "question_sources", "deleted_at")
+        if desired_sources:
+            placeholders = ",".join("?" * len(desired_sources))
+            params = [qb_id, *desired_sources]
+            if has_deleted:
+                cursor.execute(
+                    "UPDATE question_sources SET deleted_at = CURRENT_TIMESTAMP "
+                    f"WHERE question_bank_id = ? AND url NOT IN ({placeholders}) AND deleted_at IS NULL",
+                    params,
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM question_sources "
+                    f"WHERE question_bank_id = ? AND url NOT IN ({placeholders})",
+                    params,
+                )
+        elif has_deleted:
+            cursor.execute(
+                "UPDATE question_sources SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE question_bank_id = ? AND deleted_at IS NULL",
+                (qb_id,),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM question_sources WHERE question_bank_id = ?", (qb_id,)
+            )
+        for source in desired_sources.values():
+            _upsert_source(cursor, qb_id, source)
+
+    if not (
+        _table_exists(cursor, "question_original_items")
+        and _table_exists(cursor, "question_original_item_sources")
+    ):
+        return
+
+    desired_by_question = {}
+    for item in original_question_sources or []:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", ""))
+        desired_by_question[question] = [
+            source
+            for source in item.get("sources", [])
+            if isinstance(source, dict) and source.get("url")
+        ]
+    for question in original_questions or []:
+        desired_by_question.setdefault(str(question), [])
+
+    item_deleted = _has_column(cursor, "question_original_items", "deleted_at")
+    item_source_deleted = _has_column(
+        cursor, "question_original_item_sources", "deleted_at"
+    )
+    existing_items = cursor.execute(
+        "SELECT id, question_text FROM question_original_items WHERE question_bank_id = ?",
+        (qb_id,),
+    ).fetchall()
+    existing_by_question = {row[1]: row[0] for row in existing_items}
+
+    for question, item_sources in desired_by_question.items():
+        item_id = existing_by_question.get(question)
+        if item_id is None:
+            cursor.execute(
+                "INSERT INTO question_original_items (question_bank_id, question_text) VALUES (?, ?)",
+                (qb_id, question),
+            )
+            item_id = cursor.lastrowid
+        elif item_deleted:
+            cursor.execute(
+                "UPDATE question_original_items SET deleted_at = NULL WHERE id = ?",
+                (item_id,),
+            )
+
+        desired_urls = {
+            source.get("url") for source in item_sources if source.get("url")
+        }
+        if desired_urls:
+            placeholders = ",".join("?" * len(desired_urls))
+            params = [item_id, *desired_urls]
+            if item_source_deleted:
+                cursor.execute(
+                    "UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP "
+                    f"WHERE original_item_id = ? AND url NOT IN ({placeholders}) AND deleted_at IS NULL",
+                    params,
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM question_original_item_sources "
+                    f"WHERE original_item_id = ? AND url NOT IN ({placeholders})",
+                    params,
+                )
+        elif item_source_deleted:
+            cursor.execute(
+                "UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE original_item_id = ? AND deleted_at IS NULL",
+                (item_id,),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM question_original_item_sources WHERE original_item_id = ?",
+                (item_id,),
+            )
+        for source in item_sources:
+            _upsert_original_item_source(cursor, item_id, source)
+
+    stale_items = [
+        item_id
+        for question, item_id in existing_by_question.items()
+        if question not in desired_by_question
+    ]
+    for item_id in stale_items:
+        if item_source_deleted:
+            cursor.execute(
+                "UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE original_item_id = ? AND deleted_at IS NULL",
+                (item_id,),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM question_original_item_sources WHERE original_item_id = ?",
+                (item_id,),
+            )
+        if item_deleted:
+            cursor.execute(
+                "UPDATE question_original_items SET deleted_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND deleted_at IS NULL",
+                (item_id,),
+            )
+        else:
+            cursor.execute("DELETE FROM question_original_items WHERE id = ?", (item_id,))
+
+
 def merge_source_into_original_item(
     cursor,
     qb_id: int,
@@ -147,58 +416,125 @@ def merge_source_into_original_item(
     )
 
 
-def remove_original_items_by_url(cursor, url: str):
-    """保留 original_item_sources 记录以支持恢复。
+def remove_original_items_by_url(
+    cursor, url: str, owner_scope=_OWNER_SCOPE_UNSET
+):
+    """Soft delete original-item source links for a URL and owner scope.
 
-    删除面经时，只从 question_sources 表删除记录，
-    保留 question_original_item_sources 表的记录，
-    这样恢复面经时可以重新插入到 question_sources 表。
+    The rows are retained for restoration, but hidden from active source
+    queries.  An original item is also soft-deleted when its last source is
+    gone, which keeps ``original_questions`` and normalized rows aligned.
     """
-    pass
+    if not (
+        _table_exists(cursor, "question_original_items")
+        and _table_exists(cursor, "question_original_item_sources")
+    ):
+        return
+    clause, params = _owner_scope_clause(owner_scope)
+    has_source_deleted = _has_column(
+        cursor, "question_original_item_sources", "deleted_at"
+    )
+    has_item_deleted = _has_column(cursor, "question_original_items", "deleted_at")
+    if has_source_deleted:
+        cursor.execute(
+            "UPDATE question_original_item_sources SET deleted_at = CURRENT_TIMESTAMP "
+            "WHERE url = ? AND original_item_id IN ("
+            "SELECT qoi.id FROM question_original_items qoi "
+            "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+            "WHERE 1 = 1" + clause + ") AND deleted_at IS NULL",
+            (url, *params),
+        )
+    else:
+        cursor.execute(
+            "DELETE FROM question_original_item_sources "
+            "WHERE url = ? AND original_item_id IN ("
+            "SELECT qoi.id FROM question_original_items qoi "
+            "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+            "WHERE 1 = 1" + clause + ")",
+            (url, *params),
+        )
+
+    if has_item_deleted and has_source_deleted:
+        cursor.execute(
+            "UPDATE question_original_items SET deleted_at = CURRENT_TIMESTAMP "
+            "WHERE deleted_at IS NULL AND id IN ("
+            "SELECT qoi.id FROM question_original_items qoi "
+            "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+            "WHERE 1 = 1" + clause + ") AND NOT EXISTS ("
+            "SELECT 1 FROM question_original_item_sources qois "
+            "WHERE qois.original_item_id = question_original_items.id "
+            "AND qois.deleted_at IS NULL)",
+            params,
+        )
 
 
-def restore_source_for_url(cursor, url: str):
+def restore_source_for_url(cursor, url: str, owner_scope=_OWNER_SCOPE_UNSET) -> list[int]:
     """Restore sources for a URL by restoring soft-deleted records.
 
     Called when an interview is restored from soft-delete.
     """
-    cursor.execute(
-        "UPDATE question_sources SET deleted_at = NULL WHERE url = ? AND deleted_at IS NOT NULL",
-        (url,),
-    )
+    if not isinstance(getattr(cursor, "connection", None), sqlite3.Connection):
+        return []
+    affected_ids = set()
+    clause, params = _owner_scope_clause(owner_scope)
+    if _table_exists(cursor, "question_sources"):
+        rows = cursor.execute(
+            "SELECT DISTINCT qb.id FROM question_sources qs "
+            "JOIN question_bank qb ON qb.id = qs.question_bank_id "
+            "WHERE qs.url = ?" + clause,
+            (url, *params),
+        ).fetchall()
+        affected_ids.update(row[0] for row in rows)
+        if _has_column(cursor, "question_sources", "deleted_at"):
+            cursor.execute(
+                "UPDATE question_sources SET deleted_at = NULL WHERE url = ? "
+                "AND deleted_at IS NOT NULL AND question_bank_id IN ("
+                "SELECT id FROM question_bank qb WHERE 1 = 1" + clause + ")",
+                (url, *params),
+            )
 
-    cursor.execute(
-        "UPDATE question_original_item_sources SET deleted_at = NULL WHERE url = ? AND deleted_at IS NOT NULL",
-        (url,),
-    )
-
-    cursor.execute(
-        "UPDATE question_original_items SET deleted_at = NULL "
-        "WHERE id IN (SELECT DISTINCT original_item_id FROM question_original_item_sources WHERE url = ?) "
-        "AND deleted_at IS NOT NULL",
-        (url,),
-    )
-
-    affected_qb = cursor.execute(
-        "SELECT DISTINCT qoi.question_bank_id "
-        "FROM question_original_items qoi "
-        "JOIN question_original_item_sources qois ON qois.original_item_id = qoi.id "
-        "WHERE qois.url = ? AND qois.deleted_at IS NULL",
-        (url,),
-    ).fetchall()
-
-    for row in affected_qb:
-        qb_id = row[0]
-        src = cursor.execute(
-            "SELECT DISTINCT qois.company, qois.round "
+    if _table_exists(cursor, "question_original_item_sources"):
+        rows = cursor.execute(
+            "SELECT DISTINCT qoi.question_bank_id "
             "FROM question_original_item_sources qois "
             "JOIN question_original_items qoi ON qois.original_item_id = qoi.id "
-            "WHERE qoi.question_bank_id = ? AND qois.url = ? AND qois.deleted_at IS NULL LIMIT 1",
-            (qb_id, url),
+            "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+            "WHERE qois.url = ?" + clause,
+            (url, *params),
+        ).fetchall()
+        affected_ids.update(row[0] for row in rows)
+        if _has_column(cursor, "question_original_item_sources", "deleted_at"):
+            cursor.execute(
+                "UPDATE question_original_item_sources SET deleted_at = NULL "
+                "WHERE url = ? AND deleted_at IS NOT NULL AND original_item_id IN ("
+                "SELECT qoi.id FROM question_original_items qoi "
+                "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+                "WHERE 1 = 1" + clause + ")",
+                (url, *params),
+            )
+        if _has_column(cursor, "question_original_items", "deleted_at"):
+            cursor.execute(
+                "UPDATE question_original_items SET deleted_at = NULL "
+                "WHERE deleted_at IS NOT NULL AND id IN ("
+                "SELECT DISTINCT qois.original_item_id "
+                "FROM question_original_item_sources qois "
+                "JOIN question_original_items qoi ON qoi.id = qois.original_item_id "
+                "JOIN question_bank qb ON qb.id = qoi.question_bank_id "
+                "WHERE qois.url = ?" + clause + ")",
+                (url, *params),
+            )
+
+    for qb_id in affected_ids:
+        row = cursor.execute(
+            "SELECT sources, original_questions, original_question_sources "
+            "FROM question_bank WHERE id = ?",
+            (qb_id,),
         ).fetchone()
-        company = src[0] if src else ""
-        round_ = src[1] if src else ""
-        insert_source(cursor, qb_id, url, company, round_)
+        if row is None:
+            continue
+        # The caller rebuilds JSON from these normalized rows.  Returning IDs
+        # keeps this helper independent of the router layer.
+    return sorted(affected_ids)
 
 
 # ═══════════════════════════════════════════════════

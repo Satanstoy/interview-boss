@@ -19,6 +19,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
 
   const reprocessingIds = ref({})
   const reprocessProgress = ref({})
+  const deletingIds = ref(new Set())
 
   const activeReprocessing = computed(() => {
     const active = {}
@@ -32,15 +33,34 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
 
   const deleteDataRow = async (type, recordId) => {
     if (!await showConfirm('确定要删除该记录？', { title: '确认删除', variant: 'danger' })) return
+    if (deletingIds.value.has(recordId)) return
+    deletingIds.value = new Set(deletingIds.value).add(recordId)
+    let refreshStarted = false
     try {
-      await api.deleteRecord(type, recordId)
+      // The backend mutation is atomic and idempotent.  Retrying a timed-out
+      // DELETE only makes the following refreshes race and look like a hang.
+      await api.deleteRecord(type, recordId, { noRetry: true, timeout: 30_000 })
       toast.success('删除成功')
-      // 删除接口成功后再刷新；刷新失败不应把已完成的删除误报成失败。
-      await Promise.allSettled([
+      // Refresh in the background so a slow analytics/master-bank request
+      // cannot block the delete interaction after the mutation committed.
+      refreshStarted = true
+      void Promise.allSettled([
         Promise.resolve().then(() => fetchTableData()),
         Promise.resolve().then(() => fetchAnalytics()),
-      ])
-    } catch (err) { toast.error('删除失败：' + getFriendlyError(err)) }
+      ]).finally(() => {
+        const next = new Set(deletingIds.value)
+        next.delete(recordId)
+        deletingIds.value = next
+      })
+    } catch (err) {
+      toast.error('删除失败：' + getFriendlyError(err))
+    } finally {
+      if (!refreshStarted) {
+        const next = new Set(deletingIds.value)
+        next.delete(recordId)
+        deletingIds.value = next
+      }
+    }
   }
 
   const reprocessInterview = async (id) => {
@@ -219,6 +239,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
   return {
     reprocessingIds,
     reprocessProgress,
+    deletingIds,
     activeReprocessing,
     deleteDataRow,
     reprocessInterview,

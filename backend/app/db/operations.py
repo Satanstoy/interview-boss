@@ -5,9 +5,8 @@ import sqlite3
 from app.db.connection import get_db_connection
 from app.db.question_bank_sources import (
     insert_source,
-    delete_source,
     insert_original_item,
-    remove_original_items_by_url,
+    sync_question_bank_sources,
 )
 from app.db.utils import _extract_url_signature, normalize_category
 from app.services.interview_distribution import (
@@ -17,6 +16,23 @@ from app.services.interview_distribution import (
 )
 
 logger = logging.getLogger("interview-boss")
+
+
+def _mark_cluster_review_pending_if_available(cursor, cluster_id: int, reason: str):
+    """Keep legacy/lightweight schemas usable without weakening source cleanup."""
+    connection = getattr(cursor, "connection", None)
+    if not isinstance(connection, sqlite3.Connection):
+        return
+    required = {"quality_issue", "cluster_review_state", "cluster_review_tasks"}
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)",
+        tuple(required),
+    ).fetchall()
+    if {row[0] for row in rows} != required:
+        return
+    from app.services.cluster_review_lifecycle import mark_cluster_review_pending
+
+    mark_cluster_review_pending(connection, cluster_id, reason)
 
 
 # ═══════════════════════════════════════════════════
@@ -334,13 +350,32 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
             "SELECT DISTINCT question_bank_id FROM question_sources WHERE url = ?",
             (url,),
         ).fetchall()
-        if not affected_ids:
-            return
-        id_placeholders = ",".join("?" * len(affected_ids))
-        affected_rows = cursor.execute(
-            f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({id_placeholders})",
-            [r[0] for r in affected_ids],
+        if affected_ids:
+            id_placeholders = ",".join("?" * len(affected_ids))
+            affected_rows = cursor.execute(
+                f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({id_placeholders})",
+                [r[0] for r in affected_ids],
+            ).fetchall()
+        else:
+            affected_rows = []
+        original_ids = cursor.execute(
+            "SELECT DISTINCT qoi.question_bank_id "
+            "FROM question_original_item_sources qois "
+            "JOIN question_original_items qoi ON qoi.id = qois.original_item_id "
+            "WHERE qois.url = ?",
+            (url,),
         ).fetchall()
+        existing_ids = {r["id"] for r in affected_rows}
+        missing_ids = [row[0] for row in original_ids if row[0] not in existing_ids]
+        if missing_ids:
+            placeholders = ",".join("?" * len(missing_ids))
+            affected_rows.extend(
+                cursor.execute(
+                    f"SELECT id, sources, original_questions, original_question_sources "
+                    f"FROM question_bank WHERE id IN ({placeholders})",
+                    missing_ids,
+                ).fetchall()
+            )
     except Exception:
         # Fallback for tests / missing normalized tables
         affected_rows = cursor.execute(
@@ -385,35 +420,39 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
                 removed_questions.add(item.get("question", ""))
         new_oqs = [q for q in oqs if q not in removed_questions]
 
-        if len(new_sources) != len(sources):
-            if len(new_sources) == 0:
-                # 所有来源都被移除，标记删除
-                ids_to_delete.append(mr["id"])
-            else:
-                cursor.execute(
-                    "UPDATE question_bank SET frequency = ?, sources = ?, "
-                    "original_questions = ?, original_question_sources = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (
-                        len(new_oqs),
-                        json.dumps(new_sources, ensure_ascii=False),
-                        json.dumps(new_oqs, ensure_ascii=False),
-                        json.dumps(new_oqs_sources, ensure_ascii=False),
-                        mr["id"],
-                    ),
-                )
-                # Dual-write: also update normalized tables
-                try:
-                    delete_source(cursor, mr["id"], url)
-                except Exception:
-                    pass
-                try:
-                    remove_original_items_by_url(cursor, url)
-                except Exception:
-                    pass
-                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-                mark_cluster_review_pending(cursor.connection, mr["id"], "source_removed")
+        sources_changed = new_sources != sources
+        oqs_sources_changed = new_oqs_sources != oqs_sources
+        oqs_changed = new_oqs != oqs
+        if sources_changed or oqs_sources_changed or oqs_changed:
+            cursor.execute(
+                "UPDATE question_bank SET frequency = ?, sources = ?, "
+                "original_questions = ?, original_question_sources = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    max(1, len(new_oqs)),
+                    json.dumps(new_sources, ensure_ascii=False),
+                    json.dumps(new_oqs, ensure_ascii=False),
+                    json.dumps(new_oqs_sources, ensure_ascii=False),
+                    mr["id"],
+                ),
+            )
+        if len(new_sources) == 0 and mr["id"] not in ids_to_delete:
+            # The JSON projection may already be stale or empty after an
+            # earlier half-write.  A normalized source hit still identifies
+            # this QB as affected, so an empty repaired source set must be
+            # soft-deleted as well.
+            ids_to_delete.append(mr["id"])
+        sync_question_bank_sources(
+            cursor,
+            mr["id"],
+            new_sources,
+            new_oqs,
+            new_oqs_sources,
+        )
+        if sources_changed or oqs_sources_changed:
+            _mark_cluster_review_pending_if_available(
+                cursor, mr["id"], "source_removed"
+            )
 
     if ids_to_delete:
         placeholders = ",".join("?" * len(ids_to_delete))
@@ -430,7 +469,8 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
         "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE frequency <= 0 AND owner_id IS NULL AND deleted_at IS NULL"
     )
     cursor.execute(
-        "DELETE FROM question_position WHERE question_id IN (SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL AND deleted_at IS NULL)"
+        "DELETE FROM question_position WHERE question_id IN "
+        "(SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL)"
     )
 
 

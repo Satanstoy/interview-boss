@@ -14,12 +14,19 @@ from app.routers import data
 ADMIN = {"id": 1, "is_admin": 1}
 
 
-def _insert_interview(conn, url: str, company: str = "测试公司") -> int:
+def _insert_interview(
+    conn, url: str, company: str = "测试公司", owner_id=None
+) -> int:
     cursor = conn.execute(
         "INSERT INTO interview "
         "(url, company, round, focus, questions_list, difficulty, owner_id, status, job_position) "
-        "VALUES (?, ?, '一面', '未提供', ?, '中等', NULL, 'approved', '后端开发')",
-        (url, company, json.dumps(["题目A", "题目B"], ensure_ascii=False)),
+        "VALUES (?, ?, '一面', '未提供', ?, '中等', ?, 'approved', '后端开发')",
+        (
+            url,
+            company,
+            json.dumps(["题目A", "题目B"], ensure_ascii=False),
+            owner_id,
+        ),
     )
     return cursor.lastrowid
 
@@ -34,7 +41,7 @@ def _insert_detail(conn, interview_id: int, url: str, question: str) -> int:
     return cursor.lastrowid
 
 
-def _insert_question_bank_source(conn, url: str) -> int:
+def _insert_question_bank_source(conn, url: str, owner_id=None) -> int:
     oqs = [
         {"question": "题目A", "sources": [{"url": url, "company": "测试公司", "round": "一面"}]},
         {"question": "题目B", "sources": [{"url": url, "company": "测试公司", "round": "一面"}]},
@@ -42,11 +49,12 @@ def _insert_question_bank_source(conn, url: str) -> int:
     cursor = conn.execute(
         "INSERT INTO question_bank "
         "(question, frequency, sources, original_questions, original_question_sources, owner_id, status) "
-        "VALUES ('聚类题', 2, ?, ?, ?, NULL, 'approved')",
+        "VALUES ('聚类题', 2, ?, ?, ?, ?, 'approved')",
         (
             json.dumps([{"url": url, "company": "测试公司", "round": "一面"}], ensure_ascii=False),
             json.dumps(["题目A", "题目B"], ensure_ascii=False),
             json.dumps(oqs, ensure_ascii=False),
+            owner_id,
         ),
     )
     qb_id = cursor.lastrowid
@@ -146,25 +154,63 @@ async def test_delete_scopes_details_to_the_selected_interview(test_db, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_source_cleanup_failure_does_not_roll_back_interview_delete(
+async def test_private_delete_cleans_details_and_both_source_projections(
     test_db, monkeypatch
 ):
-    """遗留题库异常不能让删除按钮返回 500 或回滚主记录。"""
-    url = "internal://cleanup-failure"
-    interview_id = _insert_interview(test_db, url)
-    detail_id = _insert_detail(test_db, interview_id, url, "题目")
-    test_db.commit()
+    """私有面经的明细 owner_id 为空时，仍按 interview_id 正确级联。"""
+    url = "internal://private-delete"
+    interview_id = _insert_interview(test_db, url, owner_id=1)
+    detail_id = _insert_detail(test_db, interview_id, url, "题目A")
+    qb_id = _insert_question_bank_source(test_db, url, owner_id=1)
 
-    def fail_cleanup(cursor, source_url):
-        raise RuntimeError("模拟旧题库来源异常")
+    await _delete_interview(monkeypatch, interview_id)
 
-    monkeypatch.setattr(data, "_cleanup_sources_for_url", fail_cleanup)
-    result = await _delete_interview(monkeypatch, interview_id)
-
-    assert result == {"status": "success"}
     assert test_db.execute(
         "SELECT deleted_at FROM interview WHERE id = ?", (interview_id,)
     ).fetchone()["deleted_at"] is not None
     assert test_db.execute(
         "SELECT deleted_at FROM questions_detail WHERE id = ?", (detail_id,)
     ).fetchone()["deleted_at"] is not None
+    qb = test_db.execute(
+        "SELECT deleted_at, sources, original_questions, original_question_sources "
+        "FROM question_bank WHERE id = ?",
+        (qb_id,),
+    ).fetchone()
+    assert qb["deleted_at"] is not None
+    assert json.loads(qb["sources"]) == []
+    assert json.loads(qb["original_questions"]) == []
+    assert json.loads(qb["original_question_sources"]) == []
+    assert test_db.execute(
+        "SELECT deleted_at FROM question_sources WHERE question_bank_id = ?",
+        (qb_id,),
+    ).fetchone()["deleted_at"] is not None
+    assert test_db.execute(
+        "SELECT deleted_at FROM question_original_item_sources WHERE original_item_id IN "
+        "(SELECT id FROM question_original_items WHERE question_bank_id = ?)",
+        (qb_id,),
+    ).fetchone()["deleted_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_source_cleanup_failure_rolls_back_interview_delete(
+    test_db, monkeypatch
+):
+    """来源清理失败时，主记录和明细必须一起回滚。"""
+    url = "internal://cleanup-failure"
+    interview_id = _insert_interview(test_db, url)
+    detail_id = _insert_detail(test_db, interview_id, url, "题目")
+    test_db.commit()
+
+    def fail_cleanup(cursor, source_url, owner_scope=None):
+        raise RuntimeError("模拟旧题库来源异常")
+
+    monkeypatch.setattr(data, "_cleanup_sources_for_url", fail_cleanup)
+    with pytest.raises(Exception):
+        await _delete_interview(monkeypatch, interview_id)
+
+    assert test_db.execute(
+        "SELECT deleted_at FROM interview WHERE id = ?", (interview_id,)
+    ).fetchone()["deleted_at"] is None
+    assert test_db.execute(
+        "SELECT deleted_at FROM questions_detail WHERE id = ?", (detail_id,)
+    ).fetchone()["deleted_at"] is None

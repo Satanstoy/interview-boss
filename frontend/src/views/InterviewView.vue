@@ -84,8 +84,9 @@
             </a>
           </AppTooltip>
           <AppTooltip v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" text="删除">
-            <button @click="deleteDataRow('interview', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1 transition-colors duration-200">
-              <Trash2 class="size-4" />
+            <button @click="deleteDataRow('interview', row.id)" :disabled="deletingIds.has(row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1 disabled:opacity-50 transition-colors duration-200">
+              <Loader2 v-if="deletingIds.has(row.id)" class="size-4 animate-spin" />
+              <Trash2 v-else class="size-4" />
               <span class="text-[10px] leading-tight">删除</span>
             </button>
           </AppTooltip>
@@ -150,6 +151,7 @@ const {
   filterSeason, interviewSortOrder, interviewSeasons,
   highlightInterviewId, displayUser, safeUrl,
   saveField, deleteDataRow, reprocessInterview,
+  deletingIds,
   reprocessingIds, reprocessProgress,
   returnTab, handleReturn, floatingReturnBtn, floatingBtnStyle,
   returnToPracticeMode, formatDate,

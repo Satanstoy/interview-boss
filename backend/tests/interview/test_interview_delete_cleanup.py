@@ -152,11 +152,12 @@ class TestDeleteEndpointTransactionConsistency:
     """面经删除端点的事务一致性：软删除 + sources 清理应在同一事务中"""
 
     def test_interview_delete_calls_cleanup(self):
-        """面经删除应经过隔离的来源清理 savepoint。"""
+        """面经删除应经过同一事务的来源清理。"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
         assert 'def _delete_interview_txn' in content
-        assert '_cleanup_sources_best_effort' in content
+        assert '_cleanup_sources_in_txn' in content
+        assert '_cleanup_sources_best_effort' not in content
 
     def test_interview_delete_cascades_questions_detail(self):
         """删除面经时应级联软删除 questions_detail"""
@@ -176,13 +177,15 @@ class TestDeleteEndpointTransactionConsistency:
         """删除 JD 时应清理关联面经的 question_bank sources"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-        assert '_cleanup_sources_best_effort(cursor, iu["url"], owner_scope)' in content
+        assert '_cleanup_sources_in_txn' in content
 
     def test_delete_commits_after_cleanup(self):
         """主删除与来源清理应在同一个外层事务中提交。"""
         with open(BACKEND_ROOT / 'app/routers/data.py', 'r') as f:
             content = f.read()
-        assert 'savepoint = "interview_source_cleanup"' in content
+        assert 'def _cleanup_sources_in_txn' in content
+        assert 'There is intentionally no best-effort savepoint here.' in content
+        assert 'SAVEPOINT' not in content
         assert 'conn.commit()' in content
 
 
