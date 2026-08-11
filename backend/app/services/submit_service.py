@@ -66,7 +66,7 @@ async def background_generate_answer(
         )
         answer = await _call_llm_with_retry(prompt, user_id=user_id)
         answer, _ = await refine_answer(
-            prompt, answer, search_sources, user_id=user_id, max_rounds=1
+            prompt, answer, search_sources, user_id=user_id, max_rounds=2
         )
 
         def _update():

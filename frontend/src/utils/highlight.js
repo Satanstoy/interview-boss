@@ -1,5 +1,3 @@
-import { markedHighlight } from 'marked-highlight'
-import { marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import python from 'highlight.js/lib/languages/python'
@@ -27,16 +25,28 @@ hljs.registerLanguage('xml', xml)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('ts', typescript)
 
-const highlightExtension = markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight(code, lang) {
+export function highlightCode(code, language = '') {
+  const lang = String(language || '').trim().toLowerCase()
+  try {
     if (lang && hljs.getLanguage(lang)) {
-      try { return hljs.highlight(code, { language: lang }).value } catch { /* ignore */ }
+      return hljs.highlight(code, { language: lang }).value
     }
     return hljs.highlightAuto(code).value
-  },
-})
+  } catch {
+    return escapeHtml(code)
+  }
+}
 
-// 全局初始化一次，避免多个文件重复注册导致 highlight 执行 N 次
-marked.use({ breaks: true, gfm: true })
-marked.use(highlightExtension)
+export function normalizeLanguage(language = '') {
+  const lang = String(language || '').trim().toLowerCase()
+  return lang.replace(/[^a-z0-9_-]/g, '')
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}

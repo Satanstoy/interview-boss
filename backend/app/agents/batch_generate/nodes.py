@@ -86,7 +86,7 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
                 answer,
                 search_sources,
                 user_id=state.get("user_id"),
-                max_rounds=1,
+                max_rounds=2,
             )
             elapsed = time.monotonic() - start
             quality = evaluate_answer_quality(answer, question)

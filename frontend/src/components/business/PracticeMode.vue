@@ -135,7 +135,7 @@
                 <Button size="sm" :disabled="qState._isSavingAnswer" @click="handleSaveAnswer">{{ qState._isSavingAnswer ? '保存中...' : '保存答案' }}</Button>
               </div>
             </div>
-            <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="flashcard-answer rounded-xl border border-border/80 bg-muted/30 p-4 text-sm leading-7 text-foreground md:p-6" v-html="renderMarkdown(currentQ.ai_answer)"></div>
+            <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="flashcard-answer answer-content rounded-xl border border-border/80 bg-muted/30 p-4 text-sm leading-7 text-foreground md:p-6" v-html="renderMarkdown(currentQ.ai_answer)"></div>
             <div v-else class="rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
               <p v-if="isAdmin" class="text-sm text-muted-foreground">这道题还没有参考答案</p>
               <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
@@ -179,7 +179,7 @@
                 </div>
               </div>
               <div v-else-if="qState._recitation">
-                <div class="recitation-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
+                <div class="recitation-content answer-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
                 <div v-if="qState._recitationSources.length" class="mt-3 border-t border-border/70 pt-3">
                   <button type="button"
                     class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"

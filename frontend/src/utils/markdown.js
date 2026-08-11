@@ -1,7 +1,6 @@
-import { marked } from 'marked'
+import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
-// 导入 highlight.js 触发 marked.use() 全局初始化（只执行一次）
-import './highlight.js'
+import { highlightCode, normalizeLanguage } from './highlight.js'
 
 // 配置 DOMPurify：只允许安全的 HTML 标签和属性
 const purifyConfig = {
@@ -26,21 +25,25 @@ const purifyConfig = {
   ADD_ATTR: ['target', 'rel'],
 }
 
-// 配置 marked：自定义渲染器
-const renderer = new marked.Renderer()
-
-// 为表格添加响应式包装
-renderer.table = function(header, body) {
-  return `<div class="table-wrapper"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`
-}
-
-marked.setOptions({
-  renderer: renderer,
+// Markdown-it 默认关闭原始 HTML，并限制危险链接协议；DOMPurify 仍作为
+// v-html 前的第二道防线，防止未来新增渲染规则时绕过安全边界。
+const markdown = new MarkdownIt({
+  html: false,
   breaks: true,
-  gfm: true,
+  linkify: true,
+  typographer: false,
+  highlight(code, language) {
+    const lang = normalizeLanguage(language)
+    const languageClass = lang ? ` language-${lang}` : ''
+    return `<pre class="hljs${languageClass}"><code>${highlightCode(code, lang)}</code></pre>`
+  },
 })
 
-// LRU 缓存：避免相同文本反复做 marked.parse + DOMPurify.sanitize
+// 为表格添加响应式包装；表格内容仍由 Markdown-it 负责转义和渲染。
+markdown.renderer.rules.table_open = () => '<div class="table-wrapper"><table>'
+markdown.renderer.rules.table_close = () => '</table></div>'
+
+// LRU 缓存：避免相同文本反复做 Markdown-it 渲染与 DOMPurify.sanitize
 const CACHE_MAX = 200
 const cache = new Map()
 
@@ -50,7 +53,7 @@ const cache = new Map()
 export function renderSafeMarkdown(text) {
   if (!text) return ''
   if (cache.has(text)) return cache.get(text)
-  const rawHtml = marked.parse(text)
+  const rawHtml = markdown.render(String(text).replace(/^\uFEFF/, ''))
   const result = DOMPurify.sanitize(rawHtml, purifyConfig)
   // 简易 LRU：满了就删最早的
   if (cache.size >= CACHE_MAX) {
