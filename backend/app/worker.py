@@ -1179,14 +1179,14 @@ async def generate_answer_task(ctx, job_id: int):
                 job_type=ANSWER_GENERATION_JOB_TYPE,
             )
             if not task:
-                return None, None, None
+                return None, None
             payload_row = conn.execute(
                 "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
             ).fetchone()
             conn.commit()
             return dict(task), json.loads(payload_row["payload"]) if payload_row else None
 
-    claimed, payload, _ = await asyncio.to_thread(_claim_and_load)
+    claimed, payload = await asyncio.to_thread(_claim_and_load)
     if not claimed:
         logger.info("答案任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
