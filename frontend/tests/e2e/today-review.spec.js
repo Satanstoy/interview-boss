@@ -241,6 +241,7 @@ async function mockAllAPIs(page, options = {}) {
   } = options
   const tomorrow = tomorrowUtcString()
   const reviewedQuestionIds = new Set()
+  let currentRecruitment = { ...recruitment }
 
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
@@ -307,10 +308,18 @@ async function mockAllAPIs(page, options = {}) {
     }
     const deck = deckItems.find(candidate => candidate.key === deckKey)
     const deckName = deck?.name || deckKey
-    const items = deckKey === 'due'
+    const availableItems = deckKey === 'due'
       ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
       : deckQuestions
-    const completedToday = reviewedQuestionIds.size || (deckKey === 'due' && items.length === 0 ? Number(deck?.reviewed || 0) : 0)
+    const completedToday = reviewedQuestionIds.size || (deckKey === 'due' && availableItems.length === 0 ? Number(deck?.reviewed || 0) : 0)
+    const dueItems = availableItems.filter(question => question.next_review_at && !question.is_checkin)
+    const checkinItems = availableItems.filter(question => question.is_checkin)
+    const newItems = availableItems.filter(question => !question.next_review_at)
+    const newBudget = Math.max(0, Number(currentRecruitment.daily_capacity || 30) - completedToday - dueItems.length - checkinItems.length)
+    const allowedNewIds = new Set(newItems.slice(0, newBudget).map(question => question.id))
+    const items = deckKey === 'due'
+      ? availableItems.filter(question => question.next_review_at || allowedNewIds.has(question.id))
+      : availableItems
     const dueReviewCount = items.filter(question => question.next_review_at && !question.is_checkin).length
     const checkinCount = items.filter(question => question.is_checkin).length
     const newQuestionCount = items.filter(question => !question.next_review_at).length
@@ -321,7 +330,7 @@ async function mockAllAPIs(page, options = {}) {
           name: deckName,
           total: items.length,
           ...(deckKey === 'due' ? {
-            daily_capacity: 30,
+            daily_capacity: currentRecruitment.daily_capacity,
             completed_today: completedToday,
             remaining_today: items.length,
             planned_today: completedToday + items.length,
@@ -402,11 +411,12 @@ async function mockAllAPIs(page, options = {}) {
     if (pathname === '/api/profile/recruitment') {
       if (route.request().method() === 'PUT') {
         const body = route.request().postDataJSON()
+        currentRecruitment = { ...currentRecruitment, ...body }
         await page.evaluate((payload) => { window.__lastRecruitmentPut = payload }, body)
-        await route.fulfill({ json: { ...recruitment, ...body } })
+        await route.fulfill({ json: currentRecruitment })
         return
       }
-      await route.fulfill({ json: recruitment })
+      await route.fulfill({ json: currentRecruitment })
       return
     }
     if (route.request().method() === 'GET') {
@@ -511,6 +521,32 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     await expect(page.getByTestId('practice-deck-select')).toContainText('今日复习', { timeout: 5000 })
     await page.waitForTimeout(500)
     await expect(page.getByTestId('recruitment-status')).not.toBeVisible()
+  })
+
+  test('可在刷题页调低每日上限并立即重算新题队列', async ({ page }) => {
+    const newQuestions = Array.from({ length: 8 }, (_, index) => ({
+      ...DUE_QUESTION_SEEDS[2],
+      id: 200 + index,
+      question: `新题 ${index + 1}`,
+    }))
+    await gotoPractice(page, {
+      deckQuestions: newQuestions,
+      recruitment: { ...AUTUMN_RECRUITMENT, daily_capacity: 10 },
+    })
+
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 8 · 剩余 8')
+    await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 10')
+    await page.getByTestId('practice-capacity-decrease').click()
+
+    await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 5')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 5 · 剩余 5')
+    await expect(page.getByTestId('recruitment-status')).toContainText('容量 5 题')
+    await expect.poll(() => page.evaluate(() => window.__lastRecruitmentPut)).toEqual({
+      graduation_year: 2027,
+      batch: 'autumn',
+      daily_capacity: 5,
+      pace: 'standard',
+    })
   })
 })
 

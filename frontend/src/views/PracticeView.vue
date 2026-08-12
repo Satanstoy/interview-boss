@@ -24,6 +24,8 @@
       :has-more-questions="serverReady && hasMoreQuestions"
       :question-total="serverReady ? questionTotal : practiceQuestions.length"
       :loading-more-questions="isLoadingMoreQuestions"
+      :daily-capacity="recruitmentStatus.daily_capacity"
+      :capacity-saving="capacitySaving"
       :is-admin="currentUser?.is_admin"
       class="w-full min-w-0"
       @close="closePractice"
@@ -31,6 +33,7 @@
       @load-more="loadMoreQuestions"
       @review="handleReview"
       @correct-review="handleCorrectReview"
+      @update-daily-capacity="handleUpdateDailyCapacity"
       @toggle-star="toggleStar"
       @manage-decks="openDeckManager"
       @add-to-deck="addQuestionToDeck"
@@ -44,7 +47,8 @@ import { useRouter } from 'vue-router'
 import { CalendarClock } from '@lucide/vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Badge } from '@/components/ui/badge'
-import { fetchRecruitmentPref } from '@/services/profileApi.js'
+import { useToast } from '@/composables/useNotification.js'
+import { fetchRecruitmentPref, updateRecruitmentPref } from '@/services/profileApi.js'
 
 const PracticeMode = defineAsyncComponent({
   delay: 100,
@@ -55,6 +59,7 @@ const PracticeMode = defineAsyncComponent({
 })
 
 const router = useRouter()
+const toast = useToast()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, selectedDeck, isLoading, isReviewing, serverReady,
@@ -66,6 +71,7 @@ const recruitmentStatus = ref({
   graduation_year: null, batch: '', daily_capacity: 30, pace: 'standard',
   windows: [], current_window: null, next_window: null, urgency: 0,
 })
+const capacitySaving = ref(false)
 
 const stageLabel = computed(() => {
   const urgency = recruitmentStatus.value.urgency ?? 0
@@ -112,5 +118,24 @@ async function handleReview(payload) {
 async function handleCorrectReview(payload) {
   const response = await correctReview(payload)
   payload.onComplete?.(response)
+}
+async function handleUpdateDailyCapacity(value) {
+  const dailyCapacity = Math.min(200, Math.max(5, Number(value) || 30))
+  if (capacitySaving.value || dailyCapacity === recruitmentStatus.value.daily_capacity) return
+  capacitySaving.value = true
+  try {
+    recruitmentStatus.value = await updateRecruitmentPref({
+      graduation_year: recruitmentStatus.value.graduation_year,
+      batch: recruitmentStatus.value.batch,
+      daily_capacity: dailyCapacity,
+      pace: recruitmentStatus.value.pace,
+    })
+    await loadQuestions('due')
+    toast.success(`每日计划已调整为 ${dailyCapacity} 题`)
+  } catch {
+    toast.error('每日计划调整失败，请稍后重试')
+  } finally {
+    capacitySaving.value = false
+  }
 }
 </script>

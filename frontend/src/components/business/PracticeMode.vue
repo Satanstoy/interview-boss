@@ -71,7 +71,30 @@
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
           <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
-          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
+            <span data-testid="practice-capacity-control" class="inline-flex h-7 items-center rounded-full border border-border bg-background/80">
+              <button
+                type="button"
+                data-testid="practice-capacity-decrease"
+                class="flex size-7 items-center justify-center rounded-l-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="每日计划减少 5 题"
+                :disabled="capacitySaving || deckLoading || reviewLoading || dailyCapacity <= 5"
+                @click="adjustDailyCapacity(-5)"
+              ><Minus class="size-3" /></button>
+              <span class="min-w-20 border-x border-border px-2 text-center text-[10px] tabular-nums text-foreground" :aria-busy="capacitySaving">
+                {{ capacitySaving ? '调整中…' : `每日上限 ${dailyCapacity}` }}
+              </span>
+              <button
+                type="button"
+                data-testid="practice-capacity-increase"
+                class="flex size-7 items-center justify-center rounded-r-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="每日计划增加 5 题"
+                :disabled="capacitySaving || deckLoading || reviewLoading || dailyCapacity >= 200"
+                @click="adjustDailyCapacity(5)"
+              ><Plus class="size-3" /></button>
+            </span>
+          </div>
         </div>
         <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="mt-1 text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
@@ -393,6 +416,7 @@ import {
   Link2,
   List,
   Loader2,
+  Minus,
   PanelLeft,
   PanelLeftClose,
   Pencil,
@@ -438,12 +462,14 @@ const props = defineProps({
   hasMoreQuestions: { type: Boolean, default: false },
   questionTotal: { type: Number, default: 0 },
   loadingMoreQuestions: { type: Boolean, default: false },
+  dailyCapacity: { type: Number, default: 30 },
+  capacitySaving: { type: Boolean, default: false },
   startIndex: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
   practicedQuestions: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'load-more', 'review', 'correct-review', 'add-to-deck', 'manage-decks'])
+const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'load-more', 'review', 'correct-review', 'update-daily-capacity', 'add-to-deck', 'manage-decks'])
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
@@ -592,6 +618,10 @@ const reviewStatusHint = computed(() => {
   if (savedReview.value.proficiency != null) pieces.push(`熟练度 ${savedReview.value.proficiency}/5`)
   return pieces.join(' · ')
 })
+
+function adjustDailyCapacity(delta) {
+  emit('update-daily-capacity', Math.min(200, Math.max(5, props.dailyCapacity + delta)))
+}
 
 function isDueNow(nextReviewAt) {
   if (!nextReviewAt) return true
