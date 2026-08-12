@@ -30,7 +30,7 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
   expect(html).toContain('class="answer-source-link"')
   expect(html).toContain('class="answer-source-favicon"')
   expect(html).toContain('https://www.google.com/s2/favicons?domain=example.com')
-  expect(html).toContain('class="answer-source-trailing"')
+  expect(html).toContain('class="answer-source-label">官方文档</span>')
   expect(html).toContain('target="_blank"')
   expect(html).toContain('rel="noopener noreferrer"')
   expect(html).not.toContain('<script>')

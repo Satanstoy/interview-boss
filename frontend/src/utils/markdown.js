@@ -51,8 +51,8 @@ const markdown = new MarkdownIt({
   },
 })
 
-// 搜索增强答案里的 Markdown 链接采用 inline citation 样式：引用文字右侧
-// 展示目标网站 favicon 和外链标记，同时保留原始 href 供用户打开。
+// 搜索增强答案里的 Markdown 链接采用紧凑的 citation pill：左侧是目标网站
+// favicon，右侧沿用 Markdown 链接标题，并保留原始 href 供用户打开。
 const defaultLinkOpen = markdown.renderer.rules.link_open
 markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
   const token = tokens[index]
@@ -61,6 +61,11 @@ markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
     token.attrJoin('class', 'answer-source-link')
     token.attrSet('target', '_blank')
     token.attrSet('rel', 'noopener noreferrer')
+    const favicon = sourceFavicon({ url: href })
+    const linkOpen = defaultLinkOpen
+      ? defaultLinkOpen(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options)
+    return `${linkOpen}<img class="answer-source-favicon" src="${favicon}" alt="" loading="lazy"><span class="answer-source-label">`
   }
   return defaultLinkOpen
     ? defaultLinkOpen(tokens, index, options, env, self)
@@ -72,14 +77,9 @@ markdown.renderer.rules.link_close = (tokens, index, options, env, self) => {
   const openToken = tokens.slice(0, index).reverse().find(token => token.type === 'link_open')
   const href = openToken?.attrGet('href') || ''
   if (/^https?:\/\//i.test(href)) {
-    const favicon = sourceFavicon({ url: href })
-    const trailing = favicon
-      ? `<span class="answer-source-trailing"><img class="answer-source-favicon" src="${favicon}" alt="" loading="lazy"></span>`
-      : '<span class="answer-source-trailing"></span>'
-    const closeHtml = defaultLinkClose
+    return `</span>${defaultLinkClose
       ? defaultLinkClose(tokens, index, options, env, self)
-      : self.renderToken(tokens, index, options)
-    return `${trailing}${closeHtml}`
+      : self.renderToken(tokens, index, options)}`
   }
   return defaultLinkClose
     ? defaultLinkClose(tokens, index, options, env, self)
