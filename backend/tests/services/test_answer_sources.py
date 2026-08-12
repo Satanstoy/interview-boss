@@ -135,7 +135,9 @@ async def test_agent_generate_answer_node_writes_answer_sources(test_db):
     from app.agents.batch_generate.nodes import generate_answer_node
 
     test_db.execute(
-        "INSERT INTO question_bank (id, question, ai_answer) VALUES (20, 'Redis持久化', NULL)"
+        "INSERT INTO question_bank "
+        "(id, question, ai_answer, cat1, cat2, job_position) VALUES "
+        "(20, 'Redis持久化', NULL, '基础工程能力', '框架与中间件', '后端开发')"
     )
     test_db.commit()
 
@@ -177,6 +179,9 @@ async def test_agent_generate_answer_node_writes_answer_sources(test_db):
     assert row["ai_answer"].startswith("Redis 支持 RDB 和 AOF 两种持久化")
     assert "[Redis 官方文档](https://redis.io/docs)" in row["ai_answer"]
     assert json.loads(row["answer_sources"]) == sources
+    assert mock_prep.await_args.kwargs["job_position"] == "后端开发"
+    assert mock_prep.await_args.kwargs["cat1"] == "基础工程能力"
+    assert mock_prep.await_args.kwargs["cat2"] == "框架与中间件"
 
 
 @pytest.mark.asyncio
@@ -212,6 +217,13 @@ async def test_background_generate_answer_writes_answer_sources():
                     mock_conn = MagicMock()
                     mock_conn.__enter__.return_value = mock_conn
                     mock_conn.__exit__.return_value = None
+                    context_result = MagicMock()
+                    context_result.fetchone.return_value = (
+                        "Agent与LLM应用",
+                        "RAG系统设计",
+                        "大模型应用开发",
+                    )
+                    mock_conn.execute.side_effect = [context_result, MagicMock()]
                     mock_get_conn.return_value = mock_conn
                     with patch(
                         "app.services.answer_enrichment.refine_answer",
@@ -223,6 +235,9 @@ async def test_background_generate_answer_writes_answer_sources():
     sql, params = mock_conn.execute.call_args[0]
     assert "answer_sources" in sql
     assert json.loads(params[1]) == sources
+    assert mock_prep.await_args.kwargs["job_position"] == "大模型应用开发"
+    assert mock_prep.await_args.kwargs["cat1"] == "Agent与LLM应用"
+    assert mock_prep.await_args.kwargs["cat2"] == "RAG系统设计"
 
 
 @pytest.mark.asyncio

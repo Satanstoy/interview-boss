@@ -176,8 +176,42 @@ def _ensure_inline_source_citation(answer: str, sources: list[dict]) -> str:
     return f"{answer.rstrip()}\n\n依据：{citation}"
 
 
-def _build_prompt(question: str, results: list[dict]) -> str:
-    prompt = ANSWER_PROMPT.replace("{question}", question)
+def _format_answer_context(
+    *, job_position: str = "", cat1: str = "", cat2: str = ""
+) -> str:
+    """Format trusted question metadata used only to disambiguate the question."""
+    fields = (
+        ("目标岗位", job_position),
+        ("一级分类", cat1),
+        ("二级分类", cat2),
+    )
+    lines = [
+        f"- {label}：{str(value).strip()}"
+        for label, value in fields
+        if str(value or "").strip()
+    ]
+    return "\n".join(lines) or "- 未提供；仅根据题面作答"
+
+
+def _build_prompt(
+    question: str,
+    results: list[dict],
+    *,
+    job_position: str = "",
+    cat1: str = "",
+    cat2: str = "",
+) -> str:
+    prompt = (
+        ANSWER_PROMPT.replace("{question}", question)
+        .replace(
+            "{answer_context}",
+            _format_answer_context(
+                job_position=job_position,
+                cat1=cat1,
+                cat2=cat2,
+            ),
+        )
+    )
     return _append_sources(prompt, results)
 
 
@@ -206,6 +240,9 @@ async def prepare_answer_prompt(
     user_id: int | None = None,
     skip_search: bool = False,
     search_scope: str = "user",
+    job_position: str = "",
+    cat1: str = "",
+    cat2: str = "",
 ) -> tuple[str, list[dict]]:
     """Return an answer prompt and the sources used to enrich it.
 
@@ -213,25 +250,32 @@ async def prepare_answer_prompt(
     the existing model-only answer flow from working.
     """
     question = (question or "").strip()
+    prompt_kwargs = {
+        "job_position": job_position,
+        "cat1": cat1,
+        "cat2": cat2,
+    }
     if not question:
-        return _build_prompt(question, []), []
+        return _build_prompt(question, [], **prompt_kwargs), []
     if skip_search:
-        return _build_prompt(question, []), []
+        return _build_prompt(question, [], **prompt_kwargs), []
+    context = _format_answer_context(**prompt_kwargs)
     try:
         data = await search_web(
-            f"面试题：{question}\n请优先查找官方文档、标准、权威技术文章和可靠实践。",
+            f"{context}\n面试题：{question}\n"
+            "请结合岗位和分类消除歧义，并优先查找官方文档、标准、权威技术文章和可靠实践。",
             user_id=user_id,
             search_scope=search_scope,
             max_results=5,
         )
         results = data.get("results", [])
-        return _build_prompt(question, results), results
+        return _build_prompt(question, results, **prompt_kwargs), results
     except SearchProviderError as exc:
         logger.warning("答案生成联网搜索失败，回退到模型知识: %s", exc)
-        return _build_prompt(question, []), []
+        return _build_prompt(question, [], **prompt_kwargs), []
     except Exception:
         logger.exception("答案生成联网搜索出现未预期错误，回退到模型知识")
-        return _build_prompt(question, []), []
+        return _build_prompt(question, [], **prompt_kwargs), []
 
 
 async def prepare_recitation_prompt(
@@ -324,6 +368,7 @@ def _build_critic_prompt(question: str, draft: str, sources: list[dict]) -> str:
 4. 字数：非代码题应在 300–500 个中文字符，明显超出 520 或过短应指出。
 5. 完整性：是否遗漏该题的核心考点。
 6. 真实性：题目未提供个人事实时，是否编造公司、时长、指标、团队或“我做过”的经历；有则必须改成中性表述或“【按真实经历替换】”。
+6a. 个人化题完整性：题目要求个人经历、项目、学校、规划、时间或偏好但未提供真实资料时，答案是否给出第一人称、可直接口述且逐项回应的模板；如果只讲答题技巧、泛泛列方法，或反过来虚构一段经历，必须指出。
 7. 可视性：是否有超过 3 条的列表、重复定义、无信息增量的填充句，或把参考链接集中堆在文末；有则必须指出。
 8. 正文引用：有参考资料时，正文必须至少有 1 个指向参考资料原始 URL 的 Markdown 链接，且链接应紧跟实际使用资料的句子；缺失、链接不在资料中或只在文末堆放，都必须指出。
 9. 标题语气：是否出现“核心解法”“落地要点”“务实收尾”或同一套路的近义模板标题；是否每节标题都和本题具体内容有关。出现模板标题必须指出并要求改成自然、具体的说法。
@@ -373,6 +418,7 @@ def _build_revise_prompt(
 - 标题要像人在解释问题时留下的路标，例如“为什么这么选”“哪里最容易出问题”，但不能每道题复用同一组标题。
 - 非代码题控制在 300–500 个中文字符，最多 520 个中文字符；删掉重复定义和空话。
 - 题目没有提供的个人事实必须删除，或改为“【按真实经历替换】”，不得凭空补充。
+- 个人经历、项目复盘、学校背景、职业规划、到岗时间和兴趣偏好题必须保留第一人称完整回答形态；未知事实用 `【按真实经历替换：应填写什么】`，但不能把答案改成“应该怎么回答”的教程，也不能遗漏题目任一子问。
 - 代码题必须保留题目指定的编程语言；题目未指定语言时使用 Python，不得在修订时擅自换语言。
 - 只在确实使用参考资料的句子后放 1–2 个对应 Markdown 链接，不能把 URL 堆在结尾。
 - 输出修订后的完整 Markdown 答案，不要输出其他内容。"""

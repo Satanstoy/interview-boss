@@ -235,3 +235,27 @@ async def test_answer_prompt_includes_search_evidence_as_untrusted_context():
     assert sources[0]["url"] == "https://redis.io/docs/latest/"
     assert "Redis 官方文档" in prompt
     assert "不可信外部内容" in prompt
+
+
+@pytest.mark.asyncio
+async def test_answer_prompt_uses_position_and_categories_for_disambiguation():
+    from app.services.answer_enrichment import prepare_answer_prompt
+
+    with patch(
+        "app.services.answer_enrichment.search_web",
+        new_callable=AsyncMock,
+        return_value={"provider": "exa", "results": []},
+    ) as mock_search:
+        prompt, _ = await prepare_answer_prompt(
+            "重排序阶段的作用是什么？",
+            user_id=7,
+            job_position="大模型应用开发",
+            cat1="Agent与LLM应用",
+            cat2="RAG系统设计",
+        )
+
+    query = mock_search.await_args.args[0]
+    for value in ("大模型应用开发", "Agent与LLM应用", "RAG系统设计"):
+        assert value in query
+        assert value in prompt
+    assert "仅用于消歧" in prompt

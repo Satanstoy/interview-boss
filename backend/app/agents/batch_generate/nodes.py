@@ -61,20 +61,30 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
         conn = get_db_connection()
         placeholders = ",".join("?" * len(batch_ids))
         rows = conn.execute(
-            f"SELECT id, question FROM question_bank WHERE id IN ({placeholders})",
+            f"SELECT id, question, cat1, cat2, job_position "
+            f"FROM question_bank WHERE id IN ({placeholders})",
             batch_ids,
         ).fetchall()
-        return {r[0]: r[1] for r in rows}
+        return {
+            r[0]: {
+                "question": r[1],
+                "cat1": r[2] or "",
+                "cat2": r[3] or "",
+                "job_position": r[4] or "",
+            }
+            for r in rows
+        }
 
     questions_map = await run_db(_load_batch)
 
     async def _process_one(qid: int) -> dict:
-        question = questions_map.get(qid)
-        if not question:
+        question_data = questions_map.get(qid)
+        if not question_data:
             return {
                 "qid": qid, "question": "", "answer": "", "quality": 0.0,
                 "elapsed": 0.0, "success": False, "error": "题目不存在",
             }
+        question = question_data["question"]
         start = time.monotonic()
         try:
             prompt, search_sources = await prepare_answer_prompt(
@@ -82,6 +92,9 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
                 user_id=state.get("user_id"),
                 skip_search=bool(state.get("skip_search", False)),
                 search_scope=state.get("search_scope", "user"),
+                job_position=question_data["job_position"],
+                cat1=question_data["cat1"],
+                cat2=question_data["cat2"],
             )
             answer = await _call_llm_with_retry(
                 prompt,

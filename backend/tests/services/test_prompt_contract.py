@@ -16,6 +16,11 @@ def test_reference_answer_prompt_requires_scan_friendly_markdown():
     assert "题目指定编程语言时严格使用指定语言" in ANSWER_PROMPT
     assert "`### 代码实现`" in ANSWER_PROMPT
     assert "`### Python 实现`" not in ANSWER_PROMPT
+    assert "目标岗位、一级分类和二级分类只用于消除" in ANSWER_PROMPT
+    assert "{answer_context}" in ANSWER_PROMPT
+    assert "第一人称、可直接口述的完整示范回答" in ANSWER_PROMPT
+    assert "如果题目明确说“无需写代码”" in ANSWER_PROMPT
+    assert "不能偷偷假设一段不存在的代码或项目" in ANSWER_PROMPT
 
 
 def test_recitation_prompt_preserves_truth_and_readable_structure():
@@ -31,6 +36,8 @@ def test_refine_prompts_preserve_question_programming_language():
 
     assert "题目指定语言时必须遵从" in critic
     assert "不得在修订时擅自换语言" in revise
+    assert "第一人称完整回答形态" in revise
+    assert "个人化题完整性" in critic
 
 
 def test_candidate_answer_prompt_prioritizes_truth_and_adaptive_depth():

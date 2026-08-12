@@ -73,11 +73,27 @@ async def background_generate_answer(
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
     from app.services.llm import _call_llm_with_retry
     try:
+        def _load_context():
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT cat1, cat2, job_position FROM question_bank WHERE id = ?",
+                    (question_id,),
+                ).fetchone()
+                if not row:
+                    return {"cat1": "", "cat2": "", "job_position": ""}
+                return {
+                    "cat1": row[0] or "",
+                    "cat2": row[1] or "",
+                    "job_position": row[2] or "",
+                }
+
+        answer_context = await run_db(_load_context)
         prompt, search_sources = await prepare_answer_prompt(
             question_text,
             user_id=user_id,
             skip_search=skip_search,
             search_scope=search_scope,
+            **answer_context,
         )
         answer = await _call_llm_with_retry(
             prompt, user_id=user_id, llm_scope=llm_scope
