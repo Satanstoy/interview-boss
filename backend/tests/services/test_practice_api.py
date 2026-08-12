@@ -93,6 +93,83 @@ def test_review_requires_a_question_visible_to_the_current_user(client, test_db)
         app.dependency_overrides.pop(dependency, None)
 
 
+def test_recent_review_rating_can_be_corrected_without_double_counting(client, test_db):
+    question_id = _insert_question(test_db, "什么是事务隔离级别？", frequency=5)
+    test_db.commit()
+    app, dependency = _override_user()
+
+    try:
+        created = client.post(
+            "/api/practice/review",
+            json={"question_id": question_id, "rating": "good"},
+        )
+        assert created.status_code == 200, created.text
+        first = created.json()["review"]
+        assert first["event_id"] > 0
+        assert first["review_count"] == 1
+        assert first["interval_days"] > 1
+
+        corrected = client.put(
+            f"/api/practice/review/{first['event_id']}",
+            json={"rating": "again"},
+        )
+        assert corrected.status_code == 200, corrected.text
+        review = corrected.json()["review"]
+        assert review["event_id"] == first["event_id"]
+        assert review["last_rating"] == "again"
+        assert review["review_count"] == 1
+        assert review["interval_days"] == 0.02
+
+        state = test_db.execute(
+            "SELECT last_rating, review_count, lapse_count FROM user_question_review "
+            "WHERE user_id = 1 AND question_bank_id = ?",
+            (question_id,),
+        ).fetchone()
+        assert tuple(state) == ("again", 1, 1)
+        events = test_db.execute(
+            "SELECT rating, corrected_at FROM practice_review_events "
+            "WHERE user_id = 1 AND question_bank_id = ?",
+            (question_id,),
+        ).fetchall()
+        assert len(events) == 1
+        assert events[0]["rating"] == "again"
+        assert events[0]["corrected_at"] is not None
+    finally:
+        app.dependency_overrides.pop(dependency, None)
+
+
+def test_review_rating_cannot_be_corrected_by_another_user(client, test_db):
+    question_id = _insert_question(test_db, "什么是 MVCC？", frequency=5)
+    test_db.commit()
+    app, dependency = _override_user()
+
+    try:
+        created = client.post(
+            "/api/practice/review",
+            json={"question_id": question_id, "rating": "good"},
+        )
+        event_id = created.json()["review"]["event_id"]
+        app.dependency_overrides[dependency] = lambda: {
+            "id": 2,
+            "username": "other-user",
+            "is_admin": 0,
+            "bank_mode": "public",
+        }
+
+        rejected = client.put(
+            f"/api/practice/review/{event_id}",
+            json={"rating": "again"},
+        )
+        assert rejected.status_code == 409
+        event = test_db.execute(
+            "SELECT rating, corrected_at FROM practice_review_events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        assert tuple(event) == ("good", None)
+    finally:
+        app.dependency_overrides.pop(dependency, None)
+
+
 def test_custom_deck_can_be_created_managed_and_used_as_a_review_queue(client, test_db):
     question_id = _insert_question(test_db, "什么是消息队列？", frequency=6)
     app, dependency = _override_user()

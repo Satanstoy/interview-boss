@@ -123,6 +123,7 @@ export {
   fetchPracticeDecks,
   fetchPracticeDeckQuestions,
   submitPracticeReview,
+  correctPracticeReview,
   createPracticeDeck,
   updatePracticeDeck,
   deletePracticeDeck,

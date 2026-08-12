@@ -30,6 +30,7 @@
       @select-deck="selectDeck"
       @load-more="loadMoreQuestions"
       @review="handleReview"
+      @correct-review="handleCorrectReview"
       @toggle-star="toggleStar"
       @manage-decks="openDeckManager"
       @add-to-deck="addQuestionToDeck"
@@ -57,7 +58,7 @@ const router = useRouter()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, selectedDeck, isLoading, isReviewing, serverReady,
-  questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, addItem,
+  questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, correctReview, addItem,
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 
@@ -106,6 +107,10 @@ async function addQuestionToDeck({ deckKey, questionId }) {
 }
 async function handleReview(payload) {
   const response = await submitReview(payload)
+  payload.onComplete?.(response)
+}
+async function handleCorrectReview(payload) {
+  const response = await correctReview(payload)
   payload.onComplete?.(response)
 }
 </script>

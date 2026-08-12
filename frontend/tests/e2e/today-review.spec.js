@@ -342,7 +342,18 @@ async function mockAllAPIs(page, options = {}) {
     await route.fulfill({
       json: {
         question_id: body.question_id,
-        review: { state: 'review', proficiency: 2, review_count: 1, next_review_at: tomorrow, interval_days: 3, has_been_practiced: true },
+        review: { state: 'review', proficiency: 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: 3, has_been_practiced: true, event_id: 900 + body.question_id, can_correct: true },
+      },
+    })
+  })
+  await page.route('**/api/practice/review/*', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}')
+    const eventId = Number(new URL(route.request().url()).pathname.split('/').at(-1))
+    const questionId = eventId - 900
+    await route.fulfill({
+      json: {
+        question_id: questionId,
+        review: { state: body.rating === 'again' ? 'relearning' : 'review', proficiency: body.rating === 'again' ? 0 : 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: body.rating === 'again' ? 0.02 : 3, has_been_practiced: true, event_id: eventId, can_correct: true },
       },
     })
   })
@@ -575,6 +586,21 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     const card = page.getByTestId('practice-focus-card')
     await expect(card.getByText(seeds[1].question)).toBeVisible({ timeout: 5000 })
     await expect(card.getByText(seeds[0].question)).not.toBeVisible()
+  })
+
+  test('看完答案可修正自评且不会新增一次完成进度', async ({ page }) => {
+    await mockAllAPIs(page)
+    await page.goto('/practice')
+
+    await page.getByTestId('practice-self-assess-good').click()
+    await expect(page.getByTestId('practice-correct-rating')).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await page.getByTestId('practice-correct-again').click()
+
+    await expect(page.getByText('已修正为“不会”')).toBeVisible()
+    await expect(page.getByTestId('practice-correct-again')).toBeDisabled()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 1 题')
   })
 
   test('记得了复习 Q1 后队列移除 Q1 并显示 Q2，连续复习不跳卡', async ({ page }) => {

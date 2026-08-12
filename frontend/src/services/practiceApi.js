@@ -19,6 +19,7 @@ export const evaluateAnswer = (data) => post(`${API}/evaluate-answer`, data, { t
 export const fetchPracticeDecks = (params = {}) => get(`${API}/practice/decks${queryString(params)}`)
 export const fetchPracticeDeckQuestions = (deckKey, params = {}) => get(`${API}/practice/decks/${encodeURIComponent(deckKey)}/questions${queryString(params)}`)
 export const submitPracticeReview = (data) => post(`${API}/practice/review`, data)
+export const correctPracticeReview = (eventId, data) => put(`${API}/practice/review/${eventId}`, data)
 export const createPracticeDeck = (data) => post(`${API}/practice/decks`, data)
 export const updatePracticeDeck = (deckKey, data) => put(`${API}/practice/decks/${encodeURIComponent(deckKey)}`, data)
 export const deletePracticeDeck = (deckKey) => del(`${API}/practice/decks/${encodeURIComponent(deckKey)}`)

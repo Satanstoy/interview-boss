@@ -181,6 +181,32 @@ export function usePracticeDecks(filter = 'all') {
     } finally { isReviewing.value = false }
   }
 
+  async function correctReview({ eventId, questionId, rating, score = null }) {
+    isReviewing.value = true
+    const reviewedDeckKey = selectedDeckKey.value
+    const reviewedDeck = selectedDeck.value
+    const item = questions.value.find(question => question.id === questionId)
+    const previousNextReviewAt = item?.next_review_at || null
+    try {
+      const response = await api.correctPracticeReview(eventId, { rating, score })
+      const nextState = response.review || {}
+      for (const cached of questionCache.values()) {
+        const cachedItem = cached?.items?.find(question => question.id === questionId)
+        if (cachedItem) Object.assign(cachedItem, nextState)
+      }
+      if (item) Object.assign(item, nextState)
+      if (reviewedDeckKey === 'due' && reviewedDeck) {
+        adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+      }
+      return response
+    } catch (err) {
+      toast.error(getFriendlyError(err, '修正自评失败'))
+      return null
+    } finally {
+      isReviewing.value = false
+    }
+  }
+
   function isUtcToday(value) {
     if (!value) return false
     const raw = String(value)
@@ -294,6 +320,7 @@ export function usePracticeDecks(filter = 'all') {
     loadQuestions,
     loadMoreQuestions,
     submitReview,
+    correctReview,
     createDeck,
     updateDeck,
     deleteDeck,

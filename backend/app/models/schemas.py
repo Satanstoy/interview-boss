@@ -38,6 +38,11 @@ class PracticeReviewRequest(BaseModel):
     answer_revealed: bool = True
 
 
+class PracticeReviewCorrectionRequest(BaseModel):
+    rating: Literal["again", "hard", "good", "easy"]
+    score: Optional[int] = Field(None, ge=0, le=100)
+
+
 class PracticeDeckCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str = Field("", max_length=500)

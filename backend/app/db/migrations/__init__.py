@@ -51,6 +51,7 @@ from app.db.migrations.practice import _migration_055_practice_review_system
 from app.db.migrations.practice_decks import _migration_056_custom_practice_decks
 from app.db.migrations.practice_defaults import _migration_057_practice_default_decks
 from app.db.migrations.practice_performance import _migration_059_practice_queue_indexes
+from app.db.migrations.practice_corrections import _migration_078_practice_review_corrections
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -201,6 +202,7 @@ _MIGRATIONS = [
     (75, "job_retry_lineage", _migration_075_job_retry_lineage),
     (76, "question_variant_ownership", _migration_076_question_variant_ownership),
     (77, "quality_issue_identity", _migration_077_quality_issue_identity),
+    (78, "practice_review_corrections", _migration_078_practice_review_corrections),
 ]
 
 

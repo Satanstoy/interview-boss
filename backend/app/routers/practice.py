@@ -12,6 +12,7 @@ from app.models.schemas import (
     PracticeDeckCreateRequest,
     PracticeDeckItemRequest,
     PracticeDeckUpdateRequest,
+    PracticeReviewCorrectionRequest,
     PracticeReviewRequest,
 )
 from app.db.queries import build_bank_where_clause
@@ -24,7 +25,11 @@ from app.services.practice_deck_service import (
     remove_deck_item,
     update_custom_deck,
 )
-from app.services.practice_review_service import record_review
+from app.services.practice_review_service import (
+    ReviewCorrectionError,
+    correct_review,
+    record_review,
+)
 from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
 from app.services.recruitment_milestones import compute_urgency, get_season_windows
@@ -232,6 +237,35 @@ async def review_practice_question(
     result = await run_db(_review)
     await invalidate_master_bank_cache()
     return {"question_id": req.question_id, "review": result}
+
+
+@router.put("/api/practice/review/{event_id}")
+async def correct_practice_review(
+    event_id: int,
+    req: PracticeReviewCorrectionRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Correct one recent rating without creating a second review event."""
+
+    def _correct():
+        with get_db_connection() as conn:
+            try:
+                question_id, result = correct_review(
+                    conn,
+                    user_id=user["id"],
+                    event_id=event_id,
+                    rating=req.rating,
+                    score=req.score,
+                    urgency=_user_urgency(user["id"]),
+                )
+            except ReviewCorrectionError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            conn.commit()
+            return question_id, result
+
+    question_id, result = await run_db(_correct)
+    await invalidate_master_bank_cache()
+    return {"question_id": question_id, "review": result}
 
 
 @router.post("/api/master-bank/toggle-star/{question_id}")

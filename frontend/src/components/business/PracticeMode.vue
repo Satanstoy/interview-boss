@@ -207,27 +207,33 @@
         </div>
 
         <div v-if="answerRevealed" data-testid="practice-review-actions" class="mt-6 border-t border-border pt-5">
-          <div v-if="isAlgorithmQueue" class="flex items-center justify-between gap-3">
-            <div>
+          <div v-if="isAlgorithmQueue" class="flex flex-col gap-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
               <p class="text-sm font-semibold text-foreground">{{ reviewStatusLabel }}</p>
               <p class="mt-1 text-[11px] text-muted-foreground">{{ reviewStatusHint }}</p>
+              </div>
+              <Button
+                v-if="reviewStatus === 'error'"
+                data-testid="practice-retry-review"
+                variant="outline"
+                size="sm"
+                class="gap-1.5"
+                @click="retrySelfAssessment"
+              ><RotateCcw class="size-3.5" />重试保存</Button>
+              <Button
+                v-else
+                data-testid="practice-next-question"
+                size="sm"
+                class="gap-1.5"
+                :disabled="reviewStatus !== 'saved' || correctionLoading"
+                @click="nextWithRating"
+              ><Loader2 v-if="reviewStatus === 'saving' || correctionLoading" class="size-3.5 animate-spin" /><ArrowRight v-else class="size-3.5" />下一题 <kbd v-if="reviewStatus === 'saved' && !correctionLoading" class="hidden text-[10px] opacity-60 sm:inline">Enter</kbd></Button>
             </div>
-            <Button
-              v-if="reviewStatus === 'error'"
-              data-testid="practice-retry-review"
-              variant="outline"
-              size="sm"
-              class="gap-1.5"
-              @click="retrySelfAssessment"
-            ><RotateCcw class="size-3.5" />重试保存</Button>
-            <Button
-              v-else
-              data-testid="practice-next-question"
-              size="sm"
-              class="gap-1.5"
-              :disabled="reviewStatus !== 'saved'"
-              @click="nextWithRating"
-            ><Loader2 v-if="reviewStatus === 'saving'" class="size-3.5 animate-spin" /><ArrowRight v-else class="size-3.5" />下一题 <kbd v-if="reviewStatus === 'saved'" class="hidden text-[10px] opacity-60 sm:inline">Enter</kbd></Button>
+            <div v-if="reviewStatus === 'saved' && savedReview?.can_correct" data-testid="practice-correct-rating" class="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+              <span class="mr-auto">对照答案后判断有偏差？可直接修正</span>
+              <Button v-for="rating in correctionRatings" :key="rating" variant="ghost" size="sm" class="h-8 px-2 text-xs" :class="selfRating === rating ? 'bg-background font-semibold text-foreground shadow-sm' : ''" :disabled="correctionLoading || selfRating === rating" :data-testid="`practice-correct-${rating}`" @click="correctSelfAssessment(rating)">{{ ratingLabels[rating] }}</Button>
+            </div>
           </div>
           <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -426,7 +432,7 @@ const props = defineProps({
   practicedQuestions: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'load-more', 'review', 'add-to-deck', 'manage-decks'])
+const emit = defineEmits(['close', 'answer-evaluated', 'toggle-star', 'navigate-to-interview', 'select-deck', 'load-more', 'review', 'correct-review', 'add-to-deck', 'manage-decks'])
 const toast = useToast()
 const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
@@ -451,6 +457,7 @@ const selfRating = ref(null)
 const reviewStatus = ref('idle')
 const retainedReviewedId = ref(null)
 const savedReview = ref(null)
+const correctionLoading = ref(false)
 const RELEARNING_GAP = 3
 const relearningQueue = ref([])
 const sessionRatings = reactive({ again: 0, hard: 0, good: 0, easy: 0 })
@@ -541,6 +548,7 @@ const reviewStatusLabel = computed(() => ({
   error: '自评保存失败',
 })[reviewStatus.value] || '等待自评')
 const ratingLabels = { again: '不会', hard: '有点印象', good: '能答出', easy: '很熟' }
+const correctionRatings = ['again', 'hard', 'good']
 const reviewStatusHint = computed(() => {
   if (reviewStatus.value === 'error') return '记录尚未成功，请重试后再进入下一题'
   if (reviewStatus.value !== 'saved' || !savedReview.value) return '对照答案查漏补缺，保存完成后进入下一题'
@@ -579,7 +587,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle'; savedReview.value = null }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle'; savedReview.value = null; correctionLoading.value = false }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -592,6 +600,10 @@ function selectSession(key) {
 }
 // 墨墨模式：due 队列未完成自评前禁止切换题目
 function queueSwitchBlocked() {
+  if (reviewStatus.value === 'saving' || correctionLoading.value) {
+    toast.warning('正在保存这道题的自评，请稍候')
+    return true
+  }
   if (isAlgorithmQueue.value && !answerRevealed.value) {
     toast.warning('先自评这道题（不会 / 有点印象 / 能答出），再看答案切换')
     return true
@@ -613,7 +625,7 @@ function handleQueueScroll(event) {
 }
 // 模式切换：quiz（算法刷题）↔ browse（列表看题，默认全部题）
 function switchToBrowse() {
-  if (reviewStatus.value === 'saving') { toast.warning('正在保存这道题的自评，请稍候'); return }
+  if (reviewStatus.value === 'saving' || correctionLoading.value) { toast.warning('正在保存这道题的自评，请稍候'); return }
   viewMode.value = 'browse'
   if (props.selectedDeckKey === 'due') emit('select-deck', 'all')
 }
@@ -676,8 +688,33 @@ function handleSelfAssess(rating) {
   saveSelfAssessment()
 }
 function retrySelfAssessment() { saveSelfAssessment() }
+function correctSelfAssessment(rating) {
+  if (!currentQ.value?.id || !savedReview.value?.event_id || correctionLoading.value || rating === selfRating.value) return
+  const previousRating = selfRating.value
+  const questionId = currentQ.value.id
+  correctionLoading.value = true
+  emit('correct-review', {
+    eventId: savedReview.value.event_id,
+    questionId,
+    rating,
+    onComplete: (response) => {
+      correctionLoading.value = false
+      if (!response || retainedReviewedId.value !== questionId) return
+      savedReview.value = response.review
+      selfRating.value = rating
+      sessionRatings[previousRating] = Math.max(0, sessionRatings[previousRating] - 1)
+      sessionRatings[rating] += 1
+      const needsRelearning = rating === 'again' || rating === 'hard'
+      const withoutQuestion = sessionWeakQuestions.value.filter(question => question.id !== questionId)
+      sessionWeakQuestions.value = needsRelearning
+        ? [...withoutQuestion, currentQ.value]
+        : withoutQuestion
+      toast.success(`已修正为“${ratingLabels[rating]}”`)
+    },
+  })
+}
 function nextWithRating() {
-  if (reviewStatus.value !== 'saved' || !currentQ.value) return
+  if (reviewStatus.value !== 'saved' || correctionLoading.value || !currentQ.value) return
   const reviewedQuestion = currentQ.value
   const reviewedId = reviewedQuestion.id
   const rating = selfRating.value
