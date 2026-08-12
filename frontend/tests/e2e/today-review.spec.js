@@ -640,6 +640,38 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
   })
 
+  test('稍后再答会移到本轮末尾且不改变调度或今日进度', async ({ page }) => {
+    const reviewedIds = []
+    page.on('request', request => {
+      if (request.method() === 'POST' && request.url().endsWith('/api/practice/review')) {
+        reviewedIds.push(request.postDataJSON().question_id)
+      }
+    })
+    await gotoPractice(page)
+    const card = page.getByTestId('practice-focus-card')
+
+    await expect(card.getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible()
+    await page.getByTestId('practice-postpone').click()
+    await expect(card.getByText(DUE_QUESTION_SEEDS[1].question)).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3 · 稍后 1')
+    expect(reviewedIds).toEqual([])
+
+    await page.keyboard.press('s')
+    await expect(card.getByText(DUE_QUESTION_SEEDS[2].question)).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3 · 稍后 2')
+    expect(reviewedIds).toEqual([])
+
+    await page.keyboard.press('3')
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    expect(reviewedIds).toEqual([DUE_QUESTION_SEEDS[2].id])
+    await page.keyboard.press('Enter')
+    await expect(card.getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible()
+
+    await page.keyboard.press('2')
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    expect(reviewedIds).toEqual([DUE_QUESTION_SEEDS[2].id, DUE_QUESTION_SEEDS[0].id])
+  })
+
   test('记得了复习 Q1 后队列移除 Q1 并显示 Q2，连续复习不跳卡', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 4)
     await gotoPractice(page, { deckQuestions: seeds })

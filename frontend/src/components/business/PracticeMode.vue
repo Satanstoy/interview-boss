@@ -71,7 +71,7 @@
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
           <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
-          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
+          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
         </div>
         <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="mt-1 text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
@@ -143,6 +143,7 @@
                   <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><kbd class="hidden text-[10px] opacity-70 sm:inline">3</kbd><Check class="size-4" />能答出</Button>
                 </div>
                 <span class="text-[11px] text-muted-foreground">先自评，再看答案<span class="hidden sm:inline"> · 按 1 / 2 / 3 快速选择</span></span>
+                <Button data-testid="practice-postpone" variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="postponeCurrentQuestion"><Clock3 class="size-3.5" />稍后再答 <kbd class="hidden text-[10px] opacity-60 sm:inline">S</kbd></Button>
               </template>
             </template>
             <template v-else>
@@ -384,6 +385,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   Eye,
   Flame,
   History,
@@ -470,6 +472,7 @@ const correctionLoading = ref(false)
 const recallCover = ref(false)
 const RELEARNING_GAP = 3
 const relearningQueue = ref([])
+const postponedQuestionIds = ref([])
 const sessionRatings = reactive({ again: 0, hard: 0, good: 0, easy: 0 })
 const sessionWeakQuestions = ref([])
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
@@ -510,14 +513,22 @@ const sessionSource = computed(() => {
   if (serverDeckMode.value) {
     if (props.deckLoading) return []
     if (props.selectedDeckKey !== 'due') return props.questions
+    const postponedIds = new Set(postponedQuestionIds.value)
     const dueQuestions = props.questions.filter(question => (
-      question.id === retainedReviewedId.value || isDueNow(question.next_review_at)
+      (question.id === retainedReviewedId.value || isDueNow(question.next_review_at))
+      && !postponedIds.has(question.id)
     ))
     const dueIds = new Set(dueQuestions.map(question => question.id))
     const relearningQuestions = relearningQueue.value
       .filter(entry => entry.remaining <= 0 && !dueIds.has(entry.question.id))
       .map(entry => entry.question)
-    return [...dueQuestions, ...relearningQuestions]
+    const queuedIds = new Set([...dueIds, ...relearningQuestions.map(question => question.id)])
+    const postponedQuestions = postponedQuestionIds.value
+      .map(id => props.questions.find(question => question.id === id))
+      .filter(question => question
+        && (question.id === retainedReviewedId.value || isDueNow(question.next_review_at))
+        && !queuedIds.has(question.id))
+    return [...dueQuestions, ...relearningQuestions, ...postponedQuestions]
   }
   if (sessionKey.value === 'starred') return starredQuestions.value
   return props.questions
@@ -708,6 +719,23 @@ function handleSelfAssess(rating) {
   answerRevealed.value = true
   saveSelfAssessment()
 }
+function postponeCurrentQuestion() {
+  if (!isAlgorithmQueue.value || answerRevealed.value || recallCover.value || reviewStatus.value !== 'idle' || !currentQ.value) return
+  if (sessionQuestions.value.length <= 1) {
+    toast.info('本轮只剩这一题，先试着回忆一下吧')
+    return
+  }
+  const questionId = currentQ.value.id
+  const nextQuestionId = sessionQuestions.value[currentIndex.value + 1]?.id
+    ?? sessionQuestions.value.find(question => question.id !== questionId)?.id
+  postponedQuestionIds.value = [
+    ...postponedQuestionIds.value.filter(id => id !== questionId),
+    questionId,
+  ]
+  currentIndex.value = Math.max(0, sessionQuestions.value.findIndex(question => question.id === nextQuestionId))
+  resetState()
+  toast.info('已放到本轮稍后，不计入完成进度')
+}
 function coverAnswerForRecall() {
   if (isAlgorithmQueue.value && reviewStatus.value !== 'saved') return
   answerRevealed.value = false
@@ -747,6 +775,7 @@ function nextWithRating() {
   const reviewedId = reviewedQuestion.id
   const rating = selfRating.value
   const nextQuestionId = sessionQuestions.value[currentIndex.value + 1]?.id
+  postponedQuestionIds.value = postponedQuestionIds.value.filter(id => id !== reviewedId)
 
   // “不会”卡隔 RELEARNING_GAP 张再出现；其他评分会把它移出本轮重学队列。
   const agedQueue = relearningQueue.value
@@ -843,6 +872,7 @@ function onGlobalKeydown(event) {
       }
       const rating = { '1': 'again', '2': 'hard', '3': 'good' }[event.key]
       if (rating) { event.preventDefault(); handleSelfAssess(rating) }
+      else if (event.key.toLowerCase() === 's') { event.preventDefault(); postponeCurrentQuestion() }
       return
     }
     if (['Enter', 'ArrowRight', ' '].includes(event.key)) {
@@ -877,6 +907,7 @@ watch(() => props.selectedDeckKey, (key) => {
     pendingReviewedId.value = null
     retainedReviewedId.value = null
     relearningQueue.value = []
+    postponedQuestionIds.value = []
     resetSessionSummary()
     resetState()
     // due 队列 = 算法刷题模式；其他题单 = 浏览模式
