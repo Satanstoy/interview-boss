@@ -27,6 +27,7 @@ test('source citations render as visible cards with favicon and original URL', a
       cardVisible: Boolean(card),
       linkHref: link?.getAttribute('href') || '',
       linkTarget: link?.getAttribute('target') || '',
+      cardClass: link?.className || '',
       faviconSrc: favicon?.getAttribute('src') || '',
       text: card?.textContent || '',
     }
@@ -38,6 +39,7 @@ test('source citations render as visible cards with favicon and original URL', a
   expect(result.cardVisible).toBe(true)
   expect(result.linkHref).toBe('https://vuejs.org/guide/introduction.html')
   expect(result.linkTarget).toBe('_blank')
+  expect(result.cardClass).toContain('source-card')
   expect(result.faviconSrc).toContain('google.com/s2/favicons')
   expect(result.text).toContain('Vue 官方文档')
   expect(result.text).toContain('vuejs.org')

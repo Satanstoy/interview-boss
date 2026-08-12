@@ -204,6 +204,88 @@
     background: rgba(255,255,255,0.08);
     color: oklch(0.82 0.12 55);
   }
+
+  /* 来源卡片：圆角玻璃材质，hover 时只抬升和提亮，不改变布局 */
+  .source-card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border) 82%, var(--primary) 18%);
+    background: color-mix(in srgb, var(--card) 82%, transparent);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.56);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
+    transition: transform 220ms var(--ease-standard), border-color 220ms var(--ease-standard), background 220ms var(--ease-standard), box-shadow 220ms var(--ease-standard);
+  }
+  .source-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 58%);
+    opacity: 0;
+    transition: opacity 220ms var(--ease-standard);
+  }
+  .source-card > * {
+    position: relative;
+    z-index: 1;
+  }
+  .source-card:hover,
+  .source-card:focus-visible {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+    background: color-mix(in srgb, var(--card) 72%, var(--primary) 28%);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12), 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+  .source-card:hover::before,
+  .source-card:focus-visible::before {
+    opacity: 1;
+  }
+  .source-card__icon {
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--primary) 28%);
+    background: color-mix(in srgb, var(--muted) 76%, var(--card) 24%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    transition: transform 220ms var(--ease-standard), border-color 220ms var(--ease-standard), background 220ms var(--ease-standard);
+  }
+  .source-card:hover .source-card__icon,
+  .source-card:focus-visible .source-card__icon {
+    transform: scale(1.06);
+    border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+    background: color-mix(in srgb, var(--primary) 10%, var(--muted));
+  }
+  .source-card:hover .source-card__title,
+  .source-card:focus-visible .source-card__title {
+    color: var(--primary);
+  }
+  .source-card__external {
+    transition: transform 220ms var(--ease-standard), color 220ms var(--ease-standard);
+  }
+  .source-card:hover .source-card__external,
+  .source-card:focus-visible .source-card__external {
+    transform: translate(1px, -1px);
+    color: var(--primary);
+  }
+  .source-card--static {
+    cursor: default;
+    box-shadow: none;
+  }
+  .dark .source-card {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.055);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  .dark .source-card:hover,
+  .dark .source-card:focus-visible {
+    border-color: color-mix(in srgb, var(--primary) 58%, rgba(255, 255, 255, 0.2));
+    background: color-mix(in srgb, var(--primary) 16%, rgba(255, 255, 255, 0.08));
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+  .dark .source-card__icon {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
   .answer-content ul,
   .answer-content ol {
     padding-left: 1.5em;
