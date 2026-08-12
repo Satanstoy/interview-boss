@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { highlightCode, normalizeLanguage } from './highlight.js'
+import { sourceFavicon } from './source.js'
 
 // 配置 DOMPurify：只允许安全的 HTML 标签和属性
 const purifyConfig = {
@@ -50,8 +51,8 @@ const markdown = new MarkdownIt({
   },
 })
 
-// 搜索增强答案里的 Markdown 链接采用“引用胶囊”样式：仍然是原始链接，
-// 但在答案中明确可见，并统一新窗口打开，避免用户误以为只是普通文本。
+// 搜索增强答案里的 Markdown 链接采用 inline citation 样式：引用文字右侧
+// 展示目标网站 favicon 和外链标记，同时保留原始 href 供用户打开。
 const defaultLinkOpen = markdown.renderer.rules.link_open
 markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
   const token = tokens[index]
@@ -63,6 +64,25 @@ markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
   }
   return defaultLinkOpen
     ? defaultLinkOpen(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options)
+}
+
+const defaultLinkClose = markdown.renderer.rules.link_close
+markdown.renderer.rules.link_close = (tokens, index, options, env, self) => {
+  const openToken = tokens.slice(0, index).reverse().find(token => token.type === 'link_open')
+  const href = openToken?.attrGet('href') || ''
+  if (/^https?:\/\//i.test(href)) {
+    const favicon = sourceFavicon({ url: href })
+    const trailing = favicon
+      ? `<span class="answer-source-trailing"><img class="answer-source-favicon" src="${favicon}" alt="" loading="lazy"></span>`
+      : '<span class="answer-source-trailing"></span>'
+    const closeHtml = defaultLinkClose
+      ? defaultLinkClose(tokens, index, options, env, self)
+      : self.renderToken(tokens, index, options)
+    return `${trailing}${closeHtml}`
+  }
+  return defaultLinkClose
+    ? defaultLinkClose(tokens, index, options, env, self)
     : self.renderToken(tokens, index, options)
 }
 
