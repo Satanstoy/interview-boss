@@ -1221,6 +1221,7 @@ async def generate_answer_task(ctx, job_id: int):
             payload["question_text"],
             payload.get("user_id"),
             raise_on_error=True,
+            skip_search=bool(payload.get("skip_search", False)),
         )
         _finish(
             json.dumps(
@@ -1315,6 +1316,7 @@ async def generate_recitation_task(ctx, job_id: int):
             job_position=job_position or "",
             resume_text=resume_text,
             user_id=user_id,
+            skip_search=bool(payload.get("skip_search", False)),
         )
         answer = await _call_llm_with_retry(prompt, user_id=user_id)
 

@@ -20,6 +20,7 @@ class BatchDeleteRequest(BaseModel):
 class BatchGenerateAnswersRequest(BaseModel):
     ids: List[int]
     force: bool = False
+    allow_no_search: bool = False
 
 
 class EvaluateAnswerRequest(BaseModel):

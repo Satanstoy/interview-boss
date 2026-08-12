@@ -40,6 +40,23 @@ const MOCK_EMBEDDING = {
   },
 }
 
+const MOCK_PUBLIC_SEARCH = {
+  configured: true,
+  settings: {
+    provider: 'exa',
+    api_key: 'exa-****abcd',
+    api_key_set: true,
+    stored_api_key_set: true,
+    base_url: '',
+    enabled: true,
+    source: 'admin',
+  },
+  providers: [
+    { id: 'none', label: '不使用联网搜索', description: '仅使用模型自身知识' },
+    { id: 'exa', label: 'Exa', description: '语义搜索与网页内容检索' },
+  ],
+}
+
 async function mockAllAPIs(page) {
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({ json: { token: 'mock-token', user: MOCK_USER } })
@@ -95,7 +112,17 @@ async function mockAllAPIs(page) {
   await page.route('**/api/profile**', async (route) => {
     const method = route.request().method()
     const url = route.request().url()
-    if (url.includes('/embedding')) {
+    if (url.includes('/search/public')) {
+      if (method === 'DELETE') {
+        await route.fulfill({ json: { status: 'success' } })
+      } else if (method === 'PUT') {
+        await route.fulfill({ json: { status: 'success' } })
+      } else if (method === 'POST') {
+        await route.fulfill({ json: { status: 'success', provider: 'exa', count: 1, results: [] } })
+      } else {
+        await route.fulfill({ json: MOCK_PUBLIC_SEARCH })
+      }
+    } else if (url.includes('/embedding')) {
       if (method === 'PUT') {
         await route.fulfill({ json: { status: 'success', recompute_triggered: false, recompute_job_id: null } })
       } else {
@@ -130,6 +157,15 @@ test.describe('管理员全局模型配置', () => {
     await gotoLoggedIn(page)
     await openAdminSettings(page)
     await expect(page.getByText('模型配置')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('管理员设置出现公共联网搜索配置 tab', async ({ page }) => {
+    await gotoLoggedIn(page)
+    await openAdminSettings(page)
+    await page.getByRole('button', { name: '联网搜索', exact: true }).last().click()
+    await expect(page.getByText('公共联网搜索')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('当前生效来源：')).toBeVisible()
+    await expect(page.getByRole('combobox').last()).toContainText('Exa')
   })
 
   test('模型配置 tab 显示全局 LLM 和 embedding 表单', async ({ page }) => {

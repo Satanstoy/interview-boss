@@ -12,6 +12,50 @@ def test_search_config_migration_creates_per_user_table(test_db):
     assert {"user_id", "provider", "api_key", "base_url", "enabled"}.issubset(columns)
 
 
+def test_search_config_priority_is_personal_then_admin_public_only(test_db, monkeypatch):
+    """管理员按个人→公共优先，普通用户不能读取公共配置或环境变量。"""
+    from app.core.config import get_user_search_config, get_user_search_config_status
+
+    admin_id = test_db.execute(
+        "SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    test_db.execute(
+        "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 0)",
+        ("search-normal-user", "test-hash"),
+    )
+    normal_id = test_db.execute(
+        "SELECT id FROM users WHERE username = 'search-normal-user'"
+    ).fetchone()[0]
+    test_db.execute(
+        "INSERT INTO user_profile (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
+        (
+            "search_provider", "exa",
+            "search_api_key", "public-key",
+            "search_base_url", "",
+            "search_enabled", "1",
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO user_search_config (user_id, provider, api_key, base_url, enabled) "
+        "VALUES (?, 'tavily', 'personal-key', '', 1)",
+        (admin_id,),
+    )
+    test_db.commit()
+    monkeypatch.setenv("SEARCH_PROVIDER", "brave")
+    monkeypatch.setenv("SEARCH_API_KEY", "environment-key")
+
+    assert get_user_search_config(admin_id)["source"] == "personal"
+    assert get_user_search_config(admin_id)["api_key"] == "personal-key"
+
+    test_db.execute("DELETE FROM user_search_config WHERE user_id = ?", (admin_id,))
+    test_db.commit()
+    assert get_user_search_config(admin_id)["source"] == "admin"
+    assert get_user_search_config(admin_id)["provider"] == "exa"
+    assert get_user_search_config(normal_id) is None
+    assert get_user_search_config_status(admin_id)["source"] == "public"
+    assert get_user_search_config_status(normal_id)["source"] == "none"
+
+
 @pytest.mark.asyncio
 async def test_tavily_results_are_normalized_and_deduplicated():
     from app.services.search_service import search_web
@@ -121,7 +165,24 @@ async def test_answer_prompt_falls_back_when_search_is_unavailable():
 
     assert sources == []
     assert "什么是 Redis？" in prompt
-    assert "联网参考资料" not in prompt
+    assert "provider down" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_answer_prompt_explicit_no_search_mode_does_not_call_search():
+    from app.services.answer_enrichment import prepare_answer_prompt
+
+    with patch(
+        "app.services.answer_enrichment.search_web",
+        new_callable=AsyncMock,
+    ) as mock_search:
+        prompt, sources = await prepare_answer_prompt(
+            "什么是 Redis？", user_id=7, skip_search=True
+        )
+
+    assert sources == []
+    assert "什么是 Redis？" in prompt
+    mock_search.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -55,10 +55,10 @@ async def test_generate_answer_admin_writes_answer_sources():
          patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
         mock_run_db.return_value = mock_question
         mock_queue.return_value = {"status": "queued", "job_id": 7}
-        result = await generate_master_answer(10, user)
+        result = await generate_master_answer(10, user, allow_no_search=True)
 
     assert result == {"status": "queued", "job_id": 7}
-    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1)
+    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1, skip_search=True)
 
 
 @pytest.mark.asyncio
@@ -94,10 +94,29 @@ async def test_generate_answer_force_requeues_existing_answer():
          patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
         mock_run_db.return_value = mock_question
         mock_queue.return_value = {"status": "queued", "job_id": 9}
-        result = await generate_master_answer(10, user, force=True)
+        result = await generate_master_answer(10, user, force=True, allow_no_search=True)
 
     assert result == {"status": "queued", "job_id": 9}
-    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1)
+    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1, skip_search=True)
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_requires_explicit_no_search_confirmation():
+    """没有个人或公共搜索配置时，接口先返回可识别的确认错误。"""
+    from fastapi import HTTPException
+
+    from app.routers.answers import generate_master_answer
+
+    user = {"id": 1, "is_admin": True}
+    mock_question = {"id": 10, "question": "什么是微服务？", "ai_answer": None}
+
+    with patch("app.routers.answers.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = [mock_question, {"configured": False}]
+        with pytest.raises(HTTPException) as exc_info:
+            await generate_master_answer(10, user, allow_no_search=False)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SEARCH_NOT_CONFIGURED"
 
 
 def _exec(fn):
@@ -200,6 +219,44 @@ async def test_background_generate_answer_writes_answer_sources():
 
 
 @pytest.mark.asyncio
+async def test_background_generate_answer_does_not_overwrite_existing_answer():
+    """外部接口失败时，已有参考答案不能被失败占位符覆盖。"""
+    from app.services.submit_service import background_generate_answer
+
+    with patch(
+        "app.services.answer_enrichment.prepare_answer_prompt",
+        new_callable=AsyncMock,
+    ) as mock_prep, patch(
+        "app.services.llm._call_llm_with_retry",
+        new_callable=AsyncMock,
+    ) as mock_llm, patch(
+        "app.services.submit_service.run_db",
+        new_callable=AsyncMock,
+    ) as mock_run_db, patch(
+        "app.services.submit_service.get_db_connection"
+    ) as mock_get_conn:
+        mock_prep.return_value = ("prompt", [])
+        mock_llm.side_effect = TimeoutError("upstream timeout")
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = None
+        mock_get_conn.return_value = mock_conn
+        mock_run_db.side_effect = _exec
+
+        await background_generate_answer(
+            10,
+            "什么是微服务？",
+            user_id=1,
+            raise_on_error=False,
+        )
+
+    sql, params = mock_conn.execute.call_args[0]
+    assert "CASE" in sql
+    assert "TRIM(ai_answer)" in sql
+    assert params == (10,)
+
+
+@pytest.mark.asyncio
 async def test_batch_generate_writes_answer_sources():
     """批量生成通过 durable child jobs 派发，不在 SSE 请求内调用 LLM。"""
     from app.models.schemas import BatchGenerateAnswersRequest
@@ -217,11 +274,12 @@ async def test_batch_generate_writes_answer_sources():
          patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock) as mock_dispatch:
         mock_run_db.side_effect = [
             rows,
+            {"configured": False},
             (99, [100]),
             [{"id": 10, "status": "completed", "error": None}],
         ]
         response = await batch_generate_answers(
-            BatchGenerateAnswersRequest(ids=[10]), user
+            BatchGenerateAnswersRequest(ids=[10], allow_no_search=True), user
         )
         body = await _consume(response)
 
@@ -249,11 +307,12 @@ async def test_batch_generate_force_includes_existing_answers():
          patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock) as mock_dispatch:
         mock_run_db.side_effect = [
             rows,
+            {"configured": False},
             (99, [100]),
             [{"id": 10, "status": "completed", "error": None}],
         ]
         response = await batch_generate_answers(
-            BatchGenerateAnswersRequest(ids=[10], force=True), user
+            BatchGenerateAnswersRequest(ids=[10], force=True, allow_no_search=True), user
         )
         body = await _consume(response)
 
@@ -284,12 +343,13 @@ async def test_batch_generate_emits_init_and_done_from_durable_status():
         patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock):
         mock_run_db.side_effect = [
             rows,
+            {"configured": False},
             (101, [111]),
             [{"id": 11, "status": "completed", "error": None}],
         ]
 
         response = await answers_router.batch_generate_answers(
-            BatchGenerateAnswersRequest(ids=[11]), user
+            BatchGenerateAnswersRequest(ids=[11], allow_no_search=True), user
         )
         events = await consume(response)
 
@@ -311,12 +371,13 @@ async def test_batch_generate_reports_terminal_child_failure():
         patch("app.routers.answers._dispatch_persisted_answer_job", new_callable=AsyncMock):
         mock_run_db.side_effect = [
             rows,
+            {"configured": False},
             (102, [112]),
             [{"id": 12, "status": "failed", "error": "API 限流"}],
         ]
 
         response = await answers_router.batch_generate_answers(
-            BatchGenerateAnswersRequest(ids=[12]), user
+            BatchGenerateAnswersRequest(ids=[12], allow_no_search=True), user
         )
         chunks = []
         async for chunk in response.body_iterator:

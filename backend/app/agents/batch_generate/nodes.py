@@ -78,7 +78,9 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
         start = time.monotonic()
         try:
             prompt, search_sources = await prepare_answer_prompt(
-                question, user_id=state.get("user_id")
+                question,
+                user_id=state.get("user_id"),
+                skip_search=bool(state.get("skip_search", False)),
             )
             answer = await _call_llm_with_retry(prompt, user_id=state.get("user_id"))
             answer, _ = await refine_answer(

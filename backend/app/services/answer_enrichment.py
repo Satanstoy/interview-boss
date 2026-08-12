@@ -57,7 +57,7 @@ def _append_sources(prompt: str, results: list[dict]) -> str:
 
 
 async def prepare_answer_prompt(
-    question: str, user_id: int | None = None
+    question: str, user_id: int | None = None, skip_search: bool = False
 ) -> tuple[str, list[dict]]:
     """Return an answer prompt and the sources used to enrich it.
 
@@ -66,6 +66,8 @@ async def prepare_answer_prompt(
     """
     question = (question or "").strip()
     if not question:
+        return _build_prompt(question, []), []
+    if skip_search:
         return _build_prompt(question, []), []
     try:
         data = await search_web(
@@ -89,6 +91,7 @@ async def prepare_recitation_prompt(
     job_position: str = "",
     resume_text: str | None = None,
     user_id: int | None = None,
+    skip_search: bool = False,
 ) -> tuple[str, list[dict]]:
     """构建个人背诵稿提示词：公共参考答案为基座 + 用户背景 + 联网搜索增强。
 
@@ -113,6 +116,8 @@ async def prepare_recitation_prompt(
     query = f"面试题：{question}"
     if job_position:
         query += f"（{job_position} 岗位）"
+    if skip_search:
+        return prompt, []
     try:
         data = await search_web(
             f"{query}\n请优先查找官方文档、标准、权威技术文章和可靠实践。",

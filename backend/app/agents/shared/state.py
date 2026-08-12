@@ -69,6 +69,7 @@ class BatchGenerateState(TypedDict, total=False):
     # 输入
     question_ids: list[int]
     user_id: int
+    skip_search: bool
     # 流程状态
     current_index: int
     current_question: str

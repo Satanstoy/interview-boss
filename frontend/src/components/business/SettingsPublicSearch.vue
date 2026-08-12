@@ -1,0 +1,247 @@
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Loader2, Search, ShieldCheck, Trash2, Wifi } from '@lucide/vue'
+import { useToast, useConfirm } from '@/composables/useNotification.js'
+import {
+  deletePublicSearchConfig,
+  fetchPublicSearchConfig,
+  testPublicSearchConfig,
+  updatePublicSearchConfig,
+} from '@/services/profileApi.js'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+const { success: toastSuccess, error: toastError } = useToast()
+const { confirm: showConfirm } = useConfirm()
+
+const loading = ref(true)
+const saving = ref(false)
+const testing = ref(false)
+const showKey = ref(false)
+const error = ref('')
+const testMessage = ref('')
+const providers = ref([])
+const savedProvider = ref('none')
+
+const form = reactive({
+  provider: 'none',
+  api_key: '',
+  base_url: '',
+})
+
+const settings = reactive({
+  configured: false,
+  provider: 'none',
+  api_key: '',
+  api_key_set: false,
+  stored_api_key_set: false,
+  source: 'none',
+})
+
+const selectedProvider = computed(() =>
+  providers.value.find((item) => item.id === form.provider),
+)
+
+const sourceLabel = computed(() => {
+  if (settings.source === 'admin') return '管理员公共配置'
+  if (settings.source === 'environment') return '环境变量'
+  return '未配置'
+})
+
+const baseUrlPlaceholder = computed(() => {
+  if (form.provider === 'tavily') return '可选，例如 https://api.tavily.com/search'
+  if (form.provider === 'brave') return '可选，例如 https://api.search.brave.com/res/v1/web/search'
+  if (form.provider === 'bocha') return '可选，例如 https://api.bochaai.com/v1/web-search'
+  if (form.provider === 'exa') return '可选，例如 https://api.exa.ai/search'
+  return '留空使用系统默认地址'
+})
+
+const loadConfig = async () => {
+  loading.value = true
+  error.value = ''
+  try {
+    const data = await fetchPublicSearchConfig()
+    providers.value = data.providers || []
+    Object.assign(settings, {
+      configured: Boolean(data.configured),
+      ...(data.settings || {}),
+    })
+    form.provider = data.settings?.provider || 'none'
+    savedProvider.value = form.provider
+    form.api_key = ''
+    form.base_url = data.settings?.base_url || ''
+  } catch (e) {
+    error.value = `加载失败: ${e.message}`
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleSave = async () => {
+  error.value = ''
+  testMessage.value = ''
+  if (form.provider !== 'none' && form.provider !== savedProvider.value && !form.api_key.trim()) {
+    error.value = '切换服务商后请输入新的 API Key'
+    return
+  }
+  if (form.provider !== 'none' && !settings.stored_api_key_set && !form.api_key.trim()) {
+    error.value = '请输入公共 API Key'
+    return
+  }
+
+  saving.value = true
+  try {
+    const payload = {
+      provider: form.provider,
+      base_url: form.base_url.trim(),
+    }
+    if (form.api_key.trim()) payload.api_key = form.api_key.trim()
+    await updatePublicSearchConfig(payload)
+    toastSuccess(form.provider === 'none' ? '公共联网搜索已关闭' : '公共联网搜索配置已保存')
+    await loadConfig()
+  } catch (e) {
+    error.value = `保存失败: ${e.message}`
+  } finally {
+    saving.value = false
+  }
+}
+
+const handleTest = async () => {
+  error.value = ''
+  testMessage.value = ''
+  testing.value = true
+  try {
+    const data = await testPublicSearchConfig('Redis 缓存面试题 官方文档')
+    testMessage.value = `连接成功，返回 ${data.count || 0} 条结果`
+    toastSuccess('公共搜索服务连接成功')
+  } catch (e) {
+    error.value = `测试失败: ${e.message}`
+    toastError('公共搜索服务连接失败')
+  } finally {
+    testing.value = false
+  }
+}
+
+const handleDelete = async () => {
+  if (!await showConfirm('确定要清除管理员公共联网搜索配置吗？清除后，管理员可能回退使用环境变量。')) return
+  saving.value = true
+  try {
+    await deletePublicSearchConfig()
+    toastSuccess('公共联网搜索配置已清除')
+    await loadConfig()
+  } catch (e) {
+    error.value = `清除失败: ${e.message}`
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(loadConfig)
+</script>
+
+<template>
+  <div class="w-full space-y-8">
+    <div>
+      <div class="flex items-center gap-2">
+        <Search :size="18" class="text-primary" />
+        <h3 class="text-lg font-semibold text-foreground">公共联网搜索</h3>
+      </div>
+      <p class="mt-1 text-sm text-muted-foreground">
+        管理员生成公共参考答案时使用。管理员按个人 Key → 公共 Key 优先；普通用户不会读取这里的 Key。
+      </p>
+    </div>
+
+    <div class="rounded-xl border bg-card p-6 space-y-5">
+      <div v-if="loading" class="flex items-center justify-center py-8">
+        <Loader2 :size="22" class="animate-spin text-primary" />
+      </div>
+
+      <template v-else>
+        <div class="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+          <ShieldCheck :size="15" class="mt-0.5 shrink-0 text-primary" />
+          <span>当前生效来源：<strong class="text-foreground">{{ sourceLabel }}</strong>。普通用户仅使用自己的搜索配置，未配置时不会自动使用公共配置。</span>
+        </div>
+
+        <div class="space-y-2">
+          <Label class="text-xs font-semibold text-muted-foreground">公共搜索服务商</Label>
+          <Select v-model="form.provider">
+            <SelectTrigger class="w-full h-10 text-sm">
+              <SelectValue placeholder="选择搜索服务商" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                {{ provider.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p v-if="selectedProvider" class="text-xs text-muted-foreground">
+            {{ selectedProvider.description }}
+          </p>
+        </div>
+
+        <template v-if="form.provider !== 'none'">
+          <div class="space-y-2">
+            <Label class="text-xs font-semibold text-muted-foreground">公共 API Key</Label>
+            <div class="relative">
+              <Input
+                v-model="form.api_key"
+                :type="showKey ? 'text' : 'password'"
+                :placeholder="settings.stored_api_key_set ? '已配置，留空表示继续使用当前 Key' : '输入公共 API Key'"
+                class="pr-20 font-mono"
+              />
+              <button
+                type="button"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
+                @click="showKey = !showKey"
+              >
+                {{ showKey ? '隐藏' : '显示' }}
+              </button>
+            </div>
+            <p class="text-[11px] text-muted-foreground">
+              当前 Key：{{ settings.api_key || '未设置' }}<span v-if="settings.source === 'environment'">（来自环境变量，不会自动写入数据库）</span>
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label class="text-xs font-semibold text-muted-foreground">Base URL（可选）</Label>
+            <Input v-model="form.base_url" :placeholder="baseUrlPlaceholder" class="font-mono" />
+            <p class="text-xs text-muted-foreground">只有使用代理或自定义网关时才需要填写。</p>
+          </div>
+        </template>
+
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <Button :disabled="saving" size="sm" @click="handleSave">
+            {{ saving ? '保存中...' : '保存公共配置' }}
+          </Button>
+          <Button
+            v-if="form.provider !== 'none' && settings.configured"
+            variant="outline"
+            size="sm"
+            :disabled="testing || saving"
+            @click="handleTest"
+          >
+            <Wifi v-if="!testing" :size="14" />
+            <Loader2 v-else :size="14" class="animate-spin" />
+            <span class="ml-1">测试连接</span>
+          </Button>
+          <Button
+            v-if="settings.source === 'admin'"
+            variant="outline"
+            size="sm"
+            class="text-destructive"
+            :disabled="saving"
+            @click="handleDelete"
+          >
+            <Trash2 :size="14" />
+            <span class="ml-1">清除公共配置</span>
+          </Button>
+        </div>
+
+        <p v-if="testMessage" class="text-xs text-emerald-600 dark:text-emerald-400">{{ testMessage }}</p>
+        <p v-if="error" class="text-xs text-destructive">{{ error }}</p>
+      </template>
+    </div>
+  </div>
+</template>

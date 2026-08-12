@@ -136,6 +136,29 @@ async def _dispatch_persisted_answer_job(job_id: int) -> bool:
         return False
 
 
+async def _allow_no_search_or_raise(user: dict, allow_no_search: bool) -> bool:
+    """Require an explicit confirmation before starting a model-only answer job."""
+    from app.core.config import get_user_search_config_status
+
+    status = await run_db(lambda: get_user_search_config_status(user["id"]))
+    if status.get("configured"):
+        return False
+    if allow_no_search:
+        return True
+    if user.get("is_admin"):
+        message = "当前没有可用的个人或公共联网搜索配置。是否使用非搜索模式继续生成？"
+    else:
+        message = "当前没有配置个人联网搜索。是否使用非搜索模式继续生成？"
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "SEARCH_NOT_CONFIGURED",
+            "message": message,
+            "allow_no_search": True,
+        },
+    )
+
+
 @router.put("/save-user-answer/{question_id}")
 async def save_user_answer(
     question_id: int, body: dict, user: dict = Depends(get_current_user)
@@ -180,6 +203,7 @@ async def generate_master_answer(
     question_id: int,
     user: dict = Depends(get_current_user),
     force: bool = Query(False, description="管理员重新生成时忽略已有答案"),
+    allow_no_search: bool = Query(False, description="已确认使用无搜索模式"),
 ):
     """生成公共参考答案（仅管理员，全局共享）"""
     if not user.get("is_admin", False):
@@ -203,16 +227,23 @@ async def generate_master_answer(
     if is_admin and not force and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
         return {"status": "success", "answer": row["ai_answer"]}
 
+    skip_search = await _allow_no_search_or_raise(user, allow_no_search)
+
     return await _queue_answer_job(
         "generate_answer",
         question_id,
         row["question"],
         user["id"],
+        **({"skip_search": True} if skip_search else {}),
     )
 
 
 @router.post("/generate-recitation/{question_id}")
-async def generate_recitation(question_id: int, user: dict = Depends(get_current_user)):
+async def generate_recitation(
+    question_id: int,
+    user: dict = Depends(get_current_user),
+    allow_no_search: bool = Query(False, description="已确认使用无搜索模式"),
+):
     """定制用户个人背诵稿：以公共参考答案为基座，结合岗位/简历个性化改写。"""
 
     def _get():
@@ -232,11 +263,14 @@ async def generate_recitation(question_id: int, user: dict = Depends(get_current
             status_code=404, detail="该题目暂无公共参考答案，请等待管理员生成"
         )
 
+    skip_search = await _allow_no_search_or_raise(user, allow_no_search)
+
     return await _queue_answer_job(
         "generate_recitation",
         question_id,
         row["question"],
         user["id"],
+        **({"skip_search": True} if skip_search else {}),
     )
 
 
@@ -290,6 +324,8 @@ async def batch_generate_answers(
             headers={"X-Accel-Buffering": "no"},
         )
 
+    skip_search = await _allow_no_search_or_raise(user, req.allow_no_search)
+
     def _create_batch_jobs():
         from app.services.job_lifecycle import (
             ANSWER_BATCH_JOB_TYPE,
@@ -310,7 +346,11 @@ async def batch_generate_answers(
             )
             parent_job_id = int(cursor.lastrowid)
             child_job_ids = create_answer_generation_jobs(
-                conn, parent_job_id, questions, user["id"]
+                conn,
+                parent_job_id,
+                questions,
+                user["id"],
+                skip_search=skip_search,
             )
             conn.commit()
             return parent_job_id, child_job_ids

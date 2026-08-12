@@ -7,6 +7,7 @@ import SettingsQuality from './SettingsQuality.vue'
 import SettingsQualityAssistant from './SettingsQualityAssistant.vue'
 import SettingsSourceHealth from './SettingsSourceHealth.vue'
 import SettingsGlobalModel from './SettingsGlobalModel.vue'
+import SettingsPublicSearch from './SettingsPublicSearch.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,6 +18,7 @@ const adminTabs = [
   { id: 'taxonomy', label: '分类管理' },
   { id: 'quality', label: '聚合质量' },
   { id: 'model', label: '模型配置' },
+  { id: 'search', label: '联网搜索' },
 ]
 const adminTab = ref('taxonomy')
 const qualitySubTab = ref('list')
@@ -374,5 +376,8 @@ const onRebuild = () => {
     <div v-else-if="adminTab === 'model'" class="rounded-xl border bg-card p-6">
       <SettingsGlobalModel />
     </div>
+
+    <!-- 公共联网搜索配置 -->
+    <SettingsPublicSearch v-else-if="adminTab === 'search'" />
   </div>
 </template>

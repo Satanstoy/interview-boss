@@ -142,25 +142,49 @@ def get_user_llm_config(user_id: int) -> dict | None:
     return _get_global_llm_config()
 
 
-def get_user_search_config(user_id: int | None) -> dict | None:
-    """读取用户的联网搜索配置，未配置时回退到可选的全局环境配置。"""
+def _read_public_search_config_from_db() -> dict | None:
+    """Read the administrator-managed public search config from user_profile."""
     try:
         from app.db.connection import get_db_connection
 
-        if user_id is not None:
-            with get_db_connection() as conn:
-                row = conn.execute(
-                    "SELECT provider, api_key, base_url, enabled "
-                    "FROM user_search_config WHERE user_id = ?",
-                    (user_id,),
-                ).fetchone()
-            if row:
-                cfg = dict(row)
-                if cfg.get("enabled") and cfg.get("provider") != "none" and cfg.get("api_key"):
-                    return cfg
-                return None
+        keys = (
+            "search_provider",
+            "search_api_key",
+            "search_base_url",
+            "search_enabled",
+        )
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM user_profile WHERE key IN ({})".format(
+                    ",".join("?" * len(keys))
+                ),
+                keys,
+            ).fetchall()
+        values = {row["key"]: row["value"] for row in rows}
     except Exception:
-        pass
+        return None
+
+    provider = (values.get("search_provider") or "").strip().lower()
+    api_key = (values.get("search_api_key") or "").strip()
+    enabled = values.get("search_enabled")
+    if enabled == "0":
+        return {"provider": "none", "api_key": "", "base_url": "", "source": "disabled"}
+    if provider == "none" or not api_key:
+        return None
+    return {
+        "provider": provider,
+        "api_key": api_key,
+        "base_url": (values.get("search_base_url") or "").strip(),
+        "enabled": 1,
+        "source": "admin",
+    }
+
+
+def get_public_search_config() -> dict | None:
+    """Resolve the public search config, preferring admin DB settings over env."""
+    stored = _read_public_search_config_from_db()
+    if stored is not None:
+        return stored if stored.get("provider") != "none" else None
 
     provider = os.environ.get("SEARCH_PROVIDER", "none").strip().lower()
     api_key = os.environ.get("SEARCH_API_KEY", "").strip()
@@ -171,7 +195,104 @@ def get_user_search_config(user_id: int | None) -> dict | None:
         "api_key": api_key,
         "base_url": os.environ.get("SEARCH_BASE_URL", "").strip(),
         "enabled": 1,
+        "source": "environment",
     }
+
+
+def get_user_search_config_status(user_id: int | None) -> dict:
+    """Resolve search availability without exposing any API key."""
+    if user_id is None:
+        return {
+            "configured": False,
+            "source": "none",
+            "personal_configured": False,
+            "public_configured": False,
+            "is_admin": False,
+        }
+
+    try:
+        from app.db.connection import get_db_connection
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT u.is_admin, usc.provider, usc.api_key, usc.enabled "
+                "FROM users u LEFT JOIN user_search_config usc ON usc.user_id = u.id "
+                "WHERE u.id = ?",
+                (user_id,),
+            ).fetchone()
+    except Exception:
+        row = None
+
+    if not row:
+        return {
+            "configured": False,
+            "source": "none",
+            "personal_configured": False,
+            "public_configured": False,
+            "is_admin": False,
+        }
+
+    personal_configured = bool(
+        row["enabled"]
+        and row["provider"]
+        and row["provider"] != "none"
+        and row["api_key"]
+    )
+    is_admin = bool(row["is_admin"])
+    public_configured = bool(get_public_search_config()) if is_admin else False
+    if personal_configured:
+        source = "personal"
+    elif public_configured:
+        source = "public"
+    else:
+        source = "none"
+    return {
+        "configured": personal_configured or public_configured,
+        "source": source,
+        "personal_configured": personal_configured,
+        "public_configured": public_configured,
+        "is_admin": is_admin,
+    }
+
+
+def get_user_search_config(user_id: int | None) -> dict | None:
+    """Resolve personal search first, then admin-only public search."""
+    try:
+        from app.db.connection import get_db_connection
+
+        if user_id is None:
+            return None
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT u.is_admin, usc.provider, usc.api_key, usc.base_url, usc.enabled "
+                "FROM users u LEFT JOIN user_search_config usc ON usc.user_id = u.id "
+                "WHERE u.id = ?",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+
+        if (
+            row["enabled"]
+            and row["provider"]
+            and row["provider"] != "none"
+            and row["api_key"]
+        ):
+            return {
+                "provider": row["provider"],
+                "api_key": row["api_key"],
+                "base_url": row["base_url"] or "",
+                "enabled": row["enabled"],
+                "source": "personal",
+            }
+
+        if row["is_admin"]:
+            public = get_public_search_config()
+            if public:
+                return public
+    except Exception:
+        pass
+    return None
 
 
 def _get_global_llm_config() -> dict | None:

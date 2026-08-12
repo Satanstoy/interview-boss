@@ -1,8 +1,9 @@
 import { generateAnswer as apiGenerateAnswer, generateRecitation as apiGenerateRecitation, streamJobProgress, evaluateAnswer, fetchPracticeHistory, updateRecord, saveUserAnswer as apiSaveUserAnswer } from '../api/index.js'
 import { renderSafeMarkdown } from '../utils/markdown.js'
 import { sanitizeAgainstInjection } from '../utils/validate.js'
-import { useToast } from './useNotification.js'
+import { useToast, useConfirm } from './useNotification.js'
 import { useModelGuard } from './useModelGuard.js'
+import { runWithSearchFallback } from './useSearchFallback.js'
 
 export const dimLabel = { completeness: '完整性', depth: '深度', accuracy: '准确性', logic: '逻辑性' }
 
@@ -62,11 +63,16 @@ export function resetQState(qState) {
 
 export async function generateAnswerForQuestion(question, qState) {
   const toast = useToast()
+  const { confirm: showConfirm } = useConfirm()
   const { ensureModelReady } = useModelGuard()
   if (!await ensureModelReady({ action: 'AI 生成答案' })) return
   qState._isLoadingAnswer = true
   try {
-    const data = await resolveQueuedJob(apiGenerateAnswer(question.id, { force: true }))
+    const data = await runWithSearchFallback(
+      (allowNoSearch) => resolveQueuedJob(apiGenerateAnswer(question.id, { force: true, allowNoSearch })),
+      showConfirm,
+    )
+    if (!data) return
     question.ai_answer = data.answer
     if (Array.isArray(data.search_sources)) question.answer_sources = data.search_sources
     toast.success('答案已生成')
@@ -100,11 +106,16 @@ export async function saveAnswerForQuestion(question, qState) {
 
 export async function generateRecitationForQuestion(question, qState) {
   const toast = useToast()
+  const { confirm: showConfirm } = useConfirm()
   const { ensureModelReady } = useModelGuard()
   if (!await ensureModelReady({ action: '生成背诵稿' })) return
   qState._isGeneratingRecitation = true
   try {
-    const data = await resolveQueuedJob(await apiGenerateRecitation(question.id))
+    const data = await runWithSearchFallback(
+      (allowNoSearch) => resolveQueuedJob(apiGenerateRecitation(question.id, { allowNoSearch })),
+      showConfirm,
+    )
+    if (!data) return
     qState._recitation = data.answer
     qState._recitationSources = data.search_sources || []
     qState._isEditingRecitation = false

@@ -8,9 +8,15 @@ export const buildMasterBankSSE = (onEvent) => postSSE(`${API}/master-bank/build
 export const streamJobProgress = (jobId, onEvent) => getSSE(`${API}/jobs/${jobId}/stream`, onEvent)
 export const buildPersonalBankSSE = (onEvent) => postSSE(`${API}/master-bank/build-personal`, null, onEvent)
 export const retagQuestion = (id) => post(`${API}/master-bank/re-tag/${id}`, null, { timeout: 180_000 })
-export const generateAnswer = (id, { force = false } = {}) => post(`${API}/master-bank/generate-answer/${id}${force ? '?force=true' : ''}`, null, { timeout: 180_000 })
+export const generateAnswer = (id, { force = false, allowNoSearch = false } = {}) => {
+  const params = new URLSearchParams()
+  if (force) params.set('force', 'true')
+  if (allowNoSearch) params.set('allow_no_search', 'true')
+  const query = params.toString()
+  return post(`${API}/master-bank/generate-answer/${id}${query ? `?${query}` : ''}`, null, { timeout: 180_000 })
+}
 export const saveUserAnswer = (id, answer) => put(`${API}/master-bank/save-user-answer/${id}`, { answer })
-export const generateRecitation = (id) => post(`${API}/master-bank/generate-recitation/${id}`, null, { timeout: 180_000 })
+export const generateRecitation = (id, { allowNoSearch = false } = {}) => post(`${API}/master-bank/generate-recitation/${id}${allowNoSearch ? '?allow_no_search=true' : ''}`, null, { timeout: 180_000 })
 export const toggleStar = (id) => post(`${API}/master-bank/toggle-star/${id}`)
 export const deleteMasterQuestion = (id) => del(`${API}/master-bank/${id}`)
 export const updateQuestion = (id, data) => put(`${API}/master-bank/${id}`, data)
@@ -33,7 +39,7 @@ export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 
 // ── Batch operations ──
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
-export const batchGenerateAnswers = (ids, onEvent, { force = false } = {}) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids, force }, onEvent)
+export const batchGenerateAnswers = (ids, onEvent, { force = false, allowNoSearch = false } = {}) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids, force, allow_no_search: allowNoSearch }, onEvent)
 
 // ── Trash & Restore ──
 export const fetchMasterBankTrash = (page = 1, pageSize = 50) => get(`${API}/master-bank/trash?page=${page}&page_size=${pageSize}`)

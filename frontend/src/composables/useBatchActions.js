@@ -3,6 +3,7 @@ import * as api from '@/api/index.js'
 import { getFriendlyError } from '@/services/http.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
+import { runWithSearchFallback } from '@/composables/useSearchFallback.js'
 
 export function useBatchActions({ currentUser, jdSelection, interviewSelection, masterSelection, fetchTableData, fetchAnalytics }) {
   const toast = useToast()
@@ -107,17 +108,21 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
       if (!await showConfirm(`确定要${force ? '重新生成' : '为'}选中的 ${ids.length} 道题目${force ? '的答案' : '生成答案'}？`)) return
       if (!await ensureModelReady({ action: actionLabel })) return
       try {
-        const result = await api.batchGenerateAnswers(ids, (event) => {
-          if (event.type === 'init') {
-            if (event.total === 0) {
-              toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
-            } else {
-              onProgress(0, event.total)
+        const result = await runWithSearchFallback(
+          (allowNoSearch) => api.batchGenerateAnswers(ids, (event) => {
+            if (event.type === 'init') {
+              if (event.total === 0) {
+                toast.info(`所有 ${event.skipped} 道题目已有答案，无需生成`)
+              } else {
+                onProgress(0, event.total)
+              }
+            } else if (event.type === 'progress') {
+              onProgress(event.current, event.total)
             }
-          } else if (event.type === 'progress') {
-            onProgress(event.current, event.total)
-          }
-        }, { force })
+          }, { force, allowNoSearch }),
+          showConfirm,
+        )
+        if (!result) return
         if (result) {
           const parts = []
           if (result.generated) parts.push(`成功 ${result.generated} 题`)

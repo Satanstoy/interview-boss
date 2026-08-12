@@ -3,6 +3,7 @@ import * as api from '@/api/index.js'
 import { getFriendlyError } from '@/services/http.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
+import { runWithSearchFallback } from '@/composables/useSearchFallback.js'
 
 export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAnalytics) {
   const toast = useToast()
@@ -164,7 +165,11 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
     if (!await ensureModelReady({ action: 'AI 生成答案' })) return
     question._isLoadingAnswer = true
     try {
-      const data = await resolveQueuedJob(await api.generateAnswer(question.id, { force: true }))
+      const data = await runWithSearchFallback(
+        (allowNoSearch) => resolveQueuedJob(api.generateAnswer(question.id, { force: true, allowNoSearch })),
+        showConfirm,
+      )
+      if (!data) return
       if (currentUser.value?.is_admin) {
         question.ai_answer = data.answer
       } else {

@@ -162,10 +162,10 @@ class TestGenerateRecitation:
              patch("app.routers.answers._queue_answer_job", new_callable=AsyncMock) as mock_queue:
             mock_run_db.return_value = mock_question
             mock_queue.return_value = {"status": "queued", "job_id": 12}
-            result = await generate_recitation(10, user)
+            result = await generate_recitation(10, user, allow_no_search=True)
             assert result == {"status": "queued", "job_id": 12}
             mock_queue.assert_awaited_once_with(
-                "generate_recitation", 10, mock_question["question"], 2
+                "generate_recitation", 10, mock_question["question"], 2, skip_search=True
             )
 
     @pytest.mark.asyncio

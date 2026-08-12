@@ -23,6 +23,7 @@ async def persist_answer_generation_jobs(
     answer_tasks: list[tuple[int, str]],
     user_id: int,
     source: str = "submit",
+    skip_search: bool = False,
 ) -> tuple[int, list[int]]:
     """Persist answer child jobs for legacy and current upload paths."""
     from app.services.job_lifecycle import create_answer_generation_jobs
@@ -37,7 +38,11 @@ async def persist_answer_generation_jobs(
             )
             parent_id = int(cursor.lastrowid)
             child_ids = create_answer_generation_jobs(
-                conn, parent_id, answer_tasks, user_id
+                conn,
+                parent_id,
+                answer_tasks,
+                user_id,
+                skip_search=skip_search,
             )
             conn.commit()
             return parent_id, child_ids
@@ -56,13 +61,14 @@ async def background_generate_answer(
     question_text: str,
     user_id: int = None,
     raise_on_error: bool = False,
+    skip_search: bool = False,
 ):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
     from app.services.llm import _call_llm_with_retry
     try:
         prompt, search_sources = await prepare_answer_prompt(
-            question_text, user_id=user_id
+            question_text, user_id=user_id, skip_search=skip_search
         )
         answer = await _call_llm_with_retry(prompt, user_id=user_id)
         answer, _ = await refine_answer(
@@ -88,7 +94,21 @@ async def background_generate_answer(
 
         def _mark_failed():
             with get_db_connection() as conn:
-                conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (question_id,))
+                # 生成失败不能覆盖已有的有效参考答案；只有原本没有答案的题目
+                # 才写入失败占位符，避免一次外部接口超时造成数据丢失。
+                conn.execute(
+                    """
+                    UPDATE question_bank
+                    SET ai_answer = CASE
+                        WHEN ai_answer IS NULL OR TRIM(ai_answer) = ''
+                            THEN '[生成失败，请手动重试]'
+                        ELSE ai_answer
+                    END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (question_id,),
+                )
                 conn.commit()
         try:
             await run_db(_mark_failed)

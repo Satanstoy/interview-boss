@@ -43,6 +43,10 @@ export const fetchMySearchConfig = () => get(`${API}/profile/search`, { noCache:
 export const updateMySearchConfig = (settings) => put(`${API}/profile/search`, settings)
 export const deleteMySearchConfig = () => del(`${API}/profile/search`)
 export const testMySearchConfig = (query) => post(`${API}/profile/search/test`, { query })
+export const fetchPublicSearchConfig = () => get(`${API}/profile/search/public`, { noCache: true })
+export const updatePublicSearchConfig = (settings) => put(`${API}/profile/search/public`, settings)
+export const deletePublicSearchConfig = () => del(`${API}/profile/search/public`)
+export const testPublicSearchConfig = (query) => post(`${API}/profile/search/public/test`, { query })
 
 // ── Per-account MCP connection ──
 export const fetchMyMCPConfig = () => get(`${API}/profile/mcp`, { noCache: true })
