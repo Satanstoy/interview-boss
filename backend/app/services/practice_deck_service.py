@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from app.db.queries import build_bank_where_clause, get_dynamic_frequency_sql
 
@@ -357,6 +357,27 @@ def list_deck_questions(
             f"{from_clause}{_review_join('?')}{future_where}",
             params,
         ).fetchone()
+        forecast_rows = conn.execute(
+            f"SELECT date(uqr.next_review_at) AS review_date, COUNT(*) AS count "
+            f"{from_clause}{_review_join('?')}{future_where} "
+            "AND date(uqr.next_review_at) > date('now') "
+            "AND date(uqr.next_review_at) <= date('now', '+7 days') "
+            "GROUP BY date(uqr.next_review_at)",
+            params,
+        ).fetchall()
+        forecast_counts = {
+            row["review_date"]: int(row["count"] or 0) for row in forecast_rows
+        }
+        today = datetime.now(UTC).date()
+        review_forecast = [
+            {
+                "date": (today + timedelta(days=day_offset)).isoformat(),
+                "count": forecast_counts.get(
+                    (today + timedelta(days=day_offset)).isoformat(), 0
+                ),
+            }
+            for day_offset in range(1, 8)
+        ]
         deck = {
             **deck,
             "daily_capacity": capacity,
@@ -364,6 +385,7 @@ def list_deck_questions(
             "remaining_today": len(rows),
             "planned_today": completed_today + len(rows),
             "next_due_at": next_due_row["next_due_at"] if next_due_row else None,
+            "review_forecast": review_forecast,
         }
     else:
         rows = conn.execute(

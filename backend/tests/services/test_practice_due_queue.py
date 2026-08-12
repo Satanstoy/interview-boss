@@ -288,3 +288,5 @@ def test_due_queue_daily_budget_does_not_replenish_after_reload(test_db):
     assert deck["remaining_today"] == 1
     assert deck["planned_today"] == 2
     assert deck["next_due_at"] is not None
+    assert len(deck["review_forecast"]) == 7
+    assert sum(day["count"] for day in deck["review_forecast"]) == 1

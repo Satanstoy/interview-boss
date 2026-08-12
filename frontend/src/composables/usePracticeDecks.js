@@ -138,6 +138,7 @@ export function usePracticeDecks(filter = 'all') {
     const item = questions.value.find(question => question.id === questionId)
     const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
     const wasPracticed = Number(item?.review_count || 0) > 0
+    const previousNextReviewAt = item?.next_review_at || null
     const queueReviewIds = reviewedDueQueueIds
     const wasReviewedInQueue = queueReviewIds.has(questionId)
     try {
@@ -166,6 +167,7 @@ export function usePracticeDecks(filter = 'all') {
             reviewedDeck.next_due_at = nextState.next_review_at
           }
         }
+        adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
       }
       const deck = decks.value.find(candidate => candidate.key === reviewedDeckKey)
       if (deck) {
@@ -187,6 +189,27 @@ export function usePracticeDecks(filter = 'all') {
       : `${raw.replace(' ', 'T')}Z`)
     if (Number.isNaN(parsed.getTime())) return false
     return parsed.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+  }
+
+  function utcDateKey(value) {
+    if (!value) return ''
+    const raw = String(value)
+    const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw)
+      ? raw
+      : `${raw.replace(' ', 'T')}Z`)
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
+  }
+
+  function adjustReviewForecast(deck, previousDate, nextDate) {
+    if (!Array.isArray(deck?.review_forecast)) return
+    const previousKey = utcDateKey(previousDate)
+    const nextKey = utcDateKey(nextDate)
+    deck.review_forecast = deck.review_forecast.map(day => {
+      let count = Number(day.count || 0)
+      if (previousKey && day.date === previousKey) count = Math.max(0, count - 1)
+      if (nextKey && day.date === nextKey) count += 1
+      return { ...day, count }
+    })
   }
 
   async function createDeck(payload) {

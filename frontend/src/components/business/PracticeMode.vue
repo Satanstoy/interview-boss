@@ -76,6 +76,16 @@
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
           <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
         </div>
+        <div v-if="reviewForecast.length" data-testid="practice-review-forecast" class="mt-3 flex items-end gap-3 border-t border-border/60 pt-2" role="img" :aria-label="`未来 7 天预计复习 ${forecastTotal} 题`">
+          <div class="shrink-0 pb-3 text-[10px] leading-4 text-muted-foreground"><span class="block font-medium text-foreground">未来 7 天</span>预计 {{ forecastTotal }} 题</div>
+          <div class="grid min-w-0 flex-1 grid-cols-7 gap-1.5">
+            <div v-for="day in reviewForecast" :key="day.date" data-testid="practice-forecast-day" class="flex min-w-0 flex-col items-center gap-1" :title="`${day.date} · ${day.count} 题`">
+              <span class="text-[9px] tabular-nums text-muted-foreground">{{ day.count }}</span>
+              <span class="flex h-6 w-full items-end justify-center"><span class="w-full max-w-5 rounded-sm transition-[height]" :class="day.count ? 'bg-primary/75' : 'bg-muted'" :style="{ height: forecastBarHeight(day.count) }"></span></span>
+              <span class="text-[9px] text-muted-foreground">{{ forecastDayLabel(day.date) }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -517,6 +527,11 @@ const dailyProgress = computed(() => dailyPlanTotal.value
   ? Math.round(completedToday.value / dailyPlanTotal.value * 100)
   : 0)
 const sessionReviewCount = computed(() => Object.values(sessionRatings).reduce((sum, count) => sum + count, 0))
+const reviewForecast = computed(() => Array.isArray(props.selectedDeck?.review_forecast)
+  ? props.selectedDeck.review_forecast
+  : [])
+const forecastTotal = computed(() => reviewForecast.value.reduce((sum, day) => sum + Number(day.count || 0), 0))
+const forecastMaximum = computed(() => Math.max(1, ...reviewForecast.value.map(day => Number(day.count || 0))))
 const completionMessage = computed(() => props.selectedDeck?.next_due_at
   ? `下一轮复习将在${formatNextReview(props.selectedDeck.next_due_at)}到期，也可以切换到全部题继续刷。`
   : '今天的计划已完成，明天再来复习，或者切换到全部题继续刷。')
@@ -545,6 +560,16 @@ function isDueNow(nextReviewAt) {
     ? value
     : `${value.replace(' ', 'T')}Z`)
   return Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()
+}
+
+function forecastBarHeight(count) {
+  const value = Number(count || 0)
+  return value ? `${Math.max(4, Math.round(value / forecastMaximum.value * 24))}px` : '2px'
+}
+function forecastDayLabel(date) {
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return ['日', '一', '二', '三', '四', '五', '六'][parsed.getUTCDay()]
 }
 
 const difficultyClass = (difficulty) => {
