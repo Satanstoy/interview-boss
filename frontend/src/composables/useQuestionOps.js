@@ -8,7 +8,7 @@ import { runWithSearchFallback } from '@/composables/useSearchFallback.js'
 export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAnalytics) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
-  const { ensureModelReady } = useModelGuard()
+  const { ensureGlobalModelReady } = useModelGuard()
 
   const resolveQueuedJob = async (data) => {
     if (!data?.job_id) return data
@@ -162,7 +162,7 @@ export function useQuestionOps(masterBank, currentUser, fetchTableData, fetchAna
   }
 
   const generateAnswer = async (question) => {
-    if (!await ensureModelReady({ action: 'AI 生成答案' })) return
+    if (!await ensureGlobalModelReady({ action: 'AI 生成公共参考答案' })) return
     question._isLoadingAnswer = true
     try {
       const data = await runWithSearchFallback(

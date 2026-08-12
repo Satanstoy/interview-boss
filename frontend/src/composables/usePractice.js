@@ -64,8 +64,8 @@ export function resetQState(qState) {
 export async function generateAnswerForQuestion(question, qState) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
-  const { ensureModelReady } = useModelGuard()
-  if (!await ensureModelReady({ action: 'AI 生成答案' })) return
+  const { ensureGlobalModelReady } = useModelGuard()
+  if (!await ensureGlobalModelReady({ action: 'AI 生成公共参考答案' })) return
   qState._isLoadingAnswer = true
   try {
     const data = await runWithSearchFallback(

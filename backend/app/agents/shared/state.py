@@ -70,6 +70,8 @@ class BatchGenerateState(TypedDict, total=False):
     question_ids: list[int]
     user_id: int
     skip_search: bool
+    llm_scope: str
+    search_scope: str
     # 流程状态
     current_index: int
     current_question: str

@@ -56,6 +56,34 @@ def test_search_config_priority_is_personal_then_admin_public_only(test_db, monk
     assert get_user_search_config_status(normal_id)["source"] == "none"
 
 
+def test_public_search_scope_bypasses_admin_personal_provider(test_db):
+    """公共参考答案必须固定使用管理员公共搜索配置。"""
+    from app.core.config import get_user_search_config
+
+    admin_id = test_db.execute(
+        "SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1"
+    ).fetchone()[0]
+    test_db.execute(
+        "INSERT INTO user_profile (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
+        (
+            "search_provider", "exa",
+            "search_api_key", "public-key",
+            "search_base_url", "",
+            "search_enabled", "1",
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO user_search_config (user_id, provider, api_key, base_url, enabled) "
+        "VALUES (?, 'tavily', 'personal-key', '', 1)",
+        (admin_id,),
+    )
+    test_db.commit()
+
+    cfg = get_user_search_config(admin_id, scope="public")
+    assert cfg["source"] == "admin"
+    assert cfg["api_key"] == "public-key"
+
+
 @pytest.mark.asyncio
 async def test_tavily_results_are_normalized_and_deduplicated():
     from app.services.search_service import search_web

@@ -199,8 +199,24 @@ def get_public_search_config() -> dict | None:
     }
 
 
-def get_user_search_config_status(user_id: int | None) -> dict:
-    """Resolve search availability without exposing any API key."""
+def get_user_search_config_status(
+    user_id: int | None, scope: str = "user"
+) -> dict:
+    """Resolve search availability without exposing any API key.
+
+    Public answer generation uses the administrator-managed public search
+    configuration and must not be affected by a user's personal provider.
+    """
+    if scope == "public":
+        public = get_public_search_config()
+        return {
+            "configured": bool(public),
+            "source": "public" if public else "none",
+            "personal_configured": False,
+            "public_configured": bool(public),
+            "is_admin": True,
+        }
+
     if user_id is None:
         return {
             "configured": False,
@@ -255,10 +271,13 @@ def get_user_search_config_status(user_id: int | None) -> dict:
     }
 
 
-def get_user_search_config(user_id: int | None) -> dict | None:
-    """Resolve personal search first, then admin-only public search."""
+def get_user_search_config(user_id: int | None, scope: str = "user") -> dict | None:
+    """Resolve search config for an explicit task scope."""
     try:
         from app.db.connection import get_db_connection
+
+        if scope == "public":
+            return get_public_search_config()
 
         if user_id is None:
             return None

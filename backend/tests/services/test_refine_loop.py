@@ -36,6 +36,34 @@ async def test_refine_returns_draft_unchanged_when_critic_passes():
     assert mock_llm.call_args.kwargs.get("thinking") is True
 
 
+async def test_refine_passes_global_scope_to_all_quality_calls():
+    """公共答案质量审查和修订必须继续使用全局 LLM 配置。"""
+    with patch(
+        "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
+    ) as mock_llm:
+        mock_llm.side_effect = [
+            _critic_response(
+                "ISSUES", [{"problem": "需要更短", "evidence": "标准 2"}]
+            ),
+            "修订后的答案",
+            _critic_response("PASS"),
+        ]
+        result, _ = await refine_answer(
+            "prompt",
+            _DRAFT,
+            _SOURCES,
+            user_id=1014,
+            max_rounds=2,
+            llm_scope="global",
+        )
+
+    assert result == "修订后的答案"
+    assert all(
+        call.kwargs.get("llm_scope") == "global"
+        for call in mock_llm.call_args_list
+    )
+
+
 async def test_refine_revises_once_when_issues_and_then_passes():
     """critic 报问题 → revise 一次 → 第二轮 critic PASS → 返回修订稿"""
     revised = "修订后的答案"
@@ -193,4 +221,12 @@ async def test_generate_master_answer_uses_refine_loop():
         result = await generate_master_answer(10, user)
 
     assert result == {"status": "queued", "job_id": 10}
-    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1)
+    mock_queue.assert_awaited_once_with(
+        "generate_answer",
+        10,
+        mock_question["question"],
+        1,
+        llm_scope="global",
+        search_scope="public",
+        skip_search=True,
+    )

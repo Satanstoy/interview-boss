@@ -81,14 +81,20 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
                 question,
                 user_id=state.get("user_id"),
                 skip_search=bool(state.get("skip_search", False)),
+                search_scope=state.get("search_scope", "user"),
             )
-            answer = await _call_llm_with_retry(prompt, user_id=state.get("user_id"))
+            answer = await _call_llm_with_retry(
+                prompt,
+                user_id=state.get("user_id"),
+                llm_scope=state.get("llm_scope", "user"),
+            )
             answer, _ = await refine_answer(
                 prompt,
                 answer,
                 search_sources,
                 user_id=state.get("user_id"),
                 max_rounds=2,
+                llm_scope=state.get("llm_scope", "user"),
             )
             elapsed = time.monotonic() - start
             quality = evaluate_answer_quality(answer, question)
@@ -112,7 +118,19 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
 
             def _mark_failed():
                 conn = get_db_connection()
-                conn.execute("UPDATE question_bank SET ai_answer = '[生成失败，请手动重试]', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (qid,))
+                conn.execute(
+                    """
+                    UPDATE question_bank
+                    SET ai_answer = CASE
+                        WHEN ai_answer IS NULL OR TRIM(ai_answer) = ''
+                            THEN '[生成失败，请手动重试]'
+                        ELSE ai_answer
+                    END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (qid,),
+                )
                 conn.commit()
             try:
                 await run_db(_mark_failed)

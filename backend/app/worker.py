@@ -1086,10 +1086,21 @@ async def submit_import_task(ctx, job_id: int):
         if answer_tasks and uid is not None:
             from app.services.job_lifecycle import create_answer_generation_jobs
 
+            public_answer = bool(
+                payload.get("is_admin") and payload.get("target") == "public"
+            )
+            answer_llm_scope = "global" if public_answer else "user"
+            answer_search_scope = "public" if public_answer else "user"
+
             def _create_answer_jobs():
                 with get_db_connection() as conn:
                     ids = create_answer_generation_jobs(
-                        conn, job_id, answer_tasks, uid
+                        conn,
+                        job_id,
+                        answer_tasks,
+                        uid,
+                        llm_scope=answer_llm_scope,
+                        search_scope=answer_search_scope,
                     )
                     conn.commit()
                     return ids
@@ -1222,6 +1233,8 @@ async def generate_answer_task(ctx, job_id: int):
             payload.get("user_id"),
             raise_on_error=True,
             skip_search=bool(payload.get("skip_search", False)),
+            llm_scope=payload.get("llm_scope", "user"),
+            search_scope=payload.get("search_scope", "user"),
         )
         _finish(
             json.dumps(

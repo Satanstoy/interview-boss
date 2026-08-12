@@ -157,7 +157,15 @@ async def submit_data_stream_v2(
             if answer_tasks and uid is not None:
                 try:
                     parent_id, child_ids = await persist_answer_generation_jobs(
-                        answer_tasks, uid, source="legacy-submit-answer"
+                        answer_tasks,
+                        uid,
+                        source="legacy-submit-answer",
+                        llm_scope="global"
+                        if user.get("is_admin") and bank_target == "public"
+                        else "user",
+                        search_scope="public"
+                        if user.get("is_admin") and bank_target == "public"
+                        else "user",
                     )
                     logger.info(
                         "旧上传路径已持久化答案任务: parent=%s children=%s",

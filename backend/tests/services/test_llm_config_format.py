@@ -30,6 +30,43 @@ def test_get_user_llm_config_returns_new_fields(test_db):
     assert cfg["thinking"] == 0
 
 
+def test_global_llm_scope_ignores_admin_personal_config(monkeypatch):
+    """管理员公共答案必须绕过管理员账号的 user_llm_config。"""
+    from app.services import llm as llm_service
+
+    global_cfg = {
+        "api_key": "global-key",
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "model": "mimo-v2.5-pro",
+        "timeout": 120,
+    }
+    personal_cfg = {
+        "api_key": "personal-key",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "timeout": 120,
+    }
+    sentinel = object()
+    monkeypatch.setattr(
+        "app.core.config._get_global_llm_config", lambda: global_cfg
+    )
+    monkeypatch.setattr(
+        "app.core.config.get_user_llm_config", lambda _user_id: personal_cfg
+    )
+    monkeypatch.setattr(llm_service, "_make_client", lambda *args, **kwargs: sentinel)
+
+    client, model, timeout, base_url, _provider = llm_service.get_llm_client_for_user(
+        1014, llm_scope="global"
+    )
+
+    assert client is sentinel
+    assert (model, timeout, base_url) == (
+        "mimo-v2.5-pro",
+        120,
+        "https://token-plan-cn.xiaomimimo.com/v1",
+    )
+
+
 async def test_update_llm_config_rejects_unsupported_api_format(monkeypatch):
     """mimo OpenAI 端点选 anthropic 接口 → 400 报错"""
     from app.routers.profile_pkg.llm import update_my_llm_config

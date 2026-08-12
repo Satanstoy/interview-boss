@@ -124,6 +124,28 @@ def test_answer_jobs_are_idempotent_per_import_question(test_db):
     assert "什么是幂等性？" in payload
 
 
+def test_answer_jobs_persist_explicit_llm_and_search_scopes(test_db):
+    """公共答案任务重启后仍保留管理员全局配置作用域。"""
+    from app.services.job_lifecycle import create_answer_generation_jobs
+
+    parent_id = _new_job(test_db, "public-answer-request")
+    ids = create_answer_generation_jobs(
+        test_db,
+        parent_id,
+        [(201, "什么是事件循环？")],
+        user_id=None,
+        llm_scope="global",
+        search_scope="public",
+    )
+    test_db.commit()
+
+    payload = test_db.execute(
+        "SELECT payload FROM job_payloads WHERE job_id = ?", (ids[0],)
+    ).fetchone()[0]
+    assert '"llm_scope": "global"' in payload
+    assert '"search_scope": "public"' in payload
+
+
 def test_interview_reprocess_job_is_idempotent_while_active(test_db):
     from app.services.job_lifecycle import create_interview_reprocess_job
 

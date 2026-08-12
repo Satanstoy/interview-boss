@@ -7,7 +7,7 @@
  */
 import { ref } from 'vue'
 import router from '@/router/index.js'
-import { fetchLLMStatus } from '@/services/profileApi.js'
+import { fetchLLMStatus, testGlobalLLM } from '@/services/profileApi.js'
 
 const CACHE_TTL = 60_000
 
@@ -41,6 +41,25 @@ async function loadStatus({ force = false } = {}) {
   return statusCache.value
 }
 
+async function loadGlobalStatus() {
+  try {
+    const data = await testGlobalLLM()
+    return {
+      configured: !!data?.configured,
+      connected: !!data?.connected,
+      error: data?.error || null,
+      model: data?.model || null,
+    }
+  } catch (e) {
+    return {
+      configured: true,
+      connected: false,
+      error: `无法获取全局模型状态：${e.message}`,
+      model: null,
+    }
+  }
+}
+
 function openDialog(title, message) {
   dialogState.value = { show: true, title, message }
   return new Promise((resolve) => {
@@ -67,6 +86,27 @@ export function useModelGuard() {
       await openDialog(
         '尚未配置 AI 模型',
         `${prefix}需要使用 AI 模型，请先配置模型参数（API Key / Base URL / 模型名称）。`,
+      )
+    }
+    return false
+  }
+
+  /** 管理员专属的公共答案/题库操作：只探测管理员全局 LLM。 */
+  const ensureGlobalModelReady = async ({ action = '' } = {}) => {
+    if (isPreviewRoute()) return true
+    const status = await loadGlobalStatus()
+    if (status.configured && status.connected) return true
+
+    const prefix = action ? `「${action}」` : '当前操作'
+    if (status.configured) {
+      await openDialog(
+        '全局模型服务未接通',
+        `${prefix}需要使用管理员全局模型，但当前配置的模型暂时无法连接：\n${status.error || '未知错误'}\n\n请检查管理员设置中的全局 LLM 配置后重试。`,
+      )
+    } else {
+      await openDialog(
+        '尚未配置全局模型',
+        `${prefix}需要使用管理员全局模型，请先在管理员设置中配置全局 LLM（API Key / Base URL / 模型名称）。`,
       )
     }
     return false
@@ -108,6 +148,7 @@ export function useModelGuard() {
     dialogState,
     testing,
     ensureModelReady,
+    ensureGlobalModelReady,
     invalidateModelStatus,
     testModelConnection,
     handleDialogClose,

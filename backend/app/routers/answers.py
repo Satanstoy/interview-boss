@@ -136,11 +136,15 @@ async def _dispatch_persisted_answer_job(job_id: int) -> bool:
         return False
 
 
-async def _allow_no_search_or_raise(user: dict, allow_no_search: bool) -> bool:
+async def _allow_no_search_or_raise(
+    user: dict, allow_no_search: bool, search_scope: str = "user"
+) -> bool:
     """Require an explicit confirmation before starting a model-only answer job."""
     from app.core.config import get_user_search_config_status
 
-    status = await run_db(lambda: get_user_search_config_status(user["id"]))
+    status = await run_db(
+        lambda: get_user_search_config_status(user["id"], scope=search_scope)
+    )
     if status.get("configured"):
         return False
     if allow_no_search:
@@ -227,13 +231,17 @@ async def generate_master_answer(
     if is_admin and not force and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
         return {"status": "success", "answer": row["ai_answer"]}
 
-    skip_search = await _allow_no_search_or_raise(user, allow_no_search)
+    skip_search = await _allow_no_search_or_raise(
+        user, allow_no_search, search_scope="public"
+    )
 
     return await _queue_answer_job(
         "generate_answer",
         question_id,
         row["question"],
         user["id"],
+        llm_scope="global",
+        search_scope="public",
         **({"skip_search": True} if skip_search else {}),
     )
 
@@ -324,7 +332,9 @@ async def batch_generate_answers(
             headers={"X-Accel-Buffering": "no"},
         )
 
-    skip_search = await _allow_no_search_or_raise(user, req.allow_no_search)
+    skip_search = await _allow_no_search_or_raise(
+        user, req.allow_no_search, search_scope="public"
+    )
 
     def _create_batch_jobs():
         from app.services.job_lifecycle import (
@@ -351,6 +361,8 @@ async def batch_generate_answers(
                 questions,
                 user["id"],
                 skip_search=skip_search,
+                llm_scope="global",
+                search_scope="public",
             )
             conn.commit()
             return parent_job_id, child_job_ids

@@ -125,14 +125,16 @@ def _api_format_override() -> str:
     return os.environ.get("LLM_API_FORMAT", "auto").strip().lower()
 
 
-def resolve_api_format(base_url: str = None, user_id: int = None) -> str:
+def resolve_api_format(
+    base_url: str = None, user_id: int = None, llm_scope: str = "user"
+) -> str:
     """解析应使用的接口格式。
 
     优先级：用户配置的 api_format（非 auto）→ LLM_API_FORMAT（应急开关）→
     端点能力（anthropic 端点用 anthropic；responses-only 端点用 responses；
     其余默认 chat）。
     """
-    if user_id is not None:
+    if user_id is not None and llm_scope != "global":
         try:
             from app.core.config import get_user_llm_config
 
@@ -227,7 +229,7 @@ _user_client_cache: dict[
 ] = {}  # user_id -> (api_key, base_url, timeout, client, provider)
 
 
-def get_llm_client_for_user(user_id: int) -> tuple:
+def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     """获取用户的 LLM 客户端和模型名。
 
     Returns:
@@ -239,7 +241,12 @@ def get_llm_client_for_user(user_id: int) -> tuple:
     from app.core.config import get_user_llm_config
     from fastapi import HTTPException
 
-    cfg = get_user_llm_config(user_id)
+    if llm_scope == "global":
+        from app.core.config import _get_global_llm_config
+
+        cfg = _get_global_llm_config()
+    else:
+        cfg = get_user_llm_config(user_id)
     if not cfg:
         raise HTTPException(
             status_code=400, detail="请先在设置中配置 LLM 密钥才能使用 AI 功能"
@@ -250,6 +257,12 @@ def get_llm_client_for_user(user_id: int) -> tuple:
     model = cfg["model"]
     timeout = cfg["timeout"]
     provider = _detect_provider(base_url)
+
+    # 全局配置从 user_profile 热加载，直接按当前解析结果建 client，避免
+    # 复用某个管理员账号的 user_llm_config 或陈旧的用户 client。
+    if llm_scope == "global":
+        global_client = _make_client(api_key, base_url, timeout, provider)
+        return global_client, model, timeout, base_url, provider
 
     # 检查缓存（配置未变则复用 client）
     cached = _user_client_cache.get(user_id)
@@ -433,10 +446,10 @@ async def check_llm_status(user_id: int, force_probe: bool = False) -> dict:
     }
 
 
-def _resolve_client_and_model(user_id: int = None):
+def _resolve_client_and_model(user_id: int = None, llm_scope: str = "user"):
     """解析 LLM 客户端和模型。user_id 有值时使用用户配置，否则使用全局配置。"""
-    if user_id is not None:
-        return get_llm_client_for_user(user_id)
+    if user_id is not None or llm_scope == "global":
+        return get_llm_client_for_user(user_id, llm_scope=llm_scope)
     from app.core.config import LLM_BASE_URL
 
     return client, LLM_MODEL, LLM_TIMEOUT, LLM_BASE_URL, _detect_provider(LLM_BASE_URL)
@@ -1271,6 +1284,7 @@ async def _call_llm_with_retry(
     user_id: int = None,
     model: str = None,
     thinking: bool = None,
+    llm_scope: str = "user",
 ) -> str:
     """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）
 
@@ -1279,9 +1293,16 @@ async def _call_llm_with_retry(
     thinking: mimo 端点默认关闭深度思考（显著提速，temperature 才真正生效）；
               传 True 保留思考；None（默认）时按用户配置的 llm_thinking 决定。
     """
-    resolved_client, resolved_model, timeout, base_url, provider = (
-        _resolve_client_and_model(user_id)
-    )
+    if llm_scope == "global":
+        resolved_client, resolved_model, timeout, base_url, provider = (
+            _resolve_client_and_model(user_id, llm_scope="global")
+        )
+    else:
+        # Preserve the historical one-argument resolver contract for all
+        # ordinary user-scoped callers and their test doubles.
+        resolved_client, resolved_model, timeout, base_url, provider = (
+            _resolve_client_and_model(user_id)
+        )
     if model:
         resolved_model = model
 
@@ -1297,14 +1318,17 @@ async def _call_llm_with_retry(
 
     if thinking is None:
         try:
-            from app.core.config import get_user_llm_config
+            if llm_scope == "global":
+                thinking = False
+            else:
+                from app.core.config import get_user_llm_config
 
-            user_cfg = get_user_llm_config(user_id)
-            thinking = bool((user_cfg or {}).get("thinking"))
+                user_cfg = get_user_llm_config(user_id)
+                thinking = bool((user_cfg or {}).get("thinking"))
         except Exception:
             thinking = False
 
-    if resolve_api_format(base_url, user_id) == "responses":
+    if resolve_api_format(base_url, user_id, llm_scope=llm_scope) == "responses":
         caps = get_provider_capabilities(base_url)
         if response_format and _should_use_response_format(base_url):
             return await _call_responses(

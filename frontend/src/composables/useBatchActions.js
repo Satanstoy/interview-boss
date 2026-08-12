@@ -8,7 +8,7 @@ import { runWithSearchFallback } from '@/composables/useSearchFallback.js'
 export function useBatchActions({ currentUser, jdSelection, interviewSelection, masterSelection, fetchTableData, fetchAnalytics }) {
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
-  const { ensureModelReady } = useModelGuard()
+  const { ensureGlobalModelReady } = useModelGuard()
 
   const jdBatchActions = computed(() => {
     if (!currentUser.value?.is_admin) return []
@@ -106,7 +106,7 @@ export function useBatchActions({ currentUser, jdSelection, interviewSelection, 
       const ids = [...masterSelection.selectedIds.value]
       const actionLabel = force ? '批量重新生成答案' : '批量生成答案'
       if (!await showConfirm(`确定要${force ? '重新生成' : '为'}选中的 ${ids.length} 道题目${force ? '的答案' : '生成答案'}？`)) return
-      if (!await ensureModelReady({ action: actionLabel })) return
+      if (!await ensureGlobalModelReady({ action: actionLabel })) return
       try {
         const result = await runWithSearchFallback(
           (allowNoSearch) => api.batchGenerateAnswers(ids, (event) => {

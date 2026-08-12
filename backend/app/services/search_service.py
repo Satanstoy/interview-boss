@@ -130,6 +130,7 @@ async def search_web(
     user_id: int | None = None,
     *,
     config: dict | None = None,
+    search_scope: str = "user",
     max_results: int = 5,
     timeout: float = 12,
 ) -> dict:
@@ -139,7 +140,7 @@ async def search_web(
     by this service. Search failures are surfaced to callers so answer
     generation can explicitly fall back to the model-only prompt.
     """
-    cfg = config or get_user_search_config(user_id)
+    cfg = config or get_user_search_config(user_id, scope=search_scope)
     if not cfg or cfg.get("provider") in (None, "none") or not cfg.get("api_key"):
         return {"provider": "none", "results": []}
 

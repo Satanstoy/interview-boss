@@ -58,7 +58,10 @@ async def test_generate_answer_admin_writes_answer_sources():
         result = await generate_master_answer(10, user, allow_no_search=True)
 
     assert result == {"status": "queued", "job_id": 7}
-    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1, skip_search=True)
+    mock_queue.assert_awaited_once_with(
+        "generate_answer", 10, mock_question["question"], 1,
+        llm_scope="global", search_scope="public", skip_search=True
+    )
 
 
 @pytest.mark.asyncio
@@ -97,7 +100,10 @@ async def test_generate_answer_force_requeues_existing_answer():
         result = await generate_master_answer(10, user, force=True, allow_no_search=True)
 
     assert result == {"status": "queued", "job_id": 9}
-    mock_queue.assert_awaited_once_with("generate_answer", 10, mock_question["question"], 1, skip_search=True)
+    mock_queue.assert_awaited_once_with(
+        "generate_answer", 10, mock_question["question"], 1,
+        llm_scope="global", search_scope="public", skip_search=True
+    )
 
 
 @pytest.mark.asyncio

@@ -57,7 +57,10 @@ def _append_sources(prompt: str, results: list[dict]) -> str:
 
 
 async def prepare_answer_prompt(
-    question: str, user_id: int | None = None, skip_search: bool = False
+    question: str,
+    user_id: int | None = None,
+    skip_search: bool = False,
+    search_scope: str = "user",
 ) -> tuple[str, list[dict]]:
     """Return an answer prompt and the sources used to enrich it.
 
@@ -73,6 +76,7 @@ async def prepare_answer_prompt(
         data = await search_web(
             f"面试题：{question}\n请优先查找官方文档、标准、权威技术文章和可靠实践。",
             user_id=user_id,
+            search_scope=search_scope,
             max_results=5,
         )
         results = data.get("results", [])
@@ -92,6 +96,7 @@ async def prepare_recitation_prompt(
     resume_text: str | None = None,
     user_id: int | None = None,
     skip_search: bool = False,
+    search_scope: str = "user",
 ) -> tuple[str, list[dict]]:
     """构建个人背诵稿提示词：公共参考答案为基座 + 用户背景 + 联网搜索增强。
 
@@ -122,6 +127,7 @@ async def prepare_recitation_prompt(
         data = await search_web(
             f"{query}\n请优先查找官方文档、标准、权威技术文章和可靠实践。",
             user_id=user_id,
+            search_scope=search_scope,
             max_results=5,
         )
         results = data.get("results", [])
@@ -242,7 +248,11 @@ def _parse_critique(raw: str) -> dict:
 
 
 async def _critic_answer(
-    question: str, draft: str, sources: list[dict], user_id: int | None
+    question: str,
+    draft: str,
+    sources: list[dict],
+    user_id: int | None,
+    llm_scope: str = "user",
 ) -> dict:
     """调用 critic：返回 {"verdict", "issues"}；LLM 异常返回 PASS 语义
 
@@ -255,6 +265,7 @@ async def _critic_answer(
             system_msg=_CRITIC_SYSTEM,
             response_format={"type": "json_object"},
             user_id=user_id,
+            llm_scope=llm_scope,
             thinking=True,
         )
         return _parse_critique(raw)
@@ -264,7 +275,11 @@ async def _critic_answer(
 
 
 async def _revise_answer(
-    question: str, draft: str, issues: list[dict], user_id: int | None
+    question: str,
+    draft: str,
+    issues: list[dict],
+    user_id: int | None,
+    llm_scope: str = "user",
 ) -> str:
     """调用 revise 重写；异常返回原草稿"""
     try:
@@ -272,6 +287,7 @@ async def _revise_answer(
             _build_revise_prompt(question, draft, issues),
             system_msg="你是一个后端和算法面试指导专家。",
             user_id=user_id,
+            llm_scope=llm_scope,
         )
         return revised or draft
     except Exception:
@@ -285,6 +301,7 @@ async def refine_answer(
     sources: list[dict],
     user_id: int | None = None,
     max_rounds: int = 2,
+    llm_scope: str = "user",
 ) -> tuple[str, list[dict]]:
     """生成后质量 loop：critic（对照参考资料 + 硬性标准）→ 必要时 revise。
 
@@ -302,7 +319,9 @@ async def refine_answer(
     current = draft
     all_issues: list[dict] = []
     for _round in range(max_rounds):
-        critique = await _critic_answer(question, current, sources, user_id)
+        critique = await _critic_answer(
+            question, current, sources, user_id, llm_scope=llm_scope
+        )
         issues = critique.get("issues") or []
         if critique.get("verdict", "PASS") == "PASS" or not issues:
             # 确定性字数校验：超过上限视为 ISSUES（不依赖 LLM 估算）
@@ -316,7 +335,9 @@ async def refine_answer(
             else:
                 break
         all_issues = issues
-        current = await _revise_answer(question, current, issues, user_id)
+        current = await _revise_answer(
+            question, current, issues, user_id, llm_scope=llm_scope
+        )
     return current, all_issues
 
 

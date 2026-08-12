@@ -165,6 +165,8 @@ def create_answer_generation_jobs(
     answer_tasks: list[tuple[int, str]],
     user_id: int | None,
     skip_search: bool = False,
+    llm_scope: str = "user",
+    search_scope: str = "user",
 ) -> list[int]:
     """Persist one idempotent answer job per newly imported question."""
     job_ids: list[int] = []
@@ -197,6 +199,8 @@ def create_answer_generation_jobs(
                         "user_id": user_id,
                         "parent_job_id": parent_job_id,
                         "skip_search": skip_search,
+                        "llm_scope": llm_scope,
+                        "search_scope": search_scope,
                     },
                     ensure_ascii=False,
                 ),

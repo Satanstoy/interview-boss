@@ -24,6 +24,8 @@ async def persist_answer_generation_jobs(
     user_id: int,
     source: str = "submit",
     skip_search: bool = False,
+    llm_scope: str = "user",
+    search_scope: str = "user",
 ) -> tuple[int, list[int]]:
     """Persist answer child jobs for legacy and current upload paths."""
     from app.services.job_lifecycle import create_answer_generation_jobs
@@ -43,6 +45,8 @@ async def persist_answer_generation_jobs(
                 answer_tasks,
                 user_id,
                 skip_search=skip_search,
+                llm_scope=llm_scope,
+                search_scope=search_scope,
             )
             conn.commit()
             return parent_id, child_ids
@@ -62,17 +66,29 @@ async def background_generate_answer(
     user_id: int = None,
     raise_on_error: bool = False,
     skip_search: bool = False,
+    llm_scope: str = "user",
+    search_scope: str = "user",
 ):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
     from app.services.llm import _call_llm_with_retry
     try:
         prompt, search_sources = await prepare_answer_prompt(
-            question_text, user_id=user_id, skip_search=skip_search
+            question_text,
+            user_id=user_id,
+            skip_search=skip_search,
+            search_scope=search_scope,
         )
-        answer = await _call_llm_with_retry(prompt, user_id=user_id)
+        answer = await _call_llm_with_retry(
+            prompt, user_id=user_id, llm_scope=llm_scope
+        )
         answer, _ = await refine_answer(
-            prompt, answer, search_sources, user_id=user_id, max_rounds=2
+            prompt,
+            answer,
+            search_sources,
+            user_id=user_id,
+            max_rounds=2,
+            llm_scope=llm_scope,
         )
 
         def _update():
