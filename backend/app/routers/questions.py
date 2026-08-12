@@ -29,6 +29,24 @@ def _parse_answer_sources(value):
         return None
 
 
+def _compact_answer_sources(value):
+    """保留来源计数和可点击链接，避免 compact 列表携带长摘要。"""
+    sources = _parse_answer_sources(value) if not isinstance(value, list) else value
+    if not sources:
+        return None
+    compact = []
+    for source in sources:
+        if not isinstance(source, dict) or not source.get("url"):
+            continue
+        compact.append(
+            {
+                "title": source.get("title") or source["url"],
+                "url": source["url"],
+            }
+        )
+    return compact or None
+
+
 def _build_bank_where_clause(
     user: dict,
     table_alias: str = "qb",
@@ -147,7 +165,8 @@ async def get_master_bank(
     for r in rows:
         d = dict(r)
         d["frequency"] = d.pop("dyn_frequency", d.get("frequency", 0))
-        d["answer_sources"] = _parse_answer_sources(d.get("answer_sources"))
+        parsed_answer_sources = _parse_answer_sources(d.get("answer_sources"))
+        d["answer_sources"] = parsed_answer_sources
         norm = normalized_map.get(d["id"], {})
         d["sources"] = norm.get("sources", [])
         d["original_questions"] = norm.get("original_questions", [])
@@ -168,7 +187,10 @@ async def get_master_bank(
         if compact:
             d["ai_answer"] = None
             d["user_answer"] = ""
-            d["answer_sources"] = None
+            # The compact list omits the full answer, but source links are
+            # visible metadata for the answer card. Keep only title and URL;
+            # the detail endpoint still returns the full snippets.
+            d["answer_sources"] = _compact_answer_sources(parsed_answer_sources)
             # Replace original_question_sources with a flat source_labels map
             source_labels = {}
             for item in d.get("original_question_sources", []):

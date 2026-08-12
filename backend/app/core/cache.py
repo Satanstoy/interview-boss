@@ -18,7 +18,7 @@ from app.core.config import (
 logger = logging.getLogger("interview-boss")
 
 _cache_client: Redis | None = None
-_MASTER_BANK_PREFIX = "interview-boss:cache:v1:master-bank"
+_MASTER_BANK_PREFIX = "interview-boss:cache:v2:master-bank"
 _MASTER_BANK_EPOCH_KEY = f"{_MASTER_BANK_PREFIX}:epoch"
 
 

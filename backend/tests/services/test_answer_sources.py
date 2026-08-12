@@ -174,7 +174,8 @@ async def test_agent_generate_answer_node_writes_answer_sources(test_db):
     row = test_db.execute(
         "SELECT ai_answer, answer_sources FROM question_bank WHERE id = 20"
     ).fetchone()
-    assert row["ai_answer"] == "Redis 支持 RDB 和 AOF 两种持久化"
+    assert row["ai_answer"].startswith("Redis 支持 RDB 和 AOF 两种持久化")
+    assert "[Redis 官方文档](https://redis.io/docs)" in row["ai_answer"]
     assert json.loads(row["answer_sources"]) == sources
 
 
@@ -456,6 +457,66 @@ async def test_master_bank_list_returns_answer_sources_array():
     item = resp["items"][0]
     assert item["answer_sources"] == [
         {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_master_bank_compact_list_keeps_answer_source_links():
+    """compact 列表也必须带来源链接，供题卡直接显示来源数量。"""
+    from app.routers.questions import get_master_bank
+
+    row = {
+        "id": 12,
+        "question": "Redis 为什么快？",
+        "cat1": "后端",
+        "cat2": "缓存",
+        "tags": "",
+        "difficulty": "L2",
+        "ai_answer": "完整答案",
+        "sources": "[]",
+        "original_questions": "[]",
+        "original_question_sources": "[]",
+        "is_starred": 0,
+        "user_answer": "",
+        "review_state": "new",
+        "proficiency": 0,
+        "review_count": 0,
+        "last_rating": None,
+        "last_reviewed_at": None,
+        "next_review_at": None,
+        "interval_days": 0,
+        "ease_factor": 2.3,
+        "owner_id": None,
+        "status": "approved",
+        "job_position": "",
+        "answer_sources": json.dumps(
+            [
+                {
+                    "title": "Redis 官方文档",
+                    "url": "https://redis.io/docs",
+                    "snippet": "长摘要不应进入 compact 列表",
+                }
+            ]
+        ),
+    }
+    filter_counts = {
+        "overall_total": 1,
+        "category_counts": [],
+        "popular_tags": [],
+        "filtered_tag_counts": [],
+    }
+    user = {"id": 1, "is_admin": True}
+
+    with patch("app.routers.questions.run_db", new_callable=AsyncMock) as mock_run_db:
+        mock_run_db.side_effect = [(1, [row]), {}, filter_counts]
+        resp = await get_master_bank(
+            page=1, page_size=50, compact=True, filter="all", user=user
+        )
+
+    item = resp["items"][0]
+    assert item["ai_answer"] is None
+    assert item["answer_sources"] == [
+        {"title": "Redis 官方文档", "url": "https://redis.io/docs"}
     ]
 
 

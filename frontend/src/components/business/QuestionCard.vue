@@ -155,12 +155,11 @@
             <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content prose prose-sm dark:prose-invert max-w-none" v-html="cachedMarkdown"></div>
 
             <!-- 参考来源（答案生成时的联网搜索证据） -->
-            <div v-if="answerSources.length" class="border-t border-border/50 mt-3">
+            <div v-if="answerSources.length" data-testid="answer-sources" class="border-t border-border/50 mt-3">
               <button @click="question._showAnswerSources = !question._showAnswerSources"
                 class="w-full px-4 py-2 flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/25 transition-colors">
                 <svg class="size-3 transform transition-transform duration-200" :class="question._showAnswerSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                <span>参考来源</span>
-                <span class="text-label text-muted-foreground ml-0.5">{{ answerSources.length }}条</span>
+                <span>参考来源（{{ answerSources.length }}）</span>
               </button>
               <div v-if="question._showAnswerSources" class="px-4 pb-4 flex flex-col gap-1.5">
                 <div v-for="(src, idx) in answerSources" :key="src.url || idx"
@@ -283,19 +282,27 @@ const answerSources = computed(() => {
 const fullAnswer = ref(null)
 const isLoadingDetail = ref(false)
 const detailError = ref(false)
+const answerDetailLoaded = ref(false)
 
 async function loadFullAnswer() {
-  if (fullAnswer.value !== null) return
-  if (props.question.ai_answer) {
+  if (answerDetailLoaded.value || isLoadingDetail.value) return
+  const hasAnswer = Boolean(props.question.ai_answer)
+  const hasAnswerSources = Array.isArray(props.question.answer_sources)
+  if (hasAnswer && hasAnswerSources) {
     fullAnswer.value = props.question.ai_answer
+    answerDetailLoaded.value = true
     return
   }
+  // A full answer without answer_sources is an incomplete read model. Fetch
+  // detail so the reference-source section is not silently omitted.
+  if (hasAnswer) fullAnswer.value = props.question.ai_answer
   if (!props.question.has_reference_answer && !props.question.id) return
   isLoadingDetail.value = true
   try {
     const detail = await get(`/api/master-bank/${props.question.id}/detail`)
     fullAnswer.value = detail.ai_answer || ''
     if (Array.isArray(detail.answer_sources)) props.question.answer_sources = detail.answer_sources
+    answerDetailLoaded.value = true
     // Emit to parent so it updates the question object too
     emit('update-answer', {
       id: props.question.id,

@@ -141,7 +141,7 @@
               <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
               <Button v-if="isAdmin" size="sm" class="mt-4 gap-1.5" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><Sparkles class="size-4" />AI 生成答案</Button>
             </div>
-            <div v-if="referenceAnswerSources.length" class="mt-3 rounded-lg border border-border/70 bg-card">
+            <div v-if="referenceAnswerSources.length" data-testid="reference-answer-sources" class="mt-3 rounded-lg border border-border/70 bg-card">
               <button
                 type="button"
                 class="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"

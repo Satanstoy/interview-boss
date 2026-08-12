@@ -3,7 +3,12 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.answer_enrichment import _extract_question, refine_answer
+from app.services.answer_enrichment import (
+    _build_revise_prompt,
+    _extract_question,
+    _ensure_inline_source_citation,
+    refine_answer,
+)
 
 _SOURCES = [
     {
@@ -20,6 +25,29 @@ def _critic_response(verdict, issues=None):
     return json.dumps({"verdict": verdict, "issues": issues or []}, ensure_ascii=False)
 
 
+def test_revise_prompt_carries_source_urls_for_inline_citations():
+    prompt = _build_revise_prompt(
+        "Redis 为什么快？",
+        _DRAFT,
+        [{"problem": "缺少正文引用", "evidence": "质量标准第 8 条"}],
+        _SOURCES,
+    )
+    assert "https://redis.io/docs" in prompt
+    assert "URL 必须逐字取自上面的资料" in prompt
+
+
+def test_inline_source_citation_fallback_links_first_prose_line():
+    answer = "### 一句话记忆\nRedis 把热点数据放在内存里，读写路径更短。\n\n### 易错点\n不要把持久化当成缓存。"
+    result = _ensure_inline_source_citation(answer, _SOURCES)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
+    assert result.index("Redis 官方文档") < result.index("### 易错点")
+
+
+def test_inline_source_citation_fallback_does_not_duplicate_valid_link():
+    answer = "Redis 是内存数据结构存储系统。[文档](https://redis.io/docs)"
+    assert _ensure_inline_source_citation(answer, _SOURCES) == answer
+
+
 async def test_refine_returns_draft_unchanged_when_critic_passes():
     """critic 输出 PASS 时直接返回草稿，revise 不被调用"""
     with patch(
@@ -29,7 +57,8 @@ async def test_refine_returns_draft_unchanged_when_critic_passes():
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == _DRAFT
+    assert result.startswith(_DRAFT)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert issues == []
     assert mock_llm.call_count == 1
     # critic 必须开启深度思考（关思考会让审查变宽松，漏报问题）
@@ -57,7 +86,8 @@ async def test_refine_passes_global_scope_to_all_quality_calls():
             llm_scope="global",
         )
 
-    assert result == "修订后的答案"
+    assert result.startswith("修订后的答案")
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert all(
         call.kwargs.get("llm_scope") == "global"
         for call in mock_llm.call_args_list
@@ -80,7 +110,8 @@ async def test_refine_revises_once_when_issues_and_then_passes():
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == revised
+    assert result.startswith(revised)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert issues[0]["problem"] == "事实不准确"
     assert mock_llm.call_count == 3
 
@@ -101,7 +132,8 @@ async def test_refine_stops_at_max_rounds_even_if_issues_remain():
         result, _ = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == revised_b
+    assert result.startswith(revised_b)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert mock_llm.call_count == 4
 
 
@@ -114,7 +146,8 @@ async def test_refine_returns_draft_when_critic_json_invalid():
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == _DRAFT
+    assert result.startswith(_DRAFT)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert issues == []
     assert mock_llm.call_count == 1
 
@@ -128,7 +161,8 @@ async def test_refine_returns_draft_when_llm_raises():
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == _DRAFT
+    assert result.startswith(_DRAFT)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert issues == []
 
 
@@ -153,7 +187,8 @@ async def test_refine_treats_unknown_verdict_as_pass():
         result, issues = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == _DRAFT
+    assert result.startswith(_DRAFT)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert issues == []
     assert mock_llm.call_count == 1
 
@@ -173,7 +208,8 @@ async def test_refine_forces_revision_when_draft_too_long():
         result, issues = await refine_answer(
             "prompt", long_draft, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == revised
+    assert result.startswith(revised)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert any("超出" in i.get("problem", "") for i in issues)
     assert mock_llm.call_count == 3
 
@@ -188,7 +224,8 @@ async def test_refine_skips_length_check_for_short_draft():
         result, _ = await refine_answer(
             "prompt", short_draft, _SOURCES, user_id=1, max_rounds=2
         )
-    assert result == short_draft
+    assert result.startswith(short_draft)
+    assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert mock_llm.call_count == 1
 
 
