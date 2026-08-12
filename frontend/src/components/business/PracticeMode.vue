@@ -429,6 +429,8 @@ const selfRating = ref(null)
 const reviewStatus = ref('idle')
 const retainedReviewedId = ref(null)
 const savedReview = ref(null)
+const RELEARNING_GAP = 3
+const relearningQueue = ref([])
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
@@ -467,9 +469,14 @@ const sessionSource = computed(() => {
   if (serverDeckMode.value) {
     if (props.deckLoading) return []
     if (props.selectedDeckKey !== 'due') return props.questions
-    return props.questions.filter(question => (
+    const dueQuestions = props.questions.filter(question => (
       question.id === retainedReviewedId.value || isDueNow(question.next_review_at)
     ))
+    const dueIds = new Set(dueQuestions.map(question => question.id))
+    const relearningQuestions = relearningQueue.value
+      .filter(entry => entry.remaining <= 0 && !dueIds.has(entry.question.id))
+      .map(entry => entry.question)
+    return [...dueQuestions, ...relearningQuestions]
   }
   if (sessionKey.value === 'starred') return starredQuestions.value
   return props.questions
@@ -508,7 +515,10 @@ const reviewStatusHint = computed(() => {
   if (reviewStatus.value === 'error') return '记录尚未成功，请重试后再进入下一题'
   if (reviewStatus.value !== 'saved' || !savedReview.value) return '对照答案查漏补缺，保存完成后进入下一题'
   const pieces = [ratingLabels[selfRating.value] || '已自评']
-  if (savedReview.value.next_review_at) pieces.push(`预计 ${formatNextReview(savedReview.value.next_review_at)}复习`)
+  if (selfRating.value === 'again') pieces.push('本轮稍后再考')
+  if (savedReview.value.next_review_at) {
+    pieces.push(`${selfRating.value === 'again' ? '后续' : '预计'} ${formatNextReview(savedReview.value.next_review_at)}复习`)
+  }
   if (savedReview.value.proficiency != null) pieces.push(`熟练度 ${savedReview.value.proficiency}/5`)
   return pieces.join(' · ')
 })
@@ -617,8 +627,26 @@ function handleSelfAssess(rating) {
 function retrySelfAssessment() { saveSelfAssessment() }
 function nextWithRating() {
   if (reviewStatus.value !== 'saved' || !currentQ.value) return
+  const reviewedQuestion = currentQ.value
+  const reviewedId = reviewedQuestion.id
+  const rating = selfRating.value
   const nextQuestionId = sessionQuestions.value[currentIndex.value + 1]?.id
+
+  // “不会”卡隔 RELEARNING_GAP 张再出现；其他评分会把它移出本轮重学队列。
+  const agedQueue = relearningQueue.value
+    .filter(entry => entry.question.id !== reviewedId)
+    .map(entry => ({ ...entry, remaining: Math.max(0, entry.remaining - 1) }))
+  if (rating === 'again') agedQueue.push({ question: reviewedQuestion, remaining: RELEARNING_GAP })
+  relearningQueue.value = agedQueue
   retainedReviewedId.value = null
+
+  // 本轮没有其他卡时不让用户误入完成态，立即把最早的不会卡提到队尾。
+  if (!sessionQuestions.value.length && relearningQueue.value.length) {
+    const minimum = Math.min(...relearningQueue.value.map(entry => entry.remaining))
+    relearningQueue.value = relearningQueue.value.map(entry => (
+      entry.remaining === minimum ? { ...entry, remaining: 0 } : entry
+    ))
+  }
   const nextIndex = nextQuestionId == null
     ? Math.min(currentIndex.value, Math.max(0, sessionQuestions.value.length - 1))
     : sessionQuestions.value.findIndex(question => question.id === nextQuestionId)
@@ -715,6 +743,7 @@ watch(() => props.selectedDeckKey, (key) => {
     currentIndex.value = 0
     pendingReviewedId.value = null
     retainedReviewedId.value = null
+    relearningQueue.value = []
     resetState()
     // due 队列 = 算法刷题模式；其他题单 = 浏览模式
     viewMode.value = key === 'due' ? 'quiz' : 'browse'

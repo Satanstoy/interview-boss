@@ -484,6 +484,45 @@ test.describe('今日复习默认入口与招聘状态行', () => {
 // 2. 复习后从今日复习队列移除（不跳卡）
 // ═══════════════════════════════════════════════
 test.describe('今日复习队列复习出队不跳卡', () => {
+  test('本轮只剩一题时选择不会会立即回流而不是进入完成态', async ({ page }) => {
+    const question = DUE_QUESTION_SEEDS[0]
+    await gotoPractice(page, { deckQuestions: [question] })
+    const card = page.getByTestId('practice-focus-card')
+
+    await page.getByTestId('practice-self-assess-again').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await page.keyboard.press('Enter')
+
+    await expect(card.getByText(question.question)).toBeVisible()
+    await expect(page.getByTestId('practice-self-assess-good')).toBeVisible()
+    await expect(page.getByText('今日复习已经完成')).not.toBeVisible()
+  })
+
+  test('不会题隔三张在本轮回流，重复作答不重复扣减今日进度', async ({ page }) => {
+    const seeds = DUE_QUESTION_SEEDS.slice(0, 4)
+    await gotoPractice(page, { deckQuestions: seeds })
+    const card = page.getByTestId('practice-focus-card')
+
+    await page.getByTestId('practice-self-assess-again').click()
+    await expect(page.getByTestId('practice-review-actions')).toContainText('本轮稍后再考')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 4 · 剩余 3')
+    await page.keyboard.press('Enter')
+
+    for (const nextQuestion of seeds.slice(1)) {
+      await expect(card.getByText(nextQuestion.question)).toBeVisible()
+      await page.keyboard.press('3')
+      await expect(page.getByText('自评已保存')).toBeVisible()
+      await page.keyboard.press('Enter')
+    }
+
+    // Q1 在三张卡后回到队尾；今日计划已经完成，不因重学再次扣减。
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 4 / 4 · 剩余 0')
+    await page.keyboard.press('2')
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 4 / 4 · 剩余 0')
+  })
+
   test('键盘 1/2/3 自评显示调度反馈，保存期间不能用右键跳题', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
     await gotoPractice(page, { deckQuestions: seeds, reviewDelayMs: 350 })

@@ -20,6 +20,7 @@ export function usePracticeDecks(filter = 'all') {
   const questionTotal = ref(0)
   const isLoadingMoreQuestions = ref(false)
   const questionCache = new Map()
+  let reviewedDueQueueIds = new Set()
 
   // 今日复习的 items 可能因为每日新题容量少于 total，这是有意设计，不能
   // 用普通分页把被容量策略排除的新题重新加载回来。
@@ -69,6 +70,7 @@ export function usePracticeDecks(filter = 'all') {
       questionTotal.value = Number(response.total ?? questions.value.length)
       selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
       loadedDeckKey.value = deckKey
+      if (deckKey === 'due') reviewedDueQueueIds = new Set()
       return response
     } catch (err) {
       error.value = getFriendlyError(err, '题单加载失败')
@@ -135,6 +137,9 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
     const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
+    const wasPracticed = Number(item?.review_count || 0) > 0
+    const queueReviewIds = reviewedDueQueueIds
+    const wasReviewedInQueue = queueReviewIds.has(questionId)
     try {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
@@ -147,10 +152,13 @@ export function usePracticeDecks(filter = 'all') {
       }
       if (item) Object.assign(item, nextState)
       if (reviewedDeckKey === 'due' && reviewedDeck) {
-        if (!wasReviewedToday) {
+        if (!wasReviewedToday && !wasReviewedInQueue) {
           reviewedDeck.completed_today = Number(reviewedDeck.completed_today || 0) + 1
         }
-        reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today ?? questions.value.length) - 1)
+        if (!wasReviewedInQueue) {
+          reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today ?? questions.value.length) - 1)
+          queueReviewIds.add(questionId)
+        }
         reviewedDeck.planned_today = Number(reviewedDeck.completed_today || 0) + Number(reviewedDeck.remaining_today || 0)
         if (nextState.next_review_at) {
           const currentNextDue = reviewedDeck.next_due_at
@@ -161,7 +169,7 @@ export function usePracticeDecks(filter = 'all') {
       }
       const deck = decks.value.find(candidate => candidate.key === reviewedDeckKey)
       if (deck) {
-        deck.reviewed = Number(deck.reviewed || 0) + (item?.review_count === 1 ? 1 : 0)
+        deck.reviewed = Number(deck.reviewed || 0) + (wasPracticed ? 0 : 1)
         deck.progress = deck.total ? Math.round(deck.reviewed / deck.total * 100) : 0
       }
       return response
