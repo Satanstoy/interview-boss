@@ -154,7 +154,7 @@
     font-weight: 600;
     color: inherit;
   }
-  /* 正文引用：紧凑的来源 pill；悬停时展开带 logo 的 URL 预览卡。 */
+  /* 正文引用：沿用系统 glass 材质的紧凑来源 pill；悬停时展开 URL 预览卡。 */
   .answer-content a.answer-source-link {
     position: relative;
     isolation: isolate;
@@ -163,10 +163,10 @@
     gap: 0.24rem;
     max-width: min(100%, 18rem);
     padding: 0.03rem 0.38rem 0.03rem 0.22rem;
-    border: 1px solid var(--ib-material-hairline) !important;
+    border: 1px solid color-mix(in srgb, var(--border) 78%, var(--primary) 22%);
     border-radius: 999px;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, #111 22%), color-mix(in srgb, var(--primary) 58%, #111 42%)) !important;
-    color: #fff !important;
+    background: var(--ib-material-chrome);
+    color: var(--foreground);
     font-size: 0.78em;
     font-weight: 600;
     line-height: 1.18;
@@ -174,15 +174,15 @@
     vertical-align: middle;
     white-space: nowrap;
     overflow: visible;
-    -webkit-backdrop-filter: blur(16px) saturate(1.35);
-    backdrop-filter: blur(16px) saturate(1.35);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 2px 8px rgba(15, 23, 42, 0.12);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45);
     transition: transform 180ms var(--ease-standard), border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard), filter 180ms var(--ease-standard);
   }
   .answer-content a.answer-source-link:is(:hover, :focus-visible) {
-    border-color: color-mix(in srgb, #fff 62%, var(--primary)) !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.36), 0 6px 16px rgba(15, 23, 42, 0.2), 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
-    filter: brightness(1.08) saturate(1.08);
+    border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
+    background: color-mix(in srgb, var(--ib-material-chrome) 82%, var(--primary) 18%);
+    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.12), 0 0 0 2px color-mix(in srgb, var(--primary) 9%, transparent), inset 0 1px 0 rgba(255,255,255,0.58);
     transform: translateY(-1px);
     text-decoration: none;
   }
@@ -198,12 +198,12 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: #fff;
+    color: inherit;
   }
   .answer-content a.answer-source-link::after {
     content: '↗';
     flex: none;
-    color: #fff;
+    color: currentColor;
     font-size: 0.78em;
     font-weight: 700;
     line-height: 1;
@@ -220,13 +220,13 @@
     width: max-content;
     max-width: min(21rem, calc(100vw - 2rem));
     padding: 0.62rem 0.72rem;
-    border: 1px solid var(--ib-material-hairline) !important;
+    border: 1px solid var(--border);
     border-radius: 0.82rem;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 72%, #111 28%), color-mix(in srgb, var(--primary) 46%, #111 54%)) !important;
-    color: #fff !important;
-    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.24), inset 0 1px 0 rgba(255,255,255,0.22);
-    -webkit-backdrop-filter: blur(24px) saturate(1.45);
-    backdrop-filter: blur(24px) saturate(1.45);
+    background: var(--ib-material-overlay);
+    color: var(--foreground);
+    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255,255,255,0.42);
+    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    backdrop-filter: blur(24px) saturate(1.35);
     opacity: 0;
     pointer-events: none;
     transform: translateY(4px) scale(0.98);
@@ -257,53 +257,39 @@
     overflow-wrap: anywhere;
   }
   .answer-content .answer-source-preview__copy strong {
-    color: #fff;
+    color: var(--foreground);
     font-size: 0.78rem;
     font-weight: 700;
   }
   .answer-content .answer-source-preview__copy span {
-    color: rgba(255,255,255,0.8);
+    color: var(--muted-foreground);
   }
   .dark .answer-content a.answer-source-link {
-    color: #fff !important;
+    border-color: rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.055);
+    color: var(--foreground);
+  }
+  .dark .answer-content a.answer-source-link:is(:hover, :focus-visible) {
+    border-color: color-mix(in srgb, var(--primary) 58%, rgba(255,255,255,0.2));
+    background: color-mix(in srgb, var(--primary) 16%, rgba(255,255,255,0.08));
+  }
+  .dark .answer-content .answer-source-preview {
+    border-color: rgba(255,255,255,0.14);
+    background: rgba(18,18,22,0.82);
   }
 
-  /* 来源卡片：圆角玻璃材质，hover 时只抬升和提亮，不改变布局 */
+  /* 来源卡片：使用系统通用 glass 材质，hover 只做轻微抬升和 backlight。 */
   .source-card {
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--border) 82%, var(--primary) 18%);
-    background: color-mix(in srgb, var(--card) 82%, transparent);
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.56);
-    -webkit-backdrop-filter: blur(16px) saturate(1.25);
-    backdrop-filter: blur(16px) saturate(1.25);
-    transition: transform 220ms var(--ease-standard), border-color 220ms var(--ease-standard), background 220ms var(--ease-standard), box-shadow 220ms var(--ease-standard);
-  }
-  .source-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 58%);
-    opacity: 0;
-    transition: opacity 220ms var(--ease-standard);
-  }
-  .source-card > * {
-    position: relative;
-    z-index: 1;
+    transition: transform 180ms var(--ease-standard), border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard);
   }
   .source-card:hover,
   .source-card:focus-visible {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
-    background: color-mix(in srgb, var(--card) 72%, var(--primary) 28%);
-    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12), 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  }
-  .source-card:hover::before,
-  .source-card:focus-visible::before {
-    opacity: 1;
+    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
   }
   .source-card__icon {
     border: 1px solid color-mix(in srgb, var(--border) 72%, var(--primary) 28%);
@@ -313,13 +299,12 @@
   }
   .source-card:hover .source-card__icon,
   .source-card:focus-visible .source-card__icon {
-    transform: scale(1.06);
-    border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
-    background: color-mix(in srgb, var(--primary) 10%, var(--muted));
+    border-color: var(--border);
+    background: var(--muted);
   }
   .source-card:hover .source-card__title,
   .source-card:focus-visible .source-card__title {
-    color: var(--primary);
+    color: var(--foreground);
   }
   .source-card__external {
     transition: transform 220ms var(--ease-standard), color 220ms var(--ease-standard);
@@ -327,26 +312,20 @@
   .source-card:hover .source-card__external,
   .source-card:focus-visible .source-card__external {
     transform: translate(1px, -1px);
-    color: var(--primary);
+    color: var(--foreground);
   }
   .source-card--static {
     cursor: default;
     box-shadow: none;
   }
   .dark .source-card {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.055);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
   .dark .source-card:hover,
   .dark .source-card:focus-visible {
-    border-color: color-mix(in srgb, var(--primary) 58%, rgba(255, 255, 255, 0.2));
-    background: color-mix(in srgb, var(--primary) 16%, rgba(255, 255, 255, 0.08));
     box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
   .dark .source-card__icon {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   }
   .answer-content ul,

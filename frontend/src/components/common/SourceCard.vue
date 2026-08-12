@@ -4,7 +4,8 @@
     :href="href"
     target="_blank"
     rel="noopener noreferrer"
-    class="source-card group/source flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-left"
+    data-material="glass"
+    class="source-card group/source flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-left hover:bg-muted"
     :aria-label="`打开来源：${title}`"
   >
     <span class="source-card__icon mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg">
@@ -33,7 +34,7 @@
       <span v-if="source.snippet" class="source-card__snippet mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{{ source.snippet }}</span>
     </span>
   </a>
-  <div v-else class="source-card source-card--static flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5">
+  <div v-else data-material="glass" class="source-card source-card--static flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5">
     <span class="source-card__icon flex size-7 shrink-0 items-center justify-center rounded-lg">
       <svg class="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
         <circle cx="12" cy="12" r="9" />

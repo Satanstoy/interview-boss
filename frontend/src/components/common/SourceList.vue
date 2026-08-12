@@ -1,8 +1,11 @@
 <template>
   <div v-if="sources.length" :data-testid="testId" class="border-t border-border/60 pt-3">
-    <button
+    <Button
       type="button"
-      class="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      variant="ghost"
+      size="sm"
+      class="h-8 w-full justify-start gap-1.5 px-2 text-xs text-muted-foreground"
+      :aria-expanded="open"
       @click="emit('update:open', !open)"
     >
       <svg class="size-3.5 shrink-0 transition-transform" :class="open ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -10,7 +13,7 @@
       </svg>
       <span>{{ title }}（{{ sources.length }}）</span>
       <span class="ml-auto text-[11px] font-normal text-muted-foreground/70">点击查看原文</span>
-    </button>
+    </Button>
     <div v-if="open" class="mt-2 grid gap-2 sm:grid-cols-2">
       <SourceCard v-for="(source, index) in sources" :key="source.url || index" :source="source" />
     </div>
@@ -18,6 +21,7 @@
 </template>
 
 <script setup>
+import { Button } from '@/components/ui/button'
 import SourceCard from './SourceCard.vue'
 
 defineProps({

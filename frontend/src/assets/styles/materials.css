@@ -395,18 +395,32 @@ html:not(.dark) .ib-question-accordion-trigger:is(
   isolation: isolate;
 }
 
-/* Citation pills use the same glass treatment, with a branded dark surface so
- * their deliberately white labels stay readable in both themes. */
-:where(
-  a.answer-source-link[data-material="glass"],
-  .answer-source-preview[data-material="glass"]
-) {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--primary) 78%, #111 22%),
-    color-mix(in srgb, var(--primary) 52%, #111 48%)
-  ) !important;
-  color: #fff !important;
+/* Inline citations use the same hover backlight as other rounded controls. */
+a.answer-source-link[data-material="glass"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    100% 130% at 50% 45%,
+    var(--ib-material-backlight) 0%,
+    var(--ib-material-backlight-soft) 55%,
+    transparent 90%
+  );
+  mix-blend-mode: plus-lighter;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease-standard);
+  z-index: 0;
+}
+
+a.answer-source-link[data-material="glass"]:is(:hover, :focus-visible)::before {
+  opacity: 1;
+}
+
+a.answer-source-link[data-material="glass"] > * {
+  position: relative;
+  z-index: 1;
 }
 
 header[class~="h-11"] {

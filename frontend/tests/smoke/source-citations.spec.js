@@ -4,7 +4,9 @@ test('source citations render as visible cards with favicon and original URL', a
   await page.goto('/login')
 
   const result = await page.evaluate(async () => {
-    const { createApp } = await import('/node_modules/vue/dist/vue.esm-browser.js')
+    // Use Vite's pre-bundled runtime so Reka UI and this mounted test share
+    // the same Vue instance as the application.
+    const { createApp } = await import('/node_modules/.vite/deps/vue.js')
     const { default: SourceList } = await import('/src/components/common/SourceList.vue')
     const root = document.createElement('div')
     document.body.appendChild(root)
@@ -21,10 +23,12 @@ test('source citations render as visible cards with favicon and original URL', a
     await new Promise(resolve => requestAnimationFrame(resolve))
 
     const card = root.querySelector('[data-testid="citation-smoke"]')
+    const toggle = card?.querySelector('button')
     const link = card?.querySelector('a')
     const favicon = card?.querySelector('img')
     const result = {
       cardVisible: Boolean(card),
+      toggleUsesSystemButton: toggle?.getAttribute('data-slot') === 'button',
       linkHref: link?.getAttribute('href') || '',
       linkTarget: link?.getAttribute('target') || '',
       cardClass: link?.className || '',
@@ -37,6 +41,7 @@ test('source citations render as visible cards with favicon and original URL', a
   })
 
   expect(result.cardVisible).toBe(true)
+  expect(result.toggleUsesSystemButton).toBe(true)
   expect(result.linkHref).toBe('https://vuejs.org/guide/introduction.html')
   expect(result.linkTarget).toBe('_blank')
   expect(result.cardClass).toContain('source-card')

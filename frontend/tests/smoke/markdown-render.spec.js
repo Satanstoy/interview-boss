@@ -48,7 +48,7 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
 
   const citation = page.locator('#inline-citation-smoke .answer-source-link')
   const preview = citation.locator('.answer-source-preview')
-  await expect(citation).toHaveCSS('color', 'rgb(255, 255, 255)')
+  await expect(citation).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)')
   await expect(preview).toHaveCSS('opacity', '0')
   await citation.hover()
   await expect(preview).toHaveCSS('opacity', '1')
