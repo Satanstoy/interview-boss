@@ -395,32 +395,32 @@ html:not(.dark) .ib-question-accordion-trigger:is(
   isolation: isolate;
 }
 
-/* Inline citations use the same hover backlight as other rounded controls. */
-a.answer-source-link[data-material="glass"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    100% 130% at 50% 45%,
-    var(--ib-material-backlight) 0%,
-    var(--ib-material-backlight-soft) 55%,
-    transparent 90%
-  );
-  mix-blend-mode: plus-lighter;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 400ms var(--ease-standard);
-  z-index: 0;
+/* Sources stay neutral grey; no primary-color halo or glow. */
+:where(
+  a.answer-source-link[data-material="glass"],
+  .answer-source-preview[data-material="glass"],
+  .source-card[data-material="glass"]
+) {
+  background: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--muted-foreground) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px) !important;
 }
 
-a.answer-source-link[data-material="glass"]:is(:hover, :focus-visible)::before {
-  opacity: 1;
+a.answer-source-link[data-material="glass"]:is(:hover, :focus-visible),
+.source-card[data-material="glass"]:is(:hover, :focus-visible) {
+  background: var(--accent) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
-a.answer-source-link[data-material="glass"] > * {
-  position: relative;
-  z-index: 1;
+.answer-source-preview[data-material="glass"] {
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12) !important;
 }
 
 header[class~="h-11"] {

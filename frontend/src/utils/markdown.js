@@ -18,7 +18,7 @@ const purifyConfig = {
   ALLOWED_ATTR: [
     'href', 'target', 'rel', 'title',
     'class', 'id',
-    'data-material', 'data-source-preview', 'aria-hidden',
+    'data-material', 'data-source-preview', 'data-slot', 'aria-hidden',
     'src', 'alt', 'width', 'height',
     'colspan', 'rowspan',
   ],
@@ -92,7 +92,7 @@ markdown.renderer.rules.link_close = (tokens, index, options, env, self) => {
     const closeTag = defaultLinkClose
       ? defaultLinkClose(tokens, index, options, env, self)
       : self.renderToken(tokens, index, options)
-    return `</span><span class="answer-source-preview" data-material="glass" aria-hidden="true"><img class="answer-source-preview__favicon" src="${favicon}" alt=""><span class="answer-source-preview__copy"><strong>打开原文</strong><span>${preview}</span></span></span>${closeTag}`
+    return `</span><span class="answer-source-preview rounded-lg px-2.5 py-1.5 text-xs leading-relaxed" data-slot="tooltip-content" data-material="glass" aria-hidden="true"><img class="answer-source-preview__favicon" src="${favicon}" alt=""><span class="answer-source-preview__copy"><strong>打开原文</strong><span>${preview}</span></span></span>${closeTag}`
   }
   return defaultLinkClose
     ? defaultLinkClose(tokens, index, options, env, self)

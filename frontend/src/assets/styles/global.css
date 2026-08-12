@@ -154,43 +154,42 @@
     font-weight: 600;
     color: inherit;
   }
-  /* 正文引用：沿用系统 glass 材质的紧凑来源 pill；悬停时展开 URL 预览卡。 */
+  /* 正文引用：与正文等高的灰色来源标签；hover 时显示系统规格的小气泡。 */
   .answer-content a.answer-source-link {
     position: relative;
     isolation: isolate;
     display: inline-flex;
     align-items: center;
-    gap: 0.24rem;
+    gap: 0.2rem;
     max-width: min(100%, 18rem);
-    padding: 0.03rem 0.38rem 0.03rem 0.22rem;
-    border: 1px solid color-mix(in srgb, var(--border) 78%, var(--primary) 22%);
+    height: 1.2em;
+    min-height: 1.2em;
+    padding: 0 0.28rem 0 0.16rem;
+    border: 1px solid var(--border);
     border-radius: 999px;
-    background: var(--ib-material-chrome);
-    color: var(--foreground);
+    background: var(--muted);
+    color: var(--muted-foreground);
     font-size: 0.78em;
     font-weight: 600;
-    line-height: 1.18;
+    line-height: 1;
     text-decoration: none;
-    vertical-align: middle;
+    vertical-align: 0.02em;
     white-space: nowrap;
     overflow: visible;
-    -webkit-backdrop-filter: blur(16px) saturate(1.25);
-    backdrop-filter: blur(16px) saturate(1.25);
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45);
-    transition: transform 180ms var(--ease-standard), border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard), filter 180ms var(--ease-standard);
+    box-shadow: none;
+    transition: background-color 150ms var(--ease-standard), border-color 150ms var(--ease-standard), color 150ms var(--ease-standard);
   }
   .answer-content a.answer-source-link:is(:hover, :focus-visible) {
-    border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
-    background: color-mix(in srgb, var(--ib-material-chrome) 82%, var(--primary) 18%);
-    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.12), 0 0 0 2px color-mix(in srgb, var(--primary) 9%, transparent), inset 0 1px 0 rgba(255,255,255,0.58);
-    transform: translateY(-1px);
+    border-color: var(--border);
+    background: var(--accent);
+    color: var(--foreground);
     text-decoration: none;
   }
   .answer-content .answer-source-favicon {
-    width: 0.9em;
-    height: 0.9em;
+    width: 0.82em;
+    height: 0.82em;
     flex: none;
-    border-radius: 0.18em;
+    border-radius: 0.16em;
     object-fit: contain;
     background: white;
   }
@@ -213,36 +212,36 @@
     position: absolute;
     z-index: 30;
     left: 0;
-    bottom: calc(100% + 0.5rem);
+    bottom: calc(100% + 0.35rem);
     display: flex;
     align-items: flex-start;
-    gap: 0.55rem;
+    gap: 0.4rem;
     width: max-content;
-    max-width: min(21rem, calc(100vw - 2rem));
-    padding: 0.62rem 0.72rem;
+    max-width: min(16rem, calc(100vw - 2rem));
+    padding: 0.375rem 0.625rem;
     border: 1px solid var(--border);
-    border-radius: 0.82rem;
-    background: var(--ib-material-overlay);
-    color: var(--foreground);
-    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255,255,255,0.42);
-    -webkit-backdrop-filter: blur(24px) saturate(1.35);
-    backdrop-filter: blur(24px) saturate(1.35);
+    border-radius: 0.5rem;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     opacity: 0;
     pointer-events: none;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(2px);
     transform-origin: left bottom;
-    transition: opacity 160ms var(--ease-standard), transform 160ms var(--ease-standard);
+    transition: opacity 120ms var(--ease-standard), transform 120ms var(--ease-standard);
   }
   .answer-content a.answer-source-link:is(:hover, :focus-visible) .answer-source-preview {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   .answer-content .answer-source-preview__favicon {
-    width: 1.15rem;
-    height: 1.15rem;
+    width: 0.9rem;
+    height: 0.9rem;
     flex: none;
     margin-top: 0.05rem;
-    border-radius: 0.3rem;
+    border-radius: 0.2rem;
     background: #fff;
     object-fit: contain;
   }
@@ -250,32 +249,33 @@
     display: flex;
     min-width: 0;
     flex-direction: column;
-    gap: 0.14rem;
-    font-size: 0.76rem;
-    line-height: 1.35;
+    gap: 0.08rem;
+    font-size: 0.75rem;
+    line-height: 1.25;
     white-space: normal;
     overflow-wrap: anywhere;
   }
   .answer-content .answer-source-preview__copy strong {
-    color: var(--foreground);
-    font-size: 0.78rem;
+    color: var(--popover-foreground);
+    font-size: 0.75rem;
     font-weight: 700;
   }
   .answer-content .answer-source-preview__copy span {
     color: var(--muted-foreground);
   }
   .dark .answer-content a.answer-source-link {
-    border-color: rgba(255,255,255,0.14);
-    background: rgba(255,255,255,0.055);
-    color: var(--foreground);
+    border-color: var(--border);
+    background: var(--muted);
+    color: var(--muted-foreground);
   }
   .dark .answer-content a.answer-source-link:is(:hover, :focus-visible) {
-    border-color: color-mix(in srgb, var(--primary) 58%, rgba(255,255,255,0.2));
-    background: color-mix(in srgb, var(--primary) 16%, rgba(255,255,255,0.08));
+    border-color: var(--border);
+    background: var(--accent);
+    color: var(--foreground);
   }
   .dark .answer-content .answer-source-preview {
-    border-color: rgba(255,255,255,0.14);
-    background: rgba(18,18,22,0.82);
+    border-color: var(--border);
+    background: var(--popover);
   }
 
   /* 来源卡片：使用系统通用 glass 材质，hover 只做轻微抬升和 backlight。 */
@@ -288,12 +288,12 @@
   .source-card:hover,
   .source-card:focus-visible {
     transform: translateY(-1px);
-    border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+    border-color: var(--border);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   }
   .source-card__icon {
-    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--primary) 28%);
-    background: color-mix(in srgb, var(--muted) 76%, var(--card) 24%);
+    border: 1px solid var(--border);
+    background: var(--muted);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
     transition: transform 220ms var(--ease-standard), border-color 220ms var(--ease-standard), background 220ms var(--ease-standard);
   }
@@ -319,11 +319,11 @@
     box-shadow: none;
   }
   .dark .source-card {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   }
   .dark .source-card:hover,
   .dark .source-card:focus-visible {
-    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34), 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
   }
   .dark .source-card__icon {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);

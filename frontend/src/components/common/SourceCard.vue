@@ -5,7 +5,7 @@
     target="_blank"
     rel="noopener noreferrer"
     data-material="glass"
-    class="source-card group/source flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-left hover:bg-muted"
+    class="source-card group/source flex min-w-0 items-start gap-2.5 rounded-xl px-3 py-2.5 text-left"
     :aria-label="`打开来源：${title}`"
   >
     <span class="source-card__icon mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg">

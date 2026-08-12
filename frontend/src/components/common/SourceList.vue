@@ -4,7 +4,7 @@
       type="button"
       variant="ghost"
       size="sm"
-      class="h-8 w-full justify-start gap-1.5 px-2 text-xs text-muted-foreground"
+      class="source-list__toggle h-8 w-full justify-start gap-1.5 px-2 text-xs text-muted-foreground"
       :aria-expanded="open"
       @click="emit('update:open', !open)"
     >

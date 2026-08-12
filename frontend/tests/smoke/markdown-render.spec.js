@@ -29,7 +29,7 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
   expect(html).toContain('href="https://example.com"')
   expect(html).toContain('class="answer-source-link"')
   expect(html).toContain('data-material="glass"')
-  expect(html).toContain('class="answer-source-preview"')
+  expect(html).toContain('class="answer-source-preview rounded-lg')
   expect(html).toContain('class="answer-source-preview__favicon"')
   expect(html).toContain('class="answer-source-favicon"')
   expect(html).toContain('https://www.google.com/s2/favicons?domain=example.com')
@@ -48,6 +48,19 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
 
   const citation = page.locator('#inline-citation-smoke .answer-source-link')
   const preview = citation.locator('.answer-source-preview')
+  const citationMetrics = await citation.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const parentStyle = getComputedStyle(element.parentElement)
+    return {
+      height: element.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(parentStyle.lineHeight),
+      boxShadow: style.boxShadow,
+      tooltipSurface: element.querySelector('.answer-source-preview')?.getAttribute('data-slot') || '',
+    }
+  })
+  expect(citationMetrics.height).toBeLessThanOrEqual(citationMetrics.lineHeight + 1)
+  expect(citationMetrics.boxShadow).toBe('none')
+  expect(citationMetrics.tooltipSurface).toBe('tooltip-content')
   await expect(citation).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)')
   await expect(preview).toHaveCSS('opacity', '0')
   await citation.hover()
