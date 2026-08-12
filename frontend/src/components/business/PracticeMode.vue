@@ -67,6 +67,18 @@
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
         <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-2 overflow-hidden px-2 py-2 sm:gap-3 sm:px-4 sm:py-4 md:px-6 md:py-5">
 
+    <div v-if="isAlgorithmQueue && dailyPlanTotal" data-testid="practice-daily-progress" class="flex shrink-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2.5 shadow-sm sm:px-4">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center justify-between gap-3 text-xs">
+          <span class="font-semibold text-foreground">今日计划</span>
+          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}</span>
+        </div>
+        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
+          <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
+        </div>
+      </div>
+    </div>
+
     <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
@@ -247,7 +259,7 @@
     <div v-else class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
       <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><List :size="26" /></div>
       <h2 class="mt-5 text-lg font-semibold text-foreground">{{ sessionKey === 'due' ? '今日复习已经完成' : '这个题单还没有题目' }}</h2>
-      <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ sessionKey === 'due' ? '明天再来看看新的到期复习题，或者切换到全部题继续刷。' : '先收藏几道题，或者切换到全部题开始刷题。' }}</p>
+      <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ sessionKey === 'due' ? completionMessage : '先收藏几道题，或者切换到全部题开始刷题。' }}</p>
       <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">切换到全部题</Button></div>
     </div>
 
@@ -381,6 +393,7 @@ const props = defineProps({
   questions: { type: Array, default: () => [] },
   decks: { type: Array, default: () => [] },
   selectedDeckKey: { type: String, default: '' },
+  selectedDeck: { type: Object, default: null },
   reviewLoading: { type: Boolean, default: false },
   deckLoading: { type: Boolean, default: false },
   hasMoreQuestions: { type: Boolean, default: false },
@@ -475,6 +488,15 @@ const referenceAnswerSources = computed(() => (
   Array.isArray(currentQ.value?.answer_sources) ? currentQ.value.answer_sources : []
 ))
 const isLastQuestion = computed(() => currentIndex.value >= sessionQuestions.value.length - 1)
+const completedToday = computed(() => Number(props.selectedDeck?.completed_today || 0))
+const remainingToday = computed(() => Number(props.selectedDeck?.remaining_today ?? sessionSource.value.length))
+const dailyPlanTotal = computed(() => Number(props.selectedDeck?.planned_today || (completedToday.value + remainingToday.value)))
+const dailyProgress = computed(() => dailyPlanTotal.value
+  ? Math.round(completedToday.value / dailyPlanTotal.value * 100)
+  : 0)
+const completionMessage = computed(() => props.selectedDeck?.next_due_at
+  ? `下一轮复习将在${formatNextReview(props.selectedDeck.next_due_at)}到期，也可以切换到全部题继续刷。`
+  : '今天的计划已完成，明天再来复习，或者切换到全部题继续刷。')
 const reviewStatusLabel = computed(() => ({
   saving: '正在保存自评…',
   saved: '自评已保存',
@@ -612,14 +634,15 @@ async function togglePracticed() {
 }
 function formatNextReview(date) {
   if (!date) return ''
-  const d = new Date(String(date).replace(' ', 'T'))
+  const value = String(date)
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`)
   if (Number.isNaN(d.getTime())) return String(date).slice(0, 10)
   const now = Date.now()
   const diff = d.getTime() - now
   if (diff < 0) return '已到期'
-  const hours = Math.round(diff / 3600000)
+  const hours = Math.max(1, Math.ceil(diff / 3600000))
   if (hours < 24) return `${hours} 小时后`
-  return `${Math.round(hours / 24)} 天后`
+  return `${Math.ceil(hours / 24)} 天后`
 }
 function openDeckPicker() {
   addDeckKey.value = customDecks.value[0]?.key || ''

@@ -186,6 +186,18 @@ def _is_due(value: str) -> bool:
         return True
 
 
+def _reviewed_today_count(conn, user_id: int) -> int:
+    """Count distinct cards completed today for the user's daily workload."""
+
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT question_bank_id) AS count "
+        "FROM practice_review_events "
+        "WHERE user_id = ? AND date(reviewed_at) = date('now')",
+        (user_id,),
+    ).fetchone()
+    return int(row["count"] or 0)
+
+
 def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     """Return named system study plans with live counts and progress."""
 
@@ -300,6 +312,10 @@ def list_deck_questions(
             "AND datetime(uqr.next_review_at) <= datetime('now'))",
         )
         new_where = where_clause.replace(due_cond, "(uqr.next_review_at IS NULL)")
+        future_where = where_clause.replace(
+            due_cond,
+            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) > datetime('now'))",
+        )
         # Due reviews and mastered check-ins are intentionally uncapped (Anki
         # consensus: never cap reviews); only the new-question tail is limited
         # by the budget.
@@ -309,10 +325,13 @@ def list_deck_questions(
         checkin_rows = conn.execute(
             _select_sql(from_clause, checkin_where, frequency_sql) + order, params
         ).fetchall()
+        completed_today = _reviewed_today_count(conn, user_id)
         if max_new is not None:
             new_budget = max(0, int(max_new))
+            capacity = completed_today + len(due_rows) + len(checkin_rows) + new_budget
         else:
-            # 新题预算 = max(0, 每日容量 − 到期复习 − mastered 抽查)
+            # 新题预算 = 每日容量 − 今天已完成 − 尚待处理的到期复习/抽查。
+            # 已完成量必须跨刷新扣除，否则每次重新进入都会补满一批新题。
             capacity_row = conn.execute(
                 "SELECT daily_capacity FROM user_recruitment_pref WHERE user_id = ?",
                 (user_id,),
@@ -321,7 +340,11 @@ def list_deck_questions(
                 int(capacity_row["daily_capacity"] or 30) if capacity_row else 30
             )
             new_budget = max(
-                0, capacity - len(due_rows) - len(checkin_rows)
+                0,
+                capacity
+                - completed_today
+                - len(due_rows)
+                - len(checkin_rows),
             )
         new_rows = conn.execute(
             _select_sql(from_clause, new_where, frequency_sql)
@@ -329,6 +352,19 @@ def list_deck_questions(
             params + [new_budget],
         ).fetchall()
         rows = due_rows + checkin_rows + new_rows
+        next_due_row = conn.execute(
+            f"SELECT MIN(uqr.next_review_at) AS next_due_at "
+            f"{from_clause}{_review_join('?')}{future_where}",
+            params,
+        ).fetchone()
+        deck = {
+            **deck,
+            "daily_capacity": capacity,
+            "completed_today": completed_today,
+            "remaining_today": len(rows),
+            "planned_today": completed_today + len(rows),
+            "next_due_at": next_due_row["next_due_at"] if next_due_row else None,
+        }
     else:
         rows = conn.execute(
             _select_sql(from_clause, where_clause, frequency_sql)

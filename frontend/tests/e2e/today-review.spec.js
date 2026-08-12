@@ -302,8 +302,26 @@ async function mockAllAPIs(page, options = {}) {
     const items = deckKey === 'due'
       ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
       : deckQuestions
+    const completedToday = reviewedQuestionIds.size || (deckKey === 'due' && items.length === 0 ? Number(deck?.reviewed || 0) : 0)
     await route.fulfill({
-      json: { deck: { key: deckKey, name: deckName, total: items.length }, items, total: items.length, page_size: 100, offset: 0 },
+      json: {
+        deck: {
+          key: deckKey,
+          name: deckName,
+          total: items.length,
+          ...(deckKey === 'due' ? {
+            daily_capacity: 30,
+            completed_today: completedToday,
+            remaining_today: items.length,
+            planned_today: completedToday + items.length,
+            next_due_at: reviewedQuestionIds.size ? tomorrow : null,
+          } : {}),
+        },
+        items,
+        total: items.length,
+        page_size: 100,
+        offset: 0,
+      },
     })
   })
 
@@ -447,6 +465,7 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     // 今日复习队列已加载，第一张卡展示
     await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 3 题')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3')
   })
 
   test('无招聘偏好（batch 为空）时不渲染状态行', async ({ page }) => {
@@ -470,6 +489,7 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(page.getByTestId('practice-focus-card').getByText(seeds[0].question)).toBeVisible()
     await page.getByTestId('practice-self-assess-hard').click()
     await expect(page.getByText('自评已保存')).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
 
     // 不点击“下一题”就退出，模拟用户选完选项后直接离开。
     await page.goto('/master-bank')
@@ -532,6 +552,8 @@ test.describe('今日复习空队列', () => {
     })
 
     await expect(page.getByText('今日复习已经完成')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 3 / 3 · 剩余 0')
+    await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100')
     await expect(page.getByRole('button', { name: '切换到全部题' })).toBeVisible()
   })
 })

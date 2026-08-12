@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from app.db.connection import get_db_connection
 from app.services.practice_deck_service import list_decks, list_deck_questions
+from app.services.practice_review_service import record_review
 
 POSITION = "agent开发/大模型应用开发/大模型开发"
 
@@ -263,3 +264,27 @@ def test_due_queue_auto_new_budget_from_capacity(test_db):
         _, items, _ = list_deck_questions(conn, 1, "due")
     # 容量 1：due 1 + 抽查 1 = 2 已占 → 新题预算 0
     assert [i["id"] for i in items] == [1, 2]
+
+
+def test_due_queue_daily_budget_does_not_replenish_after_reload(test_db):
+    """今天已完成的新题必须占用每日容量，刷新不能再补满一轮新题。"""
+
+    with get_db_connection() as conn:
+        _seed(conn)
+        conn.execute(
+            "INSERT INTO user_recruitment_pref "
+            "(user_id, graduation_year, batch, daily_capacity, pace) "
+            "VALUES (1, 2027, 'autumn', 2, 'standard')"
+        )
+        record_review(conn, user_id=1, question_id=1, rating="good")
+        conn.commit()
+
+        deck, items, total = list_deck_questions(conn, 1, "due")
+
+    assert total == 2
+    assert [item["id"] for item in items] == [2]
+    assert deck["daily_capacity"] == 2
+    assert deck["completed_today"] == 1
+    assert deck["remaining_today"] == 1
+    assert deck["planned_today"] == 2
+    assert deck["next_due_at"] is not None

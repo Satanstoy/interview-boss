@@ -50,7 +50,9 @@ export function usePracticeDecks(filter = 'all') {
     error.value = null
     const cacheKey = `${unref(filter)}:${deckKey}`
     const cached = questionCache.get(cacheKey)
-    if (cached) {
+    // 今日复习是随时间和每次评分变化的活队列：重新进入时必须向服务器确认，
+    // 否则刚完成的题或刚到期的重学题会被永久缓存住。普通题单仍复用缓存。
+    if (cached && deckKey !== 'due') {
       questions.value = cached.items || []
       questionTotal.value = Number(cached.total ?? questions.value.length)
       selectedDeck.value = cached.deck || decks.value.find(deck => deck.key === deckKey) || null
@@ -133,6 +135,7 @@ export function usePracticeDecks(filter = 'all') {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
       const item = questions.value.find(question => question.id === questionId)
+      const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
       // 同一道题可能同时存在于今日复习、全部题、收藏和自定义题单缓存中。
       // 选择评分后立即同步所有缓存；是否暂时保留当前卡供用户核对答案，由
       // PracticeMode 控制。这样退出再进入时也不会从已完成的旧卡重新开始。
@@ -141,6 +144,19 @@ export function usePracticeDecks(filter = 'all') {
         if (cachedItem) Object.assign(cachedItem, nextState)
       }
       if (item) Object.assign(item, nextState)
+      if (selectedDeckKey.value === 'due' && selectedDeck.value) {
+        if (!wasReviewedToday) {
+          selectedDeck.value.completed_today = Number(selectedDeck.value.completed_today || 0) + 1
+        }
+        selectedDeck.value.remaining_today = Math.max(0, Number(selectedDeck.value.remaining_today ?? questions.value.length) - 1)
+        selectedDeck.value.planned_today = Number(selectedDeck.value.completed_today || 0) + Number(selectedDeck.value.remaining_today || 0)
+        if (nextState.next_review_at) {
+          const currentNextDue = selectedDeck.value.next_due_at
+          if (!currentNextDue || String(nextState.next_review_at) < String(currentNextDue)) {
+            selectedDeck.value.next_due_at = nextState.next_review_at
+          }
+        }
+      }
       const deck = decks.value.find(candidate => candidate.key === selectedDeckKey.value)
       if (deck) {
         deck.reviewed = Number(deck.reviewed || 0) + (item?.review_count === 1 ? 1 : 0)
@@ -151,6 +167,16 @@ export function usePracticeDecks(filter = 'all') {
       toast.error(getFriendlyError(err, '复习记录保存失败'))
       return null
     } finally { isReviewing.value = false }
+  }
+
+  function isUtcToday(value) {
+    if (!value) return false
+    const raw = String(value)
+    const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw)
+      ? raw
+      : `${raw.replace(' ', 'T')}Z`)
+    if (Number.isNaN(parsed.getTime())) return false
+    return parsed.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
   }
 
   async function createDeck(payload) {
