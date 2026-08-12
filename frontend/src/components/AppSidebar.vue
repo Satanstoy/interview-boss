@@ -175,16 +175,18 @@ function handleShowSettings() { emit('show-settings') }
   <!-- Expanded: full sidebar -->
   <div v-else class="flex flex-col h-full overflow-hidden animate-sidebar-expand">
     <!-- Header: logo + PanelLeft toggle -->
-    <div class="flex items-center justify-between px-4 py-3 shrink-0">
+    <div class="flex shrink-0 items-center gap-1 px-2 py-2">
       <a
         :href="route.query.preview === '1' ? '/master-bank?preview=1' : '/master-bank'"
-        class="flex min-w-0 items-center gap-3 rounded-lg text-left transition-colors hover:bg-sidebar-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-slot="button"
+        data-testid="sidebar-brand"
+        class="flex h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-2 text-left text-sidebar-foreground transition-all duration-200 hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         @click.prevent="goHome"
       >
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform hover:scale-105 overflow-hidden">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden">
           <img src="/favicon-b.png" alt="InterviewBoss" class="h-8 w-8 object-contain" />
         </div>
-        <div class="flex flex-col items-start leading-tight">
+        <div class="flex min-w-0 flex-col items-start justify-center leading-tight">
           <span class="text-base font-semibold tracking-tight text-sidebar-foreground whitespace-nowrap">InterviewBoss</span>
           <span class="text-[11px] text-sidebar-foreground/50 whitespace-nowrap">AI 面试准备工作台</span>
         </div>
@@ -193,7 +195,7 @@ function handleShowSettings() { emit('show-settings') }
         <button
           @click="toggleCollapsed"
           aria-label="收起侧栏"
-          class="p-1.5 rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
         >
           <PanelLeft :size="18" />
         </button>

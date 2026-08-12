@@ -50,6 +50,43 @@ test.describe('UI responsive polish', () => {
     await expect(page.getByRole('heading', { name: '高频题库' })).toBeVisible()
   })
 
+  test('expanded sidebar brand matches navigation hover and centers its logo', async ({ page }) => {
+    await gotoPreview(page, '/chat', { width: 1440, height: 900 })
+    const sidebar = page.locator('aside')
+    const brand = sidebar.getByTestId('sidebar-brand')
+    const navItem = sidebar.locator('[data-sidebar-route]').filter({ hasText: '手撕代码' })
+
+    const brandBox = await brand.boundingBox()
+    const logoBox = await brand.locator('img').boundingBox()
+    expect(Math.abs((logoBox.y + logoBox.height / 2) - (brandBox.y + brandBox.height / 2))).toBeLessThanOrEqual(1)
+
+    await brand.hover()
+    await page.waitForTimeout(550)
+    const brandHover = await brand.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        backgroundColor: style.backgroundColor,
+        boxShadow: style.boxShadow,
+        transform: style.transform,
+        backlightOpacity: getComputedStyle(element, '::before').opacity,
+      }
+    })
+
+    await navItem.hover()
+    await page.waitForTimeout(550)
+    const navHover = await navItem.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        backgroundColor: style.backgroundColor,
+        boxShadow: style.boxShadow,
+        transform: style.transform,
+        backlightOpacity: getComputedStyle(element, '::before').opacity,
+      }
+    })
+
+    expect(brandHover).toEqual(navHover)
+  })
+
   test('mobile shell navigation opens and switches routes', async ({ page }) => {
     await gotoPreview(page, '/master-bank')
     await page.getByRole('button', { name: '打开导航' }).click()
