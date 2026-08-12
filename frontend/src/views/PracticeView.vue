@@ -28,7 +28,7 @@
       @close="closePractice"
       @select-deck="selectDeck"
       @load-more="loadMoreQuestions"
-      @review="submitReview"
+      @review="handleReview"
       @toggle-star="toggleStar"
       @manage-decks="openDeckManager"
       @add-to-deck="addQuestionToDeck"
@@ -102,5 +102,9 @@ async function addQuestionToDeck({ deckKey, questionId }) {
   if (await addItem(deckKey, questionId)) {
     if (selectedDeckKey.value === deckKey) await loadQuestions(deckKey)
   }
+}
+async function handleReview(payload) {
+  const response = await submitReview(payload)
+  payload.onComplete?.(response)
 }
 </script>

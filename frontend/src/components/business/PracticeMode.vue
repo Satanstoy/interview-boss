@@ -187,10 +187,25 @@
         <div v-if="answerRevealed" data-testid="practice-review-actions" class="mt-6 border-t border-border pt-5">
           <div v-if="isAlgorithmQueue" class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-semibold text-foreground">自评已记录</p>
-              <p class="mt-1 text-[11px] text-muted-foreground">对照答案再看看，然后进入下一题</p>
+              <p class="text-sm font-semibold text-foreground">{{ reviewStatusLabel }}</p>
+              <p class="mt-1 text-[11px] text-muted-foreground">{{ reviewStatusHint }}</p>
             </div>
-            <Button data-testid="practice-next-question" size="sm" class="gap-1.5" @click="nextWithRating"><ArrowRight class="size-3.5" />下一题</Button>
+            <Button
+              v-if="reviewStatus === 'error'"
+              data-testid="practice-retry-review"
+              variant="outline"
+              size="sm"
+              class="gap-1.5"
+              @click="retrySelfAssessment"
+            ><RotateCcw class="size-3.5" />重试保存</Button>
+            <Button
+              v-else
+              data-testid="practice-next-question"
+              size="sm"
+              class="gap-1.5"
+              :disabled="reviewStatus !== 'saved'"
+              @click="nextWithRating"
+            ><Loader2 v-if="reviewStatus === 'saving'" class="size-3.5 animate-spin" /><ArrowRight v-else class="size-3.5" />下一题</Button>
           </div>
           <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -398,6 +413,8 @@ const practicedLoading = ref(false)
 const viewMode = ref(props.selectedDeckKey === 'due' ? 'quiz' : 'browse')
 const isAlgorithmQueue = computed(() => viewMode.value === 'quiz')
 const selfRating = ref(null)
+const reviewStatus = ref('idle')
+const retainedReviewedId = ref(null)
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
@@ -433,7 +450,13 @@ const serverDeckMode = computed(() => props.decks.length > 0)
 const sessionOptions = computed(() => serverDeckMode.value ? serverSessions.value : recommendedSessions.value)
 const customDecks = computed(() => props.decks.filter(deck => deck.kind === 'custom'))
 const sessionSource = computed(() => {
-  if (serverDeckMode.value) return props.deckLoading ? [] : props.questions
+  if (serverDeckMode.value) {
+    if (props.deckLoading) return []
+    if (props.selectedDeckKey !== 'due') return props.questions
+    return props.questions.filter(question => (
+      question.id === retainedReviewedId.value || isDueNow(question.next_review_at)
+    ))
+  }
   if (sessionKey.value === 'starred') return starredQuestions.value
   return props.questions
 })
@@ -452,6 +475,23 @@ const referenceAnswerSources = computed(() => (
   Array.isArray(currentQ.value?.answer_sources) ? currentQ.value.answer_sources : []
 ))
 const isLastQuestion = computed(() => currentIndex.value >= sessionQuestions.value.length - 1)
+const reviewStatusLabel = computed(() => ({
+  saving: '正在保存自评…',
+  saved: '自评已保存',
+  error: '自评保存失败',
+})[reviewStatus.value] || '等待自评')
+const reviewStatusHint = computed(() => reviewStatus.value === 'error'
+  ? '记录尚未成功，请重试后再进入下一题'
+  : '对照答案查漏补缺，保存完成后进入下一题')
+
+function isDueNow(nextReviewAt) {
+  if (!nextReviewAt) return true
+  const value = String(nextReviewAt)
+  const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(value)
+    ? value
+    : `${value.replace(' ', 'T')}Z`)
+  return Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()
+}
 
 const difficultyClass = (difficulty) => {
   const value = String(difficulty || '')
@@ -460,7 +500,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle' }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -522,16 +562,37 @@ function markAndNext(rating) {
   if (serverDeckMode.value) emit('review', { questionId: currentQ.value.id, rating })
   goNext()
 }
-// 墨墨模式：点三选项只本地记录评分并显示答案，点「下一题」才提交复习
+function saveSelfAssessment() {
+  if (!currentQ.value?.id || !selfRating.value || reviewStatus.value === 'saving') return
+  const questionId = currentQ.value.id
+  reviewStatus.value = 'saving'
+  emit('review', {
+    questionId,
+    rating: selfRating.value,
+    onComplete: (response) => {
+      if (retainedReviewedId.value !== questionId) return
+      reviewStatus.value = response ? 'saved' : 'error'
+    },
+  })
+}
+// 墨墨式主流程：三选一即落库，同时保留当前卡供用户对照答案。
 function handleSelfAssess(rating) {
   if (!currentQ.value?.id || answerRevealed.value) return
   selfRating.value = rating
+  retainedReviewedId.value = currentQ.value.id
   answerRevealed.value = true
+  saveSelfAssessment()
 }
+function retrySelfAssessment() { saveSelfAssessment() }
 function nextWithRating() {
-  if (selfRating.value) markAndNext(selfRating.value)
-  else goNext()
-  selfRating.value = null
+  if (reviewStatus.value !== 'saved' || !currentQ.value) return
+  const nextQuestionId = sessionQuestions.value[currentIndex.value + 1]?.id
+  retainedReviewedId.value = null
+  const nextIndex = nextQuestionId == null
+    ? Math.min(currentIndex.value, Math.max(0, sessionQuestions.value.length - 1))
+    : sessionQuestions.value.findIndex(question => question.id === nextQuestionId)
+  currentIndex.value = Math.max(0, nextIndex)
+  resetState()
 }
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
 async function togglePracticed() {
@@ -608,6 +669,7 @@ watch(() => props.selectedDeckKey, (key) => {
     sessionKey.value = key
     currentIndex.value = 0
     pendingReviewedId.value = null
+    retainedReviewedId.value = null
     resetState()
     // due 队列 = 算法刷题模式；其他题单 = 浏览模式
     viewMode.value = key === 'due' ? 'quiz' : 'browse'

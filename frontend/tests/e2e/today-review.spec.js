@@ -1,7 +1,7 @@
 /**
  * 今日复习（due 题单）E2E 测试 — 覆盖三个行为：
  * 1. /practice 默认进入今日复习题单 + 招聘状态行（距里程碑 N 天 / 阶段徽标 / 无偏好时隐藏）
- * 2. 复习（记得了）后当前卡从今日复习队列移除，索引补偿保证不跳卡
+ * 2. 三选一立即保存，退出重进不再重复旧卡；核对答案后推进且不跳卡
  * 3. 今日复习队列为空时展示「今日复习已经完成」完成态
  * 所有 API 均通过 page.route() mock，不依赖真实后端
  */
@@ -232,6 +232,7 @@ async function mockAllAPIs(page, options = {}) {
     recruitment = AUTUMN_RECRUITMENT,
   } = options
   const tomorrow = tomorrowUtcString()
+  const reviewedQuestionIds = new Set()
 
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
@@ -298,14 +299,18 @@ async function mockAllAPIs(page, options = {}) {
     }
     const deck = deckItems.find(candidate => candidate.key === deckKey)
     const deckName = deck?.name || deckKey
+    const items = deckKey === 'due'
+      ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
+      : deckQuestions
     await route.fulfill({
-      json: { deck: { key: deckKey, name: deckName, total: deckQuestions.length }, items: deckQuestions, total: deckQuestions.length, page_size: 100, offset: 0 },
+      json: { deck: { key: deckKey, name: deckName, total: items.length }, items, total: items.length, page_size: 100, offset: 0 },
     })
   })
 
   // Review — echo the reviewed question id, next_review_at 为明天（UTC）
   await page.route('**/api/practice/review', async (route) => {
     const body = JSON.parse(route.request().postData() || '{}')
+    reviewedQuestionIds.add(body.question_id)
     await route.fulfill({
       json: {
         question_id: body.question_id,
@@ -458,6 +463,23 @@ test.describe('今日复习默认入口与招聘状态行', () => {
 // 2. 复习后从今日复习队列移除（不跳卡）
 // ═══════════════════════════════════════════════
 test.describe('今日复习队列复习出队不跳卡', () => {
+  test('三选一保存后直接退出，再进入从下一道题继续', async ({ page }) => {
+    const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
+    await gotoPractice(page, { deckQuestions: seeds })
+
+    await expect(page.getByTestId('practice-focus-card').getByText(seeds[0].question)).toBeVisible()
+    await page.getByTestId('practice-self-assess-hard').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+
+    // 不点击“下一题”就退出，模拟用户选完选项后直接离开。
+    await page.goto('/master-bank')
+    await page.goto('/practice')
+
+    const card = page.getByTestId('practice-focus-card')
+    await expect(card.getByText(seeds[1].question)).toBeVisible({ timeout: 5000 })
+    await expect(card.getByText(seeds[0].question)).not.toBeVisible()
+  })
+
   test('记得了复习 Q1 后队列移除 Q1 并显示 Q2，连续复习不跳卡', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 4)
     await gotoPractice(page, { deckQuestions: seeds })
@@ -470,9 +492,16 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(page.getByTestId('practice-queue-sidebar')).not.toBeVisible()
     await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 4 题')
 
-    // 复习 Q1：自评「能答出」→ 显示答案 → 下一题（提交复习）
+    // 复习 Q1：自评「能答出」立即提交，同时保留当前题供核对答案。
+    const reviewRequest = page.waitForRequest(request => (
+      request.url().endsWith('/api/practice/review') && request.method() === 'POST'
+    ))
     await page.getByTestId('practice-self-assess-good').click()
+    const submitted = await reviewRequest
+    expect(submitted.postDataJSON()).toMatchObject({ question_id: seeds[0].id, rating: 'good' })
     await expect(page.getByTestId('practice-review-actions')).toBeVisible()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
     await page.getByTestId('practice-next-question').click()
 
     // 出队不跳卡：当前卡为 Q2（索引补偿）；剩余 3 张

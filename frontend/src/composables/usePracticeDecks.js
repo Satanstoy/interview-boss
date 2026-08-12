@@ -133,18 +133,12 @@ export function usePracticeDecks(filter = 'all') {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
       const item = questions.value.find(question => question.id === questionId)
-      if (selectedDeckKey.value === 'due' && nextState.next_review_at) {
-        // next_review_at 是服务器 UTC naive 时间（YYYY-MM-DD HH:MM:SS）→ 按 UTC 解析后取本地日期比较
-        const nextDate = new Date(String(nextState.next_review_at).replace(' ', 'T') + 'Z')
-        if (!Number.isNaN(nextDate.getTime())) {
-          const todayStr = new Date().toLocaleDateString('en-CA')
-          const nextDateStr = nextDate.toLocaleDateString('en-CA')
-          if (nextDateStr > todayStr) {
-            // 替换数组而非 splice：原地变更不会让 deckQuestions → practiceQuestions → sessionQuestions
-            // 计算链失效，PracticeMode 的索引补偿 watch 将不会触发，导致复习后跳过下一张卡
-            questions.value = questions.value.filter(question => question.id !== questionId)
-          }
-        }
+      // 同一道题可能同时存在于今日复习、全部题、收藏和自定义题单缓存中。
+      // 选择评分后立即同步所有缓存；是否暂时保留当前卡供用户核对答案，由
+      // PracticeMode 控制。这样退出再进入时也不会从已完成的旧卡重新开始。
+      for (const cached of questionCache.values()) {
+        const cachedItem = cached?.items?.find(question => question.id === questionId)
+        if (cachedItem) Object.assign(cachedItem, nextState)
       }
       if (item) Object.assign(item, nextState)
       const deck = decks.value.find(candidate => candidate.key === selectedDeckKey.value)
