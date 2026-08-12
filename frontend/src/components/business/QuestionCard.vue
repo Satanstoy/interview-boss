@@ -115,8 +115,19 @@
     <!-- Answer section: always rendered in contentOnly mode; v-if for toggle in normal mode -->
     <div v-if="contentOnly || question._showAnswer" :class="contentOnly ? '' : 'border-t border-border bg-muted/30 dark:bg-muted/15 relative group answer-section'">
 
+      <div v-if="contentOnly" class="flex items-center gap-2 border-b border-border/70 bg-background/70 px-3 py-2">
+        <Button size="sm" class="h-10 flex-1 gap-1.5 text-xs sm:h-8 sm:flex-none" @click="$emit('practice', question)">
+          <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4Z"/></svg>
+          开始练习这道题
+        </Button>
+        <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="$emit('toggle-star', question)">
+          <svg class="size-4" :class="question.is_starred ? 'fill-amber-400 text-amber-500' : ''" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+          {{ question.is_starred ? '已收藏' : '收藏' }}
+        </Button>
+      </div>
+
       <!-- Ownership badge + share action (visible in all modes) -->
-      <div v-if="showOwnership || canShare" class="px-4 pt-3 flex items-center gap-2">
+      <div v-if="showOwnership || canShare" class="flex items-center gap-2 px-3 pt-3 sm:px-4">
         <Badge v-if="showOwnership" variant="outline" class="text-label"
           :class="question.is_personal
             ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-600 dark:text-violet-400'
@@ -132,7 +143,7 @@
       </div>
 
       <!-- Answer (primary content — shown first) -->
-      <div class="px-4 pt-3 pb-0">
+      <div class="pb-0" :class="contentOnly ? 'px-0 pt-0' : 'px-4 pt-3'">
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
@@ -154,7 +165,7 @@
                 重新生成
               </button>
             </div>
-            <div class="rounded-md border border-border bg-card px-4 py-3 text-foreground text-sm leading-relaxed max-w-none answer-content prose prose-sm dark:prose-invert max-w-none" v-html="cachedMarkdown"></div>
+            <div class="answer-content prose prose-sm max-w-none rounded-md border border-border bg-card px-3 py-3 text-sm leading-7 text-foreground dark:prose-invert sm:px-4" v-html="cachedMarkdown"></div>
 
             <SourceList
               :sources="answerSources"

@@ -1,5 +1,5 @@
 <template>
-  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
+  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2 py-2 sm:gap-3 sm:px-4 sm:py-4 md:px-6 md:py-6">
     <!-- Error banner -->
     <div v-if="dataLoadError" class="bg-red-50/80 dark:bg-red-900/20 border border-red-200/80 dark:border-red-800/50 text-red-700 dark:text-red-400 px-4 py-3 rounded-xl flex items-center justify-between shrink-0">
       <span class="flex items-center gap-2 text-sm">
@@ -38,7 +38,7 @@
     <!-- MasterBank content -->
     <div v-if="masterBankEverShown" class="flex flex-col flex-1 min-h-0 gap-3">
       <!-- ══ 固定区域（不滚动） ══ -->
-      <div class="rounded-xl border border-border bg-card p-3 shadow-sm flex flex-col gap-3 shrink-0">
+      <div class="flex shrink-0 flex-col gap-2 rounded-xl border border-border bg-card p-2 shadow-sm sm:gap-3 sm:p-3">
         <!-- SearchFilterBar -->
         <SearchFilterBar
           :search-query="searchQuery"
@@ -49,7 +49,7 @@
         />
 
         <!-- 题库过滤 tabs（全部 / 公共 / 我的） -->
-        <div class="flex items-center gap-1.5 shrink-0">
+        <div class="flex shrink-0 items-center gap-1.5">
           <button
             v-for="tab in bankFilterTabs" :key="tab.value"
             @click="onSelectBankFilter(tab.value)"
@@ -60,10 +60,20 @@
           >
             {{ tab.label }}
           </button>
+          <span class="ml-auto text-[11px] tabular-nums text-muted-foreground md:hidden">{{ filteredMasterBank.length }} 道匹配</span>
+          <Button variant="ghost" size="sm" class="h-9 shrink-0 gap-1 px-2 text-xs md:hidden" :aria-expanded="mobileToolsOpen" @click="mobileToolsOpen = !mobileToolsOpen">
+            <SlidersHorizontal class="size-3.5" />管理
+            <ChevronDown class="size-3 transition-transform" :class="mobileToolsOpen ? 'rotate-180' : ''" />
+          </Button>
         </div>
 
+        <Button v-if="filteredMasterBank.length > 0" class="h-10 w-full gap-2 text-sm md:hidden" @click="enterPracticeMode">
+          <BookOpenCheck class="size-4" />开始八股刷题
+        </Button>
+
         <!-- BatchActionPanel (全选/反选 + 操作) -->
-        <BatchActionPanel
+        <div :class="mobileToolsOpen ? 'block' : 'hidden md:block'">
+          <BatchActionPanel
           :selected-count="masterSelection.selectedCount.value"
           :total-count="filteredMasterBank.length"
           :actions="masterBatchActions"
@@ -82,7 +92,7 @@
               <Button v-if="!displayUser?.is_admin" variant="default" size="sm" @click="triggerBuildPersonalBank" :disabled="isBuilding">
                 {{ isBuilding ? '重建中...' : '重建题库' }}
               </Button>
-              <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" @click="enterPracticeMode">
+              <Button v-if="filteredMasterBank.length > 0" variant="outline" size="sm" class="hidden md:inline-flex" @click="enterPracticeMode">
                 八股刷题模式
               </Button>
               <Button v-if="!isDataLoading" variant="outline" size="sm" @click="fetchTableData" :disabled="isDataLoading">
@@ -90,7 +100,8 @@
               </Button>
             </div>
           </template>
-        </BatchActionPanel>
+          </BatchActionPanel>
+        </div>
 
         <!-- Category tags (horizontal scroll) -->
         <div class="flex gap-1.5 shrink-0 overflow-x-auto custom-scrollbar pb-1">
@@ -171,6 +182,7 @@
 
 <script setup>
 import { inject, ref } from 'vue'
+import { BookOpenCheck, ChevronDown, SlidersHorizontal } from '@lucide/vue'
 import { useToast } from '@/composables/useNotification.js'
 import SearchFilterBar from '@/components/business/SearchFilterBar.vue'
 import MasterBankList from '@/components/business/MasterBankList.vue'
@@ -200,6 +212,7 @@ const {
 
 const toast = useToast()
 const masterBankRef = ref(null)
+const mobileToolsOpen = ref(false)
 
 const skeletonCards = [
   { title: '75%', subtitle: '45%' },

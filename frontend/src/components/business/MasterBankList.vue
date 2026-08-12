@@ -27,38 +27,41 @@
         type="multiple"
         :model-value="openItems"
         @update:model-value="onOpenChange"
-        class="flex flex-col gap-1.5 pb-4"
+        class="flex flex-col gap-2 pb-4 sm:gap-1.5"
       >
         <AccordionItem
           v-for="q in items"
           :key="q.id"
           :value="String(q.id)"
-          class="min-w-0 max-w-full border border-border rounded-xl overflow-hidden bg-card shadow-sm"
+          class="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm"
         >
-          <AccordionTrigger class="ib-question-accordion-trigger w-full min-w-0 max-w-full px-3 py-2 hover:no-underline sm:px-4">
+          <AccordionTrigger class="ib-question-accordion-trigger w-full min-w-0 max-w-full px-3 py-2.5 hover:no-underline sm:px-4 sm:py-2">
             <div class="flex min-w-0 flex-1 items-center gap-2 text-left pr-1 sm:gap-3 sm:pr-2">
               <!-- Checkbox -->
               <input
                 type="checkbox"
                 :checked="isSelected(q.id)"
+                :aria-label="`选择题目：${q.question}`"
                 @click.stop="$emit('toggle-item', q.id)"
-                class="size-4 text-primary-600 rounded-md border-border cursor-pointer shrink-0"
+                class="size-5 shrink-0 cursor-pointer rounded-md border-border text-primary-600 sm:size-4"
               />
               <!-- Content -->
               <div class="flex-1 min-w-0">
-                <span class="text-sm font-medium text-foreground truncate block">{{ q.question }}</span>
-                <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-1">
-                  <span v-if="q.frequency > 1" class="text-xs px-1 py-px rounded bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold">{{ q.frequency }}x</span>
+                <span class="block line-clamp-2 text-sm font-medium leading-5 text-foreground sm:truncate">{{ q.question }}</span>
+                <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1 sm:mt-0.5">
+                  <span v-if="q.frequency > 1" class="rounded bg-red-50 px-1.5 py-px text-[11px] font-bold text-red-600 dark:bg-red-900/20 dark:text-red-400">高频 {{ q.frequency }}</span>
                   <span class="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs px-1.5 py-px rounded font-semibold">{{ q.cat1 || '未分类' }}</span>
                   <span
-                    v-for="tag in (q.tags || '').split(',').filter(Boolean).slice(0, 3)"
+                    v-for="(tag, tagIndex) in (q.tags || '').split(',').filter(Boolean).slice(0, 3)"
                     :key="tag"
+                    :class="tagIndex > 0 ? 'hidden sm:inline-flex' : 'inline-flex'"
                     class="text-xs px-1 py-px rounded bg-muted text-muted-foreground"
                   >{{ tag.trim() }}</span>
                   <span class="text-xs font-medium px-2 py-0.5 rounded-md shrink-0 sm:ml-auto"
                     :class="difficultyClass(q.difficulty)">
                     {{ q.difficulty || '-' }}
                   </span>
+                  <span class="ml-auto text-[11px] font-medium text-primary sm:hidden">{{ q._showAnswer ? '收起答案' : '查看答案' }}</span>
                 </div>
               </div>
             </div>

@@ -15,7 +15,7 @@
         <input
           v-model="localQuery"
           type="text"
-          class="w-full h-9 pl-9 pr-9 rounded-md border border-input bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:border-ring transition-colors"
+          class="h-10 w-full rounded-md border border-input bg-transparent pl-9 pr-9 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:h-9"
           placeholder="搜索题目关键词..."
         />
         <button
@@ -35,7 +35,7 @@
         :model-value="filterDifficulty || '__all__'"
         @update:model-value="$emit('update:filterDifficulty', $event === '__all__' ? '' : $event)"
       >
-        <SelectTrigger class="min-w-[120px] h-9 text-sm">
+        <SelectTrigger class="h-10 min-w-[120px] text-sm sm:h-9">
           <SelectValue placeholder="全部难度" />
         </SelectTrigger>
         <SelectContent>

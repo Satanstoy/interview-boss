@@ -157,6 +157,21 @@ test.describe('UI responsive polish', () => {
 
   test('mobile master bank cards keep controls inside viewport', async ({ page }) => {
     await gotoPreview(page, '/master-bank')
+    const practiceButton = page.getByRole('button', { name: '开始八股刷题' })
+    await expect(practiceButton).toBeVisible()
+    expect((await practiceButton.boundingBox()).height).toBeGreaterThanOrEqual(40)
+    await expect(page.getByRole('button', { name: '全选' })).toBeHidden()
+
+    await page.getByRole('button', { name: /管理/ }).click()
+    await expect(page.getByRole('button', { name: '全选' })).toBeVisible()
+    await page.getByRole('button', { name: /管理/ }).click()
+
+    const firstQuestion = page.locator('[data-slot="accordion-trigger"]').first()
+    await expect(firstQuestion.getByText('查看答案')).toBeVisible()
+    await firstQuestion.click()
+    await expect(firstQuestion.getByText('收起答案')).toBeVisible()
+    await expect(page.getByRole('button', { name: '开始练习这道题' }).first()).toBeVisible()
+
     const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth)
     const overflowingButtons = await page.locator('button').evaluateAll((buttons, width) =>
       buttons
