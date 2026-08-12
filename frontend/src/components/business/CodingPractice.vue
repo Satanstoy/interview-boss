@@ -113,7 +113,7 @@
                 <button v-if="activeProblem._referenceAnswer" class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'answer' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'answer'">参考答案</button>
               </div>
               <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 custom-scrollbar">
-                <div v-if="contentTab === 'description'">
+                <div v-if="contentTab === 'description'" class="tab-content">
                   <div class="mb-4 flex flex-wrap items-center gap-2">
                     <span class="rounded bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">{{ activeProblem.source_type === 'imported' ? '我的题目' : '高频手撕' }}</span>
                     <span class="rounded px-2 py-0.5 text-xs font-medium" :class="difficultyClass(activeProblem.difficulty)">{{ difficultyLabel(activeProblem.difficulty) }}</span>
@@ -130,7 +130,7 @@
                   </div>
                 </div>
 
-                <div v-else-if="contentTab === 'review'" class="space-y-5">
+                <div v-else-if="contentTab === 'review'" class="tab-content space-y-5">
                   <div v-if="!activeProblem._feedback && !activeProblem._scores" class="py-12 text-center text-sm text-muted-foreground">提交代码后，AI 评审结果会显示在这里。</div>
                   <template v-else>
                     <div v-if="activeProblem._scores" class="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
@@ -141,7 +141,7 @@
                   </template>
                 </div>
 
-                <div v-else class="space-y-3">
+                <div v-else class="tab-content space-y-3">
                   <p class="text-xs text-muted-foreground">这是基于你当前代码生成的最小修改参考答案。</p>
                   <div class="h-[520px] overflow-hidden rounded-lg border border-border bg-muted/30"><CodeEditor :model-value="cleanCode(activeProblem._referenceAnswer)" :language="currentLanguage" :read-only="true" /></div>
                 </div>

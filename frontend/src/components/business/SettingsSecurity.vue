@@ -179,7 +179,7 @@ onUnmounted(() => {
         </Tabs>
       </div>
 
-      <div v-if="changeMethod === 'current'" class="space-y-3">
+      <div v-if="changeMethod === 'current'" class="tab-content space-y-3">
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">当前密码</Label>
           <Input v-model="passwordForm.currentPassword" type="password" placeholder="输入当前密码" autocomplete="current-password" :disabled="passwordSaving" />
@@ -207,7 +207,7 @@ onUnmounted(() => {
         <p v-if="passwordError" class="text-xs text-destructive">{{ passwordError }}</p>
       </div>
 
-      <div v-else class="space-y-3">
+      <div v-else class="tab-content space-y-3">
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">绑定邮箱</Label>
           <div class="flex gap-2">

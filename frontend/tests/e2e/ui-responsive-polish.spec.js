@@ -87,6 +87,30 @@ test.describe('UI responsive polish', () => {
     expect(brandHover).toEqual(navHover)
   })
 
+  test('route changes animate and text fields use Xiaomi-safe font features', async ({ page }) => {
+    await gotoPreview(page, '/chat', { width: 1440, height: 900 })
+
+    const fontFeatures = await page.evaluate(() => {
+      const textarea = document.createElement('textarea')
+      document.body.appendChild(textarea)
+      const result = {
+        body: getComputedStyle(document.body).fontFeatureSettings,
+        field: getComputedStyle(textarea).fontFeatureSettings,
+        ligatures: getComputedStyle(textarea).fontVariantLigatures,
+      }
+      textarea.remove()
+      return result
+    })
+    expect(fontFeatures.body).toBe('normal')
+    expect(fontFeatures.field).toBe('normal')
+    expect(fontFeatures.ligatures).toBe('none')
+
+    const codingRoute = page.locator('aside [data-sidebar-route]').filter({ hasText: '手撕代码' })
+    await codingRoute.click({ noWaitAfter: true })
+    await expect(page.locator('.page-route-leave-active')).toBeAttached()
+    await expect(page).toHaveURL(/\/coding\?preview=1/)
+  })
+
   test('mobile shell navigation opens and switches routes', async ({ page }) => {
     await gotoPreview(page, '/master-bank')
     await page.getByRole('button', { name: '打开导航' }).click()

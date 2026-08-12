@@ -7,7 +7,18 @@
 
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: 'cv11', 'ss01';
+    /* MiSans on Xiaomi/HyperOS corrupts some Latin glyphs when stylistic
+     * sets are forced globally. Let each installed font use its safe default. */
+    font-feature-settings: normal;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  .prose-chat,
+  .answer-content {
+    font-feature-settings: normal;
+    font-variant-ligatures: none;
   }
 
   /* Global focus ring */

@@ -422,6 +422,16 @@
 .tab-content {
   transform: translateZ(0);
   backface-visibility: hidden;
+  animation: tabContentIn var(--motion-short-3) var(--ease-decelerate) both;
+}
+
+[data-slot="tabs-content"][data-state="active"] {
+  animation: tabContentIn var(--motion-short-3) var(--ease-decelerate) both;
+}
+
+@keyframes tabContentIn {
+  from { opacity: 0; transform: translate3d(8px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
 /* ── Route and workspace transitions ── */
@@ -446,13 +456,23 @@
 
 .page-route-enter-active,
 .page-route-leave-active {
-  transition:
-    opacity var(--motion-medium-2) var(--ease-standard),
-    transform var(--motion-medium-2) var(--ease-standard);
+  transform-origin: 50% 45%;
 }
 
-.page-route-enter-from { opacity: 0; transform: translateY(6px); }
-.page-route-leave-to { opacity: 0; transform: translateY(-3px); }
+.page-route-enter-active {
+  transition:
+    opacity var(--motion-medium-1) var(--ease-decelerate),
+    transform var(--motion-medium-1) var(--ease-decelerate);
+}
+
+.page-route-leave-active {
+  transition:
+    opacity var(--motion-short-2) var(--ease-accelerate),
+    transform var(--motion-short-2) var(--ease-accelerate);
+}
+
+.page-route-enter-from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.995); }
+.page-route-leave-to { opacity: 0; transform: translate3d(0, -4px, 0) scale(0.998); }
 
 .settings-section-enter-active,
 .settings-section-leave-active {
