@@ -131,11 +131,13 @@ export function usePracticeDecks(filter = 'all') {
 
   async function submitReview({ questionId, rating, score = null }) {
     isReviewing.value = true
+    const reviewedDeckKey = selectedDeckKey.value
+    const reviewedDeck = selectedDeck.value
+    const item = questions.value.find(question => question.id === questionId)
+    const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
     try {
       const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
       const nextState = response.review || {}
-      const item = questions.value.find(question => question.id === questionId)
-      const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
       // 同一道题可能同时存在于今日复习、全部题、收藏和自定义题单缓存中。
       // 选择评分后立即同步所有缓存；是否暂时保留当前卡供用户核对答案，由
       // PracticeMode 控制。这样退出再进入时也不会从已完成的旧卡重新开始。
@@ -144,20 +146,20 @@ export function usePracticeDecks(filter = 'all') {
         if (cachedItem) Object.assign(cachedItem, nextState)
       }
       if (item) Object.assign(item, nextState)
-      if (selectedDeckKey.value === 'due' && selectedDeck.value) {
+      if (reviewedDeckKey === 'due' && reviewedDeck) {
         if (!wasReviewedToday) {
-          selectedDeck.value.completed_today = Number(selectedDeck.value.completed_today || 0) + 1
+          reviewedDeck.completed_today = Number(reviewedDeck.completed_today || 0) + 1
         }
-        selectedDeck.value.remaining_today = Math.max(0, Number(selectedDeck.value.remaining_today ?? questions.value.length) - 1)
-        selectedDeck.value.planned_today = Number(selectedDeck.value.completed_today || 0) + Number(selectedDeck.value.remaining_today || 0)
+        reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today ?? questions.value.length) - 1)
+        reviewedDeck.planned_today = Number(reviewedDeck.completed_today || 0) + Number(reviewedDeck.remaining_today || 0)
         if (nextState.next_review_at) {
-          const currentNextDue = selectedDeck.value.next_due_at
+          const currentNextDue = reviewedDeck.next_due_at
           if (!currentNextDue || String(nextState.next_review_at) < String(currentNextDue)) {
-            selectedDeck.value.next_due_at = nextState.next_review_at
+            reviewedDeck.next_due_at = nextState.next_review_at
           }
         }
       }
-      const deck = decks.value.find(candidate => candidate.key === selectedDeckKey.value)
+      const deck = decks.value.find(candidate => candidate.key === reviewedDeckKey)
       if (deck) {
         deck.reviewed = Number(deck.reviewed || 0) + (item?.review_count === 1 ? 1 : 0)
         deck.progress = deck.total ? Math.round(deck.reviewed / deck.total * 100) : 0

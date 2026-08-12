@@ -121,11 +121,11 @@
             <template v-if="isAlgorithmQueue">
               <p class="text-sm text-muted-foreground">先判断一下，能答出来吗？</p>
               <div class="flex w-full max-w-md flex-col gap-2.5 sm:w-auto sm:flex-row">
-                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('again')"><X class="size-4" />不会</Button>
-                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('hard')"><Target class="size-4" />有点印象</Button>
-                <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><Check class="size-4" />能答出</Button>
+                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('again')"><kbd class="hidden text-[10px] opacity-60 sm:inline">1</kbd><X class="size-4" />不会</Button>
+                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('hard')"><kbd class="hidden text-[10px] opacity-60 sm:inline">2</kbd><Target class="size-4" />有点印象</Button>
+                <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><kbd class="hidden text-[10px] opacity-70 sm:inline">3</kbd><Check class="size-4" />能答出</Button>
               </div>
-              <span class="text-[11px] text-muted-foreground">先自评，再看答案</span>
+              <span class="text-[11px] text-muted-foreground">先自评，再看答案<span class="hidden sm:inline"> · 按 1 / 2 / 3 快速选择</span></span>
             </template>
             <template v-else>
               <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
@@ -217,7 +217,7 @@
               class="gap-1.5"
               :disabled="reviewStatus !== 'saved'"
               @click="nextWithRating"
-            ><Loader2 v-if="reviewStatus === 'saving'" class="size-3.5 animate-spin" /><ArrowRight v-else class="size-3.5" />下一题</Button>
+            ><Loader2 v-if="reviewStatus === 'saving'" class="size-3.5 animate-spin" /><ArrowRight v-else class="size-3.5" />下一题 <kbd v-if="reviewStatus === 'saved'" class="hidden text-[10px] opacity-60 sm:inline">Enter</kbd></Button>
           </div>
           <div v-else class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -428,6 +428,7 @@ const isAlgorithmQueue = computed(() => viewMode.value === 'quiz')
 const selfRating = ref(null)
 const reviewStatus = ref('idle')
 const retainedReviewedId = ref(null)
+const savedReview = ref(null)
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
@@ -502,9 +503,15 @@ const reviewStatusLabel = computed(() => ({
   saved: '自评已保存',
   error: '自评保存失败',
 })[reviewStatus.value] || '等待自评')
-const reviewStatusHint = computed(() => reviewStatus.value === 'error'
-  ? '记录尚未成功，请重试后再进入下一题'
-  : '对照答案查漏补缺，保存完成后进入下一题')
+const ratingLabels = { again: '不会', hard: '有点印象', good: '能答出', easy: '很熟' }
+const reviewStatusHint = computed(() => {
+  if (reviewStatus.value === 'error') return '记录尚未成功，请重试后再进入下一题'
+  if (reviewStatus.value !== 'saved' || !savedReview.value) return '对照答案查漏补缺，保存完成后进入下一题'
+  const pieces = [ratingLabels[selfRating.value] || '已自评']
+  if (savedReview.value.next_review_at) pieces.push(`预计 ${formatNextReview(savedReview.value.next_review_at)}复习`)
+  if (savedReview.value.proficiency != null) pieces.push(`熟练度 ${savedReview.value.proficiency}/5`)
+  return pieces.join(' · ')
+})
 
 function isDueNow(nextReviewAt) {
   if (!nextReviewAt) return true
@@ -522,7 +529,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle' }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle'; savedReview.value = null }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -556,6 +563,7 @@ function handleQueueScroll(event) {
 }
 // 模式切换：quiz（算法刷题）↔ browse（列表看题，默认全部题）
 function switchToBrowse() {
+  if (reviewStatus.value === 'saving') { toast.warning('正在保存这道题的自评，请稍候'); return }
   viewMode.value = 'browse'
   if (props.selectedDeckKey === 'due') emit('select-deck', 'all')
 }
@@ -593,6 +601,7 @@ function saveSelfAssessment() {
     rating: selfRating.value,
     onComplete: (response) => {
       if (retainedReviewedId.value !== questionId) return
+      savedReview.value = response?.review || null
       reviewStatus.value = response ? 'saved' : 'error'
     },
   })
@@ -669,6 +678,19 @@ function onGlobalKeydown(event) {
   if (event.key === 'Escape') { emit('close'); return }
   const target = event.target
   if (target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+  if (isAlgorithmQueue.value) {
+    if (!answerRevealed.value) {
+      const rating = { '1': 'again', '2': 'hard', '3': 'good' }[event.key]
+      if (rating) { event.preventDefault(); handleSelfAssess(rating) }
+      return
+    }
+    if (['Enter', 'ArrowRight', ' '].includes(event.key)) {
+      event.preventDefault()
+      if (reviewStatus.value === 'saved') nextWithRating()
+      else if (reviewStatus.value === 'error') retrySelfAssessment()
+    }
+    return
+  }
   if (event.key === 'ArrowLeft') { event.preventDefault(); goPrev() }
   else if (event.key === 'ArrowRight') { event.preventDefault(); goNext() }
   else if (event.key === 'Enter' && currentQ.value && !answerRevealed.value && !isAlgorithmQueue.value) { event.preventDefault(); answerRevealed.value = true }

@@ -230,6 +230,7 @@ async function mockAllAPIs(page, options = {}) {
     deckItems = MOCK_DECKS.items,
     deckQuestions = DUE_QUESTION_SEEDS.slice(0, 3),
     recruitment = AUTUMN_RECRUITMENT,
+    reviewDelayMs = 0,
   } = options
   const tomorrow = tomorrowUtcString()
   const reviewedQuestionIds = new Set()
@@ -329,6 +330,7 @@ async function mockAllAPIs(page, options = {}) {
   await page.route('**/api/practice/review', async (route) => {
     const body = JSON.parse(route.request().postData() || '{}')
     reviewedQuestionIds.add(body.question_id)
+    if (reviewDelayMs) await new Promise(resolve => setTimeout(resolve, reviewDelayMs))
     await route.fulfill({
       json: {
         question_id: body.question_id,
@@ -482,6 +484,29 @@ test.describe('今日复习默认入口与招聘状态行', () => {
 // 2. 复习后从今日复习队列移除（不跳卡）
 // ═══════════════════════════════════════════════
 test.describe('今日复习队列复习出队不跳卡', () => {
+  test('键盘 1/2/3 自评显示调度反馈，保存期间不能用右键跳题', async ({ page }) => {
+    const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
+    await gotoPractice(page, { deckQuestions: seeds, reviewDelayMs: 350 })
+
+    const card = page.getByTestId('practice-focus-card')
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
+    const reviewResponse = page.waitForResponse(response => response.url().endsWith('/api/practice/review'))
+
+    await page.keyboard.press('2')
+    await expect(page.getByText('正在保存自评…')).toBeVisible()
+    await page.keyboard.press('ArrowRight')
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
+
+    await reviewResponse
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await expect(page.getByTestId('practice-review-actions')).toContainText('有点印象')
+    await expect(page.getByTestId('practice-review-actions')).toContainText('熟练度 2/5')
+    await expect(page.getByTestId('practice-review-actions')).toContainText(/预计 .+后复习/)
+
+    await page.keyboard.press('Enter')
+    await expect(card.getByText(seeds[1].question)).toBeVisible()
+  })
+
   test('三选一保存后直接退出，再进入从下一道题继续', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
     await gotoPractice(page, { deckQuestions: seeds })
