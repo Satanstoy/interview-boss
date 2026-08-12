@@ -71,7 +71,7 @@
       <div class="min-w-0 flex-1">
         <div class="flex items-center justify-between gap-3 text-xs">
           <span class="font-semibold text-foreground">今日计划</span>
-          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}</span>
+          <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
         </div>
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
           <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
@@ -85,7 +85,7 @@
         <div class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
           <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
-          <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
+          <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
             <span>题目列表</span>
           </Button>
@@ -99,7 +99,7 @@
           <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
           <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
-            <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:size-9 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+            <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:size-9 sm:min-h-0 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
           </AppTooltip>
           <Badge v-if="currentQ.difficulty" variant="outline" class="text-[10px]" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
           <Badge variant="outline" class="max-w-32 truncate text-[10px]">{{ currentQ.cat1 || '未分类' }}</Badge>
@@ -260,7 +260,19 @@
       <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><List :size="26" /></div>
       <h2 class="mt-5 text-lg font-semibold text-foreground">{{ sessionKey === 'due' ? '今日复习已经完成' : '这个题单还没有题目' }}</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ sessionKey === 'due' ? completionMessage : '先收藏几道题，或者切换到全部题开始刷题。' }}</p>
-      <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">切换到全部题</Button></div>
+      <div v-if="sessionKey === 'due' && sessionReviewCount" data-testid="practice-session-summary" class="mt-5 w-full max-w-md rounded-xl border border-border/80 bg-muted/30 p-4">
+        <p class="text-sm font-semibold text-foreground">本轮完成 {{ sessionReviewCount }} 次主动回忆</p>
+        <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <div class="rounded-lg bg-background px-2 py-2"><span class="block font-semibold text-emerald-600 dark:text-emerald-400">{{ sessionRatings.good + sessionRatings.easy }}</span><span class="text-muted-foreground">能答出</span></div>
+          <div class="rounded-lg bg-background px-2 py-2"><span class="block font-semibold text-amber-600 dark:text-amber-400">{{ sessionRatings.hard }}</span><span class="text-muted-foreground">有点模糊</span></div>
+          <div class="rounded-lg bg-background px-2 py-2"><span class="block font-semibold text-rose-600 dark:text-rose-400">{{ sessionRatings.again }}</span><span class="text-muted-foreground">不会</span></div>
+        </div>
+        <p v-if="sessionWeakQuestions.length" class="mt-3 text-xs text-muted-foreground">本轮有 {{ sessionWeakQuestions.length }} 道题需要继续巩固。</p>
+      </div>
+      <div class="mt-5 flex flex-wrap justify-center gap-2">
+        <Button v-if="sessionKey === 'due' && sessionWeakQuestions.length" data-testid="practice-retry-weak" class="gap-1.5" @click="restartWeakSession"><RotateCcw class="size-3.5" />重刷 {{ sessionWeakQuestions.length }} 道薄弱题</Button>
+        <Button variant="outline" @click="selectSession('all')">切换到全部题</Button>
+      </div>
     </div>
 
     <div v-if="currentQ" class="mx-auto flex w-full shrink-0 flex-wrap items-center justify-between gap-2 px-1 pb-[env(safe-area-inset-bottom)] sm:gap-3">
@@ -431,6 +443,8 @@ const retainedReviewedId = ref(null)
 const savedReview = ref(null)
 const RELEARNING_GAP = 3
 const relearningQueue = ref([])
+const sessionRatings = reactive({ again: 0, hard: 0, good: 0, easy: 0 })
+const sessionWeakQuestions = ref([])
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
 
 function questionAttemptCount(question) {
@@ -502,6 +516,7 @@ const dailyPlanTotal = computed(() => Number(props.selectedDeck?.planned_today |
 const dailyProgress = computed(() => dailyPlanTotal.value
   ? Math.round(completedToday.value / dailyPlanTotal.value * 100)
   : 0)
+const sessionReviewCount = computed(() => Object.values(sessionRatings).reduce((sum, count) => sum + count, 0))
 const completionMessage = computed(() => props.selectedDeck?.next_due_at
   ? `下一轮复习将在${formatNextReview(props.selectedDeck.next_due_at)}到期，也可以切换到全部题继续刷。`
   : '今天的计划已完成，明天再来复习，或者切换到全部题继续刷。')
@@ -605,14 +620,25 @@ function markAndNext(rating) {
 function saveSelfAssessment() {
   if (!currentQ.value?.id || !selfRating.value || reviewStatus.value === 'saving') return
   const questionId = currentQ.value.id
+  const reviewedQuestion = currentQ.value
+  const rating = selfRating.value
   reviewStatus.value = 'saving'
   emit('review', {
     questionId,
-    rating: selfRating.value,
+    rating,
     onComplete: (response) => {
       if (retainedReviewedId.value !== questionId) return
       savedReview.value = response?.review || null
       reviewStatus.value = response ? 'saved' : 'error'
+      if (response) {
+        sessionRatings[rating] += 1
+        if (
+          (rating === 'again' || rating === 'hard')
+          && !sessionWeakQuestions.value.some(question => question.id === questionId)
+        ) {
+          sessionWeakQuestions.value = [...sessionWeakQuestions.value, reviewedQuestion]
+        }
+      }
     },
   })
 }
@@ -652,6 +678,18 @@ function nextWithRating() {
     : sessionQuestions.value.findIndex(question => question.id === nextQuestionId)
   currentIndex.value = Math.max(0, nextIndex)
   resetState()
+}
+function restartWeakSession() {
+  if (!sessionWeakQuestions.value.length) return
+  relearningQueue.value = sessionWeakQuestions.value.map(question => ({ question, remaining: 0 }))
+  retainedReviewedId.value = null
+  currentIndex.value = 0
+  resetState()
+  toast.info(`开始巩固 ${sessionWeakQuestions.value.length} 道本轮薄弱题`)
+}
+function resetSessionSummary() {
+  for (const rating of Object.keys(sessionRatings)) sessionRatings[rating] = 0
+  sessionWeakQuestions.value = []
 }
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
 async function togglePracticed() {
@@ -744,6 +782,7 @@ watch(() => props.selectedDeckKey, (key) => {
     pendingReviewedId.value = null
     retainedReviewedId.value = null
     relearningQueue.value = []
+    resetSessionSummary()
     resetState()
     // due 队列 = 算法刷题模式；其他题单 = 浏览模式
     viewMode.value = key === 'due' ? 'quiz' : 'browse'

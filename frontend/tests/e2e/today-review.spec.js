@@ -608,6 +608,25 @@ test.describe('今日复习队列复习出队不跳卡', () => {
 // 3. 空今日复习队列 → 完成态
 // ═══════════════════════════════════════════════
 test.describe('今日复习空队列', () => {
+  test('完成后展示本轮统计并可一键重刷薄弱题', async ({ page }) => {
+    const question = DUE_QUESTION_SEEDS[0]
+    await gotoPractice(page, { deckQuestions: [question] })
+
+    await page.getByTestId('practice-self-assess-hard').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await page.keyboard.press('Enter')
+
+    const summary = page.getByTestId('practice-session-summary')
+    await expect(page.getByText('今日复习已经完成')).toBeVisible()
+    await expect(summary).toContainText('本轮完成 1 次主动回忆')
+    await expect(summary).toContainText('有点模糊')
+    await expect(summary).toContainText('本轮有 1 道题需要继续巩固')
+
+    await page.getByTestId('practice-retry-weak').click()
+    await expect(page.getByTestId('practice-focus-card').getByText(question.question)).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 1 · 剩余 0 · 待巩固 1')
+  })
+
   test('今日复习队列为空时展示完成态', async ({ page }) => {
     const doneDeck = { ...MOCK_DECKS.items[0], reviewed: 3, due: 0, progress: 100 }
     await gotoPractice(page, {
