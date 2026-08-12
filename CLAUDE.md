@@ -89,7 +89,7 @@ backend/
 frontend/
 ├── src/api/           ← 兼容层 re-export（新代码直接 import services/）
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
-├── src/composables/   ← 领域逻辑复用（use* 前缀，共 15 个）
+├── src/composables/   ← 领域逻辑复用（use* 前缀，共 19 个）
 ├── src/router/        ← Vue Router 4 配置（路由表 + 认证守卫）
 ├── src/stores/        ← Pinia 状态层（当前为空，状态走 composables）
 ├── src/layouts/       ← AuthenticatedLayout / BlankLayout / DefaultLayout
@@ -106,7 +106,7 @@ frontend/
 
 deploy/                ← 部署脚本（docker-deploy.sh 是生产用）
 nginx/                 ← Docker Nginx 配置
-docs/                  ← 历史经验库（bug-reports、tdd-reports、superpowers、analysis）
+docs/                  ← 历史经验库（bug-reports、tdd-reports、superpowers、analysis、adr、dev-log、evaluations、specs）
 scripts/               ← 项目级辅助脚本（check.sh 质量门禁入口）
 backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详见该目录 CLAUDE.md）
 ```

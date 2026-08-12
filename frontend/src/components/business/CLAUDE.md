@@ -56,6 +56,9 @@
 | `SettingsQualityAssistant.vue` | 设置 - 聚合质量 AI 助手（仅管理员）：自然语言筛选/批量处理清单；工具轨迹可折叠展示；写操作渲染「待确认操作」卡片（同款「原题→目标题」左右对照 + 确认→`/confirm`→`{message:""}` 续接让 LLM 确认并提下一步）；session_id 存 localStorage |
 | `StagingPanel.vue` | 暂存面板（导入工作台）：文本/截图/来源链接三路输入 + 类型/季节/分享设置；分享设置（公共审核队列/仅自己可见）对所有用户可选；头部展示后台 Job 实时进度列表（阶段文案 + 进度条，失败红字可关闭）；非图片文件忽略时 toast 提示；清空非空内容需确认 |
 | `UserMenu.vue` | 用户菜单 |
+| `MergeQuestionDialog.vue` | 移动题目到目标聚类弹窗：搜索目标聚类、选择目标题目或独立为新聚类 |
+| `SettingsMCP.vue` | 设置 - MCP 连接配置：账户级 MCP Token 生成/轮换/吊销、连接配置复制、Agent 配置提示词 |
+| `SettingsSearchConfig.vue` | 设置 - 联网搜索配置：多 provider 选择（Tavily/Brave/Bocha/Exa）、API Key 配置、连接测试 |
 
 ## 核心规则
 

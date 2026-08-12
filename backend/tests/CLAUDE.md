@@ -42,6 +42,7 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 |------|---------|
 | `services/` | 业务逻辑测试（LLM、聚类、pipeline、chat 等）；`services/clustering/experiments/` 为聚类实验模块测试（内存 DB + mock LLM，不调真实 LLM） |
 | `bank/` | 题库操作测试（模式、拆分、合并、编辑） |
+| `cache/` | 缓存测试（master-bank Redis 缓存） |
 | `chat/` | Chatbot 测试（agent、记忆、预算、路由） |
 | `coding/` | 手撕代码测试（题目、提交、AI 评审） |
 | `pipeline/` | 提交流程测试 |

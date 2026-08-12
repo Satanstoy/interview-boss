@@ -17,7 +17,14 @@
 | `job_position_service.py` | 复用岗位表和 interview distribution family mapping，提供精确的岗位标准化、别名解析和岗位发现 |
 | `session.py` | MCP session 状态存储：Redis 优先，SQLite 兜底，按 user_id 隔离 session key；Redis 可用时使用分布式 session lock |
 | `principal.py` | 外部 MCP 请求级账户 principal 的 ContextVar，供工具初始化和 session 命名空间读取 |
+| `agent_private_catalog.py` | Agent 私有题源目录加载：从 `data/agent_interview_catalog.json` 读取编译后的运行时目录，提供 `search_agent_private_questions` / `draw_agent_private_questions` / `select_agent_private_question` 工具函数 |
 | `__init__.py` | 包初始化 |
+
+### 数据目录
+
+| 路径 | 用途 |
+|------|------|
+| `data/agent_interview_catalog.json` | 由 `backend/scripts/import_agent_private_catalog.py` 编译的 Agent 私有题源运行时目录 |
 
 ## 契约
 

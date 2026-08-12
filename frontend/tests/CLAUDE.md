@@ -15,6 +15,7 @@ npx playwright test tests/e2e/     # E2E 测试
 | 目录 | 职责 |
 |------|------|
 | `e2e/` | 端到端测试（Playwright） |
+| `smoke/` | 冒烟测试（快速验证核心功能） |
 | `diagnosis/` | 诊断/调试用 Playwright 测试和报告 |
 | `_helpers/` | 测试辅助函数 |
 | `playwright.config.js` | Playwright 配置 |

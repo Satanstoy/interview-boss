@@ -19,6 +19,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `SettingsView.vue` | 设置页：在主工作区外壳内承载 `SettingsPage.vue` |
 | `ResumeView.vue` | 简历保存与优化页 |
 | `LoginView.vue` | 登录页 |
+| `NotFoundView.vue` | 404 页面：页面不存在提示 + 返回首页按钮 |
 
 ## 核心规则
 

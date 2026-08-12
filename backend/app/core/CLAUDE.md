@@ -12,6 +12,7 @@
 | `logging_config.py` | 日志配置（structlog 双模式：生产 JSON / 开发彩色） |
 | `interview_distribution_config.py` | 模拟面试统计的岗位族映射；未知岗位只映射到自身，禁止跨岗位混合 |
 | `validation.py` | 来源链接协议校验：`validate_source_url()` 非空时必须为 http(s)，否则 HTTPException(400)。submit 提交与 admin 编辑（data.py update_generic_data 的 interview/questions_detail/jd.url）共用，防止 App 内部分享链接（internal://）等无效值入库 |
+| `cache.py` | Redis 缓存工具（fail-open）：`get_cached_master_bank()` / `set_cached_master_bank()` 题库列表缓存，epoch-based 失效；进程级 singleton client |
 
 ## 关键模式
 

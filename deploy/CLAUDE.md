@@ -10,6 +10,7 @@
 | `docker-deploy.sh` | **生产部署脚本**（build / update / frontend / worker-up / worker-down / worker-restart / status / logs / test / backup / cleanup / diagnose / migrate） |
 | `entrypoint.sh` | Docker 容器入口点 |
 | `nginx-hardened.conf` | 旧版/参考 Nginx 安全加固配置；当前 Docker 镜像实际复制 `nginx/nginx.conf` |
+| `mirrors.sh` | 智能镜像源选择系统 v2：维护 5 类镜像源候选池（Docker Hub / npm / PyPI / Debian apt / Alpine apk），构建前并行测速选最优源（结果缓存 24h），更新 daemon.json + buildkitd.toml 的 Docker Hub 镜像，导出 `NPM_MIRROR` / `PYPI_MIRROR` / `APT_MIRROR` / `APK_MIRROR` 环境变量 |
 
 ## 规则
 
