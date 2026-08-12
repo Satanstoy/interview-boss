@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.jsdelivr.net/gh/Satanstoy/interview-boss@master/frontend/public/favicon-b-dark.png">
-  <img src="https://cdn.jsdelivr.net/gh/Satanstoy/interview-boss@master/frontend/public/favicon-b.png" alt="InterviewBoss" width="256" />
-</picture>
+<img src="https://cdn.jsdelivr.net/gh/Satanstoy/interview-boss@master/frontend/public/favicon-b.png" alt="InterviewBoss" width="256" />
 
 # InterviewBoss
 
