@@ -572,3 +572,29 @@ html:not(.dark) .settings-sidebar button:is(
     transition: none;
   }
 }
+
+/* Touch screens have no stable hover state. Keep actions direct and avoid
+ * leaving a glow behind after a tap; focus-visible remains available for
+ * keyboard users on hybrid devices. */
+@media (hover: none), (pointer: coarse) {
+  :where(
+    button,
+    a[data-slot="button"],
+    [data-slot="sidebar-menu-button"],
+    [data-sidebar="menu-button"],
+    [class*="hover:bg-"],
+    [class*="hover:border-"],
+    [class*="hover:text-"],
+    [class*="hover:shadow-"]
+  )::before {
+    display: none;
+  }
+
+  html.dark :where(button, a[data-slot="button"]):hover,
+  html:not(.dark) :where(button, a[data-slot="button"]):hover,
+  html.dark :where(button, a[data-slot="button"]):hover svg {
+    box-shadow: none;
+    filter: none;
+    text-shadow: none;
+  }
+}

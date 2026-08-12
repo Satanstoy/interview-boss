@@ -19,7 +19,7 @@
       variant="outline" size="sm"
       @click="executeAction(action)"
       :disabled="selectedCount === 0 || action.disabled || runningAction !== null"
-      class="text-xs font-medium flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
+      class="flex items-center gap-1.5 text-xs font-medium"
       :class="colorClasses(action.color)"
     >
       {{ action.label }}

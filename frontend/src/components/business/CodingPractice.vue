@@ -21,8 +21,9 @@
           <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
         </Button>
         <AppTooltip text="收起题目列表" side="right">
-          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题目列表" @click="sidebarCollapsed = true">
+          <Button variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-muted-foreground md:size-7 md:px-0" aria-label="收起题目列表" @click="sidebarCollapsed = true">
             <PanelLeftClose :size="14" />
+            <span class="text-xs md:hidden">收起</span>
           </Button>
         </AppTooltip>
       </div>
@@ -55,7 +56,7 @@
             <AppTooltip text="管理题目">
               <button
                 type="button"
-                class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                class="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground opacity-100 transition hover:bg-muted hover:text-foreground md:size-7 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
                 :class="openProblemMenuId === problem.id ? 'bg-muted opacity-100' : ''"
                 :aria-label="`管理题目 ${problem.title}`"
                 @click.stop="toggleProblemMenu(problem.id)"
@@ -85,21 +86,27 @@
       <!-- Current problem opens on the right; on mobile it replaces the list -->
       <section class="problem-detail-panel flex min-w-0 flex-1 flex-col" :class="{ 'is-detail-open': activeProblem }">
         <template v-if="activeProblem">
-          <div class="flex h-11 shrink-0 items-center gap-2 px-3">
-            <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground md:hidden" @click="activeProblem = null; sidebarCollapsed = false"><ArrowLeft :size="13" /> 题目列表</Button>
+          <div class="flex min-h-12 shrink-0 flex-wrap items-center gap-1.5 px-2 py-1.5 sm:gap-2 sm:px-3 md:h-11 md:min-h-11 md:flex-nowrap md:py-0">
+            <Button variant="ghost" size="sm" class="h-10 gap-1 px-2 text-xs text-muted-foreground md:hidden" @click="activeProblem = null; sidebarCollapsed = false"><ArrowLeft :size="13" /> 题目列表</Button>
             <div class="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{{ activeProblem.title }}</div>
             <AppTooltip :text="activeProblem.is_favorite ? '取消收藏' : '收藏题目'">
-              <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">
+              <button :aria-label="activeProblem.is_favorite ? '取消收藏' : '收藏题目'" class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs transition-colors hover:bg-muted md:size-7 md:px-0" :class="activeProblem.is_favorite ? 'text-amber-500' : 'text-muted-foreground'" @click="toggleFavorite(activeProblem)">
                 <Star :size="16" :stroke-width="1.8" :fill="activeProblem.is_favorite ? 'currentColor' : 'none'" />
+                <span class="md:sr-only">{{ activeProblem.is_favorite ? '取消收藏' : '收藏' }}</span>
               </button>
             </AppTooltip>
-            <Button variant="ghost" size="sm" class="hidden h-7 gap-1 px-2 text-xs text-muted-foreground sm:flex" @click="openAddToPlaylist"><ListPlus :size="13" /> 加入题单</Button>
-            <Button variant="ghost" size="sm" class="h-7 gap-1 px-2 text-xs text-muted-foreground" @click="selectNextProblem">下一题 <ChevronRight :size="13" /></Button>
+            <Button variant="ghost" size="sm" class="h-10 gap-1 px-2 text-xs text-muted-foreground md:h-7" @click="openAddToPlaylist"><ListPlus :size="13" /> 加入题单</Button>
+            <Button variant="ghost" size="sm" class="h-10 gap-1 px-2 text-xs text-muted-foreground md:h-7" @click="selectNextProblem">下一题 <ChevronRight :size="13" /></Button>
+          </div>
+
+          <div class="grid shrink-0 grid-cols-2 gap-1 border-y border-border px-2 py-1.5 md:hidden">
+            <Button size="sm" :variant="mobilePane === 'problem' ? 'secondary' : 'ghost'" class="h-10 gap-1.5 text-xs" @click="mobilePane = 'problem'"><BookOpen :size="14" />题目与评审</Button>
+            <Button size="sm" :variant="mobilePane === 'code' ? 'secondary' : 'ghost'" class="h-10 gap-1.5 text-xs" @click="mobilePane = 'code'"><Code2 :size="14" />代码编辑器</Button>
           </div>
 
           <div class="flex min-h-0 flex-1 flex-row">
             <!-- Problem statement -->
-            <section class="flex min-h-0 min-w-0 flex-[0_0_44%] flex-col overflow-hidden border-r border-border">
+            <section class="min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r border-border md:flex-[0_0_44%]" :class="mobilePane === 'problem' ? 'flex' : 'hidden md:flex'">
               <div class="flex shrink-0 items-center gap-1 px-4">
                 <button class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'description' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'description'">题目描述</button>
                 <button class="rounded-md px-2.5 py-2 text-xs font-medium transition-colors" :class="contentTab === 'review' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'" @click="contentTab = 'review'">AI 评审<span v-if="activeProblem._feedback || activeProblem._scores" class="ml-1 text-primary">•</span></button>
@@ -142,12 +149,12 @@
             </section>
 
             <!-- Editor -->
-            <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <section class="min-h-0 min-w-0 flex-1 flex-col overflow-hidden" :class="mobilePane === 'code' ? 'flex' : 'hidden md:flex'">
               <div class="flex h-11 shrink-0 items-center justify-between gap-2 px-3">
                 <div class="flex min-w-0 items-center gap-2">
                   <span class="mr-1 shrink-0 text-xs font-semibold text-foreground">代码</span>
                   <Select v-model="codingMode">
-                    <SelectTrigger class="h-8 w-[126px] shrink-0 rounded-lg border-0 bg-muted/70 px-2.5 text-xs shadow-none">
+                  <SelectTrigger class="h-10 w-[min(34vw,126px)] shrink-0 rounded-lg border-0 bg-muted/70 px-2 text-xs shadow-none sm:w-[126px] md:h-8 md:px-2.5">
                       <SelectValue placeholder="选择模式" />
                     </SelectTrigger>
                     <SelectContent>
@@ -155,7 +162,7 @@
                     </SelectContent>
                   </Select>
                   <Select v-model="currentLanguage">
-                    <SelectTrigger class="h-8 w-[124px] shrink-0 rounded-lg border-0 bg-muted/70 px-2.5 text-xs shadow-none">
+                  <SelectTrigger class="h-10 w-[min(30vw,124px)] shrink-0 rounded-lg border-0 bg-muted/70 px-2 text-xs shadow-none sm:w-[124px] md:h-8 md:px-2.5">
                       <SelectValue placeholder="选择语言" />
                     </SelectTrigger>
                     <SelectContent>
@@ -164,14 +171,14 @@
                   </Select>
                 </div>
                 <span v-if="activeProblem._isSubmitting" class="flex items-center gap-1 text-[11px] text-primary"><Loader2 :size="12" class="animate-spin" /> {{ activeProblem._currentStep || '分析中' }}</span>
-                <button v-else class="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" @click="clearProblem(activeProblem)">重置代码</button>
+                <button v-else class="min-h-10 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground md:min-h-0" @click="clearProblem(activeProblem)">重置代码</button>
               </div>
               <div class="min-h-0 flex-1 bg-muted/20 p-2"><div class="h-full min-h-[300px] overflow-hidden rounded-md border border-border/60 bg-background"><CodeEditor v-model="activeProblem._code" :language="currentLanguage" :read-only="activeProblem._isSubmitting" /></div></div>
               <div class="flex shrink-0 items-center justify-between gap-3 px-3 py-2.5">
                 <span class="hidden text-[11px] text-muted-foreground sm:inline">先独立完成，再查看 AI 提示</span>
                 <div class="ml-auto flex gap-2">
-                  <Button variant="outline" size="sm" class="h-8 gap-1.5 rounded-lg text-xs" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim() || activeProblem._hintCount >= 3" @click="submitCode(activeProblem, 'hint')"><Zap :size="13" /> 提示 {{ activeProblem._hintCount }}/3</Button>
-                  <Button size="sm" class="h-8 gap-1.5 rounded-lg text-xs" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim()" @click="submitCode(activeProblem, 'full_review')"><Sparkles :size="13" /> 提交评审</Button>
+                  <Button variant="outline" size="sm" class="h-10 gap-1.5 rounded-lg text-xs md:h-8" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim() || activeProblem._hintCount >= 3" @click="submitCode(activeProblem, 'hint')"><Zap :size="13" /> 提示 {{ activeProblem._hintCount }}/3</Button>
+                  <Button size="sm" class="h-10 gap-1.5 rounded-lg text-xs md:h-8" :disabled="activeProblem._isSubmitting || !activeProblem._code.trim()" @click="submitCode(activeProblem, 'full_review')"><Sparkles :size="13" /> 提交评审</Button>
                 </div>
               </div>
             </section>
@@ -217,7 +224,7 @@
 
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, ChevronRight, Ellipsis, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Search, Sparkles, Star, Trash2, Upload, Zap } from '@lucide/vue'
+import { ArrowLeft, BookOpen, ChevronRight, Code2, Ellipsis, FilePlus2, ListPlus, Loader2, PanelLeft, PanelLeftClose, Search, Sparkles, Star, Trash2, Upload, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -257,6 +264,7 @@ const codingNavigation = inject('codingNavigation')
 const problems = ref([])
 const activeProblem = ref(null)
 const contentTab = ref('description')
+const mobilePane = ref('problem')
 const isMobileViewport = () => window.matchMedia('(max-width: 767px)').matches
 const sidebarCollapsed = ref(isMobileViewport())
 const playlists = codingNavigation.playlists
@@ -331,6 +339,7 @@ async function selectProblem(problem) {
   openProblemMenuId.value = null
   activeProblem.value = problem
   contentTab.value = 'description'
+  mobilePane.value = 'problem'
   if (isMobileViewport()) sidebarCollapsed.value = true
   try { Object.assign(problem, await fetchCodingProblem(problem.id)) } catch (error) { toast.error(error.message || '获取题目详情失败') }
 }

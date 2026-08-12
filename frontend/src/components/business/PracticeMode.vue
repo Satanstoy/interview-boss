@@ -19,8 +19,9 @@
           <input v-model="deckQuery" type="search" class="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20" placeholder="搜索当前题单" />
         </div>
         <AppTooltip text="收起题单侧栏" side="right">
-          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起题单侧栏" @click="queueCollapsed = true">
+          <Button variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-muted-foreground md:size-7 md:px-0" aria-label="收起题单侧栏" @click="queueCollapsed = true">
             <PanelLeftClose :size="14" />
+            <span class="text-xs md:hidden">收起</span>
           </Button>
         </AppTooltip>
       </div>
@@ -64,16 +65,17 @@
 
     <div class="flex min-w-0 flex-1 flex-col">
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
-        <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-3 overflow-hidden px-4 py-4 md:px-6 md:py-5">
+        <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-2 overflow-hidden px-2 py-2 sm:gap-3 sm:px-4 sm:py-4 md:px-6 md:py-5">
 
     <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
-      <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-6">
-        <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <div class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
+        <div class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
           <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
-          <Button variant="ghost" size="icon" class="size-7 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
+          <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
+            <span>题目列表</span>
           </Button>
           <span class="font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
           <span>·</span>
@@ -81,11 +83,11 @@
           <span v-if="questionAttemptCount(currentQ)" class="hidden items-center gap-1 sm:inline-flex"><History class="size-3.5" />已练习 {{ questionAttemptCount(currentQ) }} 次</span>
           <span v-if="currentQ.has_been_practiced" class="hidden items-center gap-1 sm:inline-flex"><Target class="size-3.5" />熟练度 {{ currentQ.proficiency || 0 }}/5</span>
         </div>
-        <div class="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+        <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
           <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
           <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
-            <Button variant="ghost" size="icon" class="text-muted-foreground hover:text-amber-500" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+            <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:size-9 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
           </AppTooltip>
           <Badge v-if="currentQ.difficulty" variant="outline" class="text-[10px]" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
           <Badge variant="outline" class="max-w-32 truncate text-[10px]">{{ currentQ.cat1 || '未分类' }}</Badge>
@@ -106,16 +108,16 @@
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">
             <template v-if="isAlgorithmQueue">
               <p class="text-sm text-muted-foreground">先判断一下，能答出来吗？</p>
-              <div class="flex flex-col gap-2.5 sm:flex-row">
-                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-36 gap-2" @click="handleSelfAssess('again')"><X class="size-4" />不会</Button>
-                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-36 gap-2" @click="handleSelfAssess('hard')"><Target class="size-4" />有点印象</Button>
-                <Button data-testid="practice-self-assess-good" size="lg" class="w-36 gap-2" @click="handleSelfAssess('good')"><Check class="size-4" />能答出</Button>
+              <div class="flex w-full max-w-md flex-col gap-2.5 sm:w-auto sm:flex-row">
+                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('again')"><X class="size-4" />不会</Button>
+                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('hard')"><Target class="size-4" />有点印象</Button>
+                <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><Check class="size-4" />能答出</Button>
               </div>
               <span class="text-[11px] text-muted-foreground">先自评，再看答案</span>
             </template>
             <template v-else>
               <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
-              <span class="text-[11px] text-muted-foreground">Enter 查看答案 · ← → 切换题目</span>
+              <span class="text-[11px] text-muted-foreground"><span class="sm:hidden">点击按钮查看答案</span><span class="hidden sm:inline">Enter 查看答案 · ← → 切换题目</span></span>
             </template>
           </div>
 
@@ -222,7 +224,7 @@
           <p v-else-if="!qState._historyLoading" class="py-3 text-center text-xs text-muted-foreground">暂无练习记录，先完成一次自测吧。</p>
         </div>
 
-        <div v-if="currentQ.sources?.length" class="mt-5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground"><Link2 class="size-3.5" /><span>出处：</span><button v-for="(source, sourceIndex) in currentQ.sources" :key="sourceIndex" type="button" class="rounded-md border border-border bg-card px-2 py-1 transition hover:border-primary/30 hover:text-primary" @click="emit('navigate-to-interview', { source, questionId: currentQ.id })">{{ source.company || '未知公司' }} · {{ source.round || '未知轮次' }}</button></div>
+        <div v-if="currentQ.sources?.length" class="mt-5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground"><Link2 class="size-3.5" /><span>出处：</span><button v-for="(source, sourceIndex) in currentQ.sources" :key="sourceIndex" type="button" class="min-h-10 rounded-md border border-border bg-card px-3 py-2 transition hover:border-border hover:bg-accent hover:text-foreground" @click="emit('navigate-to-interview', { source, questionId: currentQ.id })">{{ source.company || '未知公司' }} · {{ source.round || '未知轮次' }}</button></div>
       </div>
       </div>
     </Card>
@@ -234,15 +236,15 @@
       <div class="mt-5 flex gap-2"><Button variant="outline" @click="selectSession('all')">切换到全部题</Button></div>
     </div>
 
-    <div v-if="currentQ" class="mx-auto flex shrink-0 w-full flex-wrap items-center justify-between gap-3 px-1">
+    <div v-if="currentQ" class="mx-auto flex w-full shrink-0 flex-wrap items-center justify-between gap-2 px-1 pb-[env(safe-area-inset-bottom)] sm:gap-3">
       <template v-if="isAlgorithmQueue">
         <span data-testid="practice-question-total" class="ml-auto text-xs tabular-nums text-muted-foreground">题库共 {{ questionBankTotal }} 题</span>
       </template>
       <template v-else>
-        <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
-        <div class="ml-auto flex items-center gap-3">
+        <Button variant="outline" class="min-w-28 flex-1 gap-2 sm:flex-none" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
+        <div class="flex flex-1 items-center justify-end gap-2 sm:ml-auto sm:gap-3">
           <span data-testid="practice-question-total" class="text-xs tabular-nums text-muted-foreground">题库共 {{ questionBankTotal }} 题</span>
-          <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
+          <Button variant="outline" class="min-w-28 flex-1 gap-2 sm:flex-none" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
         </div>
       </template>
     </div>

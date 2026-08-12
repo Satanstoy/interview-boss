@@ -140,28 +140,29 @@ const createPlaylist = async () => {
 <template>
   <header
     :data-testid="showPracticeControls ? 'practice-header' : undefined"
-    class="flex h-11 shrink-0 items-center gap-3 bg-background/80 px-3 lg:px-5"
+    class="flex min-h-12 shrink-0 items-center gap-2 bg-background/80 px-2 py-1.5 sm:gap-3 sm:px-3 md:h-11 md:min-h-11 md:py-0 lg:px-5"
   >
     <AppTooltip text="打开导航">
       <Button
         variant="ghost"
-        size="icon"
-        class="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground md:hidden"
+        size="sm"
+        class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 px-2.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground md:hidden"
         aria-label="打开导航"
         @click="emit('toggle-mobile-nav')"
       >
         <Menu class="h-4 w-4" />
+        <span class="text-xs">菜单</span>
       </Button>
     </AppTooltip>
 
     <div class="flex h-8 min-w-0 shrink-0 items-center gap-2">
-      <span class="flex h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground">
+      <span class="hidden h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground sm:flex">
         {{ activeTabLabel }}
       </span>
 
       <template v-if="showCodingControls">
         <Select :model-value="codingSelectedListKey" @update:model-value="selectCodingList">
-          <SelectTrigger class="h-8 w-[150px] rounded-lg text-xs">
+          <SelectTrigger class="h-10 w-[min(42vw,150px)] rounded-lg text-xs sm:h-8 sm:w-[150px]">
             <SelectValue placeholder="选择题单" />
           </SelectTrigger>
           <SelectContent>
@@ -205,7 +206,7 @@ const createPlaylist = async () => {
 
       <template v-else-if="showPracticeControls">
         <Select v-model:open="practiceSelectOpen" :model-value="practiceSelectedDeckKey" :disabled="practiceDeckLoading || !practiceDecks.length" @update:model-value="selectPracticeList">
-          <SelectTrigger data-testid="practice-deck-select" class="h-8 w-[150px] rounded-lg text-xs sm:w-[180px]">
+          <SelectTrigger data-testid="practice-deck-select" class="h-10 w-[min(42vw,150px)] rounded-lg text-xs sm:h-8 sm:w-[180px]">
             <SelectValue placeholder="选择题单" />
           </SelectTrigger>
           <SelectContent>
@@ -245,7 +246,7 @@ const createPlaylist = async () => {
         <Transition name="fade-slide">
           <div
             v-if="showJobPanel"
-            class="absolute right-0 top-full mt-1 z-50 w-80 bg-card rounded-xl shadow-lg border border-border p-3"
+            class="absolute right-0 top-full z-50 mt-1 w-[min(20rem,calc(100vw-1rem))] rounded-xl border border-border bg-card p-3 shadow-lg"
           >
             <div class="text-xs font-semibold text-foreground mb-2 px-1">后台任务</div>
             <div v-for="job in activeJobs" :key="job.id" class="flex flex-col gap-1.5 p-2 rounded-lg bg-muted/50 mb-1.5 last:mb-0">
@@ -300,12 +301,12 @@ const createPlaylist = async () => {
       <AppTooltip text="设置">
         <Button
           variant="ghost"
-          size="icon"
-          class="inline-flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          size="sm"
+          class="inline-flex h-10 items-center justify-center gap-1.5 px-2.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground md:h-8 md:w-8 md:px-0"
           @click="emit('show-settings')"
         >
           <Settings class="h-4 w-4" />
-          <span class="sr-only">设置</span>
+          <span class="text-xs md:sr-only">设置</span>
         </Button>
       </AppTooltip>
     </div>

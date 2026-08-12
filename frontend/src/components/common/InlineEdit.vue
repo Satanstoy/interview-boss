@@ -7,8 +7,9 @@
       </span>
       <span v-else :class="{ 'whitespace-pre-wrap break-words flex-1': type === 'textarea' }">{{ displayValue }}</span>
       <AppTooltip text="编辑">
-        <Button variant="ghost" size="icon-xs" @click="startEdit" class="text-muted-foreground hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover:opacity-100 transition shrink-0">
+        <Button variant="ghost" size="sm" @click="startEdit" class="h-9 shrink-0 gap-1.5 px-2 text-muted-foreground transition hover:text-blue-500 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 dark:hover:text-blue-400">
           <Pencil class="size-3.5" />
+          <span class="text-xs sm:hidden">编辑</span>
         </Button>
       </AppTooltip>
     </div>

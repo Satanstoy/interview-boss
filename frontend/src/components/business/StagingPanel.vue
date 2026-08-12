@@ -425,7 +425,8 @@ defineExpose({ onSubmit, isSubmitting })
               <img :src="img.preview" :alt="`图片 ${index + 1}`" class="h-full w-full object-cover" />
               <button
                 type="button"
-                class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover/img:opacity-100"
+                class="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity hover:bg-black/80 sm:size-7 sm:opacity-0 sm:group-hover/img:opacity-100 sm:focus-visible:opacity-100"
+                :aria-label="`移除图片 ${index + 1}`"
                 :disabled="isSubmitting"
                 @click.stop="removeImage(index)"
               >

@@ -620,6 +620,26 @@ test.describe('练习完整流程 — PracticePanel', () => {
     expect(metrics.workspaceRight).toBeLessThanOrEqual(metrics.viewportWidth)
   })
 
+  test('移动端刷题显示触屏操作文字且不产生横向溢出', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/practice')
+
+    const listButton = page.getByRole('button', { name: '展开题目列表' })
+    const favoriteButton = page.getByRole('button', { name: '收藏题目' })
+    await expect(listButton).toContainText('题目列表')
+    await expect(favoriteButton).toContainText('收藏')
+    await expect(page.getByText('点击按钮查看答案')).toBeVisible()
+
+    const targets = await Promise.all([listButton, favoriteButton].map(locator => locator.boundingBox()))
+    for (const target of targets) expect(target.height).toBeGreaterThanOrEqual(40)
+
+    const width = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      content: document.documentElement.scrollWidth,
+    }))
+    expect(width.content).toBeLessThanOrEqual(width.viewport + 1)
+  })
+
   test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
     await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 

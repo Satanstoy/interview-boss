@@ -18,8 +18,9 @@
           新建面试
         </Button>
         <AppTooltip text="收起面试会话列表" side="right">
-          <Button variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground" aria-label="收起面试会话列表" @click="sidebarCollapsed = true">
+          <Button variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-muted-foreground md:size-7 md:px-0" aria-label="收起面试会话列表" @click="sidebarCollapsed = true">
             <PanelLeftClose :size="14" />
+            <span class="text-xs md:hidden">收起</span>
           </Button>
         </AppTooltip>
       </div>
@@ -46,7 +47,7 @@
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    class="shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
                     aria-label="更多操作"
                     @click.stop
                   >
@@ -113,19 +114,19 @@
           v-motion
           :initial="{ opacity: 0, y: 16 }"
           :enter="{ opacity: 1, y: 0, transition: { duration: 400, easing: [0.25, 0.46, 0.45, 0.94] } }"
-          class="flex flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-6"
+          class="mx-auto flex max-w-2xl flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6"
         >
-          <div class="size-20 mx-auto mb-6 rounded-xl bg-primary/10 flex items-center justify-center">
+          <div class="mx-auto mb-4 flex size-16 items-center justify-center rounded-xl bg-primary/10 sm:mb-6 sm:size-20">
             <MessageSquare :size="40" class="text-primary" />
           </div>
-          <h2 class="text-3xl font-bold text-foreground mb-3 text-center">开始模拟面试</h2>
-          <p class="text-muted-foreground mb-8 text-center text-lg">选择左侧对话或创建新的面试会话</p>
-          <div class="grid grid-cols-2 gap-4 w-full max-w-lg">
+          <h2 class="mb-2 text-center text-2xl font-bold text-foreground sm:mb-3 sm:text-3xl">开始模拟面试</h2>
+          <p class="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-lg">选择会话，或从下面的场景开始练习</p>
+          <div class="grid w-full max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4">
             <button
               v-for="suggestion in promptSuggestions"
               :key="suggestion.text"
               @click="startWithSuggestion(suggestion.text)"
-              class="flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 hover:border-primary/30 transition-all text-left group"
+              class="group flex min-h-16 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-all hover:border-border hover:bg-accent/50 sm:p-4"
             >
               <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
                 <component :is="suggestion.icon" :size="20" class="text-primary" />
@@ -186,7 +187,7 @@
             <p class="text-sm">输入你的回答开始面试</p>
           </div>
         </div>
-        <div v-else class="max-w-3xl mx-auto px-6 pt-8 pb-8">
+        <div v-else class="mx-auto max-w-3xl px-4 pb-6 pt-5 sm:px-6 sm:pb-8 sm:pt-8">
           <!-- Grouped messages -->
           <template v-for="(group, groupIndex) in groupedMessages" :key="groupIndex">
             <!-- Time separator -->
@@ -291,7 +292,7 @@
 
       <!-- Input area -->
       <div class="shrink-0">
-        <div class="max-w-3xl mx-auto px-6 pb-4">
+        <div class="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
           <form @submit.prevent="handleSend">
             <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-xl">
               <!-- Textarea -->
@@ -314,9 +315,10 @@
                   <AppTooltip text="上传文件">
                     <button
                       type="button"
-                      class="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background transition-colors"
+                      class="flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground sm:size-8 sm:px-0"
                     >
                       <Paperclip :size="16" />
+                      <span class="text-xs sm:hidden">附件</span>
                     </button>
                   </AppTooltip>
                   <!-- Model selector -->
@@ -333,9 +335,10 @@
                     @click="handleStop"
                     variant="destructive"
                     size="icon"
-                    class="rounded-lg size-8 shrink-0"
+                    class="h-10 shrink-0 gap-1.5 rounded-lg px-3 sm:size-8 sm:px-0"
                   >
                     <Square :size="14" />
+                    <span class="text-xs sm:hidden">停止</span>
                   </Button>
                 </AppTooltip>
                 <AppTooltip v-else text="发送消息">
@@ -344,15 +347,16 @@
                     aria-label="发送消息"
                     :disabled="!inputText.trim()"
                     size="icon"
-                    class="rounded-lg size-8 shrink-0"
+                    class="h-10 shrink-0 gap-1.5 rounded-lg px-3 sm:size-8 sm:px-0"
                   >
                     <ArrowUp :size="16" />
+                    <span class="text-xs sm:hidden">发送</span>
                   </Button>
                 </AppTooltip>
               </div>
             </div>
             <div class="mt-2 flex items-center justify-between px-1">
-              <span class="text-[11px] text-muted-foreground">按 Enter 发送，Shift+Enter 换行</span>
+              <span class="hidden text-[11px] text-muted-foreground sm:inline">按 Enter 发送，Shift+Enter 换行</span>
               <span class="text-[11px] text-muted-foreground">基于题库和 JD 上下文追问</span>
             </div>
           </form>

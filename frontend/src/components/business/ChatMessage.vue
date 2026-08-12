@@ -38,31 +38,34 @@
       </div>
 
       <!-- Message actions -->
-      <div class="flex items-center gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div class="mt-3 flex flex-wrap items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
         <AppTooltip text="复制">
           <button 
             @click="copyContent" 
-            class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+            class="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0 sm:p-1.5"
           >
             <Copy v-if="!copied" :size="14" />
             <Check v-else :size="14" class="text-emerald-500" />
+            <span class="text-xs sm:hidden">{{ copied ? '已复制' : '复制' }}</span>
           </button>
         </AppTooltip>
         <AppTooltip text="重新生成">
           <button 
             @click="$emit('regenerate', message.id)" 
-            class="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" 
+            class="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0 sm:p-1.5"
           >
             <RotateCcw :size="14" />
+            <span class="text-xs sm:hidden">重新生成</span>
           </button>
         </AppTooltip>
         <AppTooltip text="点赞">
           <button 
             @click="toggleLike" 
-            class="p-1.5 rounded-md transition-colors"
+            class="flex min-h-10 items-center gap-1.5 rounded-md px-2 transition-colors sm:min-h-0 sm:p-1.5"
             :class="liked ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
           >
             <ThumbsUp :size="14" />
+            <span class="text-xs sm:hidden">点赞</span>
           </button>
         </AppTooltip>
         <span class="text-[11px] text-muted-foreground ml-2">{{ formatTime(message.created_at) }}</span>

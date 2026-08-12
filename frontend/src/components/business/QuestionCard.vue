@@ -26,8 +26,9 @@
           </AppTooltip>
           <AppTooltip v-if="canEdit" text="编辑题目">
             <button @click.stop="startEditQuestion"
-              class="opacity-0 group-hover:opacity-100 p-1 -m-1 rounded-md transition-all duration-200 hover:bg-muted text-muted-foreground hover:text-primary shrink-0">
+              class="flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-primary sm:min-h-0 sm:px-1 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
               <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+              <span class="text-xs sm:hidden">编辑</span>
             </button>
           </AppTooltip>
         </div>
@@ -70,7 +71,7 @@
         </div>
 
         <!-- Actions row: hover-reveal for secondary actions -->
-        <div class="flex gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div class="mt-2 flex gap-1.5 opacity-100 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
           <Button variant="ghost" size="sm" v-if="isAdmin" @click.stop="$emit('retag', question)" :disabled="question._isRetagging"
             class="px-2 py-1 flex items-center gap-1">
             <svg v-if="question._isRetagging" class="animate-spin size-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -97,10 +98,11 @@
 
       <!-- Star (always visible, tertiary action) -->
       <AppTooltip :text="question.is_starred ? '取消收藏' : '收藏'">
-        <button @click.stop="$emit('toggle-star', question)" class="p-1 transition-all duration-200 hover:scale-110 star-btn shrink-0">
+        <button @click.stop="$emit('toggle-star', question)" class="star-btn flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 transition-colors duration-200 hover:bg-muted sm:min-h-0 sm:px-1">
           <svg class="size-4.5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-border dark:text-foreground hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
           </svg>
+          <span class="text-xs text-muted-foreground sm:hidden">{{ question.is_starred ? '取消收藏' : '收藏' }}</span>
         </button>
       </AppTooltip>
 
@@ -145,10 +147,10 @@
         <div v-else>
             <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
             <div v-if="isAdmin" class="absolute top-0 right-0 flex gap-1 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100">
+              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
                 编辑
               </button>
-              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="bg-white/80 dark:bg-muted/60 text-caption text-muted-foreground px-2.5 py-1 rounded-md hover:bg-muted dark:hover:bg-muted transition-all duration-200 opacity-0 group-hover/answer:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed">
+              <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30 sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
                 重新生成
               </button>
             </div>
