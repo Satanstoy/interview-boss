@@ -25,6 +25,17 @@ const purifyConfig = {
   ADD_ATTR: ['target', 'rel'],
 }
 
+// DOMPurify 在部分浏览器配置下会移除 target/rel 的值；在 href 已经通过
+// ALLOWED_URI_REGEXP 校验后，再补回外部链接的安全打开属性。
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node?.tagName !== 'A') return
+  const href = node.getAttribute('href') || ''
+  if (/^https?:\/\//i.test(href)) {
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
+  }
+})
+
 // Markdown-it 默认关闭原始 HTML，并限制危险链接协议；DOMPurify 仍作为
 // v-html 前的第二道防线，防止未来新增渲染规则时绕过安全边界。
 const markdown = new MarkdownIt({
@@ -38,6 +49,22 @@ const markdown = new MarkdownIt({
     return `<pre class="hljs${languageClass}"><code>${highlightCode(code, lang)}</code></pre>`
   },
 })
+
+// 搜索增强答案里的 Markdown 链接采用“引用胶囊”样式：仍然是原始链接，
+// 但在答案中明确可见，并统一新窗口打开，避免用户误以为只是普通文本。
+const defaultLinkOpen = markdown.renderer.rules.link_open
+markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
+  const token = tokens[index]
+  const href = token.attrGet('href') || ''
+  if (/^https?:\/\//i.test(href)) {
+    token.attrJoin('class', 'answer-source-link')
+    token.attrSet('target', '_blank')
+    token.attrSet('rel', 'noopener noreferrer')
+  }
+  return defaultLinkOpen
+    ? defaultLinkOpen(tokens, index, options, env, self)
+    : self.renderToken(tokens, index, options)
+}
 
 // 为表格添加响应式包装；表格内容仍由 Markdown-it 负责转义和渲染。
 markdown.renderer.rules.table_open = () => '<div class="table-wrapper"><table>'

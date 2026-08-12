@@ -9,7 +9,8 @@
 | `highlight.js` | 关键词/文本高亮工具 |
 | `http.js` | HTTP 工具函数（非 axios，纯 fetch 封装） |
 | `logger.js` | 前端日志与错误上报到 `/api/error-report` |
-| `markdown.js` | Markdown 渲染（marked + DOMPurify） |
+| `markdown.js` | Markdown-it 渲染（安全链接、代码高亮、表格 + DOMPurify） |
+| `source.js` | 来源 URL、域名、favicon 和页面路径的展示辅助函数 |
 | `validate.js` | 表单验证工具 |
 | `quadrant.js` | 四象限决策图纯函数：`mapToQuadrant(item, heatMedian)` 把 readiness item 映射到重点突破/优势/可保持/不急象限，`heatMedian` 计算岗位热度中位数分界 |
 

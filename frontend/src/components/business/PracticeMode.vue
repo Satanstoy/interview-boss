@@ -141,26 +141,12 @@
               <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
               <Button v-if="isAdmin" size="sm" class="mt-4 gap-1.5" :disabled="qState._isLoadingAnswer" @click="handleGenerate"><Sparkles class="size-4" />AI 生成答案</Button>
             </div>
-            <div v-if="referenceAnswerSources.length" data-testid="reference-answer-sources" class="mt-3 rounded-lg border border-border/70 bg-card">
-              <button
-                type="button"
-                class="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
-                @click="qState._showAnswerSources = !qState._showAnswerSources"
-              >
-                <ChevronDown class="size-3.5 transition-transform" :class="qState._showAnswerSources ? 'rotate-180' : ''" />
-                <span>参考来源（{{ referenceAnswerSources.length }}）</span>
-              </button>
-              <div v-if="qState._showAnswerSources" class="flex flex-col gap-2 border-t border-border/70 px-3 pb-3 pt-2">
-                <div v-for="(src, idx) in referenceAnswerSources" :key="src.url || idx" class="flex items-start gap-2 text-xs">
-                  <span class="shrink-0 font-mono text-muted-foreground">{{ idx + 1 }}.</span>
-                  <div class="min-w-0">
-                    <a :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer" class="break-all font-medium text-primary hover:underline">{{ src.title || src.url }}</a>
-                    <p v-if="src.snippet" class="mt-0.5 line-clamp-2 text-muted-foreground">{{ src.snippet }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+            <SourceList
+              :sources="referenceAnswerSources"
+              :open="qState._showAnswerSources"
+              test-id="reference-answer-sources"
+              @update:open="qState._showAnswerSources = $event"
+            />
             <!-- 背诵稿（普通用户）：基于公共参考答案结合个人背景定制 -->
             <div v-if="!isAdmin && currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="mt-6 rounded-xl border border-border/80 bg-muted/30 p-4 md:p-5">
               <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -180,22 +166,12 @@
               </div>
               <div v-else-if="qState._recitation">
                 <div class="recitation-content answer-content text-sm leading-7 text-foreground" v-html="renderMarkdown(qState._recitation)"></div>
-                <div v-if="qState._recitationSources.length" class="mt-3 border-t border-border/70 pt-3">
-                  <button type="button"
-                    class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                    @click="qState._showRecitationSources = !qState._showRecitationSources">
-                    <ChevronDown class="size-3.5 transition-transform" :class="qState._showRecitationSources ? 'rotate-180' : ''" />
-                    参考来源（{{ qState._recitationSources.length }}）
-                  </button>
-                  <div v-if="qState._showRecitationSources" class="mt-2 flex flex-col gap-1.5">
-                    <a v-for="(src, idx) in qState._recitationSources" :key="src.url || idx"
-                      :href="safeUrl(src.url)" target="_blank" rel="noopener noreferrer"
-                      class="flex items-start gap-1.5 text-xs text-primary hover:underline break-all">
-                      <span class="font-mono shrink-0">{{ idx + 1 }}.</span>
-                      <span class="min-w-0">{{ src.title || src.url }}</span>
-                    </a>
-                  </div>
-                </div>
+                <SourceList
+                  :sources="qState._recitationSources"
+                  :open="qState._showRecitationSources"
+                  test-id="recitation-sources"
+                  @update:open="qState._showRecitationSources = $event"
+                />
               </div>
               <div v-else-if="qState._isGeneratingRecitation" class="flex flex-col items-center gap-2 py-4 text-primary">
                 <Loader2 class="size-5 animate-spin" />
@@ -365,7 +341,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import AppDialog from '@/components/common/AppDialog.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
-import { safeUrl } from '@/utils/validate.js'
+import SourceList from '@/components/common/SourceList.vue'
 import { useToast } from '@/composables/useNotification.js'
 import {
   dimLabel,

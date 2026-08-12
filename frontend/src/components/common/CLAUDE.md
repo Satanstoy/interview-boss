@@ -14,6 +14,8 @@
 | `AppSearchForm.vue` | 搜索表单（modelValue/placeholder props，filters 卡槽） |
 | `AppTable.vue` | 数据表格（columns/rows/loading/emptyText props，cell 卡槽） |
 | `AppTooltip.vue` | 统一悬停提示（底层 shadcn Tooltip，text/content slot） |
+| `SourceCard.vue` | 外部来源卡片（favicon、站点、标题、摘要和安全外链） |
+| `SourceList.vue` | 可折叠来源列表，复用来源卡片展示联网证据 |
 | `AsyncLoading.vue` | 异步组件 loading/error 包装 |
 | `BatchActionPanel.vue` | 批量操作栏 |
 | `ConfirmDialog.vue` | 确认对话框 |

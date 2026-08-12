@@ -93,7 +93,7 @@ _SECURITY_HEADERS = [
     (
         b"content-security-policy",
         b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        b"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
+        b"img-src 'self' data: https://www.google.com https://*.gstatic.com; font-src 'self' data:; connect-src 'self'; "
         b"frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     ),
 ]

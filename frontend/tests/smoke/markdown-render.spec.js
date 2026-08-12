@@ -27,5 +27,8 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
   expect(html).toContain('class="table-wrapper"')
   expect(html).toContain('language-python')
   expect(html).toContain('href="https://example.com"')
+  expect(html).toContain('class="answer-source-link"')
+  expect(html).toContain('target="_blank"')
+  expect(html).toContain('rel="noopener noreferrer"')
   expect(html).not.toContain('<script>')
 })

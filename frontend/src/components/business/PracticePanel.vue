@@ -85,6 +85,12 @@
                   </div>
                 </div>
                 <div class="text-sm text-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(question.ai_answer)"></div>
+                <SourceList
+                  :sources="answerSources"
+                  :open="qState._showAnswerSources"
+                  test-id="practice-panel-answer-sources"
+                  @update:open="qState._showAnswerSources = $event"
+                />
               </div>
 
               <div v-else-if="qState._isLoadingAnswer" class="flex flex-col items-center justify-center py-12 text-primary-600 dark:text-primary-400 gap-3">
@@ -236,7 +242,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { computed, ref, reactive, watch } from 'vue'
 import {
   leftTabs, dimLabel, isFailedAnswer, renderMarkdown,
   scoreColor, scoreTextColor, resetQState,
@@ -245,6 +251,7 @@ import {
 } from '@/composables/usePractice.js'
 import AppDialog from '@/components/common/AppDialog.vue'
 import AppLoading from '@/components/common/AppLoading.vue'
+import SourceList from '@/components/common/SourceList.vue'
 import Button from '@/components/ui/button/Button.vue'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -268,8 +275,13 @@ const qState = reactive({
   _historyLoading: false,
   _isEditingAnswer: false,
   _editAnswer: '',
-  _isSavingAnswer: false
+  _isSavingAnswer: false,
+  _showAnswerSources: false
 })
+
+const answerSources = computed(() => (
+  Array.isArray(props.question?.answer_sources) ? props.question.answer_sources : []
+))
 
 watch(() => props.question, (q) => {
   if (q) {

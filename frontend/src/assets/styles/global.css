@@ -154,6 +154,40 @@
     font-weight: 600;
     color: inherit;
   }
+  /* 正文引用：参考 ChatGPT/Perplexity 的 inline citation 胶囊，不让 URL 藏在普通文本里 */
+  .answer-content a.answer-source-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22rem;
+    max-width: 100%;
+    padding: 0.08rem 0.42rem;
+    border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    color: var(--primary);
+    font-size: 0.82em;
+    font-weight: 600;
+    line-height: 1.45;
+    text-decoration: none;
+    vertical-align: baseline;
+    overflow-wrap: anywhere;
+  }
+  .answer-content a.answer-source-link::before {
+    content: '↗';
+    flex: none;
+    font-size: 0.9em;
+    font-weight: 700;
+  }
+  .answer-content a.answer-source-link:hover {
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    text-decoration: none;
+  }
+  .dark .answer-content a.answer-source-link {
+    color: oklch(0.82 0.12 55);
+    border-color: color-mix(in srgb, oklch(0.82 0.12 55) 35%, transparent);
+    background: color-mix(in srgb, oklch(0.82 0.12 55) 10%, transparent);
+  }
   .answer-content ul,
   .answer-content ol {
     padding-left: 1.5em;
@@ -470,5 +504,4 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     cursor: pointer;
   }
 }
-
 
