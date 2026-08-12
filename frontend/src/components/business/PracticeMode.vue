@@ -319,6 +319,14 @@
       </div>
       <div class="mt-5 flex flex-wrap justify-center gap-2">
         <Button v-if="sessionKey === 'due' && sessionWeakQuestions.length" data-testid="practice-retry-weak" class="gap-1.5" @click="restartWeakSession"><RotateCcw class="size-3.5" />重刷 {{ sessionWeakQuestions.length }} 道薄弱题</Button>
+        <Button
+          v-if="sessionKey === 'due' && canExtendDailyPlan"
+          data-testid="practice-continue-five"
+          :variant="sessionWeakQuestions.length ? 'outline' : 'default'"
+          class="gap-1.5"
+          :disabled="capacitySaving || deckLoading"
+          @click="adjustDailyCapacity(5)"
+        ><Loader2 v-if="capacitySaving" class="size-3.5 animate-spin" /><Plus v-else class="size-3.5" />{{ capacitySaving ? '正在安排…' : '再学 5 题' }}</Button>
         <Button variant="outline" @click="selectSession('all')">切换到全部题</Button>
       </div>
     </div>
@@ -580,6 +588,7 @@ const dailyPlanTotal = computed(() => Number(props.selectedDeck?.planned_today |
 const dailyProgress = computed(() => dailyPlanTotal.value
   ? Math.round(completedToday.value / dailyPlanTotal.value * 100)
   : 0)
+const canExtendDailyPlan = computed(() => props.dailyCapacity < 200 && props.questionTotal > 0)
 const sessionReviewCount = computed(() => Object.values(sessionRatings).reduce((sum, count) => sum + count, 0))
 const studyStreak = computed(() => Number(props.selectedDeck?.study_streak || 0))
 const streakLabel = computed(() => {

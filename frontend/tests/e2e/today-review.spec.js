@@ -238,9 +238,10 @@ async function mockAllAPIs(page, options = {}) {
     deckQuestions = DUE_QUESTION_SEEDS.slice(0, 3),
     recruitment = AUTUMN_RECRUITMENT,
     reviewDelayMs = 0,
+    reviewedQuestionIds: initialReviewedQuestionIds = [],
   } = options
   const tomorrow = tomorrowUtcString()
-  const reviewedQuestionIds = new Set()
+  const reviewedQuestionIds = new Set(initialReviewedQuestionIds)
   let currentRecruitment = { ...recruitment }
 
   // Auth
@@ -345,7 +346,7 @@ async function mockAllAPIs(page, options = {}) {
           } : {}),
         },
         items,
-        total: items.length,
+        total: deckKey === 'due' ? availableItems.length : items.length,
         page_size: 100,
         offset: 0,
       },
@@ -547,6 +548,26 @@ test.describe('今日复习默认入口与招聘状态行', () => {
       daily_capacity: 5,
       pace: 'standard',
     })
+  })
+
+  test('完成今日计划后可直接追加 5 题继续学习', async ({ page }) => {
+    const remainingNewQuestions = Array.from({ length: 2 }, (_, index) => ({
+      ...DUE_QUESTION_SEEDS[2],
+      id: 300 + index,
+      question: `追加新题 ${index + 1}`,
+    }))
+    await gotoPractice(page, {
+      deckQuestions: remainingNewQuestions,
+      recruitment: { ...AUTUMN_RECRUITMENT, daily_capacity: 5 },
+      reviewedQuestionIds: [901, 902, 903, 904, 905],
+    })
+
+    await expect(page.getByText('今日复习已经完成')).toBeVisible()
+    await page.getByTestId('practice-continue-five').click()
+
+    await expect(page.getByTestId('practice-focus-card').getByText(remainingNewQuestions[0].question)).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 5 / 7 · 剩余 2')
+    await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 10')
   })
 })
 

@@ -122,6 +122,7 @@ async function handleCorrectReview(payload) {
 async function handleUpdateDailyCapacity(value) {
   const dailyCapacity = Math.min(200, Math.max(5, Number(value) || 30))
   if (capacitySaving.value || dailyCapacity === recruitmentStatus.value.daily_capacity) return
+  const previousCapacity = recruitmentStatus.value.daily_capacity
   capacitySaving.value = true
   try {
     recruitmentStatus.value = await updateRecruitmentPref({
@@ -130,8 +131,14 @@ async function handleUpdateDailyCapacity(value) {
       daily_capacity: dailyCapacity,
       pace: recruitmentStatus.value.pace,
     })
-    await loadQuestions('due')
-    toast.success(`每日计划已调整为 ${dailyCapacity} 题`)
+    const queue = await loadQuestions('due')
+    if (!queue) {
+      toast.warning('每日计划已保存，题目刷新失败，请重新进入刷题页')
+    } else if (dailyCapacity > previousCapacity && !(queue.items || []).length) {
+      toast.info('每日计划已调整，题库里暂时没有更多新题')
+    } else {
+      toast.success(`每日计划已调整为 ${dailyCapacity} 题`)
+    }
   } catch {
     toast.error('每日计划调整失败，请稍后重试')
   } finally {
