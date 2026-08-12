@@ -130,13 +130,20 @@
 
           <div v-if="!answerRevealed" class="mt-10 flex flex-col items-center gap-3">
             <template v-if="isAlgorithmQueue">
-              <p class="text-sm text-muted-foreground">先判断一下，能答出来吗？</p>
-              <div class="flex w-full max-w-md flex-col gap-2.5 sm:w-auto sm:flex-row">
-                <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('again')"><kbd class="hidden text-[10px] opacity-60 sm:inline">1</kbd><X class="size-4" />不会</Button>
-                <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('hard')"><kbd class="hidden text-[10px] opacity-60 sm:inline">2</kbd><Target class="size-4" />有点印象</Button>
-                <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><kbd class="hidden text-[10px] opacity-70 sm:inline">3</kbd><Check class="size-4" />能答出</Button>
-              </div>
-              <span class="text-[11px] text-muted-foreground">先自评，再看答案<span class="hidden sm:inline"> · 按 1 / 2 / 3 快速选择</span></span>
+              <template v-if="recallCover">
+                <p class="text-sm text-muted-foreground">答案已盖住，先在脑中完整复述一遍</p>
+                <Button data-testid="practice-reveal-again" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye class="size-4" />再次对照答案</Button>
+                <span class="text-[11px] text-muted-foreground">这次只练回忆，不会重复记录自评<span class="hidden sm:inline"> · Enter 再次查看</span></span>
+              </template>
+              <template v-else>
+                <p class="text-sm text-muted-foreground">先判断一下，能答出来吗？</p>
+                <div class="flex w-full max-w-md flex-col gap-2.5 sm:w-auto sm:flex-row">
+                  <Button data-testid="practice-self-assess-again" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('again')"><kbd class="hidden text-[10px] opacity-60 sm:inline">1</kbd><X class="size-4" />不会</Button>
+                  <Button data-testid="practice-self-assess-hard" variant="outline" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('hard')"><kbd class="hidden text-[10px] opacity-60 sm:inline">2</kbd><Target class="size-4" />有点印象</Button>
+                  <Button data-testid="practice-self-assess-good" size="lg" class="w-full gap-2 sm:w-36" @click="handleSelfAssess('good')"><kbd class="hidden text-[10px] opacity-70 sm:inline">3</kbd><Check class="size-4" />能答出</Button>
+                </div>
+                <span class="text-[11px] text-muted-foreground">先自评，再看答案<span class="hidden sm:inline"> · 按 1 / 2 / 3 快速选择</span></span>
+              </template>
             </template>
             <template v-else>
               <Button data-testid="practice-show-answer" size="lg" class="gap-2 px-6" @click="answerRevealed = true"><Eye :size="17" />查看参考答案</Button>
@@ -251,7 +258,7 @@
           <div class="mt-4 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
             <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="toggleSelfCheck"><Target class="size-3.5" />{{ showSelfCheck ? '收起自测' : '自测一下' }}</Button>
             <Button variant="ghost" size="sm" class="gap-1.5 text-muted-foreground" @click="toggleHistory"><History class="size-3.5" />练习记录<span v-if="questionAttemptCount(currentQ)" class="tabular-nums">({{ questionAttemptCount(currentQ) }})</span></Button>
-            <Button variant="ghost" size="sm" class="ml-auto gap-1.5 text-muted-foreground" @click="answerRevealed = false"><RotateCcw class="size-3.5" />再想一遍</Button>
+            <Button data-testid="practice-recall-again" variant="ghost" size="sm" class="ml-auto gap-1.5 text-muted-foreground" @click="coverAnswerForRecall"><RotateCcw class="size-3.5" />再想一遍</Button>
           </div>
         </div>
 
@@ -460,6 +467,7 @@ const reviewStatus = ref('idle')
 const retainedReviewedId = ref(null)
 const savedReview = ref(null)
 const correctionLoading = ref(false)
+const recallCover = ref(false)
 const RELEARNING_GAP = 3
 const relearningQueue = ref([])
 const sessionRatings = reactive({ again: 0, hard: 0, good: 0, easy: 0 })
@@ -600,7 +608,7 @@ const difficultyClass = (difficulty) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400'
 }
 
-function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle'; savedReview.value = null; correctionLoading.value = false }
+function resetState() { resetQState(qState); qState._recitation = currentQ.value?.user_answer || ''; answerRevealed.value = false; showSelfCheck.value = false; showHistory.value = false; selfRating.value = null; reviewStatus.value = 'idle'; savedReview.value = null; correctionLoading.value = false; recallCover.value = false }
 function selectSession(key) {
   const option = sessionOptions.value.find(item => item.key === key)
   if (!option?.count) { toast.warning('这个题单还没有题目'); return }
@@ -694,11 +702,18 @@ function saveSelfAssessment() {
 }
 // 墨墨式主流程：三选一即落库，同时保留当前卡供用户对照答案。
 function handleSelfAssess(rating) {
-  if (!currentQ.value?.id || answerRevealed.value) return
+  if (!currentQ.value?.id || answerRevealed.value || recallCover.value || reviewStatus.value !== 'idle') return
   selfRating.value = rating
   retainedReviewedId.value = currentQ.value.id
   answerRevealed.value = true
   saveSelfAssessment()
+}
+function coverAnswerForRecall() {
+  if (isAlgorithmQueue.value && reviewStatus.value !== 'saved') return
+  answerRevealed.value = false
+  recallCover.value = isAlgorithmQueue.value
+  showSelfCheck.value = false
+  showHistory.value = false
 }
 function retrySelfAssessment() { saveSelfAssessment() }
 function correctSelfAssessment(rating) {
@@ -821,6 +836,11 @@ function onGlobalKeydown(event) {
   if (target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
   if (isAlgorithmQueue.value) {
     if (!answerRevealed.value) {
+      if (recallCover.value && ['Enter', ' '].includes(event.key)) {
+        event.preventDefault()
+        answerRevealed.value = true
+        return
+      }
       const rating = { '1': 'again', '2': 'hard', '3': 'good' }[event.key]
       if (rating) { event.preventDefault(); handleSelfAssess(rating) }
       return

@@ -616,6 +616,30 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 1 题')
   })
 
+  test('再想一遍只遮住答案，不会重复提交复习记录', async ({ page }) => {
+    let reviewRequests = 0
+    page.on('request', request => {
+      if (request.method() === 'POST' && request.url().endsWith('/api/practice/review')) reviewRequests += 1
+    })
+    await gotoPractice(page)
+
+    await page.getByTestId('practice-self-assess-good').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    expect(reviewRequests).toBe(1)
+
+    await page.getByTestId('practice-recall-again').click()
+    await expect(page.getByText('答案已盖住，先在脑中完整复述一遍')).toBeVisible()
+    await expect(page.getByTestId('practice-self-assess-good')).not.toBeVisible()
+    await page.keyboard.press('1')
+    await expect(page.getByTestId('practice-reveal-again')).toBeVisible()
+    expect(reviewRequests).toBe(1)
+
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('practice-correct-rating')).toBeVisible()
+    expect(reviewRequests).toBe(1)
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+  })
+
   test('记得了复习 Q1 后队列移除 Q1 并显示 Q2，连续复习不跳卡', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 4)
     await gotoPractice(page, { deckQuestions: seeds })
