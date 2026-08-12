@@ -409,18 +409,76 @@ html:not(.dark) .ib-question-accordion-trigger:is(
   backdrop-filter: blur(12px) !important;
 }
 
-a.answer-source-link[data-material="glass"]:is(:hover, :focus-visible),
-.source-card[data-material="glass"]:is(:hover, :focus-visible) {
+a.answer-source-link[data-material="glass"]:is(:hover, :focus-visible) {
   background: var(--accent) !important;
   border-color: var(--border) !important;
   color: var(--foreground) !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
+.source-card[data-material="glass"]:is(:hover, :focus-visible) {
+  background: var(--accent) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08),
+    0 14px 32px -8px rgba(0, 0, 0, 0.16) !important;
+}
+
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__title,
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__url,
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__url > *,
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__snippet,
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__external,
+.source-card[data-material="glass"]:is(:hover, :focus-visible) .source-card__icon svg {
+  color: inherit !important;
+}
+
+html.dark .source-card[data-material="glass"]:is(:hover, :focus-visible) {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22),
+    0 16px 36px -8px rgba(0, 0, 0, 0.38) !important;
+}
+
 .answer-source-preview[data-material="glass"] {
   background: var(--popover) !important;
   color: var(--popover-foreground) !important;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Source cards use the same neutral-control backlight as the ghost toggle. */
+.source-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    100% 130% at 50% 45%,
+    var(--ib-material-backlight) 0%,
+    var(--ib-material-backlight-soft) 55%,
+    transparent 90%
+  );
+  mix-blend-mode: plus-lighter;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 500ms var(--ease-standard);
+  z-index: 0;
+}
+
+.source-card:is(:hover, :focus-visible)::before {
+  opacity: 1;
+}
+
+.source-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+html.dark .source-card:is(:hover, :focus-visible) {
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.3), 0 0 18px rgba(255, 255, 255, 0.14);
+}
+
+html.dark .source-card:is(:hover, :focus-visible) svg {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 14px rgba(255, 255, 255, 0.17));
 }
 
 header[class~="h-11"] {

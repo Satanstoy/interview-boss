@@ -50,3 +50,57 @@ test('source citations render as visible cards with favicon and original URL', a
   expect(result.text).toContain('vuejs.org')
   expect(result.text).toContain('Vue 是用于构建用户界面的渐进式框架')
 })
+
+test('reference source cards share the reference-source toggle hover treatment', async ({ page }) => {
+  await page.goto('/login')
+
+  await page.evaluate(async () => {
+    const { createApp } = await import('/node_modules/.vite/deps/vue.js')
+    const { default: SourceList } = await import('/src/components/common/SourceList.vue')
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = createApp(SourceList, {
+      sources: Array.from({ length: 5 }, (_, index) => ({
+        title: `来源 ${index + 1}`,
+        url: `https://example.com/source-${index + 1}`,
+      })),
+      open: true,
+      testId: 'hover-parity',
+    })
+    app.mount(root)
+    await new Promise(resolve => requestAnimationFrame(resolve))
+  })
+
+  const sourceList = page.locator('[data-testid="hover-parity"]')
+  const toggle = sourceList.locator('button')
+  const sourceCards = sourceList.locator('a.source-card')
+  await expect(sourceCards).toHaveCount(5)
+
+  await sourceCards.first().hover()
+  await page.waitForTimeout(600)
+  const sourceHover = await sourceCards.first().evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+      boxShadow: style.boxShadow,
+      transform: style.transform,
+      backlightOpacity: getComputedStyle(element, '::before').opacity,
+    }
+  })
+
+  await toggle.hover()
+  await page.waitForTimeout(600)
+  const toggleHover = await toggle.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+      boxShadow: style.boxShadow,
+      transform: style.transform,
+      backlightOpacity: getComputedStyle(element, '::before').opacity,
+    }
+  })
+
+  expect(sourceHover).toEqual(toggleHover)
+})

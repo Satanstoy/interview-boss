@@ -278,18 +278,16 @@
     background: var(--popover);
   }
 
-  /* 来源卡片：使用系统通用 glass 材质，hover 只做轻微抬升和 backlight。 */
+  /* 来源卡片：使用系统通用 glass 材质，hover 与中性控件保持同一套 backlight。 */
   .source-card {
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    transition: transform 180ms var(--ease-standard), border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard);
+    transition: background-color 150ms var(--ease-standard), border-color 150ms var(--ease-standard), color 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
   }
   .source-card:hover,
   .source-card:focus-visible {
-    transform: translateY(-1px);
     border-color: var(--border);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   }
   .source-card__icon {
     border: 1px solid var(--border);
@@ -307,11 +305,10 @@
     color: var(--foreground);
   }
   .source-card__external {
-    transition: transform 220ms var(--ease-standard), color 220ms var(--ease-standard);
+    transition: color 150ms var(--ease-standard);
   }
   .source-card:hover .source-card__external,
   .source-card:focus-visible .source-card__external {
-    transform: translate(1px, -1px);
     color: var(--foreground);
   }
   .source-card--static {
@@ -319,11 +316,11 @@
     box-shadow: none;
   }
   .dark .source-card {
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    box-shadow: none;
   }
   .dark .source-card:hover,
   .dark .source-card:focus-visible {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+    box-shadow: none;
   }
   .dark .source-card__icon {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
