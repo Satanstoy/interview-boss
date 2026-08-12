@@ -3,9 +3,11 @@ from app.core.prompts import ANSWER_PROMPT, RECITATION_PROMPT
 
 def test_reference_answer_prompt_requires_scan_friendly_markdown():
     assert "必须使用 Markdown 三级标题和列表" in ANSWER_PROMPT
-    assert "### 一句话记忆" in ANSWER_PROMPT
+    assert "标题是给人扫读的路标" in ANSWER_PROMPT
     assert "不能编造公司" in ANSWER_PROMPT
     assert "Markdown 链接" in ANSWER_PROMPT
+    assert "严禁使用“核心解法”“落地要点”“务实收尾”" in ANSWER_PROMPT
+    assert "不要把每道题套进同一组章节名" in ANSWER_PROMPT
 
 
 def test_recitation_prompt_preserves_truth_and_readable_structure():

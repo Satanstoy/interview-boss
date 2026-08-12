@@ -7,6 +7,7 @@ from app.services.answer_enrichment import (
     _build_revise_prompt,
     _extract_question,
     _ensure_inline_source_citation,
+    _normalise_answer_headings,
     refine_answer,
 )
 
@@ -46,6 +47,32 @@ def test_inline_source_citation_fallback_links_first_prose_line():
 def test_inline_source_citation_fallback_does_not_duplicate_valid_link():
     answer = "Redis 是内存数据结构存储系统。[文档](https://redis.io/docs)"
     assert _ensure_inline_source_citation(answer, _SOURCES) == answer
+
+
+def test_normalise_answer_headings_removes_gpt_style_labels():
+    answer = (
+        "**核心解法：**\n先做限流。\n\n"
+        "### 2. 落地要点\n用 Redis 扛住热点。\n\n"
+        "**务实收尾**\n最后说明边界。\n\n"
+        "2. **落地要点**：把消息写进队列。\n"
+        "* **务实收尾**：说明跨机房边界。\n"
+        "**核心解法：**先做限流。"
+    )
+    result = _normalise_answer_headings(answer)
+    assert "核心解法" not in result
+    assert "落地要点" not in result
+    assert "务实收尾" not in result
+    assert "### 先把思路捋清楚" in result
+    assert "### 真正做起来看这几处" in result
+    assert "### 最后看边界" in result
+    assert "2. 真正做起来看这几处：把消息写进队列。" in result
+    assert "* 最后看边界：说明跨机房边界。" in result
+    assert "### 先把思路捋清楚\n先做限流。" in result
+
+
+def test_normalise_answer_headings_does_not_touch_code_blocks_or_specific_titles():
+    answer = "```text\n### 核心解法\n```\n\n### Redis 为什么会击穿\n内容"
+    assert _normalise_answer_headings(answer) == answer
 
 
 async def test_refine_returns_draft_unchanged_when_critic_passes():

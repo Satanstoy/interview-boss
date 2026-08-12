@@ -14,6 +14,101 @@ logger = logging.getLogger("interview-boss")
 
 _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\((https?://[^)\s]+)\)")
 
+# 这些标题在模型答案里很容易形成固定模板，读起来像报告目录，不像人在面试
+# 中组织答案。提示词负责引导，落库前再做一次窄范围兜底，避免偶发生成污染题库。
+_GENERIC_HEADING_REPLACEMENTS = (
+    ("实用场景与个人经验", "什么时候会用到"),
+    ("核心解法", "先把思路捋清楚"),
+    ("落地要点", "真正做起来看这几处"),
+    ("务实收尾", "最后看边界"),
+    ("直接破题", "先说结论"),
+    ("核心解释", "先把这件事说清楚"),
+    ("关键细节", "容易被追问的地方"),
+    ("实用场景", "什么时候会用到"),
+    ("核心要点", "先记住这几件事"),
+    ("方案与取舍", "为什么这么选"),
+    ("核心对比", "放在一起看区别"),
+    ("一句话记忆", "先记住这句话"),
+)
+_MARKDOWN_HEADING_RE = re.compile(r"^(?P<indent>\s{0,3})(?P<marks>#{1,6})\s+(?P<text>.+?)\s*$")
+_BOLD_HEADING_RE = re.compile(r"^(?P<indent>\s*)\*\*(?P<text>[^*\n]+?)\*\*\s*:?[：:]?\s*$")
+_BOLD_LIST_HEADING_RE = re.compile(
+    r"^(?P<indent>\s*)(?P<marker>(?:[-*+]\s+|\d+[.)、：:]\s+))"
+    r"\*\*(?P<text>[^*\n]+?)\*\*\s*:?[：:]?\s*(?P<rest>.*)$"
+)
+_BOLD_PREFIX_HEADING_RE = re.compile(
+    r"^(?P<indent>\s*)\*\*(?P<text>[^*\n]+?)(?:：|:)?\*\*"
+    r"\s*(?:：|:)?\s*(?P<rest>.+)$"
+)
+_HEADING_NUMBER_RE = re.compile(r"^\s*\d+[.)、：:]\s*")
+
+
+def _humanize_heading_text(text: str) -> str | None:
+    """把明确的模板标题换成口语化标题；不改动正常的题目专属标题。"""
+    cleaned = _HEADING_NUMBER_RE.sub("", text.strip())
+    cleaned = cleaned.rstrip("：:").strip()
+    for generic, replacement in _GENERIC_HEADING_REPLACEMENTS:
+        if cleaned == generic:
+            return replacement
+        if cleaned.startswith(generic) and cleaned[len(generic) :].lstrip().startswith(("：", ":", "—", "-", "（", "(")):
+            suffix = cleaned[len(generic) :].lstrip()
+            return f"{replacement}{suffix}"
+    return None
+
+
+def _normalise_answer_headings(answer: str) -> str:
+    """清理模型偶发生成的模板标题，并把独立粗体标签变成三级标题。"""
+    if not answer:
+        return answer
+    lines = answer.splitlines()
+    in_code = False
+    changed = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+
+        match = _MARKDOWN_HEADING_RE.match(line)
+        if match:
+            replacement = _humanize_heading_text(match.group("text"))
+            if replacement:
+                lines[index] = f"{match.group('indent')}### {replacement}"
+                changed = True
+            continue
+
+        match = _BOLD_HEADING_RE.match(line)
+        if match:
+            replacement = _humanize_heading_text(match.group("text"))
+            if replacement:
+                lines[index] = f"{match.group('indent')}### {replacement}"
+                changed = True
+            continue
+
+        match = _BOLD_LIST_HEADING_RE.match(line)
+        if match:
+            replacement = _humanize_heading_text(match.group("text"))
+            if replacement:
+                lines[index] = (
+                    f"{match.group('indent')}{match.group('marker')}"
+                    f"{replacement}：{match.group('rest')}"
+                )
+                changed = True
+            continue
+
+        match = _BOLD_PREFIX_HEADING_RE.match(line)
+        if match:
+            replacement = _humanize_heading_text(match.group("text"))
+            if replacement:
+                lines[index] = (
+                    f"{match.group('indent')}### {replacement}\n"
+                    f"{match.group('indent')}{match.group('rest')}"
+                )
+                changed = True
+    return "\n".join(lines) if changed else answer
+
 
 def sources_json(sources: list[dict]) -> str | None:
     """把联网搜索来源序列化为 JSON 字符串；无来源返回 None（落库用）。"""
@@ -231,6 +326,7 @@ def _build_critic_prompt(question: str, draft: str, sources: list[dict]) -> str:
 6. 真实性：题目未提供个人事实时，是否编造公司、时长、指标、团队或“我做过”的经历；有则必须改成中性表述或“【按真实经历替换】”。
 7. 可视性：是否有超过 3 条的列表、重复定义、无信息增量的填充句，或把参考链接集中堆在文末；有则必须指出。
 8. 正文引用：有参考资料时，正文必须至少有 1 个指向参考资料原始 URL 的 Markdown 链接，且链接应紧跟实际使用资料的句子；缺失、链接不在资料中或只在文末堆放，都必须指出。
+9. 标题语气：是否出现“核心解法”“落地要点”“务实收尾”或同一套路的近义模板标题；是否每节标题都和本题具体内容有关。出现模板标题必须指出并要求改成自然、具体的说法。
 
 ## 输出格式（严格 JSON）
 {{
@@ -273,6 +369,8 @@ def _build_revise_prompt(
 - 如果提供了参考资料，必须在正文保留或补回至少 1 个有效 Markdown 来源链接；链接文字可以简短，但 URL 必须逐字取自上面的资料。
 - 只修改问题清单中指出的问题，保留正确考点，不要无谓扩写。
 - 保持短句、大白话、可背诵；非代码题补齐 3–4 个三级标题和必要列表。
+- 标题必须根据本题内容重新命名，禁止使用“核心解法”“落地要点”“务实收尾”“直接破题”“核心解释”“关键细节”“实用场景”“方案与取舍”“核心对比”等模板化标题，也不要把它们改成近义词后继续套用。
+- 标题要像人在解释问题时留下的路标，例如“为什么这么选”“哪里最容易出问题”，但不能每道题复用同一组标题。
 - 非代码题控制在 300–500 个中文字符，最多 520 个中文字符；删掉重复定义和空话。
 - 题目没有提供的个人事实必须删除，或改为“【按真实经历替换】”，不得凭空补充。
 - 只在确实使用参考资料的句子后放 1–2 个对应 Markdown 链接，不能把 URL 堆在结尾。
@@ -377,10 +475,12 @@ async def refine_answer(
     Returns:
         (final_answer, issues)
     """
-    if not sources or not draft:
+    if not draft:
         return draft, []
+    if not sources:
+        return _normalise_answer_headings(draft), []
     question = _extract_question(prompt)
-    current = draft
+    current = _normalise_answer_headings(draft)
     all_issues: list[dict] = []
     for _round in range(max_rounds):
         critique = await _critic_answer(
@@ -407,7 +507,9 @@ async def refine_answer(
             llm_scope=llm_scope,
             sources=sources,
         )
-    return _ensure_inline_source_citation(current, sources), all_issues
+    return _normalise_answer_headings(
+        _ensure_inline_source_citation(current, sources)
+    ), all_issues
 
 
 def _extract_question(prompt: str) -> str:
