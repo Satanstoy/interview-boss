@@ -198,6 +198,42 @@ def _reviewed_today_count(conn, user_id: int) -> int:
     return int(row["count"] or 0)
 
 
+def _study_streak(conn, user_id: int) -> dict:
+    """Return habit streaks from distinct UTC review days.
+
+    A streak through yesterday remains active until the current day ends, so
+    the UI can invite the learner to extend it instead of declaring it lost in
+    the morning.
+    """
+
+    rows = conn.execute(
+        "SELECT DISTINCT date(reviewed_at) AS day FROM practice_review_events "
+        "WHERE user_id = ? ORDER BY day ASC",
+        (user_id,),
+    ).fetchall()
+    days = [datetime.fromisoformat(row["day"]).date() for row in rows if row["day"]]
+    today = datetime.now(UTC).date()
+    day_set = set(days)
+    studied_today = today in day_set
+    cursor = today if studied_today else today - timedelta(days=1)
+    current = 0
+    while cursor in day_set:
+        current += 1
+        cursor -= timedelta(days=1)
+
+    longest = run = 0
+    previous = None
+    for day in days:
+        run = run + 1 if previous and day == previous + timedelta(days=1) else 1
+        longest = max(longest, run)
+        previous = day
+    return {
+        "study_streak": current,
+        "longest_streak": longest,
+        "studied_today": studied_today,
+    }
+
+
 def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     """Return named system study plans with live counts and progress."""
 
@@ -326,6 +362,7 @@ def list_deck_questions(
             _select_sql(from_clause, checkin_where, frequency_sql) + order, params
         ).fetchall()
         completed_today = _reviewed_today_count(conn, user_id)
+        streak = _study_streak(conn, user_id)
         if max_new is not None:
             new_budget = max(0, int(max_new))
             capacity = completed_today + len(due_rows) + len(checkin_rows) + new_budget
@@ -384,8 +421,12 @@ def list_deck_questions(
             "completed_today": completed_today,
             "remaining_today": len(rows),
             "planned_today": completed_today + len(rows),
+            "due_review_count": len(due_rows),
+            "checkin_count": len(checkin_rows),
+            "new_question_count": len(new_rows),
             "next_due_at": next_due_row["next_due_at"] if next_due_row else None,
             "review_forecast": review_forecast,
+            **streak,
         }
     else:
         rows = conn.execute(

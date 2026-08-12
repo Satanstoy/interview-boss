@@ -139,6 +139,9 @@ export function usePracticeDecks(filter = 'all') {
     const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
     const wasPracticed = Number(item?.review_count || 0) > 0
     const previousNextReviewAt = item?.next_review_at || null
+    const queueKind = !previousNextReviewAt
+      ? 'new_question_count'
+      : (item?.is_checkin ? 'checkin_count' : 'due_review_count')
     const queueReviewIds = reviewedDueQueueIds
     const wasReviewedInQueue = queueReviewIds.has(questionId)
     try {
@@ -158,7 +161,16 @@ export function usePracticeDecks(filter = 'all') {
         }
         if (!wasReviewedInQueue) {
           reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today ?? questions.value.length) - 1)
+          reviewedDeck[queueKind] = Math.max(0, Number(reviewedDeck[queueKind] || 0) - 1)
           queueReviewIds.add(questionId)
+        }
+        if (!reviewedDeck.studied_today) {
+          reviewedDeck.studied_today = true
+          reviewedDeck.study_streak = Number(reviewedDeck.study_streak || 0) + 1
+          reviewedDeck.longest_streak = Math.max(
+            Number(reviewedDeck.longest_streak || 0),
+            reviewedDeck.study_streak,
+          )
         }
         reviewedDeck.planned_today = Number(reviewedDeck.completed_today || 0) + Number(reviewedDeck.remaining_today || 0)
         if (nextState.next_review_at) {

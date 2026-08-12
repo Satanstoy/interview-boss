@@ -1,6 +1,6 @@
 """今日复习 (due) deck: review-first risk-weighted queue and new-question budget."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.db.connection import get_db_connection
 from app.services.practice_deck_service import list_decks, list_deck_questions
@@ -290,3 +290,34 @@ def test_due_queue_daily_budget_does_not_replenish_after_reload(test_db):
     assert deck["next_due_at"] is not None
     assert len(deck["review_forecast"]) == 7
     assert sum(day["count"] for day in deck["review_forecast"]) == 1
+    assert deck["due_review_count"] == 0
+    assert deck["checkin_count"] == 0
+    assert deck["new_question_count"] == 1
+    assert deck["study_streak"] == 1
+    assert deck["studied_today"] is True
+
+
+def test_due_queue_reports_active_study_streak_through_yesterday(test_db):
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    with get_db_connection() as conn:
+        _seed(conn)
+        record_review(
+            conn, user_id=1, question_id=1, rating="good", now=now - timedelta(days=2)
+        )
+        record_review(
+            conn, user_id=1, question_id=2, rating="good", now=now - timedelta(days=1)
+        )
+        conn.commit()
+
+        deck, _, _ = list_deck_questions(conn, 1, "due")
+        assert deck["study_streak"] == 2
+        assert deck["longest_streak"] == 2
+        assert deck["studied_today"] is False
+
+        record_review(conn, user_id=1, question_id=3, rating="good", now=now)
+        conn.commit()
+        deck, _, _ = list_deck_questions(conn, 1, "due")
+
+    assert deck["study_streak"] == 3
+    assert deck["longest_streak"] == 3
+    assert deck["studied_today"] is True

@@ -311,6 +311,9 @@ async function mockAllAPIs(page, options = {}) {
       ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
       : deckQuestions
     const completedToday = reviewedQuestionIds.size || (deckKey === 'due' && items.length === 0 ? Number(deck?.reviewed || 0) : 0)
+    const dueReviewCount = items.filter(question => question.next_review_at && !question.is_checkin).length
+    const checkinCount = items.filter(question => question.is_checkin).length
+    const newQuestionCount = items.filter(question => !question.next_review_at).length
     await route.fulfill({
       json: {
         deck: {
@@ -322,6 +325,12 @@ async function mockAllAPIs(page, options = {}) {
             completed_today: completedToday,
             remaining_today: items.length,
             planned_today: completedToday + items.length,
+            due_review_count: dueReviewCount,
+            checkin_count: checkinCount,
+            new_question_count: newQuestionCount,
+            study_streak: 4 + (reviewedQuestionIds.size ? 1 : 0),
+            longest_streak: 8,
+            studied_today: reviewedQuestionIds.size > 0,
             next_due_at: reviewedQuestionIds.size ? tomorrow : null,
             review_forecast: reviewForecast(reviewedQuestionIds.size),
           } : {}),
@@ -487,6 +496,8 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 3 题')
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3')
+    await expect(page.getByTestId('practice-study-streak')).toContainText('再刷 1 题延续 4 天')
+    await expect(page.getByTestId('practice-plan-mix')).toContainText('到期复习 2 · 新学 1')
     const forecast = page.getByTestId('practice-review-forecast')
     await expect(forecast).toContainText('未来 7 天')
     await expect(forecast).toContainText('预计 0 题')
@@ -577,6 +588,8 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await page.getByTestId('practice-self-assess-hard').click()
     await expect(page.getByText('自评已保存')).toBeVisible()
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await expect(page.getByTestId('practice-study-streak')).toContainText('连续 5 天')
+    await expect(page.getByTestId('practice-plan-mix')).toContainText('到期复习 1 · 新学 1')
     await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 1 题')
 
     // 不点击“下一题”就退出，模拟用户选完选项后直接离开。

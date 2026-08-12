@@ -69,10 +69,11 @@
 
     <div v-if="isAlgorithmQueue && dailyPlanTotal" data-testid="practice-daily-progress" class="flex shrink-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2.5 shadow-sm sm:px-4">
       <div class="min-w-0 flex-1">
-        <div class="flex items-center justify-between gap-3 text-xs">
-          <span class="font-semibold text-foreground">今日计划</span>
+        <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+          <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
           <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
         </div>
+        <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="mt-1 text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
         <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
           <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
         </div>
@@ -377,6 +378,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Flame,
   History,
   Layers,
   Link2,
@@ -534,6 +536,17 @@ const dailyProgress = computed(() => dailyPlanTotal.value
   ? Math.round(completedToday.value / dailyPlanTotal.value * 100)
   : 0)
 const sessionReviewCount = computed(() => Object.values(sessionRatings).reduce((sum, count) => sum + count, 0))
+const studyStreak = computed(() => Number(props.selectedDeck?.study_streak || 0))
+const streakLabel = computed(() => {
+  if (props.selectedDeck?.studied_today) return `连续 ${studyStreak.value} 天`
+  if (studyStreak.value) return `再刷 1 题延续 ${studyStreak.value} 天`
+  return '今天开始第 1 天'
+})
+const taskMixLabel = computed(() => [
+  ['到期复习', props.selectedDeck?.due_review_count],
+  ['保持手感', props.selectedDeck?.checkin_count],
+  ['新学', props.selectedDeck?.new_question_count],
+].filter(([, count]) => Number(count || 0) > 0).map(([label, count]) => `${label} ${count}`).join(' · '))
 const reviewForecast = computed(() => Array.isArray(props.selectedDeck?.review_forecast)
   ? props.selectedDeck.review_forecast
   : [])
