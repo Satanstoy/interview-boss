@@ -154,32 +154,41 @@
     font-weight: 600;
     color: inherit;
   }
-  /* 正文引用：GPT 风格的圆角来源 pill，左侧 logo，右侧来源标题 */
+  /* 正文引用：紧凑的来源 pill；悬停时展开带 logo 的 URL 预览卡。 */
   .answer-content a.answer-source-link {
+    position: relative;
+    isolation: isolate;
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.24rem;
     max-width: min(100%, 18rem);
-    padding: 0.12rem 0.48rem 0.12rem 0.28rem;
-    border: 1px solid color-mix(in srgb, var(--border) 85%, var(--primary) 15%);
+    padding: 0.03rem 0.38rem 0.03rem 0.22rem;
+    border: 1px solid var(--ib-material-hairline) !important;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--card) 88%, var(--primary) 12%);
-    color: var(--primary);
-    font-size: 0.82em;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 78%, #111 22%), color-mix(in srgb, var(--primary) 58%, #111 42%)) !important;
+    color: #fff !important;
+    font-size: 0.78em;
     font-weight: 600;
+    line-height: 1.18;
     text-decoration: none;
     vertical-align: middle;
     white-space: nowrap;
-    overflow: hidden;
+    overflow: visible;
+    -webkit-backdrop-filter: blur(16px) saturate(1.35);
+    backdrop-filter: blur(16px) saturate(1.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 2px 8px rgba(15, 23, 42, 0.12);
+    transition: transform 180ms var(--ease-standard), border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard), filter 180ms var(--ease-standard);
   }
-  .answer-content a.answer-source-link:hover {
-    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
-    background: color-mix(in srgb, var(--card) 78%, var(--primary) 22%);
+  .answer-content a.answer-source-link:is(:hover, :focus-visible) {
+    border-color: color-mix(in srgb, #fff 62%, var(--primary)) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.36), 0 6px 16px rgba(15, 23, 42, 0.2), 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+    filter: brightness(1.08) saturate(1.08);
+    transform: translateY(-1px);
     text-decoration: none;
   }
   .answer-content .answer-source-favicon {
-    width: 1.05em;
-    height: 1.05em;
+    width: 0.9em;
+    height: 0.9em;
     flex: none;
     border-radius: 0.18em;
     object-fit: contain;
@@ -189,20 +198,74 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: #fff;
   }
   .answer-content a.answer-source-link::after {
     content: '↗';
     flex: none;
-    color: currentColor;
+    color: #fff;
     font-size: 0.78em;
     font-weight: 700;
     line-height: 1;
     opacity: 0.7;
   }
+  .answer-content .answer-source-preview {
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    bottom: calc(100% + 0.5rem);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    width: max-content;
+    max-width: min(21rem, calc(100vw - 2rem));
+    padding: 0.62rem 0.72rem;
+    border: 1px solid var(--ib-material-hairline) !important;
+    border-radius: 0.82rem;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 72%, #111 28%), color-mix(in srgb, var(--primary) 46%, #111 54%)) !important;
+    color: #fff !important;
+    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.24), inset 0 1px 0 rgba(255,255,255,0.22);
+    -webkit-backdrop-filter: blur(24px) saturate(1.45);
+    backdrop-filter: blur(24px) saturate(1.45);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px) scale(0.98);
+    transform-origin: left bottom;
+    transition: opacity 160ms var(--ease-standard), transform 160ms var(--ease-standard);
+  }
+  .answer-content a.answer-source-link:is(:hover, :focus-visible) .answer-source-preview {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  .answer-content .answer-source-preview__favicon {
+    width: 1.15rem;
+    height: 1.15rem;
+    flex: none;
+    margin-top: 0.05rem;
+    border-radius: 0.3rem;
+    background: #fff;
+    object-fit: contain;
+  }
+  .answer-content .answer-source-preview__copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.14rem;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .answer-content .answer-source-preview__copy strong {
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .answer-content .answer-source-preview__copy span {
+    color: rgba(255,255,255,0.8);
+  }
   .dark .answer-content a.answer-source-link {
-    border-color: rgba(255,255,255,0.16);
-    background: rgba(255,255,255,0.08);
-    color: oklch(0.82 0.12 55);
+    color: #fff !important;
   }
 
   /* 来源卡片：圆角玻璃材质，hover 时只抬升和提亮，不改变布局 */

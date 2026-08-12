@@ -236,12 +236,14 @@
 
     <div v-if="currentQ" class="mx-auto flex shrink-0 w-full flex-wrap items-center justify-between gap-3 px-1">
       <template v-if="isAlgorithmQueue">
-        <span class="mx-auto text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
+        <span data-testid="practice-question-total" class="ml-auto text-xs tabular-nums text-muted-foreground">题库共 {{ questionBankTotal }} 题</span>
       </template>
       <template v-else>
         <Button variant="outline" class="gap-2" :disabled="currentIndex === 0" @click="goPrev"><ChevronLeft class="size-4" />上一题</Button>
-        <span class="text-xs tabular-nums text-muted-foreground">{{ currentIndex + 1 }} / {{ sessionQuestions.length }}</span>
-        <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
+        <div class="ml-auto flex items-center gap-3">
+          <span data-testid="practice-question-total" class="text-xs tabular-nums text-muted-foreground">题库共 {{ questionBankTotal }} 题</span>
+          <Button variant="outline" class="gap-2" @click="goNext">{{ isLastQuestion ? '完成一轮' : '下一题' }}<ChevronRight class="size-4" /></Button>
+        </div>
       </template>
     </div>
         </div>
@@ -365,6 +367,7 @@ const props = defineProps({
   reviewLoading: { type: Boolean, default: false },
   deckLoading: { type: Boolean, default: false },
   hasMoreQuestions: { type: Boolean, default: false },
+  questionTotal: { type: Number, default: 0 },
   loadingMoreQuestions: { type: Boolean, default: false },
   startIndex: { type: Number, default: 0 },
   isAdmin: { type: Boolean, default: false },
@@ -436,6 +439,11 @@ const sessionQuestions = computed(() => {
   const query = deckQuery.value.trim().toLowerCase()
   if (!query) return sessionSource.value
   return sessionSource.value.filter(question => [question.question, question.cat1, question.cat2, question.tags].some(value => String(value || '').toLowerCase().includes(query)))
+})
+const questionBankTotal = computed(() => {
+  if (serverDeckMode.value) return Number(props.questionTotal) || sessionSource.value.length
+  if (sessionKey.value === 'starred') return starredQuestions.value.length
+  return props.questions.length
 })
 const currentQ = computed(() => sessionQuestions.value[currentIndex.value] || null)
 const referenceAnswerSources = computed(() => (

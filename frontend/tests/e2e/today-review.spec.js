@@ -441,7 +441,7 @@ test.describe('今日复习默认入口与招聘状态行', () => {
 
     // 今日复习队列已加载，第一张卡展示
     await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText('1 / 3')).toBeVisible()
+    await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 3 题')
   })
 
   test('无招聘偏好（batch 为空）时不渲染状态行', async ({ page }) => {
@@ -468,7 +468,7 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     // 初始：当前卡 Q1；刷题模式侧栏隐藏（列表在浏览模式）；队列 4 张
     await expect(card.getByText(seeds[0].question)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-queue-sidebar')).not.toBeVisible()
-    await expect(page.getByText('1 / 4')).toBeVisible()
+    await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 4 题')
 
     // 复习 Q1：自评「能答出」→ 显示答案 → 下一题（提交复习）
     await page.getByTestId('practice-self-assess-good').click()
@@ -477,7 +477,7 @@ test.describe('今日复习队列复习出队不跳卡', () => {
 
     // 出队不跳卡：当前卡为 Q2（索引补偿）；剩余 3 张
     await expect(card.getByText(seeds[1].question)).toBeVisible()
-    await expect(page.getByText('1 / 3')).toBeVisible()
+    await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 4 题')
 
     // 切到浏览模式：默认展示全部题列表（4 题都在，出队只影响 due 队列）
     await page.getByTestId('practice-switch-browse').click()
@@ -522,7 +522,7 @@ test.describe('已掌握题抽查', () => {
 
     // 题卡带「保持手感」徽标
     await expect(page.getByTestId('checkin-badge')).toContainText('保持手感', { timeout: 5000 })
-    await expect(page.getByText('1 / 1')).toBeVisible()
+    await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 1 题')
   })
 })
 

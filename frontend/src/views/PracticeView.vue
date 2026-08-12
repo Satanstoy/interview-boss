@@ -21,6 +21,7 @@
       :review-loading="isReviewing"
       :deck-loading="isLoading"
       :has-more-questions="serverReady && hasMoreQuestions"
+      :question-total="serverReady ? questionTotal : practiceQuestions.length"
       :loading-more-questions="isLoadingMoreQuestions"
       :is-admin="currentUser?.is_admin"
       class="w-full min-w-0"
@@ -55,7 +56,7 @@ const router = useRouter()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, isLoading, isReviewing, serverReady,
-  hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, addItem,
+  questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, addItem,
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 

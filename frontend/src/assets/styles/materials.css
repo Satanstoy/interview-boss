@@ -395,6 +395,20 @@ html:not(.dark) .ib-question-accordion-trigger:is(
   isolation: isolate;
 }
 
+/* Citation pills use the same glass treatment, with a branded dark surface so
+ * their deliberately white labels stay readable in both themes. */
+:where(
+  a.answer-source-link[data-material="glass"],
+  .answer-source-preview[data-material="glass"]
+) {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary) 78%, #111 22%),
+    color-mix(in srgb, var(--primary) 52%, #111 48%)
+  ) !important;
+  color: #fff !important;
+}
+
 header[class~="h-11"] {
   border-bottom-width: 1px;
   border-bottom-style: solid;

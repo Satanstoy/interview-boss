@@ -28,10 +28,28 @@ test('markdown renderer keeps structure, highlighting, links, and sanitization',
   expect(html).toContain('language-python')
   expect(html).toContain('href="https://example.com"')
   expect(html).toContain('class="answer-source-link"')
+  expect(html).toContain('data-material="glass"')
+  expect(html).toContain('class="answer-source-preview"')
+  expect(html).toContain('class="answer-source-preview__favicon"')
   expect(html).toContain('class="answer-source-favicon"')
   expect(html).toContain('https://www.google.com/s2/favicons?domain=example.com')
   expect(html).toContain('class="answer-source-label">官方文档</span>')
   expect(html).toContain('target="_blank"')
   expect(html).toContain('rel="noopener noreferrer"')
   expect(html).not.toContain('<script>')
+
+  await page.evaluate((renderedHtml) => {
+    const host = document.createElement('div')
+    host.id = 'inline-citation-smoke'
+    host.className = 'answer-content'
+    host.innerHTML = renderedHtml
+    document.body.appendChild(host)
+  }, html)
+
+  const citation = page.locator('#inline-citation-smoke .answer-source-link')
+  const preview = citation.locator('.answer-source-preview')
+  await expect(citation).toHaveCSS('color', 'rgb(255, 255, 255)')
+  await expect(preview).toHaveCSS('opacity', '0')
+  await citation.hover()
+  await expect(preview).toHaveCSS('opacity', '1')
 })

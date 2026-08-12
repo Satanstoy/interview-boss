@@ -1,7 +1,8 @@
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { highlightCode, normalizeLanguage } from './highlight.js'
-import { sourceFavicon } from './source.js'
+import { sourceFavicon, sourceHost, sourcePath } from './source.js'
+import { escapeHtml } from './validate.js'
 
 // 配置 DOMPurify：只允许安全的 HTML 标签和属性
 const purifyConfig = {
@@ -17,6 +18,7 @@ const purifyConfig = {
   ALLOWED_ATTR: [
     'href', 'target', 'rel', 'title',
     'class', 'id',
+    'data-material', 'data-source-preview', 'aria-hidden',
     'src', 'alt', 'width', 'height',
     'colspan', 'rowspan',
   ],
@@ -58,14 +60,20 @@ markdown.renderer.rules.link_open = (tokens, index, options, env, self) => {
   const token = tokens[index]
   const href = token.attrGet('href') || ''
   if (/^https?:\/\//i.test(href)) {
+    const host = sourceHost({ url: href })
+    const path = sourcePath({ url: href })
+    const preview = `${host}${path}` || href
     token.attrJoin('class', 'answer-source-link')
+    token.attrSet('data-material', 'glass')
+    token.attrSet('data-source-preview', preview)
+    token.attrSet('title', preview)
     token.attrSet('target', '_blank')
     token.attrSet('rel', 'noopener noreferrer')
     const favicon = sourceFavicon({ url: href })
     const linkOpen = defaultLinkOpen
       ? defaultLinkOpen(tokens, index, options, env, self)
       : self.renderToken(tokens, index, options)
-    return `${linkOpen}<img class="answer-source-favicon" src="${favicon}" alt="" loading="lazy"><span class="answer-source-label">`
+    return `${linkOpen}<img class="answer-source-favicon" src="${escapeHtml(favicon)}" alt="" loading="lazy"><span class="answer-source-label">`
   }
   return defaultLinkOpen
     ? defaultLinkOpen(tokens, index, options, env, self)
@@ -77,9 +85,14 @@ markdown.renderer.rules.link_close = (tokens, index, options, env, self) => {
   const openToken = tokens.slice(0, index).reverse().find(token => token.type === 'link_open')
   const href = openToken?.attrGet('href') || ''
   if (/^https?:\/\//i.test(href)) {
-    return `</span>${defaultLinkClose
+    const host = sourceHost({ url: href })
+    const path = sourcePath({ url: href })
+    const preview = escapeHtml(`${host}${path}` || href)
+    const favicon = escapeHtml(sourceFavicon({ url: href }))
+    const closeTag = defaultLinkClose
       ? defaultLinkClose(tokens, index, options, env, self)
-      : self.renderToken(tokens, index, options)}`
+      : self.renderToken(tokens, index, options)
+    return `</span><span class="answer-source-preview" data-material="glass" aria-hidden="true"><img class="answer-source-preview__favicon" src="${favicon}" alt=""><span class="answer-source-preview__copy"><strong>打开原文</strong><span>${preview}</span></span></span>${closeTag}`
   }
   return defaultLinkClose
     ? defaultLinkClose(tokens, index, options, env, self)
