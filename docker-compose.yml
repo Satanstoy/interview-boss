@@ -197,7 +197,8 @@ services:
     cpus: 0.25
     env_file: backend/.env
     environment:
-      - OAUTH_SECRET_KEY=${OAUTH_SECRET_KEY:-change-me-in-production}
+      # OAUTH_SECRET_KEY 从 backend/.env 注入；留空时 oauth-gateway 自动生成随机密钥并告警（tech-audit-2026-08-13 D13-2，禁止公开兜底值）
+      - OAUTH_SECRET_KEY=${OAUTH_SECRET_KEY}
       - INTERVIEW_BOSS_DB=/app/data/interview-boss.db
       - INTERVIEW_BOSS_URL=http://backend:8000
       - GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://81.71.140.248}
