@@ -544,7 +544,11 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     await expect(page.getByTestId('recruitment-status')).not.toBeVisible()
   })
 
-  test('可在刷题页调低每日上限并立即重算新题队列', async ({ page }) => {
+  test('每日上限先预览，确认后只保存一次并重算新题队列', async ({ page }) => {
+    let recruitmentPutCount = 0
+    page.on('request', (request) => {
+      if (request.method() === 'PUT' && new URL(request.url()).pathname === '/api/profile/recruitment') recruitmentPutCount += 1
+    })
     const newQuestions = Array.from({ length: 8 }, (_, index) => ({
       ...DUE_QUESTION_SEEDS[2],
       id: 200 + index,
@@ -557,7 +561,25 @@ test.describe('今日复习默认入口与招聘状态行', () => {
 
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 8')
     await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 10')
-    await page.getByTestId('practice-capacity-decrease').click()
+    await page.getByTestId('practice-capacity-control').click()
+
+    const slider = page.getByTestId('practice-capacity-slider')
+    await expect(slider).toHaveValue('10')
+    await slider.fill('5')
+    await expect(page.getByTestId('practice-capacity-popover')).toContainText('5题')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 8')
+    await expect.poll(() => page.evaluate(() => window.__lastRecruitmentPut || null)).toBeNull()
+    expect(recruitmentPutCount).toBe(0)
+
+    await page.getByTestId('practice-capacity-cancel').click()
+    await expect(page.getByTestId('practice-capacity-popover')).not.toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.__lastRecruitmentPut || null)).toBeNull()
+    expect(recruitmentPutCount).toBe(0)
+
+    await page.getByTestId('practice-capacity-control').click()
+    await expect(slider).toHaveValue('10')
+    await slider.fill('5')
+    await page.getByTestId('practice-capacity-apply').click()
 
     await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 5')
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 5')
@@ -568,6 +590,7 @@ test.describe('今日复习默认入口与招聘状态行', () => {
       daily_capacity: 5,
       pace: 'standard',
     })
+    expect(recruitmentPutCount).toBe(1)
   })
 
   test('完成今日计划后可直接追加 5 题继续学习', async ({ page }) => {

@@ -73,27 +73,51 @@
           <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
           <div class="flex flex-wrap items-center gap-2">
             <span class="tabular-nums text-muted-foreground">已过关 {{ completedToday }} / {{ dailyPlanTotal }} · 今日已练 {{ attemptedToday }} 题<template v-if="reviewAttemptsToday > attemptedToday">（回忆 {{ reviewAttemptsToday }} 次）</template> · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 本轮待巩固 {{ relearningQueue.length }}</template></span>
-            <span data-testid="practice-capacity-control" class="inline-flex h-7 items-center rounded-full border border-border bg-background/80">
-              <button
-                type="button"
-                data-testid="practice-capacity-decrease"
-                class="flex size-7 items-center justify-center rounded-l-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="每日计划减少 5 题"
-                :disabled="capacitySaving || deckLoading || reviewLoading || dailyCapacity <= 5"
-                @click="adjustDailyCapacity(-5)"
-              ><Minus class="size-3" /></button>
-              <span class="min-w-20 border-x border-border px-2 text-center text-[10px] tabular-nums text-foreground" :aria-busy="capacitySaving">
-                {{ capacitySaving ? '调整中…' : `每日上限 ${dailyCapacity}` }}
-              </span>
-              <button
-                type="button"
-                data-testid="practice-capacity-increase"
-                class="flex size-7 items-center justify-center rounded-r-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="每日计划增加 5 题"
-                :disabled="capacitySaving || deckLoading || reviewLoading || dailyCapacity >= 200"
-                @click="adjustDailyCapacity(5)"
-              ><Plus class="size-3" /></button>
-            </span>
+            <Popover v-model:open="capacityEditorOpen">
+              <PopoverTrigger as-child>
+                <button
+                  type="button"
+                  data-testid="practice-capacity-control"
+                  class="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 text-[10px] tabular-nums text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="调整每日学习上限"
+                  :aria-busy="capacitySaving"
+                  :disabled="capacitySaving || deckLoading || reviewLoading"
+                >
+                  <SlidersHorizontal class="size-3 text-muted-foreground" />
+                  {{ capacitySaving ? '保存中…' : `每日上限 ${dailyCapacity}` }}
+                  <ChevronDown class="size-3 text-muted-foreground transition-transform" :class="capacityEditorOpen ? 'rotate-180' : ''" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent data-testid="practice-capacity-popover" align="end" class="w-72 gap-3 p-4">
+                <PopoverHeader>
+                  <PopoverTitle>每日学习上限</PopoverTitle>
+                  <PopoverDescription class="text-xs leading-5">只控制今天补入的新题；到期复习和待巩固题仍会优先安排。</PopoverDescription>
+                </PopoverHeader>
+                <div class="flex items-end justify-between">
+                  <span class="text-xs text-muted-foreground">调整计划</span>
+                  <span class="text-xl font-semibold tabular-nums text-foreground">{{ capacityDraft }}<span class="ml-1 text-xs font-normal text-muted-foreground">题</span></span>
+                </div>
+                <input
+                  v-model.number="capacityDraft"
+                  data-testid="practice-capacity-slider"
+                  class="h-2 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  type="range"
+                  min="5"
+                  max="200"
+                  step="5"
+                  aria-label="每日学习上限题数"
+                  :disabled="capacitySaving"
+                />
+                <div class="-mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground"><span>5</span><span>200</span></div>
+                <div class="flex justify-end gap-2 border-t border-border/60 pt-3">
+                  <Button data-testid="practice-capacity-cancel" variant="ghost" size="sm" :disabled="capacitySaving" @click="cancelCapacityEdit">取消</Button>
+                  <Button data-testid="practice-capacity-apply" size="sm" :disabled="capacitySaving || capacityDraft === dailyCapacity" @click="applyDailyCapacity">
+                    <Loader2 v-if="capacitySaving" class="size-3.5 animate-spin" />
+                    {{ capacitySaving ? '保存中…' : '应用' }}
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
         <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="mt-1 text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
@@ -330,7 +354,7 @@
           :variant="sessionWeakQuestions.length ? 'outline' : 'default'"
           class="gap-1.5"
           :disabled="capacitySaving || deckLoading"
-          @click="adjustDailyCapacity(5)"
+          @click="extendDailyPlan"
         ><Loader2 v-if="capacitySaving" class="size-3.5 animate-spin" /><Plus v-else class="size-3.5" />{{ capacitySaving ? '正在安排…' : '再学 5 题' }}</Button>
         <Button variant="outline" @click="selectSession('all')">切换到全部题</Button>
       </div>
@@ -429,7 +453,6 @@ import {
   Link2,
   List,
   Loader2,
-  Minus,
   PanelLeft,
   PanelLeftClose,
   Pencil,
@@ -437,6 +460,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Target,
@@ -446,6 +470,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import AppDialog from '@/components/common/AppDialog.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import SourceList from '@/components/common/SourceList.vue'
@@ -488,6 +513,8 @@ const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
 const queueCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
+const capacityEditorOpen = ref(false)
+const capacityDraft = ref(props.dailyCapacity)
 const currentIndex = ref(Math.max(0, props.startIndex))
 const answerRevealed = ref(false)
 const showSelfCheck = ref(false)
@@ -638,8 +665,20 @@ const reviewStatusHint = computed(() => {
   return pieces.join(' · ')
 })
 
-function adjustDailyCapacity(delta) {
-  emit('update-daily-capacity', Math.min(200, Math.max(5, props.dailyCapacity + delta)))
+function cancelCapacityEdit() {
+  capacityDraft.value = props.dailyCapacity
+  capacityEditorOpen.value = false
+}
+
+function applyDailyCapacity() {
+  const nextCapacity = Math.min(200, Math.max(5, Number(capacityDraft.value) || props.dailyCapacity))
+  capacityDraft.value = nextCapacity
+  if (nextCapacity !== props.dailyCapacity) emit('update-daily-capacity', nextCapacity)
+  capacityEditorOpen.value = false
+}
+
+function extendDailyPlan() {
+  emit('update-daily-capacity', Math.min(200, props.dailyCapacity + 5))
 }
 
 function isDueNow(nextReviewAt) {
@@ -952,6 +991,12 @@ watch(sessionQuestions, (questions) => {
   if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1)
 })
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
+watch(capacityEditorOpen, (open) => {
+  if (open) capacityDraft.value = props.dailyCapacity
+})
+watch(() => props.dailyCapacity, (capacity) => {
+  if (!capacityEditorOpen.value) capacityDraft.value = capacity
+})
 watch(() => props.selectedDeckKey, (key) => {
   if (key) {
     sessionKey.value = key
