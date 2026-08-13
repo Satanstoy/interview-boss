@@ -67,12 +67,22 @@
       <main data-testid="practice-main" class="min-h-0 flex-1 overflow-hidden">
         <div class="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col gap-2 overflow-hidden px-2 py-2 sm:gap-3 sm:px-4 sm:py-4 md:px-6 md:py-5">
 
-    <div v-if="isAlgorithmQueue && dailyPlanTotal" data-testid="practice-daily-progress" class="flex shrink-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2.5 shadow-sm sm:px-4">
+    <div v-if="isAlgorithmQueue && dailyPlanTotal" data-testid="practice-daily-progress" class="flex shrink-0 items-center gap-3 rounded-xl border border-border/80 bg-card px-3 py-2 shadow-sm sm:px-4 sm:py-2.5">
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
-          <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="tabular-nums text-muted-foreground">已过关 {{ completedToday }} / {{ dailyPlanTotal }} · 今日已练 {{ attemptedToday }} 题<template v-if="reviewAttemptsToday > attemptedToday">（回忆 {{ reviewAttemptsToday }} 次）</template> · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 本轮待巩固 {{ relearningQueue.length }}</template></span>
+          <button
+            type="button"
+            data-testid="practice-plan-toggle"
+            class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg text-left transition hover:bg-muted/40 focus-visible:outline-none"
+            :aria-expanded="dailyPlanExpanded"
+            aria-controls="practice-plan-details"
+            @click="dailyPlanExpanded = !dailyPlanExpanded"
+          >
+            <span class="flex shrink-0 items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
+            <span class="min-w-0 truncate tabular-nums text-muted-foreground">已过关 {{ completedToday }} / {{ dailyPlanTotal }} · 今日已练 {{ attemptedToday }} 题<template v-if="reviewAttemptsToday > attemptedToday">（回忆 {{ reviewAttemptsToday }} 次）</template> · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 本轮待巩固 {{ relearningQueue.length }}</template></span>
+            <ChevronDown class="size-3.5 shrink-0 text-muted-foreground transition-transform" :class="dailyPlanExpanded ? 'rotate-180' : ''" />
+          </button>
+          <div class="flex shrink-0 items-center gap-2">
             <Popover v-model:open="capacityEditorOpen">
               <PopoverTrigger as-child>
                 <button
@@ -120,17 +130,19 @@
             </Popover>
           </div>
         </div>
-        <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="mt-1 text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
-        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
-          <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
-        </div>
-        <div v-if="reviewForecast.length" data-testid="practice-review-forecast" class="mt-3 flex items-end gap-3 border-t border-border/60 pt-2" role="img" :aria-label="`未来 7 天预计复习 ${forecastTotal} 题`">
-          <div class="shrink-0 pb-3 text-[10px] leading-4 text-muted-foreground"><span class="block font-medium text-foreground">未来 7 天</span>预计 {{ forecastTotal }} 题</div>
-          <div class="grid min-w-0 flex-1 grid-cols-7 gap-1.5">
-            <div v-for="day in reviewForecast" :key="day.date" data-testid="practice-forecast-day" class="flex min-w-0 flex-col items-center gap-1" :title="`${day.date} · ${day.count} 题`">
-              <span class="text-[9px] tabular-nums text-muted-foreground">{{ day.count }}</span>
-              <span class="flex h-6 w-full items-end justify-center"><span class="w-full max-w-5 rounded-sm transition-[height]" :class="day.count ? 'bg-primary/75' : 'bg-muted'" :style="{ height: forecastBarHeight(day.count) }"></span></span>
-              <span class="text-[9px] text-muted-foreground">{{ forecastDayLabel(day.date) }}</span>
+        <div id="practice-plan-details" data-testid="practice-plan-details" v-show="dailyPlanExpanded" class="mt-2">
+          <p v-if="taskMixLabel" data-testid="practice-plan-mix" class="text-[10px] text-muted-foreground">待完成 · {{ taskMixLabel }}</p>
+          <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" :aria-valuenow="dailyProgress" aria-valuemin="0" aria-valuemax="100">
+            <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${dailyProgress}%` }"></div>
+          </div>
+          <div v-if="reviewForecast.length" data-testid="practice-review-forecast" class="mt-3 flex items-end gap-3 border-t border-border/60 pt-2" role="img" :aria-label="`未来 7 天预计复习 ${forecastTotal} 题`">
+            <div class="shrink-0 pb-3 text-[10px] leading-4 text-muted-foreground"><span class="block font-medium text-foreground">未来 7 天</span>预计 {{ forecastTotal }} 题</div>
+            <div class="grid min-w-0 flex-1 grid-cols-7 gap-1.5">
+              <div v-for="day in reviewForecast" :key="day.date" data-testid="practice-forecast-day" class="flex min-w-0 flex-col items-center gap-1" :title="`${day.date} · ${day.count} 题`">
+                <span class="text-[9px] tabular-nums text-muted-foreground">{{ day.count }}</span>
+                <span class="flex h-6 w-full items-end justify-center"><span class="w-full max-w-5 rounded-sm transition-[height]" :class="day.count ? 'bg-primary/75' : 'bg-muted'" :style="{ height: forecastBarHeight(day.count) }"></span></span>
+                <span class="text-[9px] text-muted-foreground">{{ forecastDayLabel(day.date) }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -139,42 +151,43 @@
 
     <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
-      <div class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
-        <div class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <div class="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
+        <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden text-xs text-muted-foreground sm:flex-wrap sm:gap-2">
           <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
           <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
-          <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
+          <Button v-if="viewMode === 'browse'" variant="ghost" size="sm" class="size-10 min-h-10 shrink-0 px-0 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
-            <span>题目列表</span>
+            <span class="sr-only">题目列表</span>
           </Button>
-          <span class="font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
-          <span>·</span>
-          <span>高频 {{ currentQ.frequency || 0 }} 次</span>
+          <span class="shrink-0 font-semibold text-foreground">第 {{ currentIndex + 1 }} 题</span>
+          <span class="hidden sm:inline">·</span>
+          <span class="hidden sm:inline">高频 {{ currentQ.frequency || 0 }} 次</span>
           <span v-if="questionAttemptCount(currentQ)" class="hidden items-center gap-1 sm:inline-flex"><History class="size-3.5" />已练习 {{ questionAttemptCount(currentQ) }} 次</span>
           <span v-if="currentQ.has_been_practiced" class="hidden items-center gap-1 sm:inline-flex"><Target class="size-3.5" />熟练度 {{ currentQ.proficiency || 0 }}/5</span>
+          <Button v-if="currentQ" variant="ghost" size="sm" class="size-10 min-h-10 shrink-0 gap-1 px-1.5 md:hidden" aria-label="打开题卡信息" @click="mobileInfoOpen = true"><SlidersHorizontal class="size-4" /><span class="text-[11px]">信息</span></Button>
         </div>
-        <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
+        <div class="hidden min-w-0 flex-wrap items-center gap-1.5 sm:flex sm:justify-end">
           <Button
             v-if="currentQ && viewMode === 'browse'"
             data-testid="practice-mark-familiar"
             variant="ghost"
             size="sm"
-            class="h-10 gap-1.5 px-2 text-xs text-muted-foreground hover:text-primary sm:h-8"
+            class="hidden h-10 gap-1.5 px-2 text-xs text-muted-foreground hover:text-primary sm:inline-flex sm:h-8"
             :disabled="reviewLoading"
             title="标记为很熟，拉长下一次复习间隔"
             @click="markAndNext('easy')"
           ><Zap class="size-3.5" />标记很熟</Button>
-          <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
-          <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
+          <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="hidden h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:inline-flex sm:h-8" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
+          <Button data-testid="practice-practiced" variant="ghost" size="sm" class="hidden h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:inline-flex sm:h-8" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
-            <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:size-9 sm:min-h-0 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
+            <Button variant="ghost" size="sm" class="hidden h-11 min-h-11 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:inline-flex sm:size-9 sm:min-h-0 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
           </AppTooltip>
-          <Badge v-if="currentQ.difficulty" variant="outline" class="text-[10px]" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
-          <Badge variant="outline" class="max-w-32 truncate text-[10px]">{{ currentQ.cat1 || '未分类' }}</Badge>
+          <Badge v-if="currentQ.difficulty" variant="outline" class="hidden text-[10px] sm:inline-flex" :class="difficultyClass(currentQ.difficulty)">{{ currentQ.difficulty }}</Badge>
+          <Badge variant="outline" class="hidden max-w-32 truncate text-[10px] sm:inline-flex">{{ currentQ.cat1 || '未分类' }}</Badge>
         </div>
       </div>
 
-      <div data-testid="practice-card-content" :key="currentQ.id" class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 custom-scrollbar question-content-enter sm:px-6 md:px-12 md:py-7">
+      <div data-testid="practice-card-content" :key="currentQ.id" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 py-5 custom-scrollbar question-content-enter sm:px-6 md:px-12 md:py-7">
         <div class="flex flex-wrap items-center gap-1.5">
           <Badge v-for="tag in questionTags(currentQ).slice(0, 4)" :key="tag" variant="secondary" class="text-[10px]">{{ tag }}</Badge>
         </div>
@@ -231,7 +244,7 @@
                 <Button size="sm" :disabled="qState._isSavingAnswer" @click="handleSaveAnswer">{{ qState._isSavingAnswer ? '保存中...' : '保存答案' }}</Button>
               </div>
             </div>
-            <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="flashcard-answer answer-content rounded-xl border border-border/80 bg-muted/30 p-4 text-sm leading-7 text-foreground md:p-6" v-html="renderMarkdown(currentQ.ai_answer)"></div>
+            <div v-else-if="currentQ.ai_answer && !isFailedAnswer(currentQ.ai_answer)" class="flashcard-answer answer-content min-w-0 rounded-xl border border-border/80 bg-muted/30 p-4 text-sm leading-7 text-foreground md:p-6" v-html="renderMarkdown(currentQ.ai_answer)"></div>
             <div v-else class="rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
               <p v-if="isAdmin" class="text-sm text-muted-foreground">这道题还没有参考答案</p>
               <p v-else class="text-sm text-muted-foreground">这道题还没有参考答案，请等待管理员生成</p>
@@ -393,6 +406,30 @@
     </div>
   </div>
 
+  <Sheet v-model:open="mobileInfoOpen">
+    <SheetContent data-testid="practice-mobile-info-sheet" side="right" class="w-[86vw] max-w-sm gap-0 p-0">
+      <SheetHeader class="border-b border-border px-4 py-4 pr-12 text-left">
+        <SheetTitle class="truncate text-base">题卡信息</SheetTitle>
+        <SheetDescription class="truncate text-xs">第 {{ currentIndex + 1 }} 题 · {{ currentQ?.cat1 || '未分类' }}</SheetDescription>
+      </SheetHeader>
+      <div v-if="currentQ" class="min-h-0 flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+        <p class="line-clamp-3 text-sm font-medium leading-6 text-foreground">{{ currentQ.question }}</p>
+        <div class="mt-4 grid grid-cols-2 gap-2">
+          <div class="rounded-lg border border-border bg-muted/30 px-3 py-2.5"><span class="block text-[10px] text-muted-foreground">高频出现</span><span class="mt-1 block text-sm font-semibold tabular-nums text-foreground">{{ currentQ.frequency || 0 }} 次</span></div>
+          <div class="rounded-lg border border-border bg-muted/30 px-3 py-2.5"><span class="block text-[10px] text-muted-foreground">已练习</span><span class="mt-1 block text-sm font-semibold tabular-nums text-foreground">{{ questionAttemptCount(currentQ) }} 次</span></div>
+          <div class="rounded-lg border border-border bg-muted/30 px-3 py-2.5"><span class="block text-[10px] text-muted-foreground">熟练度</span><span class="mt-1 block text-sm font-semibold tabular-nums text-foreground">{{ currentQ.proficiency || 0 }}/5</span></div>
+          <div class="rounded-lg border border-border bg-muted/30 px-3 py-2.5"><span class="block text-[10px] text-muted-foreground">难度</span><span class="mt-1 block text-sm font-semibold text-foreground">{{ currentQ.difficulty || '未标注' }}</span></div>
+        </div>
+        <div class="mt-5 flex flex-col gap-2">
+          <Button v-if="viewMode === 'browse'" data-testid="practice-mobile-mark-familiar" variant="outline" class="justify-start gap-2" :disabled="reviewLoading" @click="mobileInfoOpen = false; markAndNext('easy')"><Zap class="size-4" />标记很熟<span class="ml-auto text-xs text-muted-foreground">拉长复习</span></Button>
+          <Button data-testid="practice-mobile-add-to-deck" variant="outline" class="justify-start gap-2" @click="mobileInfoOpen = false; openDeckPicker()"><Plus class="size-4" />加入题单</Button>
+          <Button data-testid="practice-mobile-practiced" variant="outline" class="justify-start gap-2" @click="mobileInfoOpen = false; togglePracticed()"><History class="size-4" />已刷过的题</Button>
+          <Button data-testid="practice-mobile-star" variant="outline" class="justify-start gap-2" @click="mobileInfoOpen = false; toggleStar()"><Star class="size-4" :fill="currentQ.is_starred ? 'currentColor' : 'none'" />{{ currentQ.is_starred ? '取消收藏' : '收藏题目' }}</Button>
+        </div>
+      </div>
+    </SheetContent>
+  </Sheet>
+
   <AppDialog
     :open="showDeckPicker"
     title="加入题单"
@@ -487,6 +524,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import AppDialog from '@/components/common/AppDialog.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import SourceList from '@/components/common/SourceList.vue'
@@ -529,6 +567,8 @@ const sessionKey = ref(props.selectedDeckKey || 'all')
 const deckQuery = ref('')
 const queueCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
+const mobileInfoOpen = ref(false)
+const dailyPlanExpanded = ref(false)
 const capacityEditorOpen = ref(false)
 const capacityDraft = ref(props.dailyCapacity)
 const currentIndex = ref(Math.max(0, props.startIndex))
@@ -1073,5 +1113,8 @@ onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
 .flashcard-answer :deep(ul), .flashcard-answer :deep(ol) { margin: 0.6rem 0; padding-left: 1.4rem; }
 .flashcard-answer :deep(li) { margin: 0.25rem 0; }
 .flashcard-answer :deep(code) { border-radius: 0.35rem; background: hsl(var(--muted)); padding: 0.1rem 0.3rem; font-size: 0.9em; }
+.flashcard-answer :deep(pre), .flashcard-answer :deep(table) { max-width: 100%; overflow-x: auto; }
+.flashcard-answer :deep(pre) { white-space: pre; }
+.flashcard-answer :deep(img) { max-width: 100%; height: auto; }
 @keyframes question-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 </style>

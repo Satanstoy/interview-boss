@@ -628,12 +628,17 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await page.goto('/practice')
 
     const listButton = page.getByRole('button', { name: '展开题目列表' })
-    const favoriteButton = page.getByRole('button', { name: '收藏题目' })
-    await expect(listButton).toContainText('题目列表')
-    await expect(favoriteButton).toContainText('收藏')
+    const infoButton = page.getByRole('button', { name: '打开题卡信息' })
+    await expect(listButton).toBeVisible()
+    await expect(infoButton).toBeVisible()
     await expect(page.getByText('点击按钮查看答案')).toBeVisible()
 
-    const targets = await Promise.all([listButton, favoriteButton].map(locator => locator.boundingBox()))
+    await infoButton.click()
+    const sheet = page.getByTestId('practice-mobile-info-sheet')
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByRole('button', { name: '收藏题目' })).toBeVisible()
+
+    const targets = await Promise.all([listButton, infoButton, sheet.getByRole('button', { name: '收藏题目' })].map(locator => locator.boundingBox()))
     for (const target of targets) expect(target.height).toBeGreaterThanOrEqual(40)
 
     const width = await page.evaluate(() => ({
@@ -641,6 +646,19 @@ test.describe('练习完整流程 — PracticePanel', () => {
       content: document.documentElement.scrollWidth,
     }))
     expect(width.content).toBeLessThanOrEqual(width.viewport + 1)
+  })
+
+  test('移动端题卡头部保持紧凑，详情操作收进侧栏', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+
+    await expect(page.getByTestId('practice-mobile-info-sheet')).not.toBeVisible()
+    await expect(page.getByTestId('practice-mobile-info-sheet')).toHaveCount(1)
+    await page.getByRole('button', { name: '打开题卡信息' }).click()
+    await expect(page.getByTestId('practice-mobile-info-sheet')).toBeVisible()
+    await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('高频出现')
+    await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('加入题单')
+    await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('收藏题目')
   })
 
   test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
