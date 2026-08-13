@@ -10,6 +10,49 @@ def _conversation():
 
 
 class TestChatTurnLifecycle:
+    def test_precreated_first_message_is_claimed_without_duplicate(self, test_db):
+        from app.services import chat_service
+
+        conversation = chat_service.create_conversation(
+            user_id=1,
+            mode="free_practice",
+            first_message="面试官你好",
+            client_request_id="create-req-1",
+        )
+        turn = chat_service.reserve_chat_turn(
+            conversation["id"],
+            1,
+            "turn-req-1",
+            "面试官你好",
+            existing_user_message_id=conversation["first_message_id"],
+        )
+
+        assert turn.user_message_id == conversation["first_message_id"]
+        messages = chat_service.get_messages(conversation["id"])
+        assert [(message["role"], message["content"]) for message in messages] == [
+            ("user", "面试官你好")
+        ]
+
+    def test_conversation_create_request_is_idempotent(self, test_db):
+        from app.services import chat_service
+
+        first = chat_service.create_conversation(
+            user_id=1,
+            mode="free_practice",
+            first_message="面试官你好",
+            client_request_id="create-req-1",
+        )
+        retry = chat_service.create_conversation(
+            user_id=1,
+            mode="free_practice",
+            first_message="面试官你好",
+            client_request_id="create-req-1",
+        )
+
+        assert retry["id"] == first["id"]
+        assert retry["first_message_id"] == first["first_message_id"]
+        assert len(chat_service.get_messages(first["id"])) == 1
+
     def test_same_request_id_with_different_payload_is_idempotency_conflict(self, test_db):
         from app.services import chat_service
 

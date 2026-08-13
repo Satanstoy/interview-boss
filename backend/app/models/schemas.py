@@ -173,3 +173,4 @@ class CreateConversationRequest(BaseModel):
     experience_id: Optional[int] = None
     distribution_override: Optional[DistributionPreferenceRequest] = None
     first_message: Optional[str] = Field(None, min_length=1, max_length=10000)
+    client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)

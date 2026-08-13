@@ -28,6 +28,7 @@ class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     model: Optional[str] = None
     client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)
+    existing_user_message_id: Optional[int] = Field(None, gt=0)
     regenerate_message_id: Optional[int] = Field(None, gt=0)
 
 
@@ -73,6 +74,7 @@ async def create_conversation(
                 if req.distribution_override
                 else None,
                 first_message=req.first_message,
+                client_request_id=req.client_request_id,
             )
         )
 
@@ -353,6 +355,7 @@ async def send_message(
                     client_request_id,
                     req.content,
                     request_fingerprint,
+                    existing_user_message_id=req.existing_user_message_id,
                 )
             )
     except chat_service.ConversationNotWritable:
@@ -372,6 +375,8 @@ async def send_message(
         raise HTTPException(status_code=404, detail="对话不存在")
     except chat_service.TurnNotFound:
         raise HTTPException(status_code=404, detail="消息不可重新生成")
+    except chat_service.TurnUserMessageConflict:
+        raise HTTPException(status_code=409, detail="TURN_USER_MESSAGE_CONFLICT")
 
     if not turn.created:
         if turn.status == "completed":

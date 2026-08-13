@@ -298,7 +298,7 @@
                 ref="inputRef"
                 v-model="inputText"
                 :placeholder="inputPlaceholder"
-                :disabled="isSending"
+                :disabled="isSending || sendInFlight"
                 @keydown="onInputKeydown"
                 @input="autoResize"
                 rows="1"
@@ -343,7 +343,7 @@
                   <Button
                     type="submit"
                     aria-label="发送消息"
-                    :disabled="!inputText.trim()"
+                    :disabled="!inputText.trim() || sendInFlight"
                     size="icon"
                     class="h-10 min-w-16 shrink-0 justify-center gap-1.5 rounded-lg px-3 sm:h-8 sm:min-w-0 sm:w-8 sm:px-0"
                   >
@@ -456,6 +456,9 @@ const activeConversationId = ref(null)
 const messages = ref([])
 const inputText = ref('')
 const isSending = ref(false)
+// Lock immediately on submit, including the async model check and delayed
+// conversation creation window where isSending has not started yet.
+const sendInFlight = ref(false)
 const streamingContent = ref('')
 const showNewChat = ref(false)
 const creatingConversation = ref(false)
@@ -501,6 +504,11 @@ const thinkingDuration = ref(0)
 const liveThinkingSeconds = ref(0)
 let thinkingTimer = null
 let activeRequestContext = null
+
+function createClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
@@ -769,6 +777,7 @@ async function handleCreateConversation(data) {
       difficulty: data.difficulty || 'mid',
       experience_id: data.experience_id || null,
       initial_message: data.initial_message || null,
+      client_request_id: createClientRequestId(),
     }
 
     // 生成开场白用于placeholder
@@ -808,17 +817,41 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       }
     }
   }
-  if (!text || isSending.value) return
+  if (!text || isSending.value || sendInFlight.value) return
+  sendInFlight.value = true
+  const initialConversationId = activeConversationId.value
+
+  let clientRequestId = createClientRequestId()
+  let existingUserMessageId = null
 
   // 模型未配置/未接通时引导去设置页，中止发送
-  if (!props.preview && !(await ensureModelReady({ action: '发送消息' }))) return
+  if (!props.preview) {
+    try {
+      if (!(await ensureModelReady({ action: '发送消息' }))) {
+        sendInFlight.value = false
+        return
+      }
+    } catch (e) {
+      sendInFlight.value = false
+      throw e
+    }
+  }
+
+  // A user may switch conversations while the model guard is awaiting. Do not
+  // leak the original text into whichever conversation became active meanwhile.
+  if (activeConversationId.value !== initialConversationId) {
+    sendInFlight.value = false
+    return
+  }
 
   // 如果有待创建的对话，先创建对话
   if (pendingNewConversation.value && activeConversationId.value === 'pending') {
     try {
+      clientRequestId = pendingNewConversation.value.client_request_id || clientRequestId
       const createData = {
         ...pendingNewConversation.value,
         first_message: text,
+        client_request_id: clientRequestId,
       }
       const res = await chatApi.createConversation(createData)
       if (res.data?.id) {
@@ -826,6 +859,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
         pendingNewConversation.value = null
         openingMessageText.value = ''
         activeConversationId.value = res.data.id
+        existingUserMessageId = res.data.first_message_id || null
         
         // 刷新对话列表
         await loadConversations()
@@ -843,11 +877,15 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     } catch (e) {
       console.error('创建对话失败:', e)
       toastError('创建对话失败：' + (e.message || '未知错误'))
+      sendInFlight.value = false
       return
     }
   }
 
-  if (!activeConversationId.value || activeConversationId.value === 'pending') return
+  if (!activeConversationId.value || activeConversationId.value === 'pending') {
+    sendInFlight.value = false
+    return
+  }
 
   // In preview mode, simulate a response without calling real API
   if (props.preview) {
@@ -869,14 +907,12 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     }
     messages.value.push(mockResponse)
     isSending.value = false
+    sendInFlight.value = false
     await scrollToBottom()
     return
   }
 
   const conversationId = activeConversationId.value
-  const clientRequestId = globalThis.crypto?.randomUUID
-    ? globalThis.crypto.randomUUID()
-    : `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const context = {
     conversationId,
     clientRequestId,
@@ -1007,6 +1043,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       {
         clientRequestId,
         regenerateMessageId,
+        existingUserMessageId,
         onController: (controller) => {
           if (activeRequestContext === context) context.controller = controller
         },
@@ -1124,6 +1161,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       TURN_IN_PROGRESS: '当前回合仍在生成，请等待完成或先点击停止。',
       TURN_IDEMPOTENCY_CONFLICT: '这条消息已经提交，请勿重复发送。',
       TURN_REQUEST_ALREADY_EXISTS: '这条消息已经提交，请勿重复发送。',
+      TURN_USER_MESSAGE_CONFLICT: '首条消息状态发生变化，请刷新会话后重试。',
       TURN_NOT_ACTIVE: '当前回合已停止，请重新发送。',
       TURN_NOT_FOUND: '当前回合已失效，请重新发送。',
     }
@@ -1145,6 +1183,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     if (activeRequestContext !== context) return
     activeRequestContext = null
     isSending.value = false
+    sendInFlight.value = false
     resetTransientStreamState()
     await scrollToBottom()
   }
@@ -1200,6 +1239,7 @@ async function cancelActiveRequest(reason = 'client_stop', reload = true) {
   if (activeRequestContext === context) {
     activeRequestContext = null
     isSending.value = false
+    sendInFlight.value = false
     resetTransientStreamState()
   }
 

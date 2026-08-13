@@ -44,6 +44,10 @@ class TurnIdempotencyConflict(RuntimeError):
         self.status = status
 
 
+class TurnUserMessageConflict(RuntimeError):
+    """A pre-created user message cannot be claimed by this turn."""
+
+
 class SideEffectConflict(RuntimeError):
     """An optimistic-concurrency update lost its expected version."""
 
@@ -143,12 +147,15 @@ def reserve_chat_turn(
     client_request_id: str,
     content: str,
     request_fingerprint: str | None = None,
+    existing_user_message_id: int | None = None,
 ) -> ChatTurn:
     """Atomically claim one active turn and persist its user message.
 
     Reusing the same client request id returns the original turn without adding
-    another user message. A different request cannot race an existing running
-    turn because the partial unique index is backed by an immediate transaction.
+    another user message. A pre-created first message can be claimed by ID so
+    the delayed conversation creation flow does not insert it twice. A different
+    request cannot race an existing running turn because the partial unique
+    index is backed by an immediate transaction.
     """
     request_id = str(client_request_id or "").strip()
     if not request_id:
@@ -219,6 +226,33 @@ def reserve_chat_turn(
             if running:
                 raise TurnInProgress("conversation already has a running turn")
 
+            user_message_id = None
+            precreated_metadata = None
+            if existing_user_message_id is not None:
+                precreated = conn.execute(
+                    "SELECT id, content, metadata FROM chat_messages "
+                    "WHERE id = ? AND conversation_id = ? AND role = 'user'",
+                    (existing_user_message_id, conversation_id),
+                ).fetchone()
+                if not precreated or precreated["content"] != content:
+                    raise TurnUserMessageConflict(
+                        "pre-created user message does not match this turn"
+                    )
+                precreated_metadata = _safe_json_loads(precreated["metadata"])
+                if not precreated_metadata.pop("precreated", False):
+                    raise TurnUserMessageConflict(
+                        "user message is already claimed by another turn"
+                    )
+                linked = conn.execute(
+                    "SELECT id FROM chat_turns WHERE user_message_id = ? LIMIT 1",
+                    (existing_user_message_id,),
+                ).fetchone()
+                if linked:
+                    raise TurnUserMessageConflict(
+                        "user message is already claimed by another turn"
+                    )
+                user_message_id = int(existing_user_message_id)
+
             fence_row = conn.execute(
                 "SELECT COALESCE(MAX(fence), 0) + 1 AS next_fence "
                 "FROM chat_turns WHERE conversation_id = ?",
@@ -226,29 +260,54 @@ def reserve_chat_turn(
             ).fetchone()
             fence = int(fence_row["next_fence"])
             turn_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO chat_turns "
-                "(id, conversation_id, user_id, client_request_id, fence, status, request_fingerprint) "
-                "VALUES (?, ?, ?, ?, ?, 'running', ?)",
-                (turn_id, conversation_id, user_id, request_id, fence, fingerprint),
-            )
-            message_cursor = conn.execute(
-                "INSERT INTO chat_messages "
-                "(conversation_id, role, content, token_count, metadata) "
-                "VALUES (?, 'user', ?, 0, ?)",
-                (
-                    conversation_id,
-                    content,
-                    json.dumps(
-                        {"turn_id": turn_id, "turn_fence": fence},
-                        ensure_ascii=False,
+            if user_message_id is None:
+                conn.execute(
+                    "INSERT INTO chat_turns "
+                    "(id, conversation_id, user_id, client_request_id, fence, status, request_fingerprint) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?)",
+                    (turn_id, conversation_id, user_id, request_id, fence, fingerprint),
+                )
+                message_cursor = conn.execute(
+                    "INSERT INTO chat_messages "
+                    "(conversation_id, role, content, token_count, metadata) "
+                    "VALUES (?, 'user', ?, 0, ?)",
+                    (
+                        conversation_id,
+                        content,
+                        json.dumps(
+                            {"turn_id": turn_id, "turn_fence": fence},
+                            ensure_ascii=False,
+                        ),
                     ),
-                ),
-            )
-            conn.execute(
-                "UPDATE chat_turns SET user_message_id = ? WHERE id = ?",
-                (message_cursor.lastrowid, turn_id),
-            )
+                )
+                user_message_id = message_cursor.lastrowid
+                conn.execute(
+                    "UPDATE chat_turns SET user_message_id = ? WHERE id = ?",
+                    (user_message_id, turn_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO chat_turns "
+                    "(id, conversation_id, user_id, client_request_id, fence, status, "
+                    "user_message_id, request_fingerprint) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?)",
+                    (
+                        turn_id,
+                        conversation_id,
+                        user_id,
+                        request_id,
+                        fence,
+                        user_message_id,
+                        fingerprint,
+                    ),
+                )
+                precreated_metadata.update(
+                    {"turn_id": turn_id, "turn_fence": fence}
+                )
+                conn.execute(
+                    "UPDATE chat_messages SET metadata = ? WHERE id = ?",
+                    (json.dumps(precreated_metadata, ensure_ascii=False), user_message_id),
+                )
             conn.execute(
                 "UPDATE chat_conversations SET updated_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND user_id = ? AND status = 'active'",
@@ -262,7 +321,7 @@ def reserve_chat_turn(
                 client_request_id=request_id,
                 fence=fence,
                 status="running",
-                user_message_id=message_cursor.lastrowid,
+                user_message_id=user_message_id,
                 request_fingerprint=fingerprint,
             )
         except Exception:
@@ -731,9 +790,20 @@ def create_conversation(
     experience_id: Optional[int] = None,
     distribution_override: Optional[dict] = None,
     first_message: Optional[str] = None,
+    client_request_id: Optional[str] = None,
 ) -> dict:
     """创建新对话会话"""
-    conv_id = str(uuid.uuid4())
+    request_id = str(client_request_id or "").strip()
+    conv_id = (
+        str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"interview-boss:conversation:{user_id}:{request_id}",
+            )
+        )
+        if request_id
+        else str(uuid.uuid4())
+    )
     if not title:
         title = "新对话" if mode == "free_practice" else "JD定制面试"
     difficulty = difficulty or "mid"
@@ -822,9 +892,11 @@ def create_conversation(
     }
     metadata = {"interview_config": interview_config}
 
+    first_message_id = None
     with get_db_connection() as conn:
-        conn.execute(
-            "INSERT INTO chat_conversations (id, user_id, mode, title, jd_id, resume_text, job_position, metadata) "
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO chat_conversations "
+            "(id, user_id, mode, title, jd_id, resume_text, job_position, metadata) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 conv_id,
@@ -837,10 +909,43 @@ def create_conversation(
                 json.dumps(metadata, ensure_ascii=False),
             ),
         )
-        conn.commit()
+        if cursor.rowcount == 0:
+            existing = conn.execute(
+                "SELECT id, user_id, mode, title, job_position, metadata "
+                "FROM chat_conversations WHERE id = ? AND user_id = ?",
+                (conv_id, user_id),
+            ).fetchone()
+            if not existing:
+                raise ConversationNotFound("conversation not found after idempotent create")
+            first_message_row = conn.execute(
+                "SELECT id FROM chat_messages WHERE conversation_id = ? "
+                "AND role = 'user' ORDER BY id ASC LIMIT 1",
+                (conv_id,),
+            ).fetchone()
+            first_message_id = first_message_row["id"] if first_message_row else None
+            conn.commit()
+            return {
+                "id": existing["id"],
+                "mode": existing["mode"],
+                "title": existing["title"],
+                "job_position": existing["job_position"],
+                "metadata": _safe_json_loads(existing["metadata"]),
+                "first_message_id": first_message_id,
+            }
 
-    if first_message:
-        save_message(conv_id, "user", first_message)
+        if first_message:
+            message_cursor = conn.execute(
+                "INSERT INTO chat_messages "
+                "(conversation_id, role, content, token_count, metadata) "
+                "VALUES (?, 'user', ?, 0, ?)",
+                (
+                    conv_id,
+                    first_message,
+                    json.dumps({"precreated": True}, ensure_ascii=False),
+                ),
+            )
+            first_message_id = message_cursor.lastrowid
+        conn.commit()
 
     return {
         "id": conv_id,
@@ -848,6 +953,7 @@ def create_conversation(
         "title": title,
         "job_position": job_position,
         "metadata": metadata,
+        "first_message_id": first_message_id,
     }
 
 

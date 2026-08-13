@@ -32,11 +32,15 @@ export const sendMessage = (
     clientRequestId = createClientRequestId(),
     onController,
     regenerateMessageId = null,
+    existingUserMessageId = null,
   } = {},
 ) => {
   const body = regenerateMessageId ? {} : { content }
   if (model) body.model = model
   body.client_request_id = clientRequestId
+  if (!regenerateMessageId && existingUserMessageId) {
+    body.existing_user_message_id = existingUserMessageId
+  }
   return postSSE(
     regenerateMessageId
       ? `${API}/conversations/${conversationId}/messages/${regenerateMessageId}/regenerate`
