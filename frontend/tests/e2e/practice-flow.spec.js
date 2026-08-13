@@ -659,6 +659,24 @@ test.describe('练习完整流程 — PracticePanel', () => {
     expect(answerAndActions.actionsTop).toBeGreaterThanOrEqual(answerAndActions.answerBottom - 1)
   })
 
+  test('看题模式可从题卡顶部标记很熟并拉长复习间隔', async ({ page }) => {
+    let reviewPayload = null
+    page.on('request', request => {
+      if (request.method() === 'POST' && request.url().endsWith('/api/practice/review')) {
+        reviewPayload = request.postDataJSON()
+      }
+    })
+
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await expect(page.getByTestId('practice-focus-card').getByText('请介绍一下 Vue 的响应式原理')).toBeVisible()
+    await expect(page.getByTestId('practice-mark-familiar')).toBeVisible()
+    await page.getByTestId('practice-mark-familiar').click()
+
+    await expect.poll(() => reviewPayload).toEqual({ question_id: 1, rating: 'easy', score: null })
+    await expect(page.getByTestId('practice-focus-card').getByText('什么是 CSRF 攻击？如何防御？')).toBeVisible()
+    await expect(page.getByText(/已标记为很熟/)).toBeVisible()
+  })
+
   test('刷题题单与高频题库联动并保存熟练度', async ({ page }) => {
     await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 

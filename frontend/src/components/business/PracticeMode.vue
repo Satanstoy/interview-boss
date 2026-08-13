@@ -154,6 +154,16 @@
           <span v-if="currentQ.has_been_practiced" class="hidden items-center gap-1 sm:inline-flex"><Target class="size-3.5" />熟练度 {{ currentQ.proficiency || 0 }}/5</span>
         </div>
         <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
+          <Button
+            v-if="currentQ && viewMode === 'browse'"
+            data-testid="practice-mark-familiar"
+            variant="ghost"
+            size="sm"
+            class="h-10 gap-1.5 px-2 text-xs text-muted-foreground hover:text-primary sm:h-8"
+            :disabled="reviewLoading"
+            title="标记为很熟，拉长下一次复习间隔"
+            @click="markAndNext('easy')"
+          ><Zap class="size-3.5" />标记很熟</Button>
           <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
           <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
@@ -771,7 +781,17 @@ function markAndNext(rating) {
   if (!currentQ.value?.id) return
   if (rating === 'good' || rating === 'easy') rememberedIds.value = new Set([...rememberedIds.value, currentQ.value.id])
   pendingReviewedId.value = currentQ.value.id
-  if (serverDeckMode.value) emit('review', { questionId: currentQ.value.id, rating })
+  if (serverDeckMode.value) {
+    const payload = { questionId: currentQ.value.id, rating }
+    if (rating === 'easy') {
+      payload.onComplete = (response) => {
+        if (!response?.review) return
+        const nextReview = formatNextReview(response.review.next_review_at)
+        toast.success(nextReview ? `已标记为很熟，下次复习将在${nextReview}` : '已标记为很熟，复习间隔已拉长')
+      }
+    }
+    emit('review', payload)
+  }
   goNext()
 }
 function saveSelfAssessment() {
