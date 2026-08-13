@@ -22,7 +22,7 @@
 | Dim | Title | Status | 🔴 | 🟡 | 🟢 |
 |---|---|---|---|---|---|
 | D1 | Code essentiality | ❌ | 3 | 0 | 4 |
-| D2 | Docs integrity | ✅ | 0 | 0 | 2 |
+| D2 | Docs integrity | ✅ | 0 | 0 | 3 |
 | D3 | Tests as adversaries | ❌ | 1 | 3 | 2 |
 | D4 | Security posture | ❌ | 1 | 5 | 1 |
 | D5 | Multi-tenant isolation | ⚠️ | 0 | 1 | 0 |
@@ -37,7 +37,7 @@
 | D14 | Correctness & robustness | ❌ | 1 | 0 | 5 |
 | D15 | UX & interaction | ✅ | 0 | 0 | 2 |
 | D16 | UI & design-system craft | ✅ | 0 | 0 | 1 |
-| **Total** | | | **10** | **16** | **33** |
+| **Total** | | | **10** | **16** | **34** |
 
 （状态口径：✅ = 无 🔴 且 🟡≤2；⚠️ = 有 🟡 或已被缓解的 🔴；❌ = 未缓解的 🔴。D13 的两个密钥占位 🔴 因生产 env 已覆盖强随机值，记为「已缓解」→ ⚠️；D10 为 scan 级（非 release 标记），D15/D16 渲染级 pass 记为 **deferred**（未启动浏览器）。）
 
