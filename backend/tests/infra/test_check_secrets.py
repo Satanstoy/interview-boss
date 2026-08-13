@@ -1,0 +1,57 @@
+"""check_secrets.py 门禁脚本测试 — tech-audit-2026-08-13 D8-2。
+
+验证脚本能检出硬编码 API key 字面量（阻断门禁），干净文件放行。
+"""
+import importlib.util
+import os
+
+import pytest
+
+# check_secrets.py 在 backend/scripts/（check_* 运维脚本规范位置，与 test 容器挂载一致）
+_script_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "scripts",
+    "check_secrets.py",
+)
+_spec = importlib.util.spec_from_file_location("check_secrets", _script_path)
+checker = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(checker)
+
+
+class TestCheckSecrets:
+    """secret 扫描脚本行为"""
+
+    def test_api_key_literal_detected(self, tmp_path):
+        """sk- 开头 20+ 位字面量必须被检出"""
+        f = tmp_path / "leak.py"
+        f.write_text('KEY = "sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym"\\n', encoding='utf-8')
+        findings = checker.scan_file(f, f.relative_to(tmp_path))
+        assert findings, "应检出硬编码 API key"
+
+    def test_clean_file_no_findings(self, tmp_path):
+        """无密钥的普通源码不应误报"""
+        f = tmp_path / "clean.py"
+        f.write_text('print("hello")\\nAPI_KEY = os.environ.get("X", "")\\n', encoding="utf-8")
+        findings = checker.scan_file(f, f.relative_to(tmp_path))
+        assert findings == []
+
+    def test_env_placeholder_not_flagged_as_assignment(self, tmp_path):
+        """API_KEY = os.environ.get(...) / 空串占位不是密钥字面量"""
+        f = tmp_path / "cfg.py"
+        f.write_text('KEY = ""\\nTOKEN = os.getenv("T")\\n', encoding="utf-8")
+        findings = checker.scan_file(f, f.relative_to(tmp_path))
+        assert findings == []
+
+    def test_excluded_env_file_skipped(self, tmp_path):
+        """.env 文件在排除名单，不应被扫出（避免把真实本地密钥当失败）"""
+        (tmp_path / ".env").write_text(
+            "OPENAI_API_KEY=sk-real-local-key-0123456789abcdef\\n",
+            encoding="utf-8",
+        )
+        # iter_source_files 基于 PROJECT_ROOT 扫描，此处验证排除规则本身
+        assert ".env" in checker.EXCLUDE_NAMES
+
+    def test_main_returns_zero_on_clean_repo(self):
+        """对当前仓库运行 main() 应返回 0（已无硬编码密钥）"""
+        rc = checker.main()
+        assert rc == 0, "当前仓库不应有硬编码密钥（D4-1 修复后）"

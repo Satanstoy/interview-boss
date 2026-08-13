@@ -112,6 +112,17 @@ run_backend_audit() {
     bash -lc "cd '$PROJECT_DIR' && uv tool run pip-audit -r <(uv export --frozen --no-dev --format requirements-txt --no-hashes) --no-deps --disable-pip --progress-spinner off"
 }
 
+run_secret_scan() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    record "FAIL" "secret scan" "python3 command not found"
+    blocking_failed=1
+    return
+  fi
+
+  run_blocking "secret scan" \
+    python3 "$PROJECT_DIR/backend/scripts/check_secrets.py"
+}
+
 run_audit() {
   echo "AUDIT: reported only, non-blocking in this phase"
   run_frontend_audit
@@ -146,6 +157,7 @@ cd "$PROJECT_DIR" || exit 1
 
 case "$MODE" in
   all)
+    run_secret_scan
     run_backend
     run_frontend
     run_audit

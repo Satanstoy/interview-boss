@@ -63,6 +63,7 @@ backend/scripts/*
 !backend/scripts/verify_chat_tools_real_e2e.py
 !backend/scripts/verify_interview_agent_real_e2e.py
 !backend/scripts/check_source_health.py
+!backend/scripts/check_secrets.py
 *.log
 
 # 文档（内部记录，不提交）
