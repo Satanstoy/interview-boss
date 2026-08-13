@@ -42,19 +42,17 @@
               </div>
             </div>
             <DropdownMenu>
-              <AppTooltip text="更多操作">
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    class="shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
-                    aria-label="更多操作"
-                    @click.stop
-                  >
-                    <MoreHorizontal :size="14" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </AppTooltip>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  class="shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                  aria-label="更多操作"
+                  @click.stop
+                >
+                  <MoreHorizontal :size="14" />
+                </Button>
+              </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="w-40">
                 <DropdownMenuItem @click.stop="handlePin(conv.id)">
                   <Pin :size="14" class="mr-2" />
