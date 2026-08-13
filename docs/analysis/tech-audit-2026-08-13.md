@@ -3,7 +3,7 @@
 **Auditor**: tech-audit skill，在用户指示下执行
 **Scope**: full（全部 16 维度）
 **Repo HEAD at audit time**: 96d25f2（master，2026-08-13）
-**Findings source**: `.tech-audit/work/2026-08-13/findings.tsv`（60 条）— 全部 🔴 已过 refutation pass
+**Findings source**: `.tech-audit/work/2026-08-13/findings.tsv`（61 条）— 全部 🔴 已过 refutation pass
 **Previous audit**: [tech-audit-2026-08-05.md](tech-audit-2026-08-05.md)（13🔴 / 50🟡 / 15🟢）
 **Stack**: Python/FastAPI + LangGraph（chat 为纯 async harness）· Vue3/Vite/Tailwind/shadcn-vue · SQLite WAL + FAISS · Docker Compose + ARQ worker + oauth-gateway · Bash (deploy/)
 
@@ -31,13 +31,13 @@
 | D8 | Build / CI / dev-loop | ❌ | 2 | 0 | 2 |
 | D9 | Data model integrity | ⚠️ | 0 | 1 | 3 |
 | D10 | Performance & cost | ✅ | 0 | 0 | 2 |
-| D11 | Legal / compliance | ⚠️ | 0 | 3 | 0 |
+| D11 | Legal / compliance | ⚠️ | 0 | 3 | 1 |
 | D12 | Admin surface consistency | ✅ | 0 | 0 | 1 |
 | D13 | Setup replicability | ⚠️ | 2 | 1 | 1 |
 | D14 | Correctness & robustness | ❌ | 1 | 0 | 5 |
 | D15 | UX & interaction | ✅ | 0 | 0 | 2 |
 | D16 | UI & design-system craft | ✅ | 0 | 0 | 1 |
-| **Total** | | | **10** | **16** | **34** |
+| **Total** | | | **10** | **16** | **35** |
 
 （状态口径：✅ = 无 🔴 且 🟡≤2；⚠️ = 有 🟡 或已被缓解的 🔴；❌ = 未缓解的 🔴。D13 的两个密钥占位 🔴 因生产 env 已覆盖强随机值，记为「已缓解」→ ⚠️；D10 为 scan 级（非 release 标记），D15/D16 渲染级 pass 记为 **deferred**（未启动浏览器）。）
 
@@ -237,6 +237,7 @@
 - 🟡 全仓 — 无隐私政策/用户协议，注册无知情同意勾选（PIPL 第 13/17 条）。_Fix_: 隐私政策 + 用户协议页 + 注册必选勾选。
 - 🟡 `backend/app/routers/auth.py:435` — 注销仅清登录态，无账号删除/匿名化路径（PIPL 第 47 条删除权）。_Fix_: delete-account 接口 + 设置页二次确认 + 审计脱敏。
 - 🟡 `docs/` — 无 sub-processor 清单与数据流向文档（LLM/SiliconFlow/Deepgram/邮箱/search provider）。_Fix_: docs/privacy/data-flow.md。
+- 🟢 `backend/.env.example` — 仅在 backend/ 未入根，第三方密钥清单可发现性弱（合规配套）。_Fix_: 补根 .env.example 或在 data-flow 文档列明第三方。
 
 （注：若后续出现 EU 用户或付费用户，应立即升回 🔴 并优先落地「隐私+删除+导出+sub-processor」四件套。）
 
