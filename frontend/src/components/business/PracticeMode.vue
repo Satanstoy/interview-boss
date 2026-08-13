@@ -145,7 +145,7 @@
           <Badge v-for="tag in questionTags(currentQ).slice(0, 4)" :key="tag" variant="secondary" class="text-[10px]">{{ tag }}</Badge>
         </div>
 
-        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-col py-6 text-center md:py-8" :class="answerRevealed ? 'flex-none justify-start' : 'flex-1 justify-center'">
+        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-none flex-col py-5 text-center sm:py-6 md:flex-1 md:py-8" :class="answerRevealed ? 'justify-start' : 'justify-start md:justify-center'">
           <div v-if="currentQ.is_checkin" class="mb-3 flex justify-center">
             <Badge variant="outline" class="text-[10px] text-muted-foreground" data-testid="checkin-badge">保持手感 · 已掌握题每 30 天复查一次</Badge>
           </div>
@@ -299,7 +299,12 @@
           <p v-else-if="!qState._historyLoading" class="py-3 text-center text-xs text-muted-foreground">暂无练习记录，先完成一次自测吧。</p>
         </div>
 
-        <div v-if="currentQ.sources?.length" class="mt-5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground"><Link2 class="size-3.5" /><span>出处：</span><button v-for="(source, sourceIndex) in currentQ.sources" :key="sourceIndex" type="button" class="min-h-10 rounded-md border border-border bg-card px-3 py-2 transition hover:border-border hover:bg-accent hover:text-foreground" @click="emit('navigate-to-interview', { source, questionId: currentQ.id })">{{ source.company || '未知公司' }} · {{ source.round || '未知轮次' }}</button></div>
+        <div v-if="currentQ.sources?.length" data-testid="practice-question-sources" class="mt-5 flex flex-col gap-2 border-t border-border/60 pt-4 text-[11px] text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-1.5 sm:border-t-0 sm:pt-0">
+          <div class="flex items-center gap-1.5"><Link2 class="size-3.5 shrink-0" /><span>出处：</span></div>
+          <div class="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:gap-1.5">
+            <button v-for="(source, sourceIndex) in currentQ.sources" :key="sourceIndex" type="button" class="flex min-h-10 w-full min-w-0 items-center justify-start break-words rounded-md border border-border bg-card px-3 py-2 text-left leading-5 transition hover:border-border hover:bg-accent hover:text-foreground sm:w-auto sm:justify-center" @click="emit('navigate-to-interview', { source, questionId: currentQ.id })">{{ source.company || '未知公司' }} · {{ source.round || '未知轮次' }}</button>
+          </div>
+        </div>
       </div>
       </div>
     </Card>

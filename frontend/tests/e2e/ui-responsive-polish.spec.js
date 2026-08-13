@@ -184,4 +184,25 @@ test.describe('UI responsive polish', () => {
     await expectNoHorizontalOverflow(page)
   })
 
+  test('mobile practice sources stay below recall controls', async ({ page }) => {
+    await gotoPreview(page, '/practice')
+    const sources = page.getByTestId('practice-question-sources')
+    if (await sources.count()) {
+      const sourceBox = await sources.boundingBox()
+      const postponeBox = await page.getByTestId('practice-postpone').boundingBox()
+      expect(sourceBox.y).toBeGreaterThanOrEqual(postponeBox.y + postponeBox.height)
+
+      const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth)
+      const sourceButtons = await sources.locator('button').evaluateAll((buttons, width) =>
+        buttons
+          .map((button) => button.getBoundingClientRect())
+          .filter((rect) => rect.width > 0 && (rect.left < -1 || rect.right > width + 1))
+          .length,
+        viewportWidth,
+      )
+      expect(sourceButtons).toBe(0)
+    }
+    await expectNoHorizontalOverflow(page)
+  })
+
 })
