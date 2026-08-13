@@ -27,6 +27,11 @@ const MOCK_MASTER_BANK = [
     answer_complete: true,
     ai_answer: '## Vue 响应式原理\n\nVue 3 使用 Proxy 实现数据劫持，通过 track 和 trigger 实现依赖收集和派发更新。',
     key_points: ['Proxy', '依赖追踪', '触发更新'],
+    sources: [
+      { company: '腾讯', round: '一面' },
+      { company: '阿里巴巴-高德地图', round: '一面' },
+      { company: '字节', round: '一面' },
+    ],
     frequency: 5,
     created_at: '2026-01-15T10:00:00',
     _showAnswer: false,
@@ -659,6 +664,26 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('高频出现')
     await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('加入题单')
     await expect(page.getByTestId('practice-mobile-info-sheet')).toContainText('收藏题目')
+  })
+
+  test('移动端面经来源不会覆盖自评按钮', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+
+    const sources = page.getByTestId('practice-question-sources')
+    const selfAssess = page.locator('[data-testid^="practice-self-assess-"]')
+    await expect(sources).toBeVisible()
+    await expect(selfAssess).toHaveCount(3)
+
+    const layout = await page.evaluate(() => {
+      const sourceRect = document.querySelector('[data-testid="practice-question-sources"]')?.getBoundingClientRect()
+      const buttons = [...document.querySelectorAll('[data-testid^="practice-self-assess-"]')]
+      return {
+        sourceTop: sourceRect?.top || 0,
+        selfAssessBottom: Math.max(...buttons.map(button => button.getBoundingClientRect().bottom)),
+      }
+    })
+    expect(layout.sourceTop).toBeGreaterThanOrEqual(layout.selfAssessBottom - 1)
   })
 
   test('刷题以单卡为主任务并在翻牌后显示复习反馈', async ({ page }) => {
