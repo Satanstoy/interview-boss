@@ -598,6 +598,19 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await expect(page.getByTestId('practice-deck-select')).toBeVisible()
   })
 
+  test('刷新后恢复当前题卡而不是回到题单第一题', async ({ page }) => {
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await page.getByTestId('practice-switch-browse').click()
+    await expect(page.getByTestId('practice-card')).toContainText('请介绍一下 Vue 的响应式原理')
+
+    await page.getByRole('button', { name: '下一题' }).click()
+    await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
+
+    await page.reload()
+    await expect(page.getByTestId('practice-card')).toContainText('什么是 CSRF 攻击？如何防御？')
+    await expect(page.getByTestId('practice-card')).not.toContainText('请介绍一下 Vue 的响应式原理')
+  })
+
   test('刷题工作区沿用训练页滚动容器并适配视口宽度', async ({ page }) => {
     await page.getByRole('button', { name: '八股刷题', exact: true }).click()
 

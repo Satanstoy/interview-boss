@@ -557,6 +557,7 @@ const props = defineProps({
   dailyCapacity: { type: Number, default: 30 },
   capacitySaving: { type: Boolean, default: false },
   startIndex: { type: Number, default: 0 },
+  resumeScope: { type: [String, Number], default: 'anonymous' },
   isAdmin: { type: Boolean, default: false },
   practicedQuestions: { type: Object, default: () => ({}) },
 })
@@ -572,6 +573,7 @@ const dailyPlanExpanded = ref(false)
 const capacityEditorOpen = ref(false)
 const capacityDraft = ref(props.dailyCapacity)
 const currentIndex = ref(Math.max(0, props.startIndex))
+const resumeRestoredKey = ref(null)
 const answerRevealed = ref(false)
 const showSelfCheck = ref(false)
 const showHistory = ref(false)
@@ -598,6 +600,63 @@ const postponedQuestionIds = ref([])
 const sessionRatings = reactive({ again: 0, hard: 0, good: 0, easy: 0 })
 const sessionWeakQuestions = ref([])
 const qState = reactive({ _userAnswer: '', _evaluation: null, _isEvaluating: false, _isLoadingAnswer: false, _history: null, _historyLoading: false, _isEditingAnswer: false, _editAnswer: '', _isSavingAnswer: false, _recitation: '', _recitationSources: [], _showRecitationSources: false, _showAnswerSources: false, _isGeneratingRecitation: false, _isEditingRecitation: false, _editRecitation: '', _isSavingRecitation: false })
+
+const RESUME_STORAGE_KEY = 'interview-boss:practice-resume:v1'
+
+function resumeDeckKey() {
+  return String(props.selectedDeckKey || sessionKey.value || 'all')
+}
+
+function readResumeState() {
+  if (typeof window === 'undefined') return {}
+  try {
+    const value = JSON.parse(window.localStorage.getItem(RESUME_STORAGE_KEY) || '{}')
+    return value && typeof value === 'object' ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeResumeState(state) {
+  if (typeof window === 'undefined') return
+  try { window.localStorage.setItem(RESUME_STORAGE_KEY, JSON.stringify(state)) } catch { /* storage may be unavailable */ }
+}
+
+function saveResumePosition() {
+  if (!resumeRestoredKey.value || !currentQ.value?.id) return
+  const state = readResumeState()
+  const scope = String(props.resumeScope || 'anonymous')
+  const scopedState = state[scope] && typeof state[scope] === 'object' ? state[scope] : {}
+  scopedState[resumeDeckKey()] = {
+    questionId: currentQ.value.id,
+    updatedAt: new Date().toISOString(),
+  }
+  state[scope] = scopedState
+  writeResumeState(state)
+}
+
+function restoreResumePosition() {
+  const deckKey = resumeDeckKey()
+  if (resumeRestoredKey.value === deckKey || props.deckLoading || !sessionQuestions.value.length) return
+
+  const scope = String(props.resumeScope || 'anonymous')
+  const saved = readResumeState()?.[scope]?.[deckKey]
+  const savedQuestionId = saved?.questionId
+  const savedIndex = savedQuestionId == null
+    ? -1
+    : sessionQuestions.value.findIndex(question => String(question.id) === String(savedQuestionId))
+
+  if (savedIndex < 0 && savedQuestionId != null && props.hasMoreQuestions && !props.loadingMoreQuestions) {
+    emit('load-more')
+    return
+  }
+
+  currentIndex.value = savedIndex >= 0 ? savedIndex : Math.min(currentIndex.value, sessionQuestions.value.length - 1)
+  resumeRestoredKey.value = deckKey
+  pendingReviewedId.value = null
+  retainedReviewedId.value = null
+  resetState()
+}
 
 function questionAttemptCount(question) {
   const info = props.practicedQuestions?.[question?.id] || {}
@@ -1055,6 +1114,7 @@ watch(sessionQuestions, (questions) => {
     }
   }
   if (currentIndex.value >= questions.length) currentIndex.value = Math.max(0, questions.length - 1)
+  restoreResumePosition()
 })
 watch(() => props.startIndex, (index) => { currentIndex.value = Math.min(Math.max(0, index), Math.max(0, sessionQuestions.value.length - 1)) })
 watch(capacityEditorOpen, (open) => {
@@ -1067,6 +1127,7 @@ watch(() => props.selectedDeckKey, (key) => {
   if (key) {
     sessionKey.value = key
     currentIndex.value = 0
+    resumeRestoredKey.value = null
     pendingReviewedId.value = null
     retainedReviewedId.value = null
     relearningQueue.value = []
@@ -1075,10 +1136,20 @@ watch(() => props.selectedDeckKey, (key) => {
     resetState()
     // due 队列 = 算法刷题模式；其他题单 = 浏览模式
     viewMode.value = key === 'due' ? 'quiz' : 'browse'
+    restoreResumePosition()
   }
 })
-onMounted(() => document.addEventListener('keydown', onGlobalKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onGlobalKeydown))
+watch(() => currentQ.value?.id, () => { saveResumePosition() }, { flush: 'post' })
+onMounted(() => {
+  restoreResumePosition()
+  document.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('beforeunload', saveResumePosition)
+})
+onUnmounted(() => {
+  saveResumePosition()
+  document.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('beforeunload', saveResumePosition)
+})
 </script>
 
 <style scoped>

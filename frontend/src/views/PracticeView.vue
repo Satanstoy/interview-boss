@@ -26,6 +26,7 @@
       :loading-more-questions="isLoadingMoreQuestions"
       :daily-capacity="recruitmentStatus.daily_capacity"
       :capacity-saving="capacitySaving"
+      :resume-scope="currentUser?.id || currentUser?.username || 'anonymous'"
       :is-admin="currentUser?.is_admin"
       class="w-full min-w-0"
       @close="closePractice"
