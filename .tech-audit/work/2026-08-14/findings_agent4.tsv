@@ -1,0 +1,4 @@
+3	D14	backend/app/routers/auth.py:287,684	concurrent duplicate email → 500 not 409（_create 泛 except Exception；_insert_user 裸 INSERT 无 try，漏到全局 handler）	捕获 sqlite3.IntegrityError 转 409「该邮箱已被注册」，注册+注册-with-email 两路径	M	certain
+2	D14	backend/app/routers/auth.py:802	bind-email / reset-password 未捕获 IntegrityError：bind_email_with_token 的 UPDATE 直接 commit，并发绑定时唯一索引冲突抛 500	同样捕获 IntegrityError 转 409	S	certain
+2	D14	backend/tests/security/test_email_unique.py:23	registration route race untested（只测 DB 层）	对 /register 与 /register-with-email 加重复邮箱 HTTP 测试断言 409 而非 500	S	probable
+2	D12	backend/app/routers/profile_pkg/llm.py:63-69	test-global 同步探测阻塞请求无进度（check_global_llm_status 在请求线程内探测，默认 120s/上限 600s，无 SSE/进度）	改 SSE/后台 job + 前端轮询，或加明确 loading+超时文案	S	needs-verification
