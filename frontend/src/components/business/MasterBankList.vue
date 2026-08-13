@@ -79,6 +79,7 @@
               @retag="$emit('retag', $event)"
               @generate-answer="$emit('generate-answer', $event)"
               @save-field="$emit('save-field', $event)"
+              @save-user-answer="$emit('save-user-answer', $event)"
               @toggle-item="$emit('toggle-item', $event)"
               @practice="$emit('practice', $event)"
               @split-question="$emit('split-question', $event)"
@@ -129,7 +130,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'toggle-star', 'retag',
-  'generate-answer', 'save-field',
+  'generate-answer', 'save-field', 'save-user-answer',
   'toggle-item', 'practice', 'split-question',
   'start-merge', 'navigate-to-interview', 'delete', 'edit-question',
   'delete-original-question', 'update-answer', 'load-more', 'share',

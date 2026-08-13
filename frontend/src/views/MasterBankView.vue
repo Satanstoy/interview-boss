@@ -146,6 +146,7 @@
           @retag="retagQuestion"
           @generate-answer="generateAnswer"
           @save-field="saveFieldFromEvent"
+          @save-user-answer="saveUserAnswer"
           @practice="practiceQuestion = $event"
           @split-question="splitQuestion"
           @start-merge="startMerge"
@@ -202,7 +203,7 @@ const {
   isLoadingMore, hasMore, loadMoreMasterBank,
   isBuilding, triggerBuildMasterBank, triggerBuildPersonalBank,
   fetchTableData, enterPracticeMode,
-  toggleStar, retagQuestion, generateAnswer,
+  toggleStar, retagQuestion, generateAnswer, saveUserAnswer,
   saveFieldFromEvent, deleteQuestion, deleteOriginalQuestion,
   editQuestion, onUpdateAnswer, splitQuestion, startMerge,
   onNavigateToInterview, masterBankEverShown,
