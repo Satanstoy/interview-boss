@@ -21,7 +21,10 @@ REPORT_DIR = os.path.abspath(
     )
 )
 RERANK_URL = "https://api.siliconflow.cn/v1/rerank"
-RERANK_KEY = "sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym"
+# API key 从环境变量读取，禁止硬编码（tech-audit-2026-08-13 D4-1）
+RERANK_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+if not RERANK_KEY:
+    raise SystemExit("请设置环境变量 SILICONFLOW_API_KEY（SiliconFlow 平台密钥）后再运行本实验脚本")
 RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
 QUERIES = [

@@ -22,7 +22,10 @@ REPORT_DIR = os.path.abspath(
 )
 EMB_CACHE = os.path.join(REPORT_DIR, "draw_eval_embeddings.json")
 EMB_URL = "https://api.siliconflow.cn/v1/embeddings"
-EMB_KEY = "sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym"
+# API key 从环境变量读取，禁止硬编码（tech-audit-2026-08-13 D4-1）
+EMB_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+if not EMB_KEY:
+    raise SystemExit("请设置环境变量 SILICONFLOW_API_KEY（SiliconFlow 平台密钥）后再运行本实验脚本")
 EMB_MODEL = "BAAI/bge-m3"
 
 QUERIES = [
