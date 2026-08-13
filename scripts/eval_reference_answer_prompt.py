@@ -78,6 +78,11 @@ QUESTIONS = [
         "type": "混合选型",
         "question": "消息队列如何保证消息不丢失？如果业务还要求尽量不重复消费，生产者、Broker 和消费者分别要做什么？",
     },
+    {
+        "id": "Q11",
+        "type": "Agent架构选型",
+        "question": "Agent 开发中，记忆应该怎么进行分层管理，用什么结构存储比较好？请同时说明写入、检索、容量控制和容易踩的坑。",
+    },
 ]
 
 
@@ -89,7 +94,7 @@ JUDGE_PROMPT = """你是一名严格的技术面试答案评审员。下面有�
 - oral：像面试现场能自然说出口，不像报告或教材摘抄。
 - memorability：有清晰因果链和记忆锚点，复习后容易复述。
 - structure：层次服务于内容，扫读清楚且不过度模板化。
-- specificity：回答紧扣本题，能解释“为什么”和取舍，不堆术语。
+- specificity：回答紧扣本题，能解释“为什么”和取舍，不堆术语；设计/选型题还要有适用边界、端到端链路和关键失败防线。
 - integrity：不虚构经历，遵守题目指定语言等约束。
 
 总分 total 为七项的算术平均值，保留一位小数。winner 只能是 "A"、"B" 或 "tie"；两份总分差小于 0.3 时判 tie。
@@ -151,7 +156,9 @@ def _extract_json(raw: str) -> dict:
 
 
 def _prompt(template: str, question: str) -> str:
-    return template.replace("{question}", question)
+    return template.replace("{question}", question).replace(
+        "{answer_context}", "- 未提供；仅根据题面作答"
+    )
 
 
 async def _llm(prompt: str, *, system_msg: str) -> str:

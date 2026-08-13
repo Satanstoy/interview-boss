@@ -21,6 +21,12 @@ def test_reference_answer_prompt_requires_scan_friendly_markdown():
     assert "第一人称、可直接口述的完整示范回答" in ANSWER_PROMPT
     assert "如果题目明确说“无需写代码”" in ANSWER_PROMPT
     assert "不能偷偷假设一段不存在的代码或项目" in ANSWER_PROMPT
+    assert "篇幅跟随问题复杂度" in ANSWER_PROMPT
+    assert "找出所有显式子问" in ANSWER_PROMPT
+    assert "数据形态、查询方式、一致性、时效性和成本" in ANSWER_PROMPT
+    assert "写入判断 → 结构化/索引 → 召回" in ANSWER_PROMPT
+    assert "故障、数据错误、成本失控或安全问题" in ANSWER_PROMPT
+    assert "Agent/RAG" not in ANSWER_PROMPT
 
 
 def test_recitation_prompt_preserves_truth_and_readable_structure():
@@ -38,6 +44,9 @@ def test_refine_prompts_preserve_question_programming_language():
     assert "不得在修订时擅自换语言" in revise
     assert "第一人称完整回答形态" in revise
     assert "个人化题完整性" in critic
+    assert "工程闭环" in critic
+    assert "多子问、系统设计、架构、方案选型" in revise
+    assert "Agent/RAG" not in revise
 
 
 def test_candidate_answer_prompt_prioritizes_truth_and_adaptive_depth():

@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.answer_enrichment import (
+    _answer_length_limit,
     _build_revise_prompt,
     _extract_question,
     _ensure_inline_source_citation,
@@ -222,7 +223,7 @@ async def test_refine_treats_unknown_verdict_as_pass():
 
 async def test_refine_forces_revision_when_draft_too_long():
     """critic PASS 但草稿超过确定性字数上限 → 强制注入字数 ISSUE 并 revise"""
-    long_draft = "字" * 700
+    long_draft = "字" * 800
     revised = "字" * 400
     with patch(
         "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
@@ -239,6 +240,12 @@ async def test_refine_forces_revision_when_draft_too_long():
     assert "[Redis 官方文档](https://redis.io/docs)" in result
     assert any("超出" in i.get("problem", "") for i in issues)
     assert mock_llm.call_count == 3
+
+
+def test_complex_engineering_question_gets_larger_hard_ceiling():
+    question = "Agent 记忆怎么进行管理，用什么存储结构比较好？"
+    assert _answer_length_limit(question) == 1200
+    assert _answer_length_limit("什么是 Redis？") == 700
 
 
 async def test_refine_skips_length_check_for_short_draft():
