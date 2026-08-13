@@ -3,7 +3,11 @@
 from datetime import UTC, datetime, timedelta
 
 from app.db.connection import get_db_connection
-from app.services.practice_deck_service import list_decks, list_deck_questions
+from app.services.practice_deck_service import (
+    _study_day_utc_bounds,
+    list_decks,
+    list_deck_questions,
+)
 from app.services.practice_review_service import record_review
 
 POSITION = "agent开发/大模型应用开发/大模型开发"
@@ -295,6 +299,72 @@ def test_due_queue_daily_budget_does_not_replenish_after_reload(test_db):
     assert deck["new_question_count"] == 1
     assert deck["study_streak"] == 1
     assert deck["studied_today"] is True
+
+
+def test_failed_ratings_remain_in_today_queue_until_card_passes(test_db):
+    """不会/模糊是持久化尝试，不是今日过关，重进仍须继续出现。"""
+
+    with get_db_connection() as conn:
+        _seed(conn)
+        conn.execute(
+            "INSERT INTO user_recruitment_pref "
+            "(user_id, graduation_year, batch, daily_capacity, pace) "
+            "VALUES (1, 2027, 'autumn', 2, 'standard')"
+        )
+
+        first = record_review(conn, user_id=1, question_id=1, rating="again")
+        second = record_review(conn, user_id=1, question_id=1, rating="hard")
+        conn.commit()
+        failed_deck, failed_items, _ = list_deck_questions(conn, 1, "due")
+
+        passed = record_review(conn, user_id=1, question_id=1, rating="good")
+        conn.commit()
+        passed_deck, passed_items, _ = list_deck_questions(conn, 1, "due")
+
+    assert first["passed_today"] is False
+    assert second["passed_today"] is False
+    assert failed_deck["completed_today"] == 0
+    assert failed_deck["attempted_today"] == 1
+    assert failed_deck["review_attempts_today"] == 2
+    assert failed_deck["remaining_today"] == 2
+    assert failed_deck["planned_today"] == 2
+    assert failed_deck["relearning_count"] == 1
+    assert [item["id"] for item in failed_items] == [1, 2]
+    assert failed_items[0]["is_daily_relearning"] is True
+
+    assert passed["passed_today"] is True
+    assert passed_deck["completed_today"] == 1
+    assert passed_deck["attempted_today"] == 1
+    assert passed_deck["review_attempts_today"] == 3
+    assert passed_deck["remaining_today"] == 1
+    assert passed_deck["planned_today"] == 2
+    assert passed_deck["relearning_count"] == 0
+    assert [item["id"] for item in passed_items] == [2]
+
+
+def test_latest_rating_today_decides_completion(test_db):
+    """同题当天答对后又改为不会时，不得继续占用今日完成数。"""
+
+    with get_db_connection() as conn:
+        _seed(conn)
+        record_review(conn, user_id=1, question_id=1, rating="good")
+        record_review(conn, user_id=1, question_id=1, rating="again")
+        record_review(conn, user_id=1, question_id=2, rating="easy")
+        conn.commit()
+        deck, items, _ = list_deck_questions(conn, 1, "due")
+
+    assert deck["completed_today"] == 1
+    assert items[0]["id"] == 1
+    assert items[0]["is_daily_relearning"] is True
+
+
+def test_study_day_uses_shanghai_calendar_boundary(monkeypatch):
+    monkeypatch.setenv("STUDY_TIMEZONE", "Asia/Shanghai")
+    start, end = _study_day_utc_bounds(
+        datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
+    )
+    assert start == "2026-08-12 16:00:00"
+    assert end == "2026-08-13 16:00:00"
 
 
 def test_due_queue_reports_active_study_streak_through_yesterday(test_db):

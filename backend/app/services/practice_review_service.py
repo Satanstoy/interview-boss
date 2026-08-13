@@ -10,6 +10,7 @@ from app.services.practice_scheduler import ReviewState, schedule_review, state_
 
 
 CORRECTION_WINDOW = timedelta(minutes=15)
+PASSING_RATINGS = frozenset({"good", "easy"})
 
 
 def _utcnow_naive() -> datetime:
@@ -36,6 +37,8 @@ def _review_payload(result, *, score, timestamp, event_id: int) -> dict:
         "has_been_practiced": True,
         "event_id": event_id,
         "can_correct": True,
+        "passed_today": result.last_rating in PASSING_RATINGS,
+        "is_daily_relearning": result.last_rating not in PASSING_RATINGS,
     }
 
 

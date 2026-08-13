@@ -306,7 +306,9 @@ const loadPracticeContext = async () => {
   const targetDeck = requestedDeck && practiceNavigation.decks.value.some(deck => deck.key === requestedDeck)
     ? requestedDeck
     : practiceNavigation.selectedDeckKey.value
-  if (targetDeck && practiceLoadedDeckKey.value !== targetDeck) {
+  // 今日复习是数据库驱动的活队列。即使仍选中 due，从其他页面返回时也要
+  // 重读已过关数与待巩固题，不能沿用应用壳中的旧会话快照。
+  if (targetDeck && (practiceLoadedDeckKey.value !== targetDeck || targetDeck === 'due')) {
     await practiceNavigation.loadQuestions(targetDeck)
   }
 }

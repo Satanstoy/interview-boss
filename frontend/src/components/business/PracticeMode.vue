@@ -72,7 +72,7 @@
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
           <span class="flex items-center gap-1.5 font-semibold text-foreground">今日计划 <span data-testid="practice-study-streak" class="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-400"><Flame class="size-3" />{{ streakLabel }}</span></span>
           <div class="flex flex-wrap items-center gap-2">
-            <span class="tabular-nums text-muted-foreground">已完成 {{ completedToday }} / {{ dailyPlanTotal }} · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 待巩固 {{ relearningQueue.length }}</template></span>
+            <span class="tabular-nums text-muted-foreground">已过关 {{ completedToday }} / {{ dailyPlanTotal }} · 今日已练 {{ attemptedToday }} 题<template v-if="reviewAttemptsToday > attemptedToday">（回忆 {{ reviewAttemptsToday }} 次）</template> · 剩余 {{ remainingToday }}<template v-if="postponedQuestionIds.length"> · 稍后 {{ postponedQuestionIds.length }}</template><template v-if="relearningQueue.length"> · 本轮待巩固 {{ relearningQueue.length }}</template></span>
             <span data-testid="practice-capacity-control" class="inline-flex h-7 items-center rounded-full border border-border bg-background/80">
               <button
                 type="button"
@@ -553,9 +553,11 @@ const sessionSource = computed(() => {
     if (props.deckLoading) return []
     if (props.selectedDeckKey !== 'due') return props.questions
     const postponedIds = new Set(postponedQuestionIds.value)
+    const relearningIds = new Set(relearningQueue.value.map(entry => entry.question.id))
     const dueQuestions = props.questions.filter(question => (
-      (question.id === retainedReviewedId.value || isDueNow(question.next_review_at))
+      (question.id === retainedReviewedId.value || question.is_daily_relearning || isDueNow(question.next_review_at))
       && !postponedIds.has(question.id)
+      && (question.id === retainedReviewedId.value || !relearningIds.has(question.id))
     ))
     const dueIds = new Set(dueQuestions.map(question => question.id))
     const relearningQuestions = relearningQueue.value
@@ -565,7 +567,7 @@ const sessionSource = computed(() => {
     const postponedQuestions = postponedQuestionIds.value
       .map(id => props.questions.find(question => question.id === id))
       .filter(question => question
-        && (question.id === retainedReviewedId.value || isDueNow(question.next_review_at))
+        && (question.id === retainedReviewedId.value || question.is_daily_relearning || isDueNow(question.next_review_at))
         && !queuedIds.has(question.id))
     return [...dueQuestions, ...relearningQuestions, ...postponedQuestions]
   }
@@ -588,6 +590,8 @@ const referenceAnswerSources = computed(() => (
 ))
 const isLastQuestion = computed(() => currentIndex.value >= sessionQuestions.value.length - 1)
 const completedToday = computed(() => Number(props.selectedDeck?.completed_today || 0))
+const attemptedToday = computed(() => Number(props.selectedDeck?.attempted_today || 0))
+const reviewAttemptsToday = computed(() => Number(props.selectedDeck?.review_attempts_today || 0))
 const remainingToday = computed(() => Number(props.selectedDeck?.remaining_today ?? sessionSource.value.length))
 const dailyPlanTotal = computed(() => Number(props.selectedDeck?.planned_today || (completedToday.value + remainingToday.value)))
 const dailyProgress = computed(() => dailyPlanTotal.value
@@ -603,6 +607,7 @@ const streakLabel = computed(() => {
 })
 const taskMixLabel = computed(() => [
   ['到期复习', props.selectedDeck?.due_review_count],
+  ['待巩固', props.selectedDeck?.relearning_count],
   ['保持手感', props.selectedDeck?.checkin_count],
   ['新学', props.selectedDeck?.new_question_count],
 ].filter(([, count]) => Number(count || 0) > 0).map(([label, count]) => `${label} ${count}`).join(' · '))
@@ -797,6 +802,7 @@ function correctSelfAssessment(rating) {
     eventId: savedReview.value.event_id,
     questionId,
     rating,
+    previousRating,
     onComplete: (response) => {
       correctionLoading.value = false
       if (!response || retainedReviewedId.value !== questionId) return
@@ -821,11 +827,13 @@ function nextWithRating() {
   const nextQuestionId = sessionQuestions.value[currentIndex.value + 1]?.id
   postponedQuestionIds.value = postponedQuestionIds.value.filter(id => id !== reviewedId)
 
-  // “不会”卡隔 RELEARNING_GAP 张再出现；其他评分会把它移出本轮重学队列。
+  // 未达到过关条件的卡会继续留在本轮；不会更快回流，模糊稍后再验一次。
   const agedQueue = relearningQueue.value
     .filter(entry => entry.question.id !== reviewedId)
     .map(entry => ({ ...entry, remaining: Math.max(0, entry.remaining - 1) }))
-  if (rating === 'again') agedQueue.push({ question: reviewedQuestion, remaining: RELEARNING_GAP })
+  if (rating === 'again' || rating === 'hard') {
+    agedQueue.push({ question: reviewedQuestion, remaining: rating === 'again' ? RELEARNING_GAP : RELEARNING_GAP + 2 })
+  }
   relearningQueue.value = agedQueue
   retainedReviewedId.value = null
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+import os
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.db.queries import build_bank_where_clause, get_dynamic_frequency_sql
 
@@ -34,6 +36,32 @@ DECKS = (
 
 DECK_BY_KEY = {deck["key"]: deck for deck in DECKS}
 HIGH_FREQUENCY_THRESHOLD = 3
+
+
+def _study_timezone() -> ZoneInfo:
+    """Return the product study-day timezone, independent of container TZ."""
+
+    name = os.environ.get("STUDY_TIMEZONE", "Asia/Shanghai")
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _study_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
+    """UTC-naive bounds for the current learner-facing calendar day."""
+
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    zone = _study_timezone()
+    local_day = current.astimezone(zone).date()
+    start = datetime.combine(local_day, time.min, tzinfo=zone).astimezone(UTC)
+    end = start + timedelta(days=1)
+    return (
+        start.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+        end.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+    )
 
 
 def _split_bank_params(from_clause: str, params: list) -> tuple[list, list]:
@@ -181,25 +209,47 @@ def _is_due(value: str) -> bool:
         due = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if due.tzinfo:
             return due <= datetime.now(due.tzinfo)
-        return due <= datetime.utcnow()
+        return due <= datetime.now(UTC).replace(tzinfo=None)
     except (TypeError, ValueError):
         return True
 
 
-def _reviewed_today_count(conn, user_id: int) -> int:
-    """Count distinct cards completed today for the user's daily workload."""
+def _today_review_metrics(conn, user_id: int) -> dict:
+    """Return persisted attempts and passed cards for today's study day."""
 
-    row = conn.execute(
-        "SELECT COUNT(DISTINCT question_bank_id) AS count "
+    start, end = _study_day_utc_bounds()
+    activity = conn.execute(
+        "SELECT COUNT(*) AS attempts, COUNT(DISTINCT question_bank_id) AS cards "
         "FROM practice_review_events "
-        "WHERE user_id = ? AND date(reviewed_at) = date('now')",
-        (user_id,),
+        "WHERE user_id = ? AND reviewed_at >= ? AND reviewed_at < ?",
+        (user_id, start, end),
     ).fetchone()
-    return int(row["count"] or 0)
+    passed = conn.execute(
+        "SELECT COUNT(*) AS count FROM practice_review_events event "
+        "JOIN ("
+        "  SELECT question_bank_id, MAX(id) AS event_id "
+        "  FROM practice_review_events "
+        "  WHERE user_id = ? AND reviewed_at >= ? AND reviewed_at < ? "
+        "  GROUP BY question_bank_id"
+        ") latest ON latest.event_id = event.id "
+        "WHERE event.rating IN ('good', 'easy')",
+        (user_id, start, end),
+    ).fetchone()
+    return {
+        "review_attempts_today": int(activity["attempts"] or 0),
+        "attempted_today": int(activity["cards"] or 0),
+        "completed_today": int(passed["count"] or 0),
+    }
+
+
+def _reviewed_today_count(conn, user_id: int) -> int:
+    """Compatibility helper for callers that only need passed-card count."""
+
+    return _today_review_metrics(conn, user_id)["completed_today"]
 
 
 def _study_streak(conn, user_id: int) -> dict:
-    """Return habit streaks from distinct UTC review days.
+    """Return habit streaks from distinct learner-local review days.
 
     A streak through yesterday remains active until the current day ends, so
     the UI can invite the learner to extend it instead of declaring it lost in
@@ -207,13 +257,21 @@ def _study_streak(conn, user_id: int) -> dict:
     """
 
     rows = conn.execute(
-        "SELECT DISTINCT date(reviewed_at) AS day FROM practice_review_events "
-        "WHERE user_id = ? ORDER BY day ASC",
+        "SELECT reviewed_at FROM practice_review_events "
+        "WHERE user_id = ? ORDER BY reviewed_at ASC",
         (user_id,),
     ).fetchall()
-    days = [datetime.fromisoformat(row["day"]).date() for row in rows if row["day"]]
-    today = datetime.now(UTC).date()
-    day_set = set(days)
+    zone = _study_timezone()
+    day_set = {
+        datetime.fromisoformat(str(row["reviewed_at"]))
+        .replace(tzinfo=UTC)
+        .astimezone(zone)
+        .date()
+        for row in rows
+        if row["reviewed_at"]
+    }
+    days = sorted(day_set)
+    today = datetime.now(UTC).astimezone(zone).date()
     studied_today = today in day_set
     cursor = today if studied_today else today - timedelta(days=1)
     current = 0
@@ -311,6 +369,9 @@ def list_deck_questions(
     )
     join = _review_join("?")
     params = source_params + [user_id, user_id] + where_params
+    study_start, study_end = (
+        _study_day_utc_bounds() if deck_key == "due" else ("", "")
+    )
     total = conn.execute(
         f"SELECT COUNT(*) {from_clause}{join}{where_clause}", params
     ).fetchone()[0]
@@ -337,20 +398,29 @@ def list_deck_questions(
     # generic pagination path below runs and the new budget is silently bypassed.
     if deck_key == "due" and offset == 0:
         due_cond = _deck_condition("due", "")
+        unfinished_today_cond = (
+            f"(uqr.last_reviewed_at >= '{study_start}' "
+            f"AND uqr.last_reviewed_at < '{study_end}' "
+            "AND uqr.last_rating IN ('again', 'hard'))"
+        )
         due_where = where_clause.replace(
             due_cond,
             "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) <= datetime('now') "
-            "AND COALESCE(uqr.state, 'new') != 'mastered')",
+            "AND COALESCE(uqr.state, 'new') != 'mastered' "
+            f"AND NOT {unfinished_today_cond})",
         )
         checkin_where = where_clause.replace(
             due_cond,
             "(uqr.state = 'mastered' AND uqr.next_review_at IS NOT NULL "
-            "AND datetime(uqr.next_review_at) <= datetime('now'))",
+            "AND datetime(uqr.next_review_at) <= datetime('now') "
+            f"AND NOT {unfinished_today_cond})",
         )
+        unfinished_where = where_clause.replace(due_cond, unfinished_today_cond)
         new_where = where_clause.replace(due_cond, "(uqr.next_review_at IS NULL)")
         future_where = where_clause.replace(
             due_cond,
-            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) > datetime('now'))",
+            "(uqr.next_review_at IS NOT NULL AND datetime(uqr.next_review_at) > datetime('now') "
+            f"AND NOT {unfinished_today_cond})",
         )
         # Due reviews and mastered check-ins are intentionally uncapped (Anki
         # consensus: never cap reviews); only the new-question tail is limited
@@ -361,11 +431,21 @@ def list_deck_questions(
         checkin_rows = conn.execute(
             _select_sql(from_clause, checkin_where, frequency_sql) + order, params
         ).fetchall()
-        completed_today = _reviewed_today_count(conn, user_id)
+        unfinished_rows = conn.execute(
+            _select_sql(from_clause, unfinished_where, frequency_sql) + order, params
+        ).fetchall()
+        today_metrics = _today_review_metrics(conn, user_id)
+        completed_today = today_metrics["completed_today"]
         streak = _study_streak(conn, user_id)
         if max_new is not None:
             new_budget = max(0, int(max_new))
-            capacity = completed_today + len(due_rows) + len(checkin_rows) + new_budget
+            capacity = (
+                completed_today
+                + len(due_rows)
+                + len(unfinished_rows)
+                + len(checkin_rows)
+                + new_budget
+            )
         else:
             # 新题预算 = 每日容量 − 今天已完成 − 尚待处理的到期复习/抽查。
             # 已完成量必须跨刷新扣除，否则每次重新进入都会补满一批新题。
@@ -381,6 +461,7 @@ def list_deck_questions(
                 capacity
                 - completed_today
                 - len(due_rows)
+                - len(unfinished_rows)
                 - len(checkin_rows),
             )
         new_rows = conn.execute(
@@ -388,7 +469,10 @@ def list_deck_questions(
             + f" ORDER BY ({frequency_sql}) DESC, qb.id ASC LIMIT ?",
             params + [new_budget],
         ).fetchall()
-        rows = due_rows + checkin_rows + new_rows
+        # 今日答错/模糊的题不会因为短期 next_review_at 而消失。重新进入时，
+        # 它们排在新题之前继续巩固；只有 good/easy 才从今日队列毕业。
+        rows = due_rows + unfinished_rows + checkin_rows + new_rows
+        total = max(int(total), len(rows))
         next_due_row = conn.execute(
             f"SELECT MIN(uqr.next_review_at) AS next_due_at "
             f"{from_clause}{_review_join('?')}{future_where}",
@@ -418,10 +502,11 @@ def list_deck_questions(
         deck = {
             **deck,
             "daily_capacity": capacity,
-            "completed_today": completed_today,
+            **today_metrics,
             "remaining_today": len(rows),
             "planned_today": completed_today + len(rows),
             "due_review_count": len(due_rows),
+            "relearning_count": len(unfinished_rows),
             "checkin_count": len(checkin_rows),
             "new_question_count": len(new_rows),
             "next_due_at": next_due_row["next_due_at"] if next_due_row else None,
@@ -441,7 +526,17 @@ def list_deck_questions(
             for key, value in deck.items()
             if key not in {"owner_id", "sort_order"}
         },
-        [_normalise_question(row) for row in rows],
+        [
+            {
+                **_normalise_question(row),
+                "is_daily_relearning": (
+                    deck_key == "due"
+                    and row["last_rating"] in {"again", "hard"}
+                    and study_start <= str(row["last_reviewed_at"] or "") < study_end
+                ),
+            }
+            for row in rows
+        ],
         int(total),
     )
 

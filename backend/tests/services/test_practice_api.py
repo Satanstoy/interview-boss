@@ -93,6 +93,53 @@ def test_review_requires_a_question_visible_to_the_current_user(client, test_db)
         app.dependency_overrides.pop(dependency, None)
 
 
+def test_due_api_restores_attempts_and_only_removes_passed_cards(client, test_db):
+    first_id = _insert_question(test_db, "什么是事件循环？", frequency=8)
+    second_id = _insert_question(test_db, "什么是闭包？", frequency=6)
+    test_db.execute(
+        "INSERT INTO user_recruitment_pref "
+        "(user_id, graduation_year, batch, daily_capacity, pace) "
+        "VALUES (1, 2027, 'autumn', 2, 'standard')"
+    )
+    test_db.commit()
+    app, dependency = _override_user()
+
+    try:
+        for rating in ("again", "hard"):
+            reviewed = client.post(
+                "/api/practice/review",
+                json={"question_id": first_id, "rating": rating},
+            )
+            assert reviewed.status_code == 200, reviewed.text
+            assert reviewed.json()["review"]["passed_today"] is False
+
+        restored = client.get("/api/practice/decks/due/questions")
+        assert restored.status_code == 200, restored.text
+        payload = restored.json()
+        assert payload["deck"]["attempted_today"] == 1
+        assert payload["deck"]["review_attempts_today"] == 2
+        assert payload["deck"]["completed_today"] == 0
+        assert payload["deck"]["remaining_today"] == 2
+        assert [item["id"] for item in payload["items"]] == [first_id, second_id]
+        assert payload["items"][0]["is_daily_relearning"] is True
+
+        passed = client.post(
+            "/api/practice/review",
+            json={"question_id": first_id, "rating": "good"},
+        )
+        assert passed.status_code == 200, passed.text
+        assert passed.json()["review"]["passed_today"] is True
+
+        restored = client.get("/api/practice/decks/due/questions").json()
+        assert restored["deck"]["attempted_today"] == 1
+        assert restored["deck"]["review_attempts_today"] == 3
+        assert restored["deck"]["completed_today"] == 1
+        assert restored["deck"]["remaining_today"] == 1
+        assert [item["id"] for item in restored["items"]] == [second_id]
+    finally:
+        app.dependency_overrides.pop(dependency, None)
+
+
 def test_recent_review_rating_can_be_corrected_without_double_counting(client, test_db):
     question_id = _insert_question(test_db, "什么是事务隔离级别？", frequency=5)
     test_db.commit()

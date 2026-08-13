@@ -242,6 +242,9 @@ async function mockAllAPIs(page, options = {}) {
   } = options
   const tomorrow = tomorrowUtcString()
   const reviewedQuestionIds = new Set(initialReviewedQuestionIds)
+  const attemptedQuestionIds = new Set(initialReviewedQuestionIds)
+  let reviewAttemptsToday = initialReviewedQuestionIds.length
+  const latestRatings = new Map(initialReviewedQuestionIds.map(questionId => [questionId, 'good']))
   let currentRecruitment = { ...recruitment }
 
   // Auth
@@ -309,10 +312,16 @@ async function mockAllAPIs(page, options = {}) {
     }
     const deck = deckItems.find(candidate => candidate.key === deckKey)
     const deckName = deck?.name || deckKey
-    const availableItems = deckKey === 'due'
+    const availableItems = (deckKey === 'due'
       ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
-      : deckQuestions
+      : deckQuestions).map((question) => {
+      const latestRating = latestRatings.get(question.id)
+      return latestRating
+        ? { ...question, last_rating: latestRating, last_reviewed_at: new Date().toISOString(), next_review_at: tomorrow, is_daily_relearning: ['again', 'hard'].includes(latestRating) }
+        : question
+    })
     const completedToday = reviewedQuestionIds.size || (deckKey === 'due' && availableItems.length === 0 ? Number(deck?.reviewed || 0) : 0)
+    const attemptedToday = attemptedQuestionIds.size || (deckKey === 'due' && availableItems.length === 0 ? Number(deck?.reviewed || 0) : 0)
     const dueItems = availableItems.filter(question => question.next_review_at && !question.is_checkin)
     const checkinItems = availableItems.filter(question => question.is_checkin)
     const newItems = availableItems.filter(question => !question.next_review_at)
@@ -321,7 +330,8 @@ async function mockAllAPIs(page, options = {}) {
     const items = deckKey === 'due'
       ? availableItems.filter(question => question.next_review_at || allowedNewIds.has(question.id))
       : availableItems
-    const dueReviewCount = items.filter(question => question.next_review_at && !question.is_checkin).length
+    const relearningCount = items.filter(question => question.is_daily_relearning).length
+    const dueReviewCount = items.filter(question => question.next_review_at && !question.is_checkin && !question.is_daily_relearning).length
     const checkinCount = items.filter(question => question.is_checkin).length
     const newQuestionCount = items.filter(question => !question.next_review_at).length
     await route.fulfill({
@@ -333,9 +343,12 @@ async function mockAllAPIs(page, options = {}) {
           ...(deckKey === 'due' ? {
             daily_capacity: currentRecruitment.daily_capacity,
             completed_today: completedToday,
+            attempted_today: attemptedToday,
+            review_attempts_today: reviewAttemptsToday || attemptedToday,
             remaining_today: items.length,
             planned_today: completedToday + items.length,
             due_review_count: dueReviewCount,
+            relearning_count: relearningCount,
             checkin_count: checkinCount,
             new_question_count: newQuestionCount,
             study_streak: 4 + (reviewedQuestionIds.size ? 1 : 0),
@@ -356,12 +369,16 @@ async function mockAllAPIs(page, options = {}) {
   // Review — echo the reviewed question id, next_review_at 为明天（UTC）
   await page.route('**/api/practice/review', async (route) => {
     const body = JSON.parse(route.request().postData() || '{}')
-    reviewedQuestionIds.add(body.question_id)
+    latestRatings.set(body.question_id, body.rating)
+    attemptedQuestionIds.add(body.question_id)
+    reviewAttemptsToday += 1
+    if (['good', 'easy'].includes(body.rating)) reviewedQuestionIds.add(body.question_id)
+    else reviewedQuestionIds.delete(body.question_id)
     if (reviewDelayMs) await new Promise(resolve => setTimeout(resolve, reviewDelayMs))
     await route.fulfill({
       json: {
         question_id: body.question_id,
-        review: { state: 'review', proficiency: 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: 3, has_been_practiced: true, event_id: 900 + body.question_id, can_correct: true },
+        review: { state: body.rating === 'again' ? 'relearning' : 'review', proficiency: 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: body.rating === 'again' ? 0.02 : 3, has_been_practiced: true, event_id: 900 + body.question_id, can_correct: true, passed_today: ['good', 'easy'].includes(body.rating), is_daily_relearning: ['again', 'hard'].includes(body.rating) },
       },
     })
   })
@@ -369,10 +386,13 @@ async function mockAllAPIs(page, options = {}) {
     const body = JSON.parse(route.request().postData() || '{}')
     const eventId = Number(new URL(route.request().url()).pathname.split('/').at(-1))
     const questionId = eventId - 900
+    latestRatings.set(questionId, body.rating)
+    if (['good', 'easy'].includes(body.rating)) reviewedQuestionIds.add(questionId)
+    else reviewedQuestionIds.delete(questionId)
     await route.fulfill({
       json: {
         question_id: questionId,
-        review: { state: body.rating === 'again' ? 'relearning' : 'review', proficiency: body.rating === 'again' ? 0 : 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: body.rating === 'again' ? 0.02 : 3, has_been_practiced: true, event_id: eventId, can_correct: true },
+        review: { state: body.rating === 'again' ? 'relearning' : 'review', proficiency: body.rating === 'again' ? 0 : 2, review_count: 1, last_rating: body.rating, next_review_at: tomorrow, interval_days: body.rating === 'again' ? 0.02 : 3, has_been_practiced: true, event_id: eventId, can_correct: true, passed_today: ['good', 'easy'].includes(body.rating), is_daily_relearning: ['again', 'hard'].includes(body.rating) },
       },
     })
   })
@@ -506,7 +526,7 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     // 今日复习队列已加载，第一张卡展示
     await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-question-total')).toHaveText('题库共 3 题')
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3 · 今日已练 0 题 · 剩余 3')
     await expect(page.getByTestId('practice-study-streak')).toContainText('再刷 1 题延续 4 天')
     await expect(page.getByTestId('practice-plan-mix')).toContainText('到期复习 2 · 新学 1')
     const forecast = page.getByTestId('practice-review-forecast')
@@ -535,12 +555,12 @@ test.describe('今日复习默认入口与招聘状态行', () => {
       recruitment: { ...AUTUMN_RECRUITMENT, daily_capacity: 10 },
     })
 
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 8 · 剩余 8')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 8')
     await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 10')
     await page.getByTestId('practice-capacity-decrease').click()
 
     await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 5')
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 5 · 剩余 5')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 5')
     await expect(page.getByTestId('recruitment-status')).toContainText('容量 5 题')
     await expect.poll(() => page.evaluate(() => window.__lastRecruitmentPut)).toEqual({
       graduation_year: 2027,
@@ -566,7 +586,7 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     await page.getByTestId('practice-continue-five').click()
 
     await expect(page.getByTestId('practice-focus-card').getByText(remainingNewQuestions[0].question)).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 5 / 7 · 剩余 2')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 5 / 7')
     await expect(page.getByTestId('practice-capacity-control')).toContainText('每日上限 10')
   })
 })
@@ -596,7 +616,7 @@ test.describe('今日复习队列复习出队不跳卡', () => {
 
     await page.getByTestId('practice-self-assess-again').click()
     await expect(page.getByTestId('practice-review-actions')).toContainText('本轮稍后再考')
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 4 · 剩余 3')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 4 · 今日已练 1 题 · 剩余 4')
     await page.keyboard.press('Enter')
 
     for (const nextQuestion of seeds.slice(1)) {
@@ -606,12 +626,13 @@ test.describe('今日复习队列复习出队不跳卡', () => {
       await page.keyboard.press('Enter')
     }
 
-    // Q1 在三张卡后回到队尾；今日计划已经完成，不因重学再次扣减。
+    // Q1 在三张卡后回到队尾；不会只算尝试，不算今日过关。
     await expect(card.getByText(seeds[0].question)).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 4 / 4 · 剩余 0')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 3 / 4')
     await page.keyboard.press('2')
     await expect(page.getByText('自评已保存')).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 4 / 4 · 剩余 0')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 3 / 4 · 今日已练 4 题（回忆 5 次）')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('剩余 1')
   })
 
   test('键盘 1/2/3 自评显示调度反馈，保存期间不能用右键跳题', async ({ page }) => {
@@ -642,9 +663,9 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await gotoPractice(page, { deckQuestions: seeds })
 
     await expect(page.getByTestId('practice-focus-card').getByText(seeds[0].question)).toBeVisible()
-    await page.getByTestId('practice-self-assess-hard').click()
+    await page.getByTestId('practice-self-assess-good').click()
     await expect(page.getByText('自评已保存')).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 3')
     await expect(page.getByTestId('practice-study-streak')).toContainText('连续 5 天')
     await expect(page.getByTestId('practice-plan-mix')).toContainText('到期复习 1 · 新学 1')
     await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 1 题')
@@ -656,6 +677,32 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     const card = page.getByTestId('practice-focus-card')
     await expect(card.getByText(seeds[1].question)).toBeVisible({ timeout: 5000 })
     await expect(card.getByText(seeds[0].question)).not.toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 3 · 今日已练 1 题 · 剩余 2')
+  })
+
+  test('不会和模糊只记录尝试，跨页面返回仍留在今日队列', async ({ page }) => {
+    const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
+    await gotoPractice(page, { deckQuestions: seeds })
+
+    await page.getByTestId('practice-self-assess-again').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3 · 今日已练 1 题 · 剩余 3')
+
+    await page.goto('/master-bank')
+    await page.goto('/practice')
+
+    await expect(page.getByTestId('practice-focus-card').getByText(seeds[0].question)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3 · 今日已练 1 题 · 剩余 3')
+    await expect(page.getByTestId('practice-plan-mix')).toContainText('待巩固 1')
+
+    await page.getByTestId('practice-self-assess-hard').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await page.goto('/master-bank')
+    await page.goto('/practice')
+
+    await expect(page.getByTestId('practice-focus-card').getByText(seeds[0].question)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3 · 今日已练 1 题（回忆 2 次）')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('剩余 3')
   })
 
   test('看完答案可修正自评且不会新增一次完成进度', async ({ page }) => {
@@ -664,13 +711,13 @@ test.describe('今日复习队列复习出队不跳卡', () => {
 
     await page.getByTestId('practice-self-assess-good').click()
     await expect(page.getByTestId('practice-correct-rating')).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 3')
     await page.getByTestId('practice-correct-again').click()
 
     await expect(page.getByText('已修正为“不会”')).toBeVisible()
     await expect(page.getByTestId('practice-correct-again')).toBeDisabled()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
-    await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 1 题')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3 · 今日已练 1 题 · 剩余 3')
+    await expect(page.getByTestId('practice-review-forecast')).toContainText('预计 0 题')
   })
 
   test('再想一遍只遮住答案，不会重复提交复习记录', async ({ page }) => {
@@ -694,7 +741,7 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('practice-correct-rating')).toBeVisible()
     expect(reviewRequests).toBe(1)
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 3 · 剩余 2')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 3')
   })
 
   test('稍后再答会移到本轮末尾且不改变调度或今日进度', async ({ page }) => {
@@ -710,12 +757,14 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(card.getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible()
     await page.getByTestId('practice-postpone').click()
     await expect(card.getByText(DUE_QUESTION_SEEDS[1].question)).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3 · 稍后 1')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('稍后 1')
     expect(reviewedIds).toEqual([])
 
     await page.keyboard.press('s')
     await expect(card.getByText(DUE_QUESTION_SEEDS[2].question)).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 0 / 3 · 剩余 3 · 稍后 2')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 0 / 3')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('稍后 2')
     expect(reviewedIds).toEqual([])
 
     await page.keyboard.press('3')
@@ -780,16 +829,22 @@ test.describe('今日复习空队列', () => {
     await page.getByTestId('practice-self-assess-hard').click()
     await expect(page.getByText('自评已保存')).toBeVisible()
     await page.keyboard.press('Enter')
+    await expect(page.getByTestId('practice-focus-card').getByText(question.question)).toBeVisible()
+    await page.getByTestId('practice-self-assess-good').click()
+    await expect(page.getByText('自评已保存')).toBeVisible()
+    await page.keyboard.press('Enter')
 
     const summary = page.getByTestId('practice-session-summary')
     await expect(page.getByText('今日复习已经完成')).toBeVisible()
-    await expect(summary).toContainText('本轮完成 1 次主动回忆')
+    await expect(summary).toContainText('本轮完成 2 次主动回忆')
     await expect(summary).toContainText('有点模糊')
     await expect(summary).toContainText('本轮有 1 道题需要继续巩固')
 
     await page.getByTestId('practice-retry-weak').click()
     await expect(page.getByTestId('practice-focus-card').getByText(question.question)).toBeVisible()
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 1 / 1 · 剩余 0 · 待巩固 1')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 1 · 今日已练 1 题（回忆 2 次）')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('剩余 0')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('本轮待巩固 1')
   })
 
   test('今日复习队列为空时展示完成态', async ({ page }) => {
@@ -800,7 +855,7 @@ test.describe('今日复习空队列', () => {
     })
 
     await expect(page.getByText('今日复习已经完成')).toBeVisible({ timeout: 5000 })
-    await expect(page.getByTestId('practice-daily-progress')).toContainText('已完成 3 / 3 · 剩余 0')
+    await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 3 / 3 · 今日已练 3 题 · 剩余 0')
     await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100')
     await expect(page.getByRole('button', { name: '切换到全部题' })).toBeVisible()
   })

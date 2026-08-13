@@ -21,6 +21,7 @@ export function usePracticeDecks(filter = 'all') {
   const isLoadingMoreQuestions = ref(false)
   const questionCache = new Map()
   let reviewedDueQueueIds = new Set()
+  let attemptedDueQueueIds = new Set()
 
   // 今日复习的 items 可能因为每日新题容量少于 total，这是有意设计，不能
   // 用普通分页把被容量策略排除的新题重新加载回来。
@@ -70,7 +71,14 @@ export function usePracticeDecks(filter = 'all') {
       questionTotal.value = Number(response.total ?? questions.value.length)
       selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
       loadedDeckKey.value = deckKey
-      if (deckKey === 'due') reviewedDueQueueIds = new Set()
+      if (deckKey === 'due') {
+        reviewedDueQueueIds = new Set((response.items || [])
+          .filter(question => isStudyDayToday(question.last_reviewed_at) && ['good', 'easy'].includes(question.last_rating))
+          .map(question => question.id))
+        attemptedDueQueueIds = new Set((response.items || [])
+          .filter(question => isStudyDayToday(question.last_reviewed_at))
+          .map(question => question.id))
+      }
       return response
     } catch (err) {
       error.value = getFriendlyError(err, '题单加载失败')
@@ -136,12 +144,14 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
-    const wasReviewedToday = isUtcToday(item?.last_reviewed_at)
+    const wasPassedToday = isStudyDayToday(item?.last_reviewed_at) && ['good', 'easy'].includes(item?.last_rating)
+    const wasDailyRelearning = Boolean(item?.is_daily_relearning)
     const wasPracticed = Number(item?.review_count || 0) > 0
     const previousNextReviewAt = item?.next_review_at || null
-    const queueKind = !previousNextReviewAt
+    const originalQueueKind = !previousNextReviewAt
       ? 'new_question_count'
       : (item?.is_checkin ? 'checkin_count' : 'due_review_count')
+    const queueKind = wasDailyRelearning ? 'relearning_count' : originalQueueKind
     const queueReviewIds = reviewedDueQueueIds
     const wasReviewedInQueue = queueReviewIds.has(questionId)
     try {
@@ -156,10 +166,18 @@ export function usePracticeDecks(filter = 'all') {
       }
       if (item) Object.assign(item, nextState)
       if (reviewedDeckKey === 'due' && reviewedDeck) {
-        if (!wasReviewedToday && !wasReviewedInQueue) {
-          reviewedDeck.completed_today = Number(reviewedDeck.completed_today || 0) + 1
+        const passedNow = nextState.passed_today ?? ['good', 'easy'].includes(rating)
+        reviewedDeck.review_attempts_today = Number(reviewedDeck.review_attempts_today || 0) + 1
+        if (!attemptedDueQueueIds.has(questionId)) {
+          reviewedDeck.attempted_today = Number(reviewedDeck.attempted_today || 0) + 1
+          attemptedDueQueueIds.add(questionId)
         }
-        if (!wasReviewedInQueue) {
+        if (!passedNow && !wasDailyRelearning) {
+          reviewedDeck[originalQueueKind] = Math.max(0, Number(reviewedDeck[originalQueueKind] || 0) - 1)
+          reviewedDeck.relearning_count = Number(reviewedDeck.relearning_count || 0) + 1
+        }
+        if (passedNow && !wasPassedToday && !wasReviewedInQueue) {
+          reviewedDeck.completed_today = Number(reviewedDeck.completed_today || 0) + 1
           reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today ?? questions.value.length) - 1)
           reviewedDeck[queueKind] = Math.max(0, Number(reviewedDeck[queueKind] || 0) - 1)
           queueReviewIds.add(questionId)
@@ -179,7 +197,7 @@ export function usePracticeDecks(filter = 'all') {
             reviewedDeck.next_due_at = nextState.next_review_at
           }
         }
-        adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+        if (passedNow) adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
       }
       const deck = decks.value.find(candidate => candidate.key === reviewedDeckKey)
       if (deck) {
@@ -193,11 +211,14 @@ export function usePracticeDecks(filter = 'all') {
     } finally { isReviewing.value = false }
   }
 
-  async function correctReview({ eventId, questionId, rating, score = null }) {
+  async function correctReview({ eventId, questionId, rating, previousRating = null, score = null }) {
     isReviewing.value = true
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
+    const wasPassedToday = previousRating
+      ? ['good', 'easy'].includes(previousRating)
+      : (isStudyDayToday(item?.last_reviewed_at) && ['good', 'easy'].includes(item?.last_rating))
     const previousNextReviewAt = item?.next_review_at || null
     try {
       const response = await api.correctPracticeReview(eventId, { rating, score })
@@ -208,7 +229,23 @@ export function usePracticeDecks(filter = 'all') {
       }
       if (item) Object.assign(item, nextState)
       if (reviewedDeckKey === 'due' && reviewedDeck) {
-        adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+        const passedNow = nextState.passed_today ?? ['good', 'easy'].includes(rating)
+        if (wasPassedToday !== passedNow) {
+          const delta = passedNow ? 1 : -1
+          reviewedDeck.completed_today = Math.max(0, Number(reviewedDeck.completed_today || 0) + delta)
+          reviewedDeck.remaining_today = Math.max(0, Number(reviewedDeck.remaining_today || 0) - delta)
+          reviewedDeck.relearning_count = Math.max(0, Number(reviewedDeck.relearning_count || 0) - delta)
+          if (passedNow) reviewedDueQueueIds.add(questionId)
+          else reviewedDueQueueIds.delete(questionId)
+          reviewedDeck.planned_today = Number(reviewedDeck.completed_today || 0) + Number(reviewedDeck.remaining_today || 0)
+        }
+        if (wasPassedToday && !passedNow) {
+          adjustReviewForecast(reviewedDeck, previousNextReviewAt, null)
+        } else if (!wasPassedToday && passedNow) {
+          adjustReviewForecast(reviewedDeck, null, nextState.next_review_at)
+        } else if (passedNow) {
+          adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+        }
       }
       return response
     } catch (err) {
@@ -219,14 +256,17 @@ export function usePracticeDecks(filter = 'all') {
     }
   }
 
-  function isUtcToday(value) {
+  function isStudyDayToday(value) {
     if (!value) return false
     const raw = String(value)
     const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw)
       ? raw
       : `${raw.replace(' ', 'T')}Z`)
     if (Number.isNaN(parsed.getTime())) return false
-    return parsed.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    return parsed.getFullYear() === now.getFullYear()
+      && parsed.getMonth() === now.getMonth()
+      && parsed.getDate() === now.getDate()
   }
 
   function utcDateKey(value) {
