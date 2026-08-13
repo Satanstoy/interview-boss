@@ -13,14 +13,19 @@ import re
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 脚本位于 backend/scripts/，仓库根为上溯两级（backend → 仓库根）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # 排除目录/文件（相对仓库根）
+# backend/tests 与 frontend/tests 排除：测试中的 mock key（test-key/mock-token/
+# sk-****abcd 等）为合法 fixture，不应阻断门禁；生产源码与脚本才是扫描对象
 EXCLUDE_DIRS = {
     ".git",
     "node_modules",
     "dist",
     "backend/data",
+    "backend/tests",
+    "frontend/tests",
     ".tech-audit",
     "frontend/dist",
     ".venv",
@@ -38,13 +43,27 @@ ASSIGN_RE = re.compile(
 )
 
 
+def _is_mock_value(value: str) -> bool:
+    """识别测试/文档中的占位值：脱敏星号、test/mock/fake/example 标记。"""
+    lowered = value.lower()
+    return any(
+        marker in lowered
+        for marker in ("*", "test", "mock", "fake", "example", "placeholder", "xxx")
+    )
+
+
 def iter_source_files():
     for path in sorted(PROJECT_ROOT.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(PROJECT_ROOT)
         parts = rel.parts
-        if any(part in EXCLUDE_DIRS or rel.match(part) for part in EXCLUDE_DIRS):
+        # 排除：任一单段路径命中排除目录名（如 node_modules/.git/dist），
+        # 或相对路径命中多段排除项（如 backend/data、frontend/dist）
+        if any(part in EXCLUDE_DIRS for part in parts):
+            continue
+        rel_str = str(rel)
+        if any(rel_str == ex or rel_str.startswith(ex + "/") for ex in EXCLUDE_DIRS):
             continue
         if path.suffix in EXCLUDE_SUFFIXES or path.name in EXCLUDE_NAMES:
             continue
@@ -62,8 +81,10 @@ def scan_file(path: Path, rel: Path) -> list:
     for lineno, line in enumerate(content.splitlines(), 1):
         if API_KEY_RE.search(line):
             findings.append((rel, lineno, "API key 字面量 (sk-...)"))
-        elif ASSIGN_RE.search(line):
-            findings.append((rel, lineno, "疑似密钥赋值"))
+        else:
+            m = ASSIGN_RE.search(line)
+            if m and not _is_mock_value(m.group(0)):
+                findings.append((rel, lineno, "疑似密钥赋值"))
     return findings
 
 

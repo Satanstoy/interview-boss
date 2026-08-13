@@ -28,7 +28,7 @@
 - Edit: `backend/app/services/clustering/experiments/draw_questions_eval.py`
 - Create: `backend/tests/security/test_secret_scan.py`
 
-**现状**：4 个脚本第 24-26 行硬编码 `sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym`，且进入 git 历史（78c77d0/e6f4f0d/95fcf63）。
+**现状**：4 个脚本第 24-26 行硬编码 SiliconFlow API key（`sk-` 前缀 48 位，已脱敏；完整值见 git 历史 78c77d0/e6f4f0d/95fcf63）。
 
 - [ ] Step 1（RED）：写 `test_secret_scan.py` 断言 experiments 目录无 `sk-` 字面量、.env.example 无实值占位、compose 无 `change-me-in-production`
 - [ ] Step 2：跑测试确认失败（Docker test-runtime）

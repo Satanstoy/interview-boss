@@ -55,3 +55,17 @@ class TestCheckSecrets:
         """对当前仓库运行 main() 应返回 0（已无硬编码密钥）"""
         rc = checker.main()
         assert rc == 0, "当前仓库不应有硬编码密钥（D4-1 修复后）"
+
+    def test_iter_source_files_not_empty(self):
+        """迭代器必须产出真实源码文件（回归：排除过滤器恒真短路曾导致产出 0 文件，
+        secret 扫描静默失效——tech-audit-2026-08-14 D4）"""
+        files = list(checker.iter_source_files())
+        assert len(files) > 100, (
+            f"iter_source_files 仅产出 {len(files)} 个文件，排除过滤可能短路，"
+            "secret 扫描实际未扫描任何文件"
+        )
+        # 抽查确认为真实源码路径：backend/ 必有覆盖。
+        # 注意：test-runtime 容器只挂载 ./backend（frontend 不在容器内），
+        # 宿主机运行时才可能覆盖 frontend/——这里只做强约束 backend。
+        rels = {str(rel) for _, rel in files}
+        assert any(r.startswith("backend/") for r in rels), "应扫描到 backend 源码"
