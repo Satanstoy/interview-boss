@@ -57,3 +57,5 @@ severity	dim	location	title	fix	effort	confidence
 3	D4	backend/app/db/operations.py（用户 LLM/search API key 落库处）+ routers/profile_pkg/llm.py:114	用户自带 LLM/搜索 API key 明文落库无加密（上轮 🟡 未修）；oauth-gateway 仍以 :ro 挂生产 data 卷	Fernet 加密 api_key 字段（env 派生密钥），读取时解密；评估撤销 oauth-gateway DB 挂载	M	certain
 2	D4	backend/app/db/queries.py:89 f"...i.owner_id = {user_id}"	user_id 以 f-string 直插 SQL（值来自 JWT 认证上下文，非注入点，但无 int 强制）	改为参数化或 int(user_id) 前置强转	S	certain
 3	D5	backend/app/routers/{answers,chat,practice,coding}.py LLM 消耗型端点	LLM 消耗端点无按用户配额/速率门禁：开放注册 + 全局 OPENAI_API_KEY fallback 可无限烧运营方预算（上轮 🟡 未修）	LLM 调用前置 per-user 每日 token/次数配额，或移除未配置用户的全局 key fallback	M	certain
+2	D13	docker-compose.yml oauth-gateway 段 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://81.71.140.248}	compose 兜底硬编码生产公网 IP：新部署 OAuth discovery/回调默认指向生产站（配置泄漏 + fresh-clone 错误指向）	去掉 IP 兜底改必填校验，或默认 localhost 提示；生产 IP 不出现于 compose 默认值	S	certain
+1	D2	README.md:194（声称 JWT_SECRET 自动生成）vs backend/.env.example:19（静态占位）	README 与 .env.example 对 JWT_SECRET 的行为描述矛盾（D13 🔴 的一部分，单独记账便于文档修复）	随 D13 修复统一：README 明确『未设 JWT_SECRET 时自动生成写回 .env』	S	certain

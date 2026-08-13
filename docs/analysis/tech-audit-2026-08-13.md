@@ -3,7 +3,7 @@
 **Auditor**: tech-audit skill，在用户指示下执行
 **Scope**: full（全部 16 维度）
 **Repo HEAD at audit time**: 96d25f2（master，2026-08-13）
-**Findings source**: `.tech-audit/work/2026-08-13/findings.tsv`（58 条）— 全部 🔴 已过 refutation pass
+**Findings source**: `.tech-audit/work/2026-08-13/findings.tsv`（60 条）— 全部 🔴 已过 refutation pass
 **Previous audit**: [tech-audit-2026-08-05.md](tech-audit-2026-08-05.md)（13🔴 / 50🟡 / 15🟢）
 **Stack**: Python/FastAPI + LangGraph（chat 为纯 async harness）· Vue3/Vite/Tailwind/shadcn-vue · SQLite WAL + FAISS · Docker Compose + ARQ worker + oauth-gateway · Bash (deploy/)
 
@@ -33,11 +33,11 @@
 | D10 | Performance & cost | ✅ | 0 | 0 | 2 |
 | D11 | Legal / compliance | ⚠️ | 0 | 3 | 0 |
 | D12 | Admin surface consistency | ✅ | 0 | 0 | 1 |
-| D13 | Setup replicability | ⚠️ | 2 | 1 | 0 |
+| D13 | Setup replicability | ⚠️ | 2 | 1 | 1 |
 | D14 | Correctness & robustness | ❌ | 1 | 0 | 5 |
 | D15 | UX & interaction | ✅ | 0 | 0 | 2 |
 | D16 | UI & design-system craft | ✅ | 0 | 0 | 1 |
-| **Total** | | | **10** | **16** | **32** |
+| **Total** | | | **10** | **16** | **33** |
 
 （状态口径：✅ = 无 🔴 且 🟡≤2；⚠️ = 有 🟡 或已被缓解的 🔴；❌ = 未缓解的 🔴。D13 的两个密钥占位 🔴 因生产 env 已覆盖强随机值，记为「已缓解」→ ⚠️；D10 为 scan 级（非 release 标记），D15/D16 渲染级 pass 记为 **deferred**（未启动浏览器）。）
 
@@ -94,7 +94,7 @@
 - 🟢 `CLAUDE.md:7` — 声称 Python 3.10，实际 3.12（.python-version=3.12、pyproject >=3.11、README:130 >=3.12）。_Fix_: 改为 3.12。
 - 🟢 `backend/CLAUDE.md` + 根 `CLAUDE.md` — include_router 计数 18 vs 实际 22；composables 19 vs 实际 20。_Fix_: 更新计数或改「约 N 个」。
 
-（✅ 项：README+docs 全部相对链接无断链；docs/superpowers/plans 最近 3 个计划的对应功能均已在 git 中；deploy/docker-deploy.sh 19 个子命令全部真实存在。）
+（✅ 项：README+docs 全部相对链接无断链；docs/superpowers/plans 最近 3 个计划的对应功能均已在 git 中；deploy/docker-deploy.sh 19 个子命令全部真实存在。附：README.md:194 声称 JWT_SECRET「自动生成」与 .env.example:19 静态占位矛盾，随 D13 修复统一。）
 
 ---
 
@@ -267,6 +267,7 @@
   _Fix_: 去掉兜底改必填校验或启动时自动生成；补入 .env.example。
   _Threat_: threat-models/secret-management.md
 - 🟡 `docker-compose.yml backend 段` — 硬编码 /home/ubuntu/.cache/huggingface bind mount，新机器首次启动挂空 root 目录致 embedding 静默失效（HF_HUB_OFFLINE=1）。_Fix_: HF_CACHE_DIR 参数化。
+- 🟢 `docker-compose.yml oauth-gateway 段 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://81.71.140.248}` — 兜底硬编码生产公网 IP：新部署 OAuth discovery/回调默认指向生产站。_Fix_: 去掉 IP 兜底改必填校验或默认 localhost。
 
 （✅ 项：PROJECT_DIR 自定位已修；all/update 幂等（不重新生成密钥、不重启健康容器）；set -euo pipefail + 变量引号 + rm -rf 守卫全部到位。）
 
@@ -347,7 +348,7 @@
 - D9: 迁移连接未开 FK；迁移含受控 DELETE ×3；备份同盘 SPOF
 - D10: LLM 成本追踪缺失；无延迟基线
 - D12: test-global 探测 120s 无进度
-- D13: HF 缓存路径硬编码
+- D13: HF 缓存路径硬编码；GATEWAY_BASE_URL 兜底硬编码生产 IP
 - D14: OTP 双用竞态；FTS IDF 缓存；时间混用 ×6；裸 except ×7；evaluate_answer 吞错
 - D15: window.confirm 割裂；icon-only 缺 aria-label
 - D16: porcelain 图表 hex 硬编码
