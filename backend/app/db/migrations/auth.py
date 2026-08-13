@@ -284,3 +284,37 @@ def _migration_065_llm_api_format(conn):
         conn.execute(
             "ALTER TABLE user_llm_config ADD COLUMN thinking INTEGER DEFAULT 0"
         )
+
+
+def _migration_079_users_email_unique(conn):
+    """users.email 唯一约束（NULL 除外）— tech-audit-2026-08-13 D14-1。
+
+    应用层注册已有 SELECT 查重（routers/auth.py），但缺 DB 层约束，
+    并发注册/直插可产生重复 email。本迁移：
+    1. 去重：同一 email 保留最小 id，其余行 email 置 NULL（不删用户）
+    2. 建部分唯一索引：NULL/空串允许多条（未绑定邮箱），非空 email 唯一
+    """
+    cursor = conn.cursor()
+    users_cols = {
+        row[1] for row in cursor.execute("PRAGMA table_info('users')").fetchall()
+    }
+    if "email" in users_cols:
+        # 去重：保留每 email 组最小 id，其余置 NULL
+        cursor.execute(
+            """
+            UPDATE users
+            SET email = NULL
+            WHERE email IS NOT NULL AND email != ''
+              AND id NOT IN (
+                  SELECT MIN(id) FROM users
+                  WHERE email IS NOT NULL AND email != ''
+                  GROUP BY email
+              )
+            """
+        )
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+        ON users(email) WHERE email IS NOT NULL AND email != ''
+        """
+    )

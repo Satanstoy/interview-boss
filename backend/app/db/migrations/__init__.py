@@ -106,6 +106,7 @@ from app.db.migrations.jobs import (
     _migration_074_durable_job_lifecycle,
     _migration_075_job_retry_lineage,
 )
+from app.db.migrations.auth import _migration_079_users_email_unique
 from app.db.migrations.interview_distribution import (
     _migration_042_interview_distribution,
 )
@@ -203,6 +204,7 @@ _MIGRATIONS = [
     (76, "question_variant_ownership", _migration_076_question_variant_ownership),
     (77, "quality_issue_identity", _migration_077_quality_issue_identity),
     (78, "practice_review_corrections", _migration_078_practice_review_corrections),
+    (79, "users_email_unique", _migration_079_users_email_unique),
 ]
 
 
