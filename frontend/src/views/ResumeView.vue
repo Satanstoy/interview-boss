@@ -182,7 +182,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
+  <div class="flex min-h-0 flex-col gap-3 overflow-y-auto px-2 py-3 custom-scrollbar sm:gap-4 sm:px-4 sm:py-4 md:px-6 md:py-6">
     <!-- 简历卡片 -->
     <Card class="rounded-xl border border-border bg-card shadow-sm">
       <CardHeader>
@@ -240,11 +240,11 @@ onMounted(() => {
         <CardDescription>选择目标岗位，AI 生成优化版简历与优化要点</CardDescription>
       </CardHeader>
       <CardContent class="flex flex-col gap-3">
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <select
             v-model="selectedPosition"
             :disabled="useManual || !positions.length"
-            class="h-9 rounded-lg border border-border bg-card px-3 text-sm"
+            class="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm sm:h-9 sm:w-auto"
           >
             <option v-if="!positions.length" value="">暂无岗位，可在设置中添加</option>
             <option v-for="p in positions" :key="p" :value="p">{{ p }}</option>
@@ -257,10 +257,10 @@ onMounted(() => {
             v-if="useManual"
             v-model="manualPosition"
             placeholder="如：后端工程师（Go）"
-            class="h-9 min-w-56 flex-1 rounded-lg border border-border bg-card px-3 text-sm"
+            class="h-10 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-sm sm:h-9 sm:min-w-56"
           />
         </div>
-        <Button :disabled="optimizing || !hasResume" @click="handleOptimize">
+        <Button class="w-full sm:w-auto" :disabled="optimizing || !hasResume" @click="handleOptimize">
           <RefreshCw v-if="optimizing" :size="14" class="animate-spin" />
           <Sparkles v-else :size="14" />
           {{ optimizing ? '正在优化…' : '生成优化版' }}
@@ -271,7 +271,7 @@ onMounted(() => {
 
     <!-- 结果卡片 -->
     <Card v-if="optimizing || points.length || optimizedText || savedOptimization" class="rounded-xl border border-border bg-card shadow-sm">
-      <CardHeader class="flex flex-row items-center justify-between gap-2">
+      <CardHeader class="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle class="flex items-center gap-2">
             <Sparkles :size="18" class="text-primary" />
@@ -281,12 +281,12 @@ onMounted(() => {
             目标岗位：{{ savedOptimization?.position || targetPosition }} · 优化于 {{ savedOptimization?.optimized_at || '本次' }}
           </CardDescription>
         </div>
-        <div class="flex items-center gap-2">
-          <Button variant="outline" size="sm" @click="copyText()" :disabled="!optimizedText && !savedOptimization?.optimized_text">
+        <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <Button class="flex-1 sm:flex-none" variant="outline" size="sm" @click="copyText()" :disabled="!optimizedText && !savedOptimization?.optimized_text">
             <Copy :size="14" />
             复制
           </Button>
-          <Button variant="outline" size="sm" @click="downloadMarkdown" :disabled="!optimizedText && !savedOptimization?.optimized_text">
+          <Button class="flex-1 sm:flex-none" variant="outline" size="sm" @click="downloadMarkdown" :disabled="!optimizedText && !savedOptimization?.optimized_text">
             <Download :size="14" />
             下载 .md
           </Button>

@@ -102,7 +102,7 @@ const currentSectionLabel = computed(
         <Button
           variant="outline"
           size="sm"
-          class="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+          class="h-10 shrink-0 gap-1.5 rounded-lg text-xs"
           aria-label="切换设置菜单"
           @click="navCollapsed = false"
         >
@@ -115,7 +115,7 @@ const currentSectionLabel = computed(
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <div class="mx-auto flex w-full max-w-4xl flex-col px-6 py-6">
+        <div class="mx-auto flex w-full max-w-4xl flex-col px-3 py-4 sm:px-6 sm:py-6">
           <Transition name="settings-section" mode="out-in">
           <div v-if="activeSection === 'profile'" key="profile" class="settings-section">
             <SettingsProfile

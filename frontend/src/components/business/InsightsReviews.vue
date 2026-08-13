@@ -14,7 +14,7 @@ function startInterview() {
 </script>
 
 <template>
-  <section class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-5 md:px-6 md:py-7">
+  <section class="mx-auto flex max-w-7xl flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-5 md:px-6 md:py-7">
     <header>
       <p class="text-sm text-muted-foreground">目标岗位：{{ props.snapshot.target_position.name }}</p>
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">面试复盘</h1>
@@ -43,7 +43,7 @@ function startInterview() {
         <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground"><MessageSquareText class="h-6 w-6" /></div>
         <h2 class="mt-4 text-lg font-medium text-foreground">还没有模拟面试记录</h2>
         <p class="mt-2 max-w-md text-sm text-muted-foreground">完成一次模拟面试后，这里会按场次整理回顾入口；没有结构化评分时不会臆测你的薄弱项。</p>
-        <Button class="mt-5" @click="startInterview">开始一次模拟面试 <ArrowRight class="h-4 w-4" /></Button>
+        <Button class="mt-5 w-full sm:w-auto" @click="startInterview">开始一次模拟面试 <ArrowRight class="h-4 w-4" /></Button>
       </CardContent>
     </Card>
   </section>

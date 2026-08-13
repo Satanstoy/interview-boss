@@ -38,7 +38,7 @@ function goPractice() {
 </script>
 
 <template>
-  <section class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-5 md:px-6 md:py-7">
+  <section class="mx-auto flex max-w-7xl flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-5 md:px-6 md:py-7">
     <header class="flex flex-col gap-1">
       <p class="text-sm text-muted-foreground">目标岗位：{{ snapshot.target_position.name }}</p>
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">洞察总览</h1>
@@ -79,12 +79,12 @@ function goPractice() {
     </section>
 
     <section v-else class="flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-4">
+      <div class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div>
           <h2 class="text-lg font-semibold tracking-tight text-foreground">我的练习足迹</h2>
           <p class="mt-0.5 text-sm text-muted-foreground">看练习动量、难度突破口和岗位薄弱主题，决定今天最值得补什么。</p>
         </div>
-        <Button variant="outline" size="sm" @click="goPractice">去刷题 <ArrowRight class="h-4 w-4" /></Button>
+        <Button variant="outline" size="sm" class="w-full sm:w-auto" @click="goPractice">去刷题 <ArrowRight class="h-4 w-4" /></Button>
       </div>
       <div class="grid gap-3 xl:grid-cols-3">
         <div class="xl:col-span-2">
@@ -105,12 +105,12 @@ function goPractice() {
     </section>
 
     <Card>
-      <CardHeader class="flex flex-row items-center justify-between gap-4">
+      <CardHeader class="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div>
           <CardTitle>本周最该做</CardTitle>
           <p class="mt-1 text-sm text-muted-foreground">优先处理岗位热度高、个人证据不足的主题。</p>
         </div>
-        <Button variant="outline" size="sm" @click="goReadiness">查看准备度 <ArrowRight class="h-4 w-4" /></Button>
+        <Button variant="outline" size="sm" class="w-full sm:w-auto" @click="goReadiness">查看准备度 <ArrowRight class="h-4 w-4" /></Button>
       </CardHeader>
       <CardContent>
         <div v-if="snapshot.actions.length" class="grid gap-3 lg:grid-cols-3">

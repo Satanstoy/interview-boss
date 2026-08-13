@@ -608,12 +608,12 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
 </script>
 
 <template>
-  <div class="min-h-screen bg-background">
+  <div class="min-h-[100dvh] bg-background">
     <!-- Login gate -->
     <LoginPage v-if="!isAuthenticatedForUi" @login-success="handleLoginSuccess" />
 
     <!-- Main layout -->
-    <div v-else class="flex h-screen overflow-hidden">
+    <div v-else class="flex h-[100dvh] overflow-hidden">
       <!-- Sidebar -->
       <aside
         class="hidden md:flex shrink-0 flex-col border-r border-border bg-sidebar h-screen sticky top-0 overflow-hidden"

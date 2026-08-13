@@ -117,8 +117,8 @@
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
         <div class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
-          <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
+          <Button v-if="currentQ && isAlgorithmQueue" data-testid="practice-switch-browse" variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="switchToBrowse"><List class="size-3.5" />看题模式</Button>
+          <Button v-else-if="currentQ && viewMode === 'browse'" data-testid="practice-switch-quiz" variant="ghost" size="sm" class="h-10 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="switchToQuiz"><Zap class="size-3.5" />切回八股刷题</Button>
           <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 md:hidden" aria-label="展开题目列表" @click="mobileSidebarOpen = true">
             <PanelLeft :size="14" />
             <span>题目列表</span>
@@ -130,8 +130,8 @@
           <span v-if="currentQ.has_been_practiced" class="hidden items-center gap-1 sm:inline-flex"><Target class="size-3.5" />熟练度 {{ currentQ.proficiency || 0 }}/5</span>
         </div>
         <div class="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
-          <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
-          <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs text-muted-foreground" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
+          <Button v-if="currentQ" data-testid="practice-add-to-deck" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="openDeckPicker"><Plus class="size-3.5" />加入题单</Button>
+          <Button data-testid="practice-practiced" variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="togglePracticed"><History class="size-3.5" />已刷过的题</Button>
           <AppTooltip v-if="currentQ" :text="currentQ.is_starred ? '取消收藏' : '收藏题目'">
             <Button variant="ghost" size="sm" class="h-11 min-h-11 gap-1.5 px-2 text-muted-foreground hover:text-amber-500 sm:size-9 sm:min-h-0 sm:px-0" :aria-label="currentQ.is_starred ? '取消收藏' : '收藏题目'" @click="toggleStar"><Star :size="17" :fill="currentQ.is_starred ? 'currentColor' : 'none'" /><span class="text-xs sm:sr-only">{{ currentQ.is_starred ? '取消收藏' : '收藏' }}</span></Button>
           </AppTooltip>

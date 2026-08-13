@@ -255,10 +255,11 @@ defineExpose({ onSubmit, isSubmitting })
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-3 md:gap-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3 md:gap-4">
     <!-- Header bar -->
     <div class="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
       <div class="flex flex-wrap items-center gap-2">
+        <h1 class="text-base font-semibold tracking-tight text-foreground">导入</h1>
         <Badge v-if="activeJobCount > 0" variant="secondary" class="gap-1.5 text-xs">
           <span class="relative flex h-2 w-2">
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
@@ -266,10 +267,8 @@ defineExpose({ onSubmit, isSubmitting })
           </span>
           {{ activeJobCount }} 个任务处理中
         </Badge>
-        <p class="text-xs text-muted-foreground">
-          粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。
-        </p>
       </div>
+      <p class="mt-1 text-xs text-muted-foreground">粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。</p>
 
       <!-- 后台任务实时进度列表 -->
       <div v-if="visibleJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
@@ -330,9 +329,9 @@ defineExpose({ onSubmit, isSubmitting })
     </div>
 
     <!-- Main: two equal columns -->
-    <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+    <div class="grid flex-none grid-cols-1 gap-3 lg:flex-1 lg:grid-cols-2 lg:gap-4">
       <!-- Left: text -->
-      <section class="flex min-h-[280px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
+      <section class="flex min-h-[240px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm lg:min-h-[280px]">
         <div class="flex items-center gap-2">
           <FileText class="h-4 w-4 text-muted-foreground" />
           <Label class="text-sm font-medium">文本内容</Label>
@@ -345,14 +344,14 @@ defineExpose({ onSubmit, isSubmitting })
           v-model="rawText"
           :maxlength="TEXT_MAX_LENGTH"
           placeholder="粘贴面经或 JD 内容..."
-          class="min-h-[220px] flex-1 resize-none text-sm leading-relaxed"
+          class="min-h-[180px] flex-1 resize-none text-sm leading-relaxed sm:min-h-[220px]"
           :disabled="isSubmitting"
           @paste="onPaste"
         />
       </section>
 
       <!-- Right: images -->
-      <section class="flex min-h-[280px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm">
+      <section class="flex min-h-[240px] flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-sm lg:min-h-[280px]">
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2">
             <ImageIcon class="h-4 w-4 text-muted-foreground" />
@@ -375,7 +374,7 @@ defineExpose({ onSubmit, isSubmitting })
 
         <!-- Drop zone: fills remaining space -->
         <div
-          class="group relative flex min-h-[220px] flex-1 cursor-pointer flex-col rounded-lg border-2 border-dashed transition-all"
+          class="group relative flex min-h-[180px] flex-1 cursor-pointer flex-col rounded-lg border-2 border-dashed transition-all sm:min-h-[220px]"
           :class="[
             isDragging
               ? 'border-primary bg-primary/5'
@@ -459,11 +458,11 @@ defineExpose({ onSubmit, isSubmitting })
       </div>
 
       <!-- Settings -->
-      <div class="flex flex-wrap gap-2">
-        <div class="space-y-1.5">
+      <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+        <div class="min-w-0 space-y-1.5">
           <Label class="text-xs font-medium text-muted-foreground">类型</Label>
           <Select v-model="importConfig.type" :disabled="isSubmitting">
-            <SelectTrigger class="h-9 w-[110px] text-sm">
+            <SelectTrigger class="h-10 w-full text-sm sm:h-9 sm:w-[110px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -474,10 +473,10 @@ defineExpose({ onSubmit, isSubmitting })
           </Select>
         </div>
 
-        <div class="space-y-1.5">
+        <div class="min-w-0 space-y-1.5">
           <Label class="text-xs font-medium text-muted-foreground">季节</Label>
           <Select v-model="importConfig.season" :disabled="isSubmitting">
-            <SelectTrigger class="h-9 w-[140px] text-sm">
+            <SelectTrigger class="h-10 w-full text-sm sm:h-9 sm:w-[140px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -488,10 +487,10 @@ defineExpose({ onSubmit, isSubmitting })
           </Select>
         </div>
 
-        <div class="space-y-1.5">
+        <div class="col-span-2 min-w-0 space-y-1.5 sm:col-span-1">
           <Label class="text-xs font-medium text-muted-foreground">分享设置</Label>
           <Select v-model="importConfig.target" :disabled="isSubmitting">
-            <SelectTrigger class="h-9 w-[140px] text-sm">
+            <SelectTrigger class="h-10 w-full text-sm sm:h-9 sm:w-[140px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

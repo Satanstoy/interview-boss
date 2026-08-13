@@ -183,4 +183,5 @@ test.describe('UI responsive polish', () => {
     expect(overflowingButtons).toBe(0)
     await expectNoHorizontalOverflow(page)
   })
+
 })

@@ -1,5 +1,5 @@
 <template>
-  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar" style="position: relative;">
+  <div class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto px-2 py-2 custom-scrollbar sm:gap-4 sm:px-4 sm:py-4 md:px-6 md:py-6" style="position: relative;">
     <!-- 页头 -->
     <div class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
       <div class="border-b border-border px-5 py-4">
@@ -15,14 +15,14 @@
       </div>
     </div>
     <!-- Season filter bar -->
-    <div class="flex items-center gap-2 mb-3 p-3 rounded-xl border border-border bg-card shadow-sm">
+    <div class="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 shadow-sm sm:mb-3">
       <template v-if="interviewSeasons.length > 0">
         <label class="text-xs text-muted-foreground">招聘季筛选：</label>
         <Select
           :model-value="filterSeason || '__all__'"
           @update:model-value="filterSeason = $event === '__all__' ? '' : $event"
         >
-          <SelectTrigger class="min-w-[100px] h-8 text-xs">
+          <SelectTrigger class="h-10 min-w-[100px] text-xs sm:h-8">
             <SelectValue placeholder="全部" />
           </SelectTrigger>
           <SelectContent>
@@ -35,7 +35,7 @@
       <AppTooltip :text="interviewSortOrder === 'desc' ? '当前：最新在前，点击切换' : '当前：最旧在前，点击切换'">
         <button
           @click="interviewSortOrder = interviewSortOrder === 'desc' ? 'asc' : 'desc'"
-          class="inline-flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 text-xs bg-card text-foreground hover:bg-muted dark:hover:bg-muted transition-colors"
+          class="inline-flex h-10 items-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-muted dark:hover:bg-muted sm:h-auto"
         >
           <SortDesc v-if="interviewSortOrder === 'desc'" class="size-3.5" />
           <SortAsc v-else class="size-3.5" />

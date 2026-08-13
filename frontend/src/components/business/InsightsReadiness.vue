@@ -32,7 +32,7 @@ const matrixOpen = ref(false)
 </script>
 
 <template>
-  <section class="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-5 md:px-6 md:py-7">
+  <section class="mx-auto flex max-w-7xl flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-5 md:px-6 md:py-7">
     <header class="flex flex-col gap-1">
       <p class="text-sm text-muted-foreground">目标岗位：{{ props.snapshot.target_position.name }}</p>
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">岗位准备度</h1>
@@ -78,7 +78,7 @@ const matrixOpen = ref(false)
         <Button
           variant="outline"
           size="sm"
-          class="mt-2"
+          class="mt-2 h-10 sm:h-9"
           @click="matrixOpen = !matrixOpen"
         >
           {{ matrixOpen ? '收起能力矩阵' : '展开能力矩阵' }}

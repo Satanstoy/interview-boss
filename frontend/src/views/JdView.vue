@@ -1,5 +1,5 @@
 <template>
-  <div class="px-4 py-4 md:px-6 md:py-6 flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+  <div class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto px-2 py-2 custom-scrollbar sm:gap-4 sm:px-4 sm:py-4 md:px-6 md:py-6">
     <!-- 页头 -->
     <div class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
       <div class="border-b border-border px-5 py-4">

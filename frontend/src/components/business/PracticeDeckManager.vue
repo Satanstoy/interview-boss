@@ -2,7 +2,7 @@
   <div data-testid="practice-deck-manager" class="relative flex h-full min-h-0 w-full overflow-hidden bg-background">
     <div class="flex min-w-0 flex-1 flex-col">
       <main class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-        <div class="mx-auto w-full max-w-5xl px-4 pb-12 pt-6 md:px-6 md:pt-8">
+        <div class="mx-auto w-full max-w-5xl px-3 pb-12 pt-4 sm:px-4 sm:pt-6 md:px-6 md:pt-8">
           <section class="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary">Study plans</p>
@@ -27,12 +27,12 @@
           </section>
 
           <section>
-            <div class="mb-3 flex items-center justify-between">
+            <div class="mb-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 class="text-sm font-semibold text-foreground">我的题单</h2>
                 <p class="mt-1 text-xs text-muted-foreground">系统题单只有全部题和我的收藏，其余题单由你自己组织。</p>
               </div>
-              <Button data-testid="practice-deck-create" size="sm" class="gap-1.5" @click="openCreate"><Plus class="size-3.5" />新建题单</Button>
+              <Button data-testid="practice-deck-create" size="sm" class="h-10 w-full gap-1.5 sm:h-8 sm:w-auto" @click="openCreate"><Plus class="size-3.5" />新建题单</Button>
             </div>
             <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
               <article
@@ -63,8 +63,8 @@
                   <div class="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground"><span>{{ deck.kind === 'custom' ? '点击查看题目' : '点击开始复习' }}</span></div>
                 </button>
                 <div v-if="deck.kind === 'custom'" class="mt-3 flex justify-end gap-1 border-t border-border/70 pt-3">
-                  <Button variant="ghost" size="sm" class="h-7 gap-1 text-xs text-muted-foreground" @click="openEdit(deck)"><Pencil class="size-3.5" />编辑</Button>
-                  <Button variant="ghost" size="sm" class="h-7 gap-1 text-xs text-destructive hover:text-destructive" @click="emit('delete-deck', deck.key)"><Trash2 class="size-3.5" />删除</Button>
+                  <Button variant="ghost" size="sm" class="h-10 gap-1 text-xs text-muted-foreground sm:h-7" @click="openEdit(deck)"><Pencil class="size-3.5" />编辑</Button>
+                  <Button variant="ghost" size="sm" class="h-10 gap-1 text-xs text-destructive hover:text-destructive sm:h-7" @click="emit('delete-deck', deck.key)"><Trash2 class="size-3.5" />删除</Button>
                 </div>
               </article>
             </div>
@@ -89,7 +89,7 @@
                     <option v-for="question in addableQuestions" :key="question.id" :value="String(question.id)">{{ question.question }}</option>
                   </select>
                 </div>
-                <Button size="sm" class="h-9 shrink-0 gap-1.5" :disabled="!questionToAdd" @click="addQuestion"><Plus class="size-3.5" />加入题单</Button>
+                    <Button size="sm" class="h-10 shrink-0 gap-1.5 sm:h-9" :disabled="!questionToAdd" @click="addQuestion"><Plus class="size-3.5" />加入题单</Button>
               </div>
               <p v-if="!availableQuestions.length" class="mt-2 text-xs text-muted-foreground">当前题库筛选下没有可加入的题目，请先回到高频题库调整筛选。</p>
             </div>

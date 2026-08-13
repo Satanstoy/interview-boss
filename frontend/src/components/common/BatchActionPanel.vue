@@ -5,11 +5,11 @@
       framed && 'rounded-xl border border-border bg-card p-2 shadow-sm'
     ]"
   >
-    <Button @click="$emit('toggle-select-all')" variant="ghost" size="sm" class="text-xs">
+    <Button @click="$emit('toggle-select-all')" variant="ghost" size="sm" class="h-10 text-xs sm:h-8">
       <CheckSquare class="size-3.5" />
       全选
     </Button>
-    <Button @click="$emit('invert-selection')" variant="ghost" size="sm" class="text-xs">
+    <Button @click="$emit('invert-selection')" variant="ghost" size="sm" class="h-10 text-xs sm:h-8">
       <ArrowLeftRight class="size-3.5" />
       反选
     </Button>
@@ -19,7 +19,7 @@
       variant="outline" size="sm"
       @click="executeAction(action)"
       :disabled="selectedCount === 0 || action.disabled || runningAction !== null"
-      class="flex items-center gap-1.5 text-xs font-medium"
+      class="flex h-10 items-center gap-1.5 text-xs font-medium sm:h-8"
       :class="colorClasses(action.color)"
     >
       {{ action.label }}

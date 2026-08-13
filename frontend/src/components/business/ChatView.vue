@@ -335,7 +335,7 @@
                     @click="handleStop"
                     variant="destructive"
                     size="icon"
-                    class="h-10 shrink-0 gap-1.5 rounded-lg px-3 sm:size-8 sm:px-0"
+                    class="h-10 min-w-16 shrink-0 justify-center gap-1.5 rounded-lg px-3 sm:h-8 sm:min-w-0 sm:w-8 sm:px-0"
                   >
                     <Square :size="14" />
                     <span class="text-xs sm:hidden">停止</span>
@@ -347,7 +347,7 @@
                     aria-label="发送消息"
                     :disabled="!inputText.trim()"
                     size="icon"
-                    class="h-10 shrink-0 gap-1.5 rounded-lg px-3 sm:size-8 sm:px-0"
+                    class="h-10 min-w-16 shrink-0 justify-center gap-1.5 rounded-lg px-3 sm:h-8 sm:min-w-0 sm:w-8 sm:px-0"
                   >
                     <ArrowUp :size="16" />
                     <span class="text-xs sm:hidden">发送</span>
