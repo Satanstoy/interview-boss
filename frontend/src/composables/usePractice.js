@@ -93,7 +93,11 @@ export async function saveAnswerForQuestion(question, qState) {
   }
   qState._isSavingAnswer = true
   try {
-    await updateRecord({ table: 'question_bank', id: question.id, field: 'ai_answer', value: qState._editAnswer })
+    await updateRecord({
+      table_name: 'question_bank',
+      record_id: question.id,
+      update_data: { ai_answer: qState._editAnswer },
+    })
     question.ai_answer = qState._editAnswer
     qState._isEditingAnswer = false
     toast.success('答案已保存')
