@@ -110,7 +110,10 @@ const MOCK_RECOMMENDATIONS = [
 ]
 
 // ── Helper: 注册所有必要的 API mock ──
-async function mockAllAPIs(page, { studyPlans = true, paginatedPractice = false } = {}) {
+async function mockAllAPIs(page, { studyPlans = true, paginatedPractice = false, practiceAnswer = null } = {}) {
+  const practiceBank = practiceAnswer
+    ? MOCK_MASTER_BANK.map(item => item.id === 1 ? { ...item, ai_answer: practiceAnswer } : item)
+    : MOCK_MASTER_BANK
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({
@@ -128,7 +131,7 @@ async function mockAllAPIs(page, { studyPlans = true, paginatedPractice = false 
 
   // Master bank
   await page.route('**/api/master-bank**', async (route) => {
-    await route.fulfill({ json: MOCK_MASTER_BANK })
+    await route.fulfill({ json: practiceBank })
   })
 
   // Data
@@ -187,15 +190,15 @@ async function mockAllAPIs(page, { studyPlans = true, paginatedPractice = false 
       return
     }
     const baseItems = deckKey === 'custom-999-java'
-      ? [MOCK_MASTER_BANK[0]]
+      ? [practiceBank[0]]
       : deckKey === 'starred'
-        ? MOCK_MASTER_BANK.filter(item => item.is_starred)
-        : MOCK_MASTER_BANK
+        ? practiceBank.filter(item => item.is_starred)
+        : practiceBank
     const allItems = paginatedPractice && deckKey === 'all'
       ? [
           ...baseItems,
           ...Array.from({ length: 98 }, (_, index) => ({
-            ...MOCK_MASTER_BANK[index % MOCK_MASTER_BANK.length],
+            ...practiceBank[index % practiceBank.length],
             id: 100 + index,
             title: `分页题目 ${index + 1}`,
             question: `分页题目 ${index + 1}`,
@@ -732,6 +735,28 @@ test.describe('练习完整流程 — PracticePanel', () => {
     await customCard.getByRole('button').first().click()
     await expect(page.getByText('请介绍一下 Vue 的响应式原理').last()).toBeVisible()
     await expect(page.getByTestId('practice-deck-question-select')).toBeVisible()
+  })
+})
+
+test.describe('刷题参考答案布局', () => {
+  test('窄屏展开长答案时，复习操作不会覆盖答案内容', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 844 })
+    const longAnswer = Array.from({ length: 14 }, (_, index) => (
+      `### 流量治理第 ${index + 1} 步\n\n通过限流、降级、缓存和异步化控制峰值流量，避免单点故障扩散。`
+    )).join('\n\n')
+    await gotoLoggedIn(page, { practiceAnswer: longAnswer })
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await page.getByTestId('practice-show-answer').click()
+
+    const answer = page.locator('[data-testid="practice-card"] .flashcard-answer')
+    const actions = page.getByTestId('practice-review-actions')
+    await expect(answer).toBeVisible()
+    await expect(actions).toBeVisible()
+    const answerBox = await answer.boundingBox()
+    const actionsBox = await actions.boundingBox()
+    expect(answerBox).not.toBeNull()
+    expect(actionsBox).not.toBeNull()
+    expect(actionsBox.y).toBeGreaterThanOrEqual(answerBox.y + answerBox.height - 1)
   })
 })
 

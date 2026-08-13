@@ -179,7 +179,13 @@
           <Badge v-for="tag in questionTags(currentQ).slice(0, 4)" :key="tag" variant="secondary" class="text-[10px]">{{ tag }}</Badge>
         </div>
 
-        <div class="mx-auto flex min-h-0 w-full max-w-3xl flex-none flex-col py-5 text-center sm:py-6 md:flex-1 md:py-8" :class="answerRevealed ? 'justify-start' : 'justify-start md:justify-center'">
+        <div
+          class="mx-auto flex min-h-0 w-full max-w-3xl flex-col py-5 text-center sm:py-6 md:py-8"
+          :class="[
+            answerRevealed ? 'flex-none' : 'md:flex-1',
+            answerRevealed ? 'justify-start' : 'justify-start md:justify-center',
+          ]"
+        >
           <div v-if="currentQ.is_checkin" class="mb-3 flex justify-center">
             <Badge variant="outline" class="text-[10px] text-muted-foreground" data-testid="checkin-badge">保持手感 · 已掌握题每 30 天复查一次</Badge>
           </div>
