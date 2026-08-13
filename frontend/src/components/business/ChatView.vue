@@ -120,12 +120,12 @@
             <MessageSquare :size="40" class="text-primary" />
           </div>
           <h2 class="mb-2 text-center text-2xl font-bold text-foreground sm:mb-3 sm:text-3xl">开始模拟面试</h2>
-          <p class="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-lg">选择会话，或从下面的场景开始练习</p>
+          <p class="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-lg">选择一种方式开始练习</p>
           <div class="grid w-full max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4">
             <button
               v-for="suggestion in promptSuggestions"
               :key="suggestion.text"
-              @click="startWithSuggestion(suggestion.text)"
+              @click="startWithSuggestion(suggestion)"
               class="group flex min-h-16 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-all hover:border-border hover:bg-accent/50 sm:p-4"
             >
               <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
@@ -371,7 +371,8 @@
       :jd-list="jdList"
       :interview-list="interviewList"
       :initial-message="pendingInitialMessage"
-      @close="showNewChat = false; pendingInitialMessage = ''"
+      :initial-mode="pendingInterviewMode"
+      @close="showNewChat = false; pendingInitialMessage = ''; pendingInterviewMode = 'free_practice'"
       @create="handleCreateConversation"
     />
 
@@ -412,10 +413,7 @@ import {
   Square, 
   ArrowUp,
   ArrowLeft,
-  BookOpen,
-  Code,
   Briefcase,
-  Brain,
   CheckCircle2,
   Check,
   X,
@@ -473,6 +471,7 @@ const pendingQuestionSourceReason = ref(null)
 const pendingResumeRef = ref(null)
 const pendingJdRef = ref(null)
 const pendingInitialMessage = ref('')
+const pendingInterviewMode = ref('free_practice')
 const pendingBasisType = ref(null)
 const pendingBasisQuestionIds = ref([])
 const pendingBasisConfidence = ref(0)
@@ -509,25 +508,19 @@ const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
 // Prompt suggestions
 const promptSuggestions = [
-  { 
-    icon: BookOpen, 
-    title: '项目介绍', 
-    description: '如何介绍一个复杂业务项目？' 
+  {
+    icon: MessageSquare,
+    text: '自由练习',
+    title: '自由练习',
+    description: '从题库随机抽题，按你的节奏练习',
+    mode: 'free_practice',
   },
-  { 
-    icon: Code, 
-    title: '算法练习', 
-    description: '帮我复习 React Hooks 相关题目' 
-  },
-  { 
-    icon: Briefcase, 
-    title: 'JD 分析', 
-    description: '分析这个 JD 的考察重点' 
-  },
-  { 
-    icon: Brain, 
-    title: '行为面试', 
-    description: '用 STAR 法则回答软技能问题' 
+  {
+    icon: Briefcase,
+    text: '定制面试',
+    title: '定制面试',
+    description: '结合目标 JD 和简历，模拟岗位面试',
+    mode: 'jd_resume',
   },
 ]
 
@@ -765,6 +758,7 @@ async function handleCreateConversation(data) {
       messages.value = []
       showNewChat.value = false
       pendingInitialMessage.value = ''
+      pendingInterviewMode.value = 'free_practice'
       return
     }
 
@@ -789,6 +783,7 @@ async function handleCreateConversation(data) {
     messages.value = []
     showNewChat.value = false
     pendingInitialMessage.value = ''
+    pendingInterviewMode.value = 'free_practice'
   } catch (e) {
     console.error('准备对话失败:', e)
   } finally {
@@ -797,8 +792,9 @@ async function handleCreateConversation(data) {
 }
 
 // Start with suggestion
-async function startWithSuggestion(text) {
-  pendingInitialMessage.value = text
+async function startWithSuggestion(suggestion) {
+  pendingInitialMessage.value = suggestion.initialMessage || ''
+  pendingInterviewMode.value = suggestion.mode || 'free_practice'
   showNewChat.value = true
 }
 

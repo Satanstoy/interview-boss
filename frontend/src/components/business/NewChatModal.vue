@@ -168,6 +168,7 @@ const props = defineProps({
   jdList: { type: Array, default: () => [] },
   interviewList: { type: Array, default: () => [] },
   initialMessage: { type: String, default: '' },
+  initialMode: { type: String, default: 'free_practice' },
 })
 const emit = defineEmits(['close', 'create'])
 
@@ -271,6 +272,12 @@ watch(() => mode.value, () => {
   resumeText.value = ''
   resumeFileName.value = ''
   useSavedResume.value = !!savedResume.value
+})
+
+watch(() => props.visible, (visible) => {
+  if (visible) {
+    mode.value = props.initialMode === 'jd_resume' ? 'jd_resume' : 'free_practice'
+  }
 })
 
 // 加载已保存的简历
