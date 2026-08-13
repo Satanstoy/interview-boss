@@ -136,7 +136,7 @@
 - 🟡 `backend/app/db/operations.py + routers/profile_pkg/llm.py:114` — 用户自带 LLM/搜索 API key 明文落库（上轮 🟡 未修）；oauth-gateway 仍以 :ro 挂生产 data 卷。_Fix_: Fernet 加密 api_key，读取解密。
 - 🟢 `backend/app/db/queries.py:89` — user_id f-string 直插 SQL（值来自 JWT，非注入点，无 int 强转）。_Fix_: 参数化或 int() 前置。
 
-（✅ 项（已验证，非 finding）：JWT HS256+issuer+jti、refresh 服务端轮转+每用户 10 条 eviction、bcrypt+锁定+slowapi 限流+CSRF 自定义头中间件、CORS 默认同源、安全头+CSP+HSTS、MCP bearer 认证+principal 覆盖防 confused-deputy、请求日志无 body、无 SQLi（f-string 仅限 PRAGMA/ALTER 且列名受控）、Dockerfile 全非 root、无请求体 PII 落日志。）
+（✅ 项（已验证，非 finding）：JWT HS256+issuer+jti、refresh 服务端轮转+每用户 10 条 eviction、bcrypt+锁定+slowapi 限流+CSRF 自定义头中间件、CORS 默认同源、安全头+CSP+HSTS、MCP bearer 认证+principal 覆盖防 confused-deputy、请求日志无 body、无请求体 PII 落日志。SQLi：ruff S608 全仓 158 处模式已抽样复核（operations.py/job_lifecycle.py/question_variant_reconciliation.py 等），拼接片段均为代码构造的列名/WHERE 片段，用户值一律走 `?` 占位符，未发现用户输入直插；但模式面广，需 SAST 入 CI 长期盯防（见 D8-2）。）
 
 ---
 
