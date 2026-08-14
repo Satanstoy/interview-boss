@@ -72,6 +72,9 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 **Target Adapter**:
 评测目标接入 AI Evaluation System 的统一执行适配器，负责准备 Case、执行已锁定的 Target Release 和将原始结果转换为标准 Observation；它不负责决定 Benchmark 量规、Judge 结论或管理员聚合策略。
 
+**Evaluation Observation**:
+Target Adapter 输出的最小标准执行结果外壳，包含生命周期状态、时间、契约违规和 Artifact 引用；目标类型特有的 transcript、tool trace、提取结果或分析报告放在版本化的 `payload` 中，不强迫所有目标共享完整字段。
+
 **人工对比评测（Human Pairwise Review）**:
 管理员在相同评测输入下比较两个评测目标版本，并记录维度化偏好、平局或共同失败的人工评测结果。
 
