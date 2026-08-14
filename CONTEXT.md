@@ -45,6 +45,12 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **E2E 重复评测组（E2E Replication Group）**:
 在相同评测目标版本、基准案例和评测协议下重复执行多场端到端面试，并将这些运行作为一个稳定性统计单元。
 
+**模拟器 Harness 版本（Simulator Harness Release）**:
+用于编排和观测 Candidate Simulator 的不可变评测基础设施快照，至少包含运行器、对话状态推进、工具与环境夹具、超时与重试策略、随机性配置、轨迹采集和输入组装规则；它与 Candidate Simulator Release 分开版本化。
+
+**Candidate Simulator 版本（Candidate Simulator Release）**:
+用于生成候选人行为的不可变模拟器快照，包含模拟器模型、System Prompt、候选人画像、回复策略、工具配置和采样参数；它与被测评测目标版本、Simulator Harness Release 和 Judge Release 分开记录。
+
 **评测稳定性指标（Evaluation Stability Metrics）**:
 描述重复评测组整体水平和波动性的统计结果，包括典型质量、离散程度、失败率和关键门禁状态，不只使用单次分数或均值。
 
