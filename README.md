@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://cdn.jsdelivr.net/gh/Satanstoy/interview-boss@master/frontend/public/favicon-b.png" alt="InterviewBoss" width="256" />
+<img src="./frontend/public/favicon.png" alt="InterviewBoss" width="720" />
 
 # InterviewBoss
 
