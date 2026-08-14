@@ -1,0 +1,9 @@
+# 行数红线 allowlist:已知超限的 god-file(Stage B 拆分目标)。
+# 格式: "相对路径  当前行数"。
+# 门禁逻辑:列在此处的文件行数不得超过「当前行数」(即不允许继续膨胀);
+# 未列的超过 1500 行即 FAIL。Stage B 拆分后逐条移除/缩短本清单并提交。
+backend/app/services/chat_service.py 2395
+backend/app/services/llm.py 1565
+backend/app/worker.py 1805
+backend/app/agents/chat/nodes.py 2028
+frontend/src/components/business/ChatView.vue 1577

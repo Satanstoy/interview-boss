@@ -39,6 +39,8 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "httpx>=0.27.0",
+    "ruff>=0.16.3",
+    "mypy>=2.3.0",
 ]
 
 [tool.pytest.ini_options]
@@ -55,3 +57,34 @@ filterwarnings = [
     'ignore:The `local_dir_use_symlinks` argument is deprecated and ignored in `snapshot_download`.*:UserWarning',
 ]
 addopts = "-v --tb=short"
+
+[tool.ruff]
+# 阶段 A: 先立闸防膨胀。全仓当前仍有历史累积违例,ruff 以 audit WARN 接入,
+# 只报告不拦截(对齐 CLAUDE.md「audit 第一阶段只报告不拦截」)。
+# 后续随债务清偿逐步收紧为 blocking。
+target-version = "py312"
+line-length = 100
+src = ["backend/app", "backend/tests"]
+fix = false
+select = [
+  "E4",   # import 位置等结构性错误
+  "E7",   # 冒号/缩进区,不能静默跳过
+  "E9",   # 运行时错误(除变量未定义外)
+  "F",    # pyflakes: 未定义名/未用导入/未用变量(真实 bug)
+]
+ignore = [
+  "E402", # 迁移脚本/启动文件的 import-not-at-top 属合理模式,暂不强制
+]
+exclude = [
+  "backend/app/mcp_server/**",
+  "backend/scripts/**",
+]
+
+[tool.mypy]
+# 阶段 A: 同样以 audit WARN 接入,只采集不拦截。
+python_version = "3.12"
+warn_unused_ignores = false
+ignore_missing_imports = true
+check_untyped_defs = false
+no_site_packages = true
+

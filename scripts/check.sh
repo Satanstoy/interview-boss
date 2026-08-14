@@ -112,6 +112,21 @@ run_backend_audit() {
     bash -lc "cd '$PROJECT_DIR' && uv tool run pip-audit -r <(uv export --frozen --no-dev --format requirements-txt --no-hashes) --no-deps --disable-pip --progress-spinner off"
 }
 
+# line-guard: blocking gate - delegates to scripts/line_guard.sh (allowlist-based)
+run_line_guard() {
+  if ! [ -x "$PROJECT_DIR/scripts/line_guard.sh" ]; then
+    record "FAIL" "line-guard" "scripts/line_guard.sh missing or not executable"
+    blocking_failed=1
+    return
+  fi
+  if bash "$PROJECT_DIR/scripts/line_guard.sh"; then
+    record "PASS" "line-guard" "all source files within line limits"
+  else
+    record "FAIL" "line-guard" "a source file exceeds its line cap - see output above"
+    blocking_failed=1
+  fi
+}
+
 run_secret_scan() {
   if ! command -v python3 >/dev/null 2>&1; then
     record "FAIL" "secret scan" "python3 command not found"
@@ -127,6 +142,8 @@ run_audit() {
   echo "AUDIT: reported only, non-blocking in this phase"
   run_frontend_audit
   run_backend_audit
+  run_static_backend
+  run_static_frontend
 }
 
 print_summary() {
@@ -158,9 +175,11 @@ cd "$PROJECT_DIR" || exit 1
 case "$MODE" in
   all)
     run_secret_scan
+    run_line_guard
     run_backend
     run_frontend
     run_audit
+    run_static_backend
     ;;
   backend)
     run_backend
@@ -170,6 +189,9 @@ case "$MODE" in
     ;;
   audit)
     run_audit
+    ;;
+  lineguard)
+    run_line_guard
     ;;
   *)
     record "FAIL" "check mode" "unknown mode: ${MODE}"

@@ -149,6 +149,8 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 - **后端**：通过 Docker `test-runtime` 跑 pytest；`backend/tests/conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures
 - **前端**：Playwright 测试必须 mock API，禁止截图断言，禁止使用真实密码
 - **日常门禁**：`./deploy/docker-deploy.sh check` 汇总后端 collect/compile/结构测试、前端 build/smoke test 和 audit WARN。
+- **行数红线**：任何后端 `app/**/*.py` 与前端 `src/**/*.{vue,js}` 源文件不得超过 1500 行；`check.sh lineguard` 为 blocking 门禁，超线即 FAIL。拆分 god-file 时保持红线（详见 `docs/specs/2026-08-14-stability-debt-cleanup.md`）。
+- **静态检查（audit WARN，仅报告不拦截）**：根 `pyproject.toml` 的 `[tool.ruff]`（`E4,E7,E9,F`）跑后端 `ruff check backend/app`；前端 `eslint src`（`eslint.config.js`，flat config）。两者经 `check.sh audit` 报告，暂不阻断；随债务清偿逐步收紧为 blocking。
 - **详细规则**：`.claude/rules/test-files.md`（编辑测试文件时自动加载）
 
 ## Gotchas
