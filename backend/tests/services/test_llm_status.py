@@ -32,6 +32,12 @@ def _patch_config(monkeypatch, cfg):
         "app.core.config.get_user_llm_config",
         lambda uid: dict(cfg) if cfg else None,
     )
+    # 这些 status/probe 单元测试使用 mock_llm 模拟 LLM client，不应触发真实
+    # 出站 SSRF/DNS 校验（否则 base_url 在受限测试网络下可能被误判为保留 IP）。
+    monkeypatch.setattr(
+        "app.core.outbound_url.assert_safe_outbound_url_sync",
+        lambda url: None,
+    )
 
 
 def _fail_probe(mock_llm, exc):

@@ -38,7 +38,7 @@ class TestBug001SourceDisplayConsistency:
         assert 'v-for="(src, idx) in dedupedSources"' in section, "应统一遍历去重来源"
         assert 'bg-card' in section, "应使用卡片背景色"
         assert 'rounded-md' in section, "应使用圆角卡片"
-        assert 'flex items-start gap-3' in section, "应使用 flex 布局"
+        assert 'flex items-start gap-2.5' in section, "应使用 flex 布局（卡片内来源项布局）"
 
     def test_single_source_entry_has_index(self):
         """修复后：每个来源应有编号"""
