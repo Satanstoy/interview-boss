@@ -62,11 +62,24 @@ def _seed_draw_questions(conn):
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             row,
         )
+    # 双写收敛后读端在 practice_review_events(source='self_check');
+    # review_id NOT NULL FK -> user_question_review, 先插 SRS 状态拿 id
+    cur = conn.execute(
+        "INSERT INTO user_question_review "
+        "(user_id, question_bank_id, state, proficiency, review_count, last_rating, "
+        "last_score, last_reviewed_at, next_review_at, interval_days, ease_factor, "
+        "stability_days, difficulty, algorithm, updated_at) "
+        "VALUES (?, ?, 'review', 0.6, 1, 'good', 80, ?, ?, 3, 2.5, 3, 0.7, 'sm2_lite', ?)",
+        (7, 1, (datetime.now() - timedelta(days=3)).isoformat(),
+         (datetime.now() + timedelta(days=3)).isoformat(),
+         (datetime.now() - timedelta(days=3)).isoformat()),
+    )
+    review_id = cur.lastrowid
     conn.execute(
-        "INSERT INTO user_practice_history "
-        "(user_id, question_bank_id, user_answer, score, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (7, 1, "答过", 80, (datetime.now() - timedelta(days=3)).isoformat()),
+        "INSERT INTO practice_review_events "
+        "(user_id, question_bank_id, review_id, rating, score, source, reviewed_at) "
+        "VALUES (?, ?, ?, 'good', 80, 'self_check', ?)",
+        (7, 1, review_id, (datetime.now() - timedelta(days=3)).isoformat()),
     )
     conn.commit()
 

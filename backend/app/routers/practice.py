@@ -375,7 +375,7 @@ async def evaluate_answer(
         for dim in result["dimensions"].values():
             dim["score"] = max(0, min(100, int(dim.get("score", 0))))
 
-        # 自动记录练习历史（写入 user_practice_history，关联用户）
+        # 记录自评评估（只写 review 体系，双写收敛后 user_practice_history 不再写入）
         if req.question_id:
 
             def _record():
@@ -391,16 +391,9 @@ async def evaluate_answer(
                     ).fetchone()
                     if not visible:
                         raise PermissionError("question_not_visible")
-                    conn.execute(
-                        "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, evaluation_result, score) VALUES (?, ?, ?, ?, ?)",
-                        (
-                            user["id"],
-                            req.question_id,
-                            req.user_answer,
-                            json.dumps(result, ensure_ascii=False),
-                            result["overall_score"],
-                        ),
-                    )
+                    # 双写收敛(audit D9): 评估只写 review 体系(user_question_review +
+                    # practice_review_events), 不再写 user_practice_history。
+                    # 旧表仅保留存量; 读端已全部迁移到 practice_review_events。
                     rating = (
                         "easy"
                         if result["overall_score"] >= 85

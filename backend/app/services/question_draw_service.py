@@ -241,9 +241,9 @@ def draw_questions(
         ids = [r["id"] for r in candidates]
         placeholders = ",".join("?" * len(ids))
         stats = conn.execute(
-            f"SELECT question_bank_id, COUNT(*) as cnt, MAX(created_at) as last_at "
-            f"FROM user_practice_history "
-            f"WHERE user_id = ? AND question_bank_id IN ({placeholders}) "
+            f"SELECT question_bank_id, COUNT(*) as cnt, MAX(reviewed_at) as last_at "
+            f"FROM practice_review_events "
+            f"WHERE user_id = ? AND source = 'self_check' AND question_bank_id IN ({placeholders}) "
             f"GROUP BY question_bank_id",
             [user["id"]] + ids,
         ).fetchall()

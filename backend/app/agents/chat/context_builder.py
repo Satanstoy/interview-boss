@@ -78,7 +78,7 @@ def _get_user_practice_summary(user_id: int) -> str:
             # 总练习数和平均分
             row = conn.execute(
                 "SELECT COUNT(*) as total, AVG(score) as avg_score "
-                "FROM user_practice_history WHERE user_id = ?",
+                "FROM practice_review_events WHERE user_id = ? AND source = 'self_check'",
                 (user_id,)
             ).fetchone()
             total = row[0] if row else 0
@@ -90,9 +90,9 @@ def _get_user_practice_summary(user_id: int) -> str:
             # 按类别统计正确率（通过 question_bank 的 cat1）
             cat_stats = conn.execute(
                 "SELECT qb.cat1, COUNT(*) as cnt, AVG(oph.score) as avg_s "
-                "FROM user_practice_history oph "
+                "FROM practice_review_events oph "
                 "JOIN question_bank qb ON oph.question_bank_id = qb.id "
-                "WHERE oph.user_id = ? AND qb.cat1 IS NOT NULL AND qb.cat1 != '' "
+                "WHERE oph.user_id = ? AND oph.source = 'self_check' AND qb.cat1 IS NOT NULL AND qb.cat1 != '' "
                 "GROUP BY qb.cat1 ORDER BY avg_s ASC LIMIT 5",
                 (user_id,)
             ).fetchall()

@@ -134,7 +134,7 @@ def build_insights_snapshot(user: dict) -> dict:
         practiced_question_ids = set()
         evaluated_answer_count = 0
         for row in conn.execute(
-            "SELECT question_bank_id, score FROM user_practice_history WHERE user_id = ?",
+            "SELECT question_bank_id, score FROM practice_review_events WHERE user_id = ? AND source = 'self_check'",
             (user_id,),
         ).fetchall():
             topic_name = question_to_topic.get(row["question_bank_id"])
@@ -293,12 +293,8 @@ def _difficulty_label(raw: str | None) -> str:
 def _activity_day_counts(conn, user_id: int, since: str) -> dict[str, int]:
     """按天统计练习次数（正式答题 + 闪卡复习）。"""
     counts: dict[str, int] = {}
-    for row in conn.execute(
-        "SELECT date(created_at) AS day, COUNT(*) AS cnt FROM user_practice_history "
-        "WHERE user_id = ? AND created_at >= ? GROUP BY day",
-        (user_id, since),
-    ).fetchall():
-        counts[row["day"]] = counts.get(row["day"], 0) + row["cnt"]
+    # 双写收敛: user_practice_history 已停写; 只统计 practice_review_events
+    # (评估 + 闪卡复习), 修复同一评估被双计的问题。
     for row in conn.execute(
         "SELECT date(reviewed_at) AS day, COUNT(*) AS cnt FROM practice_review_events "
         "WHERE user_id = ? AND reviewed_at >= ? GROUP BY day",
@@ -312,8 +308,8 @@ def _daily_avg_scores(conn, user_id: int, since: str) -> dict[str, float]:
     """按天统计答题平均分（仅 user_practice_history 的有分记录）。"""
     avgs = {}
     for row in conn.execute(
-        "SELECT date(created_at) AS day, AVG(score) AS avg_s FROM user_practice_history "
-        "WHERE user_id = ? AND score IS NOT NULL AND created_at >= ? GROUP BY day",
+        "SELECT date(reviewed_at) AS day, AVG(score) AS avg_s FROM practice_review_events "
+        "WHERE user_id = ? AND score IS NOT NULL AND source = 'self_check' AND reviewed_at >= ? GROUP BY day",
         (user_id, since),
     ).fetchall():
         avgs[row["day"]] = round(row["avg_s"] or 0, 1)
@@ -343,8 +339,8 @@ def _build_daily_series(
 def _practice_days(conn, user_id: int) -> set[str]:
     """返回用户全部有练习活动的日期集合（跨 90 天窗口，用于 streak）。"""
     days = set()
+    # 双写收敛后 user_practice_history 已停写, 只统计 review 事件表
     for table, column in (
-        ("user_practice_history", "created_at"),
         ("practice_review_events", "reviewed_at"),
     ):
         rows = conn.execute(
@@ -401,10 +397,10 @@ def _difficulty_stats(conn, user_id: int) -> list[dict]:
     """按难度统计练习次数与正确率（score >= 60 算对）。"""
     rows = conn.execute(
         "SELECT qb.difficulty AS d, COUNT(*) AS total, "
-        "SUM(CASE WHEN uph.score >= 60 THEN 1 ELSE 0 END) AS correct "
-        "FROM user_practice_history uph "
-        "JOIN question_bank qb ON qb.id = uph.question_bank_id "
-        "WHERE uph.user_id = ? AND uph.score IS NOT NULL "
+        "SUM(CASE WHEN pre.score >= 60 THEN 1 ELSE 0 END) AS correct "
+        "FROM practice_review_events pre "
+        "JOIN question_bank qb ON qb.id = pre.question_bank_id "
+        "WHERE pre.user_id = ? AND pre.score IS NOT NULL AND pre.source = 'self_check' "
         "GROUP BY qb.difficulty",
         (user_id,),
     ).fetchall()
@@ -428,9 +424,9 @@ def _difficulty_stats(conn, user_id: int) -> list[dict]:
 def _recent_activities(conn, user_id: int, limit: int = 10) -> list[dict]:
     """合并最近的答题与复习事件，按时间倒序取前 N 条。"""
     answers = conn.execute(
-        "SELECT uph.id, 'answer' AS type, uph.question_bank_id, uph.score, "
-        "uph.created_at AS ts FROM user_practice_history uph "
-        "WHERE uph.user_id = ? ORDER BY uph.created_at DESC LIMIT ?",
+        "SELECT pre.id, 'answer' AS type, pre.question_bank_id, pre.score, "
+        "pre.reviewed_at AS ts FROM practice_review_events pre "
+        "WHERE pre.user_id = ? AND pre.source = 'self_check' ORDER BY pre.reviewed_at DESC LIMIT ?",
         (user_id, limit),
     ).fetchall()
     reviews = conn.execute(

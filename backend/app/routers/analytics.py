@@ -125,7 +125,7 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
             practiced = {}
             for r in conn.execute(
                 "SELECT question_bank_id, MAX(score) as best_score, COUNT(*) as attempt_count "
-                "FROM user_practice_history WHERE user_id = ? GROUP BY question_bank_id",
+                "FROM practice_review_events WHERE user_id = ? AND source = 'self_check' GROUP BY question_bank_id",
                 [uid],
             ).fetchall():
                 practiced[r["question_bank_id"]] = {
@@ -202,11 +202,11 @@ async def get_practice_stats(user: dict = Depends(get_current_user)):
 
             # Weak questions (recent score < 60)
             weak_rows = conn.execute(
-                "SELECT uph.question_bank_id as question_id, qb.question, uph.score, uph.created_at "
-                "FROM user_practice_history uph "
-                "JOIN question_bank qb ON uph.question_bank_id = qb.id "
-                "WHERE uph.user_id = ? AND uph.score < 60 "
-                "ORDER BY uph.created_at DESC LIMIT 5",
+                "SELECT pre.question_bank_id as question_id, qb.question, pre.score, pre.reviewed_at "
+                "FROM practice_review_events pre "
+                "JOIN question_bank qb ON pre.question_bank_id = qb.id "
+                "WHERE pre.user_id = ? AND pre.score < 60 AND pre.source = 'self_check' "
+                "ORDER BY pre.reviewed_at DESC LIMIT 5",
                 [uid],
             ).fetchall()
             recent_weak = [dict(r) for r in weak_rows]

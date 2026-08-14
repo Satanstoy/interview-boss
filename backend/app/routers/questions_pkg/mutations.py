@@ -344,6 +344,29 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     (req.target_id, question_id, req.target_id)
                 )
 
+                # 双写收敛后: 同步搬迁复习事件与 SRS 状态到目标题(否则拆题丢评估记录)
+                conn.execute(
+                    "INSERT INTO practice_review_events "
+                    "(user_id, question_bank_id, review_id, rating, score, source, reviewed_at, before_state_json) "
+                    "SELECT pre.user_id, ?, pre.review_id, pre.rating, pre.score, pre.source, pre.reviewed_at, pre.before_state_json "
+                    "FROM practice_review_events pre WHERE pre.question_bank_id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM practice_review_events t "
+                    "WHERE t.user_id = pre.user_id AND t.question_bank_id = ? "
+                    "AND t.reviewed_at = pre.reviewed_at AND t.score IS pre.score)",
+                    (req.target_id, question_id, req.target_id)
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO user_question_review "
+                    "(user_id, question_bank_id, state, proficiency, review_count, lapse_count, "
+                    "last_rating, last_score, last_reviewed_at, next_review_at, interval_days, "
+                    "ease_factor, stability_days, difficulty, algorithm, updated_at) "
+                    "SELECT uqr.user_id, ?, uqr.state, uqr.proficiency, uqr.review_count, uqr.lapse_count, "
+                    "uqr.last_rating, uqr.last_score, uqr.last_reviewed_at, uqr.next_review_at, uqr.interval_days, "
+                    "uqr.ease_factor, uqr.stability_days, uqr.difficulty, uqr.algorithm, uqr.updated_at "
+                    "FROM user_question_review uqr WHERE uqr.question_bank_id = ?",
+                    (req.target_id, question_id)
+                )
+
                 # 从源聚类中移除
                 original_norm = normalize_original_question(original_q)
                 new_src_orig = [
