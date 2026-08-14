@@ -173,6 +173,24 @@ class TestDockerCompose:
         content = self._read()
         assert "backend/data" in content, "SQLite 数据目录应挂载"
 
+    def test_test_service_data_volume_is_named_and_isolated(self):
+        """test 服务 data 卷应使用独立命名卷 test-data，禁止读写生产 backend/data"""
+        content = self._read()
+        assert "test-data:/app/backend/data" in content, "test 服务应使用独立命名卷 test-data"
+        assert "test-data:" in content, "顶层应声明 test-data 命名卷"
+        assert "./backend/data:/app/backend/data" in content, "生产 backend 应保留宿主机数据卷"
+
+    def test_hf_cache_dir_is_parameterized(self):
+        """HF 缓存路径应通过 HF_CACHE_DIR 参数化（backend+test），默认保持现状"""
+        content = self._read()
+        d = "${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}"
+        assert (d + ":/home/appuser/.cache/huggingface:ro") in content, "backend 缓存挂载应参数化"
+        assert (d + "/hub/models--Xenova--bge-small-zh-v1.5/snapshots/main:/app/models/bge-small-zh-v1.5:ro") in content, "backend 模型目录挂载应参数化"
+        assert content.count(d + ":/home/appuser/.cache/huggingface:ro") >= 2, "backend+test 两处通用缓存挂载都应参数化"
+        assert "/home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro" not in content
+        assert "/home/ubuntu/.cache/huggingface" in content, "默认缓存路径应保留以维持现有挂载语义"
+        assert "HF_HOME=/home/appuser/.cache/huggingface" in content
+
     def test_env_file_config(self):
         """应通过 env_file 注入环境变量"""
         content = self._read()

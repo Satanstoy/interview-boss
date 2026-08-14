@@ -15,7 +15,8 @@
 ## 规则
 
 - 部署命令：`./deploy/docker-deploy.sh update`
-- 后端测试：`./deploy/docker-deploy.sh test -q`（构建并使用 `test-runtime`，不是生产 `backend` 容器）
+- 后端测试：`./deploy/docker-deploy.sh test -q`（构建并使用 `test-runtime`，不是生产 `backend` 容器）。`test` 服务 data 卷为独立命名卷 `test-data`（compose 顶层 volumes 声明），挂在 `/app/backend/data`，与生产 `./backend/data` 隔离，测试不得读写生产数据
+- HuggingFace 缓存主机路径经 `HF_CACHE_DIR` 参数化：`${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}`。docker-deploy.sh 本身不设置该变量，compose 在解析时从调用进程环境读取（`HF_CACHE_DIR=/path ./deploy/docker-deploy.sh update/test` 可覆盖）；不设置时默认挂载 `/home/ubuntu/.cache/huggingface`，与旧版行为完全一致
 
 - Worker 默认不随核心服务启动；需要后台任务时执行 `./deploy/docker-deploy.sh worker-up`，任务完成后可执行 `worker-down` 释放资源
 - Docker 构建使用 BuildKit、inline cache 和 npm/uv cache mounts；部署脚本会自动执行磁盘保护和 BuildKit cache 收缩，不要绕过脚本长期直接运行 `docker compose build`

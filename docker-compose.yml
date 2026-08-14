@@ -41,8 +41,8 @@ x-app-service: &app-service
     - EMBEDDING_OFFLINE=1
   volumes:
     - ./backend/data:/app/backend/data
-    - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
-    - /home/ubuntu/.cache/huggingface/hub/models--Xenova--bge-small-zh-v1.5/snapshots/main:/app/models/bge-small-zh-v1.5:ro
+    - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
+    - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}/hub/models--Xenova--bge-small-zh-v1.5/snapshots/main:/app/models/bge-small-zh-v1.5:ro
   networks:
     - data-network
   secrets:
@@ -206,10 +206,10 @@ services:
       - ENV=test
     volumes:
       - ./backend:/app/backend:ro
-      - ./backend/data:/app/backend/data
+      - test-data:/app/backend/data
       # frontend-contract 结构测试需要读取 frontend/src 源码(经 /app/frontend 相对路径)
       - ./frontend:/app/frontend:ro
-      - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
+      - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network
     secrets:
@@ -288,3 +288,4 @@ secrets:
 volumes:
   redis-data:
   oauth-gateway-data:
+  test-data:
