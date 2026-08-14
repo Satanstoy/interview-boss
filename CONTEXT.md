@@ -21,6 +21,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **版本 Manifest（Release Manifest）**:
 描述一个评测组件不可变版本的权威 JSON 快照，包含代码、运行环境、模型、Prompt、Skill、工具、采样和其他会影响评测结果的配置，并通过内容摘要保证创建后不可静默修改。数据库只保存其可查询索引和引用关系，不替代 Manifest 原文。
 
+**执行镜像摘要（Execution Image Digest）**:
+Release Manifest 中用于锁定实际运行容器的不可变 Docker image digest；系统同时记录 Git SHA 和配置摘要，分别追溯源码、运行环境和行为配置，正式 Benchmark 不使用可变的 `latest` 标签作为唯一执行依据。
+
 **评测运行（Eval Run）**:
 管理员针对一个具体评测目标版本发起的一次完整评测执行记录；创建后锁定目标版本、Benchmark Suite、评测协议、Judge、Simulator Harness 和 Candidate Simulator 等依赖，并独立保存执行状态、原始轨迹和评分结果。
 
