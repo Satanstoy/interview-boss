@@ -95,6 +95,16 @@ const DUE_QUESTION_SEEDS = [
   },
 ]
 
+const BACKEND_QUESTION_SEEDS = [
+  {
+    ...DUE_QUESTION_SEEDS[0],
+    id: 201,
+    question: 'Q1 后端开发工程师岗位的 MySQL 索引如何优化？',
+    cat1: '数据库',
+    category: 'cat2_数据库',
+  },
+]
+
 const AUTUMN_RECRUITMENT = {
   graduation_year: 2027,
   batch: 'autumn',
@@ -244,9 +254,11 @@ async function mockAllAPIs(page, options = {}) {
   const reviewedQuestionIds = new Set(initialReviewedQuestionIds)
   const attemptedQuestionIds = new Set(initialReviewedQuestionIds)
   let reviewAttemptsToday = initialReviewedQuestionIds.length
+  let practiceDeckRequestCount = 0
   let questionRequestCount = 0
   const latestRatings = new Map(initialReviewedQuestionIds.map(questionId => [questionId, 'good']))
   let currentRecruitment = { ...recruitment }
+  let currentPosition = MOCK_USER.current_position
 
   // Auth
   await page.route('**/api/auth/refresh', async (route) => {
@@ -308,16 +320,19 @@ async function mockAllAPIs(page, options = {}) {
       return
     }
     if (!isQuestions) {
+      practiceDeckRequestCount += 1
+      await page.evaluate(count => { window.__practiceDeckRequestCount = count }, practiceDeckRequestCount)
       await route.fulfill({ json: { algorithm: 'sm2_lite', items: deckItems } })
       return
     }
     questionRequestCount += 1
     await page.evaluate(count => { window.__practiceQuestionRequestCount = count }, questionRequestCount)
+    const activeQuestionSeeds = currentPosition === '后端开发工程师' ? BACKEND_QUESTION_SEEDS : deckQuestions
     const deck = deckItems.find(candidate => candidate.key === deckKey)
     const deckName = deck?.name || deckKey
     const availableItems = (deckKey === 'due'
-      ? deckQuestions.filter(question => !reviewedQuestionIds.has(question.id))
-      : deckQuestions).map((question) => {
+      ? activeQuestionSeeds.filter(question => !reviewedQuestionIds.has(question.id))
+      : activeQuestionSeeds).map((question) => {
       const latestRating = latestRatings.get(question.id)
       return latestRating
         ? { ...question, last_rating: latestRating, last_reviewed_at: new Date().toISOString(), next_review_at: tomorrow, is_daily_relearning: ['again', 'hard'].includes(latestRating) }
@@ -443,18 +458,40 @@ async function mockAllAPIs(page, options = {}) {
       await route.fulfill({ json: currentRecruitment })
       return
     }
+    if (pathname === '/api/profile/my-position' && route.request().method() === 'PUT') {
+      currentPosition = route.request().postDataJSON()?.position || currentPosition
+      await route.fulfill({
+        json: {
+          status: 'success',
+          current_position: currentPosition,
+          current_position_id: null,
+        },
+      })
+      return
+    }
     if (route.request().method() === 'GET') {
       await route.fulfill({
         json: {
           id: 999, username: 'e2e_tester', email: 'test@example.com',
-          current_position: '前端开发工程师', current_position_id: 1,
-          positions: [{ id: 1, name: '前端开发工程师' }],
+          current_position: currentPosition, current_position_id: currentPosition === '前端开发工程师' ? 1 : null,
+          positions: [{ id: 1, name: '前端开发工程师' }, { id: 2, name: '后端开发工程师' }],
           llm_configured: true, categories: [],
         },
       })
     } else {
       await route.fulfill({ json: { status: 'success' } })
     }
+  })
+
+  await page.route('**/api/positions**', async (route) => {
+    await route.fulfill({
+      json: {
+        positions: [
+          { id: 1, name: '前端开发工程师' },
+          { id: 2, name: '后端开发工程师' },
+        ],
+      },
+    })
   })
 
   // Profile resume
@@ -541,6 +578,27 @@ test.describe('今日复习默认入口与招聘状态行', () => {
     await expect(forecast).toContainText('未来 7 天')
     await expect(forecast).toContainText('预计 0 题')
     await expect(page.getByTestId('practice-forecast-day')).toHaveCount(7)
+  })
+
+  test('切换岗位后返回八股刷题会重新加载当前岗位题单', async ({ page }) => {
+    await gotoPractice(page)
+    await expect(page.getByTestId('practice-focus-card').getByText(DUE_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
+
+    const initialDeckRequestCount = await page.evaluate(() => window.__practiceDeckRequestCount || 0)
+    const initialQuestionRequestCount = await page.evaluate(() => window.__practiceQuestionRequestCount || 0)
+
+    await page.getByRole('button', { name: '设置' }).first().click()
+    await page.locator('.settings-sidebar').getByText('面试偏好').click()
+    await expect(page.getByText('目标岗位').first()).toBeVisible({ timeout: 5000 })
+    await page.getByRole('button', { name: '后端开发工程师', exact: true }).click()
+    await expect(page.getByText('已切换到岗位：后端开发工程师')).toBeVisible({ timeout: 5000 })
+
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await expect(page).toHaveURL(/\/practice/)
+    await expect(page.getByTestId('practice-view')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByTestId('practice-focus-card').getByText(BACKEND_QUESTION_SEEDS[0].question)).toBeVisible({ timeout: 5000 })
+    await expect.poll(() => page.evaluate(() => window.__practiceDeckRequestCount || 0)).toBeGreaterThan(initialDeckRequestCount)
+    await expect.poll(() => page.evaluate(() => window.__practiceQuestionRequestCount || 0)).toBeGreaterThan(initialQuestionRequestCount)
   })
 
   test('无招聘偏好（batch 为空）时不渲染状态行', async ({ page }) => {

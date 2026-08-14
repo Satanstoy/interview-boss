@@ -323,6 +323,14 @@ const selectPracticeDeck = async (deckKey) => {
   }
 }
 
+const refreshPracticeContext = async () => {
+  practiceNavigation.invalidateQuestions()
+  practiceDecksLoaded.value = false
+  if (route.path.startsWith('/practice') && isAuthenticatedForUi.value) {
+    await loadPracticeContext()
+  }
+}
+
 const openPracticeDeckManager = () => router.push('/practice/decks')
 provide('practiceDecks', practiceNavigation)
 
@@ -570,7 +578,7 @@ provide('appData', {
   mergeSearchResults, mergeSearching, startMerge, doMergeSearch,
   confirmMerge, splitAsNew,
   // Practice
-  enterPracticeMode, practiceQuestion, practiceNavigation,
+  enterPracticeMode, practiceQuestion, practiceNavigation, refreshPracticeContext,
   // Highlight
   highlightInterviewId, returnTab, returnToPracticeMode,
   floatingReturnBtn, floatingBtnStyle, masterBankEverShown,

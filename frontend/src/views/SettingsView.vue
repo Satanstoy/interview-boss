@@ -27,6 +27,7 @@ const {
   displayUser, practiceStats, masterBank,
   activeSeason, availableSeasons,
   isBuilding, sidebarCollapsed,
+  refreshPracticeContext,
   handleLogout, handleShareDefaultChanged,
   loadAllData, triggerBuildMasterBank,
   onGoToQuestion,
@@ -34,5 +35,6 @@ const {
 
 const handleProfileUpdated = () => {
   loadAllData()
+  void refreshPracticeContext()
 }
 </script>
