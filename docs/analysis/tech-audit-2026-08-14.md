@@ -3,7 +3,7 @@
 **Auditor**: tech-audit skill（5 个并行维度 subagent + 主 agent 交叉验证）
 **Scope**: full（16 维度；D10 release-only 未跑深扫，D15/D16 为 source-level pass）
 **Repo HEAD at audit time**: fe9685f（master，2026-08-14 01:22）
-**Findings source**: `.tech-audit/work/2026-08-14/findings.tsv`（54 行：4🔴 / 15🟡 / 29🟢 / 6 FIXED）
+**Findings source**: `.tech-audit/work/2026-08-14/findings.tsv`（75 行：4🔴 / 17🟡 / 48🟢 / 6 FIXED，含 CRUD 专项 21 条）
 **Previous audit**: [tech-audit-2026-08-13.md](tech-audit-2026-08-13.md)（61 条：10🔴 / 16🟡 / 35🟢）
 **Stack**: Python/FastAPI + LangGraph · Vue3/Vite/Tailwind/shadcn-vue · SQLite WAL + FAISS · Docker Compose + ARQ worker + oauth-gateway · Bash (deploy/)
 
@@ -37,7 +37,7 @@
 | D14 Correctness & robustness | ❌ 1🔴 | ⚠️ | email 唯一索引已修；**并发注册 500 新🟡** |
 | D15 UX & interaction | ✅ | ⚠️ | a11y 升级（AppTooltip 触点设备无 label） |
 | D16 UI & design-system | ✅ | ✅ | 色板范围收敛 6→2 图 |
-| **Total** | **10🔴/16🟡/35🟢** | **4🔴/15🟡/29🟢+6FIXED** | 🔴 ▼6（4 修复+2 新），🟡 ▼1 |
+| **Total** | **10🔴/16🟡/35🟢** | **4🔴/17🟡/48🟢+6FIXED**（含 CRUD 专项） | 🔴 ▼6（4 修复+2 新） |
 
 ---
 
