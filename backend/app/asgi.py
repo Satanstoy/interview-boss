@@ -18,6 +18,7 @@ from app.routers import (
     answers,
     practice,
     admin_quality,
+    admin_evaluation,
     admin_assistant,
     admin_review,
     admin_source_health,
@@ -243,6 +244,7 @@ app.include_router(questions_pkg_router)
 app.include_router(answers.router)
 app.include_router(practice.router)
 app.include_router(admin_quality.router)
+app.include_router(admin_evaluation.router)
 app.include_router(admin_assistant.router)
 app.include_router(admin_review.router)
 app.include_router(admin_source_health.router)
