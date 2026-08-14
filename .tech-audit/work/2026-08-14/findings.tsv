@@ -104,3 +104,12 @@ FIXED	D2	backend/CLAUDE.md:92	composables 计数仍写 19，实际 20 个 use*.j
 1	D9	question_bank(duplicate_of) / backend/app/services/clustering/full_recluster.py:35; admin_review.py:99	duplicate_of 镜像机制已废除（注释标注），列不再写入（仅 1 行非 NULL），但 full_recluster/faiss/fts 仍 WHERE duplicate_of IS NULL 恒真过滤，idx_qb_duplicate_of 索引死	移除 duplicate_of 列与其索引，相应过滤条件改掉；保留在 FTS 检索中的 hard 过滤不影响结果可删	S	high
 
 2	D2	M31-38 spec	稳定核心债务清偿 spec 已产出并执行: M34/M35/M36 全部完成(god-file 拆分), M31-M33 待做(数据一致性/并发/LLM 配额)	按 spec 里程碑执行	M	certain
+FIXED	D4	auth.py:34,307 + request_ip.py + asgi.py:141	登录限速 key 曾全在 client.host 且全局 200/min 不生效——已修: request_ip.py 可信代理 IP 提取(TRUSTED_PROXY_CIDRS + XFF 校验), asgi.py GlobalRateLimitMiddleware 已接 _check_request_limit(in_middleware=True)	2026-08-14 复查确认代码已含	S	certain
+FIXED	D5	backend/app/services/insights.py:238-250	high_frequency 曾无 owner 过滤——已修: JOIN interview iv + _scope_condition(owner_id IS NULL AND approved) OR owner_id=user + deleted_at 过滤	2026-08-14 复查确认	S	certain
+FIXED	D4	frontend/src/components/business/SettingsMCP.vue:69-72	sessionStorage 持久化 MCP token——已修: 只 JS 内存持有(模块级), 注释明确不落 storage	2026-08-14 复查确认	S	certain
+FIXED	D4	backend/app/routers/auth.py:476-504 login-form	login-form CSRF 豁免+共享失败计数——已修: auth.py:542 跨源请求拒绝(锁定 DoS 防护)	2026-08-14 复查确认	S	certain
+2	D4	backend/app/mcp_server/app.py:127	mcp_api_key 仍支持 URL query 参数传递, 易泄露进访问日志/浏览器历史/Referer——2026-08-14 复查仍存在	移除 query 传递仅接受 header	S	certain
+1	D1	backend/app/routers/chat.py:695 + profile_pkg/resume.py:31 + audio.py:54	上传先 await file.read() 全量入内存再验大小(chat extract-pdf 无上限, resume/audio 上限在 read 之后), 大文件内存放大; 校验仅按 filename 后缀——2026-08-14 复查仍存在	流式/分段读取 + Content-Length 提前 413; magic/真实 MIME 校验	S	certain
+1	D4	backend/app/core/auth.py:296-305 refresh 轮转	refresh 轮转 check-then-delete 非原子(并发同 jti 可双发新 token); access 无状态 15min——2026-08-14 复查仍存在	DELETE...WHERE jti=? 以 0 行判重放	S	probable
+1	D4	backend/app/core/outbound_url.py:89-97	上游 URL SSRF 防护 DNS-rebinding TOCTOU(校验解析与连接时客户端再次解析)——2026-08-14 复查仍存在(低危: 仅管理员/自配上游可达)	固定校验解析 IP 供连接/连接前再验	M	probable
+2	D4	backend/app/routers/auth.py:238-244 _set_refresh_cookie + 230-232 _is_secure	refresh_token cookie secure=_is_secure(request) 信任 x-forwarded-proto(客户端可伪造, 需 trusted 边界), 活跃 nginx 为纯 http 时非 HTTPS 路径明文发送——2026-08-14 复查仍存在	可信代理强制 HTTPS + 权威覆写 X-Forwarded-Proto; 后端无条件 Secure	M	needs-verification
