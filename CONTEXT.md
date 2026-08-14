@@ -93,6 +93,9 @@ Benchmark Case 中可机器读取的评测定义，至少分离 `facts`、`actio
 **Case 输入 Snapshot（Case Input Snapshot）**:
 Benchmark Case 使用的简历、JD、候选人画像、对话初始状态、工具夹具和其他输入上下文的不可变快照；Case 只能引用带内容摘要的 Snapshot，不在运行时读取可变用户数据或外部当前状态。
 
+**Candidate-visible Context Boundary**:
+Candidate Simulator 只接收候选人在真实面试中可见的白名单上下文；Expected Behavior、Hard Assertions、Quality Rubric、Judge 配置和其他评测元数据属于 Harness/Judge 私有上下文，禁止进入 Simulator 输入、工具参数或系统提示词。
+
 **硬断言（Hard Assertion）**:
 对结构、权限、安全、工具契约或必需事实进行可判定校验的评测要求；失败时可以直接阻断案例通过。
 
