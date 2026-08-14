@@ -4,6 +4,23 @@
 
 ## 语言
 
+**AI 评测系统（AI Evaluation System）**:
+面向管理员的统一质量评测空间，用于评测 InterviewBoss 中的 Agent、Workflow 和 Pipeline，不直接面向普通用户。
+_避免使用_: 仅模拟面试评测系统、通用 AI 评测平台
+
+**评测目标（Evaluation Target）**:
+一个可独立定义评测范围、输入、预期行为和质量结果的 Agent、Workflow 或 Pipeline。
+_避免使用_: 被测 Agent（当目标不是 Agent 时）
+
+**系统基线（System Baseline）**:
+评测系统建立时对整个 InterviewBoss 行为状态的固定起点，用于后续判断目标版本的变化。
+
+**评测目标版本（Evaluation Target Release）**:
+某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
+
+**人工对比评测（Human Pairwise Review）**:
+管理员在相同评测输入下比较两个评测目标版本，并记录维度化偏好、平局或共同失败的人工评测结果。
+
 **面试空间（Interview Workspace）**:
 用户用于查看、复盘和继续其面试记录的统一空间。
 
