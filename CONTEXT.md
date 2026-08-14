@@ -30,6 +30,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **按需评测 Worker（On-demand Eval Worker）**:
 消费 Eval Queue 的短生命周期 Worker；在存在待处理 Eval Run 时按需启动，以低并发执行并在队列清空后退出，不为偶发评测长期占用小服务器资源。队列、数据库任务状态和事件日志在 Worker 退出后继续保留。
 
+**Compose Eval Worker**:
+1.0 部署中的独立 Docker Compose `eval-worker` 服务，使用 `eval` profile 和专用 ARQ queue 配置，由宿主机 launcher 以 `run --rm` 按需启动；它与用户任务的常驻 `worker` 服务分开定义、分开限制资源和分开重启策略。
+
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
