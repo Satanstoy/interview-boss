@@ -5,7 +5,45 @@ Functions are organized by domain in submodules and re-exported here
 so that ``from app.db.migrations import _migration_033_cluster_id`` continues to work.
 """
 
+import datetime
 import logging
+import os
+import sqlite3
+
+from app.core.config import DB_PATH
+
+# 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
+DESTRUCTIVE_VERSIONS = {81, 82, 84, 85}
+
+
+def _backup_before_destructive(db_path: str, version: int, name: str) -> str | None:
+    """破坏性迁移前用 SQLite backup API 生成整库快照；源文件不存在则跳过。"""
+    if not db_path or not os.path.exists(db_path):
+        return None
+    backups_dir = os.path.join(os.path.dirname(db_path), "backups")
+    os.makedirs(backups_dir, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(backups_dir, f"pre_migration_v{version:03d}_{stamp}.db")
+    src = sqlite3.connect(db_path)
+    dst = sqlite3.connect(dest)
+    try:
+        with dst:
+            src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
+    logger.info("已备份数据库到 %s（迁移 %03d %s 前）", dest, version, name)
+    return dest
+
+
+def _conn_is_memory(conn) -> bool:
+    """迁移连接是否指向内存库（测试环境），避免误备份生产文件。"""
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        return bool(row and row[1] == "main" and row[2] == "")
+    except Exception:
+        return True
+
 
 # ── Domain submodules ──────────────────────────────────────────────────────
 from app.db.migrations.question_bank import (
@@ -228,6 +266,17 @@ def run_migrations(conn):
         if version in applied:
             continue
         logger.info(f"Applying migration {version:03d}: {name}")
+        destructive = version in DESTRUCTIVE_VERSIONS
+        fk_was_on = False
+        if destructive:
+            # 数据安全：破坏性迁移前整库备份（内存库/文件缺失则跳过）
+            if not _conn_is_memory(conn):
+                _backup_before_destructive(DB_PATH, version, name)
+            # PRAGMA foreign_keys 只能在事务外切换；表重建期间必须关闭，
+            # 否则 DROP 父表会触发隐式 DELETE 级联清空子表
+            fk_was_on = bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+            if fk_was_on:
+                conn.execute("PRAGMA foreign_keys=OFF")
         cursor.execute("BEGIN")
         try:
             func(conn)
@@ -239,3 +288,6 @@ def run_migrations(conn):
         except Exception:
             cursor.execute("ROLLBACK")
             raise
+        finally:
+            if destructive and fk_was_on:
+                conn.execute("PRAGMA foreign_keys=ON")
