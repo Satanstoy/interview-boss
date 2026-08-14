@@ -152,6 +152,16 @@ Routers → Services → Core/DB → (external)
 - `coding_problem_favorites` 保存用户收藏，`coding_playlists` / `coding_playlist_items` 保存个人题单；题单有稳定的用户自定义顺序，支持创建、上下移动、删除和从当前题单移除题目；列表接口统一返回 `is_favorite`、`attempt_count`、`is_solved`，并支持 `scope=favorites`、`playlist_id`、搜索和筛选。
 - `POST /api/coding/import` 通过 `raw_llm_call` 使用用户的 AI 配置，Markdown 和 Prompt 都按不可信内容传给模型，模型只返回结构化题目 JSON；单次最多导入 50 道，按当前用户和标题去重。
 
+### 题库来源双写一致性（audit D9）
+
+`question_bank` 的 JSON 双写列（`sources` / `original_questions` / `original_question_sources`）必须与规范化表
+（`question_sources` / `question_original_items` / `question_original_item_sources`）严格一致。任何写路径都不允许只更新一侧。
+
+- **统一入口**：写 `question_bank` JSON 列的路径必须走 `app.services.question_bank_integrity.sync_question_bank_projections(` cursor, qb_id, sources, original_questions, original_question_sources `)` —— 它在**同一事务内**先重建规范化表，再逐一比对 JSON collections 与表集合，任一不匹配抛 `RuntimeError`（fail-closed），由外层事务整体回滚。禁止再用「先软删全部再 `INSERT OR IGNORE`」的手工重建（在 `UNIQUE(question_bank_id, url)` 下无法恢复已软删同 URL 行，会静默产生 JSON 持有该 URL 而表软删的漂移，正是审计实测的 xsec_token 笔记 URL 未落表）。
+- **已覆盖路径**：submit/增量更新（`db/operations._apply_incremental_txn`、`insert_personal_questions_txn`）、pipeline 写库（`services/pipeline/writer.py`）、题库构建/维护（`routers/bank_build.py`、`questions_pkg/{share,mutations,bulk}.py`、`admin_review.py`）、孤岛碎片整理合并（`services/pipeline/compact._do_merge_to_existing`，audit D9 本次修复）。
+- **检测**：weekly cron 与 `backend/scripts/check_source_health.py` 复用 `app.services.source_health._check_dual_write` 同口径；存量漂移用 `backend/scripts/fix_source_consistency.py` 修复。
+- **回归测试**：`backend/tests/services/test_question_bank_integrity.py::test_compact_merge_keeps_json_and_normalized_sources_aligned`（变异验证：去掉 sync 重建后测试变红）。
+
 ## 面试 Agent 质量保护
 
 面试 chat agent (`agents/chat/pipeline.py`) 包含以下质量保护机制：
@@ -228,8 +238,17 @@ docker compose --profile test run --rm -e RUN_REAL_REDIS=1 -e PYTHONPYCACHEPREFI
 
 `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `LLM_MODEL_NAME`, `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DEBUG`, `ALLOWED_ORIGINS`
 
+## 回归测试纪律（audit D3 —— 强制）
+
+**每个代码级 fix 提交必须携带对应回归测试，红线 ≥80%**（audit 口径：最近 15 个 fix 提交中带回归测试的比例 ≥ 12，即 80%）。
+
+- **必须带回归测试**：凡修改 `backend/app/**/*.py`（或前端 `frontend/src/**/*.{vue,js}`）**行为/漏洞**的 `fix(...)` 提交（auth/security/fts/practice/review/upload/email/mcp/db 行为等），必须同时提交一个能抓住该 bug 的回归测试到对应测试域：auth→`security/`、email→`security/`、upload→`security/`、fts/practice→`services/`。测试必须**做变异验证**（临时移除修复代码后测试变红），禁止空转断言。
+- **可豁免类别**（commit 需注明理由）：纯 CI 配置（workflow/gitleaks allowlist/依赖 bootstrap）、部署/运维脚本（healthcheck/systemd/migration 基建）、纯测试基建（修复测试本身/mock）、纯文档（comment/CLAUDE.md/docs/）。这些不改变应用运行时行为。
+- **漏配即补**：对历史缺回归测试的代码级 fix，立即补对应测试域回归测试（如 upload 修复补在 `security/test_upload_size_guard.py`）。
+- 详细规则见 `.claude/rules/test-files.md`。
+
 ## 详细规则
 
 Python 编码规范和测试规则见 `.claude/rules/`：
 - `python-backend.md` — 编辑 Python 文件时自动加载
-- `test-files.md` — 编辑测试文件时自动加载
+- `test-files.md` — 编辑测试文件时自动加载（含 audit D3 ≥80% 回归红线与豁免类别）
