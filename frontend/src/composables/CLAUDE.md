@@ -24,6 +24,8 @@ Vue 3 Composition API 的可复用逻辑，`use*` 命名前缀。
 | `useSidebar.js` | 侧边栏状态 |
 | `useSubmitJobs.js` | 导入任务恢复、SSE job done 回调 |
 | `useTabScroll.js` | Tab 滚动 |
+| `useChatFormat.js` | 聊天流式/等待状态格式化计算属性（接收 refs），从 ChatView.vue 抽出 |
+| `useChatInput.js` | 聊天输入框行为：`autoResize`/`resetInputHeight`/`onInputKeydown`，从 ChatView.vue 抽出 |
 | `useTheme.js` | 主题切换 |
 
 ## 核心规则

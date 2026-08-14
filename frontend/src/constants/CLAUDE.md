@@ -8,6 +8,7 @@
 |------|------|
 | `config.js` | 应用配置常量（API 路径、分页大小、SSE 重连、防抖延迟、侧边栏宽度等；部分宽度值为历史/全局配置，`useSidebar.js` 仍有局部交互常量） |
 | `enums.js` | 业务枚举（题库模式、难度等级、Tab 名称、排序方式） |
+| `chatSuggestions.js` | 聊天开场建议（`promptSuggestions`），从 ChatView.vue 抽出 |
 
 ## 常量清单
 

@@ -401,6 +401,10 @@ import { ref, computed, nextTick, onMounted, onActivated, watch } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
+import { formatGroupTime, formatRelativeTime, createClientRequestId } from '@/utils/chatFormat.js'
+import { useChatFormat } from '@/composables/useChatFormat.js'
+import { promptSuggestions } from '@/constants/chatSuggestions.js'
+import { useChatInput } from '@/composables/useChatInput.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -505,30 +509,9 @@ const liveThinkingSeconds = ref(0)
 let thinkingTimer = null
 let activeRequestContext = null
 
-function createClientRequestId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
-  return `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
 // Prompt suggestions
-const promptSuggestions = [
-  {
-    icon: MessageSquare,
-    text: '自由练习',
-    title: '自由练习',
-    description: '从题库随机抽题，按你的节奏练习',
-    mode: 'free_practice',
-  },
-  {
-    icon: Briefcase,
-    text: '定制面试',
-    title: '定制面试',
-    description: '结合目标 JD 和简历，模拟岗位面试',
-    mode: 'jd_resume',
-  },
-]
 
 const inputPlaceholder = computed(() => {
   if (pendingNewConversation.value) {
@@ -549,43 +532,16 @@ const activeConversationMode = computed(() =>
   activeConversation.value?.mode === 'jd_resume' ? 'JD 定制面试' : '自由练习'
 )
 
-const renderStreamingContent = computed(() => {
-  if (!streamingContent.value) return ''
-  const cleaned = streamingContent.value
-    .replace(/\[BASIS\][\s\S]*?\[\/BASIS\]/g, '')
-    .replace(/\[BASIS\]\{[^}]*\}/g, '')
-    .trim()
-  return renderSafeMarkdown(cleaned || streamingContent.value)
+const { renderStreamingContent, waitingText, displayThinkingDuration } = useChatFormat({
+  streamingContent,
+  processingSteps,
+  thinkingDuration,
+  liveThinkingSeconds,
+  renderSafeMarkdown,
 })
 
-const waitingText = computed(() => {
-  if (processingSteps.value.length === 0) return '正在连接...'
-  const lastStep = processingSteps.value[processingSteps.value.length - 1]
-  if (!lastStep) return '正在思考...'
-  const stepTextMap = {
-    'retrieve': '检索相关题目...',
-    'evaluate': '评估答案...',
-    'generate': '生成回答...',
-    'generating': '正在组织面试官回复...',
-    'search': '搜索知识库...',
-    'analyze': '分析问题...',
-    'think': '深度思考...',
-    'load_skill': '正在加载面试策略...',
-    'search_questions': '正在检索相关面试题...',
-    'draw_questions': '正在从题库抽题...',
-    'project-deep-dive': '正在切换到项目深挖...',
-    'algorithm-coding': '正在切换到算法面试...',
-    'interview-rhythm': '正在调整面试节奏...',
-    'theory-qa': '正在准备理论追问...',
-    'hr-soft-skills': '正在准备软技能追问...',
-    'adaptive-difficulty': '正在调整题目难度...',
-  }
-  return stepTextMap[lastStep.step] || lastStep.message || '思考中...'
-})
 
-const displayThinkingDuration = computed(() => {
-  return thinkingDuration.value || liveThinkingSeconds.value
-})
+
 
 function startThinkingTimer() {
   stopThinkingTimer()
@@ -631,19 +587,6 @@ const groupedMessages = computed(() => {
   return groups
 })
 
-function formatGroupTime(date) {
-  const now = new Date()
-  const diff = now - date
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-  
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  if (hours < 24) return `${hours} 小时前`
-  if (days < 7) return `${days} 天前`
-  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
-}
 
 // Load conversations
 async function loadConversations() {
@@ -1381,25 +1324,12 @@ async function handleStop() {
   await cancelActiveRequest('client_stop', true)
 }
 
-function autoResize() {
-  const el = inputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-}
+const { autoResize, resetInputHeight, onInputKeydown } = useChatInput({
+  inputRef,
+  onSend: handleSend,
+})
 
-function resetInputHeight() {
-  nextTick(() => {
-    if (inputRef.value) inputRef.value.style.height = '32px'
-  })
-}
 
-function onInputKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    handleSend()
-  }
-}
 
 function onMessagesScroll() {
   const el = messagesContainer.value
@@ -1415,16 +1345,6 @@ async function scrollToBottom(force = false) {
   }
 }
 
-function formatRelativeTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts + (ts.includes('Z') || ts.includes('+') ? '' : 'Z'))
-  const now = new Date()
-  const diff = now - d
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
 
 // Restore active conversation from localStorage (only if no modelValue from URL)
 const savedId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
