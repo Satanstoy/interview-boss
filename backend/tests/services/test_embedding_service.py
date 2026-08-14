@@ -40,7 +40,7 @@ class TestEncodeTextsBackendBehavior:
 
             # Should NOT raise — falls back to hash
             result = mod.encode_texts(["test"])
-            assert result.shape == (1, mod._DIMENSION)
+            assert result.shape == (1, mod._SILICONFLOW_DIMENSION)
 
     def test_explicit_hash_backend(self):
         """When EMBEDDING_BACKEND=hash, always uses hash encoding."""
@@ -53,7 +53,7 @@ class TestEncodeTextsBackendBehavior:
         """Empty input returns correctly shaped empty array."""
         for mod in _reload_module():
             result = mod.encode_texts([])
-            assert result.shape == (0, mod._DIMENSION)
+            assert result.shape == (0, mod._SILICONFLOW_DIMENSION)
 
     def test_unsupported_backend_raises(self):
         """Unknown backend value raises ValueError."""

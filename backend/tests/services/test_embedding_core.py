@@ -16,7 +16,7 @@ class TestEncodeTexts:
     # =========================================================
     def test_encode_texts_returns_correct_shape_and_dtype(self):
         """
-        正常输入应返回 (N, 512) 的 float32 numpy array
+        正常输入应返回 (N, 1024) 的 float32 numpy array
 
         红灯阶段：embedding_service 模块尚未创建
         """
@@ -26,7 +26,7 @@ class TestEncodeTexts:
         result = encode_texts(texts)
 
         assert isinstance(result, np.ndarray)
-        assert result.shape == (3, 512)
+        assert result.shape == (3, 1024)
         assert result.dtype == np.float32
 
     # =========================================================
@@ -60,12 +60,12 @@ class TestFaissIndex:
         """
         from app.services.embedding_service import build_index, search_index
 
-        # 构造 5 个 512 维向量（归一化）
-        vectors = np.random.randn(5, 512).astype(np.float32)
+        # 构造 5 个 1024 维向量（归一化, SiliconFlow bge-m3 维度）
+        vectors = np.random.randn(5, 1024).astype(np.float32)
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
 
         # query = 向量 2 + 小噪声（保证最相似）
-        query = vectors[2] + np.random.randn(512).astype(np.float32) * 0.01
+        query = vectors[2] + np.random.randn(1024).astype(np.float32) * 0.01
         query /= np.linalg.norm(query)
 
         index = build_index(vectors)
@@ -84,7 +84,7 @@ class TestFaissIndex:
         """
         from app.services.embedding_service import build_index, search_index
 
-        vectors = np.random.randn(3, 512).astype(np.float32)
+        vectors = np.random.randn(3, 1024).astype(np.float32)
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
         query = vectors[0].reshape(1, -1)
 
@@ -102,8 +102,8 @@ class TestFaissIndex:
         """
         from app.services.embedding_service import build_index, search_index
 
-        empty_vectors = np.array([], dtype=np.float32).reshape(0, 512)
-        query = np.random.randn(1, 512).astype(np.float32)
+        empty_vectors = np.array([], dtype=np.float32).reshape(0, 1024)
+        query = np.random.randn(1, 1024).astype(np.float32)
 
         index = build_index(empty_vectors)
         indices, scores = search_index(index, query, top_k=5)
