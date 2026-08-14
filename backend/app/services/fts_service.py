@@ -110,6 +110,16 @@ def _compute_idf_cache():
     return _idf_cache
 
 
+def _invalidate_idf_cache():
+    """失效 IDF 模块级缓存（D9 audit）。
+
+    question_fts 增删重建都会改变词频，若不重置，`_compute_idf_cache`
+    会永远返回首次计算的陈旧 IDF，导致自适应 RRF 权重失真。
+    """
+    global _idf_cache
+    _idf_cache = None
+
+
 def _expand_query(keywords: list[str]) -> list[str]:
     """查询扩展：将缩写展开为完整术语（零 LLM 成本）
 
@@ -364,12 +374,36 @@ def sync_fts_entry(question_bank_id: int) -> None:
         )
         conn.commit()
 
+    # 词频随新增/更新变化，失效 IDF 缓存（D9 audit）
+    _invalidate_idf_cache()
+
 
 def delete_fts_entry(question_bank_id: int) -> None:
     """从 FTS5 索引中删除一条题目"""
     with get_db_connection() as conn:
         conn.execute("DELETE FROM question_fts WHERE rowid = ?", (question_bank_id,))
         conn.commit()
+
+    # 词频随删除变化，失效 IDF 缓存（D9 audit）
+    _invalidate_idf_cache()
+
+
+def rebuild_fts_index() -> None:
+    """全量重建 question_fts 索引，使其与 question_bank 完全对齐。
+
+    手工重建路径（迁移 082 已用触发器接管运行时同步；本条用于一次性/运维
+    重建或测试复位），重建后自动失效 IDF 缓存，保证自适应 RRF 权重重算。
+    """
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM question_fts")
+        conn.execute(
+            "INSERT INTO question_fts (rowid, question, cat1, cat2, tags, ai_answer) "
+            "SELECT id, question, cat1, cat2, tags, ai_answer FROM question_bank"
+        )
+        conn.commit()
+        rebuilt = conn.execute("SELECT count(*) FROM question_fts").fetchone()[0]
+    logger.info(f"FTS 索引全量重建完成: {rebuilt} 条")
+    _invalidate_idf_cache()
 
 
 def _relevance_score(

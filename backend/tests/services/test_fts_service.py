@@ -445,3 +445,80 @@ class TestHybridSearch:
 
         result = hybrid_search(keywords=[], query_text="", limit=3)
         assert result == []
+
+
+class TestIdfCacheInvalidation:
+    """D9 audit — _idf_cache 是模块级缓存，增删条目/重建时必须失效。
+
+    否则 IDF 一旦在某次查询时计算过，后续 sync/delete/rebuild 都不会
+    重算，自适应 RRF 权重将永久陈旧（生产长跑进程尤其明显）。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_idf_cache(self):
+        """每个用例独立 DB，模块级缓存须在用例前后重置避免交叉污染。"""
+        import app.services.fts_service as fts
+        saved = fts._idf_cache
+        fts._idf_cache = None
+        yield
+        fts._idf_cache = saved
+
+    def _insert_and_sync(self, conn, qid, question, tags):
+        conn.execute(
+            "INSERT INTO question_bank (id, question, cat1, cat2, tags, status, job_position) "
+            "VALUES (?, ?, ?, ?, ?, 'approved', '后端开发')",
+            (qid, question, "中间件", "缓存", tags),
+        )
+        conn.commit()
+        from app.services.fts_service import sync_fts_entry
+        sync_fts_entry(qid)
+
+    def test_sync_fts_entry_invalidates_idf_cache(self, test_db):
+        """sync 新增文档后，_idf_cache 应重算并包含新词，而非返回旧缓存。"""
+        from app.services import fts_service
+
+        # 空库时计算一次 → 缓存为空且被记住
+        assert fts_service._compute_idf_cache() == {}
+
+        # 同步一条含唯一词 tokem_alpha 的题目
+        self._insert_and_sync(test_db, 1, "Redis 缓存策略", "redis,tokemalpha")
+
+        # 若 sync 不失效缓存，这里仍返回老的空缓存；修复后应重算
+        cache = fts_service._compute_idf_cache()
+        assert "tokemalpha" in cache, \
+            f"sync_fts_entry 后 IDF 缓存应重算并包含新词, 实际={cache}"
+
+    def test_delete_fts_entry_invalidates_idf_cache(self, test_db):
+        """delete 移除文档后，_idf_cache 应剔除该词，而非保留陈旧条目。"""
+        from app.services import fts_service
+
+        self._insert_and_sync(test_db, 1, "Redis 缓存策略", "redis,tokembeta")
+        cache = fts_service._compute_idf_cache()
+        assert "tokembeta" in cache
+
+        # 删除文档（软删 + 从 FTS 索引移除）
+        test_db.execute("DELETE FROM question_bank WHERE id = 1")
+        test_db.commit()
+        from app.services.fts_service import delete_fts_entry
+        delete_fts_entry(1)
+
+        cache2 = fts_service._compute_idf_cache()
+        assert "tokembeta" not in cache2, \
+            f"delete_fts_entry 后 IDF 缓存应剔除该词, 实际={cache2}"
+
+    def test_rebuild_fts_index_invalidates_idf_cache(self, test_db):
+        """全量重建 FTS 索引后，_idf_cache 应重算，反映 DB 最新内容。"""
+        from app.services import fts_service
+
+        # 先空库计算缓存（记住空缓存）
+        assert fts_service._compute_idf_cache() == {}
+
+        # 补一条含唯一词的题目
+        self._insert_and_sync(test_db, 1, "MySQL 索引优化", "mysql,tokemgamma")
+
+        # 全量重建 FTS 索引（重建后应可检索并重算 IDF 缓存）
+        fts_service.rebuild_fts_index()
+
+        cache = fts_service._compute_idf_cache()
+        assert "tokemgamma" in cache, \
+            f"rebuild_fts_index 后 IDF 缓存应重算, 实际={cache}"
