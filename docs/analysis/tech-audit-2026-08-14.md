@@ -3,7 +3,7 @@
 **Auditor**: tech-audit skill（5 个并行维度 subagent + 主 agent 交叉验证）
 **Scope**: full（16 维度；D10 release-only 未跑深扫，D15/D16 为 source-level pass）
 **Repo HEAD at audit time**: fe9685f（master，2026-08-14 01:22）
-**Findings source**: `.tech-audit/work/2026-08-14/findings.tsv`（75 行：4🔴 / 17🟡 / 48🟢 / 6 FIXED，含 CRUD 专项 21 条）
+**Findings source**: `.tech-audit/work/2026-08-14/findings.tsv`（103 行：4🔴 / 27🟡 / 56🟢 / 10🟢low / 6 FIXED，含 CRUD 专项 21 条 + Schema 专项 28 条，见 `docs/analysis/tech-audit-2026-08-14-schema.md`）
 **Previous audit**: [tech-audit-2026-08-13.md](tech-audit-2026-08-13.md)（61 条：10🔴 / 16🟡 / 35🟢）
 **Stack**: Python/FastAPI + LangGraph · Vue3/Vite/Tailwind/shadcn-vue · SQLite WAL + FAISS · Docker Compose + ARQ worker + oauth-gateway · Bash (deploy/)
 

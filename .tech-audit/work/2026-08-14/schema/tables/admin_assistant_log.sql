@@ -1,0 +1,1 @@
+CREATE TABLE admin_assistant_log (id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL,admin_id INTEGER NOT NULL,role TEXT NOT NULL CHECK (role IN ('user','assistant','action')),content TEXT NOT NULL DEFAULT '',tool_trace TEXT,created_at TEXT DEFAULT (datetime('now')));

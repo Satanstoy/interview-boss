@@ -1,0 +1,23 @@
+CREATE TABLE user_question_review (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            question_bank_id INTEGER NOT NULL,
+            state TEXT NOT NULL DEFAULT 'new',
+            proficiency INTEGER NOT NULL DEFAULT 0,
+            review_count INTEGER NOT NULL DEFAULT 0,
+            lapse_count INTEGER NOT NULL DEFAULT 0,
+            last_rating TEXT DEFAULT '',
+            last_score INTEGER,
+            last_reviewed_at TIMESTAMP,
+            next_review_at TIMESTAMP,
+            interval_days REAL NOT NULL DEFAULT 0,
+            ease_factor REAL NOT NULL DEFAULT 2.3,
+            stability_days REAL NOT NULL DEFAULT 0,
+            difficulty REAL NOT NULL DEFAULT 0.3,
+            algorithm TEXT NOT NULL DEFAULT 'sm2_lite',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE,
+            UNIQUE (user_id, question_bank_id)
+        );

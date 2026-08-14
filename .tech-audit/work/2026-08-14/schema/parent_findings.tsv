@@ -1,0 +1,7 @@
+severity	dim	location	title	fix	effort	confidence
+3	D9	backend/data/interview-boss.db + backend/app/db/connection.py:35	FK 孤儿数据 1319 行（历史遗留：e3936da 启用 foreign_keys=ON 前级联从未生效，硬删父行留孤儿）	一次性清理迁移：DELETE 孤儿 chat_messages/asked_questions/question_sources/…，迁移前自动备份；新增 PRAGMA foreign_key_check 回归测试防复发	M	high
+3	D9	docs/（无架构文档）	schema 文档缺失：80 个迁移 67 张表无 docs/architecture/schema.md，迁移 080 已在途	生成 docs/architecture/schema.md（表清单/列/索引/ER 简图/软删与 owner 约定），纳入 CLAUDE.md 维护流程	M	high
+2	D9	practice_decks(deck_key) + user_question_review(UNIQUE(user_id,question_bank_id))	重复唯一索引：表级 UNIQUE 与显式 UNIQUE INDEX 并存（idx_practice_deck_key / idx_uqr_user_question）	删除两个显式唯一索引，保留 sqlite_autoindex；写迁移验证索引重复清理	S	high
+2	D9	mcp_sessions.updated_at(INTEGER) / login_failures.locked_until(REAL) / jobs.available_at(TEXT DEFAULT '')	时间戳格式混杂：INTEGER epoch / REAL epoch / TEXT 空串哨兵与全库 datetime('now') 文本并存	统一 ISO-8601 TEXT + DEFAULT CURRENT_TIMESTAMP；jobs.available_at 去掉 '' 哨兵改 NOT NULL DEFAULT CURRENT_TIMESTAMP	M	high
+2	D9	question_bank.vector	死列：vector TEXT 仅迁移脚本触碰（data_repair.py 置 NULL），现役向量列为 embedding BLOB	归档/清理死列（可并入大迁移），先确认无查询引用	S	high
+2	D9	backend/app/db/migrations/__init__.py + jobs/analysis_queue/cluster_review_tasks/interview_distribution_refresh_jobs/chat_side_effect_jobs/task_logs	任务持久化碎片化：6 套队列表各自为政（jobs+payloads / analysis_queue / cluster_review_tasks / distribution_refresh_jobs / side_effect_jobs / task_logs）	新任务类型优先复用 jobs 表（job_type 维度）+ job_lifecycle；存量表冻结不再扩张；评估 jobs 留存清理策略	L	medium

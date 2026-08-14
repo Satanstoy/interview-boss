@@ -1,0 +1,20 @@
+CREATE TABLE question_bank (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT NOT NULL,
+                cat1 TEXT,
+                cat2 TEXT,
+                tags TEXT,
+                difficulty TEXT,
+                frequency INTEGER DEFAULT 1,
+                ai_answer TEXT,
+                vector TEXT,
+                sources TEXT DEFAULT '[]',
+                is_starred INTEGER DEFAULT 0,
+                owner_id INTEGER,
+                submitted_by INTEGER,
+                status TEXT DEFAULT 'approved',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, original_questions TEXT DEFAULT '[]', original_question_sources TEXT DEFAULT '[]', job_position TEXT DEFAULT '', deleted_at TIMESTAMP, question_manually_edited INTEGER DEFAULT 0, duplicate_of INTEGER DEFAULT NULL, embedding BLOB, cluster_id INTEGER DEFAULT NULL, embedding_model TEXT DEFAULT NULL, embedding_dim INTEGER DEFAULT NULL, answer_sources TEXT DEFAULT NULL, cluster_label TEXT DEFAULT NULL,
+                FOREIGN KEY (owner_id) REFERENCES users(id),
+                FOREIGN KEY (submitted_by) REFERENCES users(id)
+            );
