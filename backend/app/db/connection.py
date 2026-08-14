@@ -47,6 +47,10 @@ def init_db():
         from app.db.migrations.sources import ensure_public_url_signature_unique_indexes
 
         ensure_public_url_signature_unique_indexes(conn)
+        from app.evaluation.benchmark_catalog import sync_builtin_benchmarks
+
+        sync_builtin_benchmarks(conn)
+        conn.commit()
 
 
 async def run_db(func):

@@ -1,0 +1,31 @@
+{
+  "case_key": "counter_question_flow",
+  "scenario_key": "counter_question_flow",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "中级 RAG 与 Agent 候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 8,
+      "opening": "你好，我想重点介绍我做过的 Agent 编排。"
+    },
+    "harness_context": {
+      "behavior_injections": {"3": "候选人反问方案在真实业务里的落地和改进空间"}
+    }
+  },
+  "contract": {
+    "facts": ["Candidate asks a technical counter-question during the flow"],
+    "actions": ["answers the counter-question", "uses the answer to continue or refine the interview"],
+    "boundaries": ["does not dismiss the candidate's question"],
+    "quality_requirements": ["counter-question handling feels collaborative", "flow does not become a generic FAQ"],
+    "hard_assertions": [
+      {"id": "counter_question_answered", "description": "The counter-question is answered"},
+      {"id": "flow_continues", "description": "The interview continues with a relevant next step"}
+    ],
+    "rubric": {
+      "counter_question_handling": {"weight": 0.4, "anchors": {"1": "ignored", "3": "brief", "5": "substantive"}},
+      "conversation_flow": {"weight": 0.3, "anchors": {"1": "derails", "3": "acceptable", "5": "smooth"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface", "3": "adequate", "5": "deep"}}
+    }
+  }
+}

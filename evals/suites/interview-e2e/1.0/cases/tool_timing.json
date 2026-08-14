@@ -1,0 +1,30 @@
+{
+  "case_key": "tool_timing",
+  "scenario_key": "tool_timing",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "需要通过简历和题库工具辅助评估的中级候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 6,
+      "opening": "你好，我做过 RAG 检索和 Agent 工具调用。"
+    },
+    "harness_context": {"tool_fixture": "deterministic-interview-search"}
+  },
+  "contract": {
+    "facts": ["A deterministic search fixture is available to the interviewer"],
+    "actions": ["uses a tool only when it improves the next question", "references useful tool output"],
+    "boundaries": ["does not expose raw tool payload or internal names to candidate"],
+    "quality_requirements": ["tool calls are timely", "tool output changes the interview trajectory"],
+    "hard_assertions": [
+      {"id": "tool_result_used", "description": "At least one useful tool result is reflected in a later question"},
+      {"id": "no_raw_tool_leak", "description": "Internal tool payload is not exposed verbatim"}
+    ],
+    "rubric": {
+      "tool_effectiveness": {"weight": 0.35, "anchors": {"1": "unused", "3": "partly used", "5": "precise and consequential"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface", "3": "adequate", "5": "deep"}},
+      "conversation_flow": {"weight": 0.2, "anchors": {"1": "mechanical", "3": "acceptable", "5": "natural"}},
+      "role_adherence": {"weight": 0.15, "anchors": {"1": "leaks internals", "3": "minor drift", "5": "clean"}}
+    }
+  }
+}

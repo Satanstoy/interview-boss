@@ -1,0 +1,29 @@
+{
+  "case_key": "natural_closing",
+  "scenario_key": "natural_closing",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "中级 RAG 与 Agent 候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 14,
+      "opening": "你好，我可以从最近做的 RAG 项目开始。"
+    },
+    "harness_context": {}
+  },
+  "contract": {
+    "facts": ["The candidate does not force a closing signal early"],
+    "actions": ["collects enough evidence", "transitions to closing without an abrupt stop"],
+    "boundaries": ["does not end while an answer is incomplete"],
+    "quality_requirements": ["closing references the interview evidence", "ending feels intentional"],
+    "hard_assertions": [
+      {"id": "closing_present", "description": "A clear closing exchange is present"},
+      {"id": "no_abrupt_stop", "description": "The interview does not stop mid-answer"}
+    ],
+    "rubric": {
+      "closing_quality": {"weight": 0.4, "anchors": {"1": "abrupt", "3": "adequate", "5": "specific and natural"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface", "3": "adequate", "5": "strong"}},
+      "conversation_flow": {"weight": 0.3, "anchors": {"1": "awkward", "3": "mostly natural", "5": "smooth"}}
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "release_key": "interview-e2e-suite@1.0",
+  "release_type": "benchmark_suite",
+  "version": "1.0",
+  "target_type": "interview",
+  "judge_model": "fixed-judge-model",
+  "description": "InterviewBoss 模拟面试端到端固定基准集 1.0",
+  "protocol_release_key": "eval-protocol@1.0",
+  "case_files": [
+    "long_session_mid.json",
+    "long_session_senior.json",
+    "long_session_jd.json",
+    "error_correction.json",
+    "early_close_guard.json",
+    "proper_end.json",
+    "insufficient_evidence.json",
+    "counter_question.json",
+    "greeting_role_adherence.json",
+    "tool_timing.json",
+    "natural_closing.json",
+    "counter_question_flow.json"
+  ]
+}

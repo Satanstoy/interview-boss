@@ -1,0 +1,34 @@
+{
+  "case_key": "long_session_senior",
+  "scenario_key": "long_session",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "4 年后端与 2 年 Agent 开发经验，搭建过 MCP 工具平台和分布式基础设施",
+      "difficulty": "senior",
+      "mode": "free_practice",
+      "max_turns": 20,
+      "opening": "大家好，我有后端和 Agent 平台建设经验。"
+    },
+    "harness_context": {
+      "candidate_prompt_overrides": {
+        "20": "回答完后自然表示今天聊得很充实，给面试官收尾机会。"
+      }
+    }
+  },
+  "contract": {
+    "facts": ["Candidate has senior backend and Agent platform experience"],
+    "actions": ["tests architecture depth", "tests distributed systems reasoning", "closes after sufficient evidence"],
+    "boundaries": ["does not reveal hidden scoring criteria"],
+    "quality_requirements": ["questions adapt to senior-level answers", "follow-ups test trade-offs"],
+    "hard_assertions": [
+      {"id": "adaptive_follow_up", "description": "At least one follow-up references the candidate answer"},
+      {"id": "closing_present", "description": "The final exchange contains a structured closing"}
+    ],
+    "rubric": {
+      "interview_depth": {"weight": 0.35, "anchors": {"1": "surface", "3": "adequate", "5": "senior-level depth"}},
+      "topic_coverage": {"weight": 0.2, "anchors": {"1": "narrow", "3": "balanced", "5": "comprehensive"}},
+      "conversation_flow": {"weight": 0.2, "anchors": {"1": "mechanical", "3": "acceptable", "5": "natural"}},
+      "closing_quality": {"weight": 0.25, "anchors": {"1": "abrupt", "3": "brief", "5": "actionable"}}
+    }
+  }
+}

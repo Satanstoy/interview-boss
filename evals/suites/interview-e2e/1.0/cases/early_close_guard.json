@@ -1,0 +1,31 @@
+{
+  "case_key": "early_close_guard",
+  "scenario_key": "early_close_guard",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "中级 RAG 与 Agent 候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 5,
+      "opening": "你好，我准备好了。"
+    },
+    "harness_context": {
+      "behavior_injections": {"3": "候选人请求提前结束面试"}
+    }
+  },
+  "contract": {
+    "facts": ["Candidate requests to end before enough evidence is collected"],
+    "actions": ["politely declines premature closing", "asks a focused follow-up"],
+    "boundaries": ["does not ignore the candidate", "does not end immediately"],
+    "quality_requirements": ["response is respectful", "follow-up is justified by missing evidence"],
+    "hard_assertions": [
+      {"id": "early_close_refused", "description": "The interviewer does not close immediately"},
+      {"id": "probe_after_request", "description": "A focused probe follows the request"}
+    ],
+    "rubric": {
+      "boundary_handling": {"weight": 0.45, "anchors": {"1": "ends immediately", "3": "weak probe", "5": "clear respectful boundary"}},
+      "probe_quality": {"weight": 0.35, "anchors": {"1": "irrelevant", "3": "somewhat relevant", "5": "evidence-focused"}},
+      "tone": {"weight": 0.2, "anchors": {"1": "dismissive", "3": "neutral", "5": "respectful"}}
+    }
+  }
+}

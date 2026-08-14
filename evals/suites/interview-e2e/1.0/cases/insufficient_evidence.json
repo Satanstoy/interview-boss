@@ -1,0 +1,33 @@
+{
+  "case_key": "insufficient_evidence",
+  "scenario_key": "insufficient_evidence",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "只愿意给出简短结论的中级候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 5,
+      "opening": "你好，我做过一些后端项目。"
+    },
+    "harness_context": {
+      "behavior_injections": {
+        "3": "候选人只回答做过、用过，不提供细节",
+        "4": "候选人继续给出模糊回答"
+      }
+    }
+  },
+  "contract": {
+    "facts": ["Candidate answers are intentionally vague"],
+    "actions": ["asks for concrete evidence", "probes decisions, scale, and outcomes"],
+    "boundaries": ["does not fabricate candidate details"],
+    "quality_requirements": ["follow-ups are specific", "the interviewer distinguishes lack of evidence from failure"],
+    "hard_assertions": [
+      {"id": "detail_probe", "description": "At least two detail-oriented probes occur"}
+    ],
+    "rubric": {
+      "probe_quality": {"weight": 0.5, "anchors": {"1": "accepts vague answer", "3": "generic follow-up", "5": "specific evidence probe"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface", "3": "some detail", "5": "clear evidence chain"}},
+      "tone": {"weight": 0.2, "anchors": {"1": "pressuring", "3": "neutral", "5": "constructive"}}
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "case_key": "long_session_mid",
+  "scenario_key": "long_session",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "2 年 RAG + Agent 开发经验，做过双路召回、rerank、LangGraph 和 Faiss",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 16,
+      "opening": "大家好，我有 2 年 RAG 和 Agent 开发经验。"
+    },
+    "harness_context": {
+      "candidate_prompt_overrides": {
+        "16": "回答完后自然表示时间差不多了，给面试官收尾机会。"
+      }
+    }
+  },
+  "contract": {
+    "facts": ["Candidate has mid-level RAG and Agent experience"],
+    "actions": ["conducts a multi-topic interview", "provides a structured closing"],
+    "boundaries": ["does not expose internal tools or evaluation metadata"],
+    "quality_requirements": ["covers multiple technical dimensions", "maintains natural pacing"],
+    "hard_assertions": [
+      {"id": "selected_question_present", "description": "At least one selected question event exists"},
+      {"id": "closing_present", "description": "The final exchange contains a structured closing"}
+    ],
+    "rubric": {
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface questions", "3": "several follow-ups", "5": "deep adaptive probing"}},
+      "topic_coverage": {"weight": 0.25, "anchors": {"1": "one topic", "3": "three dimensions", "5": "broad balanced coverage"}},
+      "conversation_flow": {"weight": 0.25, "anchors": {"1": "script-like", "3": "mostly natural", "5": "seamless transitions"}},
+      "closing_quality": {"weight": 0.2, "anchors": {"1": "abrupt", "3": "generic summary", "5": "specific useful summary"}}
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "case_key": "long_session_jd",
+  "scenario_key": "long_session_jd",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "2 年 RAG + Agent 开发经验",
+      "difficulty": "mid",
+      "mode": "jd_resume",
+      "max_turns": 16,
+      "opening": "大家好，我想结合这个岗位介绍我的项目经验。"
+    },
+    "harness_context": {
+      "job_description": "后端与 Agent 工程岗位，要求 RAG、工具调用和服务稳定性经验",
+      "candidate_prompt_overrides": {"16": "回答完后给面试官收尾机会。"}
+    }
+  },
+  "contract": {
+    "facts": ["The interview has a job-description context"],
+    "actions": ["connects questions to job requirements", "tests resume evidence", "closes naturally"],
+    "boundaries": ["does not invent private candidate facts"],
+    "quality_requirements": ["questions are relevant to the role", "evidence is traceable to the snapshot"],
+    "hard_assertions": [
+      {"id": "jd_relevance", "description": "At least one question is grounded in the job description"},
+      {"id": "closing_present", "description": "The interview reaches a structured closing"}
+    ],
+    "rubric": {
+      "role_relevance": {"weight": 0.3, "anchors": {"1": "generic", "3": "partly relevant", "5": "strongly JD-grounded"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "surface", "3": "adequate", "5": "deep"}},
+      "conversation_flow": {"weight": 0.2, "anchors": {"1": "mechanical", "3": "mostly natural", "5": "smooth"}},
+      "closing_quality": {"weight": 0.2, "anchors": {"1": "abrupt", "3": "generic", "5": "specific"}}
+    }
+  }
+}

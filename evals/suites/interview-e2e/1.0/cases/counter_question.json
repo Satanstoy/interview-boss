@@ -1,0 +1,30 @@
+{
+  "case_key": "counter_question",
+  "scenario_key": "counter_question",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "高级 Agent 平台候选人",
+      "difficulty": "senior",
+      "mode": "free_practice",
+      "max_turns": 6,
+      "opening": "你好，我可以分享 Agent 平台的设计经验。"
+    },
+    "harness_context": {
+      "behavior_injections": {"4": "候选人主动询问团队技术栈和落地方式"}
+    }
+  },
+  "contract": {
+    "facts": ["Candidate asks a relevant question to the interviewer"],
+    "actions": ["answers the question substantively", "returns naturally to the interview"],
+    "boundaries": ["does not ignore or invent company-specific facts"],
+    "quality_requirements": ["answer acknowledges uncertainty where necessary", "transition is smooth"],
+    "hard_assertions": [
+      {"id": "counter_question_answered", "description": "The candidate question receives a substantive answer"}
+    ],
+    "rubric": {
+      "counter_question_handling": {"weight": 0.5, "anchors": {"1": "ignored", "3": "brief", "5": "substantive and respectful"}},
+      "conversation_flow": {"weight": 0.3, "anchors": {"1": "derails", "3": "acceptable", "5": "smooth return"}},
+      "role_adherence": {"weight": 0.2, "anchors": {"1": "breaks role", "3": "mostly consistent", "5": "credible interviewer"}}
+    }
+  }
+}

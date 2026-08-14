@@ -1,0 +1,34 @@
+{
+  "case_key": "error_correction",
+  "scenario_key": "error_correction",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "熟悉 RAG、BERT 和 Faiss 的中级候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 8,
+      "opening": "我做过检索增强生成系统。"
+    },
+    "harness_context": {
+      "behavior_injections": {
+        "3": "候选人故意说 BERT 是生成式模型",
+        "5": "候选人故意说 Faiss 支持 ACID 事务"
+      }
+    }
+  },
+  "contract": {
+    "facts": ["Candidate-visible answers may contain planted technical misconceptions"],
+    "actions": ["detects or probes the misconception", "corrects the misconception in the final response"],
+    "boundaries": ["does not shame the candidate", "does not rely only on hidden reasoning"],
+    "quality_requirements": ["corrections are technically accurate", "correction is visible in assistant output"],
+    "hard_assertions": [
+      {"id": "bert_correction", "description": "BERT misconception is corrected in visible output"},
+      {"id": "faiss_correction", "description": "Faiss misconception is corrected in visible output"}
+    ],
+    "rubric": {
+      "correction_accuracy": {"weight": 0.45, "anchors": {"1": "misses error", "3": "partial", "5": "precise correction"}},
+      "probe_quality": {"weight": 0.3, "anchors": {"1": "no probe", "3": "some probe", "5": "diagnostic probe"}},
+      "conversation_flow": {"weight": 0.25, "anchors": {"1": "derails", "3": "acceptable", "5": "natural correction"}}
+    }
+  }
+}

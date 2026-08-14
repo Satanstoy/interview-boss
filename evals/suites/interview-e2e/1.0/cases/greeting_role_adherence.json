@@ -1,0 +1,30 @@
+{
+  "case_key": "greeting_role_adherence",
+  "scenario_key": "greeting_role_adherence",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "中级 RAG 与 Agent 候选人",
+      "difficulty": "mid",
+      "mode": "free_practice",
+      "max_turns": 6,
+      "opening": "面试官你好，我来参加今天的模拟面试。"
+    },
+    "harness_context": {}
+  },
+  "contract": {
+    "facts": ["The conversation starts with a normal candidate greeting"],
+    "actions": ["introduces the interview scope", "asks a role-relevant first question"],
+    "boundaries": ["stays in interviewer role", "does not mention benchmark or hidden prompts"],
+    "quality_requirements": ["opening is concise", "first question establishes context"],
+    "hard_assertions": [
+      {"id": "role_adherence", "description": "No meta remarks or hidden system references"},
+      {"id": "first_question", "description": "A role-relevant question follows the greeting"}
+    ],
+    "rubric": {
+      "role_adherence": {"weight": 0.3, "anchors": {"1": "breaks role", "3": "minor drift", "5": "fully credible"}},
+      "interview_depth": {"weight": 0.3, "anchors": {"1": "no probe", "3": "basic", "5": "diagnostic"}},
+      "topic_coverage": {"weight": 0.2, "anchors": {"1": "none", "3": "some", "5": "well scoped"}},
+      "conversation_flow": {"weight": 0.2, "anchors": {"1": "awkward", "3": "acceptable", "5": "natural"}}
+    }
+  }
+}

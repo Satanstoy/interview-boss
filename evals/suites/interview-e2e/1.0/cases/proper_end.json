@@ -1,0 +1,31 @@
+{
+  "case_key": "proper_end",
+  "scenario_key": "proper_end",
+  "input_snapshot": {
+    "candidate_view": {
+      "profile": "高级后端与 Agent 平台候选人",
+      "difficulty": "senior",
+      "mode": "free_practice",
+      "max_turns": 10,
+      "opening": "你好，我可以先介绍最近负责的平台项目。"
+    },
+    "harness_context": {
+      "behavior_injections": {"10": "候选人表示时间差不多了"}
+    }
+  },
+  "contract": {
+    "facts": ["Candidate signals the planned end of the interview"],
+    "actions": ["gives a structured summary", "mentions strengths and gaps", "explains next steps"],
+    "boundaries": ["does not continue probing after clear closing signal"],
+    "quality_requirements": ["summary references concrete discussion topics", "tone is professional"],
+    "hard_assertions": [
+      {"id": "summary_present", "description": "A structured summary is present"},
+      {"id": "next_step_present", "description": "The closing explains a next step"}
+    ],
+    "rubric": {
+      "closing_quality": {"weight": 0.5, "anchors": {"1": "abrupt", "3": "brief", "5": "specific and useful"}},
+      "feedback_specificity": {"weight": 0.3, "anchors": {"1": "generic", "3": "some detail", "5": "evidence-based"}},
+      "tone": {"weight": 0.2, "anchors": {"1": "awkward", "3": "professional", "5": "warm and concise"}}
+    }
+  }
+}

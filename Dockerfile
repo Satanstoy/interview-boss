@@ -98,6 +98,7 @@ COPY --from=deps-builder --chown=appuser /app/.venv /app/.venv
 
 # 后端代码
 COPY --chown=appuser backend/ ./backend/
+COPY --chown=appuser evals/ ./evals/
 
 # Entrypoint（以 root 修复 bind mount 权限，然后切换到 appuser）
 COPY deploy/entrypoint.sh /entrypoint.sh
@@ -125,6 +126,7 @@ RUN useradd --create-home --shell /bin/false appuser && \
 COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
 
 COPY --chown=appuser backend/ ./backend/
+COPY --chown=appuser evals/ ./evals/
 COPY --chown=appuser frontend/src/ ./backend/frontend/src/
 COPY --chown=appuser frontend/package.json ./backend/frontend/
 COPY --chown=appuser Dockerfile docker-compose.yml .dockerignore pyproject.toml uv.lock ./
