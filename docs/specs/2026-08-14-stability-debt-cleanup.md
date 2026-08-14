@@ -133,8 +133,10 @@
 | **M31** 数据一致性收敛 | 问题 1（双写收敛 + 读迁移） | 1-2 天 | — |
 | **M32** 并发正确性加固 | 问题 2（auth/验证码/幂等，全 API 级测试） | 1 天 | — |
 | **M33** LLM 配额与 usage 落库 | 问题 3 + `llm_usage` 表 | 0.5-1 天 | — |
-| **M34** chat_service 拆分 | 问题 4a（4 层子服务） | 1-2 天 | 现有 chat 测试 |
-| **M35** nodes / worker / llm 拆分 | 问题 4b-d | 2-3 天 | chat 测试 |
+> **进度更新（2026-08-14）**：M34 ✅（chat_service 2395→104，b890bc6）；M35 ✅（worker 1805→1388 / nodes 2028→1343 / llm 1565→1319，03aa66b/66c129d/7842e54）；仅剩 M36 ChatView.vue（1577 行）待拆。
+
+| **M34** chat_service 拆分 | 问题 4a（4 层子服务） | ✅ 已完成 | chat 测试 |
+| **M35** nodes / worker / llm 拆分 | 问题 4b-d | ✅ 已完成 | chat 测试 |
 | **M36** ChatView.vue 拆分 | 问题 4e（子组件 + composable） | 1 天 | Playwright smoke |
 | **M37** 真实 Redis 集成 + cron 可见性 | 问题 5 | 0.5-1 天 | — |
 | **M38** CI 可复现跑绿 | 问题 6 | 0.5 天 | M31-33 修复后 |
