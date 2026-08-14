@@ -27,6 +27,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
+**可恢复评测进度流（Resumable Eval Progress Stream）**:
+由持久化的 `eval_run_events` 驱动的管理员 SSE 进度流；每个事件具有单调序号，支持通过 `Last-Event-ID` 断线重放。SSE 连接断开不改变 Eval Run 状态，取消必须通过独立的管理员操作完成。
+
 **评测目标版本（Evaluation Target Release）**:
 某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
 
