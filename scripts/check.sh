@@ -80,6 +80,14 @@ run_backend() {
       backend/tests/infra/test_docker_config.py \
       backend/tests/services/test_router_refactor.py \
       -q
+
+  # 全量关键子集 pytest(audit WARN 不拦截): 让完整失败面进入门禁报告。
+  # 已知既有失败(非本次引入)不会让门禁恒红; 收敛后可将此段改为 blocking。
+  run_nonblocking "backend full tests" \
+    docker compose --profile test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
+      backend/tests/bank backend/tests/chat backend/tests/pipeline \
+      backend/tests/services backend/tests/security backend/tests/infra \
+      -q --tb=no
 }
 
 run_frontend() {
