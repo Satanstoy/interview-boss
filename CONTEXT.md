@@ -96,6 +96,9 @@ Benchmark Case 使用的简历、JD、候选人画像、对话初始状态、工
 **Candidate-visible Context Boundary**:
 Candidate Simulator 只接收候选人在真实面试中可见的白名单上下文；Expected Behavior、Hard Assertions、Quality Rubric、Judge 配置和其他评测元数据属于 Harness/Judge 私有上下文，禁止进入 Simulator 输入、工具参数或系统提示词。
 
+**评测隔离运行空间（Eval Isolation Space）**:
+用于执行 Eval Target 的轻量隔离数据和工具环境，复用应用代码与 Compose 基础设施，但使用独立数据库或 namespace、测试身份、Artifact 根目录和工具夹具，禁止写入真实用户数据和生产副作用。
+
 **硬断言（Hard Assertion）**:
 对结构、权限、安全、工具契约或必需事实进行可判定校验的评测要求；失败时可以直接阻断案例通过。
 
