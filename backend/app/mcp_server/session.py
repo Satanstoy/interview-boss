@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 import uuid
+from datetime import datetime, timedelta, timezone
 import asyncio
 from contextlib import asynccontextmanager
 from inspect import isawaitable
@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 _MCP_SESSION_TTL_SECONDS = 3600
 _SQLITE_TABLE_NAME = "mcp_sessions"
+
+
+def _now_iso() -> str:
+    """UTC 无时区 ISO 文本，与 SQLite datetime('now') 输出一致（迁移 084 口径）。"""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 _PERSISTED_STATE_KEYS = (
     "active_skills",
@@ -61,7 +66,7 @@ def _ensure_sqlite_table(conn) -> None:
         CREATE TABLE IF NOT EXISTS {_SQLITE_TABLE_NAME} (
             session_id TEXT PRIMARY KEY,
             data_json TEXT NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at TEXT NOT NULL
         )
         """
     )
@@ -77,7 +82,10 @@ def _sqlite_conn():
 
 
 def _prune_sqlite_sessions(conn) -> None:
-    cutoff = int(time.time()) - _MCP_SESSION_TTL_SECONDS
+    # updated_at 为 ISO 文本（与迁移 084 统一口径），文本比较即时间比较
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_MCP_SESSION_TTL_SECONDS)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     conn.execute(
         f"DELETE FROM {_SQLITE_TABLE_NAME} WHERE updated_at < ?",
         (cutoff,),
@@ -181,7 +189,7 @@ def _save_to_sqlite(session_id: str, state: dict[str, Any]) -> None:
             data_json = excluded.data_json,
             updated_at = excluded.updated_at
         """,
-        (session_id, json.dumps(state, ensure_ascii=False), int(time.time())),
+        (session_id, json.dumps(state, ensure_ascii=False), _now_iso()),
     )
     conn.commit()
 
