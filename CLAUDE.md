@@ -4,7 +4,7 @@
 
 ## Tech Stack
 
-- **Backend**: Python 3.10 (uv, root `pyproject.toml`) / FastAPI / SQLite (WAL) / LangGraph
+- **Backend**: Python 3.12 (uv, root `pyproject.toml`) / FastAPI / SQLite (WAL) / LangGraph
 - **Frontend**: Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue
 - **Deploy**: Docker Compose → nginx 镜像内置前端 (port 8081，仅绑 127.0.0.1) → backend (8000) + redis (6379)，worker 通过 profile 按需启用。公网入口由宿主机 nginx (port 80) 按域名+路径分发：`satanstoy.site/civil6/` → 本地静态页；其余（含 `interviewboss.online` 全部、`satanstoy.site` 非 civil6 路径）→ 反代到 `127.0.0.1:8081`
 - **LLM**: OpenAI-compatible API (AsyncOpenAI + tenacity)
@@ -89,7 +89,7 @@ backend/
 frontend/
 ├── src/api/           ← 兼容层 re-export（新代码直接 import services/）
 ├── src/services/      ← API 服务层（按领域拆分），http.js 是 HTTP 客户端
-├── src/composables/   ← 领域逻辑复用（use* 前缀，共 19 个）
+├── src/composables/   ← 领域逻辑复用（use* 前缀，共 22 个）
 ├── src/router/        ← Vue Router 4 配置（路由表 + 认证守卫）
 ├── src/stores/        ← Pinia 状态层（当前为空，状态走 composables）
 ├── src/layouts/       ← AuthenticatedLayout / BlankLayout / DefaultLayout
