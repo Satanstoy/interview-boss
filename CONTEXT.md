@@ -90,6 +90,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **结构化 Case 契约（Structured Case Contract）**:
 Benchmark Case 中可机器读取的评测定义，至少分离 `facts`、`actions`、`boundaries`、`quality_requirements`、`hard_assertions`、`rubric` 和可选 `reference_answer`，用于分别驱动确定性校验、LLM Judge 和人工评测。
 
+**Case 输入 Snapshot（Case Input Snapshot）**:
+Benchmark Case 使用的简历、JD、候选人画像、对话初始状态、工具夹具和其他输入上下文的不可变快照；Case 只能引用带内容摘要的 Snapshot，不在运行时读取可变用户数据或外部当前状态。
+
 **硬断言（Hard Assertion）**:
 对结构、权限、安全、工具契约或必需事实进行可判定校验的评测要求；失败时可以直接阻断案例通过。
 
