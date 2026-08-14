@@ -27,7 +27,8 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `rhythm_profile.py` | 从有权限的 approved 面经中学习题型分布和阶段转换；必须按 owner/status/job_position/deleted_at 过滤 |
 | `interview_state.py` | 基于 `InterviewLedger` 构建可序列化 `interview_state` 快照，不替代 ledger |
 | `graph.py` | 兼容层，委托给 `pipeline.run_chat` |
-| `nodes.py` | 节点实现（recall、build_context、stream、extract）、面试阶段判定、`build_react_system_prompt()` 注入 runtime state |
+| `nodes.py` | 节点实现（recall、build_context、stream、extract）、面试阶段判定、`build_react_system_prompt()` 注入 runtime state；re-export 检索重排符号（见 `rerank.py`） |
+| `rerank.py` | 检索候选题重排（确定性 + LLM rerank）：`_deterministic_rerank_result`、`validate_rerank_result`、`llm_rerank_questions` 等，从 nodes.py 抽出 |
 | `state.py` | ChatState TypedDict，含分类阶段写入的结构化路由字段 |
 | `prompts.py` | 系统提示词（含面试阶段协议、状态字段说明）、记忆提取提示词 |
 | `classify_result.py` | `ClassifyResult` Pydantic 模型：LLM 语义分类的结构化输出（candidate_act、asked_counter_question、needs_clarification、needs_new_dimension、confidence、evidence 等） |
