@@ -27,6 +27,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测批次（Eval Batch）**:
 一组共享同一执行上下文的 Eval Run 或 Eval Run Item；批次级的目标版本、Benchmark、评测协议、Judge、Harness、Candidate Simulator、运行环境、超时、重试、采样和并发规则必须一致。Case 输入、Replication 序号和按规则生成的 seed 属于 Item 级差异。
 
+**评测 Item Attempt**:
+同一个 Eval Run Item 的一次实际执行尝试，用于记录 Worker 崩溃、网络错误、超时等操作性重试；Attempt 不增加统计样本数，原始失败 Attempt 不被覆盖，Item 最终引用一个有效 Attempt。
+
 **对比组（Comparison Group）**:
 用于管理员 A/B 对比的关联对象；它将两个或多个拥有独立生命周期的 sibling Eval Run 关联起来，要求它们共享同一 Batch 执行上下文，并明确记录各自唯一不同的 target release。
 
