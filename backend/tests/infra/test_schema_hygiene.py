@@ -246,6 +246,49 @@ class Test084NormalizeTimestampsJobs:
         v = full_db.execute("SELECT updated_at FROM mcp_sessions WHERE session_id='s1'").fetchone()["updated_at"]
         assert v.startswith("2025-") and " " in v
 
+    def test_mcp_sessions_iso_text_in_integer_column_preserved(self, full_db):
+        """回归：旧结构 updated_at INTEGER NOT NULL 里已写入 ISO 文本（mcp_server/session
+        曾在 INTEGER 列存 datetime 文本）——迁移 084 必须成功且原文本值不丢失、非 NULL。
+
+        这是生产容器启动失败的根因场景：datetime(ISO文本, 'unixepoch') 返回 NULL
+        会触发 NOT NULL constraint failed；必须等值保留原文本（不能用 NULL 覆盖）。
+        """
+        full_db.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_sessions ("
+            "session_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL)"
+        )
+        # 模拟历史遗留：INTEGER NOT NULL 列里实际存的是 ISO 文本
+        iso_value = "2026-08-14 05:52:39"
+        full_db.execute(
+            "INSERT INTO mcp_sessions (session_id, data_json, updated_at) VALUES ('s_iso', '{}', ?)",
+            (iso_value,),
+        )
+        # 混合：同一列再放一个真实 epoch 整数，验证两种格式同表共存都正常迁移
+        full_db.execute(
+            "INSERT INTO mcp_sessions (session_id, data_json, updated_at) VALUES ('s_epoch', '{}', 1750000000)"
+        )
+        _apply(full_db, 84)
+
+        # 迁移成功：列类型变为 TEXT，schema_version 写入 84
+        typ = [r[2] for r in full_db.execute("PRAGMA table_info('mcp_sessions')") if r[1] == "updated_at"][0]
+        assert typ.upper() == "TEXT"
+        assert full_db.execute("SELECT version FROM schema_version WHERE version=84").fetchone() is not None
+
+        # ISO 文本值等值保留，不丢失、非 NULL
+        iso_row = full_db.execute(
+            "SELECT updated_at FROM mcp_sessions WHERE session_id='s_iso'"
+        ).fetchone()
+        assert iso_row is not None
+        assert iso_row["updated_at"] == iso_value
+        assert isinstance(iso_row["updated_at"], str)
+
+        # 整数 epoch 场景仍正常转换成 ISO 文本（不被此修复破坏）
+        epoch_row = full_db.execute(
+            "SELECT updated_at FROM mcp_sessions WHERE session_id='s_epoch'"
+        ).fetchone()
+        assert epoch_row is not None
+        assert epoch_row["updated_at"].startswith("2025-") and " " in epoch_row["updated_at"]
+
     def test_refresh_tokens_created_at_normalized_to_iso(self, full_db):
         uid = _seed_user(full_db)
         full_db.execute("INSERT INTO refresh_tokens (user_id, jti, expires_at) VALUES (?, 'j1', '2026-12-31T00:00:00+00:00')", (uid,))
