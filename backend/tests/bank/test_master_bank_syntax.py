@@ -33,30 +33,39 @@ class TestMasterBankSyntax:
         # ast.parse 会在语法错误时抛出 SyntaxError
         ast.parse(source)
 
-    def test_gen_one_function_syntax(self):
-        """验证 _gen_one 函数的语法正确性"""
+    def test_answer_flow_function_syntax(self):
+        """验证 answers.py 当前答案生成流程函数的语法正确性。
+
+        历史回归: Bug INDENT-001 曾因 _gen_one 函数缩进错误导致 answers 模块
+        无法导入。_gen_one 已在之后的重构中被取代;本测试改为锁定当前
+        answers.py 的答案生成入口函数(每个都必须有合法的 async 函数体和
+        非空 body),以同等意图防止"答案流程模块语法/缩进被改坏"再次发生。
+        """
         with open(self.ANSWERS_PATH, "r") as f:
             source = f.read()
 
         tree = ast.parse(source)
 
-        # 查找 _gen_one 函数定义
-        gen_one_func = None
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_gen_one":
-                gen_one_func = node
-                break
+        # 当前答案生成/分发入口(取代历史 _gen_one),逐个验证存在且 body 非空
+        target_funcs = {
+            "_queue_answer_job",
+            "_dispatch_persisted_answer_job",
+            "generate_master_answer",
+            "generate_recitation",
+            "batch_generate_answers",
+        }
+        found = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in target_funcs
+        }
 
-        assert gen_one_func is not None, "_gen_one 函数未找到"
+        missing = sorted(target_funcs - found.keys())
+        assert not missing, f"answers.py 缺少答案流程函数: {missing}"
 
-        # 验证函数有函数体
-        assert len(gen_one_func.body) > 0, "_gen_one 函数体为空"
-
-        # 验证第一行是 nonlocal 语句
-        first_stmt = gen_one_func.body[0]
-        assert isinstance(first_stmt, ast.Nonlocal), (
-            f"_gen_one 函数第一行应该是 nonlocal 语句，实际是 {type(first_stmt).__name__}"
-        )
+        for name, node in found.items():
+            assert len(node.body) > 0, f"{name} 函数体为空"
 
     def test_import_module(self):
         """验证模块可以正常导入"""
