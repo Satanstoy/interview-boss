@@ -24,6 +24,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测运行（Eval Run）**:
 管理员针对一个具体评测目标版本发起的一次完整评测执行记录；创建后锁定目标版本、Benchmark Suite、评测协议、Judge、Simulator Harness 和 Candidate Simulator 等依赖，并独立保存执行状态、原始轨迹和评分结果。
 
+**评测批次（Eval Batch）**:
+一组共享同一执行上下文的 Eval Run 或 Eval Run Item；批次级的目标版本、Benchmark、评测协议、Judge、Harness、Candidate Simulator、运行环境、超时、重试、采样和并发规则必须一致。Case 输入、Replication 序号和按规则生成的 seed 属于 Item 级差异。
+
 **评测队列（Eval Queue）**:
 专门承载评测父任务、Case/Replication 子任务、Judge 和聚合任务的异步队列及 Worker Pool，与用户服务队列隔离资源、并发、限流和故障域；评测队列中的任务仍以数据库记录为事实来源。
 
