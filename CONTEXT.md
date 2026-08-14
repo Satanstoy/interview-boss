@@ -21,6 +21,12 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **版本 Manifest（Release Manifest）**:
 描述一个评测组件不可变版本的权威 JSON 快照，包含代码、运行环境、模型、Prompt、Skill、工具、采样和其他会影响评测结果的配置，并通过内容摘要保证创建后不可静默修改。数据库只保存其可查询索引和引用关系，不替代 Manifest 原文。
 
+**评测运行（Eval Run）**:
+管理员针对一个具体评测目标版本发起的一次完整评测执行记录；创建后锁定目标版本、Benchmark Suite、评测协议、Judge、Simulator Harness 和 Candidate Simulator 等依赖，并独立保存执行状态、原始轨迹和评分结果。
+
+**评测控制台（Evaluation Control Plane）**:
+面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
+
 **评测目标版本（Evaluation Target Release）**:
 某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
 
