@@ -353,3 +353,9 @@
 - D14: OTP 双用竞态；FTS IDF 缓存；时间混用 ×6；裸 except ×7；evaluate_answer 吞错
 - D15: window.confirm 割裂；icon-only 缺 aria-label
 - D16: porcelain 图表 hex 硬编码
+
+---
+
+## 状态对账更新（2026-08-14，HEAD e7f11b2）
+
+> 本审计 61 项经当前代码逐项复核：**FIXED 14 / MITIGATED 7 / STILL-OPEN 38 / NEEDS-VERIFICATION 2**。已有若干修复落地（见 reconciliation doc），但大量 🟢/🟡 仍开放。关键仍开放项：D14 验证码双用竞态+时区、D9 test 挂生产 data 卷+软删漏过滤×4、D5 无 LLM 配额、D11 合规三件套、D8 静态检查静默失效+CI 依赖引导缺失、A4 API key 明文落库+jose/passlib 弃维护。完整对账见 `.tech-audit/work/2026-08-14/2026-08-14-audit-reconciliation.md`。

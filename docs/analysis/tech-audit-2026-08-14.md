@@ -85,4 +85,21 @@ migration 079 生效后，并发重复 email 的第二个请求：注册路由 `
 | P3 | 上轮 16 个 🟡 逐项（依赖升级、配额、合规、healthcheck、runbook 等） | L |
 
 ---
-*报告由 tech-audit skill 生成；findings 明细见 `.tech-audit/work/2026-08-14/findings.tsv`*
+
+## 状态对账更新（2026-08-14 会话续跑，HEAD e7f11b2）
+
+> 本审计后对账（3 个 reconciliation subagent + 交叉复核）确认本报告所述修复大部分已落地，同时发现若干「看似已修实为未完成」项。完整对账见 `.tech-audit/work/2026-08-14/2026-08-14-audit-reconciliation.md` 与 `findings_08-14_reconciled.tsv`。
+
+**新增已修（本轮交互层安全，e7f11b2）**：限速 key→get_client_ip+asgi 全局默认；insights high_frequency owner 作用域；MCP token 出 sessionStorage；login-form 同源校验。
+
+**Triage 状态**：
+- ✅ P0 轮换 MiMo/SiliconFlow key → 仍待**用户手动**在双平台控制台执行（代码已删字面量）。
+- ❌ P0 并发注册 IntegrityError→409 → **未修**（迁移 079 后竞态变成 500）。
+- ❌ P1 CI 依赖引导 + gitleaks allowlist → **未修**（fresh-clone 必挂、gitleaks 必红）。
+- ❌ P1 测试文件 key 字面量改拼接 → **未修**（test_secret_scan.py:20 / test_check_secrets.py:27 仍含真实字面量）。
+- ❌ P2 god-file 拆分 → **未修**（chat_service 2395 / nodes 2028 / ChatView 1577，line_guard 有 allowlist）。
+- ⚠️ P2 静态检查接入 → **半修/静默失效**：[tool.ruff]/[tool.mypy]/eslint 配置在，但 check.sh 的 `run_static_backend`/`run_static_frontend` 函数未定义 → ruff/eslint 实际未执行。
+- ❌ P3 上轮 16 个 🟡 → 多数仍未修（见 reconciliation doc）。
+
+---
+*报告由 tech-audit skill 生成；findings 明细见 `.tech-audit/work/2026-08-14/findings.tsv`；对账见 reconciliation 文档*

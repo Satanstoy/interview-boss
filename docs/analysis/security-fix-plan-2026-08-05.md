@@ -4,6 +4,8 @@
 **原则**: 每个修复遵循 TDD（先写失败测试 → 最小实现 → 验证）；全部完成后跑 `./deploy/docker-deploy.sh check`
 **难度分级**: Tier 0 十分钟 → Tier 4 重构级。安全类缺陷（D4/D5/D11/D14）标 🔒
 
+> **⚠️ 状态对账（2026-08-14，HEAD e7f11b2）**：40 项经当前代码逐项复核——**FIXED 11 / MITIGATED 11 / STILL-OPEN 18**。已修：1,2,3,4,5,6,17,18,25,27（+11(修复)）；仍开放：8(时区),9(FTS),10(裸except),19(HF路径),20(OTP锁定),21(API加密),22(jose),23(uvicorn),24(passlib),26(JWT测试),28(配额),29(注销),30(隐私),31(data-flow),32(导出),34(fuzz),35(chat_service拆分),37(ChatView),38(LoginModal shadcn),40(Vite)；半修/静默失效：7,11,12,13,14,15,16,33,36,39（含 **check.sh 静态检查静默失效**：run_static_backend/run_static_frontend 未定义）。完整 TSV 见 `.tech-audit/work/2026-08-14/interaction/` 对账产物。
+
 ---
 
 ## Tier 0 — 十分钟级（配置/一行改动，无需测试）
