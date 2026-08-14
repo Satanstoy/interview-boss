@@ -18,6 +18,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测系统 1.0 基线（Evaluation System 1.0 Baseline）**:
 当前评测系统建设采用的初始冻结基线，包含当前系统基线以及各评测目标、Simulator Harness、Candidate Simulator、Judge、Benchmark Suite 和评测协议的初始 `1.0` 版本。`1.0` 表示可追溯的版本起点，不表示所有评测指标已经达到合格标准；后续变化产生新的组件版本，不覆盖或重写 `1.0`。
 
+**版本 Manifest（Release Manifest）**:
+描述一个评测组件不可变版本的权威 JSON 快照，包含代码、运行环境、模型、Prompt、Skill、工具、采样和其他会影响评测结果的配置，并通过内容摘要保证创建后不可静默修改。数据库只保存其可查询索引和引用关系，不替代 Manifest 原文。
+
 **评测目标版本（Evaluation Target Release）**:
 某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
 
