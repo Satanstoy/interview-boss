@@ -289,6 +289,25 @@ def store_refresh_token(
     return family_id
 
 
+def consume_refresh_token(jti: str, user_id: int) -> Optional[dict]:
+    """原子轮转 refresh token（DELETE-then-check 合并为单条语句）。
+
+    并发同 jti 的两个刷新请求只能有一个成功：单条
+    `DELETE ... WHERE jti=? AND expires_at>? AND user_id=? RETURNING *`
+    同时完成有效性校验与消费，以返回行数判定（1 行 = 有效且已轮转；
+    0 行 = 已用/过期/用户不匹配）。返回值即被消费的记录（remember/family
+    等供轮转后续使用），无记录返回 None，调用方应 401。
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "DELETE FROM refresh_tokens WHERE jti = ? AND expires_at > ? AND user_id = ? "
+            "RETURNING *",
+            (jti, datetime.now(timezone.utc).isoformat(), user_id),
+        ).fetchone()
+        conn.commit()
+        return dict(row) if row else None
+
+
 def get_refresh_token_jti(jti: str) -> Optional[dict]:
     """查询 refresh token jti 是否存在且有效"""
     with get_db_connection() as conn:
