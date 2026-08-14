@@ -11,6 +11,7 @@ from app.core.auth import get_current_user
 from app.db.connection import run_db, get_user_job_position
 from app.models.schemas import CreateConversationRequest
 from app.services import chat_service, resume_service
+from app.services.llm_quota import check_and_record
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/chat")
@@ -332,6 +333,10 @@ async def send_message(
         raise HTTPException(status_code=404, detail="对话不存在")
     if (conv.get("metadata") or {}).get("sealed"):
         raise HTTPException(status_code=409, detail="IMPORTED_RECORD_SEALED")
+
+    # per-user 每日 LLM 配额：超限直接拒绝，避免预留回合后无法真正调用 LLM
+    if not await check_and_record(user["id"]):
+        raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
 
     client_request_id = req.client_request_id or str(uuid.uuid4())
     turn_content = req.content

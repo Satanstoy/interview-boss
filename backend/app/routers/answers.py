@@ -10,6 +10,7 @@ from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
 from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry
+from app.services.llm_quota import check_and_record
 from app.services.answer_enrichment import (
     refine_answer,
     sources_json,
@@ -270,6 +271,9 @@ async def generate_recitation(
         raise HTTPException(
             status_code=404, detail="该题目暂无公共参考答案，请等待管理员生成"
         )
+
+    if not await check_and_record(user["id"]):
+        raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
 
     skip_search = await _allow_no_search_or_raise(user, allow_no_search)
 

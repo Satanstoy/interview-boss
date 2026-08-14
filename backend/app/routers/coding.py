@@ -14,6 +14,7 @@ from app.models.schemas import (
     CodingSubmitRequest,
 )
 from app.services.llm import _extract_json, raw_llm_call, stream_llm_messages
+from app.services.llm_quota import check_and_record
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter()
@@ -402,6 +403,10 @@ async def import_coding_problems(
     user: dict = Depends(get_current_user),
 ):
     """通过用户 Prompt 和 Markdown 内容，调用统一 LLM 基建导入个人题目。"""
+    # per-user 每日 LLM 配额
+    if not await check_and_record(user["id"]):
+        raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
+
     prompt = req.prompt.strip() or "提取其中所有适合技术面试手撕代码练习的题目，并补全必要的题意和复杂度。"
     llm_prompt = f"""
 你是面试题库编辑。请根据用户要求，从下面的 Markdown 中提取或整理手撕代码题。
@@ -553,6 +558,10 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
         raise HTTPException(status_code=400, detail=f"无效模式: {req.mode}，支持: {', '.join(VALID_MODES)}")
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="代码不能为空")
+
+    # per-user 每日 LLM 配额（手撕代码 AI 评审/提示同样消耗 LLM）
+    if not await check_and_record(user["id"]):
+        raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
 
     # 获取题目信息
     def _get_problem():

@@ -32,6 +32,7 @@ from app.services.practice_review_service import (
 )
 from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
+from app.services.llm_quota import check_and_record
 from app.services.recruitment_milestones import compute_urgency, get_season_windows
 
 logger = logging.getLogger("interview-boss")
@@ -230,6 +231,7 @@ async def review_practice_question(
                 rating=req.rating,
                 score=req.score,
                 urgency=urgency,
+                idempotency_key=req.idempotency_key,
             )
             conn.commit()
             return result
@@ -344,6 +346,10 @@ async def evaluate_answer(
         raise HTTPException(status_code=400, detail="用户答案不能为空")
     if not req.reference_answer.strip():
         raise HTTPException(status_code=400, detail="参考答案不能为空")
+
+    # per-user 每日 LLM 配额
+    if not await check_and_record(user["id"]):
+        raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
 
     prompt = EVAL_PROMPT.format(
         question=req.question_text,
