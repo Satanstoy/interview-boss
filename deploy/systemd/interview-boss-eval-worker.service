@@ -1,0 +1,9 @@
+[Unit]
+Description=InterviewBoss on-demand evaluation worker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/interview-boss
+ExecStart=/opt/interview-boss/deploy/eval-worker-launcher.sh

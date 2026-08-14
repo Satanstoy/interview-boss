@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll for pending InterviewBoss evaluation runs
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=interview-boss-eval-worker.service
+
+[Install]
+WantedBy=timers.target
