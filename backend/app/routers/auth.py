@@ -1,5 +1,6 @@
 import logging
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
@@ -18,7 +19,7 @@ from app.core.auth import (
     get_current_user,
     get_refresh_token,
     store_refresh_token,
-    get_refresh_token_jti,
+    consume_refresh_token,
     delete_refresh_token,
     is_family_invalidated,
     invalidate_family,
@@ -75,31 +76,32 @@ def _check_lockout(username: str):
 
 
 def _record_failure(username: str):
+    locked_until = (
+        datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_DURATION)
+    ).strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
-        row = conn.execute(
+        # 原子 upsert：并发登录失败不会因 SELECT-then-INSERT 竞态丢失计数或撞唯一索引
+        conn.execute(
+            """
+            INSERT INTO login_failures (username, failure_count, locked_until)
+            VALUES (?, 1, '')
+            ON CONFLICT(username) DO UPDATE SET
+                failure_count = login_failures.failure_count + 1,
+                locked_until = CASE
+                    WHEN login_failures.failure_count + 1 >= ? THEN ?
+                    ELSE ''
+                END,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (username, MAX_LOGIN_FAILURES, locked_until),
+        )
+        conn.commit()
+        count_row = conn.execute(
             "SELECT failure_count FROM login_failures WHERE username = ?", (username,)
         ).fetchone()
-        if row:
-            new_count = row["failure_count"] + 1
-            if new_count >= MAX_LOGIN_FAILURES:
-                locked_until = (
-                    datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_DURATION)
-                ).strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                locked_until = ""
-            conn.execute(
-                "UPDATE login_failures SET failure_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?",
-                (new_count, locked_until, username),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO login_failures (username, failure_count, locked_until) VALUES (?, 1, '')",
-                (username,),
-            )
-        conn.commit()
-    if row and row["failure_count"] + 1 >= MAX_LOGIN_FAILURES:
+    if count_row and count_row["failure_count"] >= MAX_LOGIN_FAILURES:
         logger.warning(
-            f"账号 '{username}' 连续失败 {row['failure_count'] + 1} 次，已锁定 {LOCKOUT_DURATION}s"
+            f"账号 '{username}' 连续失败 {count_row['failure_count']} 次，已锁定 {LOCKOUT_DURATION}s"
         )
 
 
@@ -322,10 +324,19 @@ async def register(request: Request, req: RegisterRequest, response: Response):
             if email_taken:
                 raise HTTPException(status_code=409, detail="该邮箱已被注册")
             password_hash = hash_password(req.password)
-            cursor = conn.execute(
-                "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
-                (req.username, password_hash, req.email),
-            )
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
+                    (req.username, password_hash, req.email),
+                )
+            except sqlite3.IntegrityError:
+                # 并发下另一个请求在检查与 INSERT 之间抢先插入了同 username/email，
+                # 撞唯一索引；读取当前状态区分冲突来源后映射为 409。
+                if conn.execute(
+                    "SELECT id FROM users WHERE username = ?", (req.username,)
+                ).fetchone():
+                    raise HTTPException(status_code=409, detail="用户名已存在")
+                raise HTTPException(status_code=409, detail="该邮箱已被注册")
             conn.commit()
             return cursor.lastrowid
 
@@ -429,9 +440,11 @@ async def refresh_token(
         _clear_refresh_cookie(response, request)
         raise HTTPException(status_code=401, detail="token 已失效，请重新登录")
 
-    record = get_refresh_token_jti(jti)
-    if not record or record["user_id"] != user_id:
-        # JTI 不在数据库中 — 可能是重放攻击
+    # 原子轮转：单条 DELETE（jti + expires_at>now + user_id）同时校验与消费。
+    # 并发同 jti 的多个请求只有一个能拿到 1 行（返回记录），其余拿到 None（已轮转/过期）→ 401。
+    record = consume_refresh_token(jti, user_id)
+    if not record:
+        # JTI 已被消费或不属于该用户或已过期 — 可能是重放攻击
         if family_id:
             invalidate_family(family_id)
             logger.warning(
@@ -467,7 +480,6 @@ async def refresh_token(
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
 
-    delete_refresh_token(jti)
     return _issue_token_pair(
         dict(user),
         response,
@@ -693,10 +705,18 @@ def _find_user_by_email(email: str):
 def _insert_user(username: str, password_hash: str, email: str) -> dict:
     """创建新用户"""
     with get_db_connection() as conn:
-        cursor = conn.execute(
-            "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
-            (username, password_hash, email),
-        )
+        try:
+            cursor = conn.execute(
+                "INSERT INTO users (username, password_hash, email, is_admin, share_default) VALUES (?, ?, ?, 0, 'private')",
+                (username, password_hash, email),
+            )
+        except sqlite3.IntegrityError:
+            # 并发下另一个请求在同 email/username 上抢先注册，撞唯一索引 → 409
+            if conn.execute(
+                "SELECT id FROM users WHERE username = ?", (username,)
+            ).fetchone():
+                raise HTTPException(status_code=409, detail="用户名已存在")
+            raise HTTPException(status_code=409, detail="该邮箱已注册")
         conn.commit()
         return {
             "id": cursor.lastrowid,
@@ -893,8 +913,12 @@ async def bind_email_with_token(
         ).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="该邮箱已被其他用户绑定")
-        conn.execute("UPDATE users SET email = ? WHERE id = ?", (req.email, user_id))
-        conn.commit()
+        try:
+            conn.execute("UPDATE users SET email = ? WHERE id = ?", (req.email, user_id))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # 并发下另一请求抢先绑定了该邮箱，撞唯一索引 → 409
+            raise HTTPException(status_code=409, detail="该邮箱已被其他用户绑定")
 
     return _issue_token_pair(
         {
