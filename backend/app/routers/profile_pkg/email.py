@@ -1,7 +1,7 @@
 """邮箱绑定端点"""
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.core.auth import get_current_user
@@ -18,9 +18,20 @@ class BindEmailRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
     code: str = Field(..., min_length=6, max_length=6)
 
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v):
+        # 与 auth.py 邮箱口径一致：小写 + 去空白（email 唯一索引 BINARY，防大小写变体绕过）
+        return v.strip().lower()
+
 
 class SendBindCodeRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=120)
+
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v):
+        return v.strip().lower()
 
 
 def _check_email_taken(email: str, exclude_user_id: int = None) -> bool:

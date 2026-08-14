@@ -270,12 +270,15 @@ def store_refresh_token(
             for row in oldest:
                 conn.execute("DELETE FROM refresh_tokens WHERE jti = ?", (row[0],))
         expires = datetime.now(timezone.utc) + timedelta(days=days)
+        # created_at 显式写 ISO（与 expires_at 同格式），避免与 DEFAULT CURRENT_TIMESTAMP 双格式混存
+        now_iso = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            "INSERT INTO refresh_tokens (user_id, jti, expires_at, remember, ip_address, user_agent, family_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO refresh_tokens (user_id, jti, expires_at, created_at, remember, ip_address, user_agent, family_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user_id,
                 jti,
                 expires.isoformat(),
+                now_iso,
                 1 if remember else 0,
                 ip_address,
                 user_agent,

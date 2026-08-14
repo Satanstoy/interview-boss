@@ -1,6 +1,6 @@
 import logging
 import re
-import time
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
 from fastapi.responses import HTMLResponse
@@ -47,16 +47,31 @@ def _check_lockout(username: str):
         if not row:
             return
         entry = dict(row)
-    now = time.time()
-    if entry.get("locked_until", 0) > now:
-        remaining = int(entry["locked_until"] - now)
+    # locked_until 为 ISO 文本（迁移 084 由 REAL epoch 统一而来），'' 表示未锁定
+    locked = entry.get("locked_until") or ""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    if locked and locked > now:
+        try:
+            remaining = max(
+                1,
+                int(
+                    (
+                        datetime.strptime(locked, "%Y-%m-%d %H:%M:%S")
+                        - datetime.strptime(now, "%Y-%m-%d %H:%M:%S")
+                    ).total_seconds()
+                ),
+            )
+        except ValueError:
+            remaining = LOCKOUT_DURATION
         raise HTTPException(
             status_code=429, detail=f"账号已被临时锁定，请 {remaining} 秒后重试"
         )
-    # 锁定已过期，重置
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM login_failures WHERE username = ?", (username,))
-        conn.commit()
+    # 仅当「曾锁定且已过期」才重置计数；未锁定（''）保留失败计数累积，
+    # 否则每次登录前都会清空记录，锁定机制永不触发
+    if locked:
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM login_failures WHERE username = ?", (username,))
+            conn.commit()
 
 
 def _record_failure(username: str):
@@ -66,16 +81,19 @@ def _record_failure(username: str):
         ).fetchone()
         if row:
             new_count = row["failure_count"] + 1
-            locked_until = (
-                time.time() + LOCKOUT_DURATION if new_count >= MAX_LOGIN_FAILURES else 0
-            )
+            if new_count >= MAX_LOGIN_FAILURES:
+                locked_until = (
+                    datetime.now(timezone.utc) + timedelta(seconds=LOCKOUT_DURATION)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                locked_until = ""
             conn.execute(
                 "UPDATE login_failures SET failure_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?",
                 (new_count, locked_until, username),
             )
         else:
             conn.execute(
-                "INSERT INTO login_failures (username, failure_count, locked_until) VALUES (?, 1, 0)",
+                "INSERT INTO login_failures (username, failure_count, locked_until) VALUES (?, 1, '')",
                 (username,),
             )
         conn.commit()
@@ -131,6 +149,8 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_format(cls, v):
+        # 归一化：去首尾空白 + 小写（users.username 唯一约束为 BINARY，防 Alice/alice 双账户）
+        v = v.strip().lower()
         if not _USERNAME_RE.match(v):
             raise ValueError("用户名仅允许 2-32 个字母、数字、下划线或中文")
         return v
@@ -306,13 +326,15 @@ async def register(request: Request, req: RegisterRequest, response: Response):
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, req: LoginRequest, response: Response):
-    _check_lockout(req.username)
+    # 与注册同一归一化口径：去空白 + 小写（迁移 085 已回填存量用户名）
+    username = req.username.strip().lower()
+    _check_lockout(username)
 
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, username, password_hash, is_admin, share_default, current_position_id, email FROM users WHERE username = ?",
-                (req.username,),
+                (username,),
             ).fetchone()
 
     user = await run_db(_query)
@@ -321,13 +343,13 @@ async def login(request: Request, req: LoginRequest, response: Response):
         verify_password(
             req.password, "$2b$12$eiMGPX1FDYPSJnrbi.E9Ee6eXtF/sNWWAxyCmK5Al2yYy4/wj0QAm"
         )
-        _record_failure(req.username)
+        _record_failure(username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not verify_password(req.password, user["password_hash"]):
-        _record_failure(req.username)
+        _record_failure(username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    _clear_failures(req.username)
+    _clear_failures(username)
 
     # 未绑定邮箱的老用户：返回临时 token，要求绑定邮箱
     if not user["email"]:
@@ -485,6 +507,7 @@ async def login_form(
     接受 application/x-www-form-urlencoded 的登录请求。
     用于浏览器密码管理器检测（隐藏 iframe 提交）。
     """
+    username = username.strip().lower()
     _check_lockout(username)
 
     def _query():
@@ -545,6 +568,8 @@ class EmailRegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_format(cls, v):
+        # 归一化：去首尾空白 + 小写（users.username 唯一约束为 BINARY，防 Alice/alice 双账户）
+        v = v.strip().lower()
         if not _USERNAME_RE.match(v):
             raise ValueError("用户名仅允许 2-32 个字母、数字、下划线或中文")
         return v
