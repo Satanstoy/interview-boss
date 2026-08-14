@@ -24,6 +24,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测运行（Eval Run）**:
 管理员针对一个具体评测目标版本发起的一次完整评测执行记录；创建后锁定目标版本、Benchmark Suite、评测协议、Judge、Simulator Harness 和 Candidate Simulator 等依赖，并独立保存执行状态、原始轨迹和评分结果。
 
+**评测队列（Eval Queue）**:
+专门承载评测父任务、Case/Replication 子任务、Judge 和聚合任务的异步队列及 Worker Pool，与用户服务队列隔离资源、并发、限流和故障域；评测队列中的任务仍以数据库记录为事实来源。
+
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
