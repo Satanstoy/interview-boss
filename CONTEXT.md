@@ -30,6 +30,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测 Item Attempt**:
 同一个 Eval Run Item 的一次实际执行尝试，用于记录 Worker 崩溃、网络错误、超时等操作性重试；Attempt 不增加统计样本数，原始失败 Attempt 不被覆盖，Item 最终引用一个有效 Attempt。
 
+**评测失败分类（Eval Failure Class）**:
+用于决定 Attempt 是否可重试以及重试哪一层的标准化失败类型；临时基础设施失败、目标行为失败、Harness 契约失败和 Judge 阶段失败必须分开处理，不能统一按“再跑一次”处理。
+
 **对比组（Comparison Group）**:
 用于管理员 A/B 对比的关联对象；它将两个或多个拥有独立生命周期的 sibling Eval Run 关联起来，要求它们共享同一 Batch 执行上下文，并明确记录各自唯一不同的 target release。
 
