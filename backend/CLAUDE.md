@@ -196,6 +196,17 @@ Routers → Services → Core/DB → (external)
 
 **pytest 配置**：根 `pyproject.toml` 中 `asyncio_mode = "auto"`，无需手动加 `@pytest.mark.asyncio`。
 
+**真实 Redis / ARQ 集成测试（`RUN_REAL_REDIS=1`）**：`infra/test_arq_real_redis_integration.py` 默认 skip，验证「ARQ 真实入队 → worker 真实消费 → 结果可见」关键路径（audit D3，弥补 `test_arq_integration.py` 的 mock-only）。仅在 docker compose 的 `test` 服务内运行（已 `depends_on` 真实 redis:7.4-alpine）：
+
+```bash
+docker compose --profile test run --rm -e RUN_REAL_REDIS=1 -e PYTHONPYCACHEPREFIX=/tmp/pycache \
+  test uv run pytest backend/tests/infra/test_arq_real_redis_integration.py -q
+```
+
+- 未设 `RUN_REAL_REDIS=1` 时该文件全部 skip（跳过原因 `set RUN_REAL_REDIS=1 to run real-redis integration tests`），默认套件不依赖真实 Redis。
+- 连接参数：`REDIS_HOST`（默认 `redis`）；密码优先读 `REDIS_PASSWORD_FILE` 指向的文件，其次 `REDIS_PASSWORD`，两者都不存在则 skip。
+- 测试用独立队列名 `arq:real-redis-test-*`，不触碰生产 `arq:queue`。
+
 ## 测试代码安全规范（强制）
 
 **测试代码不得硬编码敏感信息**，包括但不限于：
