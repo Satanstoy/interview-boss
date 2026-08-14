@@ -144,6 +144,18 @@ services:
     command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
     mem_limit: 384m
     cpus: 0.75
+    # ARQ 无 HTTP 端口，镜像也不含 pgrep/ps/redis-cli，故直接在 /proc 扫描属于本容器的
+    # arq worker 进程（cmdline 为 "arq app.worker.WorkerSettings"）判断存活，避免端口/依赖误判。
+    healthcheck:
+      test: |
+        for f in /proc/[0-9]*/cmdline; do
+          tr '\0' ' ' < "$$f" | grep -q 'arq[ ]app\.worker\.WorkerSettings' && exit 0
+        done
+        exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # ── Test（pytest 测试环境，按需启用：--profile test）──
   test:
