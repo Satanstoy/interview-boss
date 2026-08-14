@@ -29,24 +29,27 @@ class TestRedisConfig:
         assert settings.port == 6380
         assert settings.database == 2
 
-    def test_get_redis_url_from_env(self):
-        """应从环境变量读取 REDIS_URL"""
-        with patch.dict(os.environ, {"REDIS_URL": "redis://test:6379/1"}):
-            # 重新导入以读取新的环境变量
-            import importlib
-            import app.worker
-            importlib.reload(app.worker)
-            assert app.worker.REDIS_URL == "redis://test:6379/1"
+    def test_build_redis_url_preserves_raw(self):
+        """build_redis_url 在无运行时密码时应原样返回 raw_url。"""
+        from app.core.config import build_redis_url
+        with patch("app.core.config.REDIS_PASSWORD", ""):
+            assert build_redis_url("redis://test:6379/1", "redis://fallback:6379/0") == "redis://test:6379/1"
 
-    def test_get_redis_url_default(self):
-        """未设置 REDIS_URL 时应使用默认值"""
-        with patch.dict(os.environ, {}, clear=True):
-            if "REDIS_URL" in os.environ:
-                del os.environ["REDIS_URL"]
-            import importlib
-            import app.worker
-            importlib.reload(app.worker)
-            assert app.worker.REDIS_URL == "redis://localhost:6379/0"
+    def test_build_redis_url_uses_default(self):
+        """raw_url 为空时应回退到 default_url。"""
+        from app.core.config import build_redis_url
+        with patch("app.core.config.REDIS_PASSWORD", ""):
+            assert build_redis_url(None, "redis://localhost:6379/0") == "redis://localhost:6379/0"
+            assert build_redis_url("", "redis://localhost:6379/0") == "redis://localhost:6379/0"
+
+    def test_build_redis_url_injects_password(self):
+        """配置了运行时 REDIS_PASSWORD 时应注入认证信息到 DSN。"""
+        from urllib.parse import unquote, urlsplit
+        from app.core.config import build_redis_url
+        with patch("app.core.config.REDIS_PASSWORD", "s3cret!pw"):
+            url = build_redis_url("redis://host:6379/0", "redis://host:6379/0")
+            assert url.startswith("redis://:")
+            assert unquote(urlsplit(url).password or "") == "s3cret!pw"
 
 
 class TestRedisPool:
