@@ -15,7 +15,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | 文件 | 职责 |
 |------|------|
 | `connection.py` | 线程级连接管理、`run_db()`、岗位查询、动态频率 SQL |
-| `migrations/` | Schema 迁移包；领域文件保存 `_migration_NNN_*`，`__init__.py` 维护 `_MIGRATIONS` 并提供 `run_migrations()` |
+| `migrations/` | Schema 迁移包；领域文件保存 `_migration_NNN_*`，`__init__.py` 维护 `_MIGRATIONS` 并提供 `run_migrations()`（破坏性迁移 081/082/084/085/086 自动整库备份到 `backend/data/backups/` 并临时关闭 FK 约束） |
 | `operations.py` | 可复用 CRUD（提交、去重、软删除）；面经写入时同步 `interview_id/question_type/dimension` 并标记公共统计过期 |
 | `queries.py` | 跨领域查询（岗位、频率、分类体系） |
 | `question_bank_sources.py` | 题库来源表 CRUD + dual-write 工具 |
@@ -28,6 +28,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `migrations/practice_performance.py` | 刷题队列切换查询的覆盖索引 migration 059 |
 | `migrations/admin_assistant.py` | 管理员 AI 助手对话/操作审计日志表 migration 069：`admin_assistant_log`（session_id + admin_id 隔离，role: user/assistant/action）；migration 070：`quality_issue.target_qb_id`（误合并「并入到其他题」的目标题 ID）；migration 071：`quality_issue.new_cat2`（拆出后新题分类，LLM 判定）；migration 073：`quality_issue.source_question/source_cat2`（质量审查项原题快照，兼容已删除来源题的历史展示） |
 | `migrations/clustering.py` | 聚类基础字段与质量审核迁移；migration 072 创建 `cluster_review_state`、`cluster_review_tasks`，并为 `quality_issue` 增加版本/任务/outbox 幂等字段；migration 076 创建原始题目全局 ownership claim 表 |
+| `migrations/schema_hygiene.py` | Schema 卫生迁移 081-086：孤儿清理（081，断言 foreign_key_check=0）、FTS 重建+触发器（082，question_bank 增删改自动同步 question_fts）、重复索引清理（083）、时间戳/任务表统一（084：jobs 去 error 列、login_failures/mcp_sessions 转 TEXT、refresh_tokens ISO）、FK 声明补齐（085：11 表重建 + username 小写回填 + taxonomy 公共唯一索引）、死列删除与过期索引（086） |
 | `migrations/sources.py` | 来源规范化表 migration 016/023/047，以及公共面经/JD `url_signature` 唯一索引的安全启用 |
 | `migrations/jobs.py` | jobs/analysis_queue/job_payloads 以及 migration 074 durable job lifecycle：ARQ 投递记录、lease、worker claim、重试与幂等键 |
 
@@ -37,6 +38,10 @@ SQLite 数据库层，线程安全，WAL 模式。
 - **来源清理必须原子**：删除/恢复面经时，先在同一个外层事务内更新 JSON 投影和规范化来源表；禁止用吞异常的 best-effort savepoint，否则会产生“面经已删、来源仍在”的半删除状态。恢复也必须以规范化来源表重建 JSON 投影。
 - **来源关系按 owner 隔离**：来源 URL 不是唯一业务关系键；清理题库来源时必须同时限定 `question_bank.owner_id`，只有同一 owner 下最后一个活跃面经仍不存在时才可将题簇软删除。
 - **软删除**：`deleted_at` 列，查询时加 `WHERE deleted_at IS NULL`
+- **FTS 同步**：question_bank 的增删改由触发器（`trg_question_fts_*`，迁移 082）自动同步 question_fts，禁止绕过触发器直接改 FTS；手工重建见 `fts_service.py`
+- **归一化**：username/email 一律小写 + 去空白后入库（注册/登录/绑定均归一化，迁移 085 已回填存量）；jobs 错误只写 `last_error`（`error` 列已删除）
+- **保留期清理**：worker 每日 `scheduled_db_retention_task`（凌晨 4:00）清理过期验证码/完成队列/失败登录/陈旧任务，见 `app/worker.py:run_db_retention`
+
 - **岗位过滤**：通过 `question_position` 关联表，fallback 到 `job_position` 列
 - **模拟面试历史**：`chat_conversations.job_position` 记录会话所属岗位，列表和详情必须按用户当前岗位过滤。
 - **模拟面试回合**：`chat_turns` 是进行中请求的唯一 fence；同一 conversation 只能有一个 `running` turn，旧 turn 不能绕过 `turn_id + fence` finalize。

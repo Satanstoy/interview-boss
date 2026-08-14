@@ -19,6 +19,7 @@
 | `faiss_index_manager.py` | Per-cat2 centroid 缓存 + FAISS 索引管理器，消除 cluster_batch 全表扫描；singleton 实例通过 `get_index_manager()` 访问 | `embedding_service`, `faiss-cpu` |
 | `backpressure.py` | 自适应并发限制器（RateLimitError 自动降并发、成功后恢复）；matcher/compact 共享 singleton | — |
 | `chat_service.py` | 对话管理、消息存储、durable side-effect jobs、memory provenance/version guard、CandidateSet、interview event/generation read model | `llm`, `memory_recall_service` |
+| `worker.py`（`app/worker.py`） | ARQ worker：任务执行 + 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |

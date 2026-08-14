@@ -15,7 +15,7 @@
 | `app.py` | FastMCP app 定义，导出 `mcp` 与可挂载的 `mcp_app`；处理 `/mcp` 的账户级 MCP Token 认证、旧 API key + JWT 兼容、CSRF 豁免、session 加载/持久化，以及候选人画像和结束后 GPT 面试导入 |
 | `interview_tools.py` | 岗位发现、加载 skill、搜索、抽题、选题工具的稳定执行层；更新 chat state 并返回统一 envelope |
 | `job_position_service.py` | 复用岗位表和 interview distribution family mapping，提供精确的岗位标准化、别名解析和岗位发现 |
-| `session.py` | MCP session 状态存储：Redis 优先，SQLite 兜底，按 user_id 隔离 session key；Redis 可用时使用分布式 session lock |
+| `session.py` | MCP session 状态存储：Redis 优先，SQLite 兜底，按 user_id 隔离 session key；Redis 可用时使用分布式 session lock |（SQLite 兜底表 `mcp_sessions`.updated_at 为 ISO 文本，与迁移 084 口径一致）
 | `principal.py` | 外部 MCP 请求级账户 principal 的 ContextVar，供工具初始化和 session 命名空间读取 |
 | `agent_private_catalog.py` | Agent 私有题源目录加载：从 `data/agent_interview_catalog.json` 读取编译后的运行时目录，提供 `search_agent_private_questions` / `draw_agent_private_questions` / `select_agent_private_question` 工具函数 |
 | `__init__.py` | 包初始化 |

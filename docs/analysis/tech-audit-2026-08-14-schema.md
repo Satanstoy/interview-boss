@@ -100,3 +100,37 @@
 - **M2（短期）**：FTS 同步修复（挂接删除/合并/清空路径 + 全量重建）+ 补齐缺 FK 声明（9 处）+ email 验证码/analysis_queue/jobs 清理任务
 - **M3（中期）**：schema 文档（docs/architecture/schema.md）+ 死列/冗余索引清理 + user_practice_history 双写收敛（定唯一权威源）+ 统一时间戳格式
 
+## 修复实施（2026-08-14，同日完成）
+
+> 用户要求三项保证：不破坏数据 / 数据库操作同步改 / 安全。全部按 TDD 实施，测试在 Docker test-runtime 全绿；破坏性迁移在生产库部署时由 run_migrations 自动整库备份后执行。
+
+### 已修复（本轮 21 条标记 FIXED，另有 5 条前轮 FIXED）
+
+| commit | 内容 |
+|---|---|
+| bdb93ba | 迁移执行器安全：破坏性迁移（081/082/084/085/086）执行前自动整库备份（backend/data/backups/pre_migration_vNNN_*.db）+ 表重建期间临时关闭 FK（防 DROP 级联误删子表） |
+| 2109042 / 94b7806 | 迁移 081-086：孤儿清理（含 qois 子表级联缺口修复）、FTS 重建+触发器同步、重复索引清理、时间戳/任务表统一、11 表 FK 声明补齐（含 username 小写回填、taxonomy 去重）、死列/过期索引；代码同步：jobs.error 全部读写点改 last_error（worker/job_lifecycle/embedding_recompute/interview_import/bank_build） |
+| 52489d3 | 认证归一化：username/email 小写+去空白（注册/登录/绑定/锁定期统一口径）；locked_until TEXT 格式；顺带修复「锁定计数每次登录前被清空、锁定机制永不触发」的潜在缺陷 |
+| 0e059e5 | jobs.error 列遗留读写清理 |
+| 6050b9c | worker 每日 4:00 DB 保留期清理（过期验证码/完成队列/失败登录/90 天陈旧任务，父任务血缘保护） |
+| bbebc89 | mcp_sessions.updated_at 统一 ISO 文本 |
+
+### 生产库快照验证结果（只读副本全链跑 081-086）
+
+- integrity_check: ok；foreign_key_check: 0（1319 孤儿清零）
+- 非孤儿数据 100% 保留：users 52 / jobs 302 / question_bank 313 / interview 62 / jd 29 / chat_conversations 53 / chat_memories 295 / coding_submissions 9 / practice_decks 2 / taxonomy 7
+- 孤儿清理：chat_messages −1316、asked_questions −2215、quality_issue −7、analysis_queue −19、sources/qoi/qp −1×3
+- FTS 重建 313=313，触发器插/删同步生效；Jihangyu→jihangyu；refresh_tokens ISO 统一
+- 新增测试：test_migration_backup（6）/ test_schema_hygiene（16）/ test_auth_normalization（7）/ test_db_retention（5）/ test_mcp_session_format（3）
+
+### 剩余未修（设计/低优先，保持 open）
+
+- 任务队列碎片化整合（jobs/analysis_queue/cluster_review_tasks 等 6 套）
+- JSON 双写列漂移自动修复（现仅 weekly cron 检测）
+- interview/jd owner FK ON DELETE 策略（无用户删除路径，dormant）
+- job_positions.is_deleted → deleted_at 改名
+- practice 双写权威源收敛（user_practice_history vs SM-2 体系）
+- practice_review_events 级联删除审计保留策略
+- practice_decks.visibility 死列删除（owner FK 已补）
+- coding_playlist_items/favorites FK 侧索引、chat_memories.expires_at 物理清理
+
