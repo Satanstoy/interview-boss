@@ -1,0 +1,12 @@
+title = "InterviewBoss gitleaks config"
+
+# 豁免测试 fixture 文件：这些测试专门用来验证 secret 扫描能检出硬编码 key 字面量，
+# 因而故意包含完整 key（sk- 开头）。它们不是生产泄露，历史中的真实 key 由用户另行轮换。
+# 只按路径豁免测试 fixture，不豁免生产代码，也不全局关停检测。
+[[allowlist]]
+  description = "Test fixtures that intentionally embed a leaked siliconflow API key literal for secret-scan self-tests"
+  paths = [
+    "backend/tests/security/test_secret_scan.py",
+    "backend/tests/infra/test_check_secrets.py",
+  ]
+
