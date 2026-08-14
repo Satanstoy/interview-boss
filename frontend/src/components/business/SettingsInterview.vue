@@ -250,6 +250,7 @@ const handleGoToQuestion = (question) => {
             <Button
               variant="ghost"
               size="icon-sm"
+              aria-label="删除岗位"
               @click="handleDeletePosition(pos.name)"
               class="text-muted-foreground/50 hover:text-destructive transition-colors"
             >

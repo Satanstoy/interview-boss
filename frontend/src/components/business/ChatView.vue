@@ -152,12 +152,12 @@
               @blur="saveHeaderRename"
             />
             <AppTooltip text="保存标题">
-              <Button type="submit" variant="ghost" size="icon-xs">
+              <Button type="submit" variant="ghost" size="icon-xs" aria-label="保存标题">
                 <Check :size="14" />
               </Button>
             </AppTooltip>
             <AppTooltip text="取消">
-              <Button type="button" variant="ghost" size="icon-xs" @mousedown.prevent @click="cancelHeaderRename">
+              <Button type="button" variant="ghost" size="icon-xs" aria-label="取消" @mousedown.prevent @click="cancelHeaderRename">
                 <X :size="14" />
               </Button>
             </AppTooltip>

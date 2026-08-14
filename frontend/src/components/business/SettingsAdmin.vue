@@ -294,7 +294,7 @@ const onRebuild = () => {
                   <div class="flex items-center gap-2">
                     <span class="text-xs text-muted-foreground">分享者: {{ tax.owner_name || '匿名' }}</span>
                     <AppTooltip v-if="isAdmin" text="删除此公开分类">
-                      <Button variant="ghost" size="icon-sm"
+                      <Button variant="ghost" size="icon-sm" aria-label="删除此公开分类"
                         @click.stop="onDeletePublic(tax)"
                         class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200">
                         <Trash2 class="size-4" />

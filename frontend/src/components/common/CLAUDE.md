@@ -13,7 +13,7 @@
 | `AppPageHeader.vue` | 页面头（breadcrumbs/title/description/actions 卡槽，back 按钮） |
 | `AppSearchForm.vue` | 搜索表单（modelValue/placeholder props，filters 卡槽） |
 | `AppTable.vue` | 数据表格（columns/rows/loading/emptyText props，cell 卡槽） |
-| `AppTooltip.vue` | 统一悬停提示（底层 shadcn Tooltip，text/content slot） |
+| `AppTooltip.vue` | 统一悬停提示（底层 shadcn Tooltip，text/content slot）。a11y：icon-only 触发自动注入 `aria-label`（`text` 或显式 `ariaLabel`），touch 分支 `supportsHover=false` 渲染 `.sr-only` 文本兜底，保证 WCAG 4.1.2 可访问名 |
 | `SourceCard.vue` | 外部来源卡片（favicon、站点、标题、摘要和安全外链） |
 | `SourceList.vue` | 可折叠来源列表，复用来源卡片展示联网证据 |
 | `AsyncLoading.vue` | 异步组件 loading/error 包装 |

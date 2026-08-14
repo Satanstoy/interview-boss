@@ -26,6 +26,7 @@ Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue (reka-
 - Button/Card/Badge/Dialog/Select/Table/AlertDialog/Skeleton 等一律使用 shadcn 组件
 - 图标统一使用 `@lucide/vue`，禁止内联 SVG
 - 悬停提示统一使用 `components/common/AppTooltip.vue`（底层 shadcn Tooltip），不要新增原生 `title` 或自定义 tooltip 气泡；全局 `TooltipProvider` 放在 `App.vue`
+- **AppTooltip a11y 约定（WCAG 4.1.2）**：icon-only 触发按钮必须拥有可访问名。AppTooltip 会把 `text` 作为 `aria-label` 注入触发元素（hover 分支经 `TooltipTrigger as-child` 落到 button，touch 分支 `supportsHover=false` 时注入 aria-label 并渲染 `.sr-only` 文本兜底）；调用方可传 `ariaLabel` 显式指定且优先级最高，AppTooltip 永不覆盖调用方已有的 `aria-label`。icon-only 按钮请给 `AppTooltip` 传有意义的 `text`/`ariaLabel`，或直接在按钮上写 `aria-label`，禁止无任何文本/标签的空图标按钮
 - global.css 仅保留全局基础样式（reset、scrollbar、prose-chat、elevation、动画），不包含组件样式
 - 通用组件在 `components/common/`，shadcn 原始组件在 `components/ui/`
 
