@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.core.request_ip import get_client_ip
 from app.core.auth import get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.services.email_service import send_verification_code, verify_code
@@ -11,7 +11,7 @@ from app.services.email_service import send_verification_code, verify_code
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_client_ip)
 
 
 class BindEmailRequest(BaseModel):

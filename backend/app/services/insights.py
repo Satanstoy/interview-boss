@@ -234,14 +234,18 @@ def build_insights_snapshot(user: dict) -> dict:
         ).fetchone()[0]
 
         # 岗位高频待练：面经 questions_detail 按 cat2 聚合被问频次（降序）
-        # 仅当前岗位，排除已删，过滤「其他」/空分类等无意义主题
+        # 仅当前岗位 + 当前用户可见作用域（他人私有面经不得泄漏进聚合），
+        # JOIN interview iv 并复用 _scope_condition 过滤 owner/公共 approved，排除已删，
+        # 过滤「其他」/空分类等无意义主题。
+        high_scope, high_scope_params = _scope_condition("iv", user_id)
         high_freq_rows = conn.execute(
-            "SELECT cat2 AS topic, COUNT(*) AS frequency "
-            "FROM questions_detail "
-            "WHERE deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL) "
-            "AND cat2 IS NOT NULL AND cat2 != '' AND cat2 NOT IN ('其他', '未分类') "
-            "GROUP BY cat2 ORDER BY frequency DESC LIMIT 10",
-            (position_name,),
+            "SELECT qd.cat2 AS topic, COUNT(*) AS frequency "
+            "FROM questions_detail qd JOIN interview iv ON qd.url = iv.url "
+            f"WHERE {high_scope} AND (iv.job_position = ? OR iv.job_position = '' OR iv.job_position IS NULL) "
+            "AND qd.deleted_at IS NULL "
+            "AND qd.cat2 IS NOT NULL AND qd.cat2 != '' AND qd.cat2 NOT IN ('其他', '未分类') "
+            "GROUP BY qd.cat2 ORDER BY frequency DESC LIMIT 10",
+            [*high_scope_params, position_name],
         ).fetchall()
         high_frequency = [
             {"topic": row["topic"], "frequency": int(row["frequency"])}

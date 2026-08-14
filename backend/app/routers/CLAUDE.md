@@ -7,7 +7,7 @@
 
 | 文件 | 端点 | 职责 |
 |------|------|------|
-| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie | username/email 一律小写+去空白归一化（注册/登录/绑定/锁定期一致口径，迁移 085 已回填存量），登录大小写不敏感
+| `auth.py` | `/api/auth/*` | 登录/注册/刷新/登出/邮箱绑定、忘记密码重置、已登录修改密码；logout 必须幂等清除 refresh cookie；`/login-form`（浏览器密码管理器隐藏 iframe 提交）豁免全局 CSRF 但路由内做 `_is_same_origin_request` 同名校验拦截跨源表单 | username/email 一律小写+去空白归一化（注册/登录/绑定/锁定期一致口径，迁移 085 已回填存量），登录大小写不敏感；登录/注册/邮箱验证码等 slowapi limiter 一律 `key_func=get_client_ip`（取真实客户端 IP，防 nginx 反代下全站共享限速桶），不要改回 `get_remote_address`
 | `submit.py` | `/api/submit-stream-v2`, `/api/submit-jobs*` | JD/面经提交（LangGraph SSE + 后台 Job），并 re-export submit service 兼容旧内部导入 |
 | `data.py` | `/api/data/*` | 数据管理（JD/面经 CRUD）；面经/明细变更必须在同一事务重算 typed fact 并标记统计刷新。删除级联严格限定 owner 范围（`owner_id IS ?`，NULL 匹配公共数据）：私有删除不碰公共/他人面经、detail、question_bank sources；`_cleanup_sources_for_url` 带 owner_scope。面经删除必须把主记录、detail、JSON 来源投影和规范化来源表放进同一个严格事务；来源清理失败必须回滚整个删除，且只有同 owner 同 URL 的最后一个活跃面经才能清理来源。**静态 `question_bank.frequency` 恒为「聚类变体数」语义**（`original_questions` 长度，下限 `max(1, ...)`）：删除/恢复时 oqs 缺失必须保守取 1，禁止用剩余来源数冒充频率（真实出现频率 = 动态来源数，由刷题/题库列表动态计算）。`update_generic_data` 编辑 interview/questions_detail/jd 的 `url` 时复用 `core.validation.validate_source_url` 校验（非空必须 http(s)，internal:// 等无效值拒绝） |
 | `questions.py` | `/api/master-bank/*` | 题库 CRUD + 搜索。detail 用 all 口径可见性过滤（公共 approved OR 自己的）；编辑权限唯一矩阵 `can_edit_question`（公共题仅 admin，个人题仅本人，admin 也不能改他人个人题） |

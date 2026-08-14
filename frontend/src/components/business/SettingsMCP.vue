@@ -15,7 +15,10 @@ const issuedToken = ref('')
 const issuedConfig = ref('')
 const issuedStdioConfig = ref('')
 const copied = ref('')
-const MCP_SESSION_STORAGE_KEY = 'interview-boss:mcp-connection'
+// MCP bearer token 只保存在 JS 内存（模块级），绝不写入 sessionStorage/localStorage。
+// 与 http.js 存取 access token 的安全原则一致：避免 XSS 可读取的持久化凭证。
+// 页面刷新后 token 丢失，由 loadConfig 从 GET /api/profile/mcp 重新取回。
+let _inMemoryTokenCache = null
 
 const agentConfigPrompt = computed(() => {
   const endpoint = settings.value?.endpoint
@@ -54,53 +57,40 @@ const chatgptPrompt = computed(() => {
   ].join('\n')
 })
 
+// 凭证只在 JS 内存（模块级变量）中暂存，全组件会话内可复制；刷新即失效，
+// 由 loadConfig 重新从服务端取回。避免把 MCP bearer 凭证写入任何浏览器存储。
 const clearSessionCredentials = () => {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.removeItem(MCP_SESSION_STORAGE_KEY)
-  } catch {
-    // Ignore storage restrictions; copying still works until the page is refreshed.
-  }
+  _inMemoryTokenCache = null
 }
 
 const persistSessionCredentials = (result) => {
-  if (typeof window === 'undefined' || !result?.token) return
-  try {
-    window.sessionStorage.setItem(MCP_SESSION_STORAGE_KEY, JSON.stringify({
-      endpoint: result.endpoint,
-      rotated_at: result.rotated_at,
-      token: result.token,
-      config_json: result.config_json || '',
-      stdio_config_json: result.stdio_config_json || '',
-    }))
-  } catch {
-    // Ignore storage restrictions; copying still works until the page is refreshed.
+  if (!result?.token) return
+  _inMemoryTokenCache = {
+    endpoint: result.endpoint,
+    rotated_at: result.rotated_at,
+    token: result.token,
+    config_json: result.config_json || '',
+    stdio_config_json: result.stdio_config_json || '',
   }
 }
 
 const restoreSessionCredentials = (config) => {
-  if (typeof window === 'undefined' || !config?.configured) {
+  // 只在组件本次会话内恢复；页面刷新后内存缓存为空，回到未展示 token 状态。
+  if (!config?.configured || !_inMemoryTokenCache) return
+
+  const stored = _inMemoryTokenCache
+  const isCurrentToken = stored.token
+    && stored.endpoint === config.endpoint
+    && stored.rotated_at === config.rotated_at
+
+  if (!isCurrentToken) {
     clearSessionCredentials()
     return
   }
 
-  try {
-    const stored = JSON.parse(window.sessionStorage.getItem(MCP_SESSION_STORAGE_KEY) || 'null')
-    const isCurrentToken = stored?.token
-      && stored.endpoint === config.endpoint
-      && stored.rotated_at === config.rotated_at
-
-    if (!isCurrentToken) {
-      clearSessionCredentials()
-      return
-    }
-
-    issuedToken.value = stored.token
-    issuedConfig.value = stored.config_json || ''
-    issuedStdioConfig.value = stored.stdio_config_json || ''
-  } catch {
-    clearSessionCredentials()
-  }
+  issuedToken.value = stored.token
+  issuedConfig.value = stored.config_json || ''
+  issuedStdioConfig.value = stored.stdio_config_json || ''
 }
 
 const applyIssuedCredentials = (result) => {

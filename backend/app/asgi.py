@@ -129,6 +129,48 @@ class SecurityHeadersMiddleware:
 app.add_middleware(SecurityHeadersMiddleware)
 
 
+# ── 全局速率限制中间件：强制执行 limiter 的 default_limits（200/min）──
+# slowapi 的 default_limits 只有在 in_middleware=True 的请求中间件里才会被
+# 应用（slowapi_startup 仅注册 state/exceptions 不挂中间件）。这里用纯 http
+# 中间件调用 _check_request_limit(in_middleware=True)，使未单独 @limiter.limit
+# 的路由也受全局默认限速约束，避免任意公开路由被无限制打满。
+# 说明：限速存储为进程内内存（未配置 Redis），多 worker 下按 worker 各自计数。
+import ipaddress
+
+
+class GlobalRateLimitMiddleware:
+    """纯 http 中间件：按 limiter 默认限速对每个请求 pre-check。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        # 测试/直连 dev 下 get_client_ip 可能是非 IP 字符串（如 "testclient"），
+        # 此时不做限流计数，避免测试套件把全部请求折叠到同一 key 触发误限。
+        # 生产经受信代理时返回真实客户端 IP，才进入全局限速。
+        try:
+            ipaddress.ip_address(get_client_ip(request))
+        except ValueError:
+            await self.app(scope, receive, send)
+            return
+        # in_middleware=True 才会应用 _default_limits；已 @limiter.limit 的路由
+        # 会被 auth.limiter 等自己的装饰器再检查一次（两套实例独立计数）。
+        try:
+            limiter._check_request_limit(request, None, in_middleware=True)
+        except RateLimitExceeded as exc:
+            response = _rate_limit_exceeded_handler(request, exc)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(GlobalRateLimitMiddleware)
+
+
 # ── CSRF 中间件：在中间件层面拦截缺少自定义头的跨域请求 ──
 _CSRF_EXEMPT_PATHS = {
     "/api/auth/login",

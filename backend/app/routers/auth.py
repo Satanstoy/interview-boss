@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Response, Form, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.core.request_ip import get_client_ip
 from app.core.auth import (
     hash_password,
     verify_password,
@@ -31,7 +31,7 @@ logger = logging.getLogger("interview-boss")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_client_ip)
 
 # ── 账号锁定机制：连续失败 5 次后锁定 15 分钟（持久化到 SQLite）──
 MAX_LOGIN_FAILURES = 5
@@ -120,6 +120,35 @@ def _require_custom_header(request: Request):
     if "application/json" in ct:
         return
     raise HTTPException(status_code=403, detail="缺少必要的请求头，请通过前端发起请求")
+
+
+def _is_same_origin_request(request: Request) -> bool:
+    """校验请求的 Origin/Referer 与本站同源（用于 form-urlencoded 的 CSRF 豁免端点）。
+
+    login-form 因供浏览器密码管理器（隐藏 iframe 提交、无法带自定义头）使用而豁免
+    CSRF 中间件；为封堵跨站表单可触发的锁定 DoS，这里补一道同源校验：跨站页面
+    提交的 Origin/Referer 与本站 host 不一致则拒绝。
+    Origin 缺失时回退 Referer；两者皆无（非浏览器客户端）按同源放行。
+    比较口径：仅比 host（及非默认端口），忽略 scheme 差异（http/https 视为同源）。
+    """
+    from urllib.parse import urlsplit
+
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return True
+    try:
+        parsed = urlsplit(origin)
+        origin_host = (parsed.hostname or "").lower()
+        if parsed.port and parsed.port not in (80, 443):
+            origin_host = f"{origin_host}:{parsed.port}"
+    except ValueError:
+        return False
+
+    host_header = (request.headers.get("host", "") or "").lower()
+    if not host_header:
+        return True
+    # Host 头形如 "example.com" 或 "example.com:8443"，直接与 origin host（已含非默认端口）比较
+    return origin_host == host_header
 
 
 RESERVED_USERNAMES = {
@@ -507,6 +536,11 @@ async def login_form(
     接受 application/x-www-form-urlencoded 的登录请求。
     用于浏览器密码管理器检测（隐藏 iframe 提交）。
     """
+    # 该端点因密码管理器表单提交而豁免全局 CSRF，这里补同源校验，
+    # 封堵跨站表单可触发的账号锁定 DoS（跨源 Origin/Referer 一律拒绝）。
+    if not _is_same_origin_request(request):
+        logger.warning("login-form 检测到跨源请求，已拒绝（锁定 DoS 防护）")
+        raise HTTPException(status_code=403, detail="跨源表单提交被拒绝")
     username = username.strip().lower()
     _check_lockout(username)
 

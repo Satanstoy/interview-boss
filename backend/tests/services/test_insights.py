@@ -431,11 +431,22 @@ def test_practice_activity_endpoint_contract(client, test_db):
     assert body["streak"] == {"current": 0, "longest": 0}
 
 
-def _insert_questions_detail(conn, detail_id, cat2, position="测试岗位"):
+def _insert_questions_detail(conn, detail_id, cat2, position="测试岗位", owner_id=601):
+    """插入一条面经及其 questions_detail 行（url 关联，owner_id 拥有该面经）。
+
+    高频待练按 用户可见作用域 JOIN interview 聚合，因此必须同时提供
+    interview 父行（owner_id + status='approved'）才能进入聚合。
+    """
+    url = f"https://insights.example/detail-{detail_id}"
     conn.execute(
-        "INSERT INTO questions_detail (id, question, cat2, job_position, deleted_at) "
-        "VALUES (?, ?, ?, ?, NULL)",
-        (detail_id, f"{cat2}面经题", cat2, position),
+        "INSERT INTO interview (url, company, round, questions_list, owner_id, "
+        "status, job_position) VALUES (?, ?, '一面', '[]', ?, 'approved', ?)",
+        (url, f"{cat2}公司", owner_id, position),
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, url, question, cat2, job_position, deleted_at) "
+        "VALUES (?, ?, ?, ?, ?, NULL)",
+        (detail_id, url, f"{cat2}面经题", cat2, position),
     )
 
 
