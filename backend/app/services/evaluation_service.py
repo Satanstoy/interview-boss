@@ -158,6 +158,7 @@ def create_eval_run(
     environment_fingerprint: str = "",
     comparison_group: str = "",
     idempotency_key: str | None = None,
+    require_published: bool = False,
 ) -> dict[str, Any]:
     """Create a target-scoped Run with an immutable Batch and Case Items."""
     if replication_count < 1:
@@ -178,12 +179,42 @@ def create_eval_run(
         simulator_harness_release_id,
         candidate_simulator_release_id,
     )
+    if len(set(release_ids)) != len(release_ids):
+        raise ValueError("评测上下文中的 Release 必须各自独立")
     placeholders = ",".join("?" for _ in release_ids)
     release_count = conn.execute(
         f"SELECT COUNT(*) FROM eval_releases WHERE id IN ({placeholders})", release_ids
     ).fetchone()[0]
     if release_count != len(set(release_ids)):
         raise ValueError("评测上下文包含不存在的 Release")
+    release_rows = conn.execute(
+        f"SELECT * FROM eval_releases WHERE id IN ({placeholders})", release_ids
+    ).fetchall()
+    release_by_id = {row["id"]: row for row in release_rows}
+    expected_types = {
+        target_release_id: "target",
+        benchmark_suite_release_id: "benchmark_suite",
+        eval_protocol_release_id: "eval_protocol",
+        judge_release_id: "judge",
+        simulator_harness_release_id: "simulator_harness",
+        candidate_simulator_release_id: "candidate_simulator",
+    }
+    for release_id, expected_type in expected_types.items():
+        if release_by_id[release_id]["release_type"] != expected_type:
+            raise ValueError(f"Release 类型不匹配: 需要 {expected_type}")
+        if require_published and release_by_id[release_id]["status"] != "published":
+            raise ValueError("官方评测只能绑定已发布 Release")
+    target_type = release_by_id[target_release_id]["target_type"]
+    if target_type and suite["target_type"] and target_type != suite["target_type"]:
+        raise ValueError("Target 与 Benchmark Suite 的 target_type 不一致")
+    for release_id in (simulator_harness_release_id, candidate_simulator_release_id):
+        component_target_type = release_by_id[release_id]["target_type"]
+        if component_target_type and target_type and component_target_type != target_type:
+            raise ValueError("评测组件的 target_type 不一致")
+    suite_judge_model = suite["judge_model"] or ""
+    judge_model = release_by_id[judge_release_id]["judge_model"] or ""
+    if suite_judge_model and judge_model and suite_judge_model != judge_model:
+        raise ValueError("Benchmark Suite 与 Judge 的 judge_model 不一致")
 
     cases = conn.execute(
         """

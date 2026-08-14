@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db
@@ -34,6 +36,16 @@ class CreateEvalRunRequest(BaseModel):
     environment_fingerprint: str = ""
     comparison_group: str = ""
     idempotency_key: str | None = None
+
+
+class CreateHumanReviewRequest(BaseModel):
+    comparison_group: str = Field(min_length=1, max_length=200)
+    run_a_id: int = Field(gt=0)
+    run_b_id: int = Field(gt=0)
+    item_key: str = Field(min_length=1, max_length=200)
+    choice: Literal["a", "b", "tie", "both_fail"]
+    dimensions: dict[str, Any] = Field(default_factory=dict)
+    comment: str = Field(default="", max_length=4000)
 
 
 def _decode_json(value: str | None, default: Any):
@@ -188,6 +200,7 @@ async def create_run(body: CreateEvalRunRequest, admin: dict = Depends(get_admin
                 environment_fingerprint=body.environment_fingerprint,
                 comparison_group=body.comparison_group,
                 idempotency_key=body.idempotency_key,
+                require_published=True,
             )
             append_event(
                 conn,
@@ -263,6 +276,109 @@ async def list_runs(
             return [dict(row) for row in rows]
 
     return {"runs": await run_db(_query)}
+
+
+@router.get("/reviews")
+async def list_reviews(
+    comparison_group: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    admin: dict = Depends(get_admin_user),
+):
+    def _query():
+        with get_db_connection() as conn:
+            if comparison_group:
+                rows = conn.execute(
+                    "SELECT * FROM eval_human_reviews "
+                    "WHERE comparison_group = ? ORDER BY id DESC LIMIT ?",
+                    (comparison_group, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM eval_human_reviews ORDER BY id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            reviews = []
+            for row in rows:
+                review = dict(row)
+                review["dimensions"] = _decode_json(review.pop("dimensions_json", "{}"), {})
+                reviews.append(review)
+            return reviews
+
+    return {"reviews": await run_db(_query)}
+
+
+@router.post("/reviews")
+async def create_review(
+    body: CreateHumanReviewRequest,
+    admin: dict = Depends(get_admin_user),
+):
+    if body.run_a_id == body.run_b_id:
+        raise HTTPException(status_code=400, detail="A/B 两条 Run 不能相同")
+
+    def _create():
+        with get_db_connection() as conn:
+            runs = conn.execute(
+                "SELECT id, comparison_group, benchmark_suite_release_id, eval_protocol_release_id, "
+                "judge_release_id, simulator_harness_release_id, candidate_simulator_release_id "
+                "FROM eval_runs WHERE id IN (?, ?)",
+                (body.run_a_id, body.run_b_id),
+            ).fetchall()
+            if len(runs) != 2:
+                raise HTTPException(status_code=404, detail="A/B Run 不存在")
+            stored_groups = {row["comparison_group"] for row in runs if row["comparison_group"]}
+            if stored_groups and stored_groups != {body.comparison_group}:
+                raise HTTPException(status_code=400, detail="A/B Run 不属于指定 comparison group")
+            context_fields = (
+                "benchmark_suite_release_id",
+                "eval_protocol_release_id",
+                "judge_release_id",
+                "simulator_harness_release_id",
+                "candidate_simulator_release_id",
+            )
+            if len({tuple(row[field] for field in context_fields) for row in runs}) != 1:
+                raise HTTPException(status_code=400, detail="A/B Run 的评测上下文不一致")
+            try:
+                case_key, replication_text = body.item_key.rsplit("#", 1)
+                replication_index = int(replication_text)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="item_key 必须是 case_key#replication_index") from None
+            allowed_statuses = {"completed", "failed"} if body.choice == "both_fail" else {"completed"}
+            for run in runs:
+                item = conn.execute(
+                    "SELECT i.status FROM eval_items i "
+                    "JOIN eval_benchmark_cases c ON c.id = i.case_id "
+                    "WHERE i.run_id = ? AND c.case_key = ? AND i.replication_index = ?",
+                    (run["id"], case_key, replication_index),
+                ).fetchone()
+                if item is None or item["status"] not in allowed_statuses:
+                    raise HTTPException(status_code=400, detail="A/B Item 不存在或尚未完成")
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO eval_human_reviews "
+                    "(comparison_group, run_a_id, run_b_id, item_key, reviewer_id, choice, dimensions_json, comment) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        body.comparison_group,
+                        body.run_a_id,
+                        body.run_b_id,
+                        body.item_key,
+                        admin["id"],
+                        body.choice,
+                        json.dumps(body.dimensions, ensure_ascii=False, sort_keys=True),
+                        body.comment,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HTTPException(status_code=400, detail="人工评测记录无效") from exc
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM eval_human_reviews WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            result = dict(row)
+            result["dimensions"] = _decode_json(result.pop("dimensions_json", "{}"), {})
+            return result
+
+    return await run_db(_create)
 
 
 @router.get("/runs/{run_id}")

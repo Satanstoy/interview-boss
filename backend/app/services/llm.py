@@ -1050,6 +1050,7 @@ async def _call_llm_with_retry(
     model: str = None,
     thinking: bool = None,
     llm_scope: str = "user",
+    temperature: float = 0.3,
 ) -> str:
     """带指数退避重试 + 超时保护的 LLM 调用封装（自动适配 OpenAI / Anthropic）
 
@@ -1078,6 +1079,7 @@ async def _call_llm_with_retry(
             timeout,
             system_msg=system_msg,
             messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
             response_format=response_format,
         )
 
@@ -1101,6 +1103,7 @@ async def _call_llm_with_retry(
                 resolved_model,
                 system_msg,
                 [{"role": "user", "content": prompt}],
+                temperature=temperature,
                 response_format=response_format,
                 max_output_tokens=caps["max_output_tokens"],
             )
@@ -1115,6 +1118,7 @@ async def _call_llm_with_retry(
             resolved_model,
             effective_system,
             [{"role": "user", "content": prompt}],
+            temperature=temperature,
             max_output_tokens=caps["max_output_tokens"],
         )
 
@@ -1124,7 +1128,7 @@ async def _call_llm_with_retry(
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.3,
+        temperature=temperature,
     )
     caps = get_provider_capabilities(base_url)
     if response_format and _should_use_response_format(base_url):

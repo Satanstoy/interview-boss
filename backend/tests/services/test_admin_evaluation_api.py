@@ -53,6 +53,7 @@ def _context(conn):
         input_snapshot={"candidate_view": {"answer": "hello"}},
         contract={"hard_assertions": []},
     )
+    conn.execute("UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP")
     conn.commit()
     return target, suite_release, protocol, judge, harness, simulator
 
@@ -68,6 +69,7 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/runs/{run_id}" in paths
     assert "/api/admin/evals/runs/{run_id}/cancel" in paths
     assert "/api/admin/evals/runs/{run_id}/events" in paths
+    assert "/api/admin/evals/reviews" in paths
 
 
 def test_create_run_keeps_run_recoverable_when_queue_dispatch_fails(test_db, monkeypatch):
@@ -176,3 +178,80 @@ def test_sse_replays_only_events_after_last_event_id(test_db, monkeypatch):
     assert "id: 2" in payload
     assert "run.completed" in payload
     assert "run.created" not in payload
+
+
+def test_human_review_persists_ab_choice_and_dimensions(test_db, monkeypatch):
+    module = _router()
+    context = _context(test_db)
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    service = importlib.import_module("app.services.evaluation_service")
+    run_a = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=20,
+        comparison_group="release-ab-1",
+    )
+    run_b = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=21,
+        comparison_group="release-ab-1",
+    )
+    test_db.execute(
+        "UPDATE eval_items SET status = 'completed' WHERE run_id IN (?, ?)",
+        (run_a["id"], run_b["id"]),
+    )
+    test_db.commit()
+
+    body = module.CreateHumanReviewRequest(
+        comparison_group="release-ab-1",
+        run_a_id=run_a["id"],
+        run_b_id=run_b["id"],
+        item_key="case-1#1",
+        choice="a",
+        dimensions={"flow": "a", "evidence": "tie"},
+        comment="A 的追问更自然",
+    )
+    result = asyncio.run(module.create_review(body, {"id": 1, "is_admin": 1}))
+
+    assert result["choice"] == "a"
+    assert result["dimensions"]["flow"] == "a"
+    assert result["reviewer_id"] == 1
+    rows = asyncio.run(
+        module.list_reviews(
+            comparison_group="release-ab-1",
+            limit=20,
+            admin={"id": 1, "is_admin": 1},
+        )
+    )
+    assert len(rows["reviews"]) == 1
+    assert rows["reviews"][0]["item_key"] == "case-1#1"
+
+    with pytest.raises(module.HTTPException) as exc_info:
+        asyncio.run(
+            module.create_review(
+                module.CreateHumanReviewRequest(
+                    comparison_group="release-ab-1",
+                    run_a_id=run_a["id"],
+                    run_b_id=run_b["id"],
+                    item_key="missing-case#1",
+                    choice="tie",
+                ),
+                {"id": 1, "is_admin": 1},
+            )
+        )
+    assert exc_info.value.status_code == 400

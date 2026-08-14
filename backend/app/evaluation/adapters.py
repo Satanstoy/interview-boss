@@ -28,6 +28,10 @@ def register_target_adapter(target_type: str, adapter: TargetAdapter) -> None:
 
 
 def get_target_adapter(target_type: str) -> TargetAdapter:
+    if target_type not in _ADAPTERS and target_type == "interview":
+        from app.evaluation.interview_adapter import InterviewE2EAdapter
+
+        _ADAPTERS[target_type] = InterviewE2EAdapter()
     try:
         return _ADAPTERS[target_type]
     except KeyError as exc:

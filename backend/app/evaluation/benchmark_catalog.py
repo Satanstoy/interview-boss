@@ -98,7 +98,10 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
             "release_type": "candidate_simulator",
             "version": "1.0",
             "target_type": "interview",
-            "manifest": _baseline_manifest("candidate-simulator"),
+            "manifest": {
+                **_baseline_manifest("candidate-simulator"),
+                "model": os.environ.get("CANDIDATE_LLM_MODEL", "candidate-simulator-model"),
+            },
         },
     ]
     release_rows = {}

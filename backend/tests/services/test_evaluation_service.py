@@ -138,6 +138,25 @@ def test_append_event_allocates_monotonic_sequence_for_resumable_sse(test_db):
     ]
 
 
+def test_official_eval_run_requires_published_releases(test_db):
+    service = _service()
+    context = _evaluation_context(test_db)
+
+    with pytest.raises(ValueError, match="已发布"):
+        service.create_eval_run(
+            test_db,
+            created_by=None,
+            target_release_id=context["target"]["id"],
+            benchmark_suite_release_id=context["suite"]["id"],
+            eval_protocol_release_id=context["protocol"]["id"],
+            judge_release_id=context["judge"]["id"],
+            simulator_harness_release_id=context["harness"]["id"],
+            candidate_simulator_release_id=context["simulator"]["id"],
+            replication_count=1,
+            require_published=True,
+        )
+
+
 def test_release_manifest_digest_is_stable_and_duplicate_key_is_rejected(test_db):
     service = _service()
     manifest = {"target": "interview", "prompt": "fixed", "sampling": {"temperature": 0}}

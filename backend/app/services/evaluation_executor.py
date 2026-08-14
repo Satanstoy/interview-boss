@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from app.db.connection import get_db_connection
 from app.evaluation.adapters import get_target_adapter
+from app.evaluation.judge import judge_observation
 from app.evaluation.scoring import score_observation
 from app.services.evaluation_service import append_event
 
@@ -29,10 +30,17 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
         SELECT r.*, b.id AS batch_id, b.batch_fingerprint,
                tr.release_key AS target_release_key,
                tr.target_type AS target_type,
-               tr.manifest_json AS target_manifest_json
+               tr.manifest_json AS target_manifest_json,
+               jr.judge_model AS judge_model,
+               jr.manifest_json AS judge_manifest_json,
+               sh.manifest_json AS harness_manifest_json,
+               cs.manifest_json AS candidate_simulator_manifest_json
         FROM eval_runs r
         JOIN eval_batches b ON b.id = r.batch_id
         JOIN eval_releases tr ON tr.id = r.target_release_id
+        JOIN eval_releases jr ON jr.id = r.judge_release_id
+        JOIN eval_releases sh ON sh.id = r.simulator_harness_release_id
+        JOIN eval_releases cs ON cs.id = r.candidate_simulator_release_id
         WHERE r.id = ?
         """,
         (run_id,),
@@ -79,6 +87,13 @@ async def execute_eval_run(
         "release_key": run["target_release_key"],
         "target_type": run["target_type"],
         "manifest": json.loads(run["target_manifest_json"] or "{}"),
+        "created_by": run.get("created_by"),
+        "judge_model": run.get("judge_model") or "",
+        "judge_manifest": json.loads(run.get("judge_manifest_json") or "{}"),
+        "harness_manifest": json.loads(run.get("harness_manifest_json") or "{}"),
+        "candidate_simulator_manifest": json.loads(
+            run.get("candidate_simulator_manifest_json") or "{}"
+        ),
     }
     items = connection.execute(
         """
@@ -121,10 +136,31 @@ async def execute_eval_run(
             adapter = resolver(target_release["target_type"])
             case_snapshot = json.loads(item["input_snapshot_json"] or "{}")
             contract = json.loads(item["contract_json"] or "{}")
+            # The adapter receives the private contract for observation only;
+            # InterviewE2EAdapter never passes it to the candidate simulator.
+            case_snapshot["_eval_contract"] = contract
+            case_snapshot["_eval_seed"] = item["seed"]
+            case_snapshot["_eval_replication_index"] = item["replication_index"]
             prepared = await adapter.prepare(case_snapshot, target_release)
             raw_result = await adapter.run(prepared, target_release)
             observation = await adapter.observe(raw_result)
+            if observation.get("status") not in {"succeeded", "completed"}:
+                errors = observation.get("payload", {}).get("errors", [])
+                detail = "; ".join(str(error) for error in errors[:2]) if errors else "observation status is not succeeded"
+                raise RuntimeError(f"target_observation_failed: {detail}")
             score = score_observation(observation, contract)
+            if run["target_type"] == "interview":
+                if score["hard_gate_status"] == "passed":
+                    judge_result = await judge_observation(
+                        case_key=item["case_key"],
+                        contract=contract,
+                        observation=observation,
+                        judge_model=run["judge_model"] or "",
+                    )
+                    score.update(judge_result)
+                else:
+                    score["judge_status"] = "skipped_hard_gate"
+                    score["judge_model"] = run["judge_model"] or ""
             result_json = _json_dumps({"observation": observation, "score": score})
             connection.execute(
                 """
