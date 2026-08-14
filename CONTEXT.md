@@ -69,6 +69,9 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 **评测目标版本（Evaluation Target Release）**:
 某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
 
+**Target Adapter**:
+评测目标接入 AI Evaluation System 的统一执行适配器，负责准备 Case、执行已锁定的 Target Release 和将原始结果转换为标准 Observation；它不负责决定 Benchmark 量规、Judge 结论或管理员聚合策略。
+
 **人工对比评测（Human Pairwise Review）**:
 管理员在相同评测输入下比较两个评测目标版本，并记录维度化偏好、平局或共同失败的人工评测结果。
 
