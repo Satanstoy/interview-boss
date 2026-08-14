@@ -15,6 +15,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **系统基线（System Baseline）**:
 评测系统建立时对整个 InterviewBoss 行为状态的固定起点，用于后续判断目标版本的变化。
 
+**评测系统 1.0 基线（Evaluation System 1.0 Baseline）**:
+当前评测系统建设采用的初始冻结基线，包含当前系统基线以及各评测目标、Simulator Harness、Candidate Simulator、Judge、Benchmark Suite 和评测协议的初始 `1.0` 版本。`1.0` 表示可追溯的版本起点，不表示所有评测指标已经达到合格标准；后续变化产生新的组件版本，不覆盖或重写 `1.0`。
+
 **评测目标版本（Evaluation Target Release）**:
 某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
 
