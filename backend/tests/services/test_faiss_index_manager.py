@@ -148,8 +148,8 @@ class TestFAISSIndexManagerSearch:
         emb = _unit_vec()
         conn.execute(
             "INSERT INTO question_bank "
-            "(id, question, cat1, cat2, status, deleted_at, duplicate_of, job_position, owner_id, embedding, embedding_model, embedding_dim) "
-            "VALUES (1, '测试题', 'A', '算法', 'approved', NULL, NULL, 'pos1', NULL, ?, 'test', 512)",
+            "(id, question, cat1, cat2, status, deleted_at, job_position, owner_id, embedding, embedding_model, embedding_dim) "
+            "VALUES (1, '测试题', 'A', '算法', 'approved', NULL, 'pos1', NULL, ?, 'test', 512)",
             (emb.tobytes(),),
         )
         conn.commit()
@@ -170,14 +170,14 @@ class TestFAISSIndexManagerSearch:
         )
         conn.execute(
             "INSERT INTO question_bank "
-            "(id, question, cat1, cat2, status, deleted_at, duplicate_of, job_position, owner_id, embedding, embedding_model, embedding_dim) "
-            "VALUES (1, '公共题', 'A', '算法', 'approved', NULL, NULL, 'pos1', NULL, ?, 'test', 512)",
+            "(id, question, cat1, cat2, status, deleted_at, job_position, owner_id, embedding, embedding_model, embedding_dim) "
+            "VALUES (1, '公共题', 'A', '算法', 'approved', NULL, 'pos1', NULL, ?, 'test', 512)",
             (emb.tobytes(),),
         )
         conn.execute(
             "INSERT INTO question_bank "
-            "(id, question, cat1, cat2, status, deleted_at, duplicate_of, job_position, owner_id, embedding, embedding_model, embedding_dim) "
-            "VALUES (2, '个人题', 'A', '算法', 'approved', NULL, NULL, 'pos1', 5, ?, 'test', 512)",
+            "(id, question, cat1, cat2, status, deleted_at, job_position, owner_id, embedding, embedding_model, embedding_dim) "
+            "VALUES (2, '个人题', 'A', '算法', 'approved', NULL, 'pos1', 5, ?, 'test', 512)",
             (emb.tobytes(),),
         )
         conn.commit()
