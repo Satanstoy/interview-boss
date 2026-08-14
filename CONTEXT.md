@@ -66,6 +66,10 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
+**评测中心（Evaluation Center）**:
+评测控制台在应用侧栏中的管理员分组标题；分组下直接展示总览、测评实验、Benchmark、版本与发布、人工 A/B 五个 Tab，运行详情作为这些页面中的路由下钻，不单独占用侧栏 Tab。
+_避免使用_: 再增加一层评测中心内部导航
+
 **可恢复评测进度流（Resumable Eval Progress Stream）**:
 由持久化的 `eval_run_events` 驱动的管理员 SSE 进度流；每个事件具有单调序号，支持通过 `Last-Event-ID` 断线重放。SSE 连接断开不改变 Eval Run 状态，取消必须通过独立的管理员操作完成。
 
