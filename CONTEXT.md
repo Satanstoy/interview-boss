@@ -87,6 +87,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **预期行为（Expected Behavior）**:
 基准案例对结果应满足的事实、动作、边界和质量要求的集合，不等同于唯一标准文本。
 
+**结构化 Case 契约（Structured Case Contract）**:
+Benchmark Case 中可机器读取的评测定义，至少分离 `facts`、`actions`、`boundaries`、`quality_requirements`、`hard_assertions`、`rubric` 和可选 `reference_answer`，用于分别驱动确定性校验、LLM Judge 和人工评测。
+
 **硬断言（Hard Assertion）**:
 对结构、权限、安全、工具契约或必需事实进行可判定校验的评测要求；失败时可以直接阻断案例通过。
 
