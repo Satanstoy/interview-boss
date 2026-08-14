@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 import auth
 import db
+from public_url import PUBLIC_BASE_URL, request_base_url, sanitize_base_url
 
 _BACKEND_URL = ""
 
@@ -25,14 +26,10 @@ def _backend_url() -> str:
 
 def _public_base_url(request: Request) -> str:
     """Build public URLs from the reverse-proxy request host when available."""
-    forwarded_host = request.headers.get("x-forwarded-host")
-    host = (forwarded_host or request.headers.get("host", "")).split(",", 1)[0].strip()
-
-    if host and not host.startswith(("127.0.0.1", "localhost")):
-        proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
-        return f"{proto}://{host}".rstrip("/")
-
-    return os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
+    return request_base_url(
+        request,
+        sanitize_base_url(os.getenv("GATEWAY_BASE_URL", PUBLIC_BASE_URL)),
+    )
 
 
 def _mcp_error(request: Request, status: int, detail: str) -> JSONResponse:

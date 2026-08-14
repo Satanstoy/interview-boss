@@ -20,13 +20,13 @@ ChatGPT ──OAuth 2.1──► OAuth Gateway (:8082) ──Bearer Token──�
 Codex/Cursor ──Bearer Token──► InterviewBoss (:8081) [直连，不走网关]
 ```
 
-宿主机 nginx 新增 443 server 监听 8082，对外暴露 `https://81.71.140.248:8082/`。
+宿主机 nginx 新增 443 server 监听 8082，对外暴露 `https://interviewboss.online:8082/`。
 或者复用 443 端口，按路径分流 `/oauth/*` 和 `/.well-known/*` 到网关，`/mcp` 保留原直连。
 
 **推荐按路径分流**（单端口，用户无需记端口号）：
-- `https://81.71.140.248/.well-known/*` → 网关
-- `https://81.71.140.248/oauth/*` → 网关（/authorize, /token, /register）
-- `https://81.71.140.248/mcp` → 原 InterviewBoss（Codex/Cursor 直连）
+- `https://interviewboss.online/.well-known/*` → 网关
+- `https://interviewboss.online/oauth/*` → 网关（/authorize, /token, /register）
+- `https://interviewboss.online/mcp` → 原 InterviewBoss（Codex/Cursor 直连）
 - ChatGPT 的 /mcp 请求也走网关（网关反代到 InterviewBoss）
 
 ## Components
@@ -54,8 +54,8 @@ Codex/Cursor ──Bearer Token──► InterviewBoss (:8081) [直连，不走�
 
 ```json
 {
-  "resource": "https://81.71.140.248/mcp",
-  "authorization_servers": ["https://81.71.140.248"],
+  "resource": "https://interviewboss.online/mcp",
+  "authorization_servers": ["https://interviewboss.online"],
   "bearer_methods_supported": ["header"],
   "scopes_supported": ["mcp:read", "mcp:write"]
 }
@@ -65,10 +65,10 @@ Codex/Cursor ──Bearer Token──► InterviewBoss (:8081) [直连，不走�
 
 ```json
 {
-  "issuer": "https://81.71.140.248",
-  "authorization_endpoint": "https://81.71.140.248/oauth/authorize",
-  "token_endpoint": "https://81.71.140.248/oauth/token",
-  "registration_endpoint": "https://81.71.140.248/oauth/register",
+  "issuer": "https://interviewboss.online",
+  "authorization_endpoint": "https://interviewboss.online/oauth/authorize",
+  "token_endpoint": "https://interviewboss.online/oauth/token",
+  "registration_endpoint": "https://interviewboss.online/oauth/register",
   "code_challenge_methods_supported": ["S256"],
   "grant_types_supported": ["authorization_code", "refresh_token"],
   "response_types_supported": ["code"],
@@ -113,7 +113,7 @@ GET /oauth/authorize?
   code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&
   code_challenge_method=S256&
   state=xyz&
-  resource=https://81.71.140.248/mcp
+  resource=https://interviewboss.online/mcp
 ```
 
 网关展示登录页（InterviewBoss 账号密码），用户登录后同意授权，302 回调：
@@ -235,14 +235,14 @@ SettingsMCP.vue 新增「ChatGPT 接入」卡片：
 │                                                     │
 │ 状态：已配置 / 未配置                                │
 │                                                     │
-│ 授权页 URL:  https://81.71.140.248/oauth/authorize  │
-│ Token URL:   https://81.71.140.248/oauth/token      │
-│ MCP URL:     https://81.71.140.248/mcp              │
+│ 授权页 URL:  https://interviewboss.online/oauth/authorize  │
+│ Token URL:   https://interviewboss.online/oauth/token      │
+│ MCP URL:     https://interviewboss.online/mcp              │
 │                                                     │
 │ [复制 ChatGPT 配置提示词]                           │
 │                                                     │
 │ ⚠ ChatGPT 连接器需要在 ChatGPT 设置中添加 MCP：    │
-│   URL: https://81.71.140.248/mcp                    │
+│   URL: https://interviewboss.online/mcp              │
 │   认证: OAuth (自动发现)                            │
 └─────────────────────────────────────────────────────┘
 ```
@@ -290,7 +290,7 @@ oauth-gateway:
   environment:
     - OAUTH_SECRET_KEY=...
     - INTERVIEW_BOSS_DB=/app/data/interview-boss.db
-    - GATEWAY_BASE_URL=https://81.71.140.248
+    - GATEWAY_BASE_URL=https://interviewboss.online
   networks:
     - app-network
 ```

@@ -391,9 +391,6 @@ onMounted(loadConfig)
               <code class="block break-all rounded-md bg-muted px-2.5 py-1.5 text-foreground">{{ baseUrl }}/.well-known/oauth-authorization-server</code>
             </div>
           </div>
-          <p class="text-xs leading-5 text-muted-foreground">
-            当前部署使用公网 IP 入口。请使用上方显示的 <code class="text-foreground">https://81.71.140.248/mcp</code>，不要替换为未配置的域名。
-          </p>
         </div>
 
         <div class="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">

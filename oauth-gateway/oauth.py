@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 import auth
 import db
+from public_url import PUBLIC_BASE_URL, request_base_url, sanitize_base_url
 
 router = APIRouter()
 templates = Jinja2Templates(directory="/app/templates")
@@ -28,21 +29,15 @@ def _base_url() -> str:
     if not _BASE_URL:
         import os
 
-        _BASE_URL = os.getenv("GATEWAY_BASE_URL", "https://81.71.140.248").rstrip("/")
+        _BASE_URL = sanitize_base_url(
+            os.getenv("GATEWAY_BASE_URL", PUBLIC_BASE_URL)
+        )
     return _BASE_URL
 
 
 def _request_base_url(request: Request) -> str:
     """Use the public reverse-proxy host for browser-facing OAuth metadata."""
-    forwarded_host = request.headers.get("x-forwarded-host")
-    if forwarded_host:
-        host = forwarded_host.split(",", 1)[0].strip()
-        proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
-        return f"{proto}://{host}".rstrip("/")
-    host = request.headers.get("host", "")
-    if host and not host.startswith(("127.0.0.1", "localhost")):
-        return f"https://{host}".rstrip("/")
-    return _base_url()
+    return request_base_url(request, _base_url())
 
 
 # ── Discovery ──

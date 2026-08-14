@@ -268,7 +268,7 @@
   _Fix_: 去掉兜底改必填校验或启动时自动生成；补入 .env.example。
   _Threat_: threat-models/secret-management.md
 - 🟡 `docker-compose.yml backend 段` — 硬编码 /home/ubuntu/.cache/huggingface bind mount，新机器首次启动挂空 root 目录致 embedding 静默失效（HF_HUB_OFFLINE=1）。_Fix_: HF_CACHE_DIR 参数化。
-- 🟢 `docker-compose.yml oauth-gateway 段 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://81.71.140.248}` — 兜底硬编码生产公网 IP：新部署 OAuth discovery/回调默认指向生产站。_Fix_: 去掉 IP 兜底改必填校验或默认 localhost。
+- 🟢 `docker-compose.yml oauth-gateway 段 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://interviewboss.online}` — 兜底硬编码生产公网地址：新部署 OAuth discovery/回调默认指向生产站。_Fix_: 使用域名或通过私有环境变量覆盖。
 
 （✅ 项：PROJECT_DIR 自定位已修；all/update 幂等（不重新生成密钥、不重启健康容器）；set -euo pipefail + 变量引号 + rm -rf 守卫全部到位。）
 

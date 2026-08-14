@@ -27,7 +27,7 @@ FIXED	D8	D8-2	check.sh 已接 run_secret_scan 阻断段（check_secrets.py）	-	
 2	D14	backend/tests/security/test_email_unique.py	test_email_unique 只测 DB 层唯一约束，未覆盖应用层注册路由对 IntegrityError 的响应（新测试缺口）	补 API 级测试：并发/重复 email 注册断言 409 而非 500	S	probable
 2	D2	CLAUDE.md:7 + backend/CLAUDE.md:65	CLAUDE.md 声称 Python 3.10（实际 3.12）；include_router 声称 18（实际 22）——上轮 🟢 未修	改 3.12 与 22 次	S	certain
 2	D4	backend/.env（ADMIN_PASSWORD 长度 8）	生产管理员密码仍 8 字符——上轮 🟡 未修	≥16 字符随机密码并轮换	S	certain
-2	D13	docker-compose.yml:204 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://81.71.140.248}	compose 兜底硬编码生产公网 IP——上轮 🟢 未修	去掉 IP 兜底改必填或 localhost	S	certain
+2	D13	docker-compose.yml:204 GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://interviewboss.online}	compose 兜底硬编码生产公网地址——上轮 🟢 未修	通过私有环境变量覆盖	S	certain
 2	D14	backend/app/services/fts_service.py:70-76	_idf_cache 模块级缓存永不失效——上轮 🟢 未修	增删条目时重置	S	certain
 2	D14	backend/app/services/email_service.py:81/159/216	datetime.now() 本地 naive 时间处理——上轮 🟢 未修	统一 tz-aware UTC	M	needs-verification
 2	D4	pyproject.toml:15-17	python-jose(2021 停更)/passlib(2020 停更) 仍在依赖——上轮 🟡 未修	迁 PyJWT + argon2/bcrypt 直连	M	certain

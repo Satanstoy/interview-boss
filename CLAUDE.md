@@ -173,7 +173,7 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 ## 生产环境
 
 ```
-[公网] 公网 IP: 81.71.140.248 (勿用 curl ifconfig.me 探测，可能返回代理出口 IP)
+[公网] 公网入口：interviewboss.online（服务器地址通过私有部署配置维护）
        宿主机 nginx (port 80, 按域名+路径分发)
   ├─ satanstoy.site/civil6/      → /var/www/html/civil6/ (静态教程页)
   ├─ IP 直连 / 其余域名           → default 站点 proxy 127.0.0.1:8081 (Docker nginx)

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request
 
@@ -18,12 +21,35 @@ from app.services.mcp_token_service import (
 
 router = APIRouter()
 
+_PUBLIC_MCP_ENDPOINT = "https://interviewboss.online/mcp"
+
+
+def _is_ip_host(host: str) -> bool:
+    normalized = host.strip().strip("[]").rstrip(".")
+    try:
+        socket.inet_aton(normalized)
+        return True
+    except OSError:
+        pass
+    try:
+        ip_address(normalized)
+    except ValueError:
+        return False
+    return True
+
+
+def _configured_public_endpoint(value: str) -> str | None:
+    parsed = urlsplit(value)
+    if not parsed.hostname or _is_ip_host(parsed.hostname):
+        return None
+    return value if value.endswith("/mcp") else f"{value}/mcp"
+
 
 def _mcp_endpoint(request: Request) -> str:
     """Build the externally reachable MCP URL behind Nginx or a tunnel."""
     configured = os.getenv("MCP_PUBLIC_URL", "").strip().rstrip("/")
     if configured:
-        return configured if configured.endswith("/mcp") else f"{configured}/mcp"
+        return _configured_public_endpoint(configured) or _PUBLIC_MCP_ENDPOINT
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     forwarded_host = request.headers.get("x-forwarded-host", "")
@@ -31,6 +57,8 @@ def _mcp_endpoint(request: Request) -> str:
     host = forwarded_host.split(",", 1)[0].strip() or request.headers.get("host", "")
     if not host:
         host = request.url.netloc
+    if not host or _is_ip_host(urlsplit(f"//{host}").hostname or ""):
+        return _PUBLIC_MCP_ENDPOINT
     return f"{scheme}://{host}/mcp"
 
 
