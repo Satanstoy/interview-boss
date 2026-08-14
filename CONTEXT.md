@@ -39,6 +39,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **Artifact 保留策略（Artifact Retention Policy）**:
 按 Artifact 来源和用途决定保留期限的不可变策略；官方 Benchmark、有效评测证据和人工 A/B 证据长期保留，临时失败日志和未晋升的生产采样按 TTL 清理，清理不得破坏历史 Eval Run 的核心证据链。
 
+**评测数据基础脱敏（Pragmatic Eval Redaction）**:
+1.0 对生产采样和长期评测 Artifact 采用基础脱敏边界，优先移除明显的姓名联系方式、用户标识和 URL 等字段；默认使用合成 Fixture，不承诺企业级 DLP，也不引入独立隐私基础设施。
+
 **对比组（Comparison Group）**:
 用于管理员 A/B 对比的关联对象；它将两个或多个拥有独立生命周期的 sibling Eval Run 关联起来，要求它们共享同一 Batch 执行上下文，并明确记录各自唯一不同的 target release。
 
