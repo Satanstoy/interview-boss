@@ -10,6 +10,7 @@ docs/
 ├── agents/            ← agent/子代理相关说明
 ├── analysis/          ← 分析材料和审计记录
 ├── bug-reports/       ← 后端 bug 修复记录（按日期+描述命名）
+├── compliance/        ← 合规文档（隐私政策、账号删除、子处理器清单，见 README.md）
 ├── tdd-reports/       ← 后端 TDD 开发记录
 ├── dev-log/           ← 每次开发/设计活动的简要记录
 ├── evaluations/       ← 评测报告（Interview Agent E2E 评估等）

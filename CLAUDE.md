@@ -172,6 +172,8 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 `docs/bug-reports/` 和 `docs/tdd-reports/` 存放了 20+ 份历史文档。
 **修 Bug 前**先搜 `docs/bug-reports/`，**开发新功能前**先搜 `docs/tdd-reports/`。
 
+**合规文档**（隐私 / 账号删除 / 子处理器）位于 `docs/compliance/`：改动数据表（`backend/app/db/migrations/`）或接入新第三方供应商后需同步更新对应文档；前端设置页「账户安全」提供隐私与账号删除入口。
+
 ## 生产环境
 
 ```
@@ -192,8 +194,8 @@ worker (--profile worker, 按需启动) → redis/backend data
 - 镜像源构建保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`。不要在普通 `update` 中强制完整测速，除非正在排查镜像源故障。镜像缓存目录由 `MIRROR_CACHE_VERSION` 控制，默认写入 `/tmp/interview-boss-mirrors-v2`。
 - Docker daemon DNS 可通过 `DEPLOY_DOCKER_DNS=223.5.5.5,119.29.29.29` 覆盖，普通 update 不应频繁改 daemon；只在 `mirrors` 维护命令中持久化。
 - Nginx 反代 `/api/` → backend:8000（read timeout 600s，SSE 禁用 buffering/cache/gzip），其余 → `/usr/share/nginx/html` 静态文件
-- 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`
-- HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）
+- 数据卷：`./backend/data` → 容器内 `/app/backend/data`；前端 dist 已内置到 nginx 镜像，不再挂载宿主机 `frontend/dist`。**test 服务**使用独立命名卷 `test-data`（顶层 volumes 声明）挂到 `/app/backend/data`，与生产数据隔离，测试不得读写宿主机 `backend/data`
+- HuggingFace 缓存：`/home/ubuntu/.cache/huggingface` → 容器内 `/home/appuser/.cache/huggingface`（只读）。主机缓存路径经 `HF_CACHE_DIR` 参数化（${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}），backend/worker/test 三处挂载均适用；不设置时行为与旧版完全一致，新机器可按需指到已有缓存避免挂空 root 致 embedding 静默失效
 - 环境变量：`HF_HUB_OFFLINE=1`（强制离线模式，避免访问 huggingface.co）
 
 ## 孤岛碎片整理（Compaction）

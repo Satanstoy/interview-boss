@@ -245,7 +245,22 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Card 2: 退出登录 -->
+    <!-- Card 2: 隐私与账号删除 -->
+    <div class="rounded-xl border bg-card p-6 space-y-3">
+      <div>
+        <h4 class="text-sm font-semibold text-foreground">隐私与账号删除</h4>
+        <p class="text-xs text-muted-foreground mt-1">
+          我们不会对外出售你的个人信息。全部隐私与数据处理说明见部署方随服务提供的《隐私政策》。
+        </p>
+      </div>
+      <ul class="list-disc pl-5 space-y-1 text-xs text-muted-foreground">
+        <li>删除账号：通过部署方公布的邮箱 / SMTP 支持邮箱（SMTP_FROM / SMTP_USERNAME）提交请求，并附上账号标识（邮箱或用户名）。</li>
+        <li>注销仅清除本次登录态，不会删除账户及其关联数据；完整删除需联系运营者按流程执行。</li>
+        <li>账户相关的练习、聊天、简历、题库（私人部分）会随账号删除请求一并清理；公共内容与审计日志按平台保留规则处理。</li>
+      </ul>
+    </div>
+
+    <!-- Card 3: 退出登录 -->
     <div class="rounded-xl border bg-card p-6">
       <Button
         variant="outline"

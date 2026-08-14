@@ -362,6 +362,14 @@ docker compose --profile test run --rm test uv run pytest backend/tests/bank/ -q
 - 响应头：Nginx + 后端中间件双重安全头（CSP、HSTS、X-Frame-Options 等）
 - 数据：软删除 + 回收站；`.gitignore` 排除 `.env`、`*.db` 等敏感文件
 
+### 隐私与合规
+
+- [隐私政策](docs/compliance/privacy-policy.md)：数据收集类别、用途、存储、共享与用户权利
+- [账号删除](docs/compliance/account-deletion.md)：删除请求流程与级联清理、保留期
+- [子处理器清单](docs/compliance/sub-processors.md)：实际使用的第三方及处理范围
+
+> 以上文档随代码实现更新；改动数据表或接入新第三方后请同步修订。
+
 **严禁**将 `.env`、API 密钥、数据库文件或任何含真实凭证的文件提交到 Git 仓库。
 
 ## 贡献
