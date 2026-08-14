@@ -1156,14 +1156,13 @@ async def _refresh_answer_batch_parent(parent_job_id: int):
                 )
                 conn.execute(
                     "UPDATE jobs SET status = ?, progress_current = ?, progress_total = ?, "
-                    "result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, "
+                    "result = ?, completed_at = CURRENT_TIMESTAMP, "
                     "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('completed', 'failed')",
                     (
                         status,
                         completed + failed,
                         total,
                         result,
-                        "批量答案生成存在失败题目" if failed else None,
                         parent_job_id,
                     ),
                 )
@@ -1434,11 +1433,11 @@ async def generate_recitation_task(ctx, job_id: int):
 
 
 def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
-    """标记任务完成/失败"""
+    """标记任务完成/失败（jobs.error 列已废弃，错误只写 last_error）"""
     from app.db.connection import get_db_connection
     with get_db_connection() as conn:
         conn.execute(
-            "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE jobs SET status = ?, result = ?, last_error = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (status, result, error, job_id)
         )
         conn.commit()

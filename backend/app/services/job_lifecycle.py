@@ -392,7 +392,7 @@ def complete_job(
     result: str | None = None,
 ) -> bool:
     cur = conn.execute(
-        "UPDATE jobs SET status = 'completed', result = ?, error = NULL, "
+        "UPDATE jobs SET status = 'completed', result = ?, "
         "last_error = NULL, locked_until = NULL, worker_id = NULL, "
         "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND worker_id = ? AND status = 'running'",
@@ -417,7 +417,7 @@ def fail_job(
     if attempts < max_attempts:
         delay = min(3600, 2 ** max(0, attempts - 1) * 30)
         conn.execute(
-            "UPDATE jobs SET status = 'pending', error = NULL, last_error = ?, "
+            "UPDATE jobs SET status = 'pending', last_error = ?, "
             "available_at = datetime('now', ?), locked_until = NULL, "
             "arq_job_id = NULL, worker_id = NULL, updated_at = CURRENT_TIMESTAMP "
             "WHERE id = ? AND worker_id = ?",
@@ -426,9 +426,9 @@ def fail_job(
         return {"status": "retrying", "attempts": attempts}
 
     conn.execute(
-        "UPDATE jobs SET status = 'failed', error = ?, last_error = ?, "
+        "UPDATE jobs SET status = 'failed', last_error = ?, "
         "locked_until = NULL, worker_id = NULL, completed_at = CURRENT_TIMESTAMP, "
         "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND worker_id = ?",
-        (message, message, job_id, worker_id),
+        (message, job_id, worker_id),
     )
     return {"status": "failed", "attempts": attempts}

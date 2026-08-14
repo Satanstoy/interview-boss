@@ -13,7 +13,7 @@ import sqlite3
 from app.core.config import DB_PATH
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
-DESTRUCTIVE_VERSIONS = {81, 82, 84, 85}
+DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86}
 
 
 def _backup_before_destructive(db_path: str, version: int, name: str) -> str | None:
@@ -153,6 +153,14 @@ from app.db.migrations.recruitment import (
     _migration_064_user_recruitment_pace,
 )
 from app.db.migrations.interview_import import _migration_080_interview_import
+from app.db.migrations.schema_hygiene import (
+    _migration_081_cleanup_fk_orphans,
+    _migration_082_fts_rebuild_triggers,
+    _migration_083_index_housekeeping,
+    _migration_084_normalize_timestamps_jobs,
+    _migration_085_add_fk_declarations,
+    _migration_086_drop_dead_columns_indexes,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -245,6 +253,12 @@ _MIGRATIONS = [
     (78, "practice_review_corrections", _migration_078_practice_review_corrections),
     (79, "users_email_unique", _migration_079_users_email_unique),
     (80, "interview_import", _migration_080_interview_import),
+    (81, "cleanup_fk_orphans", _migration_081_cleanup_fk_orphans),
+    (82, "fts_rebuild_triggers", _migration_082_fts_rebuild_triggers),
+    (83, "index_housekeeping", _migration_083_index_housekeeping),
+    (84, "normalize_timestamps_jobs", _migration_084_normalize_timestamps_jobs),
+    (85, "add_fk_declarations", _migration_085_add_fk_declarations),
+    (86, "drop_dead_columns_indexes", _migration_086_drop_dead_columns_indexes),
 ]
 
 
