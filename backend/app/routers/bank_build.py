@@ -88,7 +88,7 @@ async def get_job_status(job_id: int, user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
-                "SELECT id, job_type, status, progress_current, progress_total, progress_message, error, created_at, completed_at "
+                "SELECT id, job_type, status, progress_current, progress_total, progress_message, last_error AS error, created_at, completed_at "
                 "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
                 (job_id, is_admin, user_id),
             ).fetchone()

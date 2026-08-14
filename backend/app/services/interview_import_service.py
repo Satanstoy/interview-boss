@@ -427,7 +427,7 @@ def get_import_status(user_id: int, import_id: str) -> dict[str, Any]:
         if row["job_id"]:
             job = conn.execute(
                 "SELECT id, status, progress_current, progress_total, progress_message, "
-                "result, error, attempts FROM jobs WHERE id = ? AND created_by = ?",
+                "result, last_error AS error, attempts FROM jobs WHERE id = ? AND created_by = ?",
                 (row["job_id"], int(user_id)),
             ).fetchone()
             result["job"] = dict(job) if job else None

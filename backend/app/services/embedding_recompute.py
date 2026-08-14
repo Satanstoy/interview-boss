@@ -27,7 +27,7 @@ def _update_job(job_id: int, status: str, current: int, total: int,
             params.append(worker_id)
         conn.execute(
             "UPDATE jobs SET status = ?, progress_current = ?, progress_total = ?, "
-            "progress_message = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP "
+            "progress_message = ?, result = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP "
             + where,
             params,
         )
