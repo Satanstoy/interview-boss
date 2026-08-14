@@ -15,6 +15,9 @@ from app.services import chat_service, resume_service
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/chat")
 
+# PDF 提取上传大小上限（字节），在 file.read() 之前用 Content-Length 提前拦截
+_MAX_PDF_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 def _current_position_name(user_id: int) -> str:
     _, position = get_user_job_position(user_id)
@@ -690,6 +693,10 @@ async def extract_pdf(
     """从上传的 PDF 中提取文本"""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
+
+    # 用 Content-Length 提前拦截超大文件，避免全量读入内存放大
+    if file.size and file.size > _MAX_PDF_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，请上传 10MB 以内的 PDF")
 
     try:
         content = await file.read()

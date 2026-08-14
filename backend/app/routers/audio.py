@@ -10,6 +10,9 @@ from app.services import deepgram_service
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/audio")
 
+# 音频上传大小上限（字节），在 file.read() 之前用 Content-Length 提前拦截
+MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024
+
 
 class TranscribeResponse(BaseModel):
     """转录响应模型"""
@@ -47,6 +50,13 @@ async def transcribe_audio(
     # 验证文件是否存在
     if not file.filename:
         raise HTTPException(status_code=400, detail="未提供音频文件")
+
+    # 用 Content-Length 提前拦截超大文件，避免全量读入内存放大
+    if file.size and file.size > MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件大小超过限制: 最大 {MAX_AUDIO_UPLOAD_BYTES // 1024 // 1024}MB",
+        )
 
     try:
         # 读取文件内容

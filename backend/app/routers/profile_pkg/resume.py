@@ -15,6 +15,9 @@ logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
 
+# 简历上传大小上限（字节），在 file.read() 之前用 Content-Length 提前拦截
+_MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 @router.post("/api/profile/resume")
 async def upload_resume(
@@ -27,9 +30,13 @@ async def upload_resume(
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
 
+    # 用 Content-Length 提前拦截超大文件，避免全量读入内存放大
+    if file.size and file.size > _MAX_RESUME_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件过大，请上传 10MB 以内的 PDF")
+
     try:
         content = await file.read()
-        if len(content) > 10 * 1024 * 1024:
+        if len(content) > _MAX_RESUME_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="文件过大，请上传 10MB 以内的 PDF")
 
         raw_text = resume_service.extract_pdf_text(content)
