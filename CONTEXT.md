@@ -33,6 +33,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测失败分类（Eval Failure Class）**:
 用于决定 Attempt 是否可重试以及重试哪一层的标准化失败类型；临时基础设施失败、目标行为失败、Harness 契约失败和 Judge 阶段失败必须分开处理，不能统一按“再跑一次”处理。
 
+**评测 Artifact（Evaluation Artifact）**:
+评测执行产生的不可变原始证据或派生报告，包括完整对话轨迹、SSE/工具轨迹、Judge 输入输出和聚合报告；数据库保存 Artifact 的索引、路径、类型、大小和 digest，Artifact 原文存储在受控文件或对象存储中。
+
 **对比组（Comparison Group）**:
 用于管理员 A/B 对比的关联对象；它将两个或多个拥有独立生命周期的 sibling Eval Run 关联起来，要求它们共享同一 Batch 执行上下文，并明确记录各自唯一不同的 target release。
 
