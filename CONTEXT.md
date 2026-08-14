@@ -33,6 +33,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **Compose Eval Worker**:
 1.0 部署中的独立 Docker Compose `eval-worker` 服务，使用 `eval` profile 和专用 ARQ queue 配置，由宿主机 launcher 以 `run --rm` 按需启动；它与用户任务的常驻 `worker` 服务分开定义、分开限制资源和分开重启策略。
 
+**Eval Worker Launcher**:
+运行在宿主机上的轻量调度器，负责发现待处理或需要恢复的 Eval Run、获取单实例启动锁并按需拉起 Compose Eval Worker；它不执行评测逻辑，也不由 FastAPI 请求直接驱动。
+
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
