@@ -172,6 +172,8 @@ services:
     volumes:
       - ./backend:/app/backend:ro
       - ./backend/data:/app/backend/data
+      # frontend-contract 结构测试需要读取 frontend/src 源码(经 /app/frontend 相对路径)
+      - ./frontend:/app/frontend:ro
       - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network
