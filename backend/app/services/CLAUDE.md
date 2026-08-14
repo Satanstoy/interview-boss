@@ -32,13 +32,13 @@
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |
 | `resume_service.py` | 简历 PDF 解析、存储、查询，优化结果存取（`save_optimization`/`get_optimization`） | `db/connection` |
-| `email_service.py` | 邮箱验证码发送/验证（注册、登录、绑定邮箱、重置密码） | `core/config` |
+| `email_service.py` | 邮箱验证码发送/验证（注册、登录、绑定邮箱、重置密码）；`verify_code` 用单条原子 UPDATE 完成「校验+标记已用」（audit D14，防并发双消费）；每邮箱连续失败达 `LOCKOUT_THRESHOLD`(5) 作废该码（audit D4，账本复用 `email_verification_codes` 表的 `code='__lockout__'` 保留行，不新增表列） | `core/config` |
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |
 | `question_draw_service.py` | 加权随机抽题（difficulty 映射、fallback 降级）；`behavioral` 过滤必须复用分布统计的统一信号词表（HR、人力资源、行为面、软技能、冲突、协作、失败、复盘、STAR、职业规划、影响力）；英语缩写 HR 必须按独立 token 匹配，不能误命中 `thread` 等技术词 | `db/connection`, `routers/questions` |
 | `practice_scheduler.py` | SM-2-lite 间隔复习调度：根据 again/hard/good/easy 更新熟练度、间隔和下次复习时间；`schedule_review` 支持 `urgency`（0..1 缩放间隔，最多 -40%，`again` 不受调制）；`mastered` 卡 30 天固定抽查间隔，不受 urgency 缩放 | — |
 | `recruitment_milestones.py` | 招聘季机会窗口纯函数：`get_season_windows(届次)` 生成全年 4 窗口（暑期实习/提前批/秋招正式批/春招主批，含相对权重）；`compute_urgency(windows, 今天, pace)` 机会脉冲模型——紧迫度 = clamp(base 0.2 + Σ 窗口脉冲 + 节奏偏移，0..1)，返回当前窗口与下一窗口；无窗口 → 恒 base（社招/日常实习节奏） | — |
-| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency` 给 `schedule_review`（招聘季间隔调制） | `practice_scheduler`, `db/connection` |
+| `practice_review_service.py` | 持久化刷题评分、复习状态与复习事件；`record_review` 透传 `urgency` 给 `schedule_review`（招聘季间隔调制）；`record_review` 接受可选 `idempotency_key`（audit D14），同 `(user_id, question_bank_id, idempotency_key)` 已存在事件时跳过重发，不重复写事件也不二次推进 SRS review_count（部分唯一索引 DB 层兜底） | `practice_scheduler`, `db/connection` |
 | `practice_deck_service.py` | 今日复习（due）题单 + 系统/收藏题单与自定义题单管理。due 队列四桶排序（到期复习 → mastered 抽查「保持手感」→ 新题 → 未来），复习风险权重 = **真实出现频率（动态来源数）× (5 - proficiency)**，新题按动态来源频率降序并受预算约束（`max_new` 参数显式传入，或自动取 `user_recruitment_pref.daily_capacity − 到期复习 − 抽查`，下界 0）；题卡 `frequency` 展示与全部排序均用动态来源数（与题库列表口径一致），静态 `question_bank.frequency`（聚类变体数）仅为聚类元数据，不参与展示/排序（SQLite ORDER BY 不支持别名参与表达式，需显式内联动态频率子查询）；item 带 `is_checkin`（state=mastered）标记。**自定义题单纯私有**：owner-only 可见与增删（`visibility` 字段保留但不再产生 public 可见路径） | `db/queries` |
 | `interview_distribution.py` | 模拟面试题型的唯一枚举、确定性分类、公共统计物化与分层默认值 | `core/interview_distribution_config` |
 | `insights.py` | 洞察工作台聚合：当前岗位题库覆盖、个人练习证据、JD/面经计数和面试复盘摘要；**岗位高频待练**（`high_frequency`：面经 `questions_detail` 按 cat2 聚合被问频次降序 Top10，供无练习数据时「从高频开始刷」；**JOIN interview iv 并按 `_scope_condition`（owner 或公共 approved + 未删除）过滤调用者作用域**，他人私有面经不泄漏进聚合）；**readiness.items 含 `proficiency`**（SRS 熟练度聚合，练过才有值，供技能星图/双线雷达）；练习足迹聚合（365 天周历热力/连击/30 天趋势/雷达/难度/最近刷题，口径为答题记录 + 闪卡复习事件）：雷达严格限定当前目标岗位并优先返回最薄弱主题，难度统计以 score≥60 算对且返回精确 `correct_count` / `needs_work_count` | `db/queries`, `db/connection` |
