@@ -128,7 +128,9 @@ class Test081CleanupFkOrphans:
         iid = full_db.execute("SELECT id FROM interview").fetchone()["id"]
         with _orphan_inserts(full_db):
             full_db.execute("INSERT INTO question_sources (question_bank_id, url) VALUES (999999, 'http://orphan')")
-            full_db.execute("INSERT INTO question_original_items (question_bank_id, question_text) VALUES (999999, 'x')")
+            cur = full_db.execute("INSERT INTO question_original_items (question_bank_id, question_text) VALUES (999999, 'x')")
+            oi_id = cur.lastrowid
+            full_db.execute("INSERT INTO question_original_item_sources (original_item_id, url) VALUES (?, 'http://child')", (oi_id,))
             full_db.execute("INSERT INTO quality_issue (qb_id, issue_type, suggested_action) VALUES (999999, 'mismerge', 'split')")
             full_db.execute("INSERT INTO analysis_queue (interview_id, question_detail_id) VALUES (?, 999999)", (iid,))
             full_db.execute("INSERT INTO question_position (question_id, position_id) VALUES (999999, 1)")
@@ -137,6 +139,8 @@ class Test081CleanupFkOrphans:
 
         assert full_db.execute("SELECT count(*) FROM question_sources").fetchone()[0] == 0
         assert full_db.execute("SELECT count(*) FROM question_original_items").fetchone()[0] == 0
+        # 迁移期 FK 关闭：孤儿 qoi 的子表 qois 必须被 081 手动清理
+        assert full_db.execute("SELECT count(*) FROM question_original_item_sources").fetchone()[0] == 0
         assert full_db.execute("SELECT count(*) FROM quality_issue").fetchone()[0] == 0
         assert full_db.execute("SELECT count(*) FROM question_position").fetchone()[0] == 0
         assert full_db.execute("SELECT count(*) FROM analysis_queue").fetchone()[0] == 0

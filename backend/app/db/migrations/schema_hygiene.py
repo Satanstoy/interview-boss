@@ -114,6 +114,13 @@ def _migration_081_cleanup_fk_orphans(conn):
         DELETE FROM question_original_items
         WHERE NOT EXISTS (SELECT 1 FROM question_bank q WHERE q.id = question_original_items.question_bank_id)
     """)
+    # 迁移期 FK 关闭，ON DELETE CASCADE 不生效：删除孤儿父行后必须手动清理子表
+    # （顺序在父行删除之后，否则父行仍存在时子行不会被清）
+    _del("question_original_item_sources", """
+        DELETE FROM question_original_item_sources
+        WHERE NOT EXISTS (SELECT 1 FROM question_original_items o
+                          WHERE o.id = question_original_item_sources.original_item_id)
+    """)
     _del("question_position", """
         DELETE FROM question_position
         WHERE NOT EXISTS (SELECT 1 FROM question_bank q WHERE q.id = question_position.question_id)
