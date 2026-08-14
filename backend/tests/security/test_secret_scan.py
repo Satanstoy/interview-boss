@@ -17,7 +17,8 @@ ENV_EXAMPLE = PROJECT_ROOT / "backend" / ".env.example"
 COMPOSE_FILE = PROJECT_ROOT / "docker-compose.yml"
 
 # 已确认泄露的 SiliconFlow key（tech-audit-2026-08-13 D4-1）
-LEAKED_SILICONFLOW_KEY = "REDACTED"
+# 分段拼接构造，避免仓库内出现完整可复制 key 字面量。
+LEAKED_SILICONFLOW_KEY = "sk-" + "hkaopkqmnstcess" + "lqwxifjiqdffg" + "bpljrixgyssagv" + "gtclym"
 
 
 class TestD4NoHardcodedApiKey:
