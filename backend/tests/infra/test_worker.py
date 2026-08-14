@@ -101,7 +101,7 @@ class TestTaskEnqueue:
     async def test_enqueue_cluster_batch_job(self):
         """应能将持久化聚类攒批任务入队"""
         from app.worker import enqueue_cluster_batch_job
-        with patch("app.worker._get_redis_pool") as mock_pool_fn:
+        with patch("app.worker_enqueue._get_redis_pool") as mock_pool_fn:
             mock_pool = AsyncMock()
             mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job-123"))
             mock_pool_fn.return_value = mock_pool
@@ -116,7 +116,7 @@ class TestTaskEnqueue:
     async def test_enqueue_cluster_rebuild_job(self):
         """应能将持久化全量重建任务入队"""
         from app.worker import enqueue_cluster_rebuild_job
-        with patch("app.worker._get_redis_pool") as mock_pool_fn:
+        with patch("app.worker_enqueue._get_redis_pool") as mock_pool_fn:
             mock_pool = AsyncMock()
             mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job-456"))
             mock_pool_fn.return_value = mock_pool
@@ -232,14 +232,14 @@ class TestDurableJobDispatcher:
             yield test_db
 
         with patch("app.db.connection.get_db_connection", _test_connection), patch(
-            "app.worker.enqueue_build_job",
+            "app.worker_scheduled.enqueue_build_job",
             new=AsyncMock(return_value=MagicMock(job_id="arq-build-1")),
         ) as mock_build, patch(
-            "app.worker.enqueue_recompute_embedding_job",
+            "app.worker_scheduled.enqueue_recompute_embedding_job",
             new=AsyncMock(return_value=MagicMock(job_id="arq-embedding-1")),
         ) as mock_embedding:
             with patch(
-                "app.worker.enqueue_interview_reprocess_job",
+                "app.worker_scheduled.enqueue_interview_reprocess_job",
                 new=AsyncMock(return_value=MagicMock(job_id="arq-reprocess-1")),
             ) as mock_reprocess:
                 result = await scheduled_submit_job_dispatch_task({})
