@@ -153,6 +153,7 @@ from app.db.migrations.recruitment import (
     _migration_064_user_recruitment_pace,
 )
 from app.db.migrations.interview_import import _migration_080_interview_import
+from app.db.migrations.evaluation import _migration_087_evaluation_control_plane
 from app.db.migrations.schema_hygiene import (
     _migration_081_cleanup_fk_orphans,
     _migration_082_fts_rebuild_triggers,
@@ -259,6 +260,7 @@ _MIGRATIONS = [
     (84, "normalize_timestamps_jobs", _migration_084_normalize_timestamps_jobs),
     (85, "add_fk_declarations", _migration_085_add_fk_declarations),
     (86, "drop_dead_columns_indexes", _migration_086_drop_dead_columns_indexes),
+    (87, "evaluation_control_plane", _migration_087_evaluation_control_plane),
 ]
 
 
