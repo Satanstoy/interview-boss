@@ -7,7 +7,7 @@
 
 | 文件 | 用途 |
 |------|------|
-| `docker-deploy.sh` | **生产部署脚本**（build / update / frontend / worker-up / worker-down / worker-restart / status / logs / test / backup / cleanup / diagnose / migrate） |
+| `docker-deploy.sh` | **生产部署脚本**（build / update / frontend / worker-up / worker-down / worker-restart / status / logs / test / backup / restore / cleanup / diagnose / migrate） |
 | `entrypoint.sh` | Docker 容器入口点 |
 | `nginx-hardened.conf` | 旧版/参考 Nginx 安全加固配置；当前 Docker 镜像实际复制 `nginx/nginx.conf` |
 | `mirrors.sh` | 智能镜像源选择系统 v2：维护 5 类镜像源候选池（Docker Hub / npm / PyPI / Debian apt / Alpine apk），构建前并行测速选最优源（结果缓存 24h），更新 daemon.json + buildkitd.toml 的 Docker Hub 镜像，导出 `NPM_MIRROR` / `PYPI_MIRROR` / `APT_MIRROR` / `APK_MIRROR` 环境变量 |
@@ -31,4 +31,6 @@
 - `prune_unused_docker` 为安全清理：BuildKit cache、dangling images、项目 stopped/orphan 资源；宿主机 `node_modules`/`.venv` 只报告，除非 `DEPLOY_PRUNE_HOST_ARTIFACTS=1` 或 `cleanup --aggressive`
 - `diagnose`：输出根分区、docker system df、frontend/node_modules、.venv、frontend/dist 大小等诊断信息
 - `cleanup --dry-run`：等价于 diagnose，只输出不清理
+- 数据库备份：`./deploy/docker-deploy.sh backup` 会将 SQLite 库以 WAL 在线备份方式存到 `backups/interview-boss_<时间戳>.db`，命名规则见 `backup_sqlite_wal` / `do_backup`
+- 数据库恢复：`./deploy/docker-deploy.sh restore [<备份路径>]`（缺省自动用 `backups/` 最新 `interview-boss_*.db`）。恢复流程：先校验备份为有效 SQLite 库 → **恢复前自动再备份当前库**（`backups/interview-boss_pre-restore_<时间戳>.db`）→ 停止 `backend` → 覆盖 `backend/data/interview-boss.db` 并清理 `-wal`/`-shm` → 启动 backend 并等待健康检查。恢复会覆盖生产库，属破坏性操作，仅用于恢复演练/真实故障恢复
 - 可调开关：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`、`MIRROR_CACHE_VERSION=v2`。不要把 `DEPLOY_SELECT_MIRRORS_ON_BUILD=1` 作为日常默认值，否则每次 update 都可能测速、改 daemon 或改变 build args。

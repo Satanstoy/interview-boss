@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|cleanup|diagnose|mirrors]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|restore|cleanup|diagnose|mirrors]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -476,6 +476,85 @@ do_backup() {
   ls -lh "$backup_dir/"*_"${timestamp}"* 2>/dev/null
 }
 
+# ── 恢复数据库 ──
+# 从备份文件恢复 SQLite 数据库。与备份同规则命名（backups/interview-boss_<时间戳>.db）。
+# 流程：先自动备份当前库再保险一次 → 停止 backend → 覆盖 DB 并清理 -wal/-shm → 启动 → 健康检查。
+find_latest_backup() {
+  local backup_dir="$PROJECT_DIR/backups"
+  # 仅匹配 interview-boss_<时间戳>.db 格式，排除 redis 等其他备份
+  ls -1t "$backup_dir"/interview-boss_*.db 2>/dev/null | head -1
+}
+
+do_restore() {
+  local backup_path="${1:-}"
+  local backup_dir="$PROJECT_DIR/backups"
+  local db_path="$PROJECT_DIR/backend/data/interview-boss.db"
+  local timestamp=$(date +%Y%m%d_%H%M%S)
+  local safety_backup=""
+
+  if [ -n "$backup_path" ]; then
+    backup_path="$(cd "$(dirname "$backup_path")" && pwd)/$(basename "$backup_path")"
+    if [ ! -f "$backup_path" ]; then
+      err "指定的备份文件不存在: $backup_path"
+      exit 1
+    fi
+  else
+    backup_path="$(find_latest_backup)"
+    if [ -z "$backup_path" ]; then
+      err "未找到可用备份（$backup_dir/interview-boss_*.db），请先运行 backup 命令"
+      exit 1
+    fi
+  fi
+
+  # 校验备份文件确实是有效 SQLite 数据库
+  if ! head -c 16 "$backup_path" 2>/dev/null | strings | grep -q "SQLite"; then
+    err "备份文件不是有效的 SQLite 数据库: $backup_path"
+    exit 1
+  fi
+
+  warn "即将从备份恢复数据库: $backup_path"
+  warn "  → 将覆盖当前数据库: $db_path"
+  warn "  恢复前会先自动备份当前数据库（再次保险）。"
+
+  # 自动再保险：恢复前备份当前库，避免恢复失败时丢失现有数据
+  mkdir -p "$backup_dir"
+  if [ -f "$db_path" ]; then
+    safety_backup="$backup_dir/interview-boss_pre-restore_${timestamp}.db"
+    log "恢复前自动备份当前数据库 -> $safety_backup"
+    backup_sqlite_wal "$db_path" "$safety_backup" \
+      || { err "恢复前备份当前数据库失败，已中止恢复"; exit 1; }
+  else
+    warn "当前数据库文件不存在（首次部署？），跳过恢复前备份"
+  fi
+
+  check_docker
+
+  # 1. 停止 backend 容器（避免运行中写入/覆盖数据库）
+  log "停止 backend 容器..."
+  docker compose stop --timeout 30 backend 2>/dev/null || true
+
+  # 2. 覆盖数据库并清理 WAL 相关文件
+  log "覆盖数据库并清理 -wal/-shm 残留..."
+  rm -f "$db_path-wal" "$db_path-shm"
+  cp "$backup_path" "$db_path"
+
+  # 3. 启动 backend（等待健康检查），确保依赖的基础设施也在运行
+  log "启动 backend（等待健康检查）..."
+  if ! docker compose up -d --no-deps --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway; then
+    err "backend 在 60s 内未通过健康检查"
+    docker compose ps
+    warn "恢复操作未完全成功；请检查容器状态。可用以下命令回滚到恢复前的库："
+    [ -n "$safety_backup" ] && warn "  cp '$safety_backup' '$db_path' && $0 restart"
+    exit 1
+  fi
+
+  log "数据库恢复完成: $(basename "$backup_path")"
+  if [ -n "$safety_backup" ]; then
+    log "恢复前备份保留在: $safety_backup（确认无误后可删除）"
+  fi
+  do_status
+}
+
 # ── 运行测试 ──
 do_test() {
   log "构建测试镜像..."
@@ -584,6 +663,7 @@ case "$MODE" in
   test)            check_docker; do_test "${@:2}" ;;
   check)           check_docker; do_check "${@:2}" ;;
   backup)          check_docker; do_backup ;;
+  restore)         check_docker; do_restore "${2:-}" ;;
   cleanup)         check_docker; do_cleanup "${@:2}" ;;
   diagnose)        do_diagnose ;;
   mirrors)         check_docker; do_mirrors ;;
@@ -614,6 +694,7 @@ case "$MODE" in
     echo "  test            运行 pytest 测试（可传入 pytest 参数）"
     echo "  check [backend|frontend|audit]  运行日常质量门禁（audit 只报告不拦截）"
     echo "  backup          备份数据库和 Redis 数据"
+    echo "  restore [备份路径]  从备份恢复数据库（缺省用最新备份；恢复前自动再备份当前库）"
     echo "  cleanup [--dry-run] [--aggressive]  清理本项目资源（不影响其他项目）"
     echo "  diagnose        输出磁盘/资源诊断信息（不修改任何资源）"
     echo "  mirrors         强制刷新镜像源缓存和 Docker Hub registry mirror"
