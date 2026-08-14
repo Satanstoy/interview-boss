@@ -58,6 +58,7 @@ def init_db() -> None:
                 code_method       TEXT DEFAULT 'S256',
                 scopes            TEXT,
                 resource          TEXT,
+                redirect_uri      TEXT NOT NULL DEFAULT '',
                 expires_at        TIMESTAMP NOT NULL,
                 used              BOOLEAN DEFAULT FALSE,
                 FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id)
@@ -91,6 +92,14 @@ def init_db() -> None:
         }
         if "resource" not in refresh_columns:
             conn.execute("ALTER TABLE oauth_refresh_tokens ADD COLUMN resource TEXT")
+
+        code_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(oauth_codes)")
+        }
+        if "redirect_uri" not in code_columns:
+            conn.execute(
+                "ALTER TABLE oauth_codes ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT ''"
+            )
 
 
 # ── InterviewBoss DB helpers ──
@@ -237,12 +246,23 @@ def save_code(
     scopes: str,
     resource: str,
     expires_at: str,
+    redirect_uri: str = "",
 ) -> None:
     with run_db() as conn:
         conn.execute(
-            """INSERT INTO oauth_codes (code, client_id, user_id, code_challenge, scopes, resource, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (code, client_id, user_id, code_challenge, scopes, resource, expires_at),
+            """INSERT INTO oauth_codes
+               (code, client_id, user_id, code_challenge, scopes, resource, redirect_uri, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                code,
+                client_id,
+                user_id,
+                code_challenge,
+                scopes,
+                resource,
+                redirect_uri,
+                expires_at,
+            ),
         )
 
 

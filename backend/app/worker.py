@@ -14,12 +14,13 @@ import logging
 from datetime import datetime
 from arq.connections import RedisSettings
 from arq.cron import cron
+from app.core.config import build_redis_url
 
 logger = logging.getLogger("interview-boss")
 
-REDIS_URL = os.environ.get(
-    "REDIS_QUEUE_URL",
-    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+REDIS_URL = build_redis_url(
+    os.environ.get("REDIS_QUEUE_URL") or os.environ.get("REDIS_URL"),
+    f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:6379/0",
 )
 
 

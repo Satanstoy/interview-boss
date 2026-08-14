@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import logging
+import httpx
 from openai import (
     AsyncOpenAI,
     APIConnectionError,
@@ -21,6 +22,7 @@ from tenacity import (
     retry_if_exception_type,
 )
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
+from app.core.outbound_url import assert_safe_outbound_url_sync
 
 logger = logging.getLogger("interview-boss")
 
@@ -186,12 +188,21 @@ def _should_use_response_format(base_url: str = None) -> bool:
 
 def _make_client(api_key: str, base_url: str, timeout: float, provider: str = "openai"):
     """根据 provider 创建对应的 LLM 客户端。"""
+    if base_url:
+        assert_safe_outbound_url_sync(base_url)
+    http_client = httpx.AsyncClient(follow_redirects=False)
     if provider == "anthropic":
         return AsyncAnthropic(
-            api_key=api_key or None, base_url=base_url or None, timeout=timeout
+            api_key=api_key or None,
+            base_url=base_url or None,
+            timeout=timeout,
+            http_client=http_client,
         )
     return AsyncOpenAI(
-        api_key=api_key or None, base_url=base_url or None, timeout=timeout
+        api_key=api_key or None,
+        base_url=base_url or None,
+        timeout=timeout,
+        http_client=http_client,
     )
 
 

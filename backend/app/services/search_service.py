@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.core.config import get_user_search_config
+from app.core.outbound_url import assert_safe_outbound_url, validate_outbound_url_syntax
 
 logger = logging.getLogger("interview-boss")
 
@@ -152,10 +153,14 @@ async def search_web(
         return {"provider": provider, "results": []}
     max_results = max(1, min(int(max_results), 10))
     endpoint = _endpoint(provider, cfg.get("base_url"))
+    if cfg.get("base_url"):
+        await assert_safe_outbound_url(endpoint, resolve=True)
+    else:
+        validate_outbound_url_syntax(endpoint)
     headers: dict[str, str] = {"Accept": "application/json"}
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             if provider == "tavily":
                 response = await client.post(
                     endpoint,

@@ -1,9 +1,9 @@
 """LLM 配置管理端点"""
 
-import re
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
+from app.core.outbound_url import OutboundURLBlocked, validate_outbound_url_syntax
 from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
@@ -83,8 +83,6 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
     if not model:
         raise HTTPException(status_code=400, detail="模型名称不能为空")
 
-    _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
-
     def _resolve():
         with get_db_connection() as conn:
             existing = conn.execute(
@@ -99,10 +97,10 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
 
     if not final_base_url:
         raise HTTPException(status_code=400, detail="Base URL 不能为空")
-    if not _URL_RE.match(final_base_url):
-        raise HTTPException(
-            status_code=400, detail="Base URL 格式无效，必须以 http:// 或 https:// 开头"
-        )
+    try:
+        validate_outbound_url_syntax(final_base_url)
+    except OutboundURLBlocked as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 接口类型校验：必须在端点能力矩阵支持的格式内
     if api_format not in ("auto", "chat", "responses", "anthropic"):
@@ -215,6 +213,10 @@ async def list_available_models(user: dict = Depends(get_current_user)):
             else:
                 url = f"{base}/v1/models"
 
+        if provider != "anthropic":
+            from app.core.outbound_url import assert_safe_outbound_url
+
+            await assert_safe_outbound_url(url, resolve=True)
         async with httpx.AsyncClient(timeout=10) as http_client:
             response = await http_client.get(url, headers=headers)
             response.raise_for_status()

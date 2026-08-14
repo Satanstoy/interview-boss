@@ -16,10 +16,17 @@ _REFRESH_TTL = 30 * 86400  # 30 days
 
 
 def _get_secret() -> str:
-    global _SECRET
-    if not _SECRET:
-        _SECRET = secrets.token_hex(32)
+    if len(_SECRET) < 32:
+        raise RuntimeError(
+            "OAUTH_SECRET_KEY must be at least 32 characters before serving OAuth tokens"
+        )
     return _SECRET
+
+
+def require_configured_secret() -> None:
+    """Fail closed during startup instead of rotating an in-memory secret."""
+
+    _get_secret()
 
 
 def create_access_token(

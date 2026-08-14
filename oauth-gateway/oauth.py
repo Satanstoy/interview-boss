@@ -7,6 +7,7 @@ import json
 import secrets
 import sqlite3
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse
 
@@ -22,6 +23,100 @@ router = APIRouter()
 templates = Jinja2Templates(directory="/app/templates")
 
 _BASE_URL = ""
+
+
+class _SlidingWindowLimiter:
+    def __init__(self, limit: int, window_seconds: int, max_keys: int = 10_000):
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.max_keys = max_keys
+        self._events: dict[str, deque[float]] = {}
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        events = self._events.get(key)
+        if events is None:
+            if len(self._events) >= self.max_keys:
+                self._events.pop(next(iter(self._events)), None)
+            events = self._events.setdefault(key, deque())
+        cutoff = now - self.window_seconds
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if len(events) >= self.limit:
+            return False
+        events.append(now)
+        return True
+
+    def clear(self) -> None:
+        self._events.clear()
+
+
+_DCR_LIMITER = _SlidingWindowLimiter(limit=10, window_seconds=60)
+_AUTHORIZE_LIMITER = _SlidingWindowLimiter(limit=20, window_seconds=60)
+_TOKEN_LIMITER = _SlidingWindowLimiter(limit=60, window_seconds=60)
+_MAX_OAUTH_BODY_BYTES = 64 * 1024
+_MAX_CLIENT_NAME_LENGTH = 200
+_MAX_REDIRECT_URIS = 10
+_MAX_REDIRECT_URI_LENGTH = 2048
+
+
+def _request_client_key(request: Request) -> str:
+    forwarded = request.headers.get("x-real-ip", "").split(",", 1)[0].strip()
+    if forwarded:
+        return forwarded
+    return getattr(getattr(request, "client", None), "host", None) or "unknown"
+
+
+def _enforce_rate_limit(request: Request, limiter: _SlidingWindowLimiter) -> None:
+    if not limiter.allow(_request_client_key(request)):
+        raise HTTPException(
+            status_code=429,
+            detail="请求过于频繁，请稍后重试",
+            headers={"Retry-After": str(limiter.window_seconds)},
+        )
+
+
+def _validate_registration_body(raw_body: bytes) -> tuple[str, list[str], str]:
+    if len(raw_body) > _MAX_OAUTH_BODY_BYTES:
+        raise HTTPException(413, "OAuth 注册请求过大")
+    try:
+        body = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, "OAuth 注册请求必须是有效 JSON") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "OAuth 注册请求格式无效")
+
+    client_name = body.get("client_name", "Unnamed Client")
+    redirect_uris = body.get("redirect_uris", [])
+    auth_method = body.get("token_endpoint_auth_method", "none")
+    if not isinstance(client_name, str) or not client_name.strip():
+        raise HTTPException(400, "client_name 无效")
+    if len(client_name) > _MAX_CLIENT_NAME_LENGTH:
+        raise HTTPException(400, "client_name 过长")
+    if not isinstance(redirect_uris, list) or not redirect_uris:
+        raise HTTPException(400, "redirect_uris required")
+    if len(redirect_uris) > _MAX_REDIRECT_URIS:
+        raise HTTPException(400, "redirect_uris 数量过多")
+    if auth_method not in {"none", "client_secret_post"}:
+        raise HTTPException(400, "不支持的 token_endpoint_auth_method")
+
+    normalized_uris: list[str] = []
+    for redirect_uri in redirect_uris:
+        if not isinstance(redirect_uri, str) or len(redirect_uri) > _MAX_REDIRECT_URI_LENGTH:
+            raise HTTPException(400, "redirect_uri 无效或过长")
+        parsed = urlparse(redirect_uri)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            raise HTTPException(400, "redirect_uri 必须是有效的 http(s) 地址")
+        if redirect_uri in normalized_uris:
+            raise HTTPException(400, "redirect_uris 不得重复")
+        normalized_uris.append(redirect_uri)
+    return client_name.strip(), normalized_uris, auth_method
 
 
 def _base_url() -> str:
@@ -130,13 +225,10 @@ async def mcp_openid_configuration(request: Request):
 
 @router.post("/oauth/register")
 async def register_client(request: Request):
-    body = await request.json()
-    client_name = body.get("client_name", "Unnamed Client")
-    redirect_uris = body.get("redirect_uris", [])
-    auth_method = body.get("token_endpoint_auth_method", "none")
-
-    if not redirect_uris:
-        raise HTTPException(400, "redirect_uris required")
+    _enforce_rate_limit(request, _DCR_LIMITER)
+    client_name, redirect_uris, auth_method = _validate_registration_body(
+        await request.body()
+    )
 
     client_id = f"chatgpt_{secrets.token_hex(16)}"
     client_secret_hash = None
@@ -222,6 +314,7 @@ async def authorize(
     resource: str = Query(""),
     scope: str = Query("mcp:read mcp:write"),
 ):
+    _enforce_rate_limit(request, _AUTHORIZE_LIMITER)
     if response_type != "code":
         raise HTTPException(400, "unsupported response_type")
 
@@ -273,6 +366,7 @@ async def authorize_post(
     resource: str = Form(""),
     scope: str = Form(""),
 ):
+    _enforce_rate_limit(request, _AUTHORIZE_LIMITER)
     # Graceful error on missing required fields (don't 500)
     if not client_id or not redirect_uri:
         return templates.TemplateResponse(
@@ -384,7 +478,16 @@ async def authorize_post(
     code = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
-    db.save_code(code, client_id, user_id, code_challenge, scope, resource, expires_at)
+    db.save_code(
+        code,
+        client_id,
+        user_id,
+        code_challenge,
+        scope,
+        resource,
+        expires_at,
+        redirect_uri=redirect_uri,
+    )
 
     # Redirect back to client
     params = {"code": code}
@@ -403,6 +506,7 @@ async def authorize_post(
 
 @router.post("/oauth/token")
 async def token_endpoint(request: Request):
+    _enforce_rate_limit(request, _TOKEN_LIMITER)
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         body = await request.json()
@@ -420,6 +524,32 @@ async def token_endpoint(request: Request):
         raise HTTPException(400, "unsupported grant_type")
 
 
+def _authenticate_client(body: dict) -> dict:
+    """Authenticate a registered confidential client before issuing tokens."""
+
+    client_id = body.get("client_id")
+    if not isinstance(client_id, str) or not client_id:
+        raise HTTPException(401, "invalid_client")
+    client = db.get_client(client_id)
+    if not client:
+        raise HTTPException(401, "invalid_client")
+
+    if client.get("auth_method") == "client_secret_post":
+        supplied = body.get("client_secret")
+        expected = client.get("client_secret") or ""
+        if (
+            not isinstance(supplied, str)
+            or not expected
+            or not secrets.compare_digest(auth.hash_token(supplied), expected)
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="invalid_client",
+                headers={"WWW-Authenticate": 'Basic realm="oauth"'},
+            )
+    return client
+
+
 async def _handle_authorization_code(body: dict) -> JSONResponse:
     code = body.get("code")
     redirect_uri = body.get("redirect_uri")
@@ -429,6 +559,10 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
     if not all([code, redirect_uri, client_id]):
         raise HTTPException(400, "missing required parameters")
 
+    client = _authenticate_client(body)
+    if redirect_uri not in client.get("redirect_uris", []):
+        raise HTTPException(400, "redirect_uri mismatch")
+
     # Verify and consume the code
     code_data = db.get_and_use_code(code)
     if not code_data:
@@ -436,6 +570,9 @@ async def _handle_authorization_code(body: dict) -> JSONResponse:
 
     if code_data["client_id"] != client_id:
         raise HTTPException(400, "client_id mismatch")
+
+    if code_data.get("redirect_uri") != redirect_uri:
+        raise HTTPException(400, "redirect_uri mismatch")
 
     # PKCE verification: only if code_challenge was bound to the authorization code
     stored_challenge = code_data.get("code_challenge") or ""
@@ -493,6 +630,8 @@ async def _handle_refresh_token(body: dict) -> JSONResponse:
 
     if not all([refresh_token, client_id]):
         raise HTTPException(400, "missing required parameters")
+
+    _authenticate_client(body)
 
     token_hash = auth.hash_token(refresh_token)
     token_data = db.get_refresh_token(token_hash)

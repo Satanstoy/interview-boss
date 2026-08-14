@@ -5,8 +5,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from app.core.request_ip import get_client_ip
 from app.core.logging_config import logger
 from app.db.connection import init_db
 from app.middleware.request_log import log_requests
@@ -53,7 +53,7 @@ ALLOWED_ORIGINS = [
 ]
 
 # ── 速率限制 ──
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+limiter = Limiter(key_func=get_client_ip, default_limits=["200/minute"])
 
 app = FastAPI(
     title="InterviewBoss",
@@ -235,10 +235,10 @@ async def startup_cleanup():
     # 初始化 Redis 连接池（ARQ 任务队列）
     try:
         from arq.connections import create_pool, RedisSettings
-        from app.core.config import REDIS_QUEUE_URL
+        from app.core.config import REDIS_QUEUE_URL, redact_redis_url
 
         app.state.redis = await create_pool(RedisSettings.from_dsn(REDIS_QUEUE_URL))
-        logger.info(f"Redis queue 连接池已初始化: {REDIS_QUEUE_URL}")
+        logger.info(f"Redis queue 连接池已初始化: {redact_redis_url(REDIS_QUEUE_URL)}")
     except Exception as e:
         logger.warning(f"Redis 连接池初始化失败（ARQ 将不可用）: {e}")
         app.state.redis = None
@@ -247,13 +247,13 @@ async def startup_cleanup():
     try:
         from redis.asyncio import from_url
         from app.core.cache import set_cache_client
-        from app.core.config import REDIS_CACHE_URL
+        from app.core.config import REDIS_CACHE_URL, redact_redis_url
 
         cache = from_url(REDIS_CACHE_URL, decode_responses=True)
         await cache.ping()
         set_cache_client(cache)
         app.state.redis_cache = cache
-        logger.info(f"Redis cache 连接池已初始化: {REDIS_CACHE_URL}")
+        logger.info(f"Redis cache 连接池已初始化: {redact_redis_url(REDIS_CACHE_URL)}")
     except Exception as e:
         logger.warning(f"Redis cache 初始化失败（题库接口将回退 SQLite）: {e}")
         app.state.redis_cache = None

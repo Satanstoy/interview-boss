@@ -46,20 +46,11 @@ def _configured_public_endpoint(value: str) -> str | None:
 
 
 def _mcp_endpoint(request: Request) -> str:
-    """Build the externally reachable MCP URL behind Nginx or a tunnel."""
+    """Build the externally reachable MCP URL from explicit configuration."""
     configured = os.getenv("MCP_PUBLIC_URL", "").strip().rstrip("/")
     if configured:
         return _configured_public_endpoint(configured) or _PUBLIC_MCP_ENDPOINT
-
-    forwarded_proto = request.headers.get("x-forwarded-proto", "")
-    forwarded_host = request.headers.get("x-forwarded-host", "")
-    scheme = (forwarded_proto.split(",", 1)[0].strip() or request.url.scheme).lower()
-    host = forwarded_host.split(",", 1)[0].strip() or request.headers.get("host", "")
-    if not host:
-        host = request.url.netloc
-    if not host or _is_ip_host(urlsplit(f"//{host}").hostname or ""):
-        return _PUBLIC_MCP_ENDPOINT
-    return f"{scheme}://{host}/mcp"
+    return _PUBLIC_MCP_ENDPOINT
 
 
 def _client_config(endpoint: str, token: str) -> dict:

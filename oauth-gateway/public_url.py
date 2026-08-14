@@ -50,15 +50,5 @@ def sanitize_base_url(value: str) -> str:
 
 
 def request_base_url(request, configured: str) -> str:
-    """Derive a public base URL while rejecting IP-based Host headers."""
-    forwarded_host = request.headers.get("x-forwarded-host", "")
-    host = (forwarded_host or request.headers.get("host", "")).split(",", 1)[0].strip()
-    if host:
-        try:
-            hostname = urlsplit(f"//{host}").hostname or ""
-        except ValueError:
-            hostname = ""
-        if hostname and hostname.lower() != "localhost" and not is_ip_host(hostname):
-            proto = request.headers.get("x-forwarded-proto", "https").split(",", 1)[0].strip()
-            return f"{proto}://{host}".rstrip("/")
+    """Return the configured public URL; never reflect an arbitrary Host header."""
     return sanitize_base_url(configured)

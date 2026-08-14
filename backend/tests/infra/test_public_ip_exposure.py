@@ -57,6 +57,10 @@ def test_gateway_public_url_helper_never_echoes_ip_hosts():
             "headers": {"x-forwarded-host": f"{PUBLIC_IP}:443"},
         })()
         assert request_base_url(forwarded, "https://interviewboss.online") == "https://interviewboss.online"
+        attacker = type("Request", (), {
+            "headers": {"host": "attacker.example"},
+        })()
+        assert request_base_url(attacker, "https://interviewboss.online") == "https://interviewboss.online"
         assert sanitize_base_url(f"https://{PUBLIC_IP}") == "https://interviewboss.online"
     finally:
         sys.path.pop(0)
@@ -69,6 +73,18 @@ def test_mcp_endpoint_defaults_to_public_domain_when_request_has_no_host(monkeyp
     request = type("Request", (), {
         "headers": {},
         "url": type("URL", (), {"scheme": "https", "netloc": ""})(),
+    })()
+
+    assert mcp._mcp_endpoint(request) == "https://interviewboss.online/mcp"
+
+
+def test_mcp_endpoint_does_not_reflect_arbitrary_host(monkeypatch):
+    from app.routers.profile_pkg import mcp
+
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    request = type("Request", (), {
+        "headers": {"host": "attacker.example", "x-forwarded-host": "attacker.example"},
+        "url": type("URL", (), {"scheme": "https", "netloc": "attacker.example"})(),
     })()
 
     assert mcp._mcp_endpoint(request) == "https://interviewboss.online/mcp"

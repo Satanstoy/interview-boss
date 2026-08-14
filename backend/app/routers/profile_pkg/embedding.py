@@ -216,8 +216,16 @@ async def test_embedding_config(req: dict, admin: dict = Depends(get_admin_user)
         base_url = (req.get("api_base_url") or "").strip() or "https://api.siliconflow.cn/v1"
         try:
             from openai import OpenAI
+            import httpx
+            from app.core.outbound_url import assert_safe_outbound_url_sync
 
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=30)
+            assert_safe_outbound_url_sync(base_url)
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=30,
+                http_client=httpx.Client(follow_redirects=False),
+            )
             resp = client.embeddings.create(model=api_model, input="测试")
             return {"ok": True, "dimension": len(resp.data[0].embedding)}
         except Exception as e:

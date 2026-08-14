@@ -30,9 +30,9 @@ x-app-service: &app-service
   build: *app-build
   env_file: backend/.env
   environment:
-    - REDIS_URL=redis://redis:6379/0
-    - REDIS_QUEUE_URL=redis://redis:6379/0
-    - REDIS_CACHE_URL=redis://redis-cache:6379/0
+    - REDIS_HOST=redis
+    - REDIS_CACHE_HOST=redis-cache
+    - REDIS_PASSWORD_FILE=/run/secrets/redis_password
     - HF_HUB_OFFLINE=1
     - HF_HOME=/home/appuser/.cache/huggingface
     - ENV=production
@@ -44,7 +44,9 @@ x-app-service: &app-service
     - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
     - /home/ubuntu/.cache/huggingface/hub/models--Xenova--bge-small-zh-v1.5/snapshots/main:/app/models/bge-small-zh-v1.5:ro
   networks:
-    - app-network
+    - data-network
+  secrets:
+    - redis_password
   security_opt:
     - no-new-privileges:true
   depends_on:
@@ -61,17 +63,26 @@ services:
     restart: unless-stopped
     # ARQ 的可靠任务队列：不允许用 LRU 淘汰任务数据。
     # 128MB maxmemory + 64MB 容器余量，用于连接、AOF 和内存碎片。
-    command: redis-server --maxmemory 128mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
+    command:
+      - sh
+      - -c
+      - >-
+        test -s /run/secrets/redis_password || { echo 'redis_password secret is required' >&2; exit 1; };
+        exec redis-server --maxmemory 128mb --maxmemory-policy noeviction
+        --appendonly yes --appendfsync everysec
+        --requirepass "$$(cat /run/secrets/redis_password)"
     volumes:
       - redis-data:/data
     mem_limit: 192m
     cpus: 0.25
     networks:
-      - app-network
+      - data-network
+    secrets:
+      - redis_password
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -83,15 +94,24 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     # Cache 不需要持久化；达到上限时淘汰旧缓存，不影响 queue 实例。
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    command:
+      - sh
+      - -c
+      - >-
+        test -s /run/secrets/redis_password || { echo 'redis_password secret is required' >&2; exit 1; };
+        exec redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+        --save "" --appendonly no
+        --requirepass "$$(cat /run/secrets/redis_password)"
     mem_limit: 320m
     cpus: 0.25
     networks:
-      - app-network
+      - data-network
+    secrets:
+      - redis_password
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -105,6 +125,9 @@ services:
     stop_grace_period: 30s
     mem_limit: 512m
     cpus: 0.75
+    networks:
+      - edge-network
+      - data-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 15s
@@ -140,9 +163,9 @@ services:
       - test
     env_file: backend/.env
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_QUEUE_URL=redis://redis:6379/0
-      - REDIS_CACHE_URL=redis://redis-cache:6379/0
+      - REDIS_HOST=redis
+      - REDIS_CACHE_HOST=redis-cache
+      - REDIS_PASSWORD_FILE=/run/secrets/redis_password
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=test
@@ -151,7 +174,9 @@ services:
       - ./backend/data:/app/backend/data
       - /home/ubuntu/.cache/huggingface:/home/appuser/.cache/huggingface:ro
     networks:
-      - app-network
+      - data-network
+    secrets:
+      - redis_password
     depends_on:
       redis:
         condition: service_healthy
@@ -177,7 +202,7 @@ services:
     mem_limit: 64m
     cpus: 0.25
     networks:
-      - app-network
+      - edge-network
     security_opt:
       - no-new-privileges:true
     depends_on:
@@ -197,8 +222,7 @@ services:
     cpus: 0.25
     env_file: backend/.env
     environment:
-      # OAUTH_SECRET_KEY 从 backend/.env 注入；留空时 oauth-gateway 自动生成随机密钥并告警（tech-audit-2026-08-13 D13-2，禁止公开兜底值）
-      - OAUTH_SECRET_KEY=${OAUTH_SECRET_KEY}
+      # OAuth 密钥只从 backend/.env 注入；缺失时网关启动失败。
       - INTERVIEW_BOSS_DB=/app/data/interview-boss.db
       - INTERVIEW_BOSS_URL=http://backend:8000
       - GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://interviewboss.online}
@@ -206,7 +230,7 @@ services:
       - ./backend/data:/app/data:ro
       - oauth-gateway-data:/app/oauth-data
     networks:
-      - app-network
+      - edge-network
     security_opt:
       - no-new-privileges:true
     depends_on:
@@ -215,8 +239,14 @@ services:
     logging: *default-logging
 
 networks:
-  app-network:
+  edge-network:
     driver: bridge
+  data-network:
+    driver: bridge
+
+secrets:
+  redis_password:
+    file: ./backend/.redis-password
 
 volumes:
   redis-data:

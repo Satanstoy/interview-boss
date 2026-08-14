@@ -1,5 +1,6 @@
 import os
 import logging
+from urllib.parse import quote, urlsplit, urlunsplit
 from dotenv import load_dotenv, set_key
 
 load_dotenv()
@@ -25,16 +26,66 @@ MAX_TOTAL_UPLOAD_SIZE = (
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 
-# Redis 配置
-#
-# REDIS_URL 保留为兼容旧部署配置的别名；新的部署应分别设置 queue/cache
-# 两个实例，避免 cache 的 LRU 淘汰影响 ARQ 的可靠任务投递。
-REDIS_QUEUE_URL = os.environ.get(
-    "REDIS_QUEUE_URL",
-    os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+def _read_secret_file() -> str:
+    path = os.environ.get("REDIS_PASSWORD_FILE", "").strip()
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as secret_file:
+            return secret_file.read().strip()
+    except OSError:
+        return ""
+
+
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "").strip() or _read_secret_file()
+
+
+def build_redis_url(raw_url: str | None, default_url: str) -> str:
+    """Add the runtime Redis password while preserving legacy DSN overrides."""
+
+    value = (raw_url or default_url).strip()
+    if not REDIS_PASSWORD:
+        return value
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"redis", "rediss"} or parsed.username or parsed.password:
+        return value
+    if not parsed.hostname:
+        return value
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f":{quote(REDIS_PASSWORD, safe='')}@{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def redact_redis_url(value: str) -> str:
+    """Return a log-safe Redis DSN."""
+
+    parsed = urlsplit(value)
+    if not parsed.password:
+        return value
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{parsed.username or ''}:***@{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+# Redis 配置。REDIS_URL 保留为兼容旧部署配置的别名；新的 Docker 部署
+# 通过 REDIS_HOST/REDIS_CACHE_HOST + Docker secret 组装带认证的 DSN。
+REDIS_QUEUE_URL = build_redis_url(
+    os.environ.get("REDIS_QUEUE_URL") or os.environ.get("REDIS_URL"),
+    f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:6379/0",
 )
 REDIS_URL = REDIS_QUEUE_URL
-REDIS_CACHE_URL = os.environ.get("REDIS_CACHE_URL", "redis://localhost:6380/0")
+REDIS_CACHE_URL = build_redis_url(
+    os.environ.get("REDIS_CACHE_URL"),
+    f"redis://{os.environ.get('REDIS_CACHE_HOST', 'localhost')}:6379/0",
+)
 MASTER_BANK_CACHE_TTL_SECONDS = max(
     1, int(os.environ.get("MASTER_BANK_CACHE_TTL_SECONDS", "15"))
 )

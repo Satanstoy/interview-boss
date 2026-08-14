@@ -122,6 +122,21 @@ async def test_tavily_results_are_normalized_and_deduplicated():
 
 
 @pytest.mark.asyncio
+async def test_custom_private_search_endpoint_is_blocked_before_http_request():
+    from app.services.search_service import search_web
+
+    with pytest.raises(ValueError, match="内网|保留"):
+        await search_web(
+            "Redis",
+            config={
+                "provider": "tavily",
+                "api_key": "test-key",
+                "base_url": "http://127.0.0.1:8080",
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_search_provider_http_error_is_safe():
     from app.services.search_service import SearchProviderError, search_web
 

@@ -13,7 +13,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import httpx
 import numpy as np
+
+from app.core.outbound_url import assert_safe_outbound_url_sync
 
 logger = logging.getLogger("interview-boss")
 
@@ -174,10 +177,12 @@ def _get_siliconflow_client():
     cached = _SILICONFLOW_CLIENTS.get(key)
     if cached is not None:
         return cached
+    assert_safe_outbound_url_sync(_SILICONFLOW_BASE_URL)
     client = OpenAI(
         api_key=_SILICONFLOW_API_KEY,
         base_url=_SILICONFLOW_BASE_URL,
         timeout=float(os.environ.get("EMBEDDING_API_TIMEOUT", "60")),
+        http_client=httpx.Client(follow_redirects=False),
     )
     _SILICONFLOW_CLIENTS[key] = client
     return client

@@ -7,6 +7,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import auth
 import db
 from oauth import router as oauth_router
 from proxy import proxy_mcp
@@ -18,6 +19,7 @@ app.include_router(oauth_router)
 
 @app.on_event("startup")
 async def startup():
+    auth.require_configured_secret()
     db.init_db()
 
 

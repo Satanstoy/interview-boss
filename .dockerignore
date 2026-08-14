@@ -39,6 +39,8 @@ backend/data/
 
 # Env (通过 env_file 注入)
 backend/.env
+backend/.redis-password
+.redis-password
 frontend/.env*
 
 # Nginx (nginx-runtime 镜像需要复制配置)

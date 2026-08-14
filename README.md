@@ -186,7 +186,8 @@ cd frontend && npm install && npm run dev   # 打开 http://localhost:3000
 | `ADMIN_PASSWORD` | 种子管理员密码 | *(首次必填)* |
 | `REDIS_URL` | Redis queue 连接地址（兼容旧配置别名） | `redis://localhost:6379/0` |
 | `REDIS_QUEUE_URL` | ARQ queue Redis 连接地址 | 回退到 `REDIS_URL` |
-| `REDIS_CACHE_URL` | 读模型 cache Redis 连接地址 | `redis://localhost:6380/0` |
+| `REDIS_CACHE_URL` | 读模型 cache Redis 连接地址 | `redis://localhost:6379/0`（Docker 使用 `REDIS_CACHE_HOST` + secret） |
+| `REDIS_PASSWORD_FILE` | Redis 密码文件（Docker 部署自动生成） | `backend/.redis-password` |
 | `MASTER_BANK_CACHE_TTL_SECONDS` | master-bank 缓存有效期（秒） | `15` |
 | `OPENAI_BASE_URL` | LLM API 地址 | 空 |
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |

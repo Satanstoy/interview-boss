@@ -41,6 +41,41 @@ log() { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+ensure_runtime_secrets() {
+  local redis_secret_file="$PROJECT_DIR/backend/.redis-password"
+  local env_file="$PROJECT_DIR/backend/.env"
+  local generated_secret
+
+  if [ ! -s "$redis_secret_file" ] || [ "$(wc -c < "$redis_secret_file")" -lt 33 ]; then
+    umask 077
+    if command -v openssl >/dev/null 2>&1; then
+      generated_secret=$(openssl rand -hex 32)
+    else
+      generated_secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+    fi
+    printf '%s\n' "$generated_secret" > "$redis_secret_file"
+    log "已生成 Redis 运行时认证密钥（仅保存于 backend/.redis-password）"
+  fi
+  chmod 600 "$redis_secret_file"
+
+  local oauth_secret=""
+  if [ -f "$env_file" ]; then
+    oauth_secret=$(awk -F= '$1 == "OAUTH_SECRET_KEY" { value=$2; sub(/^[[:space:]]+/, "", value); gsub(/^"|"$/, "", value); print value; exit }' "$env_file")
+    chmod 600 "$env_file"
+  fi
+  if [ -f "$env_file" ] && [ -z "$oauth_secret" ]; then
+    umask 077
+    if command -v openssl >/dev/null 2>&1; then
+      generated_secret=$(openssl rand -hex 32)
+    else
+      generated_secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+    fi
+    printf '\nOAUTH_SECRET_KEY=%s\n' "$generated_secret" >> "$env_file"
+    chmod 600 "$env_file"
+    log "已生成 OAuth 签名密钥并写入 backend/.env"
+  fi
+}
+
 # ── 检查 Docker 权限 ──
 check_docker() {
   if ! docker info >/dev/null 2>&1; then
@@ -429,7 +464,11 @@ do_backup() {
   backup_sqlite_wal "$PROJECT_DIR/backend/data/interview-boss.db" "$backup_dir/interview-boss_${timestamp}.db"
 
   log "备份 Redis queue 数据（cache 为无持久化缓存，不备份）..."
-  docker compose exec redis redis-cli BGSAVE >/dev/null 2>&1 || true
+  if [ -s "$PROJECT_DIR/backend/.redis-password" ]; then
+    docker compose exec -T redis sh -c 'REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli BGSAVE' >/dev/null 2>&1 || true
+  else
+    warn "Redis 密钥不存在，跳过 Redis BGSAVE"
+  fi
   sleep 1
   docker cp "$(docker compose ps -q redis):/data/dump.rdb"      "$backup_dir/redis_${timestamp}.rdb" 2>/dev/null || warn "Redis 备份跳过"
 
@@ -523,6 +562,11 @@ do_migrate() {
 
 # ── 主逻辑 ──
 MODE="${1:-all}"
+
+case "$MODE" in
+  diagnose|mirrors|migrate|cleanup|help|--help|-h) ;;
+  *) ensure_runtime_secrets ;;
+esac
 
 case "$MODE" in
   build)           check_docker; do_build ;;
