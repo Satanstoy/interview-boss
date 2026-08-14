@@ -36,6 +36,7 @@ class PracticeReviewRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
     score: Optional[int] = Field(None, ge=0, le=100)
     answer_revealed: bool = True
+    idempotency_key: Optional[str] = Field(None, max_length=128)
 
 
 class PracticeReviewCorrectionRequest(BaseModel):

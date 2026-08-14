@@ -24,6 +24,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `migrations/chat.py` | Chat 会话、消息、工具 trace、asked question、turn fence、durable side effects 和 structured turn 的 migrations 024-046 |
 | `migrations/practice.py` | 刷题题单、用户题目复习状态和复习事件的 migration 055 |
 | `migrations/practice_decks.py` | 自定义题单所有者、可见性与题单题目关联的 migration 056 |
+| `migrations/practice_idempotency.py` | 复习提交幂等键 migration 088：`practice_review_events` 增加可选 `idempotency_key` 列 + `(user_id, question_bank_id, idempotency_key)` 部分唯一索引（WHERE idempotency_key IS NOT NULL），DB 层兜底防重发双写 |
 | `migrations/practice_defaults.py` | 清理旧的今日复习/高频/未刷分类，仅保留全部题和我的收藏系统题单的 migration 057 |
 | `migrations/practice_performance.py` | 刷题队列切换查询的覆盖索引 migration 059 |
 | `migrations/admin_assistant.py` | 管理员 AI 助手对话/操作审计日志表 migration 069：`admin_assistant_log`（session_id + admin_id 隔离，role: user/assistant/action）；migration 070：`quality_issue.target_qb_id`（误合并「并入到其他题」的目标题 ID）；migration 071：`quality_issue.new_cat2`（拆出后新题分类，LLM 判定）；migration 073：`quality_issue.source_question/source_cat2`（质量审查项原题快照，兼容已删除来源题的历史展示） |

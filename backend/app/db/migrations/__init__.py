@@ -90,6 +90,7 @@ from app.db.migrations.practice_decks import _migration_056_custom_practice_deck
 from app.db.migrations.practice_defaults import _migration_057_practice_default_decks
 from app.db.migrations.practice_performance import _migration_059_practice_queue_indexes
 from app.db.migrations.practice_corrections import _migration_078_practice_review_corrections
+from app.db.migrations.practice_idempotency import _migration_088_practice_review_idempotency
 from app.db.migrations.chat import (
     _migration_024_chat_tables,
     _migration_025_question_fts,
@@ -162,6 +163,7 @@ from app.db.migrations.schema_hygiene import (
     _migration_085_add_fk_declarations,
     _migration_086_drop_dead_columns_indexes,
 )
+from app.db.migrations.llm import _migration_089_llm_usage
 
 logger = logging.getLogger("interview-boss")
 
@@ -261,6 +263,8 @@ _MIGRATIONS = [
     (85, "add_fk_declarations", _migration_085_add_fk_declarations),
     (86, "drop_dead_columns_indexes", _migration_086_drop_dead_columns_indexes),
     (87, "evaluation_control_plane", _migration_087_evaluation_control_plane),
+    (88, "practice_review_idempotency", _migration_088_practice_review_idempotency),
+    (89, "llm_usage", _migration_089_llm_usage),
 ]
 
 

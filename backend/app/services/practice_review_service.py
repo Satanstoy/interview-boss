@@ -111,6 +111,29 @@ def _persist_state(
     return int(row["id"])
 
 
+def _duplicate_payload(row, event) -> dict:
+    """Build an idempotent payload from a persisted review row + its event."""
+    last_rating = str(row["last_rating"] or "")
+    return {
+        "state": row["state"],
+        "proficiency": row["proficiency"],
+        "review_count": row["review_count"],
+        "lapse_count": row["lapse_count"],
+        "last_rating": last_rating,
+        "last_score": event["score"] if event is not None else None,
+        "last_reviewed_at": str(row["last_reviewed_at"] or ""),
+        "next_review_at": str(row["next_review_at"] or ""),
+        "interval_days": row["interval_days"] or 0,
+        "ease_factor": row["ease_factor"] or 2.3,
+        "algorithm": "sm2_lite",
+        "has_been_practiced": True,
+        "event_id": int(event["id"]) if event is not None else None,
+        "can_correct": True,
+        "passed_today": last_rating in PASSING_RATINGS,
+        "is_daily_relearning": last_rating not in PASSING_RATINGS,
+    }
+
+
 def record_review(
     conn,
     *,
@@ -121,8 +144,30 @@ def record_review(
     source: str = "flashcard",
     now: datetime | None = None,
     urgency: float = 0.0,
+    idempotency_key: str | None = None,
 ) -> dict:
-    """Atomically update a user's state and append an auditable review event."""
+    """Atomically update a user's state and append an auditable review event.
+
+    idempotency_key (optional) makes the submission idempotent: re-sending
+    the same key for the same user/question is skipped, so no second event
+    row is written and the SRS review_count is not advanced again. A partial
+    unique index (user_id, question_bank_id, idempotency_key) backs this up
+    at the DB layer. Rows without an idempotency key are never deduplicated.
+    """
+
+    if idempotency_key:
+        existing = conn.execute(
+            "SELECT * FROM practice_review_events "
+            "WHERE user_id = ? AND question_bank_id = ? AND idempotency_key = ?",
+            (user_id, question_id, idempotency_key),
+        ).fetchone()
+        if existing:
+            state_row = conn.execute(
+                "SELECT * FROM user_question_review "
+                "WHERE user_id = ? AND question_bank_id = ?",
+                (user_id, question_id),
+            ).fetchone()
+            return _duplicate_payload(state_row, existing)
 
     reviewed_at = (now or _utcnow_naive()).replace(microsecond=0)
     current = conn.execute(
@@ -150,8 +195,8 @@ def record_review(
         """
         INSERT INTO practice_review_events
             (user_id, question_bank_id, review_id, rating, score, source,
-             reviewed_at, before_state_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             reviewed_at, before_state_json, idempotency_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id,
@@ -162,13 +207,12 @@ def record_review(
             source,
             timestamp,
             json.dumps(asdict(before_state), separators=(",", ":")),
+            idempotency_key,
         ),
     )
     return _review_payload(
         result, score=score, timestamp=timestamp, event_id=int(event.lastrowid)
     )
-
-
 def correct_review(
     conn,
     *,

@@ -23,6 +23,7 @@
 | `test_router_refactor.py` | 路由拆分回归测试 |
 | `test_session_search.py` | 会话搜索 |
 | `test_review_urgency_wiring.py` | review 端点接入 urgency/deadline：`_user_urgency` 助手（固定 today 测 deadline 选择）+ 端点记录复习 smoke |
+| `test_review_idempotency.py` | 复习提交幂等键（audit D14）：同 `idempotency_key` 提交两次只写一行事件、SRS review_count 只 +1；不同键/无键照常推进；`/api/practice/review` 透传请求体 `idempotency_key` |
 | `test_practice_due_queue.py` | 今日复习 due 队列：四桶排序、复习风险权重 = 动态来源数 × (5 - proficiency)（静态变体数不参与）、新题预算与动态频率排序、mastered 抽查 |
 | `test_frequency_display_bugs.py` | 频率口径回归：动态频率 SQL 必须过滤 `qs.deleted_at`、同 URL 公共/私有面经去重、面经软删不计；题卡展示频率 = 活跃来源数（静态 6 / 动态 1 时显示 1，无来源显示 0） |
 | `test_settings_position_switch.py` | 设置页岗位切换 |
