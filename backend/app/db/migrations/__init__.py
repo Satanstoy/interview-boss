@@ -114,6 +114,7 @@ from app.db.migrations.recruitment import (
     _migration_062_user_recruitment_pref,
     _migration_064_user_recruitment_pace,
 )
+from app.db.migrations.interview_import import _migration_080_interview_import
 
 logger = logging.getLogger("interview-boss")
 
@@ -205,6 +206,7 @@ _MIGRATIONS = [
     (77, "quality_issue_identity", _migration_077_quality_issue_identity),
     (78, "practice_review_corrections", _migration_078_practice_review_corrections),
     (79, "users_email_unique", _migration_079_users_email_unique),
+    (80, "interview_import", _migration_080_interview_import),
 ]
 
 

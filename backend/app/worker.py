@@ -93,6 +93,15 @@ async def enqueue_interview_reprocess_job(job_id: int):
         await pool.close()
 
 
+async def enqueue_interview_import_analysis_job(job_id: int):
+    """将外部 GPT 面试记录分析任务入队。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("interview_import_analysis_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_interview_distribution_refresh(scope: str, job_position: str):
     """Queue a durable materialized-statistics refresh."""
     pool = await _get_redis_pool()
@@ -1257,6 +1266,63 @@ async def generate_answer_task(ctx, job_id: int):
         return {"status": outcome["status"], "job_id": job_id}
 
 
+async def interview_import_analysis_task(ctx, job_id: int):
+    """ARQ task: analyze one complete external MCP interview import."""
+    from app.db.connection import get_db_connection
+    from app.services.interview_import_service import analyze_import
+    from app.services.job_lifecycle import (
+        INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE,
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+
+    worker_id = default_worker_id()
+
+    def _claim_and_load():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn,
+                job_id,
+                worker_id,
+                job_type=INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE,
+            )
+            if not task:
+                return None
+            payload_row = conn.execute(
+                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            payload = json.loads(payload_row["payload"]) if payload_row else {}
+            conn.commit()
+            return payload
+
+    payload = await asyncio.to_thread(_claim_and_load)
+    if payload is None:
+        logger.info("外部面试导入分析已被其他 worker 抢占或已结束: job_id=%s", job_id)
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    try:
+        result = await asyncio.to_thread(
+            analyze_import, str(payload.get("import_id")), int(job_id)
+        )
+        with get_db_connection() as conn:
+            complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps(result, ensure_ascii=False),
+            )
+            conn.commit()
+        return {"status": "completed", "job_id": job_id, **result}
+    except Exception as exc:
+        logger.exception("外部面试导入分析失败: job_id=%s", job_id)
+        with get_db_connection() as conn:
+            fail_job(conn, job_id, worker_id, str(exc)[:500], max_attempts=0)
+            conn.commit()
+        raise
+
+
 async def generate_recitation_task(ctx, job_id: int):
     """ARQ task: generate and persist one user's recitation answer."""
     from app.db.connection import get_db_connection, run_db
@@ -1461,6 +1527,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
         CLUSTER_BATCH_JOB_TYPE,
         CLUSTER_REBUILD_JOB_TYPE,
         INTERVIEW_REPROCESS_JOB_TYPE,
+        INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE,
         DISPATCHABLE_JOB_TYPES,
         RECITATION_GENERATION_JOB_TYPE,
         RECOMPUTE_EMBEDDING_JOB_TYPE,
@@ -1485,6 +1552,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
         CLUSTER_BATCH_JOB_TYPE: enqueue_cluster_batch_job,
         CLUSTER_REBUILD_JOB_TYPE: enqueue_cluster_rebuild_job,
         INTERVIEW_REPROCESS_JOB_TYPE: enqueue_interview_reprocess_job,
+        INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE: enqueue_interview_import_analysis_job,
         BUILD_MASTER_BANK_JOB_TYPE: enqueue_build_job,
         RECOMPUTE_EMBEDDING_JOB_TYPE: enqueue_recompute_embedding_job,
         RECITATION_GENERATION_JOB_TYPE: enqueue_generate_recitation_job,
@@ -1651,6 +1719,7 @@ class WorkerSettings:
         cluster_batch_task,
         cluster_rebuild_task,
         interview_reprocess_task,
+        interview_import_analysis_task,
         refresh_interview_distribution_task,
         process_chat_side_effects_task,
         build_master_bank_task,

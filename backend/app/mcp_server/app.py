@@ -24,6 +24,7 @@ from app.mcp_server.session import (
     new_session_id,
     save_mcp_session_async,
 )
+from app.db.connection import run_db
 
 
 MCP_API_KEY = os.getenv("MCP_API_KEY", "")
@@ -44,6 +45,9 @@ def _load_mcp_usage_skill_instructions() -> str:
         "使用同一个 session_id；search_questions/draw_questions 会更新服务端候选集；"
         "空结果表示当前岗位题库为空，不跨岗位 fallback；"
         "select_question 只能使用服务端返回的 question_source 和 candidate_index。"
+        "面试结束后用 start_interview_import 创建独立导入任务，将结构化 turns 和可选 transcript 分块上传；"
+        "上传失败只重试返回的失败分块，complete_interview_import 后轮询 status；分析失败用 retry_interview_import_analysis，"
+        "成功后用 get_interview_record/get_interview_report 读取。导入任务不依赖 session，且不接受客户端 user_id。"
     )
 
 
@@ -176,7 +180,10 @@ mcp = FastMCP(
     instructions=(
         "InterviewBoss MCP exposes deterministic backend actions for an "
         "interview agent: list_job_positions, load_skill, search_questions, "
-        "draw_questions, and select_question. If the target role is unclear, "
+        "draw_questions, and select_question. It also supports post-session "
+        "GPT interview import: start_interview_import, upload chunks, "
+        "complete the import, poll status, retry analysis, and read the "
+        "published native-compatible interview record/report. If the target role is unclear, "
         "call list_job_positions first, then pass its canonical name to "
         "search_questions or draw_questions. The client should persist the returned metadata "
         "session_id and reuse it across one interview. Load a relevant skill "
@@ -256,6 +263,55 @@ def _tool_service_error(tool: str, session_id: str, message: str) -> dict[str, A
             empty_reason="service_unavailable",
         ),
         session_id,
+    )
+
+
+def _import_success(tool: str, data: Any) -> dict[str, Any]:
+    """Return a compact, predictable result for session-independent import tools."""
+    items = data if isinstance(data, list) else ([data] if data is not None else [])
+    return {
+        "ok": True,
+        "tool": tool,
+        "data": data,
+        "items": items,
+        "metadata": {"result_count": len(items)},
+        "error": None,
+    }
+
+
+def _import_error(tool: str, exc: Exception) -> dict[str, Any]:
+    from app.services.interview_import_service import InterviewImportError
+
+    if isinstance(exc, InterviewImportError):
+        code = exc.code
+        message = str(exc)
+        retryable = bool(exc.retryable)
+        failed_chunks = exc.failed_chunks
+    else:
+        logger.exception("MCP interview import tool failed: %s", tool)
+        code = "SERVICE_ERROR"
+        message = "InterviewBoss import service failed; retry the request"
+        retryable = True
+        failed_chunks = []
+    return {
+        "ok": False,
+        "tool": tool,
+        "data": {"retryable": retryable, "failed_chunks": failed_chunks},
+        "items": [],
+        "metadata": {"result_count": 0},
+        "error": {"error_code": code, "message": message},
+    }
+
+
+def _import_principal(tool: str) -> tuple[MCPPrincipal | None, dict[str, Any] | None]:
+    principal = get_mcp_principal()
+    if principal is not None:
+        return principal, None
+    from app.services.interview_import_service import InterviewImportError
+
+    return None, _import_error(
+        tool,
+        InterviewImportError("authenticated MCP account is required", code="AUTH_REQUIRED"),
     )
 
 
@@ -448,6 +504,193 @@ async def select_question(
     except Exception:
         logger.exception("MCP wrapper failed for tool=select_question session_id=%s", sid)
         return _tool_service_error("select_question", sid, "MCP service failed; retry the request")
+
+
+@mcp.tool()
+async def get_candidate_profile(include_resume: bool = False) -> dict:
+    """Read the authenticated candidate profile for a targeted interview."""
+    tool = "get_candidate_profile"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import get_candidate_profile as read_profile
+
+        data = await run_db(
+            lambda: read_profile(principal.user_id, include_resume=include_resume)
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def start_interview_import(
+    client_request_id: str = None,
+    title: str = None,
+    context: dict = None,
+    external_analysis: dict = None,
+) -> dict:
+    """Create or resume a post-session GPT interview import task."""
+    tool = "start_interview_import"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import start_import
+
+        data = await run_db(
+            lambda: start_import(
+                principal.user_id,
+                client_request_id=client_request_id,
+                title=title,
+                context=context or {},
+                external_analysis=external_analysis or {},
+            )
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def upload_interview_import_chunk(
+    import_id: str,
+    stream_type: str,
+    chunk_index: int,
+    total_chunks: int,
+    content: str,
+    content_hash: str = None,
+) -> dict:
+    """Upload one turns/transcript chunk; repeat only failed chunks on errors."""
+    tool = "upload_interview_import_chunk"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import upload_import_chunk
+
+        data = await run_db(
+            lambda: upload_import_chunk(
+                principal.user_id,
+                import_id,
+                stream_type=stream_type,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                content=content,
+                content_hash=content_hash,
+            )
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def complete_interview_import(import_id: str) -> dict:
+    """Seal uploaded chunks and enqueue asynchronous InterviewBoss analysis."""
+    tool = "complete_interview_import"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import complete_import
+
+        data = await run_db(lambda: complete_import(principal.user_id, import_id))
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def get_interview_import_status(import_id: str) -> dict:
+    """Poll one owned import; the task is independent of the MCP session."""
+    tool = "get_interview_import_status"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import get_import_status
+
+        data = await run_db(lambda: get_import_status(principal.user_id, import_id))
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def retry_interview_import_analysis(import_id: str) -> dict:
+    """Retry failed analysis without re-uploading accepted chunks."""
+    tool = "retry_interview_import_analysis"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import retry_import_analysis
+
+        data = await run_db(
+            lambda: retry_import_analysis(principal.user_id, import_id)
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def list_interview_records(limit: int = 20) -> dict:
+    """List completed owned native-compatible interview records."""
+    tool = "list_interview_records"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import list_interview_records as list_records
+
+        data = await run_db(
+            lambda: list_records(principal.user_id, limit=limit)
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def get_interview_record(import_id: str, include_raw: bool = False) -> dict:
+    """Read one owned interview record; raw evidence is opt-in."""
+    tool = "get_interview_record"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import get_interview_record as read_record
+
+        data = await run_db(
+            lambda: read_record(principal.user_id, import_id, include_raw=include_raw)
+        )
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
+
+
+@mcp.tool()
+async def get_interview_report(import_id: str) -> dict:
+    """Read the current official report and preserved external analysis."""
+    tool = "get_interview_report"
+    principal, error = _import_principal(tool)
+    if error:
+        return error
+    try:
+        from app.services.interview_import_service import (
+            InterviewImportError,
+            get_interview_report as read_report,
+        )
+
+        data = await run_db(lambda: read_report(principal.user_id, import_id))
+        if data is None:
+            raise InterviewImportError("official report is not ready", code="REPORT_NOT_READY")
+        return _import_success(tool, data)
+    except Exception as exc:
+        return _import_error(tool, exc)
 
 
 mcp_app = MCPAuthMiddleware(mcp.streamable_http_app())

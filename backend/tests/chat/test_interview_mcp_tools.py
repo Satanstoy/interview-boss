@@ -630,6 +630,15 @@ async def test_interview_mcp_app_call_tool_io_contract():
         "search_questions",
         "draw_questions",
         "select_question",
+        "get_candidate_profile",
+        "start_interview_import",
+        "upload_interview_import_chunk",
+        "complete_interview_import",
+        "get_interview_import_status",
+        "retry_interview_import_analysis",
+        "list_interview_records",
+        "get_interview_record",
+        "get_interview_report",
     ]
 
     no_query = await _call_mcp_json("search_questions", {"keywords": []})

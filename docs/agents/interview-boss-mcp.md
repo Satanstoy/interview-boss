@@ -1,6 +1,6 @@
 # InterviewBoss MCP 外部 Agent 使用说明
 
-这份说明给配置了 InterviewBoss MCP 的外部 agent 使用。它解决两个容易混淆的问题：MCP 能发现哪些工具，以及 agent 如何把这套工具调用规则保存成自己的 skill。
+这份说明给配置了 InterviewBoss MCP 的外部 agent 使用。它解决两个容易混淆的问题：MCP 能发现哪些工具，以及 agent 如何把这套工具调用规则保存成自己的 skill。除了题库工具，MCP 还提供候选人画像读取和面试结束后的批量记录归档。
 
 ## 先说结论：MCP 不等于完整的 Agent Skill
 
@@ -78,6 +78,8 @@ InterviewBoss MCP 在连接初始化时会自动附带 `interview-tool-use` skil
 - 只能选择服务端返回的候选题；
 - 正确处理空结果；
 - 不泄露 Token、账户字段和内部调试信息。
+
+同时，agent 可以调用 `get_candidate_profile` 获取当前岗位和招聘信息；需要简历全文时显式传 `include_resume=true`。
 
 服务端还会在每个 MCP session 自动激活该 skill，因此即使客户端没有本地 skill 文件，服务端 session 仍然能记录它的激活状态。
 
@@ -168,6 +170,18 @@ select_question(
 服务端会重新校验题目的可见性和账户权限。不要把自己构造的题目列表、题目文本或题目 ID 传给 `select_question`。
 
 选题成功后，agent 下一句应直接把 `selected_question` 作为面试问题问出来，不要先解释工具调用过程。
+
+## 面试结束后归档到 InterviewBoss
+
+GPT 完成一场外部模拟面试后，使用以下顺序把完整记录归档到 InterviewBoss：
+
+1. `start_interview_import`：提交标题、岗位、公司、轮次、招聘季、JD 等上下文，以及 GPT 自己的总结/评分（如有）。保存返回的 `import_id`。
+2. `upload_interview_import_chunk`：把结构化回合 JSON 数组按顺序分块上传到 `turns` 流；原始完整记录可作为 `transcript` 流另外上传。回合至少包含 `sequence`、`speaker` 和 `content`，题库题目可附 `question_id`。
+3. 上传失败时只重试返回的失败分块，不要创建新导入任务；相同 hash 的重复分块是幂等的。
+4. `complete_interview_import`：提交后立即继续和用户交流，不等待分析；使用 `get_interview_import_status` 查询异步状态。
+5. 失败时调用 `retry_interview_import_analysis`，不需要重新上传；成功后用 `get_interview_record` 和 `get_interview_report` 读取原生兼容记录和报告。
+
+导入成功后记录会进入 InterviewBoss 面试空间，但作为封存历史不能继续追加对话。继续练习时新建原生面试。默认读取不返回原始全文，只有明确需要时才使用 `include_raw=true`。导入不会自动写入独立练习历史，也不会把未匹配题目写入公共题库。
 
 ## 4. 返回值怎么判断
 

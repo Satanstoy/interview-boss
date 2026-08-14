@@ -327,6 +327,8 @@ async def send_message(
     )
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
+    if (conv.get("metadata") or {}).get("sealed"):
+        raise HTTPException(status_code=409, detail="IMPORTED_RECORD_SEALED")
 
     client_request_id = req.client_request_id or str(uuid.uuid4())
     turn_content = req.content

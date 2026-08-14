@@ -21,6 +21,15 @@ ToolName = Literal[
     "search_agent_private_questions",
     "draw_agent_private_questions",
     "select_agent_private_question",
+    "start_interview_import",
+    "upload_interview_import_chunk",
+    "complete_interview_import",
+    "get_interview_import_status",
+    "retry_interview_import_analysis",
+    "list_interview_records",
+    "get_interview_record",
+    "get_interview_report",
+    "get_candidate_profile",
 ]
 QuestionSource = Literal["search", "draw", "agent_internal"]
 

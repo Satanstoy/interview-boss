@@ -24,6 +24,7 @@ BUILD_MASTER_BANK_JOB_TYPE = "build_master_bank"
 RECOMPUTE_EMBEDDING_JOB_TYPE = "recompute_embedding"
 RECITATION_GENERATION_JOB_TYPE = "generate_recitation"
 QUALITY_REVIEW_SCAN_JOB_TYPE = "quality_review_scan"
+INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE = "interview_import_analysis"
 DISPATCHABLE_JOB_TYPES = (
     SUBMIT_IMPORT_JOB_TYPE,
     ANSWER_GENERATION_JOB_TYPE,
@@ -34,6 +35,7 @@ DISPATCHABLE_JOB_TYPES = (
     RECOMPUTE_EMBEDDING_JOB_TYPE,
     RECITATION_GENERATION_JOB_TYPE,
     QUALITY_REVIEW_SCAN_JOB_TYPE,
+    INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE,
 )
 
 
@@ -154,6 +156,46 @@ def create_interview_reprocess_job(
         ),
     )
     return job_id, "pending"
+
+
+def create_interview_import_analysis_job(
+    conn,
+    import_id: str,
+    user_id: int,
+    attempt: int,
+    parent_job_id: int | None = None,
+) -> tuple[int, str]:
+    """Create one durable analysis attempt for an external interview import."""
+    idempotency_key = f"interview-import:{import_id}:analysis:{int(attempt)}"
+    conn.execute(
+        "INSERT OR IGNORE INTO jobs "
+        "(job_type, status, progress_total, created_by, idempotency_key, parent_job_id) "
+        "VALUES (?, 'pending', 1, ?, ?, ?)",
+        (
+            INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE,
+            int(user_id),
+            idempotency_key,
+            parent_job_id,
+        ),
+    )
+    row = conn.execute(
+        "SELECT id, status FROM jobs WHERE job_type = ? AND idempotency_key = ?",
+        (INTERVIEW_IMPORT_ANALYSIS_JOB_TYPE, idempotency_key),
+    ).fetchone()
+    if not row:
+        raise RuntimeError(f"面试导入分析任务创建失败: import_id={import_id}")
+    job_id = int(row["id"])
+    conn.execute(
+        "INSERT OR IGNORE INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (
+            job_id,
+            json.dumps(
+                {"import_id": import_id, "user_id": int(user_id)},
+                ensure_ascii=False,
+            ),
+        ),
+    )
+    return job_id, str(row["status"])
 DISPATCH_LEASE_SECONDS = 300
 WORKER_LEASE_SECONDS = 1800
 MAX_JOB_ATTEMPTS = 3

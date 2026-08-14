@@ -9,7 +9,7 @@ metadata:
 
 # InterviewBoss MCP Agent Skill
 
-Use this skill whenever the user asks to practise an interview, generate interview questions, search the InterviewBoss question bank, or run a role-specific mock interview.
+Use this skill whenever the user asks to practise an interview, generate interview questions, search the InterviewBoss question bank, run a role-specific mock interview, or archive a completed external GPT interview into InterviewBoss.
 
 ## Core distinction
 
@@ -28,13 +28,14 @@ Create one stable opaque `session_id` for each interview. Pass the same value to
 
 ## Recommended workflow
 
-1. Infer the target role from the user's request. Keep the exact role in `job_position`, such as `后端开发` or `Java 工程师`.
-2. Load only the specialized server skills needed for the current interview. Do not reload a skill already active in this session.
-3. Use `search_questions` when the user gives a topic or specific technology. Extract 2–5 concrete keywords.
-4. Use `draw_questions` when the user requests a random question, a fresh question, or a filtered question by difficulty/type.
-5. Read the returned `items`. If there are multiple candidates, choose by relevance to the current interview signal, then call `select_question` with its zero-based `candidate_index`.
-6. After `select_question` returns `selected_question`, ask that question directly in a natural interviewer voice. Do not add process commentary first.
-7. Continue the conversation without another tool call when the candidate is still answering the current question. Retrieve or draw the next question only when a new question is needed.
+1. When the interview should be resume- or role-targeted, call `get_candidate_profile` first. Request `include_resume=true` only when the full resume is needed.
+2. Infer the target role from the user's request. Keep the exact role in `job_position`, such as `后端开发` or `Java 工程师`.
+3. Load only the specialized server skills needed for the current interview. Do not reload a skill already active in this session.
+4. Use `search_questions` when the user gives a topic or specific technology. Extract 2–5 concrete keywords.
+5. Use `draw_questions` when the user requests a random question, a fresh question, or a filtered question by difficulty/type.
+6. Read the returned `items`. If there are multiple candidates, choose by relevance to the current interview signal, then call `select_question` with its zero-based `candidate_index`.
+7. After `select_question` returns `selected_question`, ask that question directly in a natural interviewer voice. Do not add process commentary first.
+8. Continue the conversation without another tool call when the candidate is still answering the current question. Retrieve or draw the next question only when a new question is needed.
 
 ## Server skills
 
@@ -48,6 +49,18 @@ Use `load_skill` with one of these names when its specialized behavior is needed
 - `hr-soft-skills`: use for behavioral, career, collaboration, closing, and candidate-question phases.
 
 The `interview-tool-use` policy is loaded automatically by the MCP server. Do not spend a tool call loading it again; load only the domain skill needed for the current interview.
+
+## Archive a completed external GPT interview
+
+After an external GPT interview ends, archive the complete transcript in one batch. Do not try to observe or mirror the live chat in real time.
+
+1. Call `start_interview_import` once with the interview context and any external summary or scores. Reuse its `import_id` for retries.
+2. Upload the structured turn JSON as ordered `turns` chunks. Each turn should contain `sequence`, `speaker` (`interviewer`, `candidate`, or `system`), and `content`; attach `question_id` when the question came from InterviewBoss. Upload the original transcript separately as `transcript` chunks when available.
+3. If a chunk fails, retry only the failed chunk indicated in the machine-readable response. Duplicate chunks with the same hash are idempotent.
+4. Call `complete_interview_import`, then poll `get_interview_import_status`. Do not block the user-facing conversation waiting for analysis.
+5. On analysis failure, call `retry_interview_import_analysis`; accepted chunks do not need to be uploaded again. On success, use `get_interview_record` and `get_interview_report` to read the native-compatible record and official report.
+
+The imported record is sealed history. Continue practice in a new native InterviewBoss session. Do not write imported answers into independent practice history, and do not expose raw transcript content unless the user explicitly requests it.
 
 ## Tool policy
 
