@@ -9,7 +9,7 @@
 |------|------|
 | `batch.py` | 增量聚类、完整流水线（主入口），共享写库辅助函数；写入后自动失效 FAISS 缓存 + 记录 pipeline_metrics |
 | `batch_v2.py` | v2 版本（死代码已清理，仅保留源码级回归测试参考） |
-| `compact.py` | 孤岛碎片整理（frequency=1 题目合并），共享 `batch.py` 辅助函数 |
+| `compact.py` | 孤岛碎片整理（frequency=1 题目合并），共享 `batch.py` 辅助函数；`_do_merge_to_existing` 合并后统一走 `sync_question_bank_projections`（事务内重建规范化表 + 失败回滚，audit D9 双写一致性），禁止用手工 `delete_all_for_qb`+`insert_source` 重建 |
 | `queue.py` | 队列操作：enqueue（支持 owner_id）/ dequeue（按 owner_id 分桶）/ mark_done / mark_failed / trigger 判断 |
 | `sanitize.py` | 数据清洗：剔除纯数字、非面试话术等脏数据（`BATCH_SIZE` 由 `core/config.CLUSTER_BATCH_SIZE` 控制） |
 | `writer.py` | 数据库写入：将聚类结果写入 question_bank；面经打标必须传已知 `interview_id`，以替换同一场面试的 typed details；公共原始题写入必须先通过全局 ownership claim |

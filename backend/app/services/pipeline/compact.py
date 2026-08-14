@@ -10,11 +10,8 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
-from app.db.question_bank_sources import (
-    delete_all_for_qb,
-    insert_source,
-    insert_original_item,
-)
+from app.db.question_bank_sources import delete_all_for_qb
+from app.services.question_bank_integrity import sync_question_bank_projections
 from app.core.config import (
     CLUSTER_BATCH_SIZE,
     CLUSTER_COMPACTION_CONCURRENCY,
@@ -281,31 +278,14 @@ def _do_merge_to_existing(
         ),
     )
 
-    try:
-        delete_all_for_qb(conn, survivor_id)
-    except Exception as e:
-        logger.warning(f"[合并] delete_all_for_qb 失败 (id={survivor_id}): {e}")
-    for src in s_src:
-        try:
-            insert_source(
-                conn,
-                survivor_id,
-                src.get("url", ""),
-                src.get("company", ""),
-                src.get("round", ""),
-            )
-        except Exception as e:
-            logger.warning(f"[合并] insert_source 失败 (id={survivor_id}): {e}")
-    for oqs_entry in s_oqs_src:
-        try:
-            insert_original_item(
-                conn,
-                survivor_id,
-                oqs_entry.get("question", ""),
-                oqs_entry.get("sources", []),
-            )
-        except Exception as e:
-            logger.warning(f"[合并] insert_original_item 失败 (id={survivor_id}): {e}")
+    # 统一走事务内 sync + fail-closed 校验：规范化表必须严格镜像 JSON 双写列
+    # （sources / original_questions / original_question_sources）。
+    # 旧实现用 delete_all_for_qb（软删）+ insert_source（INSERT OR IGNORE）在
+    # UNIQUE(question_bank_id, url) 下无法恢复已软删同 URL 行，导致 JSON 持有该 URL
+    # 而 question_sources 表中其为软删 —— 正是审计 D9 实测漂移（JSON 含 xsec_token
+    # 笔记 URL 未落表）。改为 sync_question_bank_projections 后，任一不匹配抛错，
+    # 由外层 compaction 事务整体回滚，杜绝静默漂移。
+    sync_question_bank_projections(conn.cursor(), survivor_id, s_src, s_oqs, s_oqs_src)
 
     # 合并后快照 & 记录历史
     post_snapshot = _snapshot_question(conn, survivor_id)

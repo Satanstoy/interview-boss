@@ -211,3 +211,92 @@ async def test_manual_merge_does_not_append_normalized_duplicate(
         "SELECT COUNT(*) FROM question_original_items WHERE question_bank_id = 21 "
         "AND deleted_at IS NULL"
     ).fetchone()[0] == 1
+
+
+def test_compact_merge_keeps_json_and_normalized_sources_aligned(test_db):
+    """审计 D9：compaction 合并后 question_bank JSON 双写列必须与规范化表一致。
+
+    复现审计实测漂移（sources 含 xsec_token 笔记 URL 未落 question_sources 表）：
+
+    - survivor 已有活跃的 question_sources 行（URL `u1`）。
+    - 被合并单例的 JSON sources 复用 `u1` 并新增一个 xsec_token 笔记 URL `u2`。
+    - 旧实现用 `delete_all_for_qb`（软删）+`insert_source`（INSERT OR IGNORE）重建规范化表：
+      `u1` 行软删后因 `UNIQUE(question_bank_id, url)` 无法重新插入，导致 JSON 持有 `u1`
+      而 question_sources 表中 `u1` 已软删 —— JSON/表不一致且静默通过（不报错）。
+    - 修复后 compaction 合并统一走 sync_question_bank_projections（事务内重建 + 失败回滚），
+      `u1` 被恢复（deleted_at=NULL）、`u2` 落表，JSON 与表严格一致。
+    """
+    from app.services.pipeline.compact import _do_merge_to_existing
+
+    # survivor：JSON sources 与 question_sources 表初始一致（含活跃 u1 行）
+    _insert_question(
+        test_db,
+        1,
+        "什么是 RAG",
+        sources=[{"url": "u1", "company": "A"}],
+        original_questions=["什么是 RAG"],
+        original_question_sources=[
+            {"question": "什么是 RAG", "sources": [{"url": "u1", "company": "A"}]}
+        ],
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url, company, round) VALUES (1, 'u1', 'A', '')"
+    )
+    # 被合并单例 sources 复用 u1 并新增 xsec_token 笔记 URL u2
+    _insert_question(
+        test_db,
+        2,
+        "RAG 是什么",
+        status="approved",
+        sources=[{"url": "u1", "company": "A"}, {"url": "u2", "company": "B"}],
+        original_questions=["RAG 是什么"],
+        original_question_sources=[
+            {"question": "RAG 是什么", "sources": [{"url": "u1"}, {"url": "u2"}]}
+        ],
+    )
+    test_db.commit()
+
+    _do_merge_to_existing(
+        1,
+        {
+            "id": 2,
+            "question": "RAG 是什么",
+            "cat2": "B",
+            "sources": json.dumps(
+                [{"url": "u1", "company": "A"}, {"url": "u2", "company": "B"}],
+                ensure_ascii=False,
+            ),
+            "original_questions": json.dumps(["RAG 是什么"], ensure_ascii=False),
+            "original_question_sources": json.dumps(
+                [
+                    {
+                        "question": "RAG 是什么",
+                        "sources": [{"url": "u1"}, {"url": "u2"}],
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+        },
+        operation_type="compaction",
+        phase="test",
+        cat2="B",
+        confidence=0.9,
+    )
+    test_db.commit()
+
+    # JSON sources 集合 = 活跃 question_sources 集合（u1 恢复 + u2 落表）
+    row = test_db.execute(
+        "SELECT sources FROM question_bank WHERE id = 1"
+    ).fetchone()
+    json_urls = {s["url"] for s in json.loads(row["sources"])}
+    table_urls = {
+        r[0]
+        for r in test_db.execute(
+            "SELECT url FROM question_sources WHERE question_bank_id = 1 AND deleted_at IS NULL"
+        ).fetchall()
+    }
+    assert json_urls == {"u1", "u2"}
+    assert table_urls == {"u1", "u2"}, (
+        f"compaction 合并后 JSON/表漂移: json={sorted(json_urls)} table={sorted(table_urls)}"
+    )
+

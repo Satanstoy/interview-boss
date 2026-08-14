@@ -176,8 +176,7 @@ class TestCompactConfidenceFallback:
              patch('app.services.pipeline.compact._snapshot_question') as mock_snapshot, \
              patch('app.services.pipeline.compact._record_merge_history') as mock_record, \
              patch('app.services.pipeline.compact.delete_all_for_qb'), \
-             patch('app.services.pipeline.compact.insert_source'), \
-             patch('app.services.pipeline.compact.insert_original_item'), \
+             patch('app.services.pipeline.compact.sync_question_bank_projections'), \
              patch('app.services.pipeline.compact._compute_merge_confidence', return_value=0.87):
 
             mock_conn.return_value = MagicMock()
