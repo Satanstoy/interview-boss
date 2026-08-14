@@ -36,6 +36,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测 Artifact（Evaluation Artifact）**:
 评测执行产生的不可变原始证据或派生报告，包括完整对话轨迹、SSE/工具轨迹、Judge 输入输出和聚合报告；数据库保存 Artifact 的索引、路径、类型、大小和 digest，Artifact 原文存储在受控文件或对象存储中。
 
+**Artifact 保留策略（Artifact Retention Policy）**:
+按 Artifact 来源和用途决定保留期限的不可变策略；官方 Benchmark、有效评测证据和人工 A/B 证据长期保留，临时失败日志和未晋升的生产采样按 TTL 清理，清理不得破坏历史 Eval Run 的核心证据链。
+
 **对比组（Comparison Group）**:
 用于管理员 A/B 对比的关联对象；它将两个或多个拥有独立生命周期的 sibling Eval Run 关联起来，要求它们共享同一 Batch 执行上下文，并明确记录各自唯一不同的 target release。
 
