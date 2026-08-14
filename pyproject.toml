@@ -81,12 +81,12 @@ select = [
 ignore = [
   "E402",
 ]
-per-file-ignores = {
-  "backend/app/services/chat_service.py" = ["F401"],
-  "backend/app/worker.py" = ["F401"],
-  "backend/app/agents/chat/nodes.py" = ["F401"],
-  "backend/app/services/llm.py" = ["F401"],
-}
+[tool.ruff.per-file-ignores]
+# 多行 inline table 非法 TOML（inline table 不能跨行）；改用标准 table 段。
+"backend/app/services/chat_service.py" = ["F401"]
+"backend/app/worker.py" = ["F401"]
+"backend/app/agents/chat/nodes.py" = ["F401"]
+"backend/app/services/llm.py" = ["F401"]
 
 [tool.mypy]
 # 阶段 A: 同样以 audit WARN 接入,只采集不拦截。

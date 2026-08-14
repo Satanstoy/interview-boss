@@ -289,6 +289,40 @@ class Test084NormalizeTimestampsJobs:
         assert epoch_row is not None
         assert epoch_row["updated_at"].startswith("2025-") and " " in epoch_row["updated_at"]
 
+    def test_mcp_sessions_empty_and_null_updated_at_get_timestamp(self, full_db):
+        """回归：旧结构 updated_at INTEGER NOT NULL 里出现空字符串 / NULL 值。
+
+        空串既是合法 SQLite 值又满足 NOT NULL（数据库约束不拦），但若迁移把它当成
+        合法时间原样保留，会留下语义无效的 ''。迁移须把 NULL/空串/纯空白统一回填为
+        当前时间（datetime('now')），而不是保留空串。
+        """
+        full_db.execute(
+            "CREATE TABLE IF NOT EXISTS mcp_sessions ("
+            "session_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER)"
+        )
+        # 历史遗留三类坏值：空串、纯空白、NULL（updated_at 声明 INTEGER 而非 NOT NULL，
+        # 以便能插入 NULL——迁移 guard 只看声明类型 == INTEGER，仍会触发重建）
+        full_db.execute("INSERT INTO mcp_sessions (session_id, data_json, updated_at) VALUES ('s_empty', '{}', '')")
+        full_db.execute("INSERT INTO mcp_sessions (session_id, data_json, updated_at) VALUES ('s_blank', '{}', '   ')")
+        full_db.execute("INSERT INTO mcp_sessions (session_id, data_json, updated_at) VALUES ('s_null', '{}', NULL)")
+        _apply(full_db, 84)
+
+        # 迁移成功 + updated_at 为 TEXT
+        typ = [r[2] for r in full_db.execute("PRAGMA table_info('mcp_sessions')") if r[1] == "updated_at"][0]
+        assert typ.upper() == "TEXT"
+
+        # 每个坏值都被回填成真实 ISO 时间戳（非空、非纯空白、可被 SQLite 解析为时间）
+        for sid in ("s_empty", "s_blank", "s_null"):
+            row = full_db.execute(
+                "SELECT updated_at FROM mcp_sessions WHERE session_id=?", (sid,)
+            ).fetchone()
+            assert row is not None
+            v = row["updated_at"]
+            assert isinstance(v, str) and v.strip() != ""
+            assert " " in v  # 'YYYY-MM-DD HH:MM:SS'
+            parsed = full_db.execute("SELECT datetime(?) IS NOT NULL", (v,)).fetchone()[0]
+            assert parsed == 1, f"{sid} updated_at 不是合法 ISO 时间: {v!r}"
+
     def test_refresh_tokens_created_at_normalized_to_iso(self, full_db):
         uid = _seed_user(full_db)
         full_db.execute("INSERT INTO refresh_tokens (user_id, jti, expires_at) VALUES (?, 'j1', '2026-12-31T00:00:00+00:00')", (uid,))

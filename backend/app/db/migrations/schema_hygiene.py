@@ -328,9 +328,15 @@ def _migration_084_normalize_timestamps_jobs(conn):
             )
             """,
             ["session_id", "data_json", "updated_at"],
-            # NULL-safe: 整数 epoch -> ISO; 已是 ISO/TEXT 的行兜底保留原值; NULL/空 -> 当前时间。
-            # datetime(<非整数>, 'unixepoch') 会返回 NULL,若 new 表 updated_at NOT NULL 将整表重建失败。
-            "session_id, data_json, COALESCE(datetime(updated_at, 'unixepoch'), updated_at, datetime('now'))",
+            # 兼容两类历史存储 + 兜底坏值：
+            #   - INTEGER/REAL Unix 秒 -> datetime(epoch,'unixepoch') 转 ISO 文本；
+            #   - 已是 ISO 文本的 datetime 字符串 -> 原样保留（datetime(msg,'unixepoch') 对非整数会返回 NULL）；
+            #   - NULL / 空串 / 纯空白 -> datetime('now') 回填当前时间，避免新表 NOT NULL 重建失败或留下语义无效的 ''。
+            "session_id, data_json, "
+            "CASE "
+            "WHEN updated_at IS NULL OR trim(updated_at) = '' THEN datetime('now') "
+            "WHEN typeof(updated_at) IN ('integer', 'real') THEN datetime(updated_at, 'unixepoch') "
+            "ELSE updated_at END",
         )
         logger.info("迁移 084 重建 mcp_sessions（updated_at INTEGER→TEXT）")
 
