@@ -1,5 +1,5 @@
 <template>
-  <Tooltip v-if="supportsHover" :delay-duration="delayDuration">
+  <Tooltip v-if="supportsHover" v-model:open="isOpen" :delay-duration="delayDuration">
     <TooltipTrigger as-child>
       <slot />
     </TooltipTrigger>
@@ -11,7 +11,8 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 defineProps({
@@ -23,11 +24,17 @@ defineProps({
 })
 
 const supportsHover = ref(true)
+const isOpen = ref(false)
+const route = useRoute()
 let hoverQuery
 
 const syncHoverCapability = () => {
   supportsHover.value = hoverQuery?.matches ?? true
 }
+
+watch(() => route.fullPath, () => {
+  isOpen.value = false
+})
 
 onMounted(() => {
   hoverQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
