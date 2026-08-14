@@ -27,6 +27,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **评测队列（Eval Queue）**:
 专门承载评测父任务、Case/Replication 子任务、Judge 和聚合任务的异步队列及 Worker Pool，与用户服务队列隔离资源、并发、限流和故障域；评测队列中的任务仍以数据库记录为事实来源。
 
+**按需评测 Worker（On-demand Eval Worker）**:
+消费 Eval Queue 的短生命周期 Worker；在存在待处理 Eval Run 时按需启动，以低并发执行并在队列清空后退出，不为偶发评测长期占用小服务器资源。队列、数据库任务状态和事件日志在 Worker 退出后继续保留。
+
 **评测控制台（Evaluation Control Plane）**:
 面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
