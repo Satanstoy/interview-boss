@@ -225,7 +225,7 @@ services:
       # OAuth 密钥只从 backend/.env 注入；缺失时网关启动失败。
       - INTERVIEW_BOSS_DB=/app/data/interview-boss.db
       - INTERVIEW_BOSS_URL=http://backend:8000
-      - GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://interviewboss.online}
+      - GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://www.interviewboss.online}
     volumes:
       - ./backend/data:/app/data:ro
       - oauth-gateway-data:/app/oauth-data

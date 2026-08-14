@@ -21,7 +21,7 @@ from app.services.mcp_token_service import (
 
 router = APIRouter()
 
-_PUBLIC_MCP_ENDPOINT = "https://interviewboss.online/mcp"
+_PUBLIC_MCP_ENDPOINT = "https://www.interviewboss.online/mcp"
 
 
 def _is_ip_host(host: str) -> bool:

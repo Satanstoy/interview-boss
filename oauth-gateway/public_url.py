@@ -7,7 +7,7 @@ import socket
 from urllib.parse import urlsplit
 
 
-PUBLIC_BASE_URL = "https://interviewboss.online"
+PUBLIC_BASE_URL = "https://www.interviewboss.online"
 
 
 def is_ip_host(host: str) -> bool:

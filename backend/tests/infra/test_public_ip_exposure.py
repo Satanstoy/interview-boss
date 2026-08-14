@@ -31,6 +31,19 @@ def test_gateway_defaults_to_public_domain():
     assert "return request_base_url(request, _base_url())" in source
 
 
+def test_gateway_and_mcp_defaults_share_www_canonical_origin(monkeypatch):
+    from app.routers.profile_pkg import mcp
+
+    monkeypatch.delenv("GATEWAY_BASE_URL", raising=False)
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+
+    gateway_source = (REPO_ROOT / "oauth-gateway/public_url.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'PUBLIC_BASE_URL = "https://www.interviewboss.online"' in gateway_source
+    assert mcp._PUBLIC_MCP_ENDPOINT == "https://www.interviewboss.online/mcp"
+
+
 def test_gateway_public_url_helper_never_echoes_ip_hosts():
     import sys
 
@@ -52,7 +65,7 @@ def test_gateway_public_url_helper_never_echoes_ip_hosts():
             request = type("Request", (), {
                 "headers": {"host": host},
             })()
-            assert request_base_url(request, f"https://{PUBLIC_IP}") == "https://interviewboss.online"
+            assert request_base_url(request, f"https://{PUBLIC_IP}") == "https://www.interviewboss.online"
         forwarded = type("Request", (), {
             "headers": {"x-forwarded-host": f"{PUBLIC_IP}:443"},
         })()
@@ -61,7 +74,7 @@ def test_gateway_public_url_helper_never_echoes_ip_hosts():
             "headers": {"host": "attacker.example"},
         })()
         assert request_base_url(attacker, "https://interviewboss.online") == "https://interviewboss.online"
-        assert sanitize_base_url(f"https://{PUBLIC_IP}") == "https://interviewboss.online"
+        assert sanitize_base_url(f"https://{PUBLIC_IP}") == "https://www.interviewboss.online"
     finally:
         sys.path.pop(0)
 
@@ -75,7 +88,7 @@ def test_mcp_endpoint_defaults_to_public_domain_when_request_has_no_host(monkeyp
         "url": type("URL", (), {"scheme": "https", "netloc": ""})(),
     })()
 
-    assert mcp._mcp_endpoint(request) == "https://interviewboss.online/mcp"
+    assert mcp._mcp_endpoint(request) == "https://www.interviewboss.online/mcp"
 
 
 def test_mcp_endpoint_does_not_reflect_arbitrary_host(monkeypatch):
@@ -87,7 +100,7 @@ def test_mcp_endpoint_does_not_reflect_arbitrary_host(monkeypatch):
         "url": type("URL", (), {"scheme": "https", "netloc": "attacker.example"})(),
     })()
 
-    assert mcp._mcp_endpoint(request) == "https://interviewboss.online/mcp"
+    assert mcp._mcp_endpoint(request) == "https://www.interviewboss.online/mcp"
 
 
 def test_mcp_endpoint_does_not_echo_ip_from_private_config_or_request(monkeypatch):
@@ -100,4 +113,4 @@ def test_mcp_endpoint_does_not_echo_ip_from_private_config_or_request(monkeypatc
         "url": type("URL", (), {"scheme": "https", "netloc": private_ip})(),
     })()
 
-    assert mcp._mcp_endpoint(request) == "https://interviewboss.online/mcp"
+    assert mcp._mcp_endpoint(request) == "https://www.interviewboss.online/mcp"

@@ -346,7 +346,7 @@ docker compose --profile test run --rm test uv run pytest backend/tests/bank/ -q
 {
   "mcpServers": {
     "interview-boss": {
-      "url": "https://interviewboss.online/mcp",
+      "url": "https://www.interviewboss.online/mcp",
       "headers": { "Authorization": "Bearer ib_mcp_..." }
     }
   }

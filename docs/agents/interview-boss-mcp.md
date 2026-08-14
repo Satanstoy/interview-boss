@@ -21,13 +21,13 @@ MCP 和 skill 是两层东西：
 
 ## 1. 配置 MCP
 
-在 agent 客户端导入设置页生成的 JSON（生产环境地址为 `https://interviewboss.online/mcp`）：
+在 agent 客户端导入设置页生成的 JSON（生产环境地址为 `https://www.interviewboss.online/mcp`）：
 
 ```json
 {
   "mcpServers": {
     "interview-boss": {
-      "url": "https://interviewboss.online/mcp",
+      "url": "https://www.interviewboss.online/mcp",
       "headers": {
         "Authorization": "Bearer ib_mcp_..."
       }
@@ -50,7 +50,7 @@ MCP 和 skill 是两层东西：
       "args": [
         "-y",
         "mcp-remote",
-        "https://interviewboss.online/mcp",
+        "https://www.interviewboss.online/mcp",
         "--transport",
         "http-only",
         "--header",
@@ -207,11 +207,11 @@ MCP Token 已绑定账户。即使工具 schema 中出现 `user_id` 或 `bank_mo
 
 ## 6. HTTPS 访问说明
 
-生产环境已通过 `https://interviewboss.online/mcp` 提供 HTTPS 访问（Let's Encrypt 证书，由 certbot 自动续期）。对外暴露的 endpoint 由 Nginx 转发链路决定：
+生产环境已通过 `https://www.interviewboss.online/mcp` 提供 HTTPS 访问（Let's Encrypt 证书，由 certbot 自动续期）。对外暴露的 endpoint 由 Nginx 转发链路决定：
 
-1. 设置页展示的 endpoint 由 `X-Forwarded-Proto`/`X-Forwarded-Host` 自动推导为 `https://interviewboss.online/mcp`，无需手动配置 `MCP_PUBLIC_URL`；
+1. 设置页展示的 endpoint 默认使用 canonical 地址 `https://www.interviewboss.online/mcp`，无需手动配置 `MCP_PUBLIC_URL`；
 2. 只有站点位于反向代理、端口映射或安全隧道后且推导地址不正确时，才需要在 `backend/.env` 设置 `MCP_PUBLIC_URL`；
-3. 在 agent 配置里使用 `https://interviewboss.online/mcp`；
+3. 在 agent 配置里使用 `https://www.interviewboss.online/mcp`；
 4. 原 MCP Token 可以继续使用。
 
 详细服务端实现见 [README 的 MCP 章节](../../README.md#外部-mcp-接入)。
