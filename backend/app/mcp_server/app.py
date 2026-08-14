@@ -124,7 +124,6 @@ class MCPAuthMiddleware:
 
         request = Request(scope, receive)
         header_key = request.headers.get("x-mcp-api-key", "")
-        query_key = request.query_params.get("mcp_api_key", "")
         authorization = request.headers.get("authorization", "")
         principal = None
         if authorization:
@@ -136,8 +135,7 @@ class MCPAuthMiddleware:
                 # Older installations can continue using X-MCP-API-Key plus
                 # the normal short-lived access JWT.
                 legacy_key_valid = bool(
-                    MCP_API_KEY
-                    and (header_key == MCP_API_KEY or query_key == MCP_API_KEY)
+                    MCP_API_KEY and header_key == MCP_API_KEY
                 )
                 if not legacy_key_valid:
                     logger.warning("MCP bearer authentication failed")
@@ -155,7 +153,7 @@ class MCPAuthMiddleware:
                         scope, receive, send, 401, "Unauthorized MCP request"
                     )
                     return
-        elif MCP_API_KEY and (header_key == MCP_API_KEY or query_key == MCP_API_KEY):
+        elif MCP_API_KEY and header_key == MCP_API_KEY:
             await _send_mcp_error(
                 scope, receive, send, 401, "Bearer token required"
             )

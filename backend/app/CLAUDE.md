@@ -21,7 +21,7 @@ FastAPI 应用初始化、中间件、路由注册。
 
 `SecurityHeadersMiddleware` 和 `CSRFMiddleware` 是纯 ASGI 中间件，避免 `BaseHTTPMiddleware` 缓冲 SSE。`GlobalRateLimitMiddleware` 调用 `limiter._check_request_limit(in_middleware=True)` 强制执行全局默认限速（默认 200/min，进程内内存计数），并在客户端 IP 非合法 IP（测试 TestClient/直连 dev）时跳过计数。`log_requests` 通过 `app.middleware("http")` 注册；不要把会缓冲响应体的中间件放到 SSE 路径外层。
 
-`/mcp` 路径已在 `CSRFMiddleware` 中豁免，避免外部 MCP client 因缺少自定义头被拦截。`mcp_app` 外层包有 fail-closed 的 `MCPAuthMiddleware`：生产环境默认要求用户在设置页生成的账户级 MCP Bearer Token；旧部署可继续配置 `MCP_API_KEY` 并携带正确的 `X-MCP-API-Key` 头或 `mcp_api_key` 查询参数，再使用 Bearer access token。开发/测试只有显式设置 `MCP_ALLOW_ANONYMOUS=true` 才允许匿名请求。MCP principal 决定工具使用的 user_id/bank_mode，不能由工具参数覆盖。
+`/mcp` 路径已在 `CSRFMiddleware` 中豁免，避免外部 MCP client 因缺少自定义头被拦截。`mcp_app` 外层包有 fail-closed 的 `MCPAuthMiddleware`：生产环境默认要求用户在设置页生成的账户级 MCP Bearer Token；旧部署可继续配置 `MCP_API_KEY` 并携带正确的 `X-MCP-API-Key` 头（MCP API key 仅接受 header，不支持 URL query，避免泄露进访问日志/浏览器历史/Referer），再使用 Bearer access token。开发/测试只有显式设置 `MCP_ALLOW_ANONYMOUS=true` 才允许匿名请求。MCP principal 决定工具使用的 user_id/bank_mode，不能由工具参数覆盖。
 
 ## 修改后必做
 

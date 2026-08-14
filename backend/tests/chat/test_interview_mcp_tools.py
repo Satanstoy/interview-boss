@@ -594,6 +594,48 @@ async def test_mcp_auth_middleware_binds_bearer_principal(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mcp_auth_rejects_api_key_in_query_param(monkeypatch):
+    """MCP API key must not be readable from URL query (leaks via logs/history)."""
+    from app.mcp_server import app as mcp_app_module
+    from app.mcp_server.principal import MCPPrincipal
+
+    monkeypatch.setattr(mcp_app_module, "MCP_API_KEY", "test-key")
+    monkeypatch.setattr(mcp_app_module, "MCP_ALLOW_ANONYMOUS", False)
+
+    # Force the legacy account-token path to fail so the legacy global-key
+    # fallback is what decides whether the request is authorized.
+    async def _fail_account(request):
+        raise ValueError("account token invalid")
+
+    monkeypatch.setattr(mcp_app_module, "_load_account_mcp_principal", _fail_account)
+    monkeypatch.setattr(
+        mcp_app_module,
+        "_load_mcp_principal",
+        lambda request: MCPPrincipal(user_id=8, bank_mode="mixed"),
+    )
+    sent = []
+
+    async def downstream(scope, receive, send):
+        sent.append(("downstream", scope))
+
+    middleware = mcp_app_module.MCPAuthMiddleware(downstream)
+    scope = {
+        "type": "http",
+        "query_string": b"mcp_api_key=test-key",
+        "headers": [(b"authorization", b"Bearer access-token")],
+    }
+
+    async def send(message):
+        sent.append(message)
+
+    await middleware(scope, None, send)
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 401
+    assert not any(item[0] == "downstream" for item in sent if isinstance(item, tuple))
+
+
+@pytest.mark.asyncio
 async def test_load_mcp_principal_reads_user_policy_from_verified_token(monkeypatch):
     from starlette.requests import Request
     from app.mcp_server import app as mcp_app_module
