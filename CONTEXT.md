@@ -33,6 +33,9 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 **评测 Item Attempt**:
 同一个 Eval Run Item 的一次实际执行尝试，用于记录 Worker 崩溃、网络错误、超时等操作性重试；Attempt 不增加统计样本数，原始失败 Attempt 不被覆盖，Item 最终引用一个有效 Attempt。
 
+**评测数据模型 1.0**:
+评测领域使用独立的 `eval_runs`、`eval_batches`、`eval_items`、`eval_attempts`、`eval_events` 和 `eval_artifacts` 数据对象；通用 `jobs` 只承载 ARQ 投递和 Worker 生命周期，不替代评测领域状态。
+
 **评测失败分类（Eval Failure Class）**:
 用于决定 Attempt 是否可重试以及重试哪一层的标准化失败类型；临时基础设施失败、目标行为失败、Harness 契约失败和 Judge 阶段失败必须分开处理，不能统一按“再跑一次”处理。
 
@@ -134,6 +137,9 @@ Candidate Simulator 只接收候选人在真实面试中可见的白名单上下
 
 **评测稳定性指标（Evaluation Stability Metrics）**:
 描述重复评测组整体水平和波动性的统计结果，包括典型质量、离散程度、失败率和关键门禁状态，不只使用单次分数或均值。
+
+**评测协议 1.0（Eval Protocol 1.0）**:
+默认每个 Benchmark Case 执行 5 次 Replication；当结果接近 Suite 门槛或波动超过协议阈值时，通过独立扩展 Batch 增加到 10 次。协议同时定义超时、重试预算、聚合方式、质量权重和通过门槛。
 
 **生产采样集（Production Sample Set）**:
 从真实使用中脱敏采样形成、用于发现分布变化和新问题的评测集合；它不直接作为固定版本回归的唯一依据。
