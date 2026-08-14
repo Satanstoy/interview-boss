@@ -114,6 +114,9 @@ Candidate Simulator 只接收候选人在真实面试中可见的白名单上下
 **质量量规（Quality Rubric）**:
 用于评价正确性、完整性、深度、自然度或证据质量等开放式表现的维度化标准。
 
+**评测评分流水线（Evaluation Scoring Pipeline）**:
+按 Harness 合约校验、Hard Assertions、LLM Judge、结果聚合的顺序处理有效 Observation；Harness 无效时终止该 Item，Agent 行为触发硬断言失败时仍可继续 Judge 以保留质量诊断。
+
 **评测裁判版本（Judge Release）**:
 用于执行评测判断的一组不可变裁判配置快照；它决定评测结果如何产生，历史结果必须保留其对应的裁判版本。
 
