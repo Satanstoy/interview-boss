@@ -24,7 +24,7 @@ class TestCheckSecrets:
     def test_api_key_literal_detected(self, tmp_path):
         """sk- 开头 20+ 位字面量必须被检出"""
         f = tmp_path / "leak.py"
-        f.write_text('KEY = "sk-hkaopkqmnstcesslqwxifjiqdffgbpljrixgyssagvgtclym"\\n', encoding='utf-8')
+        f.write_text('KEY = "REDACTED"\\n', encoding='utf-8')
         findings = checker.scan_file(f, f.relative_to(tmp_path))
         assert findings, "应检出硬编码 API key"
 

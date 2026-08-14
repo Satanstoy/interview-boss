@@ -244,6 +244,7 @@ async function mockAllAPIs(page, options = {}) {
   const reviewedQuestionIds = new Set(initialReviewedQuestionIds)
   const attemptedQuestionIds = new Set(initialReviewedQuestionIds)
   let reviewAttemptsToday = initialReviewedQuestionIds.length
+  let questionRequestCount = 0
   const latestRatings = new Map(initialReviewedQuestionIds.map(questionId => [questionId, 'good']))
   let currentRecruitment = { ...recruitment }
 
@@ -310,6 +311,8 @@ async function mockAllAPIs(page, options = {}) {
       await route.fulfill({ json: { algorithm: 'sm2_lite', items: deckItems } })
       return
     }
+    questionRequestCount += 1
+    await page.evaluate(count => { window.__practiceQuestionRequestCount = count }, questionRequestCount)
     const deck = deckItems.find(candidate => candidate.key === deckKey)
     const deckName = deck?.name || deckKey
     const availableItems = (deckKey === 'due'
@@ -708,6 +711,25 @@ test.describe('今日复习队列复习出队不跳卡', () => {
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 1 / 3 · 今日已练 1 题 · 剩余 2')
   })
 
+  test('返回刷题页时复用新鲜缓存，不重复请求', async ({ page }) => {
+    const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
+    await gotoPractice(page, { deckQuestions: seeds })
+
+    const card = page.getByTestId('practice-focus-card')
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
+    const initialRequestCount = await page.evaluate(() => window.__practiceQuestionRequestCount || 0)
+    expect(initialRequestCount).toBeGreaterThan(0)
+
+    await page.getByRole('button', { name: /^高频题库/ }).click()
+    await expect(page).toHaveURL(/\/master-bank/)
+
+    await page.getByRole('button', { name: '八股刷题', exact: true }).click()
+    await expect(page.getByTestId('practice-card')).toBeVisible()
+    await expect(card.getByText(seeds[0].question)).toBeVisible()
+
+    await expect.poll(() => page.evaluate(() => window.__practiceQuestionRequestCount || 0)).toBe(initialRequestCount)
+  })
+
   test('不会和模糊只记录尝试，跨页面返回仍留在今日队列', async ({ page }) => {
     const seeds = DUE_QUESTION_SEEDS.slice(0, 3)
     await gotoPractice(page, { deckQuestions: seeds })
@@ -884,6 +906,7 @@ test.describe('今日复习空队列', () => {
 
     await expect(page.getByText('今日复习已经完成')).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('practice-daily-progress')).toContainText('已过关 3 / 3 · 今日已练 3 题 · 剩余 0')
+    await page.getByTestId('practice-plan-toggle').click()
     await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100')
     await expect(page.getByRole('button', { name: '切换到全部题' })).toBeVisible()
   })

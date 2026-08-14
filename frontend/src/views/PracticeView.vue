@@ -64,7 +64,7 @@ const toast = useToast()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
   decks, questions: deckQuestions, selectedDeckKey, selectedDeck, isLoading, isReviewing, serverReady,
-  questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, loadMoreQuestions, submitReview, correctReview, addItem,
+  questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, invalidateQuestions, loadMoreQuestions, submitReview, correctReview, addItem,
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)
 
@@ -132,6 +132,7 @@ async function handleUpdateDailyCapacity(value) {
       daily_capacity: dailyCapacity,
       pace: recruitmentStatus.value.pace,
     })
+    invalidateQuestions('due')
     const queue = await loadQuestions('due')
     if (!queue) {
       toast.warning('每日计划已保存，题目刷新失败，请重新进入刷题页')

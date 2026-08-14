@@ -6,6 +6,7 @@ import { useToast, useConfirm } from './useNotification.js'
 /** Loads named study plans and owns the server-backed review queue. */
 export function usePracticeDecks(filter = 'all') {
   const QUESTION_PAGE_SIZE = 100
+  const DUE_CACHE_TTL_MS = 60 * 1000
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
   const decks = ref([])
@@ -20,6 +21,12 @@ export function usePracticeDecks(filter = 'all') {
   const questionTotal = ref(0)
   const isLoadingMoreQuestions = ref(false)
   const questionCache = new Map()
+  const questionCacheUpdatedAt = new Map()
+  const questionRefreshes = new Map()
+  const questionRefreshModes = new Map()
+  const questionRequestVersions = new Map()
+  let activeLoadingRequest = null
+  let reviewMutationVersion = 0
   let reviewedDueQueueIds = new Set()
   let attemptedDueQueueIds = new Set()
 
@@ -30,6 +37,86 @@ export function usePracticeDecks(filter = 'all') {
   ))
 
   const selectedDeckSummary = computed(() => selectedDeck.value || decks.value.find(deck => deck.key === selectedDeckKey.value) || null)
+  const INVALIDATED_RESPONSE = Symbol('invalidated-practice-response')
+
+  function applyQuestionResponse(response, deckKey) {
+    questions.value = response.items || []
+    questionTotal.value = Number(response.total ?? questions.value.length)
+    selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
+    loadedDeckKey.value = deckKey
+    if (deckKey === 'due') {
+      reviewedDueQueueIds = new Set((response.items || [])
+        .filter(question => isStudyDayToday(question.last_reviewed_at) && ['good', 'easy'].includes(question.last_rating))
+        .map(question => question.id))
+      attemptedDueQueueIds = new Set((response.items || [])
+        .filter(question => isStudyDayToday(question.last_reviewed_at))
+        .map(question => question.id))
+    }
+  }
+
+  async function refreshQuestions(deckKey, cacheKey, { background = false, force = false } = {}) {
+    const existingRefresh = questionRefreshes.get(cacheKey)
+    if (!force && existingRefresh) {
+      const mode = questionRefreshModes.get(cacheKey)
+      if (mode && !mode.background) {
+        activeLoadingRequest = mode.loadingRequest
+        isLoading.value = true
+      }
+      return existingRefresh
+    }
+
+    const requestVersion = (questionRequestVersions.get(cacheKey) || 0) + 1
+    questionRequestVersions.set(cacheKey, requestVersion)
+    const mutationVersion = reviewMutationVersion
+    const loadingRequest = `${cacheKey}:${requestVersion}`
+    const request = (async () => {
+      if (!background) {
+        activeLoadingRequest = loadingRequest
+        isLoading.value = true
+      }
+      try {
+        const response = await api.fetchPracticeDeckQuestions(deckKey, {
+          filter: unref(filter), limit: QUESTION_PAGE_SIZE, offset: 0,
+        })
+        // A review submitted while this request was in flight already updated the
+        // local queue. Do not let an older server snapshot put the reviewed card back.
+        if (questionRequestVersions.get(cacheKey) !== requestVersion) return INVALIDATED_RESPONSE
+        if (reviewMutationVersion !== mutationVersion) return response
+
+        questionCache.set(cacheKey, response)
+        questionCacheUpdatedAt.set(cacheKey, Date.now())
+        if (deckKey === selectedDeckKey.value) applyQuestionResponse(response, deckKey)
+        return response
+      } catch (err) {
+        if (!background) {
+          error.value = getFriendlyError(err, '题单加载失败')
+          toast.error(error.value)
+          questions.value = []
+          loadedDeckKey.value = null
+        }
+        return null
+      } finally {
+        if (!background && activeLoadingRequest === loadingRequest) {
+          activeLoadingRequest = null
+          isLoading.value = false
+        }
+      }
+    })()
+    questionRefreshes.set(cacheKey, request)
+    questionRefreshModes.set(cacheKey, { background, loadingRequest })
+    try {
+      const response = await request
+      if (response === INVALIDATED_RESPONSE) {
+        return refreshQuestions(deckKey, cacheKey, { background, force: true })
+      }
+      return response
+    } finally {
+      if (questionRefreshes.get(cacheKey) === request) {
+        questionRefreshes.delete(cacheKey)
+        questionRefreshModes.delete(cacheKey)
+      }
+    }
+  }
 
   async function loadDecks() {
     try {
@@ -48,45 +135,39 @@ export function usePracticeDecks(filter = 'all') {
 
   async function loadQuestions(deckKey = selectedDeckKey.value) {
     selectedDeckKey.value = deckKey
-    isLoading.value = true
     error.value = null
     const cacheKey = `${unref(filter)}:${deckKey}`
     const cached = questionCache.get(cacheKey)
-    // 今日复习是随时间和每次评分变化的活队列：重新进入时必须向服务器确认，
-    // 否则刚完成的题或刚到期的重学题会被永久缓存住。普通题单仍复用缓存。
-    if (cached && deckKey !== 'due') {
-      questions.value = cached.items || []
-      questionTotal.value = Number(cached.total ?? questions.value.length)
-      selectedDeck.value = cached.deck || decks.value.find(deck => deck.key === deckKey) || null
-      loadedDeckKey.value = deckKey
+    if (cached) {
+      // Cache-first keeps the last usable queue visible while a stale due queue
+      // is refreshed. The server remains authoritative; this only changes when
+      // the refresh is allowed to block rendering.
+      applyQuestionResponse(cached, deckKey)
       isLoading.value = false
+      if (
+        deckKey !== 'due'
+        || Date.now() - (questionCacheUpdatedAt.get(cacheKey) || 0) < DUE_CACHE_TTL_MS
+      ) return cached
+
+      void refreshQuestions(deckKey, cacheKey, { background: true })
       return cached
     }
-    try {
-      const response = await api.fetchPracticeDeckQuestions(deckKey, {
-        filter: unref(filter), limit: QUESTION_PAGE_SIZE, offset: 0,
-      })
-      questionCache.set(cacheKey, response)
-      questions.value = response.items || []
-      questionTotal.value = Number(response.total ?? questions.value.length)
-      selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
-      loadedDeckKey.value = deckKey
-      if (deckKey === 'due') {
-        reviewedDueQueueIds = new Set((response.items || [])
-          .filter(question => isStudyDayToday(question.last_reviewed_at) && ['good', 'easy'].includes(question.last_rating))
-          .map(question => question.id))
-        attemptedDueQueueIds = new Set((response.items || [])
-          .filter(question => isStudyDayToday(question.last_reviewed_at))
-          .map(question => question.id))
-      }
-      return response
-    } catch (err) {
-      error.value = getFriendlyError(err, '题单加载失败')
-      toast.error(error.value)
-      questions.value = []
-      loadedDeckKey.value = null
-      return null
-    } finally { isLoading.value = false }
+    return refreshQuestions(deckKey, cacheKey)
+  }
+
+  function invalidateQuestions(deckKey = null) {
+    const keys = deckKey
+      ? [`${unref(filter)}:${deckKey}`]
+      : [...new Set([
+          ...questionCache.keys(),
+          ...questionCacheUpdatedAt.keys(),
+          ...questionRefreshes.keys(),
+        ])]
+    for (const cacheKey of keys) {
+      questionCache.delete(cacheKey)
+      questionCacheUpdatedAt.delete(cacheKey)
+      questionRequestVersions.set(cacheKey, (questionRequestVersions.get(cacheKey) || 0) + 1)
+    }
   }
 
   async function loadMoreQuestions(deckKey = selectedDeckKey.value) {
@@ -103,6 +184,7 @@ export function usePracticeDecks(filter = 'all') {
     const total = Number(cached?.total ?? questionTotal.value ?? currentItems.length)
     if (currentItems.length >= total) return cached || null
 
+    const requestVersion = questionRequestVersions.get(cacheKey) || 0
     isLoadingMoreQuestions.value = true
     try {
       const response = await api.fetchPracticeDeckQuestions(deckKey, {
@@ -122,6 +204,7 @@ export function usePracticeDecks(filter = 'all') {
         page_size: QUESTION_PAGE_SIZE,
         offset: 0,
       }
+      if (questionRequestVersions.get(cacheKey) !== requestVersion) return questionCache.get(cacheKey) || null
       questionCache.set(cacheKey, mergedResponse)
       // 如果切换题单发生在请求期间，不要把旧题单的结果写进当前队列；缓存仍然保留，
       // 下次切回该题单时可以直接使用。
@@ -140,6 +223,7 @@ export function usePracticeDecks(filter = 'all') {
   }
 
   async function submitReview({ questionId, rating, score = null }) {
+    reviewMutationVersion += 1
     isReviewing.value = true
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
@@ -160,9 +244,12 @@ export function usePracticeDecks(filter = 'all') {
       // 同一道题可能同时存在于今日复习、全部题、收藏和自定义题单缓存中。
       // 选择评分后立即同步所有缓存；是否暂时保留当前卡供用户核对答案，由
       // PracticeMode 控制。这样退出再进入时也不会从已完成的旧卡重新开始。
-      for (const cached of questionCache.values()) {
+      for (const [cacheKey, cached] of questionCache.entries()) {
         const cachedItem = cached?.items?.find(question => question.id === questionId)
-        if (cachedItem) Object.assign(cachedItem, nextState)
+        if (cachedItem) {
+          Object.assign(cachedItem, nextState)
+          questionCacheUpdatedAt.set(cacheKey, Date.now())
+        }
       }
       if (item) Object.assign(item, nextState)
       if (reviewedDeckKey === 'due' && reviewedDeck) {
@@ -212,6 +299,7 @@ export function usePracticeDecks(filter = 'all') {
   }
 
   async function correctReview({ eventId, questionId, rating, previousRating = null, score = null }) {
+    reviewMutationVersion += 1
     isReviewing.value = true
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
@@ -223,9 +311,12 @@ export function usePracticeDecks(filter = 'all') {
     try {
       const response = await api.correctPracticeReview(eventId, { rating, score })
       const nextState = response.review || {}
-      for (const cached of questionCache.values()) {
+      for (const [cacheKey, cached] of questionCache.entries()) {
         const cachedItem = cached?.items?.find(question => question.id === questionId)
-        if (cachedItem) Object.assign(cachedItem, nextState)
+        if (cachedItem) {
+          Object.assign(cachedItem, nextState)
+          questionCacheUpdatedAt.set(cacheKey, Date.now())
+        }
       }
       if (item) Object.assign(item, nextState)
       if (reviewedDeckKey === 'due' && reviewedDeck) {
@@ -293,7 +384,7 @@ export function usePracticeDecks(filter = 'all') {
   async function createDeck(payload) {
     try {
       const deck = await api.createPracticeDeck(payload)
-      questionCache.clear()
+      invalidateQuestions()
       await loadDecks()
       return deck
     } catch (err) {
@@ -305,7 +396,7 @@ export function usePracticeDecks(filter = 'all') {
   async function updateDeck(deckKey, payload) {
     try {
       const deck = await api.updatePracticeDeck(deckKey, payload)
-      questionCache.delete(`${unref(filter)}:${deckKey}`)
+      invalidateQuestions(deckKey)
       await loadDecks()
       return deck
     } catch (err) {
@@ -320,7 +411,7 @@ export function usePracticeDecks(filter = 'all') {
     if (!await showConfirm(`确定要删除题单「${deckName}」吗？题单内的题目不会被删除。`, { title: '确认删除', variant: 'danger' })) return false
     try {
       await api.deletePracticeDeck(deckKey)
-      questionCache.delete(`${unref(filter)}:${deckKey}`)
+      invalidateQuestions(deckKey)
       if (selectedDeckKey.value === deckKey) {
         selectedDeckKey.value = decks.value.find(deck => deck.key !== deckKey)?.key || 'all'
         await loadQuestions(selectedDeckKey.value)
@@ -336,7 +427,7 @@ export function usePracticeDecks(filter = 'all') {
   async function addItem(deckKey, questionId) {
     try {
       await api.addPracticeDeckItem(deckKey, questionId)
-      questionCache.delete(`${unref(filter)}:${deckKey}`)
+      invalidateQuestions(deckKey)
       return true
     } catch (err) {
       toast.error(getFriendlyError(err, '加入题单失败'))
@@ -347,7 +438,7 @@ export function usePracticeDecks(filter = 'all') {
   async function removeItem(deckKey, questionId) {
     try {
       await api.removePracticeDeckItem(deckKey, questionId)
-      questionCache.delete(`${unref(filter)}:${deckKey}`)
+      invalidateQuestions(deckKey)
       return true
     } catch (err) {
       toast.error(getFriendlyError(err, '移出题单失败'))
@@ -370,6 +461,7 @@ export function usePracticeDecks(filter = 'all') {
     error,
     loadDecks,
     loadQuestions,
+    invalidateQuestions,
     loadMoreQuestions,
     submitReview,
     correctReview,
