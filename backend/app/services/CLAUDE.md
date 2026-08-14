@@ -7,7 +7,8 @@
 
 | 文件 | 职责 | 依赖 |
 |------|------|------|
-| `llm.py` | LLM 调用（OpenAI Chat / OpenAI Responses / Anthropic Messages 三格式）、重试、流式输出；**供应商能力兼容层**：`_PROVIDER_CAPABILITIES` 矩阵（json_mode/max_output_tokens/api_formats，按 base_url 前缀匹配）+ `LLM_JSON_MODE_OVERRIDE`/`LLM_API_FORMAT` 应急开关（force-on/force-off/auto、chat/responses/anthropic/auto）；json_object 不可靠的端点自动降级为 prompt 指令 + 容错解析兜底；三格式完整参数支持（流式/工具调用/tool_choice/参数映射：messages→input、system→instructions、max_tokens→max_output_tokens、response_format→text.format、tools 扁平化、tool_choice 转换）；所有调用显式下发 `max_tokens`（默认 4096）避免服务端默认值截断 | `core/config` |
+| `llm.py` | LLM 调用（OpenAI Chat / OpenAI Responses / Anthropic Messages 三格式）、重试、流式输出；**供应商能力兼容层**：`_PROVIDER_CAPABILITIES` 矩阵（json_mode/max_output_tokens/api_formats，按 base_url 前缀匹配）+ `LLM_JSON_MODE_OVERRIDE`/`LLM_API_FORMAT` 应急开关（force-on/force-off/auto、chat/responses/anthropic/auto）；json_object 不可靠的端点自动降级为 prompt 指令 + 容错解析兜底；三格式完整参数支持（流式/工具调用/tool_choice/参数映射：messages→input、system→instructions、max_tokens→max_output_tokens、response_format→text.format、tools 扁平化、tool_choice 转换）；所有调用显式下发 `max_tokens`（默认 4096）避免服务端默认值截断；**格式转换器已抽到 `llm_converters.py`**（re-export 兼容） | `core/config`, `llm_converters` |
+| `llm_converters.py` | 消息/工具格式转换器（从 llm.py 抽出）：`_convert_tools_to_anthropic`/`_convert_messages_with_tools_to_anthropic`/`_extract_tool_calls`/`make_tool_result_message` 等，纯格式转换 | — |
 | `answer_enrichment.py` | 答案/背诵稿提示词构建：联网搜索（best-effort，失败回退纯模型）+ 来源格式化；`sources_json()` 序列化来源供落库；`refine_answer()` 生成后质量 loop（critic 对照参考资料+硬性 checklist，结构化 JSON verdict，PASS 提前停；revise 仅在有 issues 时执行；LLM 异常/JSON 解析失败回退草稿；单题 max_rounds=2、批量/流水线/agent max_rounds=1；无搜索来源跳过 loop） | `search_service`, `core/prompts`, `llm` |
 | `search_service.py` | 用户可配置联网搜索（Tavily/Brave/Bocha/Exa 等多 provider）；`search_web()` 返回规范化结果 `[{title, url, snippet, published_at}]`，未配置返回空列表不抛错 | `core/config` |
 | `pipeline/` | 批处理流水线（增量聚类、完整重建、队列、清洗、写库）与 `compact.py` 孤岛碎片整理 | `clustering`, `db` |

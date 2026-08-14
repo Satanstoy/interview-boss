@@ -2,6 +2,5 @@
 # 格式: "相对路径  当前行数"。
 # 门禁逻辑:列在此处的文件行数不得超过「当前行数」(即不允许继续膨胀);
 # 未列的超过 1500 行即 FAIL。Stage B 拆分后逐条移除/缩短本清单并提交。
-# 2026-08-14: chat_service / worker / nodes 已拆分并移出本清单。
-backend/app/services/llm.py 1565
+# 2026-08-14: chat_service / worker / nodes / llm 已拆分并移出本清单。
 frontend/src/components/business/ChatView.vue 1577

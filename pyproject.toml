@@ -85,6 +85,7 @@ per-file-ignores = {
   "backend/app/services/chat_service.py" = ["F401"],
   "backend/app/worker.py" = ["F401"],
   "backend/app/agents/chat/nodes.py" = ["F401"],
+  "backend/app/services/llm.py" = ["F401"],
 }
 
 [tool.mypy]
