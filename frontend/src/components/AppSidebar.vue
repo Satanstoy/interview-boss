@@ -15,6 +15,10 @@ import {
   Network,
   PanelLeft,
   Target,
+  FlaskConical,
+  Database,
+  GitBranch,
+  Scale,
 } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
@@ -68,6 +72,11 @@ const iconMap = {
   InsightsReviews: History,
   Import: FileUp,
   Coding: Code2,
+  EvalOverview: LayoutDashboard,
+  EvalExperiments: FlaskConical,
+  EvalBenchmarks: Database,
+  EvalReleases: GitBranch,
+  EvalReviews: Scale,
 }
 
 function isActive(tabRoute) {

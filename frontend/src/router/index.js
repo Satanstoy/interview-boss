@@ -98,6 +98,42 @@ const routes = [
         name: 'resume',
         component: () => import('@/views/ResumeView.vue'),
       },
+      {
+        path: 'admin/evals/overview',
+        name: 'admin-evals-overview',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationOverviewView.vue'),
+      },
+      {
+        path: 'admin/evals/experiments',
+        name: 'admin-evals-experiments',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationExperimentsView.vue'),
+      },
+      {
+        path: 'admin/evals/benchmarks',
+        name: 'admin-evals-benchmarks',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationBenchmarksView.vue'),
+      },
+      {
+        path: 'admin/evals/releases',
+        name: 'admin-evals-releases',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationReleasesView.vue'),
+      },
+      {
+        path: 'admin/evals/reviews',
+        name: 'admin-evals-reviews',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationReviewsView.vue'),
+      },
+      {
+        path: 'admin/evals/runs/:runId',
+        name: 'admin-evals-run',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationRunView.vue'),
+      },
     ],
   },
   {
@@ -124,6 +160,9 @@ router.beforeEach(async (to) => {
     if (!currentUser.value) {
       return { name: 'login', query: { redirect: to.fullPath } }
     }
+  }
+  if (to.matched.some(record => record.meta.adminOnly) && !currentUser.value?.is_admin) {
+    return { name: 'master-bank' }
   }
   if (to.name === 'login' && currentUser.value) {
     return { name: 'master-bank' }

@@ -548,6 +548,7 @@ export async function uploadSSE(url, formData, onEvent, _isRetry = false) {
  * @param {Function} onEvent - 回调 (data, eventType)
  * @param {object} options - 可选配置
  * @param {AbortSignal} options.signal - 外部 AbortSignal，用于取消 SSE
+ * @param {object} options.headers - 额外请求头（例如 Last-Event-ID）
  * @param {boolean} _isRetry - 内部标记
  */
 export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
@@ -577,7 +578,7 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
 
     const res = await fetch(url, {
       method: 'GET',
-      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders },
+      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders, ...(options.headers || {}) },
       signal: controller.signal,
       credentials: 'same-origin',
     })

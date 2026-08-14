@@ -27,6 +27,10 @@ import {
   LayoutDashboard,
   Network,
   Target,
+  FlaskConical,
+  Database,
+  GitBranch,
+  Scale,
 } from '@lucide/vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
 import { useQuestionOps } from '@/composables/useQuestionOps.js'
@@ -89,6 +93,12 @@ const routeToTabMap = {
   'coding': 'Coding',
   'settings': 'Settings',
   'resume': 'Resume',
+  'admin-evals-overview': 'EvalOverview',
+  'admin-evals-experiments': 'EvalExperiments',
+  'admin-evals-run': 'EvalExperiments',
+  'admin-evals-benchmarks': 'EvalBenchmarks',
+  'admin-evals-releases': 'EvalReleases',
+  'admin-evals-reviews': 'EvalReviews',
 }
 
 const tabToRouteMap = {
@@ -105,6 +115,11 @@ const tabToRouteMap = {
   Coding: '/coding',
   Settings: '/settings',
   Resume: '/resume',
+  EvalOverview: '/admin/evals/overview',
+  EvalExperiments: '/admin/evals/experiments',
+  EvalBenchmarks: '/admin/evals/benchmarks',
+  EvalReleases: '/admin/evals/releases',
+  EvalReviews: '/admin/evals/reviews',
 }
 
 // Computed reactive "activeTab" derived from route for useHighlightNav compatibility.
@@ -217,6 +232,16 @@ const sidebarGroups = computed(() => [
       { key: 'InsightsReviews', label: '面试复盘', route: '/insights/reviews' },
     ],
   },
+  ...(displayUser.value?.is_admin ? [{
+    label: '评测中心',
+    tabs: [
+      { key: 'EvalOverview', label: '测评可视化', route: '/admin/evals/overview' },
+      { key: 'EvalExperiments', label: '测评实验', route: '/admin/evals/experiments' },
+      { key: 'EvalBenchmarks', label: 'Benchmark', route: '/admin/evals/benchmarks' },
+      { key: 'EvalReleases', label: '版本与发布', route: '/admin/evals/releases' },
+      { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },
+    ],
+  }] : []),
 ])
 
 const sidebarTabs = computed(() => sidebarGroups.value.flatMap(group => group.tabs))
@@ -234,6 +259,11 @@ const navIconMap = {
   InsightsOverview: LayoutDashboard,
   InsightsReadiness: Target,
   InsightsReviews: History,
+  EvalOverview: LayoutDashboard,
+  EvalExperiments: FlaskConical,
+  EvalBenchmarks: Database,
+  EvalReleases: GitBranch,
+  EvalReviews: Scale,
 }
 
 const activeTabLabel = computed(() => {
