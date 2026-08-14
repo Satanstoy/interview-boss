@@ -18,7 +18,14 @@
 | `embedding_recompute.py` | 全量 embedding 重算 job（模型更换后由 admin 端点自动触发）：遍历 `question_bank` 全部未删除题重编码，更新 `embedding/embedding_model/embedding_dim`，重建 FAISS；**失败回滚已更新行（全成功或全不动）**，避免新旧模型向量混库导致 FAISS 维度不一致崩溃；`run_recompute` 开头从 DB reload 目标配置（worker 进程独立加载）；`jobs` 表 + `/api/jobs/{id}/stream` 推送进度 | `embedding_service`, `faiss_index_manager`, `db/connection` |
 | `faiss_index_manager.py` | Per-cat2 centroid 缓存 + FAISS 索引管理器，消除 cluster_batch 全表扫描；singleton 实例通过 `get_index_manager()` 访问 | `embedding_service`, `faiss-cpu` |
 | `backpressure.py` | 自适应并发限制器（RateLimitError 自动降并发、成功后恢复）；matcher/compact 共享 singleton | — |
-| `chat_service.py` | 对话管理、消息存储、durable side-effect jobs、memory provenance/version guard、CandidateSet、interview event/generation read model | `llm`, `memory_recall_service` |
+| `chat_service.py` | **facade**（104 行）：从 7 个子模块 re-export，向后兼容 router/agent 的既有 import；职责见下列子模块 | — |
+| `chat_common.py` | 共享原始块：会话/回合/副作用异常类、`ChatTurn`、`_safe_json_loads`、`build_turn_request_fingerprint`、`SIDE_EFFECT_MAX_ATTEMPTS`、`FLUSH_UTILIZATION_THRESHOLD` | — |
+| `chat_turn_service.py` | 回合生命周期：reserve/revision/cancel/finalize/fail + 开场白（会话 fence、幂等、side-effect 入队） | `chat_common` |
+| `chat_conversation_service.py` | 会话 CRUD：create/list/get/title/archive/delete/metadata | `chat_common`, `chat_message_service` |
+| `chat_message_service.py` | 消息写入（active 校验）/读取/分布事件/关联题目 id | `chat_common` |
+| `chat_memory_service.py` | 用户长期记忆：memory、主题记忆、简历记忆 | `chat_common` |
+| `chat_session_service.py` | session notes、刷盘触发、跨会话召回与格式化 | `chat_common`, `chat_memory_service` |
+| `chat_durable_service.py` | durable side-effect job、记忆抽取 job、CandidateSet、interview event/generation read model | `chat_common` |
 | `worker.py`（`app/worker.py`） | ARQ worker：任务执行 + 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |

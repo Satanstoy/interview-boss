@@ -66,19 +66,24 @@ target-version = "py312"
 line-length = 100
 src = ["backend/app", "backend/tests"]
 fix = false
-select = [
-  "E4",   # import 位置等结构性错误
-  "E7",   # 冒号/缩进区,不能静默跳过
-  "E9",   # 运行时错误(除变量未定义外)
-  "F",    # pyflakes: 未定义名/未用导入/未用变量(真实 bug)
-]
-ignore = [
-  "E402", # 迁移脚本/启动文件的 import-not-at-top 属合理模式,暂不强制
-]
 exclude = [
   "backend/app/mcp_server/**",
   "backend/scripts/**",
 ]
+
+[tool.ruff.lint]
+select = [
+  "E4",
+  "E7",
+  "E9",
+  "F",
+]
+ignore = [
+  "E402",
+]
+per-file-ignores = {
+  "backend/app/services/chat_service.py" = ["F401"],
+}
 
 [tool.mypy]
 # 阶段 A: 同样以 audit WARN 接入,只采集不拦截。
