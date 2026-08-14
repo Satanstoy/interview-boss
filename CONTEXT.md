@@ -75,6 +75,9 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 **Benchmark Suite 1.0**:
 当前评测框架已有 12 个模拟面试场景组成的初始固定基准集；每个场景需要固化为 Benchmark Case，并补齐 Expected Behavior、Hard Assertions、Quality Rubric 和 Replication Policy 后，才能作为正式版本门禁。
 
+**目标专属 Benchmark Suite（Target-specific Benchmark Suite）**:
+为一个评测目标或同类目标定义的固定基准集；模拟面试、面经提取和简历分析分别维护自己的案例、量规和版本，不能将不同目标的指标混在一个 Suite 中聚合。
+
 **基准案例（Benchmark Case）**:
 带有输入快照、预期行为和评测维度的最小评测单元，可被不同评测目标版本重复执行和比较。
 
