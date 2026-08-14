@@ -1713,6 +1713,55 @@ async def scheduled_source_health_task(ctx):
         raise
 
 
+def run_db_retention(conn) -> dict:
+    """按龄清理过期/完成数据（保守保留期，保护仍被引用的行）。
+
+    - email_verification_codes：已过期或 used 超 30 天（expires_at 为 ISO 文本，
+      需 datetime() 归一后再与 SQLite 时间比较）
+    - analysis_queue：done/failed 超 30 天
+    - login_failures：未锁定且 30 天无更新
+    - jobs：completed/failed 超 90 天且无子任务（parent_job_id 保护父子血缘）
+    """
+    deleted = {}
+    cur = conn.execute(
+        "DELETE FROM email_verification_codes "
+        "WHERE datetime(expires_at) < datetime('now') "
+        "OR (used = 1 AND created_at < datetime('now', '-30 days'))"
+    )
+    deleted["email_verification_codes"] = cur.rowcount
+    cur = conn.execute(
+        "DELETE FROM analysis_queue WHERE status IN ('done', 'failed') "
+        "AND created_at < datetime('now', '-30 days')"
+    )
+    deleted["analysis_queue"] = cur.rowcount
+    cur = conn.execute(
+        "DELETE FROM login_failures WHERE locked_until = '' "
+        "AND updated_at < datetime('now', '-30 days')"
+    )
+    deleted["login_failures"] = cur.rowcount
+    cur = conn.execute(
+        "DELETE FROM jobs WHERE status IN ('completed', 'failed') "
+        "AND completed_at < datetime('now', '-90 days') "
+        "AND NOT EXISTS (SELECT 1 FROM jobs c WHERE c.parent_job_id = jobs.id)"
+    )
+    deleted["jobs"] = cur.rowcount
+    conn.commit()
+    logger.info("[DB 保留期清理] %s", deleted)
+    return deleted
+
+
+async def scheduled_db_retention_task(ctx):
+    """每日凌晨 4:00 清理过期验证码 / 完成队列 / 失败登录记录 / 陈旧任务。"""
+    from app.db.connection import get_db_connection
+
+    logger.info("[定时任务] 开始 DB 保留期清理...")
+    try:
+        return await asyncio.to_thread(run_db_retention, get_db_connection())
+    except Exception as e:
+        logger.exception(f"[定时任务] DB 保留期清理失败: {e}")
+        raise
+
+
 class WorkerSettings:
     functions = [
         cluster_batch_task,
@@ -1732,6 +1781,7 @@ class WorkerSettings:
         scheduled_cluster_review_dispatch_task,
         cluster_review_task,
         scheduled_source_health_task,
+        scheduled_db_retention_task,
         recompute_embedding_task
     ]
     on_startup = startup
@@ -1750,5 +1800,6 @@ class WorkerSettings:
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
+        cron(scheduled_db_retention_task, hour={4}, minute={0}),
         cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
     ]
