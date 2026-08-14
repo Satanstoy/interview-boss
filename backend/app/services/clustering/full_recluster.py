@@ -32,7 +32,7 @@ async def full_recluster_hybrid(
         rows = conn.execute(
             "SELECT id, question, cat1, cat2, tags, frequency "
             "FROM question_bank "
-            "WHERE deleted_at IS NULL AND status = 'approved' AND duplicate_of IS NULL "
+            "WHERE deleted_at IS NULL AND status = 'approved' "
             "ORDER BY frequency DESC, id"
         ).fetchall()
         return [dict(r) for r in rows]

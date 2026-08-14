@@ -45,6 +45,12 @@ class TestChatServiceConversation:
         """T-001b: JD模式创建会话应使用 JD 标题"""
         from app.services.chat_service import create_conversation
 
+        # 迁移 085 后 chat_conversations.jd_id 有 FK（ON DELETE SET NULL），须先建 jd 行
+        test_db.execute(
+            "INSERT INTO jd (id, url, job_title) VALUES (42, 'http://jd.example/42', 'JD定制面试')"
+        )
+        test_db.commit()
+
         result = create_conversation(
             user_id=1, mode="jd_resume", jd_id=42, resume_text="简历内容"
         )

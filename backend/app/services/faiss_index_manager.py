@@ -224,7 +224,7 @@ class FAISSIndexManager:
         rows = conn.execute(
             f"SELECT id, question, embedding FROM question_bank "
             f"WHERE status = 'approved' AND deleted_at IS NULL "
-            f"AND duplicate_of IS NULL AND job_position = ? AND {owner_sql} "
+            f"AND job_position = ? AND {owner_sql} "
             f"AND (cat2 = ? OR (cat2 IS NULL AND ? = ''))",
             (job_position, *owner_params, cat2, cat2),
         ).fetchall()
@@ -244,7 +244,7 @@ class FAISSIndexManager:
         rows = conn.execute(
             f"SELECT id, question, cat2, embedding FROM question_bank "
             f"WHERE status = 'approved' AND deleted_at IS NULL "
-            f"AND duplicate_of IS NULL AND job_position = ? AND {owner_sql}",
+            f"AND job_position = ? AND {owner_sql}",
             (job_position, *owner_params),
         ).fetchall()
         for r in rows:

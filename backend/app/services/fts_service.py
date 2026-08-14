@@ -479,7 +479,7 @@ def search_questions_fts(
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "JOIN question_position qp ON qp.question_id = qb.id "
                     "WHERE question_fts MATCH ? AND qp.position_id = ? "
-                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    "AND qb.deleted_at IS NULL "
                     f"{visibility} "
                     "ORDER BY f.rank LIMIT ?",
                     [fts_query, job_position_id, *visibility_params, limit],
@@ -496,7 +496,7 @@ def search_questions_fts(
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? AND qb.job_position = ? "
-                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    "AND qb.deleted_at IS NULL "
                     f"{visibility} "
                     "ORDER BY f.rank "
                     "LIMIT ?",
@@ -515,7 +515,7 @@ def search_questions_fts(
                     "FROM question_fts f "
                     "JOIN question_bank qb ON f.rowid = qb.id "
                     "WHERE question_fts MATCH ? "
-                    "AND qb.deleted_at IS NULL AND qb.duplicate_of IS NULL "
+                    "AND qb.deleted_at IS NULL "
                     f"{visibility} "
                     "ORDER BY f.rank LIMIT ?",
                     [fts_query, *visibility_params, limit],
@@ -743,7 +743,7 @@ def _execute_like_search(
     return conn.execute(
         f"SELECT id, question, cat1, cat2, tags, ai_answer, sources "
         f"{position_from} "
-        f"WHERE deleted_at IS NULL AND duplicate_of IS NULL {visibility} "
+        f"WHERE deleted_at IS NULL {visibility} "
         f"{position_filter}AND ({where}) "
         f"LIMIT ?",
         position_params + visibility_params + params + [limit],
@@ -854,7 +854,7 @@ def _vector_search(
             "SELECT id, question, cat1, cat2, tags, embedding, sources "
             f"{position_from} "
             "WHERE deleted_at IS NULL AND embedding IS NOT NULL "
-            f"AND duplicate_of IS NULL {visibility}{position_where}",
+            f"{visibility}{position_where}",
             visibility_params + position_params,
         ).fetchall()
 

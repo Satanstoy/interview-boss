@@ -63,9 +63,8 @@ class TestBug004QueryBehavior:
         assert "deleted_at IS NULL" in src
         assert "job_position" in src
 
-        # 验证 question_bank 查询
+        # 验证 question_bank 查询（duplicate_of 镜像机制已废除，迁移 086 删除该列）
         assert "status = 'approved'" in src
-        assert "duplicate_of IS NULL" in src
 
 
 # ═══════════════════════════════════════════════════════
