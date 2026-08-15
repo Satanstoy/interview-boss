@@ -227,3 +227,27 @@ New regressions:
 - D14-4 `cluster_review_lifecycle.py` except-closure（保守）
 - D15-1 两处 `window.confirm`
 - D16-1 两组件内联 hex
+
+---
+
+## Round 2 — deep-dive exploration (same day)
+
+本轮继续探索运行时与数据层，新增/修正如下：
+
+### 新发现
+
+- 🟡 **D6 生产 worker 跑旧镜像**：worker 容器镜像创建于 08-14 04:18Z，容器内 `worker.py` 无 `scheduled_db_retention_task`（grep 0 命中，backend 容器 3 命中）。08-14 修复轮的 retention/worker 侧变更未部署。实证：`email_verification_codes` 1052 行全部过期、`analysis_queue` 574 行全部 done、`login_failures` 最老 05-07——retention cron 从未在生产运行。
+- 🟡 **D9 生产库 178 行 FK 违规**：`interview_asked_questions` 中 97 行引用不存在的 `chat_conversations`、81 行引用不存在的 `question_bank`。孤儿 asked_at 全部在 08-14 05:39–07:42（migration 081 清理之后、085 重建之前），085 重建表时未过滤带入。
+- 🟡 **D3 真实失败面 127 failed + 14 errors**（2311 passed，关键子集全量实测 7 分钟）：
+  - 14 errors：`test_reupload_after_soft_delete.py` 绕过 `test_db` fixture 直连 `DB_PATH`（no such table: users）；
+  - 7 failed：`test_email_auth.py` 同类 fixture 漂移（no such table: email_verification_codes）；
+  - 4 failed：`test_public_ip_exposure.py` test 镜像缺 `git` 且未挂 `oauth-gateway/` 源码；
+  - 其余为 chat 系列断言失败（如 No done event received），需专项收敛。
+- 🟢 **D6 磁盘卫生**：`backend/data` 738MB，其中 665MB 是备份/残留（backups/ 405MB + 根目录 60 个散落 `.bak.*`/`-wal`/`-shm` 259MB + 0 字节 `interview_boss.db`），活跃 DB 仅 32MB。
+- 🟢 **D4 ADMIN_PASSWORD 仍 8 字符**（实测长度）。
+
+### 修正/关闭
+
+- D4 refresh-cookie 项从 needs-verification 降为 🟢(2) 并修正：`interviewboss.online` 主域已是 443 SSL + HSTS + `X-Forwarded-Proto: https`；仅 `default` 站点的纯 HTTP 80 路径（IP 直连/其他域名）存在明文 cookie。
+- D14 login `_record_failure` 竞态项关闭：代码已是原子 `INSERT ... ON CONFLICT DO UPDATE`（auth.py:62-85 复查）。
+- MCP query key 项保持关闭（仅遗留 `.pyc` 二进制匹配，源码已删）。
