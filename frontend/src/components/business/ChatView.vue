@@ -209,7 +209,7 @@
           <div v-if="isSending" class="mb-6">
             <!-- Thinking block -->
             <ReasoningTimeline
-              v-if="isSending || isThinking || thinkingContent || processingSteps.length > 0"
+              v-if="isThinking || thinkingContent"
               :is-streaming="isThinking"
               :is-sending="isSending"
               :content="thinkingContent"
@@ -1123,12 +1123,13 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       created_at: new Date().toISOString(),
     })
   } finally {
-    if (activeRequestContext !== context) return
-    activeRequestContext = null
-    isSending.value = false
-    sendInFlight.value = false
-    resetTransientStreamState()
-    await scrollToBottom()
+    if (activeRequestContext === context) {
+      activeRequestContext = null
+      isSending.value = false
+      sendInFlight.value = false
+      resetTransientStreamState()
+      await scrollToBottom()
+    }
   }
 }
 
