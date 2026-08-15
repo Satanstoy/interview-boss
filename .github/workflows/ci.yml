@@ -57,3 +57,46 @@ jobs:
         run: ./scripts/check.sh lineguard
       - name: Secret scan
         run: python3 backend/scripts/check_secrets.py
+
+  # 容器镜像扫描（audit round-3 D8）：构建两个可部署镜像并扫 HIGH/CRITICAL 漏洞，
+  # 另加 fs/IaC 扫描（uv.lock / package-lock.json / Dockerfile / compose）。
+  # 当前遵循项目「audit 只报告不拦截」策略（exit-code 0）；存量清零后收紧为
+  # exit-code 1 阻断（与 ruff/mypy/eslint 的收紧节奏一致）。
+  container-scan:
+    name: Container scan (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap backend env files
+        run: |
+          [ -f backend/.env ] || cp backend/.env.example backend/.env
+          printf 'ci-placeholder-redis-password\n' > backend/.redis-password
+      - name: Build deployable images (app-runtime + nginx)
+        run: docker compose build backend nginx
+      - name: Trivy scan app image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: interview-boss-app:local
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+      - name: Trivy scan nginx image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: interview-boss-nginx:local
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+      - name: Trivy filesystem + IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          skip-dirs: node_modules,frontend/node_modules,backend/data,.venv,dist
+          exit-code: '0'
