@@ -1,6 +1,6 @@
 # Key 轮换执行手册（audit round-3 D4，待用户提供新 key 后执行）
 
-**状态**: 等待用户在 SiliconFlow 控制台生成新 key。git-filter-repo 2.47.0 已装好
+**状态（round 2 更新）**: 历史重写已在 /tmp/ib-rewrite（本地 mirror clone）执行并验证（旧 key 全历史 0 命中、8 个 REDACTED 标记、提交链完整），**尚未推送**；仍等用户新 key + 推送许可。git-filter-repo 2.47.0 已装好
 （/home/ubuntu/.local/bin/git-filter-repo）；脱敏映射在 /tmp/interview-boss-redact.txt（含旧 key 值，禁止入库）。
 
 ## 泄漏事实（已复核）
