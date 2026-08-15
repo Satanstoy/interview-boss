@@ -8,7 +8,7 @@ FastAPI 应用初始化、中间件、路由注册。
 |------|------|
 | `asgi.py` | FastAPI app 创建、中间件注册、路由注册、生命周期事件 |
 | `mcp_server/` | 后端内嵌 MCP 工具服务，承载稳定的搜索、抽题、选题执行边界 |
-| `worker.py` | ARQ 后台任务 worker（task handlers + WorkerSettings）｜仲裁：面试分布刷新、durable chat side-effect、聚类质量审查 task、build/submit/generate 等处理函数 |
+| `worker.py` | ARQ 后台任务 worker（task handlers + WorkerSettings）｜仲裁：面试分布刷新、durable chat side-effect、聚类质量审查 task、build/submit/generate 等处理函数；`build_master_bank_task` 全量重建**只允许公共已审核面经**（`interview.owner_id IS NULL AND status='approved'`，audit D5：私有/pending 面经不得公开化） |
 | `worker_enqueue.py` | 任务入队（submission side）：`_get_redis_pool` + 13 个 `enqueue_*`，供 router/service 调用（从 worker.py 重导出兼容） |
 | `worker_scheduled.py` | 定时/保留侧：`scheduled_*` cron processor + `run_db_retention`（从 worker.py 重导出兼容） |
 | `__init__.py` | 包初始化 |

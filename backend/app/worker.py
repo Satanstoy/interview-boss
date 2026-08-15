@@ -657,7 +657,11 @@ async def build_master_bank_task(ctx, job_id: int):
             with get_db_connection() as conn:
                 raw = conn.execute(
                     "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
-                    "FROM questions_detail qd WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL AND qd.job_position = ?",
+                    "FROM questions_detail qd "
+                    "JOIN interview i ON qd.url = i.url "
+                    "WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL "
+                    "AND i.deleted_at IS NULL AND i.owner_id IS NULL AND i.status = 'approved' "
+                    "AND qd.job_position = ?",
                     (current_pos,)
                 ).fetchall()
                 existing = conn.execute(
@@ -714,7 +718,8 @@ async def build_master_bank_task(ctx, job_id: int):
                 qd_rows = conn.execute(
                     "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
                     "JOIN interview i ON qd.url = i.url "
-                    "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL AND qd.job_position = ?",
+                    "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL "
+                    "AND i.owner_id IS NULL AND i.status = 'approved' AND qd.job_position = ?",
                     (current_pos,)
                 ).fetchall()
                 for row in qd_rows:

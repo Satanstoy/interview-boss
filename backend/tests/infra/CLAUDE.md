@@ -4,6 +4,8 @@
 
 `test_worker.py` 同时锁定 ARQ 任务注册数量；新增 worker 任务时应先更新其断言并覆盖入队/执行契约。定时聚类质量审查还必须覆盖审计完成后生成管理员待审清单的调用链。
 
+`test_build_master_bank_rebuild_scope.py` 锁定 audit D5：`build_master_bank_task` 全量重建只入队公共已审核（`owner_id IS NULL AND status='approved'`）面经题目，私有/pending 面经不得进入公共题库。
+
 ## 运行
 
 ```bash
