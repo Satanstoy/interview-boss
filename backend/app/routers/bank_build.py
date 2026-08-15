@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_current_job_position
+from app.services.clustering.matcher import match_new_questions
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
     claim_public_original_questions,
