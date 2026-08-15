@@ -62,7 +62,7 @@ Routers → Services → Core/DB → (external)
 现有代码有少量兼容性反向/交叉导入（例如 `core.config` 热更新后刷新 LLM client，`db.operations` 复用 `services.utils`）。改架构边界前先查真实 import 链，不要只按理想分层移动代码。
 
 ### Routers (`app/routers/`) — 路由层
-`asgi.py` 中有 22 次 `include_router` 注册（含 `profile_pkg`、`questions_pkg` 子路由包）。**路由函数必须精简，禁止包含业务逻辑。**
+`asgi.py` 中有 23 次 `include_router` 注册（含 `profile_pkg`、`questions_pkg` 子路由包），另有 1 次 `app.mount("/mcp", mcp_app)` 挂载 MCP 服务。**路由函数必须精简，禁止包含业务逻辑。**
 
 ### Services (`app/services/`) — 业务逻辑层
 - `llm.py` — AsyncOpenAI + tenacity 重试
