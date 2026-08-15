@@ -111,13 +111,15 @@ run_frontend_audit() {
 }
 
 run_backend_audit() {
-  if ! command -v uv >/dev/null 2>&1; then
-    record "SKIP" "backend audit" "uv command not found; run uv tool run pip-audit manually"
+  # 与 run_backend 保持一致走 test-runtime 容器，避免依赖宿主机 uv/PATH。
+  if ! docker info >/dev/null 2>&1; then
+    record "SKIP" "backend audit" "Docker unavailable; run uvx pip-audit manually"
     return
   fi
 
   run_nonblocking "backend audit" \
-    bash -lc "cd '$PROJECT_DIR' && uv tool run pip-audit -r <(uv export --frozen --no-dev --format requirements-txt --no-hashes) --no-deps --disable-pip --progress-spinner off"
+    docker compose --profile test run --rm test sh -lc \
+      "cd /app && uv export --frozen --no-dev --format requirements-txt --no-hashes -o /tmp/requirements-audit.txt && uv run pip-audit -r /tmp/requirements-audit.txt --no-deps --disable-pip --progress-spinner off"
 }
 
 # line-guard: blocking gate - delegates to scripts/line_guard.sh (allowlist-based)
@@ -144,6 +146,29 @@ run_secret_scan() {
 
   run_blocking "secret scan" \
     python3 "$PROJECT_DIR/backend/scripts/check_secrets.py"
+}
+
+run_static_backend() {
+  if ! docker info >/dev/null 2>&1; then
+    record "SKIP" "backend static" "Docker unavailable"
+    return
+  fi
+
+  run_nonblocking "backend ruff" \
+    docker compose --profile test run --rm test uv run ruff check backend/app
+
+  run_nonblocking "backend mypy" \
+    docker compose --profile test run --rm test uv run mypy backend/app
+}
+
+run_static_frontend() {
+  if ! command -v npm >/dev/null 2>&1; then
+    record "SKIP" "frontend static" "npm command not found"
+    return
+  fi
+
+  run_nonblocking "frontend eslint" \
+    bash -lc "cd '$PROJECT_DIR/frontend' && npm run lint"
 }
 
 run_audit() {
@@ -187,7 +212,6 @@ case "$MODE" in
     run_backend
     run_frontend
     run_audit
-    run_static_backend
     ;;
   backend)
     run_backend
