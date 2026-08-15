@@ -1,0 +1,37 @@
+severity	dim	location	title	fix	effort	confidence
+4	D14	backend/app/routers/bank_build.py:277	POST /api/master-bank/build-personal 调用未导入的 match_new_questions（定义于 app/services/clustering/matcher.py:694），个人题目与公共题库均非空时必 NameError	在 bank_build.py 顶部 from app.services.clustering.matcher import match_new_questions	S	certain
+4	D8	scripts/check.sh:153-154,190	check.sh 调用未定义的 run_static_backend/run_static_frontend，ruff/mypy/eslint 从未被门禁执行（all 分支末尾重复调用 run_static_backend）	定义两个函数分别跑 ruff check backend/app、mypy backend/app 与 eslint src；删除 all 分支末尾的重复调用	S	certain
+3	D3	backend 关键子集全量 pytest（bank/chat/pipeline/services/security/infra）	实测 127 failed + 14 errors / 2311 passed：test_reupload_after_soft_delete.py 14 errors 绕过 test_db fixture 直连真实 DB_PATH（no such table: users）；test_email_auth 7 个同类 fixture 漂移；test_public_ip_exposure 4 个因 test 镜像缺 git 且未挂 oauth-gateway 源码；chat 系列另有断言失败（No done event received）	按失败簇分批收敛：先修绕过 test_db 的测试隔离与镜像/挂载缺口，再修 chat 断言失败；全绿前把 full tests 从 WARN 保留为审计信号	L	certain
+3	D4	backend/requirements（pip-audit 容器化后首次可见）	pip-audit 报 14 条 PYSEC 漏洞：aiohttp 3.14.1、click 8.3.2、cryptography 49.0.0、ecdsa 0.19.2、mcp 1.12.4、pyasn1 0.6.3，均有可用升级版本	uv add 升级上述依赖并重跑 full tests；mcp 升级注意 MCP server 兼容性	M	certain
+3	D4	frontend/package-lock.json	npm audit --omit=dev 报 16 个生产依赖漏洞（9 high）：postcss 任意文件读取、undici 多个 high（经 shadcn-vue 传递），均有可用修复	升级 postcss/undici 及传递依赖，npm audit fix 后重跑 build+smoke	M	certain
+3	D4	git 历史 529f232..78c77d0	SiliconFlow/MiMo 真实 key 字面量已从工作树移除，但 git 历史仍含，需服务商侧轮换	在服务商控制台轮换 tp-ck- / sk- 开头的历史 key	S	certain
+3	D6	docker compose worker 容器（镜像 2026-08-14T04:18Z）	生产 worker 仍在跑 08-14 旧镜像：容器内 worker.py 无 scheduled_db_retention_task，08-14 修复轮的 retention/worker 侧变更未部署；实测 email_verification_codes 1052 行全部过期、analysis_queue 574 行全部 done 无清理	./deploy/docker-deploy.sh update 重新部署 worker 到当前 app 镜像；部署后验证 retention cron 可见性	S	certain
+3	D8	frontend/eslint.config.js	eslint 未配置 TS parser，101 个 lang="ts" 的 Vue 组件产生 100 个 parsing error，前端 lint 对 TS 组件空转	安装 @typescript-eslint/parser + typescript，在 flat config 中接入 parser 与 parserOptions	M	certain
+3	D9	backend/data/interview-boss.db PRAGMA foreign_key_check	生产库 178 行 FK 违规：interview_asked_questions 中 97 行引用不存在的 chat_conversations（conv-multi-turn）、81 行引用不存在的 question_bank；孤儿 asked_at 均在 08-14 05:39-07:42，即 migration 081 清理后、085 重建前的窗口，085 重建时未过滤带入	新增 migration 090 删除这批孤儿；把 PRAGMA foreign_key_check 断言挂到迁移回归；复盘 081→085 窗口写入来源	M	certain
+2	D14	backend/app/routers/auth.py:62-85	login _record_failure SELECT-then-INSERT 竞态：b7fdf7a 已改 atomic upsert，需复查并发双失败路径	INSERT OR IGNORE / ON CONFLICT DO UPDATE 自增	S	needs-verification
+2	D14	backend/app/routers/data.py:925-937	update_generic_data 对 interview UPDATE+COMMIT 后才在事务外提交 reprocess 任务，任务失败则派生状态陈旧	重处理任务必达 + 失败告警/重试，或提交前校验前置条件	M	certain
+2	D3	backend/tests/coding/test_coding.py	coding 关键路径测试薄：无越权操作他人题/超长代码/恶意 markdown 边界；auth_client fixture 每文件重复	补 coding 越权/超长/恶意输入用例；auth_client 收敛进共享 conftest.py	S	certain
+2	D3	backend/tests/security/	对抗性 fuzz corpus 缺失：无 SQL 注入语料、Unicode 代理对/零宽/换行边界、无 1MB 超长输入、无 hypothesis 属性化	为 auth/login/submit/master-bank 补注入语料 + Unicode 边界 + 1MB 输入用例	M	certain
+2	D4	backend/.env ADMIN_PASSWORD	生产管理员密码仍为 8 字符（审计实测长度=8）	生成 ≥16 字符随机密码并轮换；同步更新部署侧引用	S	certain
+2	D4	backend/app/db/operations.py + routers/profile_pkg/llm.py	用户自带 LLM/搜索 API key 明文落库无加密	Fernet 加密 api_key 字段（env 派生密钥），读取时解密	M	certain
+2	D4	backend/app/routers/auth.py:228-233 + /etc/nginx/sites-available/default:49	refresh cookie secure 标志信任 X-Forwarded-Proto；主域 interviewboss.online 走 443 SSL+HSTS 且 XFP=$scheme=https 安全，但 default 站点（IP 直连/其他域名）为纯 HTTP 80，该路径 cookie 明文发送	default 站点 80 也跳 HTTPS（IP 证书已存在），或后端在可信代理判定下无条件 Secure	M	certain
+2	D6	backend/app/worker.py WorkerSettings.cron_jobs + do_status	6 个 ARQ cron 无 LastRunAt/失败可见性，worker 按需关闭时静默缺跑	DB 记录每 cron last_run_at/status + worker 心跳 + admin 只读端点	M	probable
+2	D6	backend/data/ 目录	生产数据目录 738MB 中约 665MB 为备份与残留：backups/ 405MB + 根目录 60 个散落 .bak.*/-wal/-shm 共 259MB + 0 字节 interview_boss.db；活跃 DB 仅 21MB+11MB WAL	清理超过保留期的 .bak 与孤立 -wal/-shm；备份移出数据卷并纳入 docker-deploy.sh cleanup	M	certain
+2	D6	docker-compose.yml nginx / oauth-gateway 段	nginx（公网入口 facade）与 oauth-gateway（认证网关）无 healthcheck，backend/redis/worker 均有	nginx 加 /health 探测、oauth-gateway 加 /health 探测	M	certain
+2	D7	.github/（无 dependabot.yml/renovate.json）	无自动依赖更新，Vite/uvicorn 显著滞后没有机器人驱动升级与 CVE 提醒	新增 .github/dependabot.yml（python-uv + npm，weekly）	S	certain
+2	D7	frontend/package.json:56	vite ^4.4.5（lock 钉 4.5.14）落后 4 个大版本，构建链安全修复长期缺失	vite 升 ^7/^8 + @vitejs/plugin-vue 同步升级，重跑 build 验证	M	certain
+2	D7	pyproject.toml deps	uvicorn==0.24.0 硬钉（最新 0.52），python-jose（2021 停更）/passlib（2020 停更）仍在依赖	放开 uvicorn>=0.30，迁 PyJWT + bcrypt 直连	M	certain
+2	D8	.githooks/commit-msg	commit-msg hook 已入库但依赖本机 core.hooksPath，fresh clone 无任何 hook、无安装脚本	新增 .githooks/install.sh 写 core.hooksPath=.githooks，并在文档/CI 调用	S	certain
+2	D8	scripts/check.sh:113-121 run_backend_audit()	check.sh 后端依赖审计（pip-audit）未像 run_backend 其余步骤一样走 test-runtime 容器，而是直接在宿主机调用 uv；宿主机 PATH 无 uv 即静默 SKIP	改为 docker compose --profile test run --rm test sh -lc "uv tool run pip-audit ..."（test 镜像已实测含 uv 0.12.4），与 collect/compile/tests 一致	S	certain
+2	D8	scripts/line_guard.sh + backend/tests	line-guard 只扫 backend/app 与 frontend/src，不覆盖 backend/tests（test_react_loop.py 3728 行、test_chat.py 2038、test_langgraph_workflows.py 1400、test_pipeline_e2e.py 1160）	把 backend/tests 纳入 line_guard（可设更高上限），并计划拆分超大测试文件	M	certain
+2	D9	backend/app/db/ 6 套队列表	任务持久化碎片化：jobs+payloads / analysis_queue / cluster_review_tasks / distribution_refresh_jobs / side_effect_jobs / task_logs	新任务类型优先复用 jobs 表；存量表冻结；评估留存清理	L	probable
+2	D9	backend/app/routers/chat.py:450-454	chat 加载关联 JD SELECT content FROM jd WHERE id=? 未过滤 deleted_at，软删 JD 内容仍进 LLM 上下文	加 AND deleted_at IS NULL	S	certain
+2	D9	backend/app/services/email_service.py:81/159/216	datetime.now() 本地 naive 时间处理	统一 tz-aware UTC	M	needs-verification
+2	D9	backend/app/services/fts_service.py:70-76	_idf_cache 模块级缓存，需确认 delete_fts_entry 路径也重置，否则 RRF 权重陈旧	在 delete_fts_entry 路径也重置 _idf_cache	S	needs-verification
+2	D9	backend/data/ + backups/	备份与生产库同盘同卷（SPOF），backups/ 残留裸 cp 的 -wal/-shm	备份移出生产 data 卷并多轮归档；清理残留文件	M	probable
+1	D1	backend/app/services/pipeline/batch_v2.py	batch_v2 为死模块：生产零调用，仅测试 inspect.getsource 引用其行为作回归	删除模块并把回归点固化为契约注释，或显式标 deprecated	S	certain
+1	D14	backend/app/agents/chat/react_loop.py:536-543	死代码：return False 之后 logger.info 引用未定义 tool_names，不可达	删除不可达代码块	S	certain
+1	D14	backend/app/services/cluster_review_lifecycle.py:721-730	except 变量 exc 在 to_thread 嵌套函数闭包中引用（实测运行正常，保守）	将 str(exc) 在 except 块内预求值为默认参数 err=str(exc)	S	needs-verification
+1	D15	frontend/src/views/PracticeDecksView.vue:51 + SiteHeader.vue:99	自定义题单删除仍用原生 window.confirm	改用 useConfirm()/ConfirmDialog（已有 7 组件先例）	S	certain
+1	D16	frontend/src/components/business/PracticeStarChart.vue:47-103 + PracticeQuadChart.vue:33-84	两个图表组件绕过 src/utils/chartTokens.js 内联重复同一套 hex	改 import { porcelain } from '@/utils/chartTokens.js'	S	certain
+1	D2	backend/CLAUDE.md:65	文档声称 asgi.py 有 22 次 include_router，实际 23 次 include_router + 1 次 app.mount("/mcp")	更新计数为 23 并补述 MCP mount	S	certain

@@ -1,0 +1,59 @@
+severity	dim	location	title	fix	effort	confidence
+4	D8	.github/workflows/ci.yml:9-59	CI 缺容器镜像扫描（Trivy）：deploy 镜像无任何 image scan 阶段	在 backend job 增加 Trivy 步骤（aquasecurity/trivy-action 扫 interview-boss-app:local / nginx 镜像）或 build 前 hadolint+trivy；现有 pip-audit/npm audit 只覆盖语言层依赖	S	certain
+3	D8	scripts/line_guard.sh:48,53	line_guard 不扫 backend/tests：test_react_loop.py 3728 行、test_chat.py 2038 行无约束	增加第三个 find 循环扫 backend/tests（上限可放宽至 2000），并拆分两个超大测试文件	S	certain
+3	D8	.github/workflows/ci.yml:39	静态检查（ruff/mypy/eslint）在 CI 中 '|| true' 永不阻断（实测 ruff 179 / mypy 436 / eslint 63）	将 ruff/eslint 提为独立 blocking step（先清零存量再收紧）；当前与 CLAUDE.md 审计 WARN 策略一致，随债务清偿逐步收紧	M	certain
+3	D8	.githooks/commit-msg	commit-msg hook 无 install.sh，fresh clone 无钩子（round-2 遗留）	新增 .githooks/install.sh 写 core.hooksPath 并接入 README/check.sh	S	certain
+2	D8	oauth-gateway/Dockerfile:1	基础镜像 minor-pinned 未 digest-pinned，构建不可完全复现	至少文档化可变 tag 权衡；生产 bar 再 digest-pin	S	certain
+1	D8	scripts/check.sh:2	set -uo pipefail 缺 -e	改为 set -euo pipefail（run_blocking 已包 exit code，无现网 bug）	S	certain
+2	D15	frontend/src/views/PracticeDecksView.vue:51	删除自定义题单仍用原生 window.confirm（round-2 遗留）	改用 useConfirm()/ConfirmDialog（已有 7+ 组件先例）	S	certain
+2	D15	frontend/src/components/SiteHeader.vue:99	全局头删除题单仍用原生 window.confirm，且文案与 PracticeDecksView 漂移	同上，并统一两处删除确认文案	S	certain
+2	D16	frontend/src/components/business/PracticeStarChart.vue:47-103	绕过 chartTokens.js 内联 12 个 porcelain hex（round-2 遗留）	改 import { porcelain } from '@/utils/chartTokens.js'	M	certain
+2	D16	frontend/src/components/business/PracticeQuadChart.vue:33-84	内联 porcelain hex 7 个 + KnowledgeGraph 另硬编码 11 个	统一走 chartTokens.js（porcelain/porcelainTooltip/RAMP）	M	certain
+1	D16	frontend/src/components/business/PracticeRecentTimeline.vue	4 个死组件随 build 发布（PracticeRecentTimeline/PracticeHighFreqChart/ThinkingBlock/ExamDistribution，0 引用）	删除或显式标 deprecated；组件 CLAUDE.md 已注明'保留待用'	S	certain
+1	D15	frontend/src/components/business/PracticeMode.vue:141,177,435,462	4 处原生 title 绕过 AppTooltip 约定	改用 AppTooltip 组件（icon 按钮补 aria-label）	S	probable
+2	D2	README.md:280	README composables 计数 20 vs 实际 22（根 CLAUDE.md 已正确为 22）	更新为 22 或去掉精确计数	S	certain
+2	D2	pyproject.toml:6	requires-python >=3.11 与 Dockerfile/README/CLAUDE 的 3.12 不一致	统一为 >=3.12 或修正文档	S	certain
+3	D13	backend/.env.example	README 环境变量表 7 个变量在 .env.example 中无占位行（SEARCH_*/SILICONFLOW_API_KEY/EMBEDDING_API_MODEL/CLUSTER_MIN_SIMILARITY/REDIS_URL/REDIS_PASSWORD_FILE）	补注释占位行，使模板可填写	S	certain
+3	D9	backend/app/db/migrations/schema_hygiene.py:359-376	生产库 178 行 FK 违规持续存在：migration 085 重建表原样搬运 081→085 FK-off 窗口期孤儿行（实测 interview_asked_questions 97 行引用缺失 chat_conversations + 81 行缺失 question_bank；schema_version max=89 无 090）	新增 migration 090 删除孤儿行（NOT EXISTS 过滤）并在 085 重建末尾加 foreign_key_check 断言 fail-closed；回归测试模拟 081→085 窗口写孤儿	M	certain
+3	D9	backend/tests/infra/test_schema_hygiene.py:362-400	FK 回归套件不覆盖 081→085 孤儿写入窗口，CI 全绿而生产库带病	新增用例：应用 081 后（FK off 窗口）写孤儿行，再应用 085 并断言 foreign_key_check=0	S	certain
+2	D9	backend/app/routers/chat.py:451	chat 加载关联 JD 无 deleted_at 过滤（round-2 遗留），软删 JD 仍进 LLM 上下文；agents/chat/memory_extract.py:129 同类问题	两处查询均加 AND deleted_at IS NULL	S	certain
+2	D9	backend/app/services/email_service.py:104,126,149,207,264	email_service 5 处 naive datetime.now()；run_db_retention 用 SQLite UTC now 比对本地时区 expires_at，过期清理偏差约 8h（D14 同源合并）	统一 tz-aware UTC 写入与比较（或 retention 侧 datetime(expires_at,'localtime')）	M	probable
+2	D9	backend/app/db/migrations/llm.py:11-32	migration 089 llm_usage 重复索引（UNIQUE(user_id,day) + idx_llm_usage_user_day）且 user_id 无 FK	删重复索引，加 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE	S	certain
+2	D9	backend/app/db/ (jobs+analysis_queue+cluster_review_tasks+task_logs)	队列表碎片化持续（round-2 遗留；实测 jobs 302 / analysis_queue 574 全 done / cluster_review_tasks 333 / task_logs 8；payloads/distribution_refresh_jobs/side_effect_jobs 并非真实表）	冻结旧表，新任务类型走 jobs 表；analysis_queue done 行与 email_verification_codes 过期行纳入 retention 清理	M	probable
+3	D6	backend/app/worker.py:1386	生产 worker 仍跑 08-14 旧镜像（783f58123828，容器内 worker.py 无 scheduled_db_retention_task，backend 容器 3 命中）；retention cron 从未运行（email_verification_codes 1052/1052 过期、analysis_queue 574 done 未清理）	./deploy/docker-deploy.sh worker-up 重新部署 worker 到当前 app 镜像并验证 cron 生效	S	certain
+2	D6	backend/data/ (738MB) + ./backups/ (1.3GB)	备份与残留同盘 SPOF，根分区 82% 已用（round-2 遗留：405MB pre_migration 备份 + 249MB 58 个 .bak + 1.3GB 顶层 backups/）	备份移出数据盘（rsync/restic 到第二盘或对象存储），保留期清理并入 docker-deploy.sh cleanup	M	certain
+2	D6	docker-compose.yml:225-276	nginx（公网门面）与 oauth-gateway（认证网关）无 healthcheck（round-2 遗留，compose 仅 backend/redis/redis-cache 有）	nginx 加 /health 探测、oauth-gateway 加 /health 端点与健康检查	M	certain
+2	D6	backend/app/worker.py:1379-1388	6 个 ARQ cron 无 LastRunAt/失败可见性（round-2 遗留；仅 compaction 落 task_logs 8 行）	每 cron 记录 last_run_at/status 到 DB + worker 心跳 + admin 只读端点	M	certain
+2	D6	docs/（无 runbook 目录）	无运维 runbook（DB down/LLM 5xx/配额耗尽/磁盘满/OOM 的检测与恢复步骤）	新增 docs/runbook/ 覆盖主要事故场景	M	certain
+2	D6	deploy/docker-deploy.sh:488-556 (do_restore)	恢复流程只手工演练过一次（08-12 smoke 痕迹），无定期恢复演练	每周恢复演练（test-data 卷 + integrity_check + 行数冒烟）或文档化节奏	M	probable
+1	D14	backend/app/agents/chat/react_loop.py:536-543	return 后不可达死代码引用未定义 tool_names（round-2 遗留）	删除不可达代码块	S	certain
+1	D14	backend/app/services/cluster_review_lifecycle.py:721-730	except 变量 exc 在嵌套闭包中引用（round-2 遗留，实测正常）	except 块内预求值 err=str(exc) 作默认参数	S	needs-verification
+2	D14	backend/app/routers/data.py:930-937	interview 编辑 commit 后事务外提交 reprocess 任务（round-2 遗留；现提交幂等复用 queued/running job，风险降低但任务仍 best-effort）	任务必达 + 失败告警/重试，或提交前校验前置条件	M	certain
+3	D12	docker-compose.yml:161-166 + app/eval_worker.py	评测中心异步运行无已部署消费者：eval_run_task 入队 arq:eval，但 eval worker 仅 profile:[eval] + restart:'no' + --burst，无任何 deploy 命令拉起（docker ps 无 eval-worker），admin 建 run 后永久 queued 且无提示	worker-up 兼容 eval profile / 默认 profile + restart unless-stopped + healthcheck；前端展示 worker offline 状态	M	certain
+2	D11	backend/app/db/migrations/evaluation.py:200	eval_human_reviews.reviewer_id ON DELETE RESTRICT 会阻塞管理员账号删除（eval_* 表未列入 account-deletion.md）	改 ON DELETE SET NULL + 快照 reviewer_name/email，或文档化手工删除顺序	S	probable
+2	D11	backend（无导出端点）	无数据导出/可携带性路径（privacy-policy.md sec.5 已留口子）	实现 owner 作用域 GET /api/account/export 或明确记为 out-of-scope + 手册流程	M	certain
+2	D12	docker-compose.yml:165	eval-worker restart:'no' + --burst 单次排空即退出，后续批次静默堆积	restart: unless-stopped + 去掉 --burst（或 cron 重拉）+ healthcheck	S	certain
+4	D5	backend/app/worker.py:715-750 (build_master_bank_task)	管理员全量重建题库把全部用户私有/pending 面经题目公开化：_load/_enqueue_all 无 interview.owner_id/status 过滤，analysis_queue 以 NULL（公共桶）入队，insert_new_clusters 硬编码 owner_id=NULL（已读代码核实整链）	在 _load/_enqueue_all 的 JOIN 中限定 i.owner_id IS NULL AND i.status='approved'；补回归测试断言私有面经题目永不进入公共题库	M	certain
+3	D3	backend/tests/services/clustering/test_reupload_after_soft_delete.py:38	测试隔离绕过：autouse fixture 直接 get_db_connection() 直连 DB_PATH（empty test-data 卷）→ 14 errors（round-2 已知，仍 open）	fixture 注入 test_db 内存连接；conftest 加 sentinel 断言无测试打开 DB_PATH	S	certain
+3	D3	backend/app/db/connection.py:19-37	threading.local 连接对 asyncio.to_thread 不可见：chat 流水线经 to_thread 的 DB 访问落到真实 DB_PATH → ~80 个 chat 测试 'no such table'（round-2 的 'chat 断言失败' 真根因）	改 contextvars 传播连接（或 client fixture 在 sqlite3.connect 边界全局路由到 test_db）；补 to_thread 全链路内存库回归测试	M	certain
+3	D3	backend/tests/infra/test_public_ip_exposure.py:10-11	test 镜像缺 git 且未挂 oauth-gateway 源码 → 4 failures（round-2 已知，仍 open）	镜像装 git + 挂载 oauth-gateway 只读卷，或改写为不依赖两者	S	certain
+3	D3	backend/CLAUDE.md 回归纪律	回归测试比例 ~21%（最近 15 个 fix 提交仅 3 个带测试），远低于仓库自定 ≥80% 红线（round-2 已知，实测仍成立）	CI/门禁检查 fix 提交必须带 test_*.py/*.spec.js 变更（按豁免类别）；补回缺失回归测试	M	certain
+2	D3	backend/tests/coding/test_coding.py:48-418	coding 测试缺对抗用例：跨用户越权、50000 字符边界、恶意 markdown（round-2 已知）	补越权 404/超长边界/恶意导入用例；auth_client 收敛进共享 conftest	S	probable
+2	D3	backend/tests/security/	无对抗 fuzz corpus：无 SQL/XSS 语料、无 Unicode/1MB 边界、无 hypothesis（round-2 已知）	新增注入语料 fixture + hypothesis 属性测试覆盖 login/submit/master-bank	M	probable
+2	D3	scripts/line_guard.sh:48,53	line_guard 不覆盖 backend/tests（test_react_loop.py 3728L / test_chat.py 2038L 无约束）	纳入 backend/tests（可设更高上限）并规划拆分	S	certain
+2	D3	frontend/tests/e2e/*.spec.js	Playwright E2E 全 mock（page.route），无一条真实全栈链路	补 1 条真栈 E2E（login→submit→response，LLM 在服务边界 mock）	M	probable
+2	D1	backend/app/services/pipeline/batch_v2.py:40	delete: 383 行死模块 batch_v2 仅为 inspect.getsource 回归夹具而存在（round-2 遗留）	删除模块；回归测试改指 live compact.py 路径，删除 verify_compaction_real.py:83 引用	S	certain
+2	D1	frontend/src/components/NavMain.vue:1	delete: 5 个孤儿 shadcn-vue 侧边栏模板组件（NavMain/NavUser/NavSecondary/NavDocuments/DragHandle 共 326 行，0 引用）	删除 5 个文件	S	certain
+1	D1	backend/app/services/clustering/experiments/draw_questions_eval.py	delete: 8 个独立评测 harness（约 2275 行，无生产/测试/CI 调用者）	删除 8 个文件；保留 memory_labels.py/prompts.py/evaluate.py	S	certain
+1	D1	backend/app/agents/chat/structured_turn.py:234	yagni: validate_writer_output 全量测试但从未接入生产管道	在 contract writer 路径调用，或删除并移除其测试断言	S	certain
+1	D1	backend/app/agents/chat/structured_turn.py:150	shrink: WriterBrief 同名双定义（turn_intent dataclass vs structured_turn BaseModel）+ TurnContract/TurnContractV2 并行	改名或内联；单一文档说明两者派生关系	S	probable
+3	D7	pyproject.toml:20-22	死依赖 python-jose/passlib（2021/2020 停更）经 ecdsa/pyasn1 保持 4 个生产 CVE 存活（round-2 遗留，实测 pip-audit 14 条中 ecdsa/pyasn1 均 'via python-jose'）	迁 PyJWT + 直连 bcrypt；uv export 消除 ecdsa/pyasn1 传递依赖	M	certain
+3	D7	pyproject.toml:18	uvicorn==0.24.0 硬钉（round-2 遗留）：锁死旧 click 8.3.2（PYSEC-2026-2132）	放开 uvicorn>=0.30 让 click 浮动到 >=8.3.3，重跑全量测试	S	certain
+3	D7	frontend/package.json:47 (vite ^4.4.5)	vite 落后 4 个大版本，npm audit --omit=dev 16 个生产漏洞（9 high：postcss/undici）；package.json overrides 仍钉在含漏洞版本（round-2 遗留）	升级 vite ^7/^8 + plugin-vue，同步更新 undici/postcss overrides，重跑 build+smoke	M	certain
+2	D7	.github/（无 dependabot.yml/renovate.json）	无自动依赖更新机器人（round-2 遗留）	新增 dependabot.yml（python-uv + npm，weekly，HIGH/CRITICAL 标记）	S	certain
+2	D7	frontend/package.json:12,30,31	3 个未使用生产依赖：puppeteer-core、@hugeicons/core-free-icons、@hugeicons/vue（0 导入）	移入 devDependencies 或删除；清 components.json iconLibrary 配置（实际用 @lucide/vue 72 处）	S	certain
+2	D7	frontend/package.json（无 engines 字段）	无 Node 引擎约束：CI 用 Node 20，Docker 构建用 Node 22，无守卫	加 engines + .nvmrc 对齐 Node 大版本	S	certain
+4	D4	backend/.env:22	生产 SiliconFlow API key 仍在 git 历史（8 个提交含 sk-hkaopkq...clym，含 fix(security) 提交自身）且从未轮换：backend/.env:22 仍是同一把活 key（round-2 遗留升级）	立即在服务商控制台轮换；git filter-repo 重写/脱敏 8 个提交（c48260d/e6f4f0d/95fcf63/78c77d0/d6f70b0/eb50a92/42cf667/a26aaf5）	M	certain
+3	D4	backend/app/routers/profile_pkg/llm.py:143-150	用户自带 LLM/search API key 明文落库（user_llm_config.api_key / user_search_config.api_key 直插；读路径 llm.py:31 / search.py:169 明文 SELECT，仅 GET 响应 _mask_key 遮蔽）（round-2 遗留）	Fernet 加密落库（JWT_SECRET 派生密钥），llm.py/search_service.py 调用点解密	M	certain
+3	D4	backend/.env:17	生产 ADMIN_PASSWORD 仍 8 字符（round-2 遗留，实测 len=8）	生成 ≥16 字符随机密码并轮换，同步部署侧引用	S	certain
+2	D4	backend/app/routers/（189 个路由）	仅 audio.py:29 声明 response_model，其余路由直接返回 dict/DB 行，响应侧 Pydantic 形状无强制	优先为 auth/data/profile 返回用户 dict/DB 行的路由补 response_model 或 Field(exclude)	L	probable
