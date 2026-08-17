@@ -11,6 +11,8 @@ import base64
 import shutil
 import asyncio
 import logging
+from functools import wraps
+from contextlib import nullcontext
 from datetime import datetime
 from arq.connections import RedisSettings
 from arq.cron import cron
@@ -22,6 +24,197 @@ REDIS_URL = build_redis_url(
     os.environ.get("REDIS_QUEUE_URL") or os.environ.get("REDIS_URL"),
     f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:6379/0",
 )
+
+
+def _ensure_observability_tables(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worker_heartbeats (
+            worker_name TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            queue_name TEXT NOT NULL DEFAULT '',
+            last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_error TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worker_cron_runs (
+            task_name TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            last_run_at TIMESTAMP,
+            last_finished_at TIMESTAMP,
+            last_error TEXT NOT NULL DEFAULT '',
+            last_result_json TEXT NOT NULL DEFAULT '{}',
+            run_count INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
+def _connection_context(conn=None):
+    if conn is not None:
+        return nullcontext(conn)
+    from app.db.connection import get_db_connection
+
+    candidate = get_db_connection()
+    if hasattr(candidate, "execute"):
+        return nullcontext(candidate)
+    return candidate
+
+
+def record_worker_heartbeat(
+    worker_name: str,
+    *,
+    status: str,
+    queue_name: str = "",
+    error: str = "",
+    metadata: dict | None = None,
+    conn=None,
+):
+    """Persist the latest worker state for offline-vs-empty diagnostics."""
+    with _connection_context(conn) as connection:
+        _ensure_observability_tables(connection)
+        payload = json.dumps(
+            metadata or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        connection.execute(
+            """
+            INSERT INTO worker_heartbeats
+                (worker_name, status, queue_name, last_seen_at, last_error, metadata_json)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+            ON CONFLICT(worker_name) DO UPDATE SET
+                status = excluded.status,
+                queue_name = excluded.queue_name,
+                last_seen_at = CURRENT_TIMESTAMP,
+                last_error = excluded.last_error,
+                metadata_json = excluded.metadata_json
+            """,
+            (worker_name, status, queue_name, error[:500], payload),
+        )
+        connection.commit()
+    return {
+        "worker_name": worker_name,
+        "status": status,
+        "queue_name": queue_name,
+        "last_error": error[:500],
+        "metadata": metadata or {},
+    }
+
+
+def record_cron_execution(
+    task_name: str,
+    *,
+    status: str,
+    result=None,
+    error: str = "",
+    conn=None,
+):
+    """Persist the latest scheduled-task result, including failures."""
+    with _connection_context(conn) as connection:
+        _ensure_observability_tables(connection)
+        result_json = json.dumps(
+            result or {}, ensure_ascii=False, sort_keys=True, default=str
+        )
+        is_running = status == "running"
+        connection.execute(
+            """
+            INSERT INTO worker_cron_runs
+                (task_name, status, last_run_at, last_finished_at, last_error,
+                 last_result_json, run_count)
+            VALUES (?, ?, CURRENT_TIMESTAMP,
+                    CASE WHEN ? = 1 THEN NULL ELSE CURRENT_TIMESTAMP END,
+                    ?, ?, CASE WHEN ? = 1 THEN 1 ELSE 0 END)
+            ON CONFLICT(task_name) DO UPDATE SET
+                status = excluded.status,
+                last_run_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP
+                                   ELSE worker_cron_runs.last_run_at END,
+                last_finished_at = CASE WHEN ? = 1 THEN worker_cron_runs.last_finished_at
+                                        ELSE CURRENT_TIMESTAMP END,
+                last_error = excluded.last_error,
+                last_result_json = excluded.last_result_json,
+                run_count = worker_cron_runs.run_count + CASE WHEN ? = 1 THEN 1 ELSE 0 END
+            """,
+            (
+                task_name,
+                status,
+                int(is_running),
+                error[:500],
+                result_json,
+                int(is_running),
+                int(is_running),
+                int(is_running),
+                int(is_running),
+            ),
+        )
+        connection.commit()
+
+
+def get_cron_status(task_name: str, *, conn=None) -> dict:
+    """Return a stable status shape even when a task has never run."""
+    with _connection_context(conn) as connection:
+        _ensure_observability_tables(connection)
+        row = connection.execute(
+            "SELECT * FROM worker_cron_runs WHERE task_name = ?", (task_name,)
+        ).fetchone()
+    if row is None:
+        return {"task_name": task_name, "status": "not_run", "run_count": 0}
+    return dict(row)
+
+
+def observed_cron_task(task):
+    """Wrap an ARQ cron task without swallowing errors or changing its name."""
+
+    @wraps(task)
+    async def wrapped(ctx):
+        task_name = task.__name__
+        record_cron_execution(task_name, status="running")
+        try:
+            result = await task(ctx)
+        except Exception as exc:
+            record_cron_execution(task_name, status="failed", error=str(exc))
+            raise
+        record_cron_execution(task_name, status="succeeded", result=result)
+        return result
+
+    return wrapped
+
+
+def get_eval_worker_status(*, conn=None) -> dict:
+    """Classify an evaluation queue as empty, active, or worker-offline."""
+    with _connection_context(conn) as connection:
+        _ensure_observability_tables(connection)
+        counts = {
+            row["status"]: row["count"]
+            for row in connection.execute(
+                "SELECT status, COUNT(*) AS count FROM eval_runs GROUP BY status"
+            ).fetchall()
+        }
+        heartbeat = connection.execute(
+            "SELECT * FROM worker_heartbeats WHERE worker_name = 'eval-worker'"
+        ).fetchone()
+        stale_queued = connection.execute(
+            "SELECT COUNT(*) FROM eval_runs "
+            "WHERE status IN ('created', 'queued') "
+            "AND created_at < datetime('now', '-10 minutes')"
+        ).fetchone()[0]
+    queued = sum(counts.get(status, 0) for status in ("created", "queued", "running"))
+    if not queued:
+        queue_state = "queue_empty"
+    elif stale_queued:
+        queue_state = "queued_stuck"
+    elif heartbeat is None or heartbeat["status"] != "online":
+        queue_state = "worker_offline"
+    else:
+        queue_state = "worker_online"
+    return {
+        "queue_state": queue_state,
+        "counts": counts,
+        "stale_queued_count": stale_queued,
+        "heartbeat": dict(heartbeat) if heartbeat else None,
+    }
 
 
 from app.worker_enqueue import (
@@ -172,6 +365,12 @@ async def startup(ctx):
     from app.core.config import _reload_from_db
     from app.services.embedding_service import reload_embedding_config
     init_db()
+    record_worker_heartbeat(
+        "arq-worker",
+        status="online",
+        queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
+        metadata={"pid": os.getpid()},
+    )
     _reload_from_db()
     reload_embedding_config()
     try:
@@ -190,6 +389,12 @@ async def startup(ctx):
 
 async def shutdown(ctx):
     """Worker 关闭时清理"""
+    record_worker_heartbeat(
+        "arq-worker",
+        status="offline",
+        queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
+        metadata={"pid": os.getpid()},
+    )
     from app.core.cache import close_cache_client
 
     await close_cache_client()
@@ -1350,6 +1555,26 @@ from app.worker_scheduled import (
     scheduled_db_retention_task,
 )
 
+
+async def scheduled_worker_heartbeat_task(ctx):
+    """Keep the ARQ worker liveness record fresh between restarts."""
+    return record_worker_heartbeat(
+        "arq-worker",
+        status="online",
+        queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
+        metadata={"pid": os.getpid()},
+    )
+
+
+scheduled_worker_heartbeat_task = observed_cron_task(scheduled_worker_heartbeat_task)
+scheduled_compaction_task = observed_cron_task(scheduled_compaction_task)
+scheduled_quality_audit_task = observed_cron_task(scheduled_quality_audit_task)
+scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dispatch_task)
+scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
+scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
+scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
+process_chat_side_effects_task = observed_cron_task(process_chat_side_effects_task)
+
 class WorkerSettings:
     functions = [
         cluster_batch_task,
@@ -1370,7 +1595,8 @@ class WorkerSettings:
         cluster_review_task,
         scheduled_source_health_task,
         scheduled_db_retention_task,
-        recompute_embedding_task
+        recompute_embedding_task,
+        scheduled_worker_heartbeat_task,
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -1390,4 +1616,5 @@ class WorkerSettings:
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(scheduled_db_retention_task, hour={4}, minute={0}),
         cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
+        cron(scheduled_worker_heartbeat_task, minute=set(range(0, 60))),
     ]

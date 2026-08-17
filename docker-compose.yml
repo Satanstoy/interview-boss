@@ -169,6 +169,8 @@ services:
       - REDIS_CACHE_HOST=redis-cache
       - REDIS_PASSWORD_FILE=/run/secrets/redis_password
       - EVAL_QUEUE_NAME=arq:eval
+      - ARQ_QUEUE_NAME=arq:eval
+      - EVAL_WORKER_NAME=eval-worker
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=production

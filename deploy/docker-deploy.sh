@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|test|check|backup|restore|cleanup|diagnose|mirrors]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|eval-worker-install|eval-worker-status|test|check|backup|restore|cleanup|diagnose|mirrors]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -431,6 +431,73 @@ do_worker_restart() {
   do_status
 }
 
+# ── Eval Worker systemd timer ──
+do_eval_worker_install() {
+  local unit_dir="/etc/systemd/system"
+  log "安装 Eval Worker systemd service/timer..."
+  sudo install -m 0644 \
+    "$PROJECT_DIR/deploy/systemd/interview-boss-eval-worker.service" \
+    "$unit_dir/interview-boss-eval-worker.service"
+  sudo install -m 0644 \
+    "$PROJECT_DIR/deploy/systemd/interview-boss-eval-worker.timer" \
+    "$unit_dir/interview-boss-eval-worker.timer"
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now interview-boss-eval-worker.timer
+  log "Eval Worker timer 已安装并启用"
+}
+
+do_eval_worker_status() {
+  local db_path="$PROJECT_DIR/backend/data/interview-boss.db"
+  log "Eval Worker systemd 状态："
+  systemctl is-enabled interview-boss-eval-worker.timer 2>/dev/null || true
+  systemctl is-active interview-boss-eval-worker.timer 2>/dev/null || true
+  echo ""
+  log "Eval Worker 容器状态："
+  docker compose --profile eval ps eval-worker || true
+  echo ""
+  log "Eval Run 队列诊断："
+  if [ -f "$db_path" ]; then
+    DB_PATH="$db_path" python3 - <<'PY'
+import os
+import sqlite3
+
+path = os.environ["DB_PATH"]
+with sqlite3.connect(path) as conn:
+    conn.row_factory = sqlite3.Row
+    counts = {
+        row["status"]: row["count"]
+        for row in conn.execute(
+            "SELECT status, COUNT(*) AS count FROM eval_runs GROUP BY status"
+        )
+    }
+    try:
+        heartbeat = conn.execute(
+            "SELECT status, last_seen_at, last_error "
+            "FROM worker_heartbeats WHERE worker_name = 'eval-worker'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        heartbeat = None
+    active = sum(counts.get(status, 0) for status in ("created", "queued", "running"))
+    if active == 0:
+        state = "queue_empty"
+    elif heartbeat is None or heartbeat["status"] != "online":
+        state = "worker_offline"
+    else:
+        state = "worker_online"
+    stale = conn.execute(
+        "SELECT COUNT(*) FROM eval_runs "
+        "WHERE status IN ('created', 'queued') "
+        "AND created_at < datetime('now', '-10 minutes')"
+    ).fetchone()[0]
+    if active and stale:
+        state = "queued_stuck"
+    print({"queue_state": state, "stale_queued_count": stale, "counts": counts, "heartbeat": dict(heartbeat) if heartbeat else None})
+PY
+  else
+    warn "数据库不存在: $db_path"
+  fi
+}
+
 # ── 备份数据 ──
 # SQLite WAL 模式在线备份：裸 cp 会漏掉 -wal 中未 checkpoint 的已提交事务且可能撕裂文件，
 # 必须用 sqlite 在线备份 API（.backup / python backup）。
@@ -660,6 +727,8 @@ case "$MODE" in
   worker-down)     check_docker; do_worker_down ;;
   worker-restart)  check_docker; do_worker_restart ;;
   worker-logs)     check_docker; do_logs worker ;;
+  eval-worker-install) check_docker; do_eval_worker_install ;;
+  eval-worker-status)  check_docker; do_eval_worker_status ;;
   test)            check_docker; do_test "${@:2}" ;;
   check)           check_docker; do_check "${@:2}" ;;
   backup)          check_docker; do_backup ;;
@@ -689,8 +758,10 @@ case "$MODE" in
     echo "  frontend        快速更新前端（npm build + docker cp，跳过镜像构建）"
     echo "  worker-up       按需启动 Worker"
     echo "  worker-down     停止并移除 Worker 容器"
-    echo "  worker-restart  重建 app 镜像并重启 Worker"
-    echo "  worker-logs     查看 Worker 日志"
+  echo "  worker-restart  重建 app 镜像并重启 Worker"
+  echo "  worker-logs     查看 Worker 日志"
+  echo "  eval-worker-install 安装并启用 Eval Worker systemd timer"
+  echo "  eval-worker-status  查看 timer、容器、队列与 heartbeat 状态"
     echo "  test            运行 pytest 测试（可传入 pytest 参数）"
     echo "  check [backend|frontend|audit]  运行日常质量门禁（audit 只报告不拦截）"
     echo "  backup          备份数据库和 Redis 数据"

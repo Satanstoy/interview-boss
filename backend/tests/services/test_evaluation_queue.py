@@ -54,4 +54,5 @@ def test_eval_worker_has_low_concurrency_and_separate_queue():
     assert settings.queue_name == queue.EVAL_QUEUE_NAME
     assert settings.max_jobs == 1
     assert settings.queue_read_limit == 1
+    assert settings.max_tries == 3
     assert worker.eval_run_task in settings.functions
