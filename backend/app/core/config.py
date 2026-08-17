@@ -18,7 +18,6 @@ ENV_PATH = os.path.join(
 
 
 _RUNTIME_SECRET_MIN_LENGTHS = {
-    "ADMIN_PASSWORD": 16,
     "JWT_SECRET": 32,
     "OAUTH_SECRET_KEY": 32,
 }

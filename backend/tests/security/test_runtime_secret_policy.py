@@ -21,15 +21,14 @@ def test_runtime_secret_policy_accepts_strong_production_values():
     validator(_valid_production_env())
 
 
-def test_runtime_secret_policy_rejects_short_admin_password():
+def test_runtime_secret_policy_allows_existing_admin_password_length():
     validator = getattr(config, "validate_runtime_secrets", None)
     assert callable(validator)
 
     env = _valid_production_env()
-    env["ADMIN_PASSWORD"] = "short-password"
+    env["ADMIN_PASSWORD"] = "legacy-pass"
 
-    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD"):
-        validator(env)
+    validator(env)
 
 
 def test_runtime_secret_policy_rejects_short_signing_secret():

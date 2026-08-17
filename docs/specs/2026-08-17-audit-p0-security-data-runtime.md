@@ -11,18 +11,20 @@
 
 ## Task P0-A：密钥与管理员密码安全
 
+> 产品决定：不把 `ADMIN_PASSWORD` 的 16 位长度作为生产启动硬门槛；启动时仍校验 JWT/OAuth 签名密钥长度，管理员密码是否为空继续由管理员初始化逻辑处理。
+
 **Files**
 
 - Modify: `backend/app/core/config.py`、`backend/app/db/migrations/auth.py`
 - Test: `backend/tests/security/test_runtime_secret_policy.py`
 - Docs: `docs/runbooks/secret-rotation.md`
 
-- [ ] RED：测试 `ADMIN_PASSWORD` 少于 16 个字符时配置校验失败；测试 JWT/OAuth/第三方 key 只从环境变量读取。
-- [ ] GREEN：增加统一 secret policy 校验；禁止弱管理员密码和生产默认值。
+- [x] RED：测试现有长度的 `ADMIN_PASSWORD` 可以启动；测试 JWT/OAuth/第三方 key 只从环境变量读取。
+- [x] GREEN：增加统一 secret policy 校验，但不在启动阶段强制管理员密码长度。
 - [ ] REFACTOR：将启动校验与错误信息集中到配置模块，避免各模块重复判断。
 - [ ] 运维步骤：轮换并撤销旧 SiliconFlow key；用 `git filter-repo` 清理可达历史；使用 gitleaks 全史扫描。
 
-**Done when**：弱密码测试通过、配置错误在启动时明确失败、runbook 包含轮换/历史清理/验证/回滚步骤，且仓库不写入任何真实 secret。
+**Done when**：签名密钥配置错误在启动时明确失败，管理员初始化仍拒绝空密码，runbook 包含轮换/历史清理/验证/回滚步骤，且仓库不写入任何真实 secret。
 
 ## Task P0-B：数据库 FK 孤儿修复与迁移保护
 

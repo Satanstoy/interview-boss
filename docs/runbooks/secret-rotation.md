@@ -21,7 +21,7 @@
    ./deploy/docker-deploy.sh backup
    ```
 
-3. 生成符合生产策略的新值：`ADMIN_PASSWORD` 至少 16 个字符，`JWT_SECRET_KEY` 和 OAuth/第三方 key 至少 32 个字符；使用密码管理器或 secret manager 保存。
+3. 生成轮换值：`ADMIN_PASSWORD` 需要配置且保持可用，`JWT_SECRET_KEY` 和 OAuth/第三方 key 至少 32 个字符；使用密码管理器或 secret manager 保存。
 4. 检查仓库工作树和当前部署配置，确认新值只会通过环境变量或 secret manager 注入：
 
    ```bash
