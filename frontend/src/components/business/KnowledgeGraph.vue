@@ -1,9 +1,9 @@
 <template>
-  <div class="overflow-hidden rounded-3xl bg-[#081F5C] text-[#EDEFF1]">
+  <div :style="{ background: t.bg, color: t.txt }" class="overflow-hidden rounded-3xl">
     <div class="flex flex-col gap-3 px-5 pt-5 sm:flex-row sm:items-start sm:justify-between sm:px-7 sm:pt-7">
       <div>
         <h2 class="text-lg font-bold tracking-tight">{{ graphHeadline }}</h2>
-        <p class="mt-1 text-xs text-[#9EB3CD]">
+        <p :style="{ color: t.faint }" class="mt-1 text-xs">
           {{ categoryCount }} 个主题自组织 · 节点面积 = 题目数 · 拖拽探索 · 悬停聚焦邻接关系
         </p>
       </div>
@@ -11,7 +11,8 @@
         v-if="nodeCount > 0"
         variant="outline"
         size="sm"
-        class="self-start border-[#4D82C6] bg-transparent text-[#EDEFF1] hover:bg-[#0F2B66] hover:text-white"
+        :style="{ borderColor: t.faint2, color: t.txt }"
+        class="self-start bg-transparent hover:bg-[#0F2B66] hover:text-white"
         @click="resetView"
       >
         <RotateCcw class="h-3.5 w-3.5" />
@@ -19,13 +20,13 @@
       </Button>
     </div>
 
-    <div v-if="isLoading" class="flex min-h-[520px] flex-col items-center justify-center gap-3 text-[#9EB3CD]">
+    <div v-if="isLoading" :style="{ color: t.faint }" class="flex min-h-[520px] flex-col items-center justify-center gap-3">
       <LoaderCircle class="h-7 w-7 animate-spin" />
       <p class="text-sm">正在组织知识关系…</p>
     </div>
 
-    <div v-else-if="nodeCount === 0" class="flex min-h-[520px] flex-col items-center justify-center gap-1 text-center text-[#9EB3CD]">
-      <p class="text-base font-semibold text-[#EDEFF1]">还没有形成知识网络</p>
+    <div v-else-if="nodeCount === 0" :style="{ color: t.faint }" class="flex min-h-[520px] flex-col items-center justify-center gap-1 text-center">
+      <p :style="{ color: t.txt }" class="text-base font-semibold">还没有形成知识网络</p>
       <p class="text-sm">请先导入面经数据并完成聚类。</p>
     </div>
 
@@ -37,7 +38,7 @@
       aria-label="可拖拽的知识点力导向网络"
     />
 
-    <div v-if="nodeCount > 0" class="flex flex-wrap items-center justify-between gap-2 px-5 pb-5 text-[10px] font-medium uppercase tracking-[0.1em] text-[#6C93C7] sm:px-7 sm:pb-6">
+    <div v-if="nodeCount > 0" :style="{ color: t.faint }" class="flex flex-wrap items-center justify-between gap-2 px-5 pb-5 text-[10px] font-medium uppercase tracking-[0.1em] sm:px-7 sm:pb-6">
       <span>Force Graph · B2 · Knowledge clusters · Porcelain</span>
       <span>{{ nodeCount }} nodes · {{ linkCount }} links</span>
     </div>
@@ -54,7 +55,9 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { Button } from '@/components/ui/button'
 import { fetchKnowledgeGraph } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
-import { RAMP_DARK } from '@/utils/chartTokens.js'
+import { PORCELAIN, RAMP_DARK } from '@/utils/chartTokens.js'
+
+const t = PORCELAIN.dark
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
@@ -91,10 +94,10 @@ function buildOption({ nodes, links }) {
     animationEasing: 'quarticOut',
     tooltip: {
       confine: true,
-      backgroundColor: '#F7F2EB',
+      backgroundColor: PORCELAIN.light.bg,
       borderWidth: 0,
       padding: [10, 14],
-      textStyle: { color: '#081F5C', fontSize: 12 },
+      textStyle: { color: PORCELAIN.light.txt, fontSize: 12 },
       formatter: (params) => {
         if (params.dataType === 'node') {
           const data = params.data
@@ -136,13 +139,13 @@ function buildOption({ nodes, links }) {
             : Math.min(30, 4 + Math.sqrt(value) * 4.2),
           itemStyle: {
             color: rampByImportance(value, maxSize, isHub),
-            borderColor: '#081F5C',
+            borderColor: t.bg,
             borderWidth: isHub ? 2 : 0,
           },
           label: {
             show: isHub,
             position: isHub ? 'inside' : 'right',
-            color: isHub ? '#081F5C' : '#EDEFF1',
+            color: isHub ? t.bg : t.txt,
             fontSize: isHub ? 10 : 9,
             fontWeight: isHub ? 800 : 600,
             formatter: ({ name }) => name.length > 8 ? `${name.slice(0, 8)}…` : name,
@@ -159,22 +162,22 @@ function buildOption({ nodes, links }) {
         _targetName: link.target.split(':')[1] || link.target,
         lineStyle: {
           width: Math.max(0.7, Math.sqrt(Number(link.weight) || 0) * 0.8),
-          color: '#4D82C6',
+          color: t.faint2,
           opacity: 0.42,
           curveness: 0.08,
         },
       })),
       emphasis: {
         focus: 'adjacency',
-        lineStyle: { color: '#EDEFF1', opacity: 0.95, width: 1.8 },
-        label: { show: true, color: '#EDEFF1', position: 'right', fontSize: 10, fontWeight: 700 },
+        lineStyle: { color: t.txt, opacity: 0.95, width: 1.8 },
+        label: { show: true, color: t.txt, position: 'right', fontSize: 10, fontWeight: 700 },
       },
       blur: {
         itemStyle: { opacity: 0.1 },
         lineStyle: { opacity: 0.03 },
         label: { show: false },
       },
-      lineStyle: { color: '#4D82C6', opacity: 0.42, curveness: 0.08 },
+      lineStyle: { color: t.faint2, opacity: 0.42, curveness: 0.08 },
     }],
   }
 }
