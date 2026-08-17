@@ -105,24 +105,13 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
     except OutboundURLBlocked as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # 接口类型校验：必须在端点能力矩阵支持的格式内
+    # 接口类型只校验枚举，不按 URL 静态拒绝显式协议。
+    # 自定义网关常常复用普通 /v1 URL，真实兼容性由连接探测/首次请求验证。
     if api_format not in ("auto", "chat", "responses", "anthropic"):
         raise HTTPException(
             status_code=400,
             detail="接口类型无效，可选：auto / chat / responses / anthropic",
         )
-    if api_format != "auto":
-        from app.services.llm import get_provider_formats
-
-        supported = get_provider_formats(final_base_url)
-        if api_format not in supported:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"该端点不支持 {api_format} 接口，仅支持："
-                    f"{', '.join(supported)}。请检查 Base URL 与接口类型是否匹配"
-                ),
-            )
 
     if timeout is not None:
         try:

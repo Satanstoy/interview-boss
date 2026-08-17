@@ -38,6 +38,12 @@ def _patch_config(monkeypatch, cfg):
         "app.core.outbound_url.assert_safe_outbound_url_sync",
         lambda url: None,
     )
+    # llm.py imports this guard directly, so patch the module alias as well;
+    # otherwise DNS resolution inside the Docker test network makes the test flaky.
+    monkeypatch.setattr(
+        "app.services.llm.assert_safe_outbound_url_sync",
+        lambda url: None,
+    )
 
 
 def _fail_probe(mock_llm, exc):

@@ -42,6 +42,10 @@ _RETRYABLE_EXCEPTIONS = (
 # 全局默认 client（openai 或 anthropic 类型）
 client = None
 
+_SUPPORTED_API_FORMATS = ("chat", "responses", "anthropic")
+_API_FORMAT_CACHE_TTL = 600
+_api_format_cache: dict[tuple, tuple[str, float]] = {}
+
 
 # --------------- 提供商检测 ---------------
 
@@ -51,9 +55,80 @@ def _detect_provider(base_url: str) -> str:
     if not base_url:
         return "openai"
     lower = base_url.lower()
-    if "anthropic" in lower:
+    hostname = _provider_hostname(base_url)
+    path = urlsplit(lower if "://" in lower else f"//{lower}").path
+    if hostname == "api.anthropic.com" or "/anthropic" in path:
         return "anthropic"
     return "openai"
+
+
+def _provider_for_api_format(api_format: str | None) -> str | None:
+    """将协议格式映射为 SDK provider；OpenAI 的两种格式共用一个 SDK。"""
+    if api_format == "anthropic":
+        return "anthropic"
+    if api_format in ("chat", "responses"):
+        return "openai"
+    return None
+
+
+def _normalise_api_format(value: str | None) -> str:
+    value = (value or "auto").strip().lower()
+    return value if value in ("auto", *_SUPPORTED_API_FORMATS) else "auto"
+
+
+def _endpoint_api_format_hint(base_url: str | None, model: str | None = None) -> str | None:
+    """仅从明确的 endpoint/provider 线索推断格式，不把普通域名当作事实。"""
+    lower = (base_url or "").lower().rstrip("/")
+    path = urlsplit(lower if "://" in lower else f"//{lower}").path
+    if _provider_hostname(base_url) == "api.anthropic.com" or "/anthropic" in path or "/messages" in path:
+        return "anthropic"
+    if "/responses" in path:
+        return "responses"
+    if "/chat/completions" in path:
+        return "chat"
+    return None
+
+
+def _explicit_api_format(
+    base_url: str | None = None, user_id: int | None = None, llm_scope: str = "user"
+) -> str | None:
+    """返回用户/环境明确指定的格式；auto 和无效值返回 None。"""
+    if user_id is not None and llm_scope != "global":
+        try:
+            from app.core.config import get_user_llm_config
+
+            configured = _normalise_api_format(
+                (get_user_llm_config(user_id) or {}).get("api_format")
+            )
+            if configured != "auto":
+                return configured
+        except Exception:
+            pass
+    override = _normalise_api_format(_api_format_override())
+    return override if override != "auto" else None
+
+
+def llm_config_fingerprint(cfg: dict | None) -> tuple:
+    """生成会影响连通性/协议选择的配置指纹。"""
+    cfg = cfg or {}
+    return (
+        cfg.get("api_key"),
+        cfg.get("base_url"),
+        cfg.get("model"),
+        _normalise_api_format(cfg.get("api_format")),
+    )
+
+
+def clear_api_format_cache(base_url: str | None = None, model: str | None = None):
+    """清理自动协议探测缓存；传 endpoint/model 时只清理匹配项。"""
+    if base_url is None and model is None:
+        _api_format_cache.clear()
+        return
+    for key in list(_api_format_cache):
+        if (base_url is None or key[1] == base_url) and (
+            model is None or key[2] == model
+        ):
+            _api_format_cache.pop(key, None)
 
 
 def _is_mimo(base_url: str | None) -> bool:
@@ -136,6 +211,14 @@ def get_provider_capabilities(base_url: str = None) -> dict:
     return dict(_DEFAULT_CAPS)
 
 
+def _has_named_provider_capability(base_url: str | None) -> bool:
+    hostname = _provider_hostname(base_url)
+    return any(
+        prefix != "*" and hostname == prefix
+        for prefix, _caps in _PROVIDER_CAPABILITIES
+    )
+
+
 def get_provider_formats(base_url: str = None) -> list[str]:
     """返回端点支持的接口格式列表（chat / responses / anthropic）。"""
     return list(get_provider_capabilities(base_url).get("api_formats", ["chat"]))
@@ -144,6 +227,142 @@ def get_provider_formats(base_url: str = None) -> list[str]:
 def _api_format_override() -> str:
     """接口格式应急开关：chat / responses / anthropic / auto（默认）"""
     return os.environ.get("LLM_API_FORMAT", "auto").strip().lower()
+
+
+def _api_format_cache_key(
+    api_key: str | None, base_url: str | None, model: str | None
+) -> tuple:
+    return (api_key or "", base_url or "", model or "")
+
+
+def _cache_api_format(
+    api_key: str | None, base_url: str | None, model: str | None, api_format: str
+):
+    _api_format_cache[_api_format_cache_key(api_key, base_url, model)] = (
+        api_format,
+        time.time(),
+    )
+
+
+def _cached_api_format(
+    api_key: str | None, base_url: str | None, model: str | None
+) -> str | None:
+    cached = _api_format_cache.get(_api_format_cache_key(api_key, base_url, model))
+    if not cached:
+        return None
+    if time.time() - cached[1] >= _API_FORMAT_CACHE_TTL:
+        _api_format_cache.pop(_api_format_cache_key(api_key, base_url, model), None)
+        return None
+    return cached[0]
+
+
+def _is_endpoint_mismatch(exc: Exception) -> bool:
+    """只有明确的路由不存在错误才允许探测下一个协议。"""
+    return getattr(exc, "status_code", None) in (404, 405, 415)
+
+
+async def _probe_api_format(client, model: str, timeout: float, api_format: str):
+    """用不带工具/提示词的最小请求验证单一协议。"""
+    wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
+    if api_format == "anthropic":
+        request = client.messages.create(
+            model=model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    elif api_format == "responses":
+        request = client.responses.create(
+            model=model,
+            input="ping",
+            max_output_tokens=1,
+        )
+    else:
+        request = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+        )
+    return await asyncio.wait_for(request, timeout=wait_for)
+
+
+async def resolve_api_format_async(
+    client,
+    model: str,
+    timeout: float,
+    base_url: str | None,
+    provider: str,
+    *,
+    api_key: str | None = None,
+    user_id: int | None = None,
+    llm_scope: str = "user",
+    _return_probe_error: bool = False,
+) -> str | tuple[str, Exception | None, bool]:
+    """解析协议：显式配置 → 缓存 → 明确 endpoint hint → 最小探测 → Chat。
+
+    探测只在无法从配置/endpoint 确定协议时执行，且只有 404/405/415 才会尝试
+    下一个协议；认证、限流、超时和参数错误直接抛出，避免重复计费或掩盖故障。
+    """
+    def result(
+        api_format: str,
+        probe_error: Exception | None = None,
+        probed: bool = False,
+    ):
+        if _return_probe_error:
+            return api_format, probe_error, probed
+        return api_format
+
+    explicit = _explicit_api_format(base_url, user_id, llm_scope)
+    if explicit:
+        return result(explicit)
+
+    if api_key is None and user_id is not None and llm_scope != "global":
+        try:
+            from app.core.config import get_user_llm_config
+
+            api_key = (get_user_llm_config(user_id) or {}).get("api_key")
+        except Exception:
+            pass
+
+    cached = _cached_api_format(api_key, base_url, model)
+    if cached:
+        return result(cached)
+
+    hint = _endpoint_api_format_hint(base_url, model)
+    if hint:
+        _cache_api_format(api_key, base_url, model, hint)
+        return result(hint)
+
+    static_formats = get_provider_formats(base_url)
+    if _has_named_provider_capability(base_url) and len(static_formats) == 1:
+        detected = static_formats[0]
+        _cache_api_format(api_key, base_url, model, detected)
+        return result(detected)
+
+    # 已知同时支持 Chat/Responses 的官方或网关端点保持历史稳定默认值；
+    # 只有未知端点才需要实际探测，避免每个请求额外消耗一次 token。
+    if _has_named_provider_capability(base_url) and "chat" in static_formats:
+        _cache_api_format(api_key, base_url, model, "chat")
+        return result("chat")
+
+    candidates = ["chat", "responses"]
+    if provider == "anthropic":
+        candidates = ["anthropic"]
+    last_mismatch = None
+    for candidate in candidates:
+        try:
+            await _probe_api_format(client, model, timeout, candidate)
+        except Exception as exc:
+            if _is_endpoint_mismatch(exc):
+                last_mismatch = exc
+                continue
+            raise
+        _cache_api_format(api_key, base_url, model, candidate)
+        return result(candidate, probed=True)
+
+    if last_mismatch:
+        logger.warning("LLM endpoint did not advertise a supported protocol; falling back to chat")
+    _cache_api_format(api_key, base_url, model, "chat")
+    return result("chat", last_mismatch, probed=last_mismatch is not None)
 
 
 def resolve_api_format(
@@ -155,23 +374,19 @@ def resolve_api_format(
     端点能力（anthropic 端点用 anthropic；responses-only 端点用 responses；
     其余默认 chat）。
     """
-    if user_id is not None and llm_scope != "global":
-        try:
-            from app.core.config import get_user_llm_config
-
-            user_cfg = get_user_llm_config(user_id)
-            user_format = (user_cfg or {}).get("api_format")
-            if user_format and user_format != "auto":
-                return user_format
-        except Exception:
-            pass
-    override = _api_format_override()
-    if override in ("chat", "responses", "anthropic"):
-        return override
+    explicit = _explicit_api_format(base_url, user_id, llm_scope)
+    if explicit:
+        return explicit
     if base_url is None:
         from app.core.config import LLM_BASE_URL
 
         base_url = LLM_BASE_URL
+    cached = _cached_api_format(None, base_url, None)
+    if cached:
+        return cached
+    hint = _endpoint_api_format_hint(base_url)
+    if hint:
+        return hint
     formats = get_provider_formats(base_url)
     if "anthropic" in formats:
         return "anthropic"
@@ -205,8 +420,15 @@ def _should_use_response_format(base_url: str = None) -> bool:
     return get_provider_capabilities(base_url)["json_mode"]
 
 
-def _make_client(api_key: str, base_url: str, timeout: float, provider: str = "openai"):
+def _make_client(
+    api_key: str,
+    base_url: str,
+    timeout: float,
+    provider: str = "openai",
+    api_format: str | None = None,
+):
     """根据 provider 创建对应的 LLM 客户端。"""
+    provider = _provider_for_api_format(api_format) or provider
     if base_url:
         assert_safe_outbound_url_sync(base_url)
     http_client = httpx.AsyncClient(follow_redirects=False)
@@ -229,12 +451,14 @@ def _init_global_client():
     """初始化全局 client（从环境变量读取）。"""
     global client
     base_url = os.environ.get("OPENAI_BASE_URL")
-    provider = _detect_provider(base_url)
+    api_format = _explicit_api_format(base_url)
+    provider = _provider_for_api_format(api_format) or _detect_provider(base_url)
     client = _make_client(
         api_key=os.environ.get("OPENAI_API_KEY"),
         base_url=base_url,
         timeout=LLM_TIMEOUT,
         provider=provider,
+        api_format=api_format,
     )
 
 
@@ -246,9 +470,16 @@ def rebuild_clients():
     global client
     from app.core.config import LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT as _TIMEOUT
 
-    provider = _detect_provider(LLM_BASE_URL)
-    client = _make_client(LLM_API_KEY or None, LLM_BASE_URL or None, _TIMEOUT, provider)
-    logger.info(f"LLM 客户端已重建（provider={provider}）")
+    api_format = _explicit_api_format(LLM_BASE_URL)
+    provider = _provider_for_api_format(api_format) or _detect_provider(LLM_BASE_URL)
+    client = _make_client(
+        LLM_API_KEY or None,
+        LLM_BASE_URL or None,
+        _TIMEOUT,
+        provider,
+        api_format=api_format,
+    )
+    logger.info(f"LLM 客户端已重建（provider={provider}, api_format={api_format or 'auto'}）")
 
 
 # --------------- Per-user client 缓存 ---------------
@@ -286,12 +517,25 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     base_url = cfg["base_url"]
     model = cfg["model"]
     timeout = cfg["timeout"]
-    provider = _detect_provider(base_url)
+    configured_format = _normalise_api_format(cfg.get("api_format"))
+    override_format = _normalise_api_format(_api_format_override())
+    client_api_format = (
+        configured_format
+        if configured_format != "auto"
+        else override_format if override_format != "auto" else None
+    )
+    provider = _provider_for_api_format(client_api_format) or _detect_provider(base_url)
 
     # 全局配置从 user_profile 热加载，直接按当前解析结果建 client，避免
     # 复用某个管理员账号的 user_llm_config 或陈旧的用户 client。
     if llm_scope == "global":
-        global_client = _make_client(api_key, base_url, timeout, provider)
+        global_client = _make_client(
+            api_key,
+            base_url,
+            timeout,
+            provider,
+            api_format=client_api_format,
+        )
         return global_client, model, timeout, base_url, provider
 
     # 检查缓存（配置未变则复用 client）
@@ -301,10 +545,17 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
         and cached[0] == api_key
         and cached[1] == base_url
         and cached[2] == timeout
+        and cached[5] == client_api_format
     ):
         return cached[3], model, timeout, base_url, cached[4]
 
-    user_client = _make_client(api_key, base_url, timeout, provider)
+    user_client = _make_client(
+        api_key,
+        base_url,
+        timeout,
+        provider,
+        api_format=client_api_format,
+    )
 
     # 缓存淘汰：超过上限时清除最旧的一半
     if len(_user_client_cache) >= _MAX_USER_CLIENT_CACHE:
@@ -312,7 +563,14 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
         for k in keys[: len(keys) // 2]:
             _user_client_cache.pop(k, None)
 
-    _user_client_cache[user_id] = (api_key, base_url, timeout, user_client, provider)
+    _user_client_cache[user_id] = (
+        api_key,
+        base_url,
+        timeout,
+        user_client,
+        provider,
+        client_api_format,
+    )
     return user_client, model, timeout, base_url, provider
 
 
@@ -367,7 +625,20 @@ async def _probe_resolved(client, model, timeout, base_url, provider, user_id=No
     """向给定的 client/model 发最小请求验证可用性，返回 (connected, error)。"""
     wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
     try:
-        if provider == "anthropic":
+        api_format, probe_error, probed = await resolve_api_format_async(
+            client,
+            model=model,
+            timeout=timeout,
+            base_url=base_url,
+            provider=provider,
+            user_id=user_id,
+            _return_probe_error=True,
+        )
+        if probe_error is not None:
+            return False, _classify_probe_error(probe_error)
+        if probed:
+            return True, None
+        if api_format == "anthropic":
             await asyncio.wait_for(
                 client.messages.create(
                     model=model,
@@ -376,7 +647,7 @@ async def _probe_resolved(client, model, timeout, base_url, provider, user_id=No
                 ),
                 timeout=wait_for,
             )
-        elif resolve_api_format(base_url, user_id) == "responses":
+        elif api_format == "responses":
             await asyncio.wait_for(
                 client.responses.create(
                     model=model,
@@ -424,8 +695,21 @@ async def check_global_llm_status() -> dict:
     model = cfg.get("model")
     timeout = cfg.get("timeout") or 120
     base_url = cfg.get("base_url")
-    provider = _detect_provider(base_url)
-    client = _make_client(cfg["api_key"], base_url, timeout, provider)
+    configured_format = _normalise_api_format(cfg.get("api_format"))
+    override_format = _normalise_api_format(_api_format_override())
+    api_format = (
+        configured_format
+        if configured_format != "auto"
+        else override_format if override_format != "auto" else None
+    )
+    provider = _provider_for_api_format(api_format) or _detect_provider(base_url)
+    client = _make_client(
+        cfg["api_key"],
+        base_url,
+        timeout,
+        provider,
+        api_format=api_format,
+    )
     connected, error = await _probe_resolved(client, model, timeout, base_url, provider)
     return {"configured": True, "connected": connected, "error": error, "model": model}
 
@@ -450,7 +734,7 @@ async def check_llm_status(user_id: int, force_probe: bool = False) -> dict:
             "model": None,
         }
 
-    fingerprint = (cfg.get("api_key"), cfg.get("base_url"), cfg.get("model"))
+    fingerprint = llm_config_fingerprint(cfg)
     now = time.time()
     cached = _llm_status_cache.get(user_id)
     if (
@@ -516,7 +800,8 @@ async def _llm_with_tools_call(
     api_format: str | None = None,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
-    if provider == "anthropic":
+    api_format = api_format or resolve_api_format(base_url, user_id)
+    if api_format == "anthropic":
         anthropic_tools = _convert_tools_to_anthropic(tools) if tools else []
         call_kwargs = dict(
             model=model,
@@ -555,7 +840,7 @@ async def _llm_with_tools_call(
         }
 
     # OpenAI path（chat 或 responses）
-    if resolve_api_format(base_url, user_id) == "responses":
+    if api_format == "responses":
         caps = get_provider_capabilities(base_url)
         if not system_text:
             system_text = "\n\n".join(
@@ -652,6 +937,14 @@ async def llm_with_tools(
         user_id
     )
     model = kwargs.pop("model", None) or model
+    api_format = await resolve_api_format_async(
+        resolved_client,
+        model=model,
+        timeout=timeout,
+        base_url=base_url,
+        provider=provider,
+        user_id=user_id,
+    )
     max_tokens = kwargs.get("max_tokens", 4096)
     temperature = kwargs.get("temperature", 0.7)
     tool_choice = kwargs.get("tool_choice")
@@ -660,7 +953,7 @@ async def llm_with_tools(
     prompt_cache_options = kwargs.get("prompt_cache_options")
 
     # Anthropic 需要预先转换消息格式
-    if provider == "anthropic":
+    if api_format == "anthropic":
         system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(
             messages
         )
@@ -679,6 +972,7 @@ async def llm_with_tools(
             cache_control=cache_control,
             prompt_cache_key=prompt_cache_key,
             prompt_cache_options=prompt_cache_options,
+            api_format=api_format,
         )
 
     return await _llm_with_tools_call(
@@ -696,6 +990,7 @@ async def llm_with_tools(
         cache_control=cache_control,
         prompt_cache_key=prompt_cache_key,
         prompt_cache_options=prompt_cache_options,
+        api_format=api_format,
     )
 
 
@@ -842,9 +1137,13 @@ async def _call_anthropic(
 
 def _extract_anthropic_text(response) -> str:
     """从 Anthropic 响应中提取文本，兼容 ThinkingBlock / TextBlock。"""
+    parts = []
     for block in response.content:
-        if hasattr(block, "text"):
-            return block.text.strip()
+        text = getattr(block, "text", None)
+        if text:
+            parts.append(text)
+    if parts:
+        return "".join(parts).strip()
     # fallback：拼接所有 block 的 str
     return "".join(str(b) for b in response.content).strip()
 
@@ -892,13 +1191,37 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
                     }
                 )
             continue
+        content = msg.get("content", "") or ""
+        if isinstance(content, str):
+            response_content = [{"type": "input_text", "text": content}]
+        else:
+            response_content = []
+            for block in content:
+                block_type = block.get("type")
+                if block_type in ("text", "input_text"):
+                    response_content.append(
+                        {"type": "input_text", "text": block.get("text", "")}
+                    )
+                elif block_type in ("image_url", "input_image"):
+                    image = block.get("image_url") or block.get("url")
+                    detail = block.get("detail")
+                    if isinstance(image, dict):
+                        detail = detail or image.get("detail")
+                        image = image.get("url")
+                    image_item = {"type": "input_image", "image_url": image}
+                    if detail:
+                        image_item["detail"] = detail
+                    response_content.append(image_item)
+                else:
+                    # 保留未知内容的可读文本，避免静默丢失用户输入。
+                    response_content.append(
+                        {"type": "input_text", "text": str(block)}
+                    )
         items.append(
             {
                 "type": "message",
                 "role": role or "user",
-                "content": [
-                    {"type": "input_text", "text": str(msg.get("content", "") or "")}
-                ],
+                "content": response_content,
             }
         )
     return items
@@ -997,28 +1320,48 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
         user_id
     )
+    requested_model = kwargs.get("model") or model
+    api_format = await resolve_api_format_async(
+        resolved_client,
+        model=requested_model,
+        timeout=timeout,
+        base_url=base_url,
+        provider=provider,
+        user_id=user_id,
+    )
 
     # 处理 model=None 的情况，使用默认模型
     if kwargs.get("model") is None:
         kwargs["model"] = model
 
-    if provider == "anthropic":
+    if api_format == "anthropic":
         messages = kwargs.get("messages", [])
         system_text, anthropic_msgs = _convert_openai_messages_to_anthropic(messages)
         response_format = kwargs.get("response_format")
-        system_msg = system_text or "你是一个后端和算法面试指导专家。"
-        if response_format and response_format.get("type") == "json_object":
-            system_msg += (
-                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
+        passthrough = {
+            key: kwargs[key]
+            for key in (
+                "top_p",
+                "top_k",
+                "stop_sequences",
+                "metadata",
+                "service_tier",
+                "thinking",
+                "cache_control",
             )
-        response = await resolved_client.messages.create(
-            model=kwargs["model"],
-            max_tokens=kwargs.get("max_tokens", 8192),
-            system=system_msg,
+            if kwargs.get(key) is not None
+        }
+        return await _call_anthropic(
+            resolved_client,
+            kwargs["model"],
+            timeout,
+            system_msg=system_text or "你是一个后端和算法面试指导专家。",
             messages=anthropic_msgs,
             temperature=kwargs.get("temperature", 0.3),
+            response_format=response_format,
+            max_tokens=kwargs.get("max_tokens", 8192),
+            **passthrough,
         )
-        return _extract_anthropic_text(response)
 
     caps = get_provider_capabilities(base_url)
     response_format = kwargs.get("response_format")
@@ -1034,7 +1377,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
                 }
                 kwargs["messages"] = msgs
 
-    if resolve_api_format(base_url, user_id) == "responses":
+    if api_format == "responses":
         # Responses API 路径：messages → input、system → instructions
         messages = kwargs.get("messages", [])
         system_text = ""
@@ -1129,7 +1472,17 @@ async def _call_llm_with_retry(
     if model:
         resolved_model = model
 
-    if provider == "anthropic":
+    api_format = await resolve_api_format_async(
+        resolved_client,
+        model=resolved_model,
+        timeout=timeout,
+        base_url=base_url,
+        provider=provider,
+        user_id=user_id,
+        llm_scope=llm_scope,
+    )
+
+    if api_format == "anthropic":
         return await _call_anthropic(
             resolved_client,
             resolved_model,
@@ -1152,7 +1505,7 @@ async def _call_llm_with_retry(
         except Exception:
             thinking = False
 
-    if resolve_api_format(base_url, user_id, llm_scope=llm_scope) == "responses":
+    if api_format == "responses":
         caps = get_provider_capabilities(base_url)
         if response_format and _should_use_response_format(base_url):
             return await _call_responses(
@@ -1219,26 +1572,52 @@ async def _call_llm_with_retry_messages(
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
         user_id
     )
+    requested_model = kwargs.get("model") or model
+    api_format = await resolve_api_format_async(
+        resolved_client,
+        model=requested_model,
+        timeout=timeout,
+        base_url=base_url,
+        provider=provider,
+        user_id=user_id,
+    )
 
-    if provider == "anthropic":
+    if api_format == "anthropic":
         system_text, anthropic_msgs = _convert_openai_messages_to_anthropic(messages)
+        response_format = kwargs.get("response_format")
+        passthrough = {
+            key: kwargs[key]
+            for key in (
+                "top_p",
+                "top_k",
+                "stop_sequences",
+                "metadata",
+                "service_tier",
+                "thinking",
+                "cache_control",
+            )
+            if kwargs.get(key) is not None
+        }
         return await _call_anthropic(
             resolved_client,
-            model,
+            requested_model,
             timeout,
             system_msg=system_text or "你是一个后端和算法面试指导专家。",
             messages=anthropic_msgs,
             max_tokens=kwargs.get("max_tokens", 8192),
+            temperature=kwargs.get("temperature", 0.3),
+            response_format=response_format,
+            **passthrough,
         )
 
-    kwargs.setdefault("model", model)
+    kwargs.setdefault("model", requested_model)
     caps = get_provider_capabilities(base_url)
     response_format = kwargs.get("response_format")
     if response_format and not _should_use_response_format(base_url):
         kwargs.pop("response_format", None)
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
-    if resolve_api_format(base_url, user_id) == "responses":
+    if api_format == "responses":
         system_text = ""
         for m in messages:
             if m.get("role") == "system":
@@ -1280,20 +1659,47 @@ async def stream_llm_messages(
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
         user_id
     )
-
     if kwargs.get("model"):
         model = kwargs.pop("model")
+    api_format = await resolve_api_format_async(
+        resolved_client,
+        model=model,
+        timeout=timeout,
+        base_url=base_url,
+        provider=provider,
+        user_id=user_id,
+    )
 
-    if provider == "anthropic":
+    if api_format == "anthropic":
         # Anthropic 流式：转换消息格式
         system_text, anthropic_msgs = _convert_openai_messages_to_anthropic(messages)
-        async with resolved_client.messages.stream(
+        response_format = kwargs.get("response_format")
+        effective_system = system_text or "你是一个后端和算法面试指导专家。"
+        if response_format and response_format.get("type") == "json_object":
+            effective_system += (
+                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
+            )
+        stream_kwargs = dict(
             model=model,
-            system=system_text or "你是一个后端和算法面试指导专家。",
+            system=effective_system,
             messages=anthropic_msgs,
-            max_tokens=kwargs.get("max_tokens", 4096),
+            max_tokens=kwargs.get(
+                "max_tokens", kwargs.get("max_output_tokens", 4096)
+            ),
             temperature=kwargs.get("temperature", 0.7),
-        ) as stream:
+        )
+        for key in (
+            "top_p",
+            "top_k",
+            "stop_sequences",
+            "metadata",
+            "service_tier",
+            "thinking",
+            "cache_control",
+        ):
+            if kwargs.get(key) is not None:
+                stream_kwargs[key] = kwargs[key]
+        async with resolved_client.messages.stream(**stream_kwargs) as stream:
             async for event in stream:
                 # Anthropic 流式事件：检查是否是 ThinkingBlock
                 if hasattr(event, "type"):
@@ -1331,12 +1737,25 @@ async def stream_llm_messages(
     kwargs.setdefault("model", model)
     kwargs.setdefault("temperature", 0.7)
 
-    if resolve_api_format(base_url, user_id) == "responses":
+    if api_format == "responses":
         # Responses API 流式：语义事件
+        caps = get_provider_capabilities(base_url)
+        response_format = kwargs.pop("response_format", None)
+        system_text = "\n".join(
+            str(msg.get("content", ""))
+            for msg in messages
+            if msg.get("role") in ("system", "developer")
+        ).strip()
         kwargs.pop("messages", None)
         kwargs["input"] = kwargs.pop(
             "input", None
         ) or _convert_messages_to_responses_input(messages, "")
+        kwargs.setdefault("instructions", system_text or None)
+        kwargs["max_output_tokens"] = kwargs.pop(
+            "max_output_tokens", kwargs.pop("max_tokens", caps["max_output_tokens"])
+        )
+        if response_format and response_format.get("type") == "json_object":
+            kwargs.setdefault("text", {"format": {"type": "json_object"}})
         stream = await resolved_client.responses.create(stream=True, **kwargs)
         async for event in stream:
             etype = getattr(event, "type", "")

@@ -14,6 +14,10 @@
 | `test_generate_answer_fix.py` | 答案生成修复 |
 | `test_integration_bugs.py` | 集成 bug 回归 |
 | `test_llm_dual_format.py` | LLM 双格式解析（OpenAI/Anthropic） |
+| `test_llm_formats_http.py` | 三协议 HTTP 契约（Chat `/chat/completions`、Responses `/responses`、Anthropic `/messages`）：完整参数、结构化输出、多模态、工具调用/历史、流式 SSE、文本/usage/结束原因解析 |
+| `test_llm_protocol_converters.py` | 三协议内部消息/响应转换：Responses 多模态、Anthropic 多文本块、缓存 usage 归一化 |
+| `test_llm_protocol_detection.py` | 显式协议选择、未知自定义网关自动探测、认证失败不跨协议重试、配置指纹缓存 |
+| `test_llm_protocol_live.py` | 可选真实服务 smoke test；设置 `RUN_LIVE_LLM_TESTS=1` 后按 Chat/Responses/Anthropic 分别运行 |
 | `test_llm_tool_calling.py` | LLM tool calling 兼容 |
 | `test_memory_flush.py` | 记忆刷新 |
 | `test_memory_recall_rules.py` | 记忆召回规则 |
@@ -38,4 +42,14 @@
 
 ```bash
 docker compose --profile test run --rm test uv run pytest backend/tests/services/ -q
+
+# 只跑三协议契约与自动识别回归
+docker compose --profile test run --rm test uv run pytest \
+  backend/tests/services/test_llm_formats_http.py \
+  backend/tests/services/test_llm_protocol_converters.py \
+  backend/tests/services/test_llm_protocol_detection.py -q
+
+# 可选真实接口闭环（需要配置 LLM_TEST_* 环境变量）
+RUN_LIVE_LLM_TESTS=1 docker compose --profile test run --rm test \
+  uv run pytest backend/tests/services/test_llm_protocol_live.py -q
 ```

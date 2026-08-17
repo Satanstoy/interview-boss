@@ -2,9 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
-
-
 def test_migration_creates_llm_api_format_columns(test_db):
     """user_llm_config 应有 api_format / thinking 列"""
     columns = {
@@ -67,8 +64,8 @@ def test_global_llm_scope_ignores_admin_personal_config(monkeypatch):
     )
 
 
-async def test_update_llm_config_rejects_unsupported_api_format(monkeypatch):
-    """mimo OpenAI 端点选 anthropic 接口 → 400 报错"""
+async def test_update_llm_config_accepts_explicit_api_format_for_custom_endpoint(monkeypatch):
+    """显式协议由用户配置负责，不能被 URL 能力矩阵阻止。"""
     from app.routers.profile_pkg.llm import update_my_llm_config
 
     def _exec(fn):
@@ -84,20 +81,19 @@ async def test_update_llm_config_rejects_unsupported_api_format(monkeypatch):
             conn.__exit__.return_value = None
             conn.execute.return_value.fetchone.return_value = None
             mock_get_conn.return_value = conn
-            try:
-                await update_my_llm_config(
-                    {
-                        "llm_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-                        "llm_model": "mimo-v2.5-pro",
-                        "llm_api_format": "anthropic",
-                    },
-                    {"id": 1},
-                )
-                raise AssertionError("应抛出 400")
-            except HTTPException as e:
-                assert e.status_code == 400
-                assert "anthropic" in str(e.detail)
-                assert "chat" in str(e.detail) or "responses" in str(e.detail)
+            result = await update_my_llm_config(
+                {
+                    "llm_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                    "llm_model": "mimo-v2.5-pro",
+                    "llm_api_format": "anthropic",
+                },
+                {"id": 1},
+            )
+
+    assert result["status"] == "success"
+    sql, params = conn.execute.call_args_list[-1][0]
+    assert "api_format" in sql
+    assert "anthropic" in params
 
 
 async def test_update_llm_config_accepts_supported_api_format(monkeypatch):

@@ -58,6 +58,7 @@ async def test_http_chat_full_params(monkeypatch):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/chat/completions")
         captured.update(_body(request))
         return _ok({
             "id": "chatcmpl-1", "object": "chat.completion", "model": "gpt-test",
@@ -77,6 +78,7 @@ async def test_http_chat_full_params(monkeypatch):
         messages=[{"role": "system", "content": "你是面试官"},
                   {"role": "user", "content": "你好"}],
         temperature=0.5, max_tokens=200, top_p=0.9,
+        response_format={"type": "json_object"},
         tools=[{"type": "function", "function": {"name": "search", "description": "搜索",
                                                  "parameters": {"type": "object", "properties": {}}}}],
         tool_choice="auto",
@@ -86,6 +88,7 @@ async def test_http_chat_full_params(monkeypatch):
     assert captured["temperature"] == 0.5
     assert captured["max_tokens"] == 200
     assert captured["top_p"] == 0.9
+    assert captured["response_format"] == {"type": "json_object"}
     assert captured["messages"][0] == {"role": "system", "content": "你是面试官"}
     assert captured["tools"][0]["function"]["name"] == "search"
     assert captured["tool_choice"] == "auto"
@@ -273,6 +276,7 @@ async def test_http_responses_full_params(monkeypatch):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/responses")
         captured.update(_body(request))
         return _ok({
             "id": "resp_1", "object": "response", "status": "completed",
@@ -345,6 +349,7 @@ async def test_http_responses_tools_and_message_history(monkeypatch):
 
 async def test_http_responses_streaming(monkeypatch):
     """responses：语义事件流（output_text.delta + reasoning_text.delta）"""
+    captured = {}
     events = [
         {"type": "response.created", "response": {}},
         {"type": "response.output_text.delta", "item_id": "i1", "output_index": 0,
@@ -357,6 +362,7 @@ async def test_http_responses_streaming(monkeypatch):
     ]
 
     def handler(request):
+        captured.update(_body(request))
         return _sse([json.dumps(e, ensure_ascii=False) for e in events])
 
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
@@ -369,7 +375,11 @@ async def test_http_responses_streaming(monkeypatch):
 
     texts, thinkings = [], []
     async for chunk in stream_llm_messages(
-        [{"role": "user", "content": "hi"}], user_id=1, yield_thinking=True,
+        [{"role": "system", "content": "你是助手"}, {"role": "user", "content": "hi"}],
+        user_id=1,
+        yield_thinking=True,
+        response_format={"type": "json_object"},
+        max_tokens=123,
     ):
         if chunk["type"] == "content":
             texts.append(chunk["content"])
@@ -377,6 +387,10 @@ async def test_http_responses_streaming(monkeypatch):
             thinkings.append(chunk["content"])
     assert "".join(texts) == "你好"
     assert "".join(thinkings) == "思考中"
+    assert captured["instructions"] == "你是助手"
+    assert captured["max_output_tokens"] == 123
+    assert captured["text"] == {"format": {"type": "json_object"}}
+    assert "response_format" not in captured
 
 
 # ---------------- Anthropic Messages ----------------
@@ -397,6 +411,7 @@ async def test_http_anthropic_full_params(monkeypatch):
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/messages")
         captured["body"] = _body(request)
         captured["headers"] = dict(request.headers)
         return _ok({
@@ -417,6 +432,40 @@ async def test_http_anthropic_full_params(monkeypatch):
     assert captured["body"]["system"] == "你是面试官"
     assert captured["body"]["messages"][0] == {"role": "user", "content": "你好"}
     assert captured["body"]["max_tokens"] == 8192
+
+
+async def test_http_anthropic_messages_preserve_json_instruction_and_parameters(monkeypatch):
+    """多消息 Anthropic 调用也必须处理 JSON 指令并透传受支持参数。"""
+    captured = {}
+
+    def handler(request):
+        captured["body"] = _body(request)
+        return _ok({
+            "id": "msg-json",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [{"type": "text", "text": '{"ok":true}'}],
+            "stop_reason": "end_turn",
+        })
+
+    client = _anthropic_client(handler)
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
+    )
+    from app.services.llm import _call_llm_with_retry_messages
+
+    result = await _call_llm_with_retry_messages(
+        [{"role": "system", "content": "你是助手"}, {"role": "user", "content": "输出 JSON"}],
+        user_id=1,
+        response_format={"type": "json_object"},
+        top_p=0.8,
+    )
+
+    assert result == '{"ok":true}'
+    assert "严格以 JSON 格式输出" in captured["body"]["system"]
+    assert captured["body"]["top_p"] == 0.8
 
 
 async def test_http_anthropic_tools(monkeypatch):
@@ -455,8 +504,59 @@ async def test_http_anthropic_tools(monkeypatch):
     assert result["finish_reason"] == "tool_calls"
 
 
+async def test_http_anthropic_tool_history_round_trip(monkeypatch):
+    """Anthropic 请求必须把 assistant tool_use 与 role=tool 结果按交替消息发送。"""
+    captured = {}
+
+    def handler(request):
+        captured.update(_body(request))
+        return _ok({
+            "id": "msg-history",
+            "type": "message",
+            "role": "assistant",
+            "model": "c",
+            "content": [{"type": "text", "text": "已完成"}],
+            "stop_reason": "end_turn",
+        })
+
+    client = _anthropic_client(handler)
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+    )
+    from app.services.llm import llm_with_tools
+
+    await llm_with_tools(
+        [
+            {"role": "user", "content": "查"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "search", "arguments": '{"q":"x"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "结果"},
+        ],
+        [{"type": "function", "function": {"name": "search", "parameters": {"type": "object"}}}],
+        user_id=1,
+    )
+
+    assert [message["role"] for message in captured["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert captured["messages"][1]["content"][0]["type"] == "tool_use"
+    assert captured["messages"][2]["content"][0]["type"] == "tool_result"
+
+
 async def test_http_anthropic_streaming(monkeypatch):
     """anthropic：SSE 事件流（content_block_start/delta + thinking_delta）"""
+    captured = {}
     events = [
         ("message_start", json.dumps({"type": "message_start", "message": {"id": "m1", "content": [], "usage": {"input_tokens": 10, "output_tokens": 10}}})),
         ("content_block_start", json.dumps({"type": "content_block_start", "index": 0,
@@ -477,6 +577,7 @@ async def test_http_anthropic_streaming(monkeypatch):
     ]
 
     def handler(request):
+        captured["body"] = _body(request)
         return _sse_anthropic(events)
 
     client = _anthropic_client(handler)
@@ -488,7 +589,11 @@ async def test_http_anthropic_streaming(monkeypatch):
 
     texts, thinkings = [], []
     async for chunk in stream_llm_messages(
-        [{"role": "user", "content": "hi"}], user_id=1, yield_thinking=True,
+        [{"role": "system", "content": "你是助手"}, {"role": "user", "content": "hi"}],
+        user_id=1,
+        yield_thinking=True,
+        response_format={"type": "json_object"},
+        top_p=0.8,
     ):
         if chunk["type"] == "content":
             texts.append(chunk["content"])
@@ -496,3 +601,6 @@ async def test_http_anthropic_streaming(monkeypatch):
             thinkings.append(chunk["content"])
     assert "".join(texts) == "你好"
     assert "".join(thinkings) == "想"
+    assert "严格以 JSON 格式输出" in captured["body"]["system"]
+    assert captured["body"]["top_p"] == 0.8
+    assert "response_format" not in captured["body"]
