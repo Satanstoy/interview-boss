@@ -26,11 +26,12 @@ router = APIRouter(prefix="/api/admin/evals", tags=["admin-evaluation"])
 
 class CreateEvalRunRequest(BaseModel):
     target_release_id: int
-    benchmark_suite_release_id: int
-    eval_protocol_release_id: int
-    judge_release_id: int
-    simulator_harness_release_id: int
-    candidate_simulator_release_id: int
+    evaluation_release_id: int | None = None
+    benchmark_suite_release_id: int | None = None
+    eval_protocol_release_id: int | None = None
+    judge_release_id: int | None = None
+    simulator_harness_release_id: int | None = None
+    candidate_simulator_release_id: int | None = None
     replication_count: int = Field(default=5, ge=1, le=100)
     seed: int = 1
     environment_fingerprint: str = ""
@@ -58,6 +59,7 @@ def _decode_json(value: str | None, default: Any):
 def _serialize_run(row) -> dict[str, Any]:
     result = dict(row)
     result["summary"] = _decode_json(result.pop("summary_json", "{}"), {})
+    result["snapshot"] = _decode_json(result.pop("snapshot_json", "{}"), {})
     result["cancel_requested"] = bool(result.get("cancel_requested"))
     return result
 
@@ -68,6 +70,7 @@ def _run_query(conn, run_id: int):
         SELECT r.*, b.batch_fingerprint, b.replication_count,
                b.environment_fingerprint, b.seed,
                tr.release_key AS target_release_key,
+               er.release_key AS evaluation_release_key,
                bs.release_key AS benchmark_suite_release_key,
                ep.release_key AS eval_protocol_release_key,
                jr.release_key AS judge_release_key,
@@ -82,10 +85,32 @@ def _run_query(conn, run_id: int):
         JOIN eval_releases jr ON jr.id = r.judge_release_id
         JOIN eval_releases sh ON sh.id = r.simulator_harness_release_id
         JOIN eval_releases cs ON cs.id = r.candidate_simulator_release_id
+        LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
         WHERE r.id = ?
         """,
         (run_id,),
     ).fetchone()
+
+
+def _ab_snapshot_context(row) -> tuple[Any, ...] | None:
+    """Return the immutable context fields that must match for human A/B."""
+    if row["evaluation_release_id"] is None:
+        return None
+    snapshot = _decode_json(row["snapshot_json"], {})
+    resolved = snapshot.get("resolved") or {}
+    cases = tuple(
+        (case.get("id"), case.get("input_digest"))
+        for case in snapshot.get("cases", [])
+        if isinstance(case, dict)
+    )
+    return (
+        row["evaluation_release_id"],
+        resolved.get("replication_count"),
+        resolved.get("seed"),
+        resolved.get("environment_fingerprint"),
+        tuple(resolved.get("case_ids") or []),
+        cases,
+    )
 
 
 @router.get("/overview")
@@ -182,11 +207,18 @@ async def list_releases(
             if status:
                 clauses.append("status = ?")
                 params.append(status)
+            if release_type is None:
+                clauses.append("release_type IN ('target', 'evaluation')")
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = conn.execute(
                 f"SELECT * FROM eval_releases {where} ORDER BY id DESC", params
             ).fetchall()
-            return [dict(row) for row in rows]
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["manifest"] = _decode_json(item.pop("manifest_json", "{}"), {})
+                result.append(item)
+            return result
 
     return {"releases": await run_db(_query)}
 
@@ -198,7 +230,8 @@ async def list_benchmarks(admin: dict = Depends(get_admin_user)):
             suites = conn.execute(
                 """
                 SELECT s.*, r.release_key, r.version, r.status AS release_status,
-                       r.manifest_digest
+                       r.release_type, r.target_type AS release_target_type,
+                       r.manifest_digest, r.manifest_json
                 FROM eval_benchmark_suites s
                 JOIN eval_releases r ON r.id = s.release_id
                 ORDER BY s.id DESC
@@ -215,6 +248,8 @@ async def list_benchmarks(admin: dict = Depends(get_admin_user)):
                     (suite["id"],),
                 ).fetchall()
                 item = dict(suite)
+                item["manifest"] = _decode_json(item.pop("manifest_json", "{}"), {})
+                item["evaluation_release_key"] = item.get("release_key")
                 item["cases"] = [
                     {
                         **dict(case),
@@ -240,6 +275,7 @@ async def create_run(body: CreateEvalRunRequest, admin: dict = Depends(get_admin
                 conn,
                 created_by=admin["id"],
                 target_release_id=body.target_release_id,
+                evaluation_release_id=body.evaluation_release_id,
                 benchmark_suite_release_id=body.benchmark_suite_release_id,
                 eval_protocol_release_id=body.eval_protocol_release_id,
                 judge_release_id=body.judge_release_id,
@@ -317,9 +353,13 @@ async def list_runs(
             rows = conn.execute(
                 f"SELECT r.id, r.status, r.total_items, r.completed_items, r.failed_items, "
                 f"r.comparison_group, r.created_at, r.started_at, r.finished_at, "
-                f"tr.release_key AS target_release_key, br.release_key AS benchmark_suite_release_key "
+                f"tr.release_key AS target_release_key, "
+                f"COALESCE(er.release_key, br.release_key) AS evaluation_release_key, "
+                f"br.release_key AS benchmark_suite_release_key "
                 f"FROM eval_runs r JOIN eval_releases tr ON tr.id = r.target_release_id "
-                f"JOIN eval_releases br ON br.id = r.benchmark_suite_release_id {where} "
+                f"JOIN eval_releases br ON br.id = r.benchmark_suite_release_id "
+                f"LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id "
+                f"{where} "
                 "ORDER BY r.id DESC LIMIT ?",
                 params,
             ).fetchall()
@@ -368,7 +408,7 @@ async def create_review(
     def _create():
         with get_db_connection() as conn:
             runs = conn.execute(
-                "SELECT id, comparison_group, benchmark_suite_release_id, eval_protocol_release_id, "
+                "SELECT id, target_release_id, comparison_group, evaluation_release_id, snapshot_json, benchmark_suite_release_id, eval_protocol_release_id, "
                 "judge_release_id, simulator_harness_release_id, candidate_simulator_release_id "
                 "FROM eval_runs WHERE id IN (?, ?)",
                 (body.run_a_id, body.run_b_id),
@@ -378,7 +418,17 @@ async def create_review(
             stored_groups = {row["comparison_group"] for row in runs if row["comparison_group"]}
             if stored_groups and stored_groups != {body.comparison_group}:
                 raise HTTPException(status_code=400, detail="A/B Run 不属于指定 comparison group")
-            context_fields = (
+            dual_contexts = [_ab_snapshot_context(row) for row in runs]
+            if any(context is not None for context in dual_contexts):
+                if any(context is None for context in dual_contexts):
+                    raise HTTPException(status_code=400, detail="A/B Run 必须使用同一种版本绑定模式")
+                if len(set(dual_contexts)) != 1:
+                    raise HTTPException(status_code=400, detail="A/B Run 的完整评测上下文不一致")
+                if runs[0]["target_release_id"] == runs[1]["target_release_id"]:
+                    raise HTTPException(status_code=400, detail="A/B Run 必须比较两个不同的被测版本")
+            context_fields = ("evaluation_release_id",) if any(
+                row["evaluation_release_id"] is not None for row in runs
+            ) else (
                 "benchmark_suite_release_id",
                 "eval_protocol_release_id",
                 "judge_release_id",

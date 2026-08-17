@@ -56,6 +56,16 @@ def test_evaluation_tables_keep_release_and_batch_context(test_db):
         "candidate_simulator_release_id",
         "status",
     } <= run_columns
+    assert {"evaluation_release_id", "snapshot_json"} <= batch_columns
+    assert {"evaluation_release_id", "snapshot_json"} <= run_columns
+
+
+def test_dual_axis_migration_is_registered(test_db):
+    version = test_db.execute(
+        "SELECT version, name FROM schema_version WHERE version = 93"
+    ).fetchone()
+
+    assert tuple(version) == (93, "evaluation_dual_axis")
 
 
 def test_evaluation_migration_is_idempotent(test_db):

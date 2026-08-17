@@ -18,6 +18,7 @@
     "actions": ["gives a structured summary", "mentions strengths and gaps", "explains next steps"],
     "boundaries": ["does not continue probing after clear closing signal"],
     "quality_requirements": ["summary references concrete discussion topics", "tone is professional"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "summary_present", "description": "A structured summary is present"},
       {"id": "next_step_present", "description": "The closing explains a next step"}

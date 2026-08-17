@@ -1,11 +1,10 @@
 {
-  "release_key": "interview-e2e-suite@1.0",
-  "release_type": "benchmark_suite",
+  "release_key": "interview-eval@1.0",
+  "release_type": "evaluation",
   "version": "1.0",
   "target_type": "interview",
-  "judge_model": "fixed-judge-model",
+  "judge_model": "gpt-4o",
   "description": "InterviewBoss 模拟面试端到端固定基准集 1.0",
-  "protocol_release_key": "eval-protocol@1.0",
   "case_files": [
     "long_session_mid.json",
     "long_session_senior.json",

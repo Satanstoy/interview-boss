@@ -32,7 +32,7 @@ def test_interview_e2e_suite_1_0_contains_structured_cases():
     catalog = _catalog()
     suite = catalog.load_suite_definition("interview-e2e-suite@1.0")
 
-    assert suite["release_key"] == "interview-e2e-suite@1.0"
+    assert suite["release_key"] == "interview-eval@1.0"
     assert suite["target_type"] == "interview"
     assert suite["judge_model"]
     assert {case["case_key"] for case in suite["cases"]} == EXPECTED_CASES
@@ -60,12 +60,12 @@ def test_sync_builtin_suite_uses_configured_model_for_candidate_simulator(test_d
     catalog.sync_builtin_benchmarks(test_db)
 
     manifest = test_db.execute(
-        "SELECT manifest_json FROM eval_releases WHERE release_key = 'candidate-simulator@1.0'"
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
     ).fetchone()[0]
     assert '"model":"mimo-v2.5-pro"' in manifest
 
 
-def test_sync_builtin_suite_versions_legacy_placeholder_candidate_simulator(test_db, monkeypatch):
+def test_sync_builtin_suite_archives_legacy_component_releases(test_db, monkeypatch):
     catalog = _catalog()
     service = importlib.import_module("app.services.evaluation_service")
     legacy = service.create_release(
@@ -86,13 +86,14 @@ def test_sync_builtin_suite_versions_legacy_placeholder_candidate_simulator(test
 
     catalog.sync_builtin_benchmarks(test_db)
 
-    versions = test_db.execute(
-        "SELECT release_key, version, manifest_json FROM eval_releases "
-        "WHERE release_type = 'candidate_simulator' ORDER BY version"
-    ).fetchall()
-    assert [row[0] for row in versions] == ["candidate-simulator@1.0", "candidate-simulator@1.1"]
-    assert '"model":"candidate-simulator-model"' in versions[0][2]
-    assert '"model":"mimo-v2.5-pro"' in versions[1][2]
+    status = test_db.execute(
+        "SELECT status FROM eval_releases WHERE release_key = 'candidate-simulator@1.0'"
+    ).fetchone()[0]
+    assert status == "archived"
+    evaluation_manifest = test_db.execute(
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
+    ).fetchone()[0]
+    assert '"model":"mimo-v2.5-pro"' in evaluation_manifest
 
 
 def test_sync_builtin_suite_records_judge_model_and_cases(test_db):
@@ -101,10 +102,11 @@ def test_sync_builtin_suite_records_judge_model_and_cases(test_db):
     result = catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
 
-    assert result == {"suites": 1, "cases": 12, "releases": 6}
+    assert result == {"suites": 1, "cases": 12, "releases": 2}
     suite = test_db.execute(
         "SELECT s.judge_model, r.status FROM eval_benchmark_suites s "
         "JOIN eval_releases r ON r.id = s.release_id"
     ).fetchone()
-    assert tuple(suite) == ("fixed-judge-model", "published")
+    assert suite[0]
+    assert suite[1] == "published"
     assert test_db.execute("SELECT COUNT(*) FROM eval_benchmark_cases").fetchone()[0] == 12

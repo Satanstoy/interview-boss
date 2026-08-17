@@ -23,13 +23,8 @@ const overviewPayload = {
 
 const releasesPayload = {
   releases: [
-    { id: 1, release_key: 'interview-agent@1.0', release_type: 'target', target_type: 'interview', status: 'published', version: '1.0' },
-    { id: 2, release_key: 'interview-e2e-suite@1.0', release_type: 'benchmark_suite', target_type: 'interview', status: 'published', version: '1.0' },
-    { id: 3, release_key: 'eval-protocol@1.0', release_type: 'eval_protocol', status: 'published', version: '1.0' },
-    { id: 4, release_key: 'judge@1.0', release_type: 'judge', status: 'published', version: '1.0', judge_model: 'fixed-judge' },
-    { id: 5, release_key: 'interview-harness@1.0', release_type: 'simulator_harness', status: 'published', version: '1.0' },
-    { id: 6, release_key: 'candidate-simulator@1.0', release_type: 'candidate_simulator', status: 'published', version: '1.0' },
-    { id: 7, release_key: 'candidate-simulator@1.1', release_type: 'candidate_simulator', status: 'published', version: '1.1' },
+    { id: 1, release_key: 'interview-agent@1.0', release_type: 'target', target_type: 'interview', status: 'published', version: '1.0', manifest: { workflow: 'chat-interview', model: 'target-model' } },
+    { id: 2, release_key: 'interview-eval@1.0', release_type: 'evaluation', target_type: 'interview', status: 'published', version: '1.0', judge_model: 'fixed-judge', manifest: { benchmark: { suite_key: 'interview-e2e-suite' }, judge: { model: 'fixed-judge' }, simulator_harness: { version: '1.0' }, candidate_simulator: { model: 'candidate-model' }, tool_evaluation: { enabled: true }, intent_evaluation: { enabled: true } } },
   ],
 }
 
@@ -39,7 +34,7 @@ const runsPayload = {
       id: 12,
       status: 'completed',
       target_release_key: 'interview-agent@1.0',
-      benchmark_suite_release_key: 'interview-e2e-suite@1.0',
+      evaluation_release_key: 'interview-eval@1.0',
       completed_items: 60,
       total_items: 60,
       created_at: '2026-08-17T10:00:00Z',
@@ -51,11 +46,13 @@ const benchmarksPayload = {
   suites: [
     {
       id: 1,
-      release_key: 'interview-e2e-suite@1.0',
+      release_key: 'interview-eval@1.0',
+      evaluation_release_key: 'interview-eval@1.0',
       release_status: 'published',
       description: '模拟面试的固定 E2E 场景。',
       target_type: 'interview',
       judge_model: 'fixed-judge',
+      manifest: { tool_evaluation: { enabled: true }, intent_evaluation: { enabled: true } },
       cases: [],
     },
   ],
@@ -127,11 +124,13 @@ test.describe('评测中心可读性', () => {
 
     await expect(page.getByRole('heading', { name: '发起一次评测' })).toBeVisible()
     await expect(page.getByText('第 1 步：选择被测版本')).toBeVisible()
-    await expect(page.getByText('第 2 步：选择评测基线')).toBeVisible()
+    await expect(page.getByText('第 2 步：选择完整评测版本')).toBeVisible()
     await expect(page.getByText('第 3 步：固定运行参数')).toBeVisible()
     await expect(page.getByText('每个 Case 重跑次数')).toBeVisible()
     await expect(page.getByRole('button', { name: '创建并开始评测' })).toBeVisible()
-    await expect(page.locator('#eval-candidate-simulator')).toHaveValue('7')
+    await expect(page.locator('#eval-release')).toHaveValue('2')
+    await expect(page.getByText('工具调用效果')).toBeVisible()
+    await expect(page.getByText('意图识别效果')).toBeVisible()
   })
 
   test('评测对象明确区分已支持和待接入', async ({ page }) => {
@@ -148,25 +147,26 @@ test.describe('评测中心可读性', () => {
   test('版本列表使用固定列宽并保持关键固定项可读', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
-    await expect(page.getByText('固定的 Case、输入快照与质量要求。')).toBeVisible()
+    await expect(page.getByText('完整评测版本会一起固定题集、规则、Judge、Harness、模拟器、工具调用和意图识别指标。')).toBeVisible()
     const tableLayout = await page.locator('table').first().evaluate(element => getComputedStyle(element).tableLayout)
     expect(tableLayout).toBe('fixed')
 
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(page.locator('table').first()).toHaveJSProperty('scrollWidth', await page.locator('table').first().evaluate(element => element.clientWidth))
+    const tableWidth = await page.locator('table').first().evaluate(element => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
+    expect(tableWidth.scrollWidth).toBeGreaterThanOrEqual(tableWidth.clientWidth)
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {
     await page.goto('/admin/evals/benchmarks?preview=1')
     await expect(page.getByRole('heading', { name: 'Benchmark：这套题集测什么' })).toBeVisible()
-    await expect(page.getByText('先看每套题集覆盖的场景和质量要求')).toBeVisible()
+    await expect(page.getByText('这里定义完整评测版本要测什么')).toBeVisible()
 
     await page.goto('/admin/evals/releases?preview=1')
     await expect(page.getByRole('heading', { name: '版本与发布：决定测谁' })).toBeVisible()
-    await expect(page.getByText('只有已发布版本可以进入正式 Benchmark')).toBeVisible()
+    await expect(page.getByText('先选择被测对象版本，再绑定一个完整评测版本')).toBeVisible()
 
     await page.goto('/admin/evals/reviews?preview=1')
     await expect(page.getByRole('heading', { name: '人工 A/B：核对版本差异' })).toBeVisible()
-    await expect(page.getByText('先定位同一 Case，再阅读两边的完整 E2E 回答')).toBeVisible()
+    await expect(page.getByText('先定位同一个完整评测版本下的两条 Run')).toBeVisible()
   })
 })

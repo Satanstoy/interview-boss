@@ -30,6 +30,7 @@ const itemKeys = computed(() => {
 const itemA = computed(() => runA.value?.items?.find(item => `${item.case_key}#${item.replication_index}` === form.value.item))
 const itemB = computed(() => runB.value?.items?.find(item => `${item.case_key}#${item.replication_index}` === form.value.item))
 const turns = item => item?.result?.observation?.payload?.turns || []
+const metrics = item => item?.result?.observation?.payload || {}
 const reviewStep = computed(() => {
   if (!form.value.group) return 1
   if (!runA.value || !runB.value) return 2
@@ -108,10 +109,10 @@ onMounted(load)
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader title="人工 A/B：核对版本差异" description="在相同输入、Benchmark、Harness、Simulator 和 Judge 下，逐 Case 比较两个版本的完整回答。" active-key="reviews" />
+      <EvaluationPageHeader title="人工 A/B：核对版本差异" description="在同一个完整评测版本、同一 Case、同一输入快照和同一批次参数下，只比较两个被测版本的回答差异。" active-key="reviews" />
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <template v-else>
-        <AppCard class="mt-6" title="人工比较工作台" description="先定位同一 Case，再阅读两边的完整 E2E 回答，最后记录你的判断。">
+        <AppCard class="mt-6" title="人工比较工作台" description="先定位同一个完整评测版本下的两条 Run，再阅读同一 Case 的完整 E2E 回答，最后记录你的判断。">
           <div class="mb-5 grid gap-2 sm:grid-cols-4">
             <div v-for="step in [{ number: 1, label: '选择比较组' }, { number: 2, label: '选择两个版本' }, { number: 3, label: '选择 Case' }, { number: 4, label: '提交判断' }]" :key="step.number" :class="['flex items-center gap-2 rounded-lg border px-3 py-2 text-xs', reviewStep >= step.number ? 'border-primary/30 bg-primary/5 text-primary' : 'border-border/70 text-muted-foreground']"><span class="flex size-5 items-center justify-center rounded-full bg-background font-semibold ring-1 ring-border/70">{{ step.number }}</span>{{ step.label }}</div>
           </div>
@@ -128,6 +129,7 @@ onMounted(load)
             <div class="mt-6 grid gap-5 lg:grid-cols-2">
               <article v-for="entry in [{ item: itemA, label: '回答 A', run: runA }, { item: itemB, label: '回答 B', run: runB }]" :key="entry.label" class="rounded-xl border border-border/70 bg-muted/20 p-4">
                 <div class="mb-3 flex items-start gap-3"><div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-border/70"><ArrowLeftRight class="size-4" /></div><div><h3 class="font-medium">{{ entry.label }}</h3><p class="mt-0.5 text-xs text-muted-foreground">{{ entry.run?.target_release_key || '选择版本后显示' }}</p></div></div>
+                <div v-if="entry.item" class="mb-4 grid gap-2 text-xs sm:grid-cols-2"><div class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">工具调用效果</div><div class="mt-1 text-muted-foreground">{{ metrics(entry.item).tool_metrics?.call_count || 0 }} 次调用 · {{ metrics(entry.item).tool_metrics?.failed_call_count || 0 }} 次失败 · 结果{{ metrics(entry.item).tool_metrics?.result_used ? '已使用' : '未确认使用' }}</div></div><div class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">意图识别效果</div><div class="mt-1 text-muted-foreground">{{ metrics(entry.item).intent_metrics?.observed_turn_count || 0 }} 轮记录 · 覆盖率 {{ metrics(entry.item).intent_metrics?.intent_coverage == null ? '—' : `${Math.round(metrics(entry.item).intent_metrics.intent_coverage * 100)}%` }} · 准确率 {{ metrics(entry.item).intent_metrics?.accuracy == null ? '—' : `${Math.round(metrics(entry.item).intent_metrics.accuracy * 100)}%` }}</div></div><div class="text-xs text-muted-foreground">Hard Gate：{{ entry.item.hard_gate_status || '—' }} · Judge：{{ entry.item.judge_status || '—' }} · 分数：{{ entry.item.score == null ? '—' : Number(entry.item.score).toFixed(3) }}</div></div>
                 <div v-if="turns(entry.item).length" class="space-y-3 text-sm"><div v-for="turn in turns(entry.item)" :key="turn.turn" class="rounded-lg bg-background p-3"><div class="text-xs text-muted-foreground">第 {{ turn.turn }} 轮</div><div class="mt-2 text-xs text-muted-foreground">候选人：{{ turn.user }}</div><div class="mt-1 leading-6">面试官：{{ turn.assistant }}</div></div></div>
                 <div v-else class="flex min-h-40 items-center justify-center text-center text-sm text-muted-foreground">选择两个版本和 Case 后显示完整回答。</div>
               </article>

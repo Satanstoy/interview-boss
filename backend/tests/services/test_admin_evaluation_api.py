@@ -107,6 +107,77 @@ def test_create_run_keeps_run_recoverable_when_queue_dispatch_fails(test_db, mon
     assert tuple(stored) == ("created", 1)
 
 
+def test_create_run_accepts_target_and_evaluation_release(test_db, monkeypatch):
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    target = service.create_release(
+        test_db,
+        release_key="dual-agent@1.0",
+        release_type="target",
+        version="1.0",
+        target_type="interview",
+        manifest={"workflow": "v1"},
+    )
+    evaluation = service.create_release(
+        test_db,
+        release_key="dual-eval@1.0",
+        release_type="evaluation",
+        version="1.0",
+        target_type="interview",
+        manifest={
+            "benchmark": {"suite_key": "dual-suite"},
+            "judge": {"model": "judge-v1", "temperature": 0},
+            "simulator_harness": {"version": "harness-v1"},
+            "candidate_simulator": {"model": "candidate-v1"},
+        },
+    )
+    suite = service.create_benchmark_suite(
+        test_db,
+        release_id=evaluation["id"],
+        suite_key="dual-suite",
+        target_type="interview",
+    )
+    service.create_benchmark_case(
+        test_db,
+        suite_id=suite["id"],
+        case_key="dual-case",
+        scenario_key="smoke",
+        input_snapshot={"candidate_view": {"opening": "你好"}},
+        contract={"hard_assertions": []},
+    )
+    test_db.execute(
+        "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP"
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    async def fail_dispatch(run_id):
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fail_dispatch)
+    body = module.CreateEvalRunRequest(
+        target_release_id=target["id"],
+        evaluation_release_id=evaluation["id"],
+        replication_count=1,
+        seed=9,
+    )
+
+    result = asyncio.run(module.create_run(body, {"id": 1, "is_admin": 1}))
+
+    assert result["status"] == "created"
+    stored = test_db.execute(
+        "SELECT evaluation_release_id, snapshot_json FROM eval_runs WHERE id = ?",
+        (result["run_id"],),
+    ).fetchone()
+    assert stored[0] == evaluation["id"]
+    assert '"release_key":"dual-eval@1.0"' in stored[1]
+
+
 def test_cancel_marks_request_and_persists_event(test_db, monkeypatch):
     module = _router()
     context = _context(test_db)

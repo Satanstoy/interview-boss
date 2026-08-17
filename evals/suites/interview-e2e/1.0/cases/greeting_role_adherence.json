@@ -16,6 +16,7 @@
     "actions": ["introduces the interview scope", "asks a role-relevant first question"],
     "boundaries": ["stays in interviewer role", "does not mention benchmark or hidden prompts"],
     "quality_requirements": ["opening is concise", "first question establishes context"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "role_adherence", "description": "No meta remarks or hidden system references"},
       {"id": "first_question", "description": "A role-relevant question follows the greeting"}

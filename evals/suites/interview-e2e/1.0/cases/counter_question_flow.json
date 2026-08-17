@@ -18,6 +18,7 @@
     "actions": ["answers the counter-question", "uses the answer to continue or refine the interview"],
     "boundaries": ["does not dismiss the candidate's question"],
     "quality_requirements": ["counter-question handling feels collaborative", "flow does not become a generic FAQ"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "counter_question_answered", "description": "The counter-question is answered"},
       {"id": "flow_continues", "description": "The interview continues with a relevant next step"}

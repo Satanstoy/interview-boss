@@ -156,6 +156,7 @@ from app.db.migrations.recruitment import (
 )
 from app.db.migrations.interview_import import _migration_080_interview_import
 from app.db.migrations.evaluation import _migration_087_evaluation_control_plane
+from app.db.migrations.evaluation_dual_axis import _migration_093_evaluation_dual_axis
 from app.db.migrations.schema_hygiene import (
     _migration_081_cleanup_fk_orphans,
     _migration_082_fts_rebuild_triggers,
@@ -273,6 +274,7 @@ _MIGRATIONS = [
     (90, "analysis_queue_fk_cascade", migration_090_analysis_queue_fk),
     (91, "repair_fk_orphans", migration_091_repair_fk_orphans),
     (92, "preserve_quality_issue_history", migration_092_preserve_quality_issue_history),
+    (93, "evaluation_dual_axis", _migration_093_evaluation_dual_axis),
 ]
 
 

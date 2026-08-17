@@ -16,6 +16,7 @@
     "actions": ["collects enough evidence", "transitions to closing without an abrupt stop"],
     "boundaries": ["does not end while an answer is incomplete"],
     "quality_requirements": ["closing references the interview evidence", "ending feels intentional"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "closing_present", "description": "A clear closing exchange is present"},
       {"id": "no_abrupt_stop", "description": "The interview does not stop mid-answer"}

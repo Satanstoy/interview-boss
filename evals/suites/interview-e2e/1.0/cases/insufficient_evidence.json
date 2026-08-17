@@ -21,6 +21,7 @@
     "actions": ["asks for concrete evidence", "probes decisions, scale, and outcomes"],
     "boundaries": ["does not fabricate candidate details"],
     "quality_requirements": ["follow-ups are specific", "the interviewer distinguishes lack of evidence from failure"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "detail_probe", "description": "At least two detail-oriented probes occur"}
     ],

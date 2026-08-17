@@ -494,6 +494,12 @@ def _add_interview_observability_metadata(
         ledger,
         state.get("rhythm_profile") or {},
     )
+    if state.get("intent"):
+        metadata["intent"] = state.get("intent")
+    if isinstance(state.get("classify_result"), dict):
+        metadata["classify_result"] = dict(state["classify_result"])
+    if isinstance(state.get("turn_intent"), dict):
+        metadata["turn_intent"] = dict(state["turn_intent"])
     public_active_skills = [
         name for name in state.get("active_skills", []) if name != "agent-interview"
     ]

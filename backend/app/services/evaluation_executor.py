@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from typing import Any, Callable
 
@@ -24,6 +25,84 @@ def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+def _snapshot_error(snapshot: dict[str, Any]) -> str | None:
+    target = snapshot.get("target_release")
+    evaluation = snapshot.get("evaluation_release")
+    cases = snapshot.get("cases")
+    if not isinstance(target, dict) or not target.get("release_key"):
+        return "缺少 target_release 快照"
+    if not isinstance(evaluation, dict) or not evaluation.get("release_key"):
+        return "缺少 evaluation_release 快照"
+    evaluation_manifest = evaluation.get("manifest")
+    if not isinstance(evaluation_manifest, dict):
+        return "缺少 evaluation manifest 快照"
+    required_groups = {"benchmark", "protocol", "judge", "simulator_harness", "candidate_simulator"}
+    if not required_groups <= set(evaluation_manifest):
+        return "Evaluation Release 快照缺少固定组件"
+    if not isinstance(cases, list) or not cases:
+        return "缺少 Benchmark Case 快照"
+    for case in cases:
+        if not isinstance(case, dict) or case.get("id") is None:
+            return "Benchmark Case 快照格式无效"
+        if not isinstance(case.get("input_snapshot"), dict) or not isinstance(case.get("contract"), dict):
+            return "Benchmark Case 快照未包含输入与契约"
+    return None
+
+
+def _runtime_identity_error(target_snapshot: dict[str, Any]) -> str | None:
+    expected = str(target_snapshot.get("git_sha") or "")
+    actual = os.environ.get("EVAL_RUNTIME_GIT_SHA", "current-code-state")
+    if expected and expected not in {"current-code-state", "local-baseline"} and expected != actual:
+        return f"Target Release git_sha={expected} 与 Eval Worker={actual} 不一致"
+    return None
+
+
+def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
+    rows = conn.execute(
+        "SELECT result_json FROM eval_items WHERE run_id = ? AND status = 'completed'",
+        (run_id,),
+    ).fetchall()
+    tool_samples = []
+    intent_samples = []
+    for row in rows:
+        try:
+            result = json.loads(row["result_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        observation = result.get("observation") or {}
+        payload = observation.get("payload") or {}
+        if isinstance(payload.get("tool_metrics"), dict):
+            tool_samples.append(payload["tool_metrics"])
+        if isinstance(payload.get("intent_metrics"), dict):
+            intent_samples.append(payload["intent_metrics"])
+
+    tool_call_count = sum(int(item.get("call_count") or 0) for item in tool_samples)
+    failed_call_count = sum(int(item.get("failed_call_count") or 0) for item in tool_samples)
+    used_count = sum(bool(item.get("result_used")) for item in tool_samples)
+    intent_accuracy = [
+        float(item["accuracy"])
+        for item in intent_samples
+        if item.get("accuracy") is not None
+    ]
+    return {
+        "tool": {
+            "items_evaluated": len(tool_samples),
+            "call_count": tool_call_count,
+            "failed_call_count": failed_call_count,
+            "result_used_rate": round(used_count / len(tool_samples), 4) if tool_samples else None,
+        },
+        "intent": {
+            "items_evaluated": len(intent_samples),
+            "observed_turn_count": sum(int(item.get("observed_turn_count") or 0) for item in intent_samples),
+            "intent_coverage": round(
+                sum(float(item.get("intent_coverage") or 0) for item in intent_samples) / len(intent_samples),
+                4,
+            ) if intent_samples else None,
+            "accuracy": round(sum(intent_accuracy) / len(intent_accuracy), 4) if intent_accuracy else None,
+        },
+    }
+
+
 def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         """
@@ -34,18 +113,60 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
                jr.judge_model AS judge_model,
                jr.manifest_json AS judge_manifest_json,
                sh.manifest_json AS harness_manifest_json,
-               cs.manifest_json AS candidate_simulator_manifest_json
+               cs.manifest_json AS candidate_simulator_manifest_json,
+               er.manifest_json AS evaluation_manifest_json
         FROM eval_runs r
         JOIN eval_batches b ON b.id = r.batch_id
         JOIN eval_releases tr ON tr.id = r.target_release_id
         JOIN eval_releases jr ON jr.id = r.judge_release_id
         JOIN eval_releases sh ON sh.id = r.simulator_harness_release_id
         JOIN eval_releases cs ON cs.id = r.candidate_simulator_release_id
+        LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
         WHERE r.id = ?
         """,
         (run_id,),
     ).fetchone()
-    return _row_dict(row)
+    result = _row_dict(row)
+    if result is None:
+        return None
+
+    # New runs are immutable snapshots. The legacy component columns are kept
+    # only so old rows and old readers remain readable during the migration.
+    if result.get("evaluation_release_id") and result.get("snapshot_json"):
+        try:
+            snapshot = json.loads(result["snapshot_json"])
+        except (TypeError, json.JSONDecodeError):
+            snapshot = {}
+        result["_snapshot_error"] = _snapshot_error(snapshot) or _runtime_identity_error(
+            snapshot.get("target_release") or {}
+        )
+        target_snapshot = snapshot.get("target_release") or {}
+        evaluation_snapshot = snapshot.get("evaluation_release") or {}
+        evaluation_manifest = evaluation_snapshot.get("manifest") or {}
+        if target_snapshot:
+            result["target_release_key"] = target_snapshot.get(
+                "release_key", result["target_release_key"]
+            )
+            result["target_type"] = target_snapshot.get(
+                "target_type", result["target_type"]
+            )
+            result["target_manifest_json"] = _json_dumps(
+                target_snapshot.get("manifest") or {}
+            )
+        if evaluation_manifest:
+            judge_manifest = evaluation_manifest.get("judge") or {}
+            harness_manifest = evaluation_manifest.get("simulator_harness") or {}
+            candidate_manifest = evaluation_manifest.get("candidate_simulator") or {}
+            result["judge_model"] = str(
+                judge_manifest.get("model") or result.get("judge_model") or ""
+            )
+            result["judge_manifest_json"] = _json_dumps(judge_manifest)
+            result["harness_manifest_json"] = _json_dumps(harness_manifest)
+            result["candidate_simulator_manifest_json"] = _json_dumps(
+                candidate_manifest
+            )
+        result["evaluation_manifest_json"] = _json_dumps(evaluation_manifest)
+    return result
 
 
 async def execute_eval_run(
@@ -61,6 +182,20 @@ async def execute_eval_run(
         raise ValueError(f"Eval Run 不存在: {run_id}")
     if run["status"] in {"completed", "failed", "cancelled"}:
         return {"run_id": run_id, "status": run["status"]}
+    if run.get("_snapshot_error"):
+        error = run["_snapshot_error"]
+        summary = {"error": error, "total_items": run["total_items"]}
+        connection.execute(
+            "UPDATE eval_runs SET status = 'failed', summary_json = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (_json_dumps(summary), run_id),
+        )
+        connection.execute(
+            "UPDATE eval_batches SET status = 'failed', summary_json = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (_json_dumps(summary), run["batch_id"]),
+        )
+        append_event(connection, run_id, "run.failed", summary)
+        connection.commit()
+        return {"run_id": run_id, "status": "failed", **summary}
 
     connection.execute(
         """
@@ -94,6 +229,17 @@ async def execute_eval_run(
         "candidate_simulator_manifest": json.loads(
             run.get("candidate_simulator_manifest_json") or "{}"
         ),
+        "evaluation_release_id": run.get("evaluation_release_id"),
+        "evaluation_manifest": json.loads(run.get("evaluation_manifest_json") or "{}"),
+    }
+    try:
+        run_snapshot = json.loads(run.get("snapshot_json") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        run_snapshot = {}
+    case_snapshots = {
+        case.get("id"): case
+        for case in run_snapshot.get("cases", [])
+        if isinstance(case, dict) and case.get("id") is not None
     }
     items = connection.execute(
         """
@@ -132,10 +278,25 @@ async def execute_eval_run(
         attempt_id = attempt_cursor.lastrowid
         connection.commit()
 
+        case_key = item["case_key"]
         try:
             adapter = resolver(target_release["target_type"])
-            case_snapshot = json.loads(item["input_snapshot_json"] or "{}")
-            contract = json.loads(item["contract_json"] or "{}")
+            frozen_case = case_snapshots.get(item["case_id"])
+            if run.get("evaluation_release_id") and frozen_case is None:
+                raise RuntimeError(f"Run 快照缺少 Case: {item['case_id']}")
+            case_key = frozen_case.get("case_key", item["case_key"]) if frozen_case else item["case_key"]
+            case_snapshot = (
+                frozen_case.get("input_snapshot")
+                if frozen_case
+                else json.loads(item["input_snapshot_json"] or "{}")
+            )
+            contract = (
+                frozen_case.get("contract")
+                if frozen_case
+                else json.loads(item["contract_json"] or "{}")
+            )
+            case_snapshot = case_snapshot if isinstance(case_snapshot, dict) else {}
+            contract = contract if isinstance(contract, dict) else {}
             # The adapter receives the private contract for observation only;
             # InterviewE2EAdapter never passes it to the candidate simulator.
             case_snapshot["_eval_contract"] = contract
@@ -152,7 +313,7 @@ async def execute_eval_run(
             if run["target_type"] == "interview":
                 if score["hard_gate_status"] == "passed":
                     judge_result = await judge_observation(
-                        case_key=item["case_key"],
+                        case_key=case_key,
                         contract=contract,
                         observation=observation,
                         judge_model=run["judge_model"] or "",
@@ -193,7 +354,7 @@ async def execute_eval_run(
                 connection,
                 run_id,
                 "item.completed",
-                {"item_id": item["id"], "case_key": item["case_key"]},
+                {"item_id": item["id"], "case_key": case_key},
             )
         except Exception as exc:
             logger.exception("评测 Item 执行失败: run_id=%s item_id=%s", run_id, item["id"])
@@ -218,7 +379,7 @@ async def execute_eval_run(
                 connection,
                 run_id,
                 "item.failed",
-                {"item_id": item["id"], "case_key": item["case_key"]},
+                {"item_id": item["id"], "case_key": case_key},
             )
         finally:
             counts = connection.execute(
@@ -272,6 +433,7 @@ async def execute_eval_run(
         "completed_items": completed,
         "failed_items": failed,
         "cancelled_items": cancelled,
+        "metric_summary": _aggregate_metric_summary(connection, run_id),
     }
     connection.execute(
         """

@@ -18,6 +18,7 @@
     "actions": ["answers the question substantively", "returns naturally to the interview"],
     "boundaries": ["does not ignore or invent company-specific facts"],
     "quality_requirements": ["answer acknowledges uncertainty where necessary", "transition is smooth"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "counter_question_answered", "description": "The candidate question receives a substantive answer"}
     ],

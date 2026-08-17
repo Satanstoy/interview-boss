@@ -1,4 +1,4 @@
-"""Load Git-versioned Benchmark definitions and seed their relational index."""
+"""Load Git-versioned Benchmark definitions and seed the 1.0 release axes."""
 
 from __future__ import annotations
 
@@ -13,9 +13,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SUITE_ROOT = REPO_ROOT / "evals" / "suites" / "interview-e2e" / "1.0"
 
 
+EVALUATION_RELEASE_KEY = "interview-eval@1.0"
+INTERNAL_SUITE_KEY = "interview-e2e-suite"
+
+
 def load_suite_definition(release_key: str) -> dict[str, Any]:
-    if release_key != "interview-e2e-suite@1.0":
-        raise ValueError(f"未知 Benchmark Suite: {release_key}")
+    if release_key not in {EVALUATION_RELEASE_KEY, "interview-e2e-suite@1.0"}:
+        raise ValueError(f"未知模拟面试评测版本: {release_key}")
     suite = json.loads((SUITE_ROOT / "suite.json").read_text(encoding="utf-8"))
     cases = []
     for filename in suite["case_files"]:
@@ -43,6 +47,14 @@ def _ensure_published_release(conn, **kwargs) -> tuple[dict[str, Any], bool]:
         "SELECT * FROM eval_releases WHERE release_key = ?", (kwargs["release_key"],)
     ).fetchone()
     if existing:
+        if existing["status"] == "draft":
+            conn.execute(
+                "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (existing["id"],),
+            )
+            existing = conn.execute(
+                "SELECT * FROM eval_releases WHERE id = ?", (existing["id"],)
+            ).fetchone()
         return dict(existing), False
     release = create_release(conn, **kwargs)
     conn.execute(
@@ -61,94 +73,102 @@ def _candidate_simulator_model() -> str:
     )
 
 
-def _version_legacy_candidate_simulator(
-    conn, legacy_release: dict[str, Any], model: str
-) -> None:
-    """Create a new immutable candidate release for the old placeholder model."""
-    try:
-        manifest = json.loads(legacy_release.get("manifest_json") or "{}")
-    except json.JSONDecodeError:
-        manifest = {}
-    if manifest.get("model") != "candidate-simulator-model":
-        return
-
-    release_key = "candidate-simulator@1.1"
-    if conn.execute(
-        "SELECT 1 FROM eval_releases WHERE release_key = ?", (release_key,)
-    ).fetchone():
-        return
-
-    replacement_manifest = {
-        **manifest,
-        "version": "1.1",
-        "model": model,
-        "parent_release_key": legacy_release.get("release_key", "candidate-simulator@1.0"),
-    }
-    replacement = create_release(
-        conn,
-        release_key=release_key,
-        release_type="candidate_simulator",
-        version="1.1",
-        target_type=legacy_release.get("target_type", "interview"),
-        display_name=legacy_release.get("display_name", ""),
-        manifest=replacement_manifest,
-        created_by=legacy_release.get("created_by"),
-    )
-    conn.execute(
-        "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (replacement["id"],),
+def _judge_model(suite: dict[str, Any]) -> str:
+    return (
+        os.environ.get("EVAL_JUDGE_MODEL")
+        or os.environ.get("LLM_MODEL_NAME")
+        or suite.get("judge_model")
+        or "gpt-4o"
     )
 
 
 def sync_builtin_benchmarks(conn) -> dict[str, int]:
-    """Idempotently index the fixed Interview E2E Suite 1.0."""
-    suite = load_suite_definition("interview-e2e-suite@1.0")
-    judge_model = suite["judge_model"]
+    """Idempotently index the complete Interview Evaluation Release 1.0."""
+    suite = load_suite_definition(EVALUATION_RELEASE_KEY)
+    judge_model = _judge_model(suite)
+    candidate_model = _candidate_simulator_model()
+    target_model = os.environ.get("LLM_MODEL_NAME") or "gpt-4o"
+    target_manifest = {
+        **_baseline_manifest("interview-agent"),
+        "target_type": "interview",
+        "workflow": "chat-interview",
+        "model": target_model,
+    }
+    evaluation_manifest = {
+        "schema_version": 1,
+        "release_key": EVALUATION_RELEASE_KEY,
+        "target_type": "interview",
+        "benchmark": {
+            "version": "1.0",
+            "suite_key": INTERNAL_SUITE_KEY,
+            "description": suite["description"],
+            "cases": suite["cases"],
+        },
+        "protocol": {
+            "version": "1.0",
+            "replication_count": 5,
+            "seed_strategy": "sha256(base_seed:case_id:replication)",
+            "aggregate": "mean_median_dispersion",
+            "max_attempts": 1,
+        },
+        "judge": {
+            "version": "1.0",
+            "model": judge_model,
+            "temperature": 0,
+            "response_format": "json_object",
+            "prompt_version": "interview-e2e-judge-v1",
+            "credential_ref": "global-llm",
+        },
+        "simulator_harness": {
+            "adapter": "InterviewE2EAdapter",
+            "version": "1.0",
+            "max_turns": 50,
+            "trace_fields": ["tool_calls_trace", "classify_result", "turn_intent"],
+        },
+        "candidate_simulator": {
+            "version": "1.0",
+            "model": candidate_model,
+            "temperature": 0.7,
+            "credential_ref": "global-llm",
+        },
+        "tool_evaluation": {
+            "version": "1.0",
+            "enabled": True,
+            "source": "metadata.tool_calls_trace",
+            "deterministic": True,
+        },
+        "intent_evaluation": {
+            "version": "1.0",
+            "enabled": True,
+            "source": "metadata.classify_result",
+            "strategy_source": "metadata.turn_intent",
+            "deterministic": True,
+        },
+        "retrieval": {
+            "version": "1.0",
+            "embedding_model": os.environ.get("EMBEDDING_MODEL", "BAAI/bge-m3"),
+            "credential_ref": "siliconflow-embedding",
+        },
+        "runtime": _baseline_manifest("interview-evaluation"),
+    }
     releases = [
         {
             "release_key": "interview-agent@1.0",
             "release_type": "target",
             "version": "1.0",
             "target_type": "interview",
-            "manifest": _baseline_manifest("interview-agent"),
+            "manifest": target_manifest,
+            "git_sha": target_manifest["git_sha"],
+            "image_digest": target_manifest["image_digest"],
+            "config_digest": target_manifest["config_digest"],
         },
         {
-            "release_key": suite["release_key"],
-            "release_type": "benchmark_suite",
-            "version": suite["version"],
-            "target_type": suite["target_type"],
-            "judge_model": judge_model,
-            "manifest": suite,
-        },
-        {
-            "release_key": "eval-protocol@1.0",
-            "release_type": "eval_protocol",
-            "version": "1.0",
-            "manifest": {**_baseline_manifest("eval-protocol"), "replication_count": 5},
-        },
-        {
-            "release_key": "judge@1.0",
-            "release_type": "judge",
-            "version": "1.0",
-            "judge_model": judge_model,
-            "manifest": {**_baseline_manifest("judge"), "model": judge_model, "temperature": 0},
-        },
-        {
-            "release_key": "interview-harness@1.0",
-            "release_type": "simulator_harness",
+            "release_key": EVALUATION_RELEASE_KEY,
+            "release_type": "evaluation",
             "version": "1.0",
             "target_type": "interview",
-            "manifest": _baseline_manifest("interview-harness"),
-        },
-        {
-            "release_key": "candidate-simulator@1.0",
-            "release_type": "candidate_simulator",
-            "version": "1.0",
-            "target_type": "interview",
-            "manifest": {
-                **_baseline_manifest("candidate-simulator"),
-                "model": _candidate_simulator_model(),
-            },
+            "judge_model": judge_model,
+            "manifest": evaluation_manifest,
         },
     ]
     release_rows = {}
@@ -158,21 +178,24 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
         release_rows[release["release_key"]] = row
         created_releases += int(created)
 
-    _version_legacy_candidate_simulator(
-        conn,
-        release_rows["candidate-simulator@1.0"],
-        _candidate_simulator_model(),
+    # Keep historical component rows queryable, but remove them from the
+    # published selection surface now that the complete Evaluation Release is
+    # the only public evaluation version.
+    conn.execute(
+        "UPDATE eval_releases SET status = 'archived', archived_at = CURRENT_TIMESTAMP "
+        "WHERE release_type IN ('benchmark_suite', 'eval_protocol', 'judge', "
+        "'simulator_harness', 'candidate_simulator') AND status = 'published'"
     )
 
     suite_row = conn.execute(
         "SELECT * FROM eval_benchmark_suites WHERE release_id = ?",
-        (release_rows[suite["release_key"]]["id"],),
+        (release_rows[EVALUATION_RELEASE_KEY]["id"],),
     ).fetchone()
     if suite_row is None:
         suite_row = create_benchmark_suite(
             conn,
-            release_id=release_rows[suite["release_key"]]["id"],
-            suite_key="interview-e2e-suite",
+            release_id=release_rows[EVALUATION_RELEASE_KEY]["id"],
+            suite_key=INTERNAL_SUITE_KEY,
             target_type=suite["target_type"],
             judge_model=judge_model,
             description=suite["description"],

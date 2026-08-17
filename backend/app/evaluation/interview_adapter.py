@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from app.agents.chat.graph import run_chat
+from app.evaluation.tool_scoring import evaluate_interview_trace
 from app.services import chat_service
 from app.services.llm import _call_llm_with_retry_messages
 
@@ -76,6 +77,8 @@ class InterviewE2EAdapter:
         turns: list[dict[str, Any]] = []
         interviewer_response = ""
         errors: list[str] = []
+        target_manifest = target_release.get("manifest") or {}
+        interviewer_model = str(target_manifest.get("model") or "")
 
         try:
             for turn_index in range(1, max_turns + 1):
@@ -95,6 +98,7 @@ class InterviewE2EAdapter:
                     user_message,
                     mode,
                     candidate_view,
+                    model=interviewer_model,
                 )
                 interviewer_response = result["assistant"]
                 if turn_index == 1:
@@ -135,15 +139,25 @@ class InterviewE2EAdapter:
             assertion_id = assertion.get("id", "unknown") if isinstance(assertion, dict) else str(assertion)
             passed, evidence = self._check_assertion(assertion_id, turns, all_events, assistant_text, errors)
             hard_assertions.append({"id": assertion_id, "passed": passed, "evidence": evidence})
+        trace_score = evaluate_interview_trace(turns, contract)
+        assertion_by_id = {item["id"]: item for item in hard_assertions}
+        for assertion in trace_score["assertions"]:
+            assertion_by_id[assertion["id"]] = assertion
+        hard_assertions = list(assertion_by_id.values())
+        contract_violations = [item["id"] for item in hard_assertions if not item["passed"]]
         return {
             "status": "succeeded" if raw_result.get("status") == "succeeded" else "failed",
             "payload": {
                 "conversation_id": raw_result.get("conversation_id"),
                 "turns": turns,
                 "errors": errors,
+                "tool_calls": trace_score["tool_calls"],
+                "tool_metrics": trace_score["tool_metrics"],
+                "intent_records": trace_score["intent_records"],
+                "intent_metrics": trace_score["intent_metrics"],
             },
             "hard_assertions": hard_assertions,
-            "contract_violations": [item["id"] for item in hard_assertions if not item["passed"]],
+            "contract_violations": contract_violations,
         }
 
     async def _candidate_reply(
@@ -191,6 +205,7 @@ class InterviewE2EAdapter:
         user_message: str,
         mode: str,
         candidate_view: dict[str, Any],
+        model: str = "",
     ) -> dict[str, Any]:
         request_id = uuid.uuid4().hex
         fingerprint = chat_service.build_turn_request_fingerprint(user_message)
@@ -213,6 +228,7 @@ class InterviewE2EAdapter:
                 mode=mode,
                 resume_text=str(candidate_view.get("profile") or ""),
                 difficulty=str(candidate_view.get("difficulty") or "mid"),
+                model=model or None,
                 turn_id=turn.id,
                 turn_fence=turn.fence,
             ):

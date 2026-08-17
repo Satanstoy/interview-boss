@@ -16,6 +16,20 @@
     "actions": ["uses a tool only when it improves the next question", "references useful tool output"],
     "boundaries": ["does not expose raw tool payload or internal names to candidate"],
     "quality_requirements": ["tool calls are timely", "tool output changes the interview trajectory"],
+    "tool_expectations": {
+      "required_tools": ["search_questions"],
+      "min_calls": 1,
+      "max_calls": 4,
+      "max_failed_calls": 0,
+      "require_result_used": true
+    },
+    "intent_expectations": [
+      {
+        "turn": 1,
+        "expected_intent": "interview_question",
+        "expected_strategy": "deep_dive"
+      }
+    ],
     "hard_assertions": [
       {"id": "tool_result_used", "description": "At least one useful tool result is reflected in a later question"},
       {"id": "no_raw_tool_leak", "description": "Internal tool payload is not exposed verbatim"}

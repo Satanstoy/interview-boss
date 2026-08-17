@@ -12,6 +12,7 @@ export const STATUS_LABELS = {
 
 export const RELEASE_TYPE_LABELS = {
   target: '被测版本',
+  evaluation: '完整评测版本',
   benchmark_suite: '评测题集',
   eval_protocol: '评测规则',
   judge: '评分模型',
@@ -56,6 +57,7 @@ export const EVALUATION_FLOW_STEPS = [
 
 export const RELEASE_TYPE_META = {
   target: { title: '被测版本', description: '待评测的 Agent、Workflow 或 Pipeline。' },
+  evaluation: { title: '完整评测版本', description: '一次评测所使用的题集、规则、模型、Harness 和模拟器整体版本。' },
   benchmark_suite: { title: '评测题集', description: '固定的 Case、输入快照与质量要求。' },
   eval_protocol: { title: '评测规则', description: '重跑次数、聚合方式与通过门槛。' },
   judge: { title: '评分模型', description: '固定的 Judge Model 与评分 Prompt。' },

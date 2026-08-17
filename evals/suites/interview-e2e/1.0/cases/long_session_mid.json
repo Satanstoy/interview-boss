@@ -20,6 +20,7 @@
     "actions": ["conducts a multi-topic interview", "provides a structured closing"],
     "boundaries": ["does not expose internal tools or evaluation metadata"],
     "quality_requirements": ["covers multiple technical dimensions", "maintains natural pacing"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "selected_question_present", "description": "At least one selected question event exists"},
       {"id": "closing_present", "description": "The final exchange contains a structured closing"}

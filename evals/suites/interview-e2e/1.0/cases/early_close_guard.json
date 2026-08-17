@@ -18,6 +18,7 @@
     "actions": ["politely declines premature closing", "asks a focused follow-up"],
     "boundaries": ["does not ignore the candidate", "does not end immediately"],
     "quality_requirements": ["response is respectful", "follow-up is justified by missing evidence"],
+    "intent_expectations": [{"turn": 1, "expected_intent": "interview_question", "expected_strategy": "deep_dive"}],
     "hard_assertions": [
       {"id": "early_close_refused", "description": "The interviewer does not close immediately"},
       {"id": "probe_after_request", "description": "A focused probe follows the request"}
