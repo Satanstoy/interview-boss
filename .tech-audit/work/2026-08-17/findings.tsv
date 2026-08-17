@@ -1,8 +1,45 @@
 severity	dim	location	title	fix	effort	confidence
-2	D13	backend/.env.example:1-48	.env.example 仅文档 48 个变量，代码实际使用 ~110 个（缺 CLUSTER_*/EMBEDDING_*/SEARCH_*/REDIS_URL/DEEPGRAM_API_KEY/DAILY_LLM_CALL_LIMIT 等 63 个可选变量）	按功能域分组补全所有 os.environ.get 调用的可选变量占位行（含默认值注释），使新运维者无需 grep 源码即可发现可调旋钮	S	certain
-2	D14	backend/app/services/insights.py:479	datetime.now().date() 无时区感知，与 email_service 同类 naive datetime 问题	统一用 datetime.now(timezone.utc) 或项目级 utcnow() 辅助函数（round-2 已修 email_service；insights 为同类遗漏）	S	certain
-2	D14	backend/app/services/llm.py:290-294	_user_client_cache 半数淘汰策略无 TTL/LRU：缓存满时一次性丢弃最旧一半，高频用户可能刚被淘汰又被重建	改为 LRU 淘汰或加 TTL（如 maxsize + per-entry timestamp），减少无谓重建开销	S	probable
-2	D15	frontend/src/components/business/PracticePanel.vue:19	图标关闭按钮无 aria-label，纯 SVG 无文本标签，屏幕阅读器无法识别	加 aria-label="关闭" 或改用 AppTooltip 包裹	S	certain
-2	D15	frontend/src/components/business/CodingPractice.vue:68,378	移出题单/取消收藏 destructive action 无确认步骤，点击即执行（同组件其他删除操作已有 showConfirm 先例）	在 removeProblemFromCurrentList 入口加 useConfirm() 确认对话框	S	certain
-2	D16	frontend/src/components/business/KnowledgeGraph.vue:94-177	ECharts 图表配置内联 14 个 porcelain hex 值（#F7F2EB/#081F5C/#EDEFF1/#9EB3CD 等），绕过 chartTokens.js 设计 token（仅 import 了 RAMP_DARK 用于节点色阶）	统一 import { porcelain, porcelainTooltip } from '@/utils/chartTokens.js' 并引用 token 属性替换所有硬编码 hex	M	certain
-1	D16	frontend/src/components/business/ExamDistribution.vue:109-119	死组件（0 引用）内联 6 个主题色 hex（#574f49/#e8e4dd/#e7e5e2/#4a4540/#1a1816/#faf9f7），随 build 发布无用代码	删除文件或标 deprecated；保留则统一走 chartTokens	S	certain
+4	D4	backend/.env:22; git history (43b0a3a7, 8c070972 等)	SiliconFlow API key 仍存在当前运行环境并留在可达 git 历史，是否仍有效尚未核实	立即在服务商侧轮换并撤销旧 key；对可达历史做脱敏重写，之后用 gitleaks 全史扫描确认	M	certain
+3	D3	scripts/check.sh:84-90; full-check output	后端关键测试子集仍有 72 failed / 2404 passed / 7 skipped，check.sh 仅 WARN 不阻断	先按失败簇修复测试隔离和契约回归，再把关键子集恢复为 blocking；保留失败基线	L	certain
+3	D3	frontend/tests/e2e/*.spec.js	29 条 Playwright spec 中 25 条依赖 page.route mock，没有自动化真实前后端/Redis/worker 全链路	增加最小真实栈 smoke：注册/登录、提交、队列消费、结果回读；CI 单独运行并设超时	L	certain
+3	D4	backend/.env:17; backend/app/db/migrations/auth.py:114-123	当前 ADMIN_PASSWORD 仅 11 字符，启动校验只检查是否存在，不设最小长度	轮换为随机 16+ 字符密码，并在配置校验中强制长度与生产禁用默认值	S	certain
+3	D7	frontend/package.json; frontend/package-lock.json	npm audit --omit=dev 实测 16 条生产漏洞，其中 9 high，含 direct DOMPurify/ECharts/PostCSS/Puppeteer 路径	升级或替换受影响包，删除不需要的 Puppeteer 路径；将 audit 变成有明确豁免和截止日期的门禁	L	certain
+3	D7	pyproject.toml; uv.lock	当前导出依赖仍有 pip-audit 9 条漏洞，涉及 aiohttp 3.14.1、click 8.3.2、cryptography 49.0.0、mcp 1.12.4	按修复版本升级并提交锁文件；对无直接修复的包建立升级/替代跟踪	M	certain
+3	D8	scripts/check.sh:151-179; .github/workflows/ci.yml:38-39	ruff 175 条、mypy 436 条、ESLint 13 errors/50 warnings，但静态检查和 audit 在本地/CI 都是 WARN-only	先收敛存量，再按模块逐步设 blocking；CI 不要用 audit || true 隐藏失败	L	certain
+3	D8	scripts/line_guard.sh:45-53	line_guard 不扫描 backend/tests，当前 test_react_loop.py 3728 行、test_chat.py 2038 行仍可继续膨胀	增加 backend/tests 扫描并对既有巨型测试拆分设置过渡基线	M	certain
+3	D9	backend/data/interview-boss.db; backend/app/db/migrations/schema_hygiene_2.py:30-72	当前数据库 PRAGMA foreign_key_check 仍有 178 条违规；migration 090 只重建 FK，不清理既有孤儿	先备份并执行显式修复迁移/隔离孤儿，再将 foreign_key_check 纳入启动或发布门禁	M	certain
+3	D6	docker-compose.yml:160-181; deploy/systemd/interview-boss-eval-worker.timer; runtime	评测 worker 依赖 systemd timer，但 timer inactive/not-found，运行态无 eval-worker；queued 评测可能无人消费	在部署脚本中安装启用 timer，或提供常驻 worker；前端对消费者离线和 queued 超时给出告警	M	certain
+3	D6	runtime worker image sha256:783f...; backend/data/interview-boss.db	运行中的 worker 仍是旧镜像，代码已有 retention cron；当前仍有 115 条未使用过期验证码和 574 条 done analysis_queue 记录	发布/重启 worker 到当前镜像，增加 cron last-run/失败监控，并确认 retention 实际执行	M	certain
+2	D1	backend/app/services/pipeline/batch_v2.py:1-383	batch_v2 是生产零调用的死实现，但被源码回归测试保留，继续增加维护分叉	将测试改为 live compact/batch 路径后删除，或明确隔离为 fixture 并禁止生产导入	M	certain
+2	D2	docs/specs/2026-08-17-audit-round4-fixes.md:10-20	修复 spec 的 A-I 仍全部标记未开始，与已落地提交事实相反，容易重复执行或误判状态	按提交逐项回填 ✅/🚧，并把未完成项与本轮 findings.tsv 对齐	S	certain
+2	D2	pyproject.toml:6; Dockerfile:30; .python-version:1	项目声明 requires-python >=3.11，但 Docker、mypy、.python-version 和文档实际按 3.12 运行	统一最低版本声明，或为 3.11 建 CI 矩阵并修复依赖/类型差异	S	certain
+2	D4	backend/app/routers/; only audio.py declares response_model	约 190 个路由只有 1 个声明 response_model，DB row/dict 直接出 API 边界，响应字段缺少契约保护	优先为 auth/profile/data/admin 路由补 Pydantic response model，并禁止敏感字段隐式外泄	L	certain
+2	D4	backend/app/db/queries.py:72-96	动态频率 SQL 将 user_id 直接拼进 f-string；当前调用类型为 int，仍缺少边界强制与参数化契约	入口先 int 强制/拒绝异常值，table_alias 使用白名单，能参数化的值全部改占位符	S	certain
+2	D5	backend/app/routers/chat.py:444-454; backend/app/agents/chat/memory_extract.py:121-134	chat 及 memory_extract 读取 JD 只按 id，不过滤 deleted_at，软删 JD 仍可进入上下文/标题	统一通过带 owner_id 与 deleted_at IS NULL 的可见性查询，并补软删回归测试	S	certain
+2	D5	backend/app/services/llm_quota.py:34-55	LLM 配额先 SELECT 再 UPSERT，突发并发下多个请求可同时通过并超过每日上限	使用带 WHERE call_count < limit 的单条 UPSERT/rowcount 判定，补并发边界测试	S	certain
+2	D6	backend/app/routers/health.py:10-21; docker-compose.yml:224-276	应用 health 只检查 SQLite，nginx 与 oauth-gateway 没有 healthcheck，Redis/worker 故障可能仍显示健康	区分 liveness/readiness，加入 Redis 与 worker 可用性；为公网门面和 OAuth 网关增加探针	M	certain
+2	D6	backend/app/worker.py:1384-1391	6 个 cron 没有 last-run/status/失败可见性，worker 停掉后任务会静默缺跑	写入 cron 状态与 worker 心跳，补 admin 只读诊断和告警	M	probable
+2	D6	backend/data/ (738M); backups/ (1.3G); deploy/docker-deploy.sh:458-476	数据库与备份位于同一故障域，备份命令无保留轮转，长期积累会放大磁盘/SPOF 风险	备份复制到独立存储，加入保留期/容量告警，并定期做恢复演练	M	certain
+2	D6	docs/; deploy/docker-deploy.sh	没有覆盖 DB down、LLM 5xx、配额耗尽、磁盘满、OOM、恢复回滚的运维 runbook	补最小值班手册，记录备份校验、恢复演练和告警响应负责人	M	certain
+2	D7	frontend/package.json:47; frontend/package.json (no engines)	Vite 仍为 ^4.4.5，package.json 没有 Node engines；CI Node 20 与 Docker Node 22 缺少兼容性守卫	升级 Vite/Vue 工具链并完成构建回归，声明并在 CI/Docker 统一 Node 版本	M	certain
+2	D7	.github/ (no dependabot.yml/renovate.json)	没有自动依赖更新策略，当前漏洞会持续靠人工发现	加入 Dependabot/Renovate，按周提 PR 并为 high/critical 设 SLA	S	certain
+2	D8	.githooks/commit-msg	仓库有 commit-msg hook 但没有安装/启用脚本，fresh clone 默认没有钩子	提供 install-hooks 或 pre-commit 配置，并在 CI 验证 hook/提交规范	S	certain
+2	D8	oauth-gateway/Dockerfile:1; Dockerfile:30	基础镜像使用可变 tag，未 digest pin，构建不可完全复现	发布流程记录镜像 digest 并逐步 pin；定期更新 digest	S	certain
+2	D9	backend/app/db/connection.py:48-53	init_db 的迁移连接没有先执行 PRAGMA foreign_keys=ON，迁移期间的约束状态依赖迁移内部实现	连接初始化立即打开 FK 并在迁移前后断言状态	S	certain
+2	D9	backend/app/db/migrations/__init__.py:15-16; schema_hygiene_2.py:48-72	破坏性 migration 090 重建并 DROP analysis_queue，但不在 DESTRUCTIVE_VERSIONS 自动备份集合中	把 090 纳入备份集合，迁移测试覆盖失败回滚和备份存在性	S	certain
+2	D10	backend/app/services/llm_quota.py:4-14	成本控制只按调用次数，total_tokens 仅统计；相同次数的短答/长文成本可能相差很大	增加 token/金额预算与按 provider/model 的成本表，调用前后同时检查额度	M	probable
+2	D11	frontend/src/components/business/LoginModal.vue:137-149; docs/compliance/privacy-policy.md:54-62	注册流程没有呈现隐私政策/条款并记录明确同意，隐私说明只在登录后设置页出现	在注册提交前展示版本化政策链接与同意记录，保存 policy_version/timestamp	M	certain
+2	D11	backend/app/db/migrations/evaluation.py:194-204; docs/compliance/account-deletion.md:7-16	账号删除仍是运营者手工流程，且 eval_human_reviews.reviewer_id ON DELETE RESTRICT 可能阻塞管理员删除	实现导出/删除工作流或明确 SLA；为评测审阅记录设计匿名化/SET NULL 策略	M	certain
+2	D11	backend（无 account export endpoint）; docs/compliance/privacy-policy.md:54-62	隐私政策承诺可协助导出，但系统没有自助导出端点或可审计导出流程	实现按 user_id 的可携带性导出、权限校验、脱敏和过期下载链接	M	certain
+2	D12	backend/app/routers/analytics.py:323-396	clear_db 已有确认 token 和备份，但没有写入管理员审计日志，破坏性操作只能从应用日志追溯	在事务中记录 admin、目标、确认 token 摘要、备份路径、结果和时间	S	certain
+2	D13	backend/.env.example:1-48	.env.example 只列约 48 个变量，代码实际读取约 110 个，缺少 63 个可选配置占位	按功能域补全可选变量、默认值、敏感性和生产必填说明	S	certain
+2	D13	docker-compose.yml:212; Dockerfile runtime config	HF_CACHE_DIR 默认绑定 /home/ubuntu/.cache/huggingface，换用户/机器时 setup 不可复现	默认使用项目相对目录或 XDG 路径，启动前校验目录权限并在文档说明缓存迁移	S	certain
+2	D14	backend/app/services/email_service.py:104,126,149,207,264	验证码/锁定账本仍混用 naive datetime.now，与 UTC 存储/比较约定不一致	统一 timezone-aware UTC 序列化和解析，补跨时区过期测试	S	certain
+2	D14	backend/app/services/llm.py:237-296	_user_client_cache 满时一次性丢弃最旧一半，无 TTL/LRU，高频用户会反复重建客户端	使用有上限的 LRU/TTL 缓存并记录命中/淘汰指标	S	probable
+2	D14	backend/app/routers/data.py:925-937	interview 更新事务提交后才创建 reprocess job，进程在两步之间退出会留下已更新但未重处理的数据	使用同一 durable job/outbox 事务，或增加可恢复扫描补偿窗口	M	probable
+1	D14	backend/app/agents/chat/react_loop.py:522-543	return 后仍有不可达日志代码，引用已不存在的 tool_names	删除不可达代码并让静态检查阻断此类残留	S	certain
+2	D15	frontend/src/components/business/CodingPractice.vue:68,378	移出题单/取消收藏仍无确认，点击即执行破坏性动作	在入口使用 useConfirm，并补键盘/取消路径测试	S	certain
+2	D15	frontend/src/views/PracticeDecksView.vue:51; frontend/src/components/SiteHeader.vue:99	删除题单仍使用原生 window.confirm，交互样式与 AppTooltip/AlertDialog 约定不一致	统一使用项目确认组件并保证文案、焦点和 ESC 行为一致	S	certain
+1	D15	frontend/src/components/business/PracticeMode.vue:141,177,435,462	4 处原生 title 绕过统一 Tooltip，无触屏/键盘等价说明	改用 AppTooltip 或补可见辅助文本	S	certain
+2	D16	frontend/src/components/business/PracticeStarChart.vue:47-103; PracticeQuadChart.vue:33-122	两个图表仍内联多组 porcelain hex/rgba，绕过 chartTokens，主题切换易漂移	统一使用 chartTokens 的 porcelain/ramp/tooltip token	M	certain
+1	D16	frontend/src/components/business/ExamDistribution.vue:109-119	0 引用死组件仍随源码发布，并内联 6 个主题色	删除或标记为 fixture；若保留则统一 token	S	certain
