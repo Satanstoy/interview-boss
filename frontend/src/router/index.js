@@ -105,6 +105,12 @@ const routes = [
         component: () => import('@/views/admin/EvaluationOverviewView.vue'),
       },
       {
+        path: 'admin/evals/results',
+        name: 'admin-evals-results',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationResultsView.vue'),
+      },
+      {
         path: 'admin/evals/experiments',
         name: 'admin-evals-experiments',
         meta: { adminOnly: true },

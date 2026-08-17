@@ -139,6 +139,61 @@ def test_cancel_marks_request_and_persists_event(test_db, monkeypatch):
     ).fetchone()[0] == "run.cancel_requested"
 
 
+def test_overview_aggregates_human_ab_evidence(test_db, monkeypatch):
+    module = _router()
+    context = _context(test_db)
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    service = importlib.import_module("app.services.evaluation_service")
+    run_a = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=30,
+        comparison_group="release-ab-1",
+    )
+    run_b = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=31,
+        comparison_group="release-ab-1",
+    )
+    test_db.execute(
+        "UPDATE eval_items SET status = 'completed', score = CASE run_id WHEN ? THEN 0.8 ELSE 0.6 END WHERE run_id IN (?, ?)",
+        (run_a["id"], run_a["id"], run_b["id"]),
+    )
+    for choice in ("a", "a", "b"):
+        test_db.execute(
+            "INSERT INTO eval_human_reviews "
+            "(comparison_group, run_a_id, run_b_id, item_key, reviewer_id, choice) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("release-ab-1", run_a["id"], run_b["id"], f"case-1#{choice}", 1, choice),
+        )
+    test_db.commit()
+
+    result = asyncio.run(module.overview({"id": 1, "is_admin": 1}))
+
+    summary = result["human_reviews"]
+    assert summary["total"] == 3
+    assert summary["comparison_groups"][0]["comparison_group"] == "release-ab-1"
+    assert summary["comparison_groups"][0]["a_wins"] == 2
+    assert summary["comparison_groups"][0]["b_wins"] == 1
+    assert summary["comparison_groups"][0]["run_a_avg_score"] == 0.8
+    assert summary["comparison_groups"][0]["run_b_avg_score"] == 0.6
+
+
 def test_sse_replays_only_events_after_last_event_id(test_db, monkeypatch):
     module = _router()
     context = _context(test_db)

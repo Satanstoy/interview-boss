@@ -7,6 +7,7 @@ defineProps({
   title: { type: String, required: true },
   description: { type: String, required: true },
   activeKey: { type: String, default: '' },
+  showFlow: { type: Boolean, default: true },
 })
 
 const router = useRouter()
@@ -28,6 +29,6 @@ function navigate(crumb) {
         <slot name="actions" />
       </template>
     </AppPageHeader>
-    <EvaluationFlowNav :active-key="activeKey" />
+    <EvaluationFlowNav v-if="showFlow" :active-key="activeKey" />
   </div>
 </template>

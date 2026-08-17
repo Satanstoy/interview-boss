@@ -99,6 +99,52 @@ async def overview(admin: dict = Depends(get_admin_user)):
                 "SELECT id, status, target_release_id, summary_json, created_at "
                 "FROM eval_runs ORDER BY id DESC LIMIT 10"
             ).fetchall()
+            review_rows = conn.execute(
+                """
+                WITH review_groups AS (
+                    SELECT
+                        comparison_group,
+                        run_a_id,
+                        run_b_id,
+                        COUNT(*) AS review_count,
+                        SUM(CASE WHEN choice = 'a' THEN 1 ELSE 0 END) AS a_wins,
+                        SUM(CASE WHEN choice = 'b' THEN 1 ELSE 0 END) AS b_wins,
+                        SUM(CASE WHEN choice = 'tie' THEN 1 ELSE 0 END) AS ties,
+                        SUM(CASE WHEN choice = 'both_fail' THEN 1 ELSE 0 END) AS both_fail,
+                        MAX(created_at) AS last_review_at
+                    FROM eval_human_reviews
+                    GROUP BY comparison_group, run_a_id, run_b_id
+                ), run_scores AS (
+                    SELECT run_id, AVG(score) AS avg_score
+                    FROM eval_items
+                    WHERE status = 'completed' AND score IS NOT NULL
+                    GROUP BY run_id
+                )
+                SELECT
+                    g.comparison_group,
+                    g.run_a_id,
+                    g.run_b_id,
+                    a_target.release_key AS run_a_target_release_key,
+                    b_target.release_key AS run_b_target_release_key,
+                    g.review_count,
+                    g.a_wins,
+                    g.b_wins,
+                    g.ties,
+                    g.both_fail,
+                    g.last_review_at,
+                    a_scores.avg_score AS run_a_avg_score,
+                    b_scores.avg_score AS run_b_avg_score
+                FROM review_groups g
+                JOIN eval_runs run_a ON run_a.id = g.run_a_id
+                JOIN eval_runs run_b ON run_b.id = g.run_b_id
+                JOIN eval_releases a_target ON a_target.id = run_a.target_release_id
+                JOIN eval_releases b_target ON b_target.id = run_b.target_release_id
+                LEFT JOIN run_scores a_scores ON a_scores.run_id = g.run_a_id
+                LEFT JOIN run_scores b_scores ON b_scores.run_id = g.run_b_id
+                ORDER BY g.last_review_at DESC
+                LIMIT 20
+                """
+            ).fetchall()
             return {
                 "counts": {row["status"]: row["count"] for row in counts},
                 "latest_runs": [
@@ -111,6 +157,10 @@ async def overview(admin: dict = Depends(get_admin_user)):
                     }
                     for row in latest
                 ],
+                "human_reviews": {
+                    "total": sum(row["review_count"] for row in review_rows),
+                    "comparison_groups": [dict(row) for row in review_rows],
+                },
             }
 
     return await run_db(_query)

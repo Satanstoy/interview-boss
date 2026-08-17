@@ -32,10 +32,14 @@ const byType = computed(() => type => releases.value.filter(release => release.r
 function chooseDefaults() {
   const defaults = {
     target: 'interview-agent@1.0', suite: 'interview-e2e-suite@1.0', protocol: 'eval-protocol@1.0',
-    judge: 'judge@1.0', harness: 'interview-harness@1.0', simulator: 'candidate-simulator@1.0',
+    judge: 'judge@1.0', harness: 'interview-harness@1.0', simulator: '',
   }
   for (const [field, key] of Object.entries(defaults)) {
-    const found = releases.value.find(item => item.release_key === key)
+    const found = field === 'simulator'
+      ? releases.value
+        .filter(item => item.release_type === 'candidate_simulator' && item.status === 'published')
+        .sort((a, b) => Number(b.id) - Number(a.id))[0]
+      : releases.value.find(item => item.release_key === key)
     if (found) form.value[field] = String(found.id)
   }
 }

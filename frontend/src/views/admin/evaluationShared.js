@@ -23,7 +23,7 @@ export const EVALUATION_FLOW_STEPS = [
   { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁', route: '/admin/evals/releases' },
   { key: 'benchmarks', keys: ['EvalBenchmarks', 'admin-evals-benchmarks'], label: 'Benchmark', description: '决定测什么', route: '/admin/evals/benchmarks' },
   { key: 'experiments', keys: ['EvalExperiments', 'admin-evals-experiments', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
-  { key: 'results', keys: ['EvalOverview', 'admin-evals-overview'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/overview' },
+  { key: 'results', keys: ['EvalResults', 'admin-evals-results'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/results' },
   { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
 ]
 

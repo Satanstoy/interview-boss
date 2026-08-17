@@ -52,6 +52,49 @@ def test_interview_e2e_suite_1_0_contains_structured_cases():
         assert "rubric" not in case["input_snapshot"]["candidate_view"]
 
 
+def test_sync_builtin_suite_uses_configured_model_for_candidate_simulator(test_db, monkeypatch):
+    catalog = _catalog()
+    monkeypatch.delenv("CANDIDATE_LLM_MODEL", raising=False)
+    monkeypatch.setenv("LLM_MODEL_NAME", "mimo-v2.5-pro")
+
+    catalog.sync_builtin_benchmarks(test_db)
+
+    manifest = test_db.execute(
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'candidate-simulator@1.0'"
+    ).fetchone()[0]
+    assert '"model":"mimo-v2.5-pro"' in manifest
+
+
+def test_sync_builtin_suite_versions_legacy_placeholder_candidate_simulator(test_db, monkeypatch):
+    catalog = _catalog()
+    service = importlib.import_module("app.services.evaluation_service")
+    legacy = service.create_release(
+        test_db,
+        release_key="candidate-simulator@1.0",
+        release_type="candidate_simulator",
+        version="1.0",
+        target_type="interview",
+        manifest={"component": "candidate-simulator", "version": "1.0", "model": "candidate-simulator-model"},
+    )
+    test_db.execute(
+        "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (legacy["id"],),
+    )
+    test_db.commit()
+    monkeypatch.delenv("CANDIDATE_LLM_MODEL", raising=False)
+    monkeypatch.setenv("LLM_MODEL_NAME", "mimo-v2.5-pro")
+
+    catalog.sync_builtin_benchmarks(test_db)
+
+    versions = test_db.execute(
+        "SELECT release_key, version, manifest_json FROM eval_releases "
+        "WHERE release_type = 'candidate_simulator' ORDER BY version"
+    ).fetchall()
+    assert [row[0] for row in versions] == ["candidate-simulator@1.0", "candidate-simulator@1.1"]
+    assert '"model":"candidate-simulator-model"' in versions[0][2]
+    assert '"model":"mimo-v2.5-pro"' in versions[1][2]
+
+
 def test_sync_builtin_suite_records_judge_model_and_cases(test_db):
     catalog = _catalog()
 

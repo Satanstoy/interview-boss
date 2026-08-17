@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ArrowLeftRight, Check, RefreshCw } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
@@ -10,6 +11,7 @@ import { formatDate, reviewChoiceLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const runs = ref([])
+const route = useRoute()
 const reviews = ref([])
 const runA = ref(null)
 const runB = ref(null)
@@ -43,7 +45,7 @@ async function load() {
     const [runData, reviewData] = await Promise.all([fetchEvaluationRuns(), fetchHumanReviews()])
     runs.value = runData.runs || []
     reviews.value = reviewData.reviews || []
-    if (!form.value.group) form.value.group = groups.value[0] || ''
+    if (!form.value.group) form.value.group = String(route.query.group || groups.value[0] || '')
   } catch (err) {
     error.value = err.message || '人工评测加载失败'
   } finally {

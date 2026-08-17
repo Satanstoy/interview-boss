@@ -53,6 +53,53 @@ def _ensure_published_release(conn, **kwargs) -> tuple[dict[str, Any], bool]:
     return release, True
 
 
+def _candidate_simulator_model() -> str:
+    return (
+        os.environ.get("CANDIDATE_LLM_MODEL")
+        or os.environ.get("LLM_MODEL_NAME")
+        or "gpt-4o"
+    )
+
+
+def _version_legacy_candidate_simulator(
+    conn, legacy_release: dict[str, Any], model: str
+) -> None:
+    """Create a new immutable candidate release for the old placeholder model."""
+    try:
+        manifest = json.loads(legacy_release.get("manifest_json") or "{}")
+    except json.JSONDecodeError:
+        manifest = {}
+    if manifest.get("model") != "candidate-simulator-model":
+        return
+
+    release_key = "candidate-simulator@1.1"
+    if conn.execute(
+        "SELECT 1 FROM eval_releases WHERE release_key = ?", (release_key,)
+    ).fetchone():
+        return
+
+    replacement_manifest = {
+        **manifest,
+        "version": "1.1",
+        "model": model,
+        "parent_release_key": legacy_release.get("release_key", "candidate-simulator@1.0"),
+    }
+    replacement = create_release(
+        conn,
+        release_key=release_key,
+        release_type="candidate_simulator",
+        version="1.1",
+        target_type=legacy_release.get("target_type", "interview"),
+        display_name=legacy_release.get("display_name", ""),
+        manifest=replacement_manifest,
+        created_by=legacy_release.get("created_by"),
+    )
+    conn.execute(
+        "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (replacement["id"],),
+    )
+
+
 def sync_builtin_benchmarks(conn) -> dict[str, int]:
     """Idempotently index the fixed Interview E2E Suite 1.0."""
     suite = load_suite_definition("interview-e2e-suite@1.0")
@@ -100,7 +147,7 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
             "target_type": "interview",
             "manifest": {
                 **_baseline_manifest("candidate-simulator"),
-                "model": os.environ.get("CANDIDATE_LLM_MODEL", "candidate-simulator-model"),
+                "model": _candidate_simulator_model(),
             },
         },
     ]
@@ -110,6 +157,12 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
         row, created = _ensure_published_release(conn, **release)
         release_rows[release["release_key"]] = row
         created_releases += int(created)
+
+    _version_legacy_candidate_simulator(
+        conn,
+        release_rows["candidate-simulator@1.0"],
+        _candidate_simulator_model(),
+    )
 
     suite_row = conn.execute(
         "SELECT * FROM eval_benchmark_suites WHERE release_id = ?",

@@ -1,19 +1,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Activity, ArrowRight, CheckCircle2, Clock3, FlaskConical, XCircle } from '@lucide/vue'
+import { Activity, CheckCircle2, Clock3, FlaskConical, XCircle } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
-import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { formatDate, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { fetchEvaluationOverview } from '@/services/evaluationApi.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const router = useRouter()
 const overview = ref(null)
-const runs = ref([])
 const loading = ref(true)
 const error = ref('')
+const humanReviews = computed(() => overview.value?.human_reviews || { total: 0, comparison_groups: [] })
 
 const cards = computed(() => [
   { label: '已完成', value: overview.value?.counts?.completed || 0, icon: CheckCircle2, tone: 'text-emerald-600' },
@@ -26,9 +25,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [summary, runData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns()])
-    overview.value = summary
-    runs.value = runData.runs || []
+    overview.value = await fetchEvaluationOverview()
   } catch (err) {
     error.value = err.message || '评测总览加载失败'
   } finally {
@@ -43,9 +40,9 @@ onMounted(load)
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <EvaluationPageHeader
-        title="评测总览"
-        description="这里查看所有评测运行的整体状态，判断下一步要启动、跟进还是人工复核。"
-        active-key="results"
+        title="测评可视化"
+        description="站在五步评测流程之上，快速查看系统状态、人工证据和下一步需要处理的事项。"
+        :show-flow="false"
       >
         <template #actions>
           <Button variant="outline" @click="router.push('/admin/evals/experiments')">
@@ -69,14 +66,28 @@ onMounted(load)
           </AppCard>
         </div>
 
-        <AppCard class="mt-6" title="最近评测" description="点击一条记录查看完整 E2E 进度、逐 Case 结果和版本绑定。">
-          <div v-if="!runs.length" class="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-10 text-center"><div class="font-medium">还没有评测记录</div><p class="mt-1 text-sm text-muted-foreground">先选择一个被测版本，创建一场完整 E2E 评测。</p><Button class="mt-4" size="sm" @click="router.push('/admin/evals/experiments')">开始一次完整评测</Button></div>
+        <AppCard class="mt-6" title="人工 A/B 汇总" description="人工判断是独立质量证据，用来核验版本差异，不覆盖 Hard Gate 或 Judge。">
+          <div class="mb-4 flex items-center justify-between rounded-lg bg-muted/30 px-4 py-3">
+            <span class="text-sm text-muted-foreground">已完成人工比较</span>
+            <span class="text-2xl font-semibold">{{ humanReviews.total }}</span>
+          </div>
+          <div v-if="!humanReviews.comparison_groups.length" class="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-8 text-center text-sm text-muted-foreground">
+            还没有人工 A/B 数据。完成两条同一 comparison group 的 E2E Run 后，可以进入人工 A/B 核验。
+          </div>
           <div v-else class="divide-y divide-border/60">
-            <button v-for="run in runs" :key="run.id" type="button" class="flex w-full items-center gap-4 py-4 text-left transition-colors hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
-              <div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="font-medium">评测 #{{ run.id }}</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span></div><div class="mt-1 text-xs text-muted-foreground">{{ formatDate(run.created_at) }} · 被测版本：{{ run.target_release_key || '未命名' }}</div></div>
-              <div class="hidden w-40 sm:block"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>已处理 {{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${runProgress(run)}%` }" /></div></div>
-              <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
-            </button>
+            <div v-for="group in humanReviews.comparison_groups" :key="`${group.comparison_group}-${group.run_a_id}-${group.run_b_id}`" class="flex flex-wrap items-center gap-3 py-4">
+              <div class="min-w-48 flex-1">
+                <div class="font-medium">{{ group.comparison_group }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">{{ group.run_a_target_release_key }} 对比 {{ group.run_b_target_release_key }}</div>
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs">
+                <span class="rounded-full bg-emerald-500/10 px-2 py-1 text-emerald-700">A 胜 {{ group.a_wins }}</span>
+                <span class="rounded-full bg-blue-500/10 px-2 py-1 text-blue-700">B 胜 {{ group.b_wins }}</span>
+                <span class="rounded-full bg-muted px-2 py-1 text-muted-foreground">平局 {{ group.ties }}</span>
+                <span class="rounded-full bg-destructive/10 px-2 py-1 text-destructive">都失败 {{ group.both_fail }}</span>
+              </div>
+              <Button size="sm" variant="ghost" @click="router.push({ path: '/admin/evals/reviews', query: { group: group.comparison_group } })">进入人工 A/B</Button>
+            </div>
           </div>
         </AppCard>
       </template>

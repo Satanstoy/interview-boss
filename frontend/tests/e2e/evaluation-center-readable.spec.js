@@ -2,6 +2,23 @@ import { expect, test } from '@playwright/test'
 
 const overviewPayload = {
   counts: { completed: 2, running: 1, queued: 0, created: 0, failed: 0, cancelled: 0 },
+  human_reviews: {
+    total: 3,
+    comparison_groups: [
+      {
+        comparison_group: 'release-ab-2026-08',
+        run_a_id: 11,
+        run_b_id: 12,
+        run_a_target_release_key: 'interview-agent@1.0',
+        run_b_target_release_key: 'interview-agent@1.1',
+        review_count: 3,
+        a_wins: 2,
+        b_wins: 1,
+        ties: 0,
+        both_fail: 0,
+      },
+    ],
+  },
 }
 
 const releasesPayload = {
@@ -12,6 +29,7 @@ const releasesPayload = {
     { id: 4, release_key: 'judge@1.0', release_type: 'judge', status: 'published', version: '1.0', judge_model: 'fixed-judge' },
     { id: 5, release_key: 'interview-harness@1.0', release_type: 'simulator_harness', status: 'published', version: '1.0' },
     { id: 6, release_key: 'candidate-simulator@1.0', release_type: 'candidate_simulator', status: 'published', version: '1.0' },
+    { id: 7, release_key: 'candidate-simulator@1.1', release_type: 'candidate_simulator', status: 'published', version: '1.1' },
   ],
 }
 
@@ -47,7 +65,13 @@ async function mockEvaluationApis(page) {
   await page.route('**/api/admin/evals/releases**', route => route.fulfill({ json: releasesPayload }))
   await page.route('**/api/admin/evals/runs**', route => route.fulfill({ json: runsPayload }))
   await page.route('**/api/admin/evals/benchmarks', route => route.fulfill({ json: benchmarksPayload }))
-  await page.route('**/api/auth/**', route => route.fulfill({ json: { id: 1, username: 'admin', is_admin: true } }))
+  await page.route('**/api/admin/evals/reviews**', route => route.fulfill({ json: { reviews: [] } }))
+  await page.route('**/api/auth/**', route => {
+    if (route.request().url().includes('/api/auth/refresh')) {
+      return route.fulfill({ json: { token: 'mock-token', user: { id: 1, username: 'admin', is_admin: true } } })
+    }
+    return route.fulfill({ json: { id: 1, username: 'admin', is_admin: true } })
+  })
   await page.route('**/api/data/**', route => route.fulfill({ json: [] }))
   await page.route('**/api/analytics**', route => route.fulfill({ json: {} }))
   await page.route('**/api/practice/**', route => route.fulfill({ json: [] }))
@@ -55,7 +79,10 @@ async function mockEvaluationApis(page) {
   await page.route('**/api/interview**', route => route.fulfill({ json: [] }))
   await page.route('**/api/coding/**', route => route.fulfill({ json: [] }))
   await page.route('**/api/knowledge**', route => route.fulfill({ json: { nodes: [], edges: [] } }))
-  await page.route('**/api/admin/**', route => route.fulfill({ json: [] }))
+  await page.route('**/api/admin/**', route => {
+    if (route.request().url().includes('/api/admin/evals/')) return route.fallback()
+    return route.fulfill({ json: [] })
+  })
 }
 
 test.describe('评测中心可读性', () => {
@@ -63,13 +90,35 @@ test.describe('评测中心可读性', () => {
     await mockEvaluationApis(page)
   })
 
-  test('总览告诉管理员评测流程和下一步动作', async ({ page }) => {
+  test('可视化展示运行状态和人工 A/B 汇总', async ({ page }) => {
     await page.goto('/admin/evals/overview?preview=1')
 
-    await expect(page.getByRole('heading', { name: '评测总览' })).toBeVisible()
-    await expect(page.getByText('版本与发布 → Benchmark → 测评实验 → 评测结果 → 人工 A/B')).toBeVisible()
-    await expect(page.getByText('这里查看所有评测运行的整体状态')).toBeVisible()
+    await expect(page.getByRole('heading', { name: '测评可视化' })).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText('人工 A/B 汇总')).toBeVisible()
+    await expect(page.getByText('release-ab-2026-08')).toBeVisible()
+    await expect(page.getByText('A 胜 2')).toBeVisible()
     await expect(page.getByRole('button', { name: '开始一次完整评测' }).first()).toBeVisible()
+  })
+
+  test('评测结果独立承载 Run 进度', async ({ page }) => {
+    await page.goto('/admin/evals/results?preview=1')
+
+    await expect(page.getByRole('heading', { name: '评测结果' })).toBeVisible()
+    await expect(page.getByText('最近评测运行')).toBeVisible()
+    await expect(page.getByText('评测 #12')).toBeVisible()
+  })
+
+  test('流程导航按五步顺序排列', async ({ page }) => {
+    await page.goto('/admin/evals/releases?preview=1')
+
+    const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
+    await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
+    const labels = await flowSteps.allTextContents()
+    const evaluationLabels = ['版本与发布', 'Benchmark', '测评实验', '评测结果', '人工 A/B']
+    const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
+
+    expect(positions.every(position => position >= 0)).toBeTruthy()
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 
   test('实验页按步骤解释配置项', async ({ page }) => {
@@ -81,6 +130,7 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('第 3 步：固定运行参数')).toBeVisible()
     await expect(page.getByText('每个 Case 重跑次数')).toBeVisible()
     await expect(page.getByRole('button', { name: '创建并开始评测' })).toBeVisible()
+    await expect(page.locator('select').nth(5)).toHaveValue('7')
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {
