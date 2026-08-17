@@ -147,10 +147,10 @@
         <!-- Edit answer mode -->
         <div v-if="question._isEditingAnswer" class="flex flex-col gap-3">
           <label class="font-bold text-foreground text-sm">编辑答案</label>
-          <textarea v-model="question._editAnswer" rows="8" class="w-full max-w-3xl border border-input rounded-lg p-4 text-sm focus:outline-none focus:ring-1 focus:ring-ring font-mono bg-transparent text-foreground transition-all duration-200"></textarea>
+          <textarea v-model="localQuestion._editAnswer" rows="8" class="w-full max-w-3xl border border-input rounded-lg p-4 text-sm focus:outline-none focus:ring-1 focus:ring-ring font-mono bg-transparent text-foreground transition-all duration-200"></textarea>
           <div class="flex gap-2 justify-end mt-2">
-            <Button variant="outline" size="sm" @click="question._isEditingAnswer = false" class="px-5">取消</Button>
-            <Button variant="default" size="sm" @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: question._editAnswer, rowObj: question, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question, answer: question._editAnswer })" class="px-5">保存</Button>
+            <Button variant="outline" size="sm" @click="localQuestion._isEditingAnswer = false" class="px-5">取消</Button>
+            <Button variant="default" size="sm" @click="isAdmin ? $emit('save-field', { tableName: 'question_bank', recordId: question.id, dbColumn: 'ai_answer', newValue: localQuestion._editAnswer, rowObj: localQuestion, editStateKey: '_isEditingAnswer', frontendKey: 'ai_answer' }) : $emit('save-user-answer', { question: localQuestion, answer: localQuestion._editAnswer })" class="px-5">保存</Button>
           </div>
         </div>
 
@@ -158,7 +158,7 @@
         <div v-else>
             <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
             <div v-if="isAdmin" class="absolute top-0 right-0 flex gap-1 z-10">
-              <button @click="question._isEditingAnswer = true; question._editAnswer = displayAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
+              <button @click="localQuestion._isEditingAnswer = true; localQuestion._editAnswer = displayAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
                 编辑
               </button>
               <button @click.stop="$emit('generate-answer', question)" :disabled="question._isLoadingAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30 sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
@@ -171,7 +171,7 @@
               :sources="answerSources"
               :open="Boolean(question._showAnswerSources)"
               test-id="answer-sources"
-              @update:open="question._showAnswerSources = $event"
+              @update:open="localQuestion._showAnswerSources = $event"
             />
           </div>
 
@@ -202,7 +202,7 @@
                 <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 AI 生成答案
               </Button>
-              <Button v-if="isAdmin" variant="ghost" size="sm" @click="question._isEditingAnswer = true; question._editAnswer = ''" class="px-5 py-2">
+              <Button v-if="isAdmin" variant="ghost" size="sm" @click="localQuestion._isEditingAnswer = true; localQuestion._editAnswer = ''" class="px-5 py-2">
                 手动编写
               </Button>
               <p v-else class="text-caption text-muted-foreground">暂无参考答案，请等待管理员生成</p>
@@ -262,7 +262,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import AppTooltip from '@/components/common/AppTooltip.vue'
@@ -275,7 +275,7 @@ import { safeUrl } from '@/utils/validate.js'
 import { get } from '@/services/http.js'
 
 const answerSources = computed(() => {
-  const raw = props.question.answer_sources
+  const raw = localQuestion.answer_sources
   return Array.isArray(raw) ? raw : []
 })
 
@@ -287,26 +287,26 @@ const answerDetailLoaded = ref(false)
 
 async function loadFullAnswer() {
   if (answerDetailLoaded.value || isLoadingDetail.value) return
-  const hasAnswer = Boolean(props.question.ai_answer)
-  const hasAnswerSources = Array.isArray(props.question.answer_sources)
+  const hasAnswer = Boolean(localQuestion.ai_answer)
+  const hasAnswerSources = Array.isArray(localQuestion.answer_sources)
   if (hasAnswer && hasAnswerSources) {
-    fullAnswer.value = props.question.ai_answer
+    fullAnswer.value = localQuestion.ai_answer
     answerDetailLoaded.value = true
     return
   }
   // A full answer without answer_sources is an incomplete read model. Fetch
   // detail so the reference-source section is not silently omitted.
-  if (hasAnswer) fullAnswer.value = props.question.ai_answer
-  if (!props.question.has_reference_answer && !props.question.id) return
+  if (hasAnswer) fullAnswer.value = localQuestion.ai_answer
+  if (!localQuestion.has_reference_answer && !localQuestion.id) return
   isLoadingDetail.value = true
   try {
-    const detail = await get(`/api/master-bank/${props.question.id}/detail`)
+    const detail = await get(`/api/master-bank/${localQuestion.id}/detail`)
     fullAnswer.value = detail.ai_answer || ''
-    if (Array.isArray(detail.answer_sources)) props.question.answer_sources = detail.answer_sources
+    if (Array.isArray(detail.answer_sources)) localQuestion.answer_sources = detail.answer_sources
     answerDetailLoaded.value = true
     // Emit to parent so it updates the question object too
     emit('update-answer', {
-      id: props.question.id,
+      id: localQuestion.id,
       ai_answer: detail.ai_answer,
       answer_sources: detail.answer_sources,
     })
@@ -329,17 +329,26 @@ const props = defineProps({
   contentOnly: { type: Boolean, default: false },
 })
 
+// Keep transient UI state local to the card.  The question object is owned by
+// the list, so editing it directly here creates hidden parent updates and
+// violates Vue's one-way data flow.
+const localQuestion = reactive({})
+watch(() => props.question, (value) => {
+  for (const key of Object.keys(localQuestion)) delete localQuestion[key]
+  Object.assign(localQuestion, value)
+}, { immediate: true, deep: true })
+
 const emit = defineEmits(['toggle-answer', 'toggle-star', 'retag', 'generate-answer', 'save-field', 'toggle-item', 'practice', 'split-question', 'start-merge', 'navigate-to-interview', 'delete', 'edit-question', 'delete-original-question', 'update-answer'])
 
 // Trigger detail load when answer section is shown
-watch(() => props.question._showAnswer, (show) => {
+watch(() => localQuestion._showAnswer, (show) => {
   if (show) loadFullAnswer()
 }, { immediate: true })
 
 // In content-only mode (Accordion), always mark as showing so lazy load triggers
 onMounted(() => {
   if (props.contentOnly) {
-    props.question._showAnswer = true
+    localQuestion._showAnswer = true
   }
 })
 
@@ -352,7 +361,7 @@ watch(() => props.question.ai_answer, (val) => {
 
 // 平滑展开/收起来源详情（JS 高度动画 + 锁定 scrollTop 防止虚拟滚动器跳动）
 const toggleSources = () => {
-  const q = props.question
+  const q = localQuestion
   const el = sourcesContentRef.value
   if (!el || !q.sources?.length) return
 
@@ -411,45 +420,34 @@ const DIFFICULTY_CLASSES = {
 }
 
 const parsedTags = computed(() => {
-  const tags = props.question.tags
+  const tags = localQuestion.tags
   return tags ? tags.split(',') : []
 })
 
 const canShare = computed(() => {
   // 仅我的私有题可分享（公共题不可转私有）
-  return props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)
+  return localQuestion.owner_id != null && String(localQuestion.owner_id) === String(props.currentUserId)
 })
 
 const canDelete = computed(() => {
   if (props.isAdmin) return true
-  if (props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)) return true
+  if (localQuestion.owner_id != null && String(localQuestion.owner_id) === String(props.currentUserId)) return true
   return false
 })
 
 const canEdit = computed(() => {
   if (props.isAdmin) return true
-  if (props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)) return true
+  if (localQuestion.owner_id != null && String(localQuestion.owner_id) === String(props.currentUserId)) return true
   return false
 })
 
 const startEditQuestion = () => {
-  props.question._isEditingQuestion = true
-  props.question._editQuestion = props.question.question
-}
-
-const cancelEditQuestion = () => {
-  props.question._isEditingQuestion = false
-  props.question._editQuestion = ''
-}
-
-const saveEditQuestion = () => {
-  const newValue = (props.question._editQuestion || '').trim()
-  if (!newValue) return
-  emit('edit-question', { question: props.question, newValue })
+  localQuestion._isEditingQuestion = true
+  localQuestion._editQuestion = localQuestion.question
 }
 
 const difficultyClass = computed(() => {
-  const d = String(props.question.difficulty || '')
+  const d = String(localQuestion.difficulty || '')
   if (d.includes('L3')) return DIFFICULTY_CLASSES.L3
   if (d.includes('L2')) return DIFFICULTY_CLASSES.L2
   return DIFFICULTY_CLASSES.default
@@ -457,7 +455,7 @@ const difficultyClass = computed(() => {
 
 const displayAnswer = computed(() => {
   // 公共参考答案（题解）是唯一答案展示源
-  return fullAnswer.value || props.question.ai_answer || ''
+  return fullAnswer.value || localQuestion.ai_answer || ''
 })
 
 const cachedMarkdown = computed(() => {
@@ -465,12 +463,12 @@ const cachedMarkdown = computed(() => {
 })
 
 const hasSources = computed(() => {
-  const q = props.question
+  const q = localQuestion
   return (q.original_questions && q.original_questions.length > 0) || (q.sources && q.sources.length > 0)
 })
 
 const sourceCount = computed(() => {
-  const q = props.question
+  const q = localQuestion
   if (q.sources && q.sources.length > 0) return q.sources.length
   return 0
 })
@@ -478,7 +476,7 @@ const sourceCount = computed(() => {
 const isFailedAnswer = (answer) => answer && answer.includes('生成失败')
 
 const showOwnership = computed(() =>
-  props.question.owner_id != null && String(props.question.owner_id) === String(props.currentUserId)
+  localQuestion.owner_id != null && String(localQuestion.owner_id) === String(props.currentUserId)
 )
 
 const formatPosition = (pos) => {
@@ -489,8 +487,8 @@ const formatPosition = (pos) => {
 
 // 按 URL 去重的来源列表，仅在展开时计算以节省性能
 const dedupedSources = computed(() => {
-  if (!props.question._showSources) return []
-  const q = props.question
+  if (!localQuestion._showSources) return []
+  const q = localQuestion
   const sources = q.sources || []
 
   // 优先用 original_question_sources（非 compact 模式）
