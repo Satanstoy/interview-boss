@@ -7,7 +7,6 @@ import time
 import json
 import asyncio
 import logging
-from datetime import datetime
 from app.worker_enqueue import (
     enqueue_build_job,
     enqueue_cluster_batch_job,
@@ -47,13 +46,6 @@ async def scheduled_compaction_task(ctx):
         result = await compact_singletons_in_db()
         elapsed = time.time() - start_time
 
-        # 记录统计日志
-        log_entry = {
-            "task": "scheduled_compaction",
-            "timestamp": datetime.now().isoformat(),
-            "result": result,
-            "elapsed_seconds": round(elapsed, 2)
-        }
         logger.info(f"[定时任务] Compaction 完成: {result}")
 
         # 写入数据库记录
@@ -353,5 +345,3 @@ async def scheduled_db_retention_task(ctx):
     except Exception as e:
         logger.exception(f"[定时任务] DB 保留期清理失败: {e}")
         raise
-
-

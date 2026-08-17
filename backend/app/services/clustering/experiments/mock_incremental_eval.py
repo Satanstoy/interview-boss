@@ -74,11 +74,6 @@ def is_representative(q):
 def pick_sample(qs):
     """从 agent 分类抽 10 题：优先混合 cluster 成员与孤岛。"""
     cat2_qs = [q for q in qs if q["cat1"] == CAT1]
-    in_cluster = [
-        q
-        for q in cat2_qs
-        if q["frequency"] > 1 or any(str(q["id"]) in str(x) for x in [])
-    ]
     # 孤岛（frequency=1）与 cluster 成员都要有
     islands = [q for q in cat2_qs if q["frequency"] == 1]
     members = [q for q in cat2_qs if q["frequency"] > 1]
@@ -103,7 +98,6 @@ async def main():
     sample_ids = {q["id"] for q in sample}
     print(f"[eval] mock 新题 {len(sample)} 道: {sorted(sample_ids)}")
 
-    truth = build_ground_truth(qs)
     existing = [q for q in qs if q["id"] not in sample_ids]
 
     # 构造 existing_clusters_by_cat2（按 cat2 分组，只有代表题作候选）

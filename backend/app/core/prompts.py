@@ -183,7 +183,6 @@ def _build_examples(categories: list) -> str:
     cat1_name = categories[0]["cat1"]
     cat1_child = categories[0]["children"][0] if categories[0]["children"] else ""
     cat2_name = categories[1]["cat1"]
-    cat2_child = categories[1]["children"][0] if categories[1]["children"] else ""
     return f"""## Few-Shot 示例
 输入题目列表：[{{"id": 0, "题目": "请介绍你做过的一个项目，并说明其中遇到的难点"}}]
 输出：

@@ -13,8 +13,6 @@ def _migration_011_data_backfills(conn):
     user_profile.current_job_position -> users.current_position_id,
     embedding cleanup, empty season backfill,
     taxonomy from user_profile JSON -> taxonomy table."""
-    cursor = conn.cursor()
-
     # ── 数据迁移：question_bank.job_position → job_positions + question_position ──
     jp_count = conn.execute("SELECT COUNT(*) FROM job_positions").fetchone()[0]
     if jp_count == 0:

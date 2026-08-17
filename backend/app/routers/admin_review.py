@@ -1,7 +1,7 @@
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user, get_admin_user
+from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
@@ -190,7 +190,7 @@ async def approve_question(question_id: int, admin: dict = Depends(get_admin_use
             conn.commit()
             return dict(row)
 
-    question = await run_db(_approve)
+    await run_db(_approve)
     return {"status": "success", "message": "已通过审核"}
 
 

@@ -120,7 +120,6 @@ def merge_duplicate_group(
 
     keep_id, keep_url = records[0][0], records[0][1]
     drop_pairs = [(r[0], r[1]) for r in records[1:]]
-    url_map = {drop_url: keep_url for _, drop_url in drop_pairs}
 
     base = {
         "signature": signature,
@@ -167,7 +166,6 @@ def _preview_actions(conn, table, keep_id, drop_pairs) -> dict:
     ).fetchone()[0]
     actions["questions_detail_deduped"] = max(0, dup_detail)
     # question_sources 冲突行 + 待归一行
-    keep_url = None
     url_map = {u: None for _, u in drop_pairs}
     removed = 0
     normalized = 0

@@ -1,5 +1,4 @@
 import logging
-import time
 
 from app.agents.shared.state import SubmitState
 from app.agents.shared.events import emit_progress, NodeTimer
@@ -20,7 +19,6 @@ async def persist_public_node(state: SubmitState) -> dict:
         saved_url = state.get("saved_url", "")
         season = state.get("season", "")
         is_admin = state.get("is_admin", False)
-        user_id = state["user_id"]
         record_owner_id = None
         record_status = "approved" if is_admin else "pending"
 

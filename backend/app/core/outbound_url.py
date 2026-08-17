@@ -45,7 +45,8 @@ def _split_url(url: str):
         username = parsed.username
         password = parsed.password
         hostname = parsed.hostname
-        port = parsed.port
+        # Accessing ``port`` validates malformed numeric ports before use.
+        parsed.port
     except ValueError as exc:
         raise OutboundURLBlocked("上游 URL 格式无效") from exc
 

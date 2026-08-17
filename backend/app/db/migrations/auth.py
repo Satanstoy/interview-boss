@@ -107,8 +107,6 @@ def _migration_010_users_extra_columns(conn):
 def _migration_012_admin_seed(conn):
     """Seed admin user.  Migrate master_question_bank -> question_bank,
     practice_history -> user_practice_history.  Drop old tables."""
-    cursor = conn.cursor()
-
     # ── 种子管理员 ──
     admin_username = os.getenv("ADMIN_USERNAME", "sj")
     admin_password = os.getenv("ADMIN_PASSWORD")

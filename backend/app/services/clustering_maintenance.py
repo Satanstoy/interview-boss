@@ -469,7 +469,7 @@ def _merge_variant_duplicates(oq: list[str], dup_pairs: list[list[int]]) -> list
         return oq
     merge_targets = set()
     for pair in dup_pairs:
-        keep, drop = min(pair), max(pair)  # 保留较小下标
+        drop = max(pair)  # 保留较小下标
         merge_targets.add(drop)
     return [v for idx, v in enumerate(oq) if idx not in merge_targets]
 

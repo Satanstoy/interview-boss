@@ -4,8 +4,6 @@ import os
 import sqlite3
 from app.db.connection import get_db_connection
 from app.db.question_bank_sources import (
-    insert_source,
-    insert_original_item,
     sync_question_bank_sources,
 )
 from app.db.utils import _extract_url_signature, normalize_category
@@ -601,15 +599,11 @@ def _apply_incremental_txn(
     ).fetchone()
     for item in unmatched_rows:
         row = item.get("_orig_row") if isinstance(item, dict) else item
-        item_id = item.get("id") if isinstance(item, dict) else None
         url, company, round_, q_text = row[0], row[1], row[2], row[3]
         cat1 = normalize_category(row[4])
         cat2 = normalize_category(row[5]) if len(row) > 5 else ""
         tags = row[6] if len(row) > 6 else ""
         diff_tag = row[7] if len(row) > 7 else "未知"
-        sources_json = json.dumps(
-            [{"url": url, "company": company, "round": round_}], ensure_ascii=False
-        )
         sources, original_questions, original_question_sources = (
             canonicalize_question_bank_payload(
                 [{"url": url, "company": company, "round": round_}],

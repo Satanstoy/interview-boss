@@ -52,9 +52,6 @@ async def transcribe_audio(
         }
 
     try:
-        # 根据文件扩展名设置 MIME 类型
-        mime_type = _get_mime_type(filename)
-
         # 配置转录选项
         options = PrerecordedOptions(
             model=model,

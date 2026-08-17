@@ -20,7 +20,7 @@ def _extract_company_from_sources(question: dict) -> str:
     if isinstance(sources, str):
         try:
             sources = json.loads(sources)
-        except:
+        except (TypeError, ValueError):
             return ""
     if sources and isinstance(sources, list):
         return sources[0].get("company", "")
@@ -34,7 +34,7 @@ def _extract_round_from_sources(question: dict) -> str:
     if isinstance(sources, str):
         try:
             sources = json.loads(sources)
-        except:
+        except (TypeError, ValueError):
             return ""
     if sources and isinstance(sources, list):
         return sources[0].get("round", "")
@@ -108,13 +108,11 @@ def _response_references_jd(response: str, jd_text: str) -> bool:
 def _get_resume_name(user_id: int) -> str:
     try:
         from app.services import resume_service
-        from app.db.connection import get_db_connection
 
-        with get_db_connection() as conn:
-            resume = resume_service.get_resume_text(user_id)
-            if resume:
-                return "我的简历"
-    except:
+        resume = resume_service.get_resume_text(user_id)
+        if resume:
+            return "我的简历"
+    except Exception:
         pass
     return ""
 
@@ -129,7 +127,7 @@ def _get_jd_title(jd_id: int, user_id: int | None = None) -> str:
             row = load_visible_jd(conn, jd_id, user_id)
             if row and row[0]:
                 return row["job_title"]
-    except:
+    except Exception:
         pass
     return ""
 
@@ -369,4 +367,3 @@ async def extract_memory(state: ChatState) -> dict:
         logger.debug(f"记忆提取跳过: {e}")
 
     return {}
-
