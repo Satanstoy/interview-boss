@@ -525,3 +525,43 @@ def test_insights_readiness_items_include_srs_proficiency(test_db):
     assert items["RAG系统设计"]["proficiency"] == 85
     assert items["Agent编排"]["proficiency"] == 60
     assert items["未练主题"]["proficiency"] is None
+
+
+def test_practice_activity_uses_utc_date_not_naive(test_db):
+    """build_practice_activity 必须用 datetime.now(timezone.utc) 而非 datetime.now()。
+
+    模拟 UTC 23:30 / 本地次日 07:30（+8 时区）的场景：
+    如果用 naive datetime.now()，today 会是次日，导致 heatmap 末尾日期错位。
+    """
+    from unittest.mock import patch
+    from datetime import datetime, timezone, timedelta
+
+    from app.services.insights import build_practice_activity
+
+    _insert_user(test_db, 801)
+    test_db.commit()
+
+    # UTC 时间：2026-08-17 23:30:00
+    fake_utc = datetime(2026, 8, 17, 23, 30, 0, tzinfo=timezone.utc)
+    # 如果用 naive now() 模拟本地 +8，会得到 2026-08-18 07:30:00
+    fake_local = datetime(2026, 8, 18, 7, 30, 0)
+
+    original_datetime = datetime
+
+    class FakeDatetime:
+        @staticmethod
+        def now(tz=None):
+            if tz == timezone.utc:
+                return fake_utc
+            return fake_local
+
+        @staticmethod
+        def strptime(*args, **kwargs):
+            return original_datetime.strptime(*args, **kwargs)
+
+    with patch("app.services.insights.datetime", FakeDatetime):
+        data = build_practice_activity({"id": 801})
+
+    # 应该使用 UTC 日期 2026-08-17，而非本地日期 2026-08-18
+    assert data["heatmap"][-1]["date"] == "2026-08-17"
+    assert data["trend"][-1]["date"] == "2026-08-17"

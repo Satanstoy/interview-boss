@@ -4,7 +4,7 @@
 """
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 
 from app.db.connection import get_db_connection, get_user_job_position
@@ -476,7 +476,7 @@ def build_practice_activity(user: dict) -> dict:
     user_id = int(user["id"])
     _, position_name = get_user_job_position(user_id)
     with get_db_connection() as conn:
-        today = datetime.now().date()
+        today = datetime.now(timezone.utc).date()
         heatmap = _build_daily_series(conn, user_id, 365, today)
         trend = _build_daily_series(conn, user_id, 30, today)
         days = _practice_days(conn, user_id)
