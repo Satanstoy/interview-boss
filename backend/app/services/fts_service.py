@@ -486,7 +486,7 @@ def search_questions_fts(
     with get_db_connection() as conn:
         # 检测 CJK 关键词：unicode61 tokenizer 不支持 CJK，直接用 LIKE 搜索
         if has_cjk:
-            logger.info(f"FTS 检索: 检测到 CJK 关键词，跳过 FTS5 直接用 LIKE 搜索")
+            logger.info("FTS 检索: 检测到 CJK 关键词，跳过 FTS5 直接用 LIKE 搜索")
             results = _fallback_like_search(
                 keywords,
                 conn,

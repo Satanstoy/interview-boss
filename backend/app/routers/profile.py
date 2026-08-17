@@ -309,7 +309,7 @@ async def update_profile(
             if not _URL_RE.match(v.strip()):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Base URL 格式无效，URL 必须以 http:// 或 https:// 开头",
+                    detail="Base URL 格式无效，URL 必须以 http:// 或 https:// 开头",
                 )
 
     if not filtered:

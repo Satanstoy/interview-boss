@@ -134,7 +134,7 @@ async def main():
     from app.agents.chat.tools import _llm_rerank_in_tool
 
     lines = [
-        f"# 生产混合检索链路评估（hybrid_search → LLM rerank，bge-m3）",
+        "# 生产混合检索链路评估（hybrid_search → LLM rerank，bge-m3）",
         "",
         f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",

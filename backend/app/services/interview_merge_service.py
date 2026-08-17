@@ -161,8 +161,8 @@ def _preview_actions(conn, table, keep_id, drop_pairs) -> dict:
         drop_ids,
     ).fetchone()[0]
     dup_detail = conn.execute(
-        f"SELECT COUNT(*) - COUNT(DISTINCT question) FROM questions_detail "
-        f"WHERE interview_id = ? AND owner_id IS NULL AND deleted_at IS NULL",
+        "SELECT COUNT(*) - COUNT(DISTINCT question) FROM questions_detail "
+        "WHERE interview_id = ? AND owner_id IS NULL AND deleted_at IS NULL",
         (keep_id,),
     ).fetchone()[0]
     actions["questions_detail_deduped"] = max(0, dup_detail)

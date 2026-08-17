@@ -534,7 +534,7 @@ async def run_quality_audit(user_id: int = None, sample_size: int = AUDIT_SAMPLE
             sample.append({"id": r["id"], "question": r["question"], "oq": oq})
 
     total_variants = inconsistent = duplicates = coverage = 0
-    lines = [f"# 聚类质量定期审查报告", "",
+    lines = ["# 聚类质量定期审查报告", "",
              f"**时间**: {_time.strftime('%Y-%m-%d %H:%M:%S')}", "",
              f"- 抽样: {len(sample)} 个聚类", ""]
 

@@ -145,7 +145,7 @@ async def main():
     print(f"[eval] 匹配: {len(matched)} 道 / 未匹配: {len(unmatched)} 道")
 
     lines = [
-        f"# 生产 matcher mock 增量聚类评估（cluster_label 新方法）",
+        "# 生产 matcher mock 增量聚类评估（cluster_label 新方法）",
         "",
         f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}  **耗时**: {time.monotonic() - t0:.0f}s",
         "",

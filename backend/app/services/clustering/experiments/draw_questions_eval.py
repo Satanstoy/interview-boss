@@ -239,7 +239,7 @@ async def main():
             cache[f"q{r['id']}"] = v
         json.dump(cache, open(EMB_CACHE, "w"))
 
-    lines = [f"# 抽题工具评估报告", "", f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}", "",
+    lines = ["# 抽题工具评估报告", "", f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}", "",
              f"- 题库: {len(qs)} 题（活跃）", f"- 场景: {len(SCENARIOS)} 个（LLM 并发执行）", ""]
     summary = []
 

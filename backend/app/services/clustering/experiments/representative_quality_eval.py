@@ -101,7 +101,7 @@ async def main():
     covers_all = 0
     quality_issues = []
 
-    lines = [f"# 代表题质量评估（代表题 vs oq 变体一致性）", "",
+    lines = ["# 代表题质量评估（代表题 vs oq 变体一致性）", "",
              f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}  **耗时**: 进行中", "",
              f"- 抽样: {len(sample)} 个聚类（frequency>1 代表题）", ""]
 

@@ -200,7 +200,7 @@ async def main():
     }
 
     lines = [
-        f"# 向量 top-20 + LLM rerank 评估（对照生产混合检索 3.5）",
+        "# 向量 top-20 + LLM rerank 评估（对照生产混合检索 3.5）",
         "",
         f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",

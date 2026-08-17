@@ -221,7 +221,7 @@ async def main():
     bge_q = {q: v for q, v in zip(QUERIES, embed_bgem3(QUERIES))}
 
     # ---- 阶段 3：检索 + 打分 ----
-    lines = [f"# 题库 embedding 重算评估：hash 基线 vs bge-m3", "",
+    lines = ["# 题库 embedding 重算评估：hash 基线 vs bge-m3", "",
              f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}", "",
              f"- 题库: {len(qs)} 题", f"- 存量维度: {dims}", f"- 重算后: bge-m3 {len(new_vec[qs[0]['id']])} 维", ""]
     summary = []

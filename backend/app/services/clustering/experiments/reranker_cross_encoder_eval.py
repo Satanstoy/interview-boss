@@ -186,7 +186,7 @@ async def main():
     t0 = time.monotonic()
 
     lines = [
-        f"# Cross-Encoder Rerank 评估（bge-reranker-v2-m3 via SiliconFlow）",
+        "# Cross-Encoder Rerank 评估（bge-reranker-v2-m3 via SiliconFlow）",
         "",
         f"**时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
