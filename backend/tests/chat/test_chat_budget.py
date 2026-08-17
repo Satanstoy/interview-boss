@@ -4,7 +4,7 @@ TDD 测试 — TokenBudgetManager 统一预算管理 + 五级级联压缩
 红灯阶段：此模块尚不存在，测试应 FAIL
 """
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock
 
 
 def _make_messages(n: int, content_per_msg: str = "这是一段面试对话内容，关于技术问题的讨论。") -> list[dict]:
@@ -151,6 +151,62 @@ class TestTokenBudgetManager:
         assert hasattr(snapshot, "compression_tier")
         assert hasattr(snapshot, "total_chars")
         assert snapshot.total_chars > 0
+
+    def test_model_capability_drives_token_budget_and_reserves_output(self):
+        """B-008: context/input/output limits must be separate budget inputs."""
+        from app.agents.chat.budget import TokenBudgetManager
+        from app.services.model_capabilities import ModelCapability
+
+        state = {
+            "message_history": _make_messages(5, "短消息"),
+            "session_notes": "",
+            "compressed_context": None,
+            "memory_summaries": [],
+            "retrieved_questions": [],
+            "user_message": "请问 Redis 有哪些数据结构？",
+        }
+        capability = ModelCapability(
+            context_window_tokens=32768,
+            output_token_limit=4096,
+            source="metadata",
+            confidence="reported",
+            chars_per_token=2.0,
+        )
+
+        mgr = TokenBudgetManager(model_capability=capability)
+        snapshot = mgr.measure(state)
+
+        assert snapshot.context_window_tokens == 32768
+        assert snapshot.available_tokens == 28672
+        assert snapshot.token_estimate_source == "capability"
+        assert mgr.needs_compression(snapshot) is False
+
+    @pytest.mark.asyncio
+    async def test_summarize_context_consumes_capability_from_state(self):
+        """B-009: the live context node must use the resolved model capability."""
+        from app.agents.chat.nodes import summarize_context
+        from app.services.model_capabilities import ModelCapability
+
+        state = {
+            "message_history": _make_messages(5, "短消息"),
+            "session_notes": "",
+            "compressed_context": None,
+            "memory_summaries": [],
+            "retrieved_questions": [],
+            "user_message": "测试消息",
+            "model_capability": ModelCapability(
+                context_window_tokens=32768,
+                output_token_limit=4096,
+                source="metadata",
+                confidence="reported",
+                chars_per_token=2.0,
+            ),
+        }
+
+        result = await summarize_context(state)
+
+        assert result["budget_snapshot"].context_window_tokens == 32768
+        assert result["budget_snapshot"].token_estimate_source == "capability"
 
 
 class TestBudgetHelpers:

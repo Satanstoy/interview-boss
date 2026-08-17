@@ -208,7 +208,8 @@ async def summarize_context(state: ChatState) -> dict:
     """五级渐进式上下文压缩（委托给 TokenBudgetManager）"""
     from app.agents.chat.budget import TokenBudgetManager
 
-    budget = TokenBudgetManager()
+    model_capability = state.get("model_capability")
+    budget = TokenBudgetManager(model_capability=model_capability)
     snapshot = budget.measure(state)
 
     messages = state.get("message_history", [])
@@ -219,6 +220,7 @@ async def summarize_context(state: ChatState) -> dict:
             "recent_messages": messages[-KEEP_RECENT_ROUNDS * 2 :] if messages else [],
             "compressed_context": state.get("compressed_context"),
             "budget_snapshot": snapshot,
+            "model_capability": model_capability,
         }
 
     recent, compressed, tier = await budget.compress(
@@ -235,6 +237,7 @@ async def summarize_context(state: ChatState) -> dict:
         "recent_messages": recent,
         "compressed_context": compressed,
         "budget_snapshot": snapshot,
+        "model_capability": model_capability,
     }
 
 

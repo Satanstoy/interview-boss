@@ -6,7 +6,9 @@
 - 零 LLM 成本路径优先
 """
 import logging
+import math
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Optional
 
 from app.agents.chat.nodes import (
@@ -15,6 +17,7 @@ from app.agents.chat.nodes import (
     _truncate_to_budget,
 )
 from app.services.llm import _call_llm_with_retry
+from app.services.model_capabilities import ModelCapability
 from app.agents.chat.prompts import (
     CONTEXT_COMPRESS_PROMPT,
     CONTEXT_COMPRESS_UPDATE_PROMPT,
@@ -36,6 +39,12 @@ class BudgetSnapshot:
     available_chars: int = 0
     utilization_pct: float = 0.0
     compression_tier: str = "none"
+    context_window_tokens: int | None = None
+    input_token_limit: int | None = None
+    output_reserve_tokens: int | None = None
+    total_tokens: int = 0
+    available_tokens: int = 0
+    token_estimate_source: str = "char_legacy"
 
 
 class TokenBudgetManager:
@@ -54,18 +63,82 @@ class TokenBudgetManager:
         total_budget_chars: int = 28000,
         output_reserve_chars: int = 4000,
         system_overhead_chars: int = 500,
+        model_capability: ModelCapability | None = None,
+        token_counter: Callable[[str], int] | None = None,
     ):
         self.total_budget = total_budget_chars
         self.output_reserve = output_reserve_chars
         self.system_overhead = system_overhead_chars
+        self.model_capability = model_capability
+        self.token_counter = token_counter
+        self.context_window_tokens = (
+            model_capability.context_window_tokens if model_capability else None
+        )
+        self.output_reserve_tokens = (
+            model_capability.output_token_limit if model_capability else None
+        )
+        self.input_budget_tokens = None
+        self.chars_per_token = 2.0
+        if model_capability and model_capability.context_window_tokens:
+            self.chars_per_token = min(
+                2.0,
+                max(1.0, model_capability.chars_per_token or 2.0),
+            )
+            if model_capability.input_token_limit:
+                self.input_budget_tokens = model_capability.input_token_limit
+            else:
+                reserve = model_capability.output_token_limit or 4096
+                self.input_budget_tokens = max(
+                    200, model_capability.context_window_tokens - reserve
+                )
         # 各 section 预算（字符数）
         self.system_budget = 3000  # 与 nodes.py SYSTEM_BUDGET 一致
         self.memory_budget = 800
         self.compressed_budget = 1200
         self.retrieved_budget = 1000
 
+    @property
+    def token_mode(self) -> bool:
+        return self.input_budget_tokens is not None
+
+    def _estimate_text_tokens(self, text: str) -> int:
+        if not text:
+            return 0
+        if self.token_counter is not None:
+            try:
+                return max(0, int(self.token_counter(text)))
+            except Exception:
+                logger.debug("token counter failed; using conservative char estimate", exc_info=True)
+        return max(1, math.ceil(len(text) / self.chars_per_token))
+
+    def _estimate_messages_tokens(self, messages: list[dict]) -> int:
+        # The small per-message overhead covers role/JSON framing.  It is a
+        # conservative fallback when the provider has no tokenizer endpoint.
+        return sum(
+            self._estimate_text_tokens(str(message.get("content", ""))) + 4
+            for message in messages
+        )
+
+    def _estimate_chars_tokens(self, chars: int) -> int:
+        if chars <= 0:
+            return 0
+        return max(1, math.ceil(chars / self.chars_per_token))
+
     def _available_for_context(self, recent_chars: int = 0) -> int:
         """计算可用于 compressed context 的空间"""
+        if self.token_mode:
+            fixed_tokens = self._estimate_chars_tokens(
+                self.system_budget
+                + self.memory_budget
+                + self.retrieved_budget
+                + self.system_overhead
+            )
+            recent_tokens = self._estimate_chars_tokens(recent_chars)
+            available_tokens = max(
+                200,
+                (self.input_budget_tokens or 0) - fixed_tokens - recent_tokens,
+            )
+            return max(200, math.floor(available_tokens * self.chars_per_token))
         used = (
             self.system_budget
             + self.memory_budget
@@ -97,7 +170,27 @@ class TokenBudgetManager:
             + self.system_overhead
         )
         available = self.total_budget - self.output_reserve
-        utilization = (total / available * 100) if available > 0 else 100.0
+        total_tokens = 0
+        available_tokens = 0
+        if self.token_mode:
+            total_tokens = (
+                self._estimate_chars_tokens(system_chars)
+                + self._estimate_text_tokens(compressed or "")
+                + self._estimate_chars_tokens(memory_chars)
+                + self._estimate_chars_tokens(retrieved_chars)
+                + self._estimate_messages_tokens(messages[-10:])
+                + self._estimate_text_tokens(user_message)
+                + self._estimate_chars_tokens(self.system_overhead)
+            )
+            available_tokens = self.input_budget_tokens or 0
+            available = math.floor(available_tokens * self.chars_per_token)
+            utilization = (
+                total_tokens / available_tokens * 100
+                if available_tokens > 0
+                else 100.0
+            )
+        else:
+            utilization = (total / available * 100) if available > 0 else 100.0
 
         return BudgetSnapshot(
             system_chars=system_chars,
@@ -109,10 +202,20 @@ class TokenBudgetManager:
             total_chars=total,
             available_chars=available,
             utilization_pct=round(utilization, 1),
+            context_window_tokens=self.context_window_tokens,
+            input_token_limit=(
+                self.input_budget_tokens if self.token_mode else None
+            ),
+            output_reserve_tokens=self.output_reserve_tokens,
+            total_tokens=total_tokens,
+            available_tokens=available_tokens,
+            token_estimate_source=("capability" if self.token_mode else "char_legacy"),
         )
 
     def needs_compression(self, snapshot: BudgetSnapshot) -> bool:
         """判断是否需要压缩"""
+        if self.token_mode:
+            return snapshot.total_tokens > snapshot.available_tokens
         return snapshot.total_chars > snapshot.available_chars
 
     async def compress(
@@ -148,6 +251,25 @@ class TokenBudgetManager:
             + full_snapshot.memory_chars + full_snapshot.retrieved_chars
             + total + full_snapshot.current_msg_chars + self.system_overhead
         )
+        if self.token_mode:
+            full_snapshot.total_tokens = (
+                self._estimate_chars_tokens(full_snapshot.system_chars)
+                + self._estimate_text_tokens(existing_compressed or "")
+                + self._estimate_messages_tokens(messages)
+                + self._estimate_chars_tokens(self.system_overhead)
+            )
+            full_snapshot.available_tokens = self.input_budget_tokens or 0
+            full_snapshot.available_chars = math.floor(
+                full_snapshot.available_tokens * self.chars_per_token
+            )
+            full_snapshot.utilization_pct = round(
+                full_snapshot.total_tokens
+                / full_snapshot.available_tokens
+                * 100
+                if full_snapshot.available_tokens
+                else 100.0,
+                1,
+            )
         if not self.needs_compression(full_snapshot):
             recent = messages[-10:] if messages else []
             return recent, existing_compressed, "none"

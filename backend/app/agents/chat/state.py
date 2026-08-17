@@ -1,9 +1,9 @@
 """Chat Agent State — 面试对话状态机的状态定义"""
 
-from typing import Literal, TypedDict, Annotated, Optional
-from operator import add
+from typing import Literal, TypedDict, Optional
 
 from app.agents.chat.decision_config import DecisionConfig
+from app.services.model_capabilities import ModelCapability
 
 
 class BudgetSnapshotType(TypedDict, total=False):
@@ -19,6 +19,12 @@ class BudgetSnapshotType(TypedDict, total=False):
     available_chars: int
     utilization_pct: float
     compression_tier: str
+    context_window_tokens: int | None
+    input_token_limit: int | None
+    output_reserve_tokens: int | None
+    total_tokens: int
+    available_tokens: int
+    token_estimate_source: str
 
 
 class ChatState(TypedDict, total=False):
@@ -36,6 +42,7 @@ class ChatState(TypedDict, total=False):
     jd_text: Optional[str]  # JD 文本内容
     resume_text: Optional[str]  # 简历文本
     model: Optional[str]  # 用户选择的模型（覆盖默认配置）
+    model_capability: Optional[ModelCapability]  # 已解析的 context/input/output 能力
     bank_mode: Optional[str]  # 题库过滤口径 all/public/mine
     difficulty: Optional[str]  # 面试难度 junior/mid/senior/staff_plus
 
