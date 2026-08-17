@@ -10,6 +10,7 @@ from app.core.config import (
     get_user_search_config,
 )
 from app.db.connection import get_db_connection, run_db
+from app.services.encryption import encrypt_value, decrypt_value
 from app.services.search_service import (
     SUPPORTED_SEARCH_PROVIDERS,
     get_search_provider_options,
@@ -101,7 +102,7 @@ async def update_public_search_config(req: dict, admin: dict = Depends(get_admin
         with get_db_connection() as conn:
             values = {
                 "search_provider": provider,
-                "search_api_key": final_key if provider != "none" else "",
+                "search_api_key": encrypt_value(final_key) if final_key and provider != "none" else "",
                 "search_base_url": base_url,
                 "search_enabled": "0" if provider == "none" else "1",
             }
@@ -170,7 +171,12 @@ async def update_my_search_config(req: dict, user: dict = Depends(get_current_us
                 (user["id"],),
             ).fetchone()
             same_provider = existing and existing["provider"] == provider
-            final_key = api_key or (existing["api_key"] if same_provider else "")
+            if not api_key and same_provider and existing["api_key"]:
+                final_key = existing["api_key"]  # keep already-encrypted value
+            elif api_key:
+                final_key = encrypt_value(api_key)
+            else:
+                final_key = ""
             if provider == "none":
                 final_key = ""
             if provider != "none" and not final_key:

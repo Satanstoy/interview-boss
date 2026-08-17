@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
 from app.core.outbound_url import OutboundURLBlocked, validate_outbound_url_syntax
 from app.db.connection import get_db_connection, run_db
+from app.services.encryption import encrypt_value, decrypt_value
 
 logger = logging.getLogger("interview-boss")
 
@@ -37,10 +38,12 @@ async def get_my_llm_config(user: dict = Depends(get_current_user)):
     if not cfg:
         return {"configured": False, "settings": {}}
 
+    raw_key = decrypt_value(cfg["api_key"]) if cfg["api_key"] else ""
+
     return {
         "configured": True,
         "settings": {
-            "llm_api_key": _mask_key(cfg["api_key"]) if cfg["api_key"] else "",
+            "llm_api_key": _mask_key(raw_key) if raw_key else "",
             "llm_api_key_set": bool(cfg["api_key"]),
             "llm_base_url": cfg["base_url"] or "",
             "llm_model": cfg["model"] or "gpt-4o",
@@ -138,7 +141,7 @@ async def update_my_llm_config(req: dict, user: dict = Depends(get_current_user)
             if not api_key and existing and existing["api_key"]:
                 final_key = existing["api_key"]
             else:
-                final_key = api_key
+                final_key = encrypt_value(api_key) if api_key else ""
 
             conn.execute(
                 "INSERT INTO user_llm_config (user_id, api_key, base_url, model, timeout, api_format, thinking, updated_at) "

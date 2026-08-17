@@ -176,6 +176,7 @@ def get_user_llm_config(user_id: int) -> dict | None:
     """从 user_llm_config 表读取用户的 LLM 配置。未配置时回退到全局配置。"""
     try:
         from app.db.connection import get_db_connection
+        from app.services.encryption import decrypt_value
 
         with get_db_connection() as conn:
             row = conn.execute(
@@ -184,6 +185,9 @@ def get_user_llm_config(user_id: int) -> dict | None:
             ).fetchone()
             if row:
                 cfg = dict(row)
+                # Decrypt the stored API key
+                if cfg.get("api_key"):
+                    cfg["api_key"] = decrypt_value(cfg["api_key"])
                 # 未配置 api_key 视为未配置，回退到全局
                 if not cfg.get("api_key"):
                     return _get_global_llm_config()
@@ -197,6 +201,7 @@ def _read_public_search_config_from_db() -> dict | None:
     """Read the administrator-managed public search config from user_profile."""
     try:
         from app.db.connection import get_db_connection
+        from app.services.encryption import decrypt_value
 
         keys = (
             "search_provider",
@@ -216,7 +221,7 @@ def _read_public_search_config_from_db() -> dict | None:
         return None
 
     provider = (values.get("search_provider") or "").strip().lower()
-    api_key = (values.get("search_api_key") or "").strip()
+    api_key = decrypt_value((values.get("search_api_key") or "").strip())
     enabled = values.get("search_enabled")
     if enabled == "0":
         return {"provider": "none", "api_key": "", "base_url": "", "source": "disabled"}
@@ -326,6 +331,7 @@ def get_user_search_config(user_id: int | None, scope: str = "user") -> dict | N
     """Resolve search config for an explicit task scope."""
     try:
         from app.db.connection import get_db_connection
+        from app.services.encryption import decrypt_value
 
         if scope == "public":
             return get_public_search_config()
@@ -350,7 +356,7 @@ def get_user_search_config(user_id: int | None, scope: str = "user") -> dict | N
         ):
             return {
                 "provider": row["provider"],
-                "api_key": row["api_key"],
+                "api_key": decrypt_value(row["api_key"]),
                 "base_url": row["base_url"] or "",
                 "enabled": row["enabled"],
                 "source": "personal",
