@@ -2563,10 +2563,24 @@ class TestReactLoopIntegration:
                             new_callable=AsyncMock,
                             return_value="mock result",
                         ):
-                            base_state["intent"] = "practice_request"
-                            base_state["answer_complete"] = True
-                            async for event in _react_loop(base_state):
-                                collected.append(event)
+                            with patch(
+                                "app.agents.chat.contract_executor.execute_turn_contract",
+                                new=AsyncMock(
+                                    return_value={
+                                        "status": "success",
+                                        "text": "好的，请实现一个快速排序。",
+                                        "writer_trace": {
+                                            "writer": "clarify_writer",
+                                            "result": "success",
+                                        },
+                                        "validator_trace": [],
+                                    }
+                                ),
+                            ):
+                                base_state["intent"] = "practice_request"
+                                base_state["answer_complete"] = True
+                                async for event in _react_loop(base_state):
+                                    collected.append(event)
         finally:
             _event_queue_var.reset(token)
 
@@ -3154,6 +3168,20 @@ class TestRepetitionProtection:
                 "app.services.llm.stream_llm_messages",
                 side_effect=lambda *a, **kw: _mock_stream_strings("继续问边界条件"),
             ),
+            patch(
+                "app.agents.chat.contract_executor.execute_turn_contract",
+                new=AsyncMock(
+                    return_value={
+                        "status": "success",
+                        "text": "继续问边界条件",
+                        "writer_trace": {
+                            "writer": "clarify_writer",
+                            "result": "success",
+                        },
+                        "validator_trace": [],
+                    }
+                ),
+            ),
         ):
             events = []
             async for event in _react_loop(base_state):
@@ -3398,6 +3426,20 @@ class TestRetrievalGap:
                         "请说说 RAG 的检索流程。"
                     ),
                 ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "请说说 RAG 的检索流程。",
+                            "writer_trace": {
+                                "writer": "clarify_writer",
+                                "result": "success",
+                            },
+                            "validator_trace": [],
+                        }
+                    ),
+                ),
             ):
                 yielded = []
                 async for event in _react_loop(state):
@@ -3461,6 +3503,20 @@ class TestRetrievalGap:
                     "app.services.llm.stream_llm_messages",
                     side_effect=lambda *a, **kw: _mock_stream_strings(
                         "请说说你对 Redis 持久化的理解。"
+                    ),
+                ),
+                patch(
+                    "app.agents.chat.contract_executor.execute_turn_contract",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "success",
+                            "text": "请说说你对 Redis 持久化的理解。",
+                            "writer_trace": {
+                                "writer": "clarify_writer",
+                                "result": "success",
+                            },
+                            "validator_trace": [],
+                        }
                     ),
                 ),
             ):

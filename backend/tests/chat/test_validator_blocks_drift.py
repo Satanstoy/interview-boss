@@ -156,6 +156,11 @@ async def _run_turn_with_validator(
         patch("app.services.llm.stream_llm_messages", side_effect=stream_side_effect),
         patch("app.services.llm.raw_llm_call", new_callable=AsyncMock, return_value=""),
         patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value=llm_answer,
+        ),
+        patch(
             "app.agents.chat.output_guardrails.needs_output_repair",
             return_value={"needs_repair": False},
         ),
