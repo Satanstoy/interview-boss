@@ -32,27 +32,29 @@ def _today() -> str:
 
 
 def _increment_usage(conn, user_id: int, day: str, tokens: int = 0, limit: int = DAILY_LLM_CALL_LIMIT) -> bool:
-    """同步原子 upsert：查询今日用量，超限返回 False；否则计数 +1 并返回 True。"""
-    row = conn.execute(
-        "SELECT call_count FROM llm_usage WHERE user_id = ? AND day = ?",
-        (user_id, day),
-    ).fetchone()
-    if row is not None and row["call_count"] >= limit:
-        logger.warning(
-            "per-user daily LLM quota exceeded: user_id=%s day=%s limit=%s",
-            user_id, day, limit,
-        )
+    """Atomically reserve one call, returning False when the limit is reached."""
+    if limit <= 0:
         return False
-    conn.execute(
+
+    cursor = conn.execute(
         "INSERT INTO llm_usage (user_id, day, call_count, total_tokens) "
         "VALUES (?, ?, 1, ?) "
         "ON CONFLICT(user_id, day) DO UPDATE SET "
         "call_count = call_count + 1, "
-        "total_tokens = total_tokens + ?",
-        (user_id, day, tokens, tokens),
+        "total_tokens = total_tokens + excluded.total_tokens "
+        "WHERE call_count < ?",
+        (user_id, day, tokens, limit),
     )
     conn.commit()
-    return True
+    allowed = cursor.rowcount == 1
+    if not allowed:
+        logger.warning(
+            "per-user daily LLM quota exceeded: user_id=%s day=%s limit=%s",
+            user_id,
+            day,
+            limit,
+        )
+    return allowed
 
 
 async def check_and_record(

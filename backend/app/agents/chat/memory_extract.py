@@ -5,6 +5,7 @@
 """
 import logging
 from app.services import chat_service
+from app.services import load_visible_jd
 from app.services.llm import _call_llm_with_retry, _extract_json
 from app.agents.chat.state import ChatState
 from app.agents.chat.prompts import MEMORY_EXTRACT_PROMPT
@@ -118,18 +119,16 @@ def _get_resume_name(user_id: int) -> str:
     return ""
 
 
-def _get_jd_title(jd_id: int) -> str:
+def _get_jd_title(jd_id: int, user_id: int | None = None) -> str:
     if not jd_id:
         return ""
     try:
         from app.db.connection import get_db_connection
 
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT job_title FROM jd WHERE id = ?", (jd_id,)
-            ).fetchone()
+            row = load_visible_jd(conn, jd_id, user_id)
             if row and row[0]:
-                return row[0]
+                return row["job_title"]
     except:
         pass
     return ""
@@ -370,5 +369,4 @@ async def extract_memory(state: ChatState) -> dict:
         logger.debug(f"记忆提取跳过: {e}")
 
     return {}
-
 

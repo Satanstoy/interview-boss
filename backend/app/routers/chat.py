@@ -445,13 +445,11 @@ async def send_message(
             jd_text = None
             if conv.get("jd_id"):
                 from app.db.connection import get_db_connection
+                from app.services import format_jd_text, load_visible_jd
 
                 with get_db_connection() as conn:
-                    jd_row = conn.execute(
-                        "SELECT content FROM jd WHERE id = ?", (conv["jd_id"],)
-                    ).fetchone()
-                    if jd_row:
-                        jd_text = jd_row[0]
+                    jd_row = load_visible_jd(conn, conv["jd_id"], user["id"])
+                    jd_text = format_jd_text(jd_row)
 
             async for event in run_chat(
                 conversation_id=conversation_id,

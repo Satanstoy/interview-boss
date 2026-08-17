@@ -415,7 +415,9 @@ def _build_react_metadata(state: ChatState, response_text: str) -> tuple[dict, s
     if state.get("jd_text") and _response_references_jd(
         clean_response, state["jd_text"]
     ):
-        metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
+        metadata["jd_ref"] = _get_jd_title(
+            state.get("jd_id"), user_id=state.get("user_id")
+        )
 
     # Private Agent questions are allowed to shape the interviewer response,
     # but their catalog references and rubric must never be returned through

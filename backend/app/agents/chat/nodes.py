@@ -979,7 +979,9 @@ async def generate_response(state: ChatState) -> AsyncGenerator[dict, None]:
     if state.get("jd_text") and _response_references_jd(
         full_response, state.get("jd_text", "")
     ):
-        metadata["jd_ref"] = _get_jd_title(state.get("jd_id"))
+        metadata["jd_ref"] = _get_jd_title(
+            state.get("jd_id"), user_id=state.get("user_id")
+        )
 
     logger.info(
         f"Chat round complete: "
