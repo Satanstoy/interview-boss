@@ -310,9 +310,9 @@ async def shutdown_cleanup():
     if mcp_session_manager is not None:
         await mcp_session_manager.__aexit__(None, None, None)
 
-    from app.db.connection import _local
+    from app.db.connection import _db_conn_var
 
-    conn = getattr(_local, "conn", None)
+    conn = _db_conn_var.get()
     if conn is not None:
         try:
             conn.close()

@@ -120,13 +120,13 @@ def test_db():
     # 替换生产 DB 连接
     import app.db.connection as db_module
 
-    original_local = db_module._local
-    db_module._local.conn = conn
+    # 使用 ContextVar 替代 threading.local
+    original_token = db_module._db_conn_var.set(conn)
 
     yield conn
 
     conn.close()
-    db_module._local = original_local
+    db_module._db_conn_var.reset(original_token)
 
 
 # ── Mock LLM ─────────────────────────────────────────────────
@@ -180,7 +180,7 @@ def client(test_db):
         from app.asgi import app
 
     # 强制连接指向 test_db
-    db_module._local.conn = test_db
+    db_module._db_conn_var.set(test_db)
 
     # 额外 patch 模块本身的 get_db_connection，兜底拦截 `app.db.connection.get_db_connection()`
     # 的直接调用（如 TestClient 线程内 _local.conn 为空时，会走到真实 DB_PATH 连接生产库）。

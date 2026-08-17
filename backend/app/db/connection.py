@@ -6,19 +6,26 @@
 """
 import sqlite3
 import asyncio
-import threading
 import logging
+from contextvars import ContextVar
 
 from app.core.config import DB_PATH
 
 logger = logging.getLogger("interview-boss")
 
-_local = threading.local()
+# 使用 ContextVar 替代 threading.local，确保 asyncio.to_thread() 能访问连接
+_db_conn_var: ContextVar[sqlite3.Connection | None] = ContextVar(
+    "_db_conn_var", default=None
+)
 
 
 def get_db_connection():
-    """获取线程本地数据库连接，避免每次请求重复建立连接和设置 PRAGMA"""
-    conn = getattr(_local, 'conn', None)
+    """获取当前上下文的数据库连接，避免每次请求重复建立连接和设置 PRAGMA
+    
+    使用 ContextVar 替代 threading.local，确保 asyncio.to_thread() 
+    创建的子线程能访问到主线程设置的连接。
+    """
+    conn = _db_conn_var.get()
     if conn is not None:
         try:
             conn.execute("SELECT 1")
@@ -34,7 +41,7 @@ def get_db_connection():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=10000")
-    _local.conn = conn
+    _db_conn_var.set(conn)
     return conn
 
 
