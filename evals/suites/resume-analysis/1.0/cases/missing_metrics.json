@@ -1,0 +1,19 @@
+{
+  "case_key": "missing_metrics",
+  "scenario_key": "resume_analysis_missing_metrics",
+  "input_snapshot": {
+    "resume_text": "李四\nPython 后端开发\n负责内部数据服务，使用 FastAPI 和 PostgreSQL。没有记录具体性能指标。",
+    "position": "后端工程师"
+  },
+  "contract": {
+    "source_facts": ["Python", "FastAPI", "PostgreSQL"],
+    "target_terms": ["后端", "性能", "指标"],
+    "forbidden_claims": ["提升 99%", "降低 80%", "日均千万请求"],
+    "min_points": 2,
+    "rubric": {
+      "fact_grounding": {"weight": 0.45, "anchors": {"1": "虚构数字", "3": "基本忠实", "5": "明确区分事实与待补数据"}},
+      "actionability": {"weight": 0.35, "anchors": {"1": "无建议", "3": "泛化建议", "5": "指出应补充的指标"}},
+      "format_quality": {"weight": 0.2, "anchors": {"1": "不可用", "3": "基本可读", "5": "结构清晰"}}
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "case_key": "standard_interview",
+  "scenario_key": "interview_extraction_standard",
+  "input_snapshot": {
+    "raw_text": "星河科技二面，主要考察 RAG 和 Agent 架构。问题包括：请介绍 RAG 的多路召回如何设计；MCP 和 Function Calling 有什么区别？整体难度中等。",
+    "content_type_hint": "interview"
+  },
+  "contract": {
+    "expected_type": "interview",
+    "required_fields": ["公司", "面试轮次", "考察重点", "具体题目清单", "难易程度"],
+    "field_expectations": [
+      {"path": "公司", "expected": "星河科技"},
+      {"path": "面试轮次", "expected": "二面"},
+      {"path": "难易程度", "expected": "中等"}
+    ],
+    "expected_questions": ["RAG 的多路召回如何设计", "MCP 和 Function Calling 有什么区别"],
+    "min_question_count": 2,
+    "rubric": {
+      "field_grounding": {"weight": 0.35, "anchors": {"1": "大量字段错误", "3": "主要字段正确", "5": "字段完整且有依据"}},
+      "question_extraction": {"weight": 0.4, "anchors": {"1": "漏掉主要问题", "3": "提取大部分问题", "5": "完整保留原题"}},
+      "format_quality": {"weight": 0.25, "anchors": {"1": "不可用", "3": "基本可用", "5": "结构稳定"}}
+    }
+  }
+}

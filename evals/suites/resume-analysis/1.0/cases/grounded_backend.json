@@ -1,0 +1,19 @@
+{
+  "case_key": "grounded_backend",
+  "scenario_key": "resume_analysis_grounded",
+  "input_snapshot": {
+    "resume_text": "张三\n后端工程师\n使用 Java、Spring Boot 和 MySQL 开发订单系统，负责接口性能优化。\n项目经历：建设 RAG 知识库，使用 Python 和 Elasticsearch 完成检索。",
+    "position": "大模型应用工程师"
+  },
+  "contract": {
+    "source_facts": ["Java", "Spring Boot", "MySQL", "RAG", "Python", "Elasticsearch"],
+    "target_terms": ["大模型", "检索", "RAG", "项目"],
+    "forbidden_claims": ["提升 300%", "带领 50 人团队", "负责过 OpenAI 训练"],
+    "min_points": 3,
+    "rubric": {
+      "fact_grounding": {"weight": 0.4, "anchors": {"1": "编造经历", "3": "基本忠实", "5": "事实边界清晰"}},
+      "job_alignment": {"weight": 0.35, "anchors": {"1": "与岗位无关", "3": "部分匹配", "5": "突出相关经历"}},
+      "actionability": {"weight": 0.25, "anchors": {"1": "泛泛而谈", "3": "有部分建议", "5": "建议具体可执行"}}
+    }
+  }
+}

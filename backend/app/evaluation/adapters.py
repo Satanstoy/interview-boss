@@ -32,6 +32,16 @@ def get_target_adapter(target_type: str) -> TargetAdapter:
         from app.evaluation.interview_adapter import InterviewE2EAdapter
 
         _ADAPTERS[target_type] = InterviewE2EAdapter()
+    if target_type not in _ADAPTERS and target_type in {"experience_extraction", "jd_extraction", "question_tagging"}:
+        from app.evaluation.content_adapters import ContentExtractionAdapter, QuestionTaggingAdapter
+
+        _ADAPTERS["experience_extraction"] = ContentExtractionAdapter("interview")
+        _ADAPTERS["jd_extraction"] = ContentExtractionAdapter("jd")
+        _ADAPTERS["question_tagging"] = QuestionTaggingAdapter()
+    if target_type not in _ADAPTERS and target_type == "resume_analysis":
+        from app.evaluation.resume_adapter import ResumeAnalysisAdapter
+
+        _ADAPTERS[target_type] = ResumeAnalysisAdapter()
     try:
         return _ADAPTERS[target_type]
     except KeyError as exc:

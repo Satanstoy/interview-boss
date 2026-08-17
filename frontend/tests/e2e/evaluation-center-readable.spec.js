@@ -133,21 +133,23 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('意图识别效果')).toBeVisible()
   })
 
-  test('评测对象明确区分已支持和待接入', async ({ page }) => {
+  test('评测对象明确展示已接入的目标类型', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
     await expect(page.getByText('评测对象')).toBeVisible()
     await expect(page.getByRole('button', { name: /模拟面试 Agent/ })).toBeVisible()
     await expect(page.getByText('可运行完整 E2E')).toBeVisible()
     await expect(page.getByText('面经提取 Agent')).toBeVisible()
-    await expect(page.getByText('简历分析 Agent')).toBeVisible()
-    await expect(page.getByText('待接入').first()).toBeVisible()
+    await expect(page.getByText('JD 提取 Agent')).toBeVisible()
+    await expect(page.getByText(/简历分析 \/ 优化 Agent/)).toBeVisible()
+    await expect(page.getByText('面试题分类 Agent')).toBeVisible()
+    await expect(page.getByText('可运行结构化 Eval').first()).toBeVisible()
   })
 
   test('版本列表使用固定列宽并保持关键固定项可读', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
-    await expect(page.getByText('完整评测版本会一起固定题集、规则、Judge、Harness、模拟器、工具调用和意图识别指标。')).toBeVisible()
+    await expect(page.getByText('完整评测版本会固定适合该目标的题集、规则、模型、执行器和确定性指标；模拟面试额外固定模拟器、工具调用与意图识别。')).toBeVisible()
     const tableLayout = await page.locator('table').first().evaluate(element => getComputedStyle(element).tableLayout)
     expect(tableLayout).toBe('fixed')
 

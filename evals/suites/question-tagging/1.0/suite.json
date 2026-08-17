@@ -1,0 +1,10 @@
+{
+  "release_key": "question-tagging-eval@1.0",
+  "release_type": "evaluation",
+  "version": "1.0",
+  "target_type": "question_tagging",
+  "suite_key": "question-tagging-suite",
+  "judge_model": "gpt-4o",
+  "description": "面试题分类与标签评测 1.0",
+  "case_files": ["rag_question.json", "distributed_question.json", "algorithm_question.json", "mixed_questions.json"]
+}

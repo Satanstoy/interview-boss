@@ -150,7 +150,7 @@ async def background_generate_answer(
             raise
 
 
-async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None) -> List[List[str]]:
+async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None, model: str = None) -> List[List[str]]:
     input_data = [{"id": idx, "题目": q} for idx, q in enumerate(questions)]
     q_json = json.dumps(input_data, ensure_ascii=False)
     prompt = build_tagging_prompt(taxonomy_config) if taxonomy_config else TAGGING_PROMPT
@@ -173,6 +173,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
         system_msg="你是一个严格输出 JSON 对象的助手，格式必须为 {\"questions\": [...]}。必须输出输入数据中每一项对应的 \"id\" 字段，以便于与原输入一一对应。",
         response_format=kwargs.get("response_format"),
         user_id=user_id,
+        model=model,
     )
     try:
         raw_items = _extract_json(raw_content).get("questions", [])

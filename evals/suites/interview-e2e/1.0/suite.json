@@ -3,6 +3,7 @@
   "release_type": "evaluation",
   "version": "1.0",
   "target_type": "interview",
+  "suite_key": "interview-e2e-suite",
   "judge_model": "gpt-4o",
   "description": "InterviewBoss 模拟面试端到端固定基准集 1.0",
   "case_files": [

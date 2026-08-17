@@ -1,0 +1,19 @@
+{
+  "case_key": "career_switch",
+  "scenario_key": "resume_analysis_career_switch",
+  "input_snapshot": {
+    "resume_text": "王五\n测试工程师转 AI 应用开发\n使用 Java 编写自动化测试，参与过接口测试平台建设。近期学习 Python、LangChain，并完成一个文档问答 Demo。",
+    "position": "AI 应用开发工程师"
+  },
+  "contract": {
+    "source_facts": ["Java", "Python", "LangChain", "文档问答"],
+    "target_terms": ["AI 应用", "Python", "项目", "迁移"],
+    "forbidden_claims": ["五年 AI 开发经验", "独立训练大模型"],
+    "min_points": 2,
+    "rubric": {
+      "fact_grounding": {"weight": 0.35, "anchors": {"1": "改写成虚假经历", "3": "大体忠实", "5": "完整保留转型事实"}},
+      "job_alignment": {"weight": 0.4, "anchors": {"1": "忽略转型目标", "3": "有部分匹配", "5": "清楚呈现可迁移能力"}},
+      "actionability": {"weight": 0.25, "anchors": {"1": "无行动建议", "3": "建议一般", "5": "建议具体"}}
+    }
+  }
+}

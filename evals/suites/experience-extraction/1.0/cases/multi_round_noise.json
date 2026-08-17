@@ -1,0 +1,21 @@
+{
+  "case_key": "multi_round_noise",
+  "scenario_key": "interview_extraction_multi_round",
+  "input_snapshot": {
+    "raw_text": "公司：云杉网络\n一面：Java 并发、Redis。\n二面：系统设计和故障排查。\n面试官最后问了期望薪资，候选人做了自我介绍。\n题目：Redis 缓存击穿怎么处理？如何设计限流？",
+    "content_type_hint": "interview"
+  },
+  "contract": {
+    "expected_type": "interview",
+    "required_fields": ["公司", "面试轮次", "考察重点", "具体题目清单", "难易程度"],
+    "field_expectations": [{"path": "公司", "expected": "云杉网络"}],
+    "expected_questions": ["Redis 缓存击穿怎么处理", "如何设计限流"],
+    "min_question_count": 2,
+    "forbidden_content": ["期望薪资", "自我介绍"],
+    "rubric": {
+      "noise_filtering": {"weight": 0.4, "anchors": {"1": "把闲聊当题目", "3": "部分过滤", "5": "只保留有效题目"}},
+      "multi_round_handling": {"weight": 0.3, "anchors": {"1": "轮次混乱", "3": "基本识别", "5": "保留轮次信息"}},
+      "grounding": {"weight": 0.3, "anchors": {"1": "编造信息", "3": "大体忠实", "5": "严格依据原文"}}
+    }
+  }
+}

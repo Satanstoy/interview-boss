@@ -10,22 +10,77 @@ from typing import Any
 from app.services.evaluation_service import create_benchmark_case, create_benchmark_suite, create_release
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SUITE_ROOT = REPO_ROOT / "evals" / "suites" / "interview-e2e" / "1.0"
-
-
+SUITES_ROOT = REPO_ROOT / "evals" / "suites"
 EVALUATION_RELEASE_KEY = "interview-eval@1.0"
 INTERNAL_SUITE_KEY = "interview-e2e-suite"
 
+BUILTIN_SUITES = (
+    {
+        "evaluation_key": "interview-eval@1.0",
+        "target_key": "interview-agent@1.0",
+        "target_type": "interview",
+        "target_component": "interview-agent",
+        "workflow": "chat-interview",
+        "adapter": "InterviewE2EAdapter",
+    },
+    {
+        "evaluation_key": "experience-extraction-eval@1.0",
+        "target_key": "experience-extraction@1.0",
+        "target_type": "experience_extraction",
+        "target_component": "experience-extraction-agent",
+        "workflow": "submit-extract-interview",
+        "adapter": "ContentExtractionAdapter:interview",
+    },
+    {
+        "evaluation_key": "jd-extraction-eval@1.0",
+        "target_key": "jd-extraction@1.0",
+        "target_type": "jd_extraction",
+        "target_component": "jd-extraction-agent",
+        "workflow": "submit-extract-jd",
+        "adapter": "ContentExtractionAdapter:jd",
+    },
+    {
+        "evaluation_key": "resume-analysis-eval@1.0",
+        "target_key": "resume-analysis@1.0",
+        "target_type": "resume_analysis",
+        "target_component": "resume-analysis-agent",
+        "workflow": "resume-optimize",
+        "adapter": "ResumeAnalysisAdapter",
+    },
+    {
+        "evaluation_key": "question-tagging-eval@1.0",
+        "target_key": "question-tagging@1.0",
+        "target_type": "question_tagging",
+        "target_component": "question-tagging-agent",
+        "workflow": "submit-classify",
+        "adapter": "QuestionTaggingAdapter",
+    },
+)
+
+
+def _suite_root(release_key: str) -> Path:
+    if release_key == "interview-e2e-suite@1.0":
+        release_key = EVALUATION_RELEASE_KEY
+    spec = next((item for item in BUILTIN_SUITES if item["evaluation_key"] == release_key), None)
+    if spec is None:
+        raise ValueError(f"未知评测版本: {release_key}")
+    suite_name = release_key.split("-eval@", 1)[0]
+    if release_key == EVALUATION_RELEASE_KEY:
+        suite_name = "interview-e2e"
+    return SUITES_ROOT / suite_name / "1.0"
+
 
 def load_suite_definition(release_key: str) -> dict[str, Any]:
-    if release_key not in {EVALUATION_RELEASE_KEY, "interview-e2e-suite@1.0"}:
-        raise ValueError(f"未知模拟面试评测版本: {release_key}")
-    suite = json.loads((SUITE_ROOT / "suite.json").read_text(encoding="utf-8"))
+    suite_root = _suite_root(release_key)
+    suite = json.loads((suite_root / "suite.json").read_text(encoding="utf-8"))
     cases = []
     for filename in suite["case_files"]:
-        case_path = SUITE_ROOT / "cases" / filename
+        case_path = suite_root / "cases" / filename
         case = json.loads(case_path.read_text(encoding="utf-8"))
-        if not case["input_snapshot"].get("candidate_view"):
+        input_snapshot = case.get("input_snapshot") or {}
+        if not isinstance(input_snapshot, dict) or not input_snapshot:
+            raise ValueError(f"Case 缺少 input_snapshot: {case['case_key']}")
+        if suite["target_type"] == "interview" and not input_snapshot.get("candidate_view"):
             raise ValueError(f"Case 缺少 candidate_view: {case['case_key']}")
         cases.append(case)
     suite["cases"] = cases
@@ -82,33 +137,26 @@ def _judge_model(suite: dict[str, Any]) -> str:
     )
 
 
-def sync_builtin_benchmarks(conn) -> dict[str, int]:
-    """Idempotently index the complete Interview Evaluation Release 1.0."""
-    suite = load_suite_definition(EVALUATION_RELEASE_KEY)
-    judge_model = _judge_model(suite)
-    candidate_model = _candidate_simulator_model()
-    target_model = os.environ.get("LLM_MODEL_NAME") or "gpt-4o"
-    target_manifest = {
-        **_baseline_manifest("interview-agent"),
-        "target_type": "interview",
-        "workflow": "chat-interview",
-        "model": target_model,
-    }
-    evaluation_manifest = {
+def _evaluation_manifest(
+    suite: dict[str, Any], spec: dict[str, str], judge_model: str, candidate_model: str
+) -> dict[str, Any]:
+    manifest: dict[str, Any] = {
         "schema_version": 1,
-        "release_key": EVALUATION_RELEASE_KEY,
-        "target_type": "interview",
+        "release_key": spec["evaluation_key"],
+        "target_type": spec["target_type"],
         "benchmark": {
             "version": "1.0",
-            "suite_key": INTERNAL_SUITE_KEY,
+            "suite_key": suite.get("suite_key") or spec["evaluation_key"].replace("@1.0", "-suite"),
             "description": suite["description"],
             "cases": suite["cases"],
         },
         "protocol": {
             "version": "1.0",
-            "replication_count": 5,
+            "replication_count": 3 if spec["target_type"] != "interview" else 5,
             "seed_strategy": "sha256(base_seed:case_id:replication)",
             "aggregate": "mean_median_dispersion",
+            "deterministic_weight": 0.6,
+            "judge_weight": 0.4,
             "max_attempts": 1,
         },
         "judge": {
@@ -116,67 +164,137 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
             "model": judge_model,
             "temperature": 0,
             "response_format": "json_object",
-            "prompt_version": "interview-e2e-judge-v1",
+            "prompt_version": f"{spec['target_type']}-judge-v1",
             "credential_ref": "global-llm",
         },
         "simulator_harness": {
-            "adapter": "InterviewE2EAdapter",
+            "adapter": spec["adapter"],
             "version": "1.0",
-            "max_turns": 50,
-            "trace_fields": ["tool_calls_trace", "classify_result", "turn_intent"],
+            "trace_fields": ["payload", "hard_assertions", "contract_violations"],
         },
-        "candidate_simulator": {
+        "runtime": _baseline_manifest(f"{spec['target_component']}-evaluation"),
+    }
+    if spec["target_type"] == "interview":
+        manifest["simulator_harness"].update({"max_turns": 50, "trace_fields": ["tool_calls_trace", "classify_result", "turn_intent"]})
+        manifest["candidate_simulator"] = {
             "version": "1.0",
             "model": candidate_model,
             "temperature": 0.7,
             "credential_ref": "global-llm",
-        },
-        "tool_evaluation": {
+        }
+        manifest["tool_evaluation"] = {
             "version": "1.0",
             "enabled": True,
             "source": "metadata.tool_calls_trace",
             "deterministic": True,
-        },
-        "intent_evaluation": {
+        }
+        manifest["intent_evaluation"] = {
             "version": "1.0",
             "enabled": True,
             "source": "metadata.classify_result",
             "strategy_source": "metadata.turn_intent",
             "deterministic": True,
-        },
-        "retrieval": {
+        }
+        manifest["retrieval"] = {
             "version": "1.0",
             "embedding_model": os.environ.get("EMBEDDING_MODEL", "BAAI/bge-m3"),
             "credential_ref": "siliconflow-embedding",
-        },
-        "runtime": _baseline_manifest("interview-evaluation"),
-    }
-    releases = [
-        {
-            "release_key": "interview-agent@1.0",
-            "release_type": "target",
+        }
+    elif spec["target_type"] in {"experience_extraction", "jd_extraction"}:
+        manifest["structured_evaluation"] = {
             "version": "1.0",
-            "target_type": "interview",
-            "manifest": target_manifest,
-            "git_sha": target_manifest["git_sha"],
-            "image_digest": target_manifest["image_digest"],
-            "config_digest": target_manifest["config_digest"],
-        },
-        {
-            "release_key": EVALUATION_RELEASE_KEY,
-            "release_type": "evaluation",
+            "scorer": "content_scoring.evaluate_content_trace",
+            "deterministic": True,
+            "judge_dimensions": "field_grounding,question_or_technology_coverage,format_quality",
+        }
+    elif spec["target_type"] == "resume_analysis":
+        manifest["resume_evaluation"] = {
             "version": "1.0",
-            "target_type": "interview",
-            "judge_model": judge_model,
-            "manifest": evaluation_manifest,
-        },
-    ]
+            "scorer": "content_scoring.evaluate_resume_trace",
+            "deterministic": True,
+            "judge_dimensions": "fact_grounding,job_alignment,actionability",
+        }
+    elif spec["target_type"] == "question_tagging":
+        manifest["tagging_evaluation"] = {
+            "version": "1.0",
+            "scorer": "content_scoring.evaluate_tagging_trace",
+            "deterministic": True,
+            "judge_dimensions": "taxonomy_accuracy,tag_quality,difficulty",
+        }
+    return manifest
+
+
+def sync_builtin_benchmarks(conn) -> dict[str, int]:
+    """Idempotently index the complete built-in Evaluation Releases 1.0."""
+    candidate_model = _candidate_simulator_model()
+    target_model = os.environ.get("LLM_MODEL_NAME") or "gpt-4o"
     release_rows = {}
     created_releases = 0
-    for release in releases:
-        row, created = _ensure_published_release(conn, **release)
-        release_rows[release["release_key"]] = row
-        created_releases += int(created)
+    total_cases = 0
+    for spec in BUILTIN_SUITES:
+        suite = load_suite_definition(spec["evaluation_key"])
+        judge_model = _judge_model(suite)
+        target_manifest = {
+            **_baseline_manifest(spec["target_component"]),
+            "target_type": spec["target_type"],
+            "workflow": spec["workflow"],
+            "model": target_model,
+        }
+        evaluation_manifest = _evaluation_manifest(suite, spec, judge_model, candidate_model)
+        releases = [
+            {
+                "release_key": spec["target_key"],
+                "release_type": "target",
+                "version": "1.0",
+                "target_type": spec["target_type"],
+                "manifest": target_manifest,
+                "git_sha": target_manifest["git_sha"],
+                "image_digest": target_manifest["image_digest"],
+                "config_digest": target_manifest["config_digest"],
+            },
+            {
+                "release_key": spec["evaluation_key"],
+                "release_type": "evaluation",
+                "version": "1.0",
+                "target_type": spec["target_type"],
+                "judge_model": judge_model,
+                "manifest": evaluation_manifest,
+            },
+        ]
+        total_cases += len(suite["cases"])
+        for release in releases:
+            row, created = _ensure_published_release(conn, **release)
+            release_rows[release["release_key"]] = row
+            created_releases += int(created)
+
+        suite_row = conn.execute(
+            "SELECT * FROM eval_benchmark_suites WHERE release_id = ?",
+            (release_rows[spec["evaluation_key"]]["id"],),
+        ).fetchone()
+        if suite_row is None:
+            suite_row = create_benchmark_suite(
+                conn,
+                release_id=release_rows[spec["evaluation_key"]]["id"],
+                suite_key=suite.get("suite_key") or f"{spec['target_type']}-suite",
+                target_type=spec["target_type"],
+                judge_model=judge_model,
+                description=suite["description"],
+            )
+        for case in suite["cases"]:
+            exists = conn.execute(
+                "SELECT id FROM eval_benchmark_cases WHERE suite_id = ? AND case_key = ?",
+                (suite_row["id"], case["case_key"]),
+            ).fetchone()
+            if exists:
+                continue
+            create_benchmark_case(
+                conn,
+                suite_id=suite_row["id"],
+                case_key=case["case_key"],
+                scenario_key=case["scenario_key"],
+                input_snapshot=case["input_snapshot"],
+                contract=case["contract"],
+            )
 
     # Keep historical component rows queryable, but remove them from the
     # published selection surface now that the complete Evaluation Release is
@@ -187,35 +305,4 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
         "'simulator_harness', 'candidate_simulator') AND status = 'published'"
     )
 
-    suite_row = conn.execute(
-        "SELECT * FROM eval_benchmark_suites WHERE release_id = ?",
-        (release_rows[EVALUATION_RELEASE_KEY]["id"],),
-    ).fetchone()
-    if suite_row is None:
-        suite_row = create_benchmark_suite(
-            conn,
-            release_id=release_rows[EVALUATION_RELEASE_KEY]["id"],
-            suite_key=INTERNAL_SUITE_KEY,
-            target_type=suite["target_type"],
-            judge_model=judge_model,
-            description=suite["description"],
-        )
-    cases_created = 0
-    for case in suite["cases"]:
-        exists = conn.execute(
-            "SELECT id FROM eval_benchmark_cases WHERE suite_id = ? AND case_key = ?",
-            (suite_row["id"], case["case_key"]),
-        ).fetchone()
-        if exists:
-            continue
-        create_benchmark_case(
-            conn,
-            suite_id=suite_row["id"],
-            case_key=case["case_key"],
-            scenario_key=case["scenario_key"],
-            input_snapshot=case["input_snapshot"],
-            contract=case["contract"],
-        )
-        cases_created += 1
-
-    return {"suites": 1, "cases": len(suite["cases"]), "releases": len(releases)}
+    return {"suites": len(BUILTIN_SUITES), "cases": total_cases, "releases": len(BUILTIN_SUITES) * 2}

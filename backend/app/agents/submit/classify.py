@@ -92,14 +92,17 @@ async def classify_node(state: SubmitState) -> dict:
         if not taxonomy_config:
             taxonomy_config = await run_db(lambda: get_taxonomy_for_position(user_id=state.get("user_id")))
 
-        tagged_rows = await tag_questions_batch(
-            url=state.get("saved_url", ""),
-            company=data.get("公司", "未提供"),
-            round_=data.get("面试轮次", "未提供"),
-            questions=q_list,
-            taxonomy_config=taxonomy_config,
-            user_id=state["user_id"],
-        )
+        tagging_kwargs = {
+            "url": state.get("saved_url", ""),
+            "company": data.get("公司", "未提供"),
+            "round_": data.get("面试轮次", "未提供"),
+            "questions": q_list,
+            "taxonomy_config": taxonomy_config,
+            "user_id": state["user_id"],
+        }
+        if state.get("_eval_model"):
+            tagging_kwargs["model"] = state["_eval_model"]
+        tagged_rows = await tag_questions_batch(**tagging_kwargs)
 
     # 从 taxonomy 提取合法分类用于质量检查
     valid_cat1 = None

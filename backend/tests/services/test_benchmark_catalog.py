@@ -102,11 +102,12 @@ def test_sync_builtin_suite_records_judge_model_and_cases(test_db):
     result = catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
 
-    assert result == {"suites": 1, "cases": 12, "releases": 2}
-    suite = test_db.execute(
+    assert result == {"suites": 5, "cases": 27, "releases": 10}
+    suites = test_db.execute(
         "SELECT s.judge_model, r.status FROM eval_benchmark_suites s "
         "JOIN eval_releases r ON r.id = s.release_id"
-    ).fetchone()
-    assert suite[0]
-    assert suite[1] == "published"
-    assert test_db.execute("SELECT COUNT(*) FROM eval_benchmark_cases").fetchone()[0] == 12
+    ).fetchall()
+    assert len(suites) == 5
+    assert {row[1] for row in suites} == {"published"}
+    assert all(row[0] for row in suites)
+    assert test_db.execute("SELECT COUNT(*) FROM eval_benchmark_cases").fetchone()[0] == 27

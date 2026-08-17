@@ -1,0 +1,10 @@
+{
+  "release_key": "resume-analysis-eval@1.0",
+  "release_type": "evaluation",
+  "version": "1.0",
+  "target_type": "resume_analysis",
+  "suite_key": "resume-analysis-suite",
+  "judge_model": "gpt-4o",
+  "description": "简历分析与岗位定向优化评测 1.0",
+  "case_files": ["grounded_backend.json", "missing_metrics.json", "career_switch.json", "prompt_injection.json"]
+}

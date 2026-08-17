@@ -1,0 +1,24 @@
+{
+  "case_key": "missing_salary",
+  "scenario_key": "jd_extraction_missing_field",
+  "input_snapshot": {
+    "raw_text": "招聘后端工程师，工作地点北京。负责 Java 服务和 MySQL，要求熟悉 Spring。",
+    "content_type_hint": "jd"
+  },
+  "contract": {
+    "expected_type": "jd",
+    "required_fields": ["公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"],
+    "field_expectations": [
+      {"path": "公司", "expected": "未提供"},
+      {"path": "薪资范围", "expected": "未提供"},
+      {"path": "岗位名称", "expected": "后端工程师"}
+    ],
+    "expected_questions": [],
+    "min_question_count": 0,
+    "rubric": {
+      "missing_value_handling": {"weight": 0.5, "anchors": {"1": "编造薪资或公司", "3": "部分标记未知", "5": "所有缺失字段明确标记"}},
+      "technology_coverage": {"weight": 0.3, "anchors": {"1": "技术要求丢失", "3": "覆盖部分", "5": "完整保留"}},
+      "format_quality": {"weight": 0.2, "anchors": {"1": "不可用", "3": "基本可用", "5": "结构稳定"}}
+    }
+  }
+}

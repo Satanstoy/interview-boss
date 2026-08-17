@@ -55,7 +55,10 @@ async def extract_node(state: SubmitState) -> dict:
             })
 
         _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id)
-        llm_kwargs = dict(model=_m, temperature=0.1)
+        llm_kwargs = dict(
+            model=state.get("_eval_model") or _m,
+            temperature=float(state.get("_eval_temperature", 0.1)),
+        )
         if _should_use_response_format(_bu):
             llm_kwargs["response_format"] = {"type": "json_object"}
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]

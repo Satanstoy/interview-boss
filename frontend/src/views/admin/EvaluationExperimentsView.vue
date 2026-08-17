@@ -43,6 +43,9 @@ const evaluationConfig = computed(() => {
     simulator: manifest.candidate_simulator?.model || '—',
     tool: Boolean(manifest.tool_evaluation?.enabled),
     intent: Boolean(manifest.intent_evaluation?.enabled),
+    structured: Boolean(manifest.structured_evaluation),
+    resume: Boolean(manifest.resume_evaluation),
+    tagging: Boolean(manifest.tagging_evaluation),
   }
 })
 
@@ -144,8 +147,8 @@ onMounted(load)
               <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评测题集</span><div class="mt-1 font-medium">{{ evaluationConfig.benchmark }}</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">固定 Judge</span><div class="mt-1 break-all font-mono font-medium">{{ evaluationConfig.judge }}</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">执行器 / 候选人</span><div class="mt-1 font-medium">{{ evaluationConfig.harness }} · {{ evaluationConfig.simulator }}</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">明确指标</span><div class="mt-1 flex flex-wrap gap-1.5"><span v-if="evaluationConfig.tool" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />工具调用效果</span><span v-if="evaluationConfig.intent" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />意图识别效果</span></div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">执行器 / 候选人</span><div class="mt-1 font-medium">{{ evaluationConfig.harness }} · {{ evaluationConfig.simulator === '—' ? '无需模拟器' : evaluationConfig.simulator }}</div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">明确指标</span><div class="mt-1 flex flex-wrap gap-1.5"><span v-if="evaluationConfig.tool" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />工具调用效果</span><span v-if="evaluationConfig.intent" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />意图识别效果</span><span v-if="evaluationConfig.structured" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />字段与题目召回</span><span v-if="evaluationConfig.resume" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />事实与岗位匹配</span><span v-if="evaluationConfig.tagging" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />分类与标签准确率</span></div></div>
               </div>
             </EvaluationStepCard>
 

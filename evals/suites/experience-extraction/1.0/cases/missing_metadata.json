@@ -1,0 +1,23 @@
+{
+  "case_key": "missing_metadata",
+  "scenario_key": "interview_extraction_missing_metadata",
+  "input_snapshot": {
+    "raw_text": "面试中聊了向量数据库的索引和召回，追问了召回率与延迟的权衡。",
+    "content_type_hint": "interview"
+  },
+  "contract": {
+    "expected_type": "interview",
+    "required_fields": ["公司", "面试轮次", "考察重点", "具体题目清单", "难易程度"],
+    "field_expectations": [
+      {"path": "公司", "expected": "未提供"},
+      {"path": "面试轮次", "expected": "未提供"}
+    ],
+    "expected_questions": ["向量数据库的索引和召回", "召回率与延迟的权衡"],
+    "min_question_count": 2,
+    "rubric": {
+      "missing_value_handling": {"weight": 0.4, "anchors": {"1": "擅自编造", "3": "部分保留未知", "5": "明确标记未提供"}},
+      "question_extraction": {"weight": 0.4, "anchors": {"1": "没有题目", "3": "提取部分", "5": "题目完整"}},
+      "semantic_summary": {"weight": 0.2, "anchors": {"1": "无关", "3": "大致相关", "5": "准确概括"}}
+    }
+  }
+}

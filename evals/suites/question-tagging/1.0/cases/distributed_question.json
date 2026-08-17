@@ -1,0 +1,15 @@
+{
+  "case_key": "distributed_question",
+  "scenario_key": "question_tagging_distributed",
+  "input_snapshot": {
+    "company": "云杉网络",
+    "round": "二面",
+    "questions": ["分布式事务的一致性方案有哪些，如何选择？"],
+    "taxonomy": {"D.分布式与高并发": ["D3.分布式事务与一致性"]}
+  },
+  "contract": {
+    "taxonomy": {"D.分布式与高并发": ["D3.分布式事务与一致性"]},
+    "expected_labels": {"分布式事务的一致性方案有哪些，如何选择？": {"一级大类": "D.分布式与高并发", "二级子类": "D3.分布式事务与一致性", "难度标签": "L2-中等"}},
+    "rubric": {"taxonomy_accuracy": {"weight": 0.55, "anchors": {"1": "分类错误", "3": "一级正确", "5": "层级准确"}}, "tag_quality": {"weight": 0.25, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}

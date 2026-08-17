@@ -32,7 +32,7 @@ onMounted(load)
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader title="Benchmark：这套题集测什么" description="这里定义完整评测版本要测什么：固定 Case、输入快照、质量要求，以及工具调用和意图识别的可验证契约。" active-key="benchmarks" />
+      <EvaluationPageHeader title="Benchmark：这套题集测什么" description="这里定义完整评测版本要测什么：固定 Case、输入快照、质量要求，以及结构化指标和 Judge 语义指标。" active-key="benchmarks" />
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <p v-else-if="error" class="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
       <div v-else class="mt-6 space-y-5">
@@ -42,7 +42,7 @@ onMounted(load)
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ suite.release_key }}</span><span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">{{ statusLabel(suite.release_status) }}</span></div>
               <p class="mt-1 text-sm text-muted-foreground">{{ suite.description || '固定的评测场景与质量要求。' }}</p>
-              <div class="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4"><span><strong class="font-medium text-foreground">{{ suite.cases?.length || 0 }}</strong> 个 Case</span><span class="break-words">完整评测版本：<strong class="font-medium text-foreground">{{ suite.evaluation_release_key || suite.release_key }}</strong></span><span>工具调用与意图识别：<strong class="font-medium text-foreground">已纳入契约</strong></span><span>适用对象：<strong class="font-medium text-foreground">{{ evaluationTargetLabel(suite.target_type) }}</strong></span></div>
+              <div class="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4"><span><strong class="font-medium text-foreground">{{ suite.cases?.length || 0 }}</strong> 个 Case</span><span class="break-words">完整评测版本：<strong class="font-medium text-foreground">{{ suite.evaluation_release_key || suite.release_key }}</strong></span><span>评测方式：<strong class="font-medium text-foreground">规则指标 + Judge</strong></span><span>适用对象：<strong class="font-medium text-foreground">{{ evaluationTargetLabel(suite.target_type) }}</strong></span></div>
             </div>
             <ChevronDown :class="['mt-1 size-5 shrink-0 transition-transform', opened === suite.id ? 'rotate-180' : '']" />
           </button>
@@ -54,14 +54,14 @@ onMounted(load)
                 <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">候选人可见输入</div><div class="text-muted-foreground">Simulator 只能看到本 Case 明确允许的上下文。</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 flex items-center gap-1 font-medium text-foreground"><ShieldCheck class="size-3.5 text-emerald-600" />硬约束</div><div class="text-muted-foreground">{{ item.contract?.hard_assertions?.length || 0 }} 个必检条件</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">质量维度</div><div class="text-muted-foreground">{{ Object.keys(item.contract?.rubric || {}).join('、') || '未配置' }}</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">工具调用效果</div><div class="text-muted-foreground">{{ item.contract?.tool_expectations?.required_tools?.join('、') || '按轨迹记录' }}；{{ item.contract?.tool_expectations?.require_result_used ? '必须使用结果' : '记录结果使用' }}</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">意图识别效果</div><div class="text-muted-foreground">{{ item.contract?.intent_expectations?.length || 0 }} 个意图与策略对齐点</div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">确定性指标</div><div class="text-muted-foreground">{{ item.contract?.tool_expectations ? `工具：${item.contract.tool_expectations.required_tools?.join('、') || '按轨迹记录'}` : item.contract?.expected_type ? `字段：${item.contract.required_fields?.length || 0} 项` : item.contract?.taxonomy ? `分类：${Object.keys(item.contract.taxonomy).length} 个一级类目` : '按契约记录' }}</div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><div class="mb-1 font-medium text-foreground">语义指标</div><div class="text-muted-foreground">{{ Object.keys(item.contract?.rubric || {}).length }} 个 Judge 维度</div></div>
               </div>
               <details class="mt-3 rounded-lg border border-border/60 px-3 py-2">
                 <summary class="cursor-pointer text-xs font-medium text-muted-foreground">查看输入快照与详细要求</summary>
                 <div class="mt-3 grid gap-3 text-xs md:grid-cols-2">
-                  <div><div class="mb-1 font-medium text-foreground">candidate_view</div><pre class="max-h-36 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(item.input_snapshot?.candidate_view || {}, null, 2) }}</pre></div>
-                  <div><div class="mb-1 font-medium text-foreground">quality_requirements</div><pre class="max-h-36 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(item.contract?.quality_requirements || [], null, 2) }}</pre></div>
+                  <div><div class="mb-1 font-medium text-foreground">输入快照</div><pre class="max-h-36 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(item.input_snapshot || {}, null, 2) }}</pre></div>
+                  <div><div class="mb-1 font-medium text-foreground">确定性契约</div><pre class="max-h-36 overflow-auto text-muted-foreground">{{ JSON.stringify({ required_fields: item.contract?.required_fields, expected_questions: item.contract?.expected_questions, source_facts: item.contract?.source_facts, target_terms: item.contract?.target_terms, expected_labels: item.contract?.expected_labels, tool_expectations: item.contract?.tool_expectations, intent_expectations: item.contract?.intent_expectations }, null, 2) }}</pre></div>
                 </div>
               </details>
             </div>

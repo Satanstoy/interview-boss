@@ -26,14 +26,23 @@ function manifestOf(release) {
 function fixedItems(release) {
   const manifest = manifestOf(release)
   if (release.release_type === 'evaluation') {
-    return [
+    const items = [
       `题集 ${manifest.benchmark?.suite_key || '已固化'}`,
       `Judge ${manifest.judge?.model || release.judge_model || '已固化'}`,
-      `Harness ${manifest.simulator_harness?.version || '1.0'}`,
-      `候选人 ${manifest.candidate_simulator?.model || '已固化'}`,
-      manifest.tool_evaluation?.enabled ? '工具调用效果' : '',
-      manifest.intent_evaluation?.enabled ? '意图识别效果' : '',
-    ].filter(Boolean)
+      `执行器 ${manifest.simulator_harness?.version || '1.0'}`,
+    ]
+    if (manifest.candidate_simulator) items.push(`候选人 ${manifest.candidate_simulator.model || '已固化'}`)
+    if (manifest.tool_evaluation?.enabled) items.push('工具调用效果')
+    if (manifest.intent_evaluation?.enabled) items.push('意图识别效果')
+    if (manifest.protocol?.deterministic_weight != null || manifest.protocol?.judge_weight != null) {
+      const deterministic = Math.round(Number(manifest.protocol.deterministic_weight || 0) * 100)
+      const judge = Math.round(Number(manifest.protocol.judge_weight || 0) * 100)
+      items.push(`混合评分：规则 ${deterministic}% + Judge ${judge}%`)
+    }
+    if (manifest.structured_evaluation) items.push('结构化字段与事实依据')
+    if (manifest.resume_evaluation) items.push('简历事实与岗位匹配')
+    if (manifest.tagging_evaluation) items.push('分类、标签与难度')
+    return items
   }
   return [
     manifest.workflow ? `Workflow ${manifest.workflow}` : '',
@@ -62,7 +71,7 @@ onMounted(load)
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader title="版本与发布：决定测谁" description="先选择被测对象版本，再绑定一个完整评测版本。完整评测版本会一起固定题集、规则、Judge、Harness、模拟器、工具调用和意图识别指标。" active-key="releases" />
+      <EvaluationPageHeader title="版本与发布：决定测谁" description="先选择被测对象版本，再绑定一个完整评测版本。完整评测版本会固定适合该目标的题集、规则、模型、执行器和确定性指标；模拟面试额外固定模拟器、工具调用与意图识别。" active-key="releases" />
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <p v-else-if="error" class="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
       <div v-else class="mt-6 space-y-5">

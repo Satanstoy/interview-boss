@@ -11,7 +11,7 @@ from typing import Any, Callable
 from app.db.connection import get_db_connection
 from app.evaluation.adapters import get_target_adapter
 from app.evaluation.judge import judge_observation
-from app.evaluation.scoring import score_observation
+from app.evaluation.scoring import combine_hybrid_score, score_observation
 from app.services.evaluation_service import append_event
 
 logger = logging.getLogger("interview-boss.evaluation")
@@ -36,7 +36,16 @@ def _snapshot_error(snapshot: dict[str, Any]) -> str | None:
     evaluation_manifest = evaluation.get("manifest")
     if not isinstance(evaluation_manifest, dict):
         return "缺少 evaluation manifest 快照"
-    required_groups = {"benchmark", "protocol", "judge", "simulator_harness", "candidate_simulator"}
+    required_groups = {"benchmark", "protocol", "judge", "simulator_harness"}
+    target_type = str(target.get("target_type") or evaluation.get("target_type") or "")
+    target_groups = {
+        "interview": {"candidate_simulator", "tool_evaluation", "intent_evaluation", "retrieval"},
+        "experience_extraction": {"structured_evaluation"},
+        "jd_extraction": {"structured_evaluation"},
+        "resume_analysis": {"resume_evaluation"},
+        "question_tagging": {"tagging_evaluation"},
+    }
+    required_groups |= target_groups.get(target_type, set())
     if not required_groups <= set(evaluation_manifest):
         return "Evaluation Release 快照缺少固定组件"
     if not isinstance(cases, list) or not cases:
@@ -64,6 +73,12 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
     ).fetchall()
     tool_samples = []
     intent_samples = []
+    content_samples = []
+    resume_samples = []
+    tagging_samples = []
+    final_scores = []
+    deterministic_scores = []
+    judge_scores = []
     for row in rows:
         try:
             result = json.loads(row["result_json"] or "{}")
@@ -71,10 +86,28 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
             continue
         observation = result.get("observation") or {}
         payload = observation.get("payload") or {}
+        score = result.get("score") or {}
+        if isinstance(score, dict):
+            for bucket, target in (
+                ("score", final_scores),
+                ("deterministic_score", deterministic_scores),
+                ("judge_score", judge_scores),
+            ):
+                value = score.get(bucket)
+                if value is not None:
+                    target.append(float(value))
         if isinstance(payload.get("tool_metrics"), dict):
             tool_samples.append(payload["tool_metrics"])
         if isinstance(payload.get("intent_metrics"), dict):
             intent_samples.append(payload["intent_metrics"])
+        metrics = payload.get("metrics")
+        if isinstance(metrics, dict):
+            if "field_coverage" in metrics:
+                content_samples.append(metrics)
+            if "source_fact_coverage" in metrics:
+                resume_samples.append(metrics)
+            if "taxonomy_validity" in metrics:
+                tagging_samples.append(metrics)
 
     tool_call_count = sum(int(item.get("call_count") or 0) for item in tool_samples)
     failed_call_count = sum(int(item.get("failed_call_count") or 0) for item in tool_samples)
@@ -84,7 +117,13 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
         for item in intent_samples
         if item.get("accuracy") is not None
     ]
-    return {
+    summary = {
+        "score": {
+            "items_evaluated": len(final_scores),
+            "final_mean": round(sum(final_scores) / len(final_scores), 4) if final_scores else None,
+            "deterministic_mean": round(sum(deterministic_scores) / len(deterministic_scores), 4) if deterministic_scores else None,
+            "judge_mean": round(sum(judge_scores) / len(judge_scores), 4) if judge_scores else None,
+        },
         "tool": {
             "items_evaluated": len(tool_samples),
             "call_count": tool_call_count,
@@ -101,6 +140,27 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
             "accuracy": round(sum(intent_accuracy) / len(intent_accuracy), 4) if intent_accuracy else None,
         },
     }
+    if content_samples:
+        summary["content"] = {
+            "items_evaluated": len(content_samples),
+            "field_coverage": round(sum(float(item.get("field_coverage") or 0) for item in content_samples) / len(content_samples), 4),
+            "question_recall": round(sum(float(item.get("question_recall") or 0) for item in content_samples) / len(content_samples), 4),
+            "question_precision": round(sum(float(item.get("question_precision") or 0) for item in content_samples) / len(content_samples), 4),
+        }
+    if resume_samples:
+        summary["resume"] = {
+            "items_evaluated": len(resume_samples),
+            "source_fact_coverage": round(sum(float(item.get("source_fact_coverage") or 0) for item in resume_samples) / len(resume_samples), 4),
+            "target_alignment": round(sum(float(item.get("target_alignment") or 0) for item in resume_samples) / len(resume_samples), 4),
+            "forbidden_claim_count": sum(int(item.get("forbidden_claim_count") or 0) for item in resume_samples),
+        }
+    if tagging_samples:
+        summary["tagging"] = {
+            "items_evaluated": len(tagging_samples),
+            "taxonomy_validity": round(sum(float(item.get("taxonomy_validity") or 0) for item in tagging_samples) / len(tagging_samples), 4),
+            "classification_accuracy": round(sum(float(item.get("classification_accuracy") or 0) for item in tagging_samples) / len(tagging_samples), 4),
+        }
+    return summary
 
 
 def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
@@ -309,19 +369,22 @@ async def execute_eval_run(
                 errors = observation.get("payload", {}).get("errors", [])
                 detail = "; ".join(str(error) for error in errors[:2]) if errors else "observation status is not succeeded"
                 raise RuntimeError(f"target_observation_failed: {detail}")
-            score = score_observation(observation, contract)
-            if run["target_type"] == "interview":
-                if score["hard_gate_status"] == "passed":
-                    judge_result = await judge_observation(
-                        case_key=case_key,
-                        contract=contract,
-                        observation=observation,
-                        judge_model=run["judge_model"] or "",
-                    )
-                    score.update(judge_result)
-                else:
-                    score["judge_status"] = "skipped_hard_gate"
-                    score["judge_model"] = run["judge_model"] or ""
+            evaluation_manifest = json.loads(run.get("evaluation_manifest_json") or "{}")
+            protocol = evaluation_manifest.get("protocol")
+            score = score_observation(observation, contract, protocol=protocol)
+            if score["hard_gate_status"] == "passed":
+                judge_result = await judge_observation(
+                    case_key=case_key,
+                    contract=contract,
+                    observation=observation,
+                    judge_model=run["judge_model"] or "",
+                )
+                score.update(judge_result)
+                score.update(combine_hybrid_score(score, judge_result.get("score")))
+            else:
+                score["judge_status"] = "skipped_hard_gate"
+                score["judge_model"] = run["judge_model"] or ""
+                score.update(combine_hybrid_score(score, None))
             result_json = _json_dumps({"observation": observation, "score": score})
             connection.execute(
                 """

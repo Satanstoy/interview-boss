@@ -1,0 +1,18 @@
+{
+  "case_key": "mixed_questions",
+  "scenario_key": "question_tagging_mixed_batch",
+  "input_snapshot": {
+    "company": "远山数据",
+    "round": "终面",
+    "questions": ["MCP 和 Function Calling 的区别是什么？", "Redis 缓存击穿如何处理？"],
+    "taxonomy": {"B.Agent与LLM应用": ["B3.工具调用与协议集成"], "D.分布式与高并发": ["D1.缓存设计与优化"]}
+  },
+  "contract": {
+    "taxonomy": {"B.Agent与LLM应用": ["B3.工具调用与协议集成"], "D.分布式与高并发": ["D1.缓存设计与优化"]},
+    "expected_labels": {
+      "MCP 和 Function Calling 的区别是什么？": {"一级大类": "B.Agent与LLM应用", "二级子类": "B3.工具调用与协议集成", "难度标签": "L2-中等"},
+      "Redis 缓存击穿如何处理？": {"一级大类": "D.分布式与高并发", "二级子类": "D1.缓存设计与优化", "难度标签": "L2-中等"}
+    },
+    "rubric": {"taxonomy_accuracy": {"weight": 0.55, "anchors": {"1": "分类错误", "3": "部分正确", "5": "全部准确"}}, "tag_quality": {"weight": 0.25, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "release_key": "experience-extraction-eval@1.0",
+  "release_type": "evaluation",
+  "version": "1.0",
+  "target_type": "experience_extraction",
+  "suite_key": "experience-extraction-suite",
+  "judge_model": "gpt-4o",
+  "description": "面经提取 Agent 结构化抽取评测 1.0",
+  "case_files": [
+    "standard_interview.json",
+    "multi_round_noise.json",
+    "missing_metadata.json",
+    "prompt_injection.json"
+  ]
+}

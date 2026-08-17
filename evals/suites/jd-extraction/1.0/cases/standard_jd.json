@@ -1,0 +1,24 @@
+{
+  "case_key": "standard_jd",
+  "scenario_key": "jd_extraction_standard",
+  "input_snapshot": {
+    "raw_text": "星河科技招聘大模型应用工程师。岗位职责：负责 RAG、Agent 和工具调用系统建设。要求熟悉 Python、FastAPI、PostgreSQL。薪资 25k-40k。加分项：有 MCP 实践经验。",
+    "content_type_hint": "jd"
+  },
+  "contract": {
+    "expected_type": "jd",
+    "required_fields": ["公司", "岗位名称", "薪资范围", "核心技术要求", "加分项"],
+    "field_expectations": [
+      {"path": "公司", "expected": "星河科技"},
+      {"path": "岗位名称", "expected": "大模型应用工程师"},
+      {"path": "薪资范围", "expected": "25k-40k"}
+    ],
+    "expected_questions": [],
+    "min_question_count": 0,
+    "rubric": {
+      "field_grounding": {"weight": 0.45, "anchors": {"1": "大量错误", "3": "主要字段正确", "5": "字段完整准确"}},
+      "technology_coverage": {"weight": 0.35, "anchors": {"1": "漏掉技术栈", "3": "覆盖主要技术", "5": "技术要求完整"}},
+      "format_quality": {"weight": 0.2, "anchors": {"1": "不可用", "3": "基本可用", "5": "结构清晰"}}
+    }
+  }
+}

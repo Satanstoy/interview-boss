@@ -17,11 +17,20 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_1_0(tes
         "FROM eval_releases ORDER BY release_key"
     ).fetchall()
 
-    assert result["releases"] == 2
-    assert [(row[0], row[1], row[2], row[3], row[4]) for row in rows] == [
+    assert result["releases"] == 10
+    actual = {(row[0], row[1], row[2], row[3], row[4]) for row in rows}
+    assert {
         ("interview-agent@1.0", "target", "interview", "1.0", "published"),
         ("interview-eval@1.0", "evaluation", "interview", "1.0", "published"),
-    ]
+        ("experience-extraction@1.0", "target", "experience_extraction", "1.0", "published"),
+        ("experience-extraction-eval@1.0", "evaluation", "experience_extraction", "1.0", "published"),
+        ("jd-extraction@1.0", "target", "jd_extraction", "1.0", "published"),
+        ("jd-extraction-eval@1.0", "evaluation", "jd_extraction", "1.0", "published"),
+        ("resume-analysis@1.0", "target", "resume_analysis", "1.0", "published"),
+        ("resume-analysis-eval@1.0", "evaluation", "resume_analysis", "1.0", "published"),
+        ("question-tagging@1.0", "target", "question_tagging", "1.0", "published"),
+        ("question-tagging-eval@1.0", "evaluation", "question_tagging", "1.0", "published"),
+    } <= actual
     manifest = _service()._decode_manifest(
         test_db.execute(
             "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
@@ -271,6 +280,9 @@ def test_executor_reads_judge_harness_and_simulator_from_run_snapshot(test_db, m
             "judge": {"model": "judge-snapshot-v1", "temperature": 0},
             "simulator_harness": {"max_turns": 6, "version": "harness-snapshot-v1"},
             "candidate_simulator": {"model": "candidate-snapshot-v1", "temperature": 0.2},
+            "tool_evaluation": {"enabled": True},
+            "intent_evaluation": {"enabled": True},
+            "retrieval": {"embedding_model": "BAAI/bge-m3"},
         },
     )
     suite = service.create_benchmark_suite(

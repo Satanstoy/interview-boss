@@ -1,0 +1,10 @@
+{
+  "release_key": "jd-extraction-eval@1.0",
+  "release_type": "evaluation",
+  "version": "1.0",
+  "target_type": "jd_extraction",
+  "suite_key": "jd-extraction-suite",
+  "judge_model": "gpt-4o",
+  "description": "JD 提取 Agent 结构化抽取评测 1.0",
+  "case_files": ["standard_jd.json", "missing_salary.json", "prompt_injection.json"]
+}

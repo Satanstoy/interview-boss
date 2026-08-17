@@ -1,0 +1,15 @@
+{
+  "case_key": "rag_question",
+  "scenario_key": "question_tagging_rag",
+  "input_snapshot": {
+    "company": "星河科技",
+    "round": "一面",
+    "questions": ["请介绍 RAG 多路召回的设计和优化"],
+    "taxonomy": {"B.Agent与LLM应用": ["B2.RAG系统设计"]}
+  },
+  "contract": {
+    "taxonomy": {"B.Agent与LLM应用": ["B2.RAG系统设计"]},
+    "expected_labels": {"请介绍 RAG 多路召回的设计和优化": {"一级大类": "B.Agent与LLM应用", "二级子类": "B2.RAG系统设计", "难度标签": "L2-中等"}},
+    "rubric": {"taxonomy_accuracy": {"weight": 0.5, "anchors": {"1": "分类错误", "3": "一级正确", "5": "层级准确"}}, "tag_quality": {"weight": 0.3, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}

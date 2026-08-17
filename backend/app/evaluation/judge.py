@@ -44,11 +44,13 @@ case_key: {case_key}
 1. 逐个 rubric dimension 评分，score 必须是 1-5 的整数。
 2. reasoning 必须引用 observation 中的具体事实、轮次或工具事件；证据缺失时明确写“证据不足”。
 3. overall_score 是 0-1 的小数，按 rubric 权重聚合；不要因为硬断言失败而隐藏维度分数。
-4. 对 tool_metrics 和 intent_metrics 优先使用系统提供的确定性统计；不要凭 transcript 猜测调用次数或意图识别结果。
-5. tool_effectiveness 必须同时考虑工具是否必要、工具结果是否被后续面试动作使用、调用是否失败或冗余，而不只看调用数量。
-6. intent 相关维度必须同时考虑分类结果与后续策略/工具动作是否一致；意图识别正确但没有驱动正确动作，不能给满分。
-7. critical_issues 和 highlights 只写 observation 能支持的内容。
-8. 只输出 JSON，不要 markdown，不要额外解释。
+4. 对 observation.payload.metrics、tool_metrics、intent_metrics 等系统提供的确定性统计优先使用；不要凭文本猜测字段覆盖、分类准确率、工具次数或意图结果。
+5. 对结构化抽取，重点判断字段是否忠实于输入、是否遗漏关键信息、是否把未知事实编造成确定事实。
+6. 对简历分析，重点判断事实边界、岗位匹配、建议可执行性；禁止把优化文本中的新增内容当成候选人的真实经历。
+7. 对题目分类，重点判断分类层级、标签和难度是否与题意及冻结 taxonomy 一致。
+8. 对模拟面试，tool_effectiveness 必须同时考虑工具是否必要、工具结果是否被后续动作使用、调用是否失败或冗余；intent 还必须驱动正确策略。
+9. critical_issues 和 highlights 只写 observation 能支持的内容。
+10. 只输出 JSON，不要 markdown，不要额外解释。
 
 ## 输出格式
 {{
