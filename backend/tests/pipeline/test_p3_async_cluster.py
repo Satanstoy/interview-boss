@@ -1,6 +1,5 @@
 """聚类攒批由数据库 Job + ARQ 负责调度，不依赖进程内 asyncio task。"""
 
-from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,16 +11,15 @@ async def test_cluster_window_is_persisted_and_immediately_dispatched(test_db):
 
     test_db.execute("INSERT INTO interview (id, url) VALUES (1, 'internal://1')")
     test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, question) VALUES (1, 1, '待聚类题目')"
+    )
+    test_db.execute(
         "INSERT INTO analysis_queue (interview_id, question_detail_id, status) "
         "VALUES (1, 1, 'pending')"
     )
     test_db.commit()
 
-    @contextmanager
-    def _connection():
-        yield test_db
-
-    with patch("app.db.connection.get_db_connection", _connection), \
+    with patch.object(queue, "get_db_connection", return_value=test_db), \
          patch.object(queue, "CLUSTER_DELAY_SECONDS", 0), \
          patch(
              "app.worker.enqueue_cluster_batch_job",
@@ -50,11 +48,7 @@ async def test_cluster_window_deduplicates_active_job(test_db):
     )
     test_db.commit()
 
-    @contextmanager
-    def _connection():
-        yield test_db
-
-    with patch("app.db.connection.get_db_connection", _connection), \
+    with patch.object(queue, "get_db_connection", return_value=test_db), \
          patch("app.worker.enqueue_cluster_batch_job", new=AsyncMock()) as mock_enqueue:
         assert await queue._run_cluster_batch_in_background(user_id=1) is False
 
@@ -67,16 +61,15 @@ async def test_cluster_window_dispatch_failure_keeps_job_pending(test_db):
 
     test_db.execute("INSERT INTO interview (id, url) VALUES (1, 'internal://1')")
     test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, question) VALUES (1, 1, '待聚类题目')"
+    )
+    test_db.execute(
         "INSERT INTO analysis_queue (interview_id, question_detail_id, status) "
         "VALUES (1, 1, 'pending')"
     )
     test_db.commit()
 
-    @contextmanager
-    def _connection():
-        yield test_db
-
-    with patch("app.db.connection.get_db_connection", _connection), \
+    with patch.object(queue, "get_db_connection", return_value=test_db), \
          patch.object(queue, "CLUSTER_DELAY_SECONDS", 0), \
          patch(
              "app.worker.enqueue_cluster_batch_job",

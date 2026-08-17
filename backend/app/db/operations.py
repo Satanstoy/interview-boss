@@ -633,6 +633,7 @@ def _apply_incremental_txn(
                 cat2,
                 tags,
                 diff_tag,
+                1,
                 json.dumps(sources, ensure_ascii=False),
                 json.dumps(original_questions, ensure_ascii=False),
                 oqs_json,

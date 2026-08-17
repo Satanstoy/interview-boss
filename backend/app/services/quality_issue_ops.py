@@ -69,10 +69,18 @@ def _historical_merged_question(
 
 
 def serialize_issue(row, conn) -> dict:
-    qb = conn.execute(
-        "SELECT question, cat2, original_questions FROM question_bank WHERE id = ?",
-        (row["qb_id"],),
-    ).fetchone()
+    row_keys = row.keys()
+    source_qb_id = (
+        row["source_qb_id"]
+        if "source_qb_id" in row_keys and row["source_qb_id"] is not None
+        else row["qb_id"]
+    )
+    qb = None
+    if row["qb_id"] is not None:
+        qb = conn.execute(
+            "SELECT question, cat2, original_questions FROM question_bank WHERE id = ?",
+            (row["qb_id"],),
+        ).fetchone()
     # 并入目标题（target_qb_id）对应的代表题（用于卡片「目标题」对照）
     target_qb = None
     if row["target_qb_id"] is not None:
@@ -92,7 +100,7 @@ def serialize_issue(row, conn) -> dict:
     historical_question = None
     if not qb:
         historical_question = _historical_merged_question(
-            conn, row["qb_id"], row["target_qb_id"]
+            conn, source_qb_id, row["target_qb_id"]
         )
     variants = json_loads(qb["original_questions"]) if qb and qb["original_questions"] else []
     variant_index = row["variant_index"]
@@ -104,7 +112,7 @@ def serialize_issue(row, conn) -> dict:
 
     return {
         "id": row["id"],
-        "qb_id": row["qb_id"],
+        "qb_id": source_qb_id,
         "question": (
             qb["question"] if qb else (source_question or historical_question or "")
         ),

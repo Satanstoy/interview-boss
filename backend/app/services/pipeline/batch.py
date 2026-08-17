@@ -236,6 +236,10 @@ async def cluster_batch(
                 raise
 
         await _run_db(_pre_clean)
+        # Source cleanup may soft-delete a centroid.  Drop the in-memory
+        # cache before loading candidates so a rebuild cannot match against a
+        # deleted cluster.
+        get_index_manager().invalidate(job_position, owner_id)
 
     # ── Step 1: 加载已有聚类 ──
     existing_by_cat2 = await _load_existing_clusters_by_cat2(job_position, owner_id)

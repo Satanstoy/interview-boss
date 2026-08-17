@@ -665,6 +665,10 @@ class TestSubmitNodes:
                 new_callable=AsyncMock,
                 side_effect=lambda f: f(),
             ),
+            patch(
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                new=AsyncMock(return_value=True),
+            ),
         ):
             state = {
                 "extracted_data": {
@@ -1171,6 +1175,10 @@ class TestSubmitGraphE2E:
                 new_callable=AsyncMock,
                 side_effect=lambda f: f(),
             ),
+            patch(
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                new=AsyncMock(return_value=True),
+            ),
         ):
             input_state = {
                 "raw_text": "字节跳动二面面经...",
@@ -1236,6 +1244,10 @@ class TestSubmitGraphE2E:
             patch("app.services.pipeline.enqueue_questions", return_value=3),
             patch(
                 "app.services.pipeline.should_trigger_clustering", return_value=False
+            ),
+            patch(
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                new=AsyncMock(return_value=True),
             ),
         ):
             input_state = {

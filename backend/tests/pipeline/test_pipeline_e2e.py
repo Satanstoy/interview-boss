@@ -868,7 +868,7 @@ class TestCleanupThoroughness:
         conn.close()
 
     def test_cleanup_deletes_qb_when_all_sources_gone(self):
-        """所有来源被移除后 QB 删除"""
+        """所有来源被移除后 QB 软删除并清理岗位映射"""
         from app.db.operations import _cleanup_old_sources_txn_v2
 
         conn = create_test_db()
@@ -894,10 +894,9 @@ class TestCleanupThoroughness:
         _cleanup_old_sources_txn_v2(cursor, url, "后端开发")
         conn.commit()
 
-        assert (
-            conn.execute("SELECT * FROM question_bank WHERE id = 200").fetchone()
-            is None
-        )
+        qb = conn.execute("SELECT * FROM question_bank WHERE id = 200").fetchone()
+        assert qb is not None
+        assert qb["deleted_at"] is not None
         assert (
             len(
                 conn.execute(

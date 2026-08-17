@@ -483,7 +483,7 @@ class TestThoroughCleanup:
         conn.close()
 
     def test_cleanup_deletes_qb_when_frequency_zero(self):
-        """当所有来源都被移除后，QB 记录应被删除"""
+        """当所有来源都被移除后，QB 记录应软删除"""
         conn = create_test_db()
         sources = json.dumps(
             [{"url": "http://only-url.com", "company": "公司", "round": "一面"}],
@@ -499,7 +499,8 @@ class TestThoroughCleanup:
             )
 
         qb = conn.execute("SELECT * FROM question_bank WHERE id = 1").fetchone()
-        assert qb is None  # 已被删除
+        assert qb is not None
+        assert qb["deleted_at"] is not None
         conn.close()
 
     def test_cleanup_removes_question_position_for_deleted_qb(self):

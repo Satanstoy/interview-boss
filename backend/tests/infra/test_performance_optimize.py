@@ -62,16 +62,17 @@ class TestFrontendLazyLoad:
         return Path(BACKEND_ROOT.parent / "frontend/src/router/index.js").read_text()
 
     def test_mock_interview_is_async(self):
-        """T-003a: MockInterview 组件应异步加载"""
+        """T-003a: 模拟面试 Chat 入口及其页面应异步加载"""
         content = self._get_app_vue_content()
-        assert "mock-interview" in content
-        assert "import('@/views/MockInterviewView.vue')" in content
+        assert "chat/:sessionId?" in content
+        assert "import('@/views/ChatView.vue')" in content
 
     def test_knowledge_graph_is_async(self):
-        """T-003b: KnowledgeGraph 组件应异步加载"""
+        """T-003b: 旧知识图谱入口应收敛到当前岗位准备度页面"""
         content = self._get_app_vue_content()
         assert "knowledge-graph" in content
-        assert "import('@/views/KnowledgeGraphView.vue')" in content
+        assert "name: 'insights-readiness'" in content
+        assert "view: 'graph'" in content
 
     def test_practice_mode_is_async(self):
         """T-003c: PracticeMode 组件应异步加载"""

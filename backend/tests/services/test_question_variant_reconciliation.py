@@ -181,6 +181,31 @@ def test_claim_original_question_rejects_other_active_cluster(test_db):
         claim_original_question_owner(test_db, "相同原题", 31)
 
 
+def test_claim_original_question_reuses_stale_registry_for_new_active_row(test_db):
+    """A newly inserted row may replace a registry owner after source cleanup."""
+    from app.services.question_variant_reconciliation import (
+        claim_original_question_owner,
+    )
+
+    _insert_qb(test_db, 32, "历史题簇", ["重建题"])
+    test_db.execute(
+        "INSERT INTO question_variant_owners "
+        "(normalized_question, question_bank_id, question_text) "
+        "VALUES ('重建题', 32, '重建题')"
+    )
+    test_db.execute("UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP WHERE id = 32")
+    _insert_qb(test_db, 33, "新题簇", ["重建题"])
+    test_db.commit()
+
+    claim_original_question_owner(test_db, "重建题", 33)
+
+    owner = test_db.execute(
+        "SELECT question_bank_id FROM question_variant_owners "
+        "WHERE normalized_question = '重建题'"
+    ).fetchone()
+    assert owner[0] == 33
+
+
 def test_apply_matched_rejects_cross_cluster_duplicate(test_db):
     from app.services.pipeline.writer import apply_matched
     from app.services.question_variant_reconciliation import VariantOwnershipConflict

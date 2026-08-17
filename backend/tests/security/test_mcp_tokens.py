@@ -124,7 +124,8 @@ def test_mcp_profile_config_returns_copyable_active_token(test_db, client):
     issued = __import__("asyncio").run(rotate_my_mcp_token(request, {"id": 9}))
     assert issued["configured"] is True
     assert issued["token"].startswith("ib_mcp_")
-    assert issued["config"]["mcpServers"]["interview-boss"]["url"] == "http://interview.test/mcp"
+    canonical_endpoint = "https://www.interviewboss.online/mcp"
+    assert issued["config"]["mcpServers"]["interview-boss"]["url"] == canonical_endpoint
     assert (
         issued["config"]["mcpServers"]["interview-boss"]["headers"]["Authorization"]
         == f"Bearer {issued['token']}"
@@ -134,11 +135,11 @@ def test_mcp_profile_config_returns_copyable_active_token(test_db, client):
     assert stdio["args"][:5] == [
         "-y",
         "mcp-remote",
-        "http://interview.test/mcp",
+        canonical_endpoint,
         "--transport",
         "http-only",
     ]
-    assert "--allow-http" in stdio["args"]
+    assert "--allow-http" not in stdio["args"]
     assert stdio["env"]["INTERVIEW_BOSS_MCP_AUTH"] == f"Bearer {issued['token']}"
     assert "mcp-remote" in issued["stdio_config_json"]
 
@@ -198,6 +199,12 @@ def test_mcp_middleware_accepts_account_token_without_global_key(test_db, client
 @pytest.mark.asyncio
 async def test_mcp_draw_passes_explicit_job_position_to_service(test_db, monkeypatch):
     from app.mcp_server import interview_tools
+
+    test_db.execute(
+        "INSERT INTO job_positions (id, name, description) VALUES (?, ?, ?)",
+        (902, "后端开发", "后端服务开发岗位"),
+    )
+    test_db.commit()
 
     captured = {}
 

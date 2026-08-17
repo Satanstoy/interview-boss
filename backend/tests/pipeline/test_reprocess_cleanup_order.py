@@ -285,6 +285,7 @@ class TestCleanupBeforeClustering:
             return {"matched_to_existing": [], "new_clusters": []}
 
         with (
+            patch("app.db.connection.get_db_connection", return_value=conn),
             patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
             patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
             patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
@@ -382,6 +383,7 @@ class TestCleanupBeforeClustering:
             return {"matched_to_existing": [], "new_clusters": []}
 
         with (
+            patch("app.db.connection.get_db_connection", return_value=conn),
             patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
             patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
             patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
@@ -471,27 +473,25 @@ class TestCleanupBeforeClustering:
 
         async def mock_process_incremental(new_rows, existing_by_cat2, user_id=None):
             return {
-                "matched_to_existing": [],
-                "new_clusters": [
+                "matched_to_existing": [
                     {
-                        "representative": "什么是RAG",
-                        "items": [
-                            {
-                                "question": "什么是RAG",
-                                "cat1": "B.Agent与LLM应用",
-                                "cat2": "B1.Agent架构与范式",
-                                "tags": "Agent架构设计",
-                                "diff_tag": "L2-中等",
-                                "url": "http://url-x.com",
-                                "company": "公司X",
-                                "round": "一面",
-                            }
-                        ],
+                        "qd_id": new_rows[0]["id"],
+                        "cluster_id": 1,
+                        "question": new_rows[0]["question"],
+                        "cat1": new_rows[0]["cat1"],
+                        "cat2": new_rows[0]["cat2"],
+                        "tags": new_rows[0]["tags"],
+                        "diff_tag": new_rows[0]["diff_tag"],
+                        "url": new_rows[0]["url"],
+                        "company": new_rows[0]["company"],
+                        "round": new_rows[0]["round"],
                     }
                 ],
+                "new_clusters": [],
             }
 
         with (
+            patch("app.db.connection.get_db_connection", return_value=conn),
             patch("app.services.pipeline.queue.get_db_connection", return_value=conn),
             patch("app.services.pipeline.batch.get_db_connection", return_value=conn),
             patch("app.services.pipeline.writer.get_db_connection", return_value=conn),
@@ -520,11 +520,11 @@ class TestCleanupBeforeClustering:
             batch = dequeue_batch(20)
             await cluster_batch(batch, user_id=1)
 
-        # 新聚类应有 AI 答案
+        # 重新聚类命中原有题簇后，原题簇应保留 AI 答案
         new_qb = conn.execute(
-            "SELECT * FROM question_bank WHERE id > 1 AND ai_answer IS NOT NULL AND ai_answer != ''"
+            "SELECT * FROM question_bank WHERE id = 1 AND ai_answer IS NOT NULL AND ai_answer != ''"
         ).fetchone()
-        assert new_qb is not None, "新聚类应继承 AI 答案"
+        assert new_qb is not None, "原题簇应保留 AI 答案"
         assert "RAG是检索增强生成" in new_qb["ai_answer"], (
             f"AI 答案内容不正确: {new_qb['ai_answer']}"
         )

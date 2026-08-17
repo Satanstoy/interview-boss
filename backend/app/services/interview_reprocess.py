@@ -73,7 +73,7 @@ def load_reprocess_job(job_id: int, user_id: int, is_admin: bool = False):
     conn = get_db_connection()
     return conn.execute(
         "SELECT j.id, j.status, j.progress_current, j.progress_total, "
-        "j.progress_message, j.result, j.error, j.created_by "
+        "j.progress_message, j.result, j.last_error AS error, j.created_by "
         "FROM jobs j WHERE j.id = ? AND j.job_type = ? "
         "AND (? = 1 OR j.created_by = ?)",
         (job_id, INTERVIEW_REPROCESS_JOB_TYPE, int(is_admin), user_id),

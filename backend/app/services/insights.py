@@ -432,7 +432,8 @@ def _recent_activities(conn, user_id: int, limit: int = 10) -> list[dict]:
     reviews = conn.execute(
         "SELECT pre.id, 'review' AS type, pre.question_bank_id, NULL AS score, "
         "pre.rating, pre.reviewed_at AS ts FROM practice_review_events pre "
-        "WHERE pre.user_id = ? ORDER BY pre.reviewed_at DESC LIMIT ?",
+        "WHERE pre.user_id = ? AND pre.source != 'self_check' "
+        "ORDER BY pre.reviewed_at DESC LIMIT ?",
         (user_id, limit),
     ).fetchall()
     merged = sorted(

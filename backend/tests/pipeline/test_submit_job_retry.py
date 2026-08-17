@@ -13,7 +13,7 @@ def _override_user():
 def _create_failed_submit_job(test_db):
     cursor = test_db.execute(
         "INSERT INTO jobs (job_type, status, progress_total, created_by, "
-        "available_at, error) VALUES ('submit_import', 'failed', 6, 1, "
+        "available_at, last_error) VALUES ('submit_import', 'failed', 6, 1, "
         "CURRENT_TIMESTAMP, '模拟失败')"
     )
     job_id = cursor.lastrowid

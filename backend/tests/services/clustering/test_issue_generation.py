@@ -39,12 +39,15 @@ async def test_generate_quality_issues_two_round_confirm(test_db, monkeypatch):
     result = await generate_quality_issues(user_id=None, limit=10)
     assert result["created"] == 1
 
-    row = test_db.execute("SELECT * FROM quality_issue").fetchone()
-    assert row[1] == 1  # qb_id
-    assert row[3] == "mismerge"  # issue_type
-    assert row[4] == "split"     # suggested_action
-    assert row[8] == "pending"
-    assert row[7] >= 0.85  # 高置信
+    row = test_db.execute(
+        "SELECT qb_id, issue_type, suggested_action, status, confidence "
+        "FROM quality_issue"
+    ).fetchone()
+    assert row["qb_id"] == 1
+    assert row["issue_type"] == "mismerge"
+    assert row["suggested_action"] == "split"
+    assert row["status"] == "pending"
+    assert row["confidence"] >= 0.85
 
 
 async def test_generate_quality_issues_skips_unconfirmed(test_db, monkeypatch):

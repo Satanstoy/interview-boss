@@ -166,6 +166,12 @@ def test_serialize_old_done_unmerged_issue_recovers_deleted_source_from_history(
     ).fetchone()
     execute_issue(test_db, issue)
 
+    historical_row = test_db.execute(
+        "SELECT qb_id, source_qb_id FROM quality_issue WHERE id = ?",
+        (issue["id"],),
+    ).fetchone()
+    assert tuple(historical_row) == (None, 200)
+
     serialized = serialize_issue(
         test_db.execute("SELECT * FROM quality_issue WHERE id = ?", (issue["id"],)).fetchone(),
         test_db,

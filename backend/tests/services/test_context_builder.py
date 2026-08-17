@@ -74,10 +74,18 @@ class TestBuildContext:
         conn.execute("INSERT INTO question_bank (question, cat1, status) VALUES ('Redis 数据结构', '中间件', 'approved')")
         qb_id = conn.execute("SELECT id FROM question_bank LIMIT 1").fetchone()[0]
 
-        # 插入练习记录
+        # 插入当前练习事件口径（user_practice_history 已停写）
         conn.execute(
-            "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, score) VALUES (?, ?, ?, ?)",
-            (user_id, qb_id, "五种数据结构...", 65)
+            "INSERT INTO user_question_review "
+            "(user_id, question_bank_id, state, last_score) VALUES (?, ?, 'review', ?)",
+            (user_id, qb_id, 65),
+        )
+        review_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO practice_review_events "
+            "(user_id, question_bank_id, review_id, rating, score, source) "
+            "VALUES (?, ?, ?, 'good', ?, 'self_check')",
+            (user_id, qb_id, review_id, 65),
         )
         conn.commit()
 

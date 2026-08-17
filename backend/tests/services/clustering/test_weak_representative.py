@@ -48,12 +48,13 @@ async def test_generate_weak_representative_issue(test_db, monkeypatch):
     assert result["created"] == 1
 
     row = test_db.execute(
-        "SELECT * FROM quality_issue WHERE qb_id = 1"
+        "SELECT issue_type, suggested_action, suggested_value, status "
+        "FROM quality_issue WHERE qb_id = 1"
     ).fetchone()
-    assert row[3] == "weak_representative"
-    assert row[4] == "refine_representative"
-    assert row[6] == "传统工作流与Agent工作流的区别及其适用场景"  # suggested_value
-    assert row[8] == "pending"
+    assert row["issue_type"] == "weak_representative"
+    assert row["suggested_action"] == "refine_representative"
+    assert row["suggested_value"] == "传统工作流与Agent工作流的区别及其适用场景"
+    assert row["status"] == "pending"
 
 
 async def test_generate_weak_representative_skips_good(test_db, monkeypatch):

@@ -141,9 +141,10 @@ class TestBug008EvaluateAnswerVisibility:
         assert func_match
         func_content = func_match.group(0)
 
-        # 应该有对 question_bank 的查询来验证题目
-        queries_question_bank = 'question_bank' in func_content
-        assert queries_question_bank, "evaluate_answer 应查询 question_bank 验证题目"
+        # 统一可见性 helper 会生成 question_bank 查询；验证端点确实调用该 helper，
+        # 避免把实现锁死为某一种 SQL 拼接形式。
+        uses_visibility_query = "build_bank_where_clause" in func_content
+        assert uses_visibility_query, "evaluate_answer 应通过题库可见性查询验证题目"
 
 
 class TestBug009AnalyticsIsolation:

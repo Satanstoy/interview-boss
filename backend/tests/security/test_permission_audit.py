@@ -20,9 +20,9 @@ class TestBuildPersonalVariableFix:
         # 修复后不应包含 admin['id']
         assert "admin['id']" not in source, \
             "BUG-001: build_personal_bank 仍然引用 admin['id']，应为 user['id']"
-        # 应包含 user['id']
-        assert "user['id']" in source, \
-            "BUG-001: build_personal_bank 应引用 user['id']"
+        # 允许单引号或双引号，但必须从当前用户对象读取 ID。
+        assert "user['id']" in source or 'user["id"]' in source, \
+            "BUG-001: build_personal_bank 应引用当前用户的 id"
 
     @pytest.mark.asyncio
     async def test_build_personal_endpoint_accepts_regular_user(self):

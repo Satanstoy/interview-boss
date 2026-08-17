@@ -179,6 +179,15 @@ def client(test_db):
     else:
         from app.asgi import app
 
+    # slowapi uses process-local memory storage.  Reset all limiter instances
+    # between TestClient-based tests so one test's requests cannot consume
+    # another test's quota while preserving the production limit configuration.
+    from app.routers import auth
+    from app.routers.profile_pkg import email
+
+    for rate_limiter in (app.state.limiter, auth.limiter, email.limiter):
+        rate_limiter._storage.reset()
+
     # 强制连接指向 test_db
     db_module._db_conn_var.set(test_db)
 

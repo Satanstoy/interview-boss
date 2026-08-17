@@ -40,7 +40,7 @@ class TestEncodeTextsBackendBehavior:
 
             # Should NOT raise — falls back to hash
             result = mod.encode_texts(["test"])
-            assert result.shape == (1, mod._SILICONFLOW_DIMENSION)
+            assert result.shape == (1, mod._DIMENSION)
 
     def test_explicit_hash_backend(self):
         """When EMBEDDING_BACKEND=hash, always uses hash encoding."""

@@ -9,6 +9,44 @@ def _insert_user(conn, user_id, position="测试岗位"):
     )
 
 
+def _insert_self_check(conn, user_id, question_bank_id, score, reviewed_at=None):
+    """Insert the current self-check event contract used by insights."""
+    review_id = user_id * 100000 + question_bank_id
+    conn.execute(
+        "INSERT OR IGNORE INTO user_question_review "
+        "(id, user_id, question_bank_id, state, last_score) "
+        "VALUES (?, ?, ?, 'review', ?)",
+        (review_id, user_id, question_bank_id, score),
+    )
+    if reviewed_at is None:
+        conn.execute(
+            "INSERT INTO practice_review_events "
+            "(user_id, question_bank_id, review_id, rating, score, source) "
+            "VALUES (?, ?, ?, ?, ?, 'self_check')",
+            (
+                user_id,
+                question_bank_id,
+                review_id,
+                "good" if score is None or score >= 60 else "again",
+                score,
+            ),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO practice_review_events "
+            "(user_id, question_bank_id, review_id, rating, score, source, reviewed_at) "
+            "VALUES (?, ?, ?, ?, ?, 'self_check', ?)",
+            (
+                user_id,
+                question_bank_id,
+                review_id,
+                "good" if score is None or score >= 60 else "again",
+                score,
+                reviewed_at,
+            ),
+        )
+
+
 def _insert_question(conn, question_id, topic, position="测试岗位", frequency=1, deleted_at=None, difficulty="简单", sources=None):
     conn.execute(
         "INSERT INTO question_bank "
@@ -41,14 +79,8 @@ def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
     _insert_question(test_db, 2, "Agent编排", frequency=3)
     _insert_question(test_db, 3, "前端工程", position="其他岗位", frequency=99)
     _insert_question(test_db, 4, "已删除主题", frequency=99, deleted_at="2026-08-01")
-    test_db.execute(
-        "INSERT INTO user_practice_history (user_id, question_bank_id, score) VALUES (?, ?, ?)",
-        (101, 1, 50),
-    )
-    test_db.execute(
-        "INSERT INTO user_practice_history (user_id, question_bank_id, score) VALUES (?, ?, ?)",
-        (101, 2, 85),
-    )
+    _insert_self_check(test_db, 101, 1, 50)
+    _insert_self_check(test_db, 101, 2, 85)
     test_db.commit()
 
     snapshot = build_insights_snapshot({"id": 101})
@@ -129,10 +161,7 @@ def test_insights_practice_and_reviews_are_user_scoped(test_db):
     _insert_user(test_db, 201)
     _insert_user(test_db, 202)
     _insert_question(test_db, 11, "检索增强")
-    test_db.execute(
-        "INSERT INTO user_practice_history (user_id, question_bank_id, score) VALUES (?, ?, ?)",
-        (202, 11, 95),
-    )
+    _insert_self_check(test_db, 202, 11, 95)
     test_db.execute(
         "INSERT INTO chat_conversations (id, user_id, mode, title, job_position) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -196,11 +225,15 @@ def test_insights_endpoint_requires_auth_and_returns_contract(client, test_db):
 
 def _insert_review(conn, user_id, review_id, question_bank_id, rating, reviewed_at, score=None):
     conn.execute(
-        "INSERT INTO user_question_review "
+        "INSERT OR IGNORE INTO user_question_review "
         "(id, user_id, question_bank_id, proficiency, state, last_rating) "
         "VALUES (?, ?, ?, 40, 'review', ?)",
         (review_id, user_id, question_bank_id, rating),
     )
+    review_id = conn.execute(
+        "SELECT id FROM user_question_review WHERE user_id = ? AND question_bank_id = ?",
+        (user_id, question_bank_id),
+    ).fetchone()[0]
     conn.execute(
         "INSERT INTO practice_review_events "
         "(user_id, question_bank_id, review_id, rating, score, reviewed_at) "
@@ -221,16 +254,8 @@ def test_practice_activity_heatmap_trend_and_streak(test_db):
     three_days_ago = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
 
     for i, score in enumerate((85, 90)):
-        test_db.execute(
-            "INSERT INTO user_practice_history "
-            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
-            (401, 1, score, f"{today} 10:0{i}:00"),
-        )
-    test_db.execute(
-        "INSERT INTO user_practice_history "
-        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
-        (401, 1, 50, f"{three_days_ago} 09:00:00"),
-    )
+        _insert_self_check(test_db, 401, 1, score, f"{today} 10:0{i}:00")
+    _insert_self_check(test_db, 401, 1, 50, f"{three_days_ago} 09:00:00")
     _insert_review(test_db, 401, 1, 1, "good", f"{yesterday} 20:00:00", score=85)
     test_db.commit()
 
@@ -258,16 +283,8 @@ def test_practice_activity_streak_breaks_with_gap(test_db):
     _insert_question(test_db, 2, "Agent编排")
     today = datetime.now().strftime("%Y-%m-%d")
     three_days_ago = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
-    test_db.execute(
-        "INSERT INTO user_practice_history "
-        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
-        (402, 2, 70, f"{today} 09:00:00"),
-    )
-    test_db.execute(
-        "INSERT INTO user_practice_history "
-        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
-        (402, 2, 70, f"{three_days_ago} 09:00:00"),
-    )
+    _insert_self_check(test_db, 402, 2, 70, f"{today} 09:00:00")
+    _insert_self_check(test_db, 402, 2, 70, f"{three_days_ago} 09:00:00")
     test_db.commit()
 
     data = build_practice_activity({"id": 402})
@@ -325,11 +342,7 @@ def test_practice_activity_difficulty_correct_rate(test_db):
     _insert_question(test_db, 3, "前端工程", difficulty="hard")
     _insert_question(test_db, 4, "未标注难度", difficulty="")
     for qid, score in ((1, 70), (1, 50), (2, 90), (3, 45), (4, 66)):
-        test_db.execute(
-            "INSERT INTO user_practice_history "
-            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, datetime('now'))",
-            (405, qid, score),
-        )
+        _insert_self_check(test_db, 405, qid, score)
     test_db.commit()
 
     data = build_practice_activity({"id": 405})
@@ -361,11 +374,7 @@ def test_practice_activity_recent_merges_and_limits(test_db):
     _insert_user(test_db, 406)
     _insert_question(test_db, 1, "RAG系统设计")
     for i in range(12):
-        test_db.execute(
-            "INSERT INTO user_practice_history "
-            "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, ?)",
-            (406, 1, 60 + i, f"2026-08-01 {i:02d}:00:00"),
-        )
+        _insert_self_check(test_db, 406, 1, 60 + i, f"2026-08-01 {i:02d}:00:00")
     _insert_review(test_db, 406, 1, 1, "easy", "2026-08-05 09:00:00")
     test_db.commit()
 
@@ -388,11 +397,7 @@ def test_practice_activity_is_user_scoped(test_db):
     _insert_user(test_db, 407)
     _insert_user(test_db, 408)
     _insert_question(test_db, 1, "RAG系统设计")
-    test_db.execute(
-        "INSERT INTO user_practice_history "
-        "(user_id, question_bank_id, score, created_at) VALUES (?, ?, ?, datetime('now'))",
-        (407, 1, 88),
-    )
+    _insert_self_check(test_db, 407, 1, 88)
     test_db.commit()
 
     data = build_practice_activity({"id": 408})

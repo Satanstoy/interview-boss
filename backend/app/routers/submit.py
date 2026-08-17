@@ -344,7 +344,7 @@ async def get_active_submit_jobs(user: dict = Depends(get_current_user)):
         with get_db_connection() as conn:
             rows = conn.execute(
                 "SELECT j.id, j.job_type, j.status, j.progress_current, "
-                "j.progress_total, j.progress_message, j.error, j.last_error, "
+                "j.progress_total, j.progress_message, j.last_error AS error, "
                 "j.created_at, j.updated_at, j.parent_job_id "
                 "FROM jobs j "
                 "WHERE j.created_by = ? "
@@ -363,8 +363,6 @@ async def get_active_submit_jobs(user: dict = Depends(get_current_user)):
             for row in rows:
                 item = dict(row)
                 item["retryable"] = item["status"] == "failed"
-                item["error"] = item.get("error") or item.get("last_error")
-                item.pop("last_error", None)
                 result.append(item)
             return result
 

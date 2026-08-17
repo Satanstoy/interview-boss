@@ -153,9 +153,11 @@ def test_approve_issue_executes_split(client, test_db, monkeypatch):
         "SELECT frequency, original_questions FROM question_bank WHERE id = 1"
     ).fetchone()
     assert "关于研究生方向" not in json.loads(row[1])
-    issue = test_db.execute("SELECT * FROM quality_issue WHERE id = 1").fetchone()
-    assert issue[8] == "done"
-    assert issue[11] == 1  # reviewed_by (admin id=1)
+    issue = test_db.execute(
+        "SELECT status, reviewed_by FROM quality_issue WHERE id = 1"
+    ).fetchone()
+    assert issue["status"] == "done"
+    assert issue["reviewed_by"] == 1
 
 
 def test_approve_already_processed_404(client, test_db, monkeypatch):

@@ -251,7 +251,11 @@ def claim_original_question_owner(conn, question: str, question_bank_id: int) ->
     if existing and existing[0] != question_bank_id:
         # The registry may contain a stale owner after a manual repair. If no
         # active JSON owner exists, the current writer can safely take it over.
-        active = _active_variant_owners(conn, normalized)
+        active = [
+            owner
+            for owner in _active_variant_owners(conn, normalized)
+            if owner["question_bank_id"] != question_bank_id
+        ]
         if active:
             raise VariantOwnershipConflict(question, active)
         conn.execute(

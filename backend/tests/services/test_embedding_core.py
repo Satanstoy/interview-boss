@@ -14,19 +14,21 @@ class TestEncodeTexts:
     # =========================================================
     # T-001: 正常编码返回正确维度
     # =========================================================
-    def test_encode_texts_returns_correct_shape_and_dtype(self):
+    def test_encode_texts_returns_correct_shape_and_dtype(self, monkeypatch):
         """
         正常输入应返回 (N, 1024) 的 float32 numpy array
 
         红灯阶段：embedding_service 模块尚未创建
         """
-        from app.services.embedding_service import encode_texts
+        import app.services.embedding_service as embedding_service
+
+        monkeypatch.setattr(embedding_service, "_BACKEND", "hash")
 
         texts = ["什么是微服务架构", "解释一下 Redis 缓存穿透", "TCP 三次握手的过程"]
-        result = encode_texts(texts)
+        result = embedding_service.encode_texts(texts)
 
         assert isinstance(result, np.ndarray)
-        assert result.shape == (3, 1024)
+        assert result.shape == (3, embedding_service._DIMENSION)
         assert result.dtype == np.float32
 
     # =========================================================
@@ -118,12 +120,14 @@ class TestPrefilterCentroids:
     # =========================================================
     # T-006: prefilter_centroids 返回 top-K 候选
     # =========================================================
-    def test_prefilter_centroids_returns_top_k_candidates(self):
+    def test_prefilter_centroids_returns_top_k_candidates(self, monkeypatch):
         """
         给定一组 centroid（id + question + embedding）和一个 query 文本，
         应返回最相似的 K 个 centroid IDs
         """
-        from app.services.embedding_service import prefilter_centroids
+        import app.services.embedding_service as embedding_service
+
+        monkeypatch.setattr(embedding_service, "_BACKEND", "hash")
 
         # 构造 centroid 列表（模拟已有聚类）
         centroids = []
@@ -140,14 +144,13 @@ class TestPrefilterCentroids:
             })
 
         # 用真实的 encode_texts 生成 embedding
-        from app.services.embedding_service import encode_texts
         texts = [c["question"] for c in centroids]
-        embeddings = encode_texts(texts)
+        embeddings = embedding_service.encode_texts(texts)
         for c, emb in zip(centroids, embeddings):
             c["embedding"] = emb
 
         # query: 与 "Redis 缓存穿透" 相似的问题
-        result = prefilter_centroids(
+        result = embedding_service.prefilter_centroids(
             query_text="如何处理缓存击穿问题",
             centroids=centroids,
             top_k=3,
