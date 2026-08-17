@@ -3,15 +3,14 @@
 """
 import json
 import logging
-from typing import List, Dict
+from typing import List
 
-from app.db.connection import get_db_connection, run_db
+from app.db.connection import get_db_connection, run_db  # noqa: F401 — legacy E2E patch seam
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
     claim_public_original_questions,
     sync_question_bank_projections,
 )
-from app.services.question_variant_reconciliation import normalize_original_question
 
 logger = logging.getLogger("interview-boss")
 
@@ -120,14 +119,6 @@ def apply_matched(conn, matched, job_position, saved_answers):
             "company": item.get('company', ''),
             "round": item.get('round', ''),
         }
-        old_urls = {
-            source.get("url")
-            for source in sources
-            if isinstance(source, dict) and source.get("url")
-        }
-        old_questions = {
-            normalize_original_question(question) for question in oqs
-        }
         sources.append(source)
 
         q = item.get('question', '')
@@ -139,10 +130,6 @@ def apply_matched(conn, matched, job_position, saved_answers):
 
         sources, oqs, oqs_src = canonicalize_question_bank_payload(
             sources, oqs, oqs_src
-        )
-        url_is_new = bool(url and url not in old_urls)
-        q_is_new = bool(
-            q and normalize_original_question(q) not in old_questions
         )
         claim_public_original_questions(
             conn, cluster_id, existing["owner_id"], "approved", oqs
@@ -200,7 +187,6 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
         # 写入 embedding（供后续 prefilter_centroids 使用）
         try:
             from app.services.embedding_service import encode_texts
-            import numpy as np
             emb = encode_texts([entry['question']])
             if emb.shape[0] > 0:
                 conn.execute("UPDATE question_bank SET embedding = ? WHERE id = ?", (emb[0].tobytes(), new_id))

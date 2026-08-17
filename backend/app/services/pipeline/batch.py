@@ -5,7 +5,6 @@
 """
 
 import json
-import asyncio
 import logging
 import numpy as np
 import inspect
@@ -16,12 +15,9 @@ from app.services.faiss_index_manager import get_index_manager
 from app.services.clustering import process_incremental_batch
 from .sanitize import BATCH_SIZE, sanitize_batch
 from .queue import (
-    dequeue_batch,
     mark_batch_done,
-    mark_batch_failed,
-    should_trigger_clustering,
 )
-from .writer import apply_matched, insert_new_clusters, tag_and_write_details
+from .writer import apply_matched, insert_new_clusters
 
 logger = logging.getLogger("interview-boss")
 
@@ -270,14 +266,18 @@ async def cluster_batch(
     del result
 
     # ── Step 3: 原子写入 ──
-    def _atomic_write():
+    def _atomic_write(
+        matched_rows=matched,
+        new_cluster_rows=new_clusters,
+        answer_cache=saved_answers,
+    ):
         conn = get_db_connection()
         conn.execute("BEGIN")
         new_qb_ids = []
         try:
-            apply_matched(conn, matched, job_position, saved_answers)
+            apply_matched(conn, matched_rows, job_position, answer_cache)
             new_qb_ids = insert_new_clusters(
-                conn, new_clusters, job_position, saved_answers
+                conn, new_cluster_rows, job_position, answer_cache
             )
             conn.execute("COMMIT")
         except Exception:
@@ -375,7 +375,6 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
     """创建一个持久化全量聚类任务，不在 API/SSE 进程内执行。"""
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
-        CLUSTER_REBUILD_JOB_TYPE,
         create_cluster_rebuild_job,
         mark_job_dispatched,
     )

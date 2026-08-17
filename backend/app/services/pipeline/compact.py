@@ -360,10 +360,6 @@ async def _match_singletons_to_existing(
 
     async def _process_batch(batch_groups):
         """处理一批 cat2 组:一次 LLM 调用匹配 + 一次验证"""
-        from app.services.clustering import (
-            _format_existing_clusters,
-            _format_new_questions,
-        )
 
         all_existing_lines = []
         all_new_lines = []

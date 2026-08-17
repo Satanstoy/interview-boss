@@ -11,20 +11,7 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection, run_db
-from app.db.question_bank_sources import (
-    delete_all_for_qb,
-    insert_source,
-    insert_original_item,
-)
 from app.services.clustering import process_incremental_batch, _cluster_unmatched
-from .sanitize import BATCH_SIZE, sanitize_batch
-from .queue import (
-    dequeue_batch,
-    mark_batch_done,
-    mark_batch_failed,
-    should_trigger_clustering,
-)
-from .writer import apply_matched, insert_new_clusters, tag_and_write_details
 from .compact import _do_merge_to_existing
 
 logger = logging.getLogger("interview-boss")
@@ -149,7 +136,6 @@ async def compact_singletons_in_db_v2(user_id: int = None) -> Dict:
             )
 
             matched = result.get("matched_to_existing", [])
-            new_clusters = result.get("new_clusters", [])
 
             if matched:
                 total_matched_to_existing += len(matched)
