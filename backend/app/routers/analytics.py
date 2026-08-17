@@ -282,12 +282,56 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
         raise HTTPException(status_code=500, detail="规范化失败，请查看服务端日志")
 
 
+@router.post("/api/analytics/clear-db/preview")
+async def preview_clear_db(admin: dict = Depends(get_admin_user)):
+    """预览将删除的数据统计"""
+    import hashlib
+    import os
+    import time
+
+    def _query():
+        stats = {}
+        tables = [
+            "interview",
+            "question_bank",
+            "jd",
+            "questions_detail",
+            "chat_conversations",
+            "chat_messages",
+        ]
+        with get_db_connection() as conn:
+            for table in tables:
+                try:
+                    count = conn.execute(
+                        f"SELECT COUNT(*) FROM {table}"
+                    ).fetchone()[0]
+                    stats[table] = count
+                except Exception:
+                    stats[table] = 0
+        return stats
+
+    stats = await run_db(_query)
+
+    secret = os.getenv("JWT_SECRET", "")
+    token = hashlib.sha256(
+        f"{secret}:{time.time()}".encode()
+    ).hexdigest()
+
+    return {"stats": stats, "confirm_token": token}
+
+
 @router.post("/api/clear-db")
-async def clear_db(admin: dict = Depends(get_admin_user)):
-    """清空所有数据库表（执行前自动创建备份）"""
+async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_admin_user)):
+    """清空所有数据库表（需要确认 token，执行前自动创建备份）"""
     import os
     import shutil
     from app.core.config import DB_PATH
+
+    if not confirm_token:
+        raise HTTPException(status_code=400, detail="需要确认 token")
+
+    if len(confirm_token) < 64:
+        raise HTTPException(status_code=400, detail="无效的确认 token")
 
     backup_path = f"{DB_PATH}.bak.{int(__import__('time').time())}"
     try:
