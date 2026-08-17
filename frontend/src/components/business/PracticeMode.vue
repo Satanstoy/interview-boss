@@ -862,11 +862,12 @@ function handleQueueScroll(event) {
 function switchToBrowse() {
   if (reviewStatus.value === 'saving' || correctionLoading.value) { toast.warning('正在保存这道题的自评，请稍候'); return }
   viewMode.value = 'browse'
-  if (props.selectedDeckKey === 'due') emit('select-deck', 'all')
+  // 只切换视图模式，不改变当前题单
 }
 function switchToQuiz() {
+  if (reviewStatus.value === 'saving' || correctionLoading.value) { toast.warning('正在保存这道题的自评，请稍候'); return }
   viewMode.value = 'quiz'
-  if (props.selectedDeckKey !== 'due') emit('select-deck', 'due')
+  // 只切换视图模式，不改变当前题单
 }
 function goPrev() { if (queueSwitchBlocked()) return; if (currentIndex.value > 0) { currentIndex.value -= 1; pendingReviewedId.value = null; resetState() } }
 function goNext() {

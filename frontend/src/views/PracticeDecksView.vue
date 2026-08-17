@@ -48,7 +48,7 @@ async function updateManagerDeck({ deckKey, payload }) {
   await updateDeck(deckKey, payload)
 }
 async function deleteManagerDeck(deckKey) {
-  if (!window.confirm('确定删除这个自定义题单吗？题目和刷题记录不会被删除。')) return
+  // deleteDeck 内部已有 styled confirm dialog，无需重复确认
   await deleteDeck(deckKey)
   if (selectedDeckKey.value === deckKey) questions.value = []
 }

@@ -45,11 +45,12 @@ export function usePracticeDecks(filter = 'all') {
     selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
     loadedDeckKey.value = deckKey
     if (deckKey === 'due') {
+      const studyDate = response.deck?.study_date
       reviewedDueQueueIds = new Set((response.items || [])
-        .filter(question => isStudyDayToday(question.last_reviewed_at) && ['good', 'easy'].includes(question.last_rating))
+        .filter(question => isStudyDayToday(question.last_reviewed_at, studyDate) && ['good', 'easy'].includes(question.last_rating))
         .map(question => question.id))
       attemptedDueQueueIds = new Set((response.items || [])
-        .filter(question => isStudyDayToday(question.last_reviewed_at))
+        .filter(question => isStudyDayToday(question.last_reviewed_at, studyDate))
         .map(question => question.id))
     }
   }
@@ -228,7 +229,8 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
-    const wasPassedToday = isStudyDayToday(item?.last_reviewed_at) && ['good', 'easy'].includes(item?.last_rating)
+    const studyDate = selectedDeck.value?.study_date
+    const wasPassedToday = isStudyDayToday(item?.last_reviewed_at, studyDate) && ['good', 'easy'].includes(item?.last_rating)
     const wasDailyRelearning = Boolean(item?.is_daily_relearning)
     const wasPracticed = Number(item?.review_count || 0) > 0
     const previousNextReviewAt = item?.next_review_at || null
@@ -304,9 +306,10 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
+    const studyDate = selectedDeck.value?.study_date
     const wasPassedToday = previousRating
       ? ['good', 'easy'].includes(previousRating)
-      : (isStudyDayToday(item?.last_reviewed_at) && ['good', 'easy'].includes(item?.last_rating))
+      : (isStudyDayToday(item?.last_reviewed_at, studyDate) && ['good', 'easy'].includes(item?.last_rating))
     const previousNextReviewAt = item?.next_review_at || null
     try {
       const response = await api.correctPracticeReview(eventId, { rating, score })
@@ -347,17 +350,12 @@ export function usePracticeDecks(filter = 'all') {
     }
   }
 
-  function isStudyDayToday(value) {
-    if (!value) return false
+  function isStudyDayToday(value, studyDate) {
+    if (!value || !studyDate) return false
     const raw = String(value)
-    const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw)
-      ? raw
-      : `${raw.replace(' ', 'T')}Z`)
-    if (Number.isNaN(parsed.getTime())) return false
-    const now = new Date()
-    return parsed.getFullYear() === now.getFullYear()
-      && parsed.getMonth() === now.getMonth()
-      && parsed.getDate() === now.getDate()
+    // 后端存储格式 "YYYY-MM-DD HH:MM:SS"（UTC-naive）
+    // 取前 10 位即日期部分，与服务端 study_date 比较
+    return raw.slice(0, 10) === studyDate
   }
 
   function utcDateKey(value) {

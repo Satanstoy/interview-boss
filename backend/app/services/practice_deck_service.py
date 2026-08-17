@@ -48,6 +48,15 @@ def _study_timezone() -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def _study_date_string(now: datetime | None = None) -> str:
+    """Return the current learner-facing calendar day as YYYY-MM-DD."""
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    zone = _study_timezone()
+    return current.astimezone(zone).date().isoformat()
+
+
 def _study_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
     """UTC-naive bounds for the current learner-facing calendar day."""
 
@@ -256,10 +265,12 @@ def _study_streak(conn, user_id: int) -> dict:
     the morning.
     """
 
+    # 最长连续打卡不可能超过 400 天，限制查询范围避免全表扫描
+    cutoff = (datetime.now(UTC) - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S")
     rows = conn.execute(
         "SELECT reviewed_at FROM practice_review_events "
-        "WHERE user_id = ? ORDER BY reviewed_at ASC",
-        (user_id,),
+        "WHERE user_id = ? AND reviewed_at >= ? ORDER BY reviewed_at ASC",
+        (user_id, cutoff),
     ).fetchall()
     zone = _study_timezone()
     day_set = {
@@ -312,10 +323,12 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     ).fetchall()
     deck_definitions = [{**deck, "kind": deck["kind"]} for deck in DECKS]
     deck_definitions.extend(dict(row) for row in custom_decks)
+    _parts_cache = {}
     for deck in deck_definitions:
-        _, from_clause, where_clause, source_params, where_params, _ = (
-            _base_query_parts(conn, user_id, filter_mode, deck["key"])
-        )
+        cache_key = deck["key"]
+        if cache_key not in _parts_cache:
+            _parts_cache[cache_key] = _base_query_parts(conn, user_id, filter_mode, cache_key)
+        _, from_clause, where_clause, source_params, where_params, _ = _parts_cache[cache_key]
         query = (
             "SELECT COUNT(*) AS total, "
             "SUM(CASE WHEN COALESCE(uqr.review_count, 0) > 0 THEN 1 ELSE 0 END) AS reviewed, "
@@ -339,6 +352,7 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
                 "reviewed": reviewed,
                 "due": due,
                 "progress": round(reviewed / total * 100) if total else 0,
+                "study_date": _study_date_string(),
             }
         )
     return result
@@ -489,18 +503,20 @@ def list_deck_questions(
         forecast_counts = {
             row["review_date"]: int(row["count"] or 0) for row in forecast_rows
         }
-        today = datetime.now(UTC).date()
+        # forecast 日期用 study timezone 对齐 completed_today
+        study_start_date = datetime.strptime(study_start, "%Y-%m-%d %H:%M:%S").date()
         review_forecast = [
             {
-                "date": (today + timedelta(days=day_offset)).isoformat(),
+                "date": (study_start_date + timedelta(days=day_offset)).isoformat(),
                 "count": forecast_counts.get(
-                    (today + timedelta(days=day_offset)).isoformat(), 0
+                    (study_start_date + timedelta(days=day_offset)).isoformat(), 0
                 ),
             }
             for day_offset in range(1, 8)
         ]
         deck = {
             **deck,
+            "study_date": _study_date_string(),
             "daily_capacity": capacity,
             **today_metrics,
             "remaining_today": len(rows),

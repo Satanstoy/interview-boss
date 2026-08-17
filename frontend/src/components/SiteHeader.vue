@@ -96,7 +96,6 @@ const movePlaylist = async (playlist, direction) => {
 }
 
 const removePlaylist = async (playlist) => {
-  if (!window.confirm(`确定删除题单「${playlist.name}」吗？题目本身不会被删除。`)) return
   try {
     await deleteCodingPlaylist(playlist.id)
     if (codingSelectedListKey.value === String(playlist.id)) codingNavigation?.selectList('all')
