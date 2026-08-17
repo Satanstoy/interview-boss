@@ -55,4 +55,34 @@ def test_eval_worker_has_low_concurrency_and_separate_queue():
     assert settings.max_jobs == 1
     assert settings.queue_read_limit == 1
     assert settings.max_tries == 3
+    assert settings.job_timeout >= 6 * 60 * 60
     assert worker.eval_run_task in settings.functions
+
+
+def test_eval_worker_reconciles_cancelled_run(monkeypatch):
+    worker = _worker_module()
+    calls = []
+
+    async def cancelled_run(run_id):
+        raise asyncio.CancelledError
+
+    def reconcile(run_id, *, reason):
+        calls.append((run_id, reason))
+        return {"run_id": run_id, "status": "failed"}
+
+    def heartbeat(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "app.services.evaluation_executor.execute_eval_run", cancelled_run
+    )
+    monkeypatch.setattr(
+        "app.services.evaluation_executor.reconcile_interrupted_eval_run",
+        reconcile,
+    )
+    monkeypatch.setattr("app.worker.record_worker_heartbeat", heartbeat)
+
+    result = asyncio.run(worker.eval_run_task({}, 99))
+
+    assert result == {"run_id": 99, "status": "failed"}
+    assert calls[0] == (99, "worker_cancelled")

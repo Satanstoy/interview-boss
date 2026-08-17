@@ -99,6 +99,14 @@ def test_eval_run_binds_evaluation_release_and_resolved_snapshot(test_db):
         input_snapshot={"candidate_view": {"opening": "你好"}},
         contract={"hard_assertions": [], "rubric": {"quality": {"weight": 1}}},
     )
+    service.create_benchmark_case(
+        test_db,
+        suite_id=suite["id"],
+        case_key="not-selected",
+        scenario_key="smoke",
+        input_snapshot={"candidate_view": {"opening": "不应执行"}},
+        contract={"hard_assertions": [], "rubric": {"quality": {"weight": 1}}},
+    )
     test_db.commit()
 
     run = service.create_eval_run(
@@ -108,6 +116,7 @@ def test_eval_run_binds_evaluation_release_and_resolved_snapshot(test_db):
         evaluation_release_id=evaluation["id"],
         replication_count=2,
         seed=17,
+        case_keys=["tool-and-intent"],
     )
 
     assert run["evaluation_release_id"] == evaluation["id"]
@@ -115,6 +124,7 @@ def test_eval_run_binds_evaluation_release_and_resolved_snapshot(test_db):
     assert snapshot["target_release"]["release_key"] == "interview-agent@1.0"
     assert snapshot["evaluation_release"]["release_key"] == "interview-eval@1.0"
     assert snapshot["resolved"]["replication_count"] == 2
+    assert snapshot["resolved"]["case_ids"] == [snapshot["cases"][0]["id"]]
     assert snapshot["cases"][0]["case_key"] == "tool-and-intent"
     assert snapshot["cases"][0]["contract"]["rubric"]["quality"]["weight"] == 1
 

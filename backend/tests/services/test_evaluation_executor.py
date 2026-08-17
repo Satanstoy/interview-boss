@@ -215,7 +215,7 @@ def test_executor_runs_fixed_judge_for_interview_targets(test_db, monkeypatch):
             return {
                 "status": "succeeded",
                 "payload": raw_result,
-                "hard_assertions": [{"id": "has_answer", "passed": True}],
+                "hard_assertions": [{"id": "has_answer", "passed": False}],
             }
 
     async def fake_judge(**kwargs):
@@ -289,3 +289,59 @@ def test_executor_marks_failed_target_observation_as_failed_item(test_db):
         "SELECT status FROM eval_items WHERE run_id = ?", (run["id"],)
     ).fetchone()
     assert item[0] == "failed"
+
+
+def test_reconcile_interrupted_run_closes_active_items_and_batch(test_db):
+    executor = _executor()
+    target, suite, protocol, judge, harness, simulator = _context(test_db)
+    run = _service().create_eval_run(
+        test_db,
+        created_by=None,
+        target_release_id=target["id"],
+        benchmark_suite_release_id=suite["id"],
+        eval_protocol_release_id=protocol["id"],
+        judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"],
+        replication_count=1,
+        seed=13,
+    )
+    item_id = test_db.execute(
+        "SELECT id FROM eval_items WHERE run_id = ?", (run["id"],)
+    ).fetchone()[0]
+    attempt_id = test_db.execute(
+        "INSERT INTO eval_attempts (item_id, attempt_index, attempt_kind) VALUES (?, 1, 'target')",
+        (item_id,),
+    ).lastrowid
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'running' WHERE id = ?", (run["id"],)
+    )
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'running' WHERE id = ?", (run["batch_id"],)
+    )
+    test_db.execute(
+        "UPDATE eval_items SET status = 'running' WHERE id = ?", (item_id,)
+    )
+    test_db.commit()
+
+    result = executor.reconcile_interrupted_eval_run(
+        run["id"], conn=test_db, reason="worker_timeout"
+    )
+
+    assert result["status"] == "failed"
+    assert result["failure_class"] == "worker_timeout"
+    item = test_db.execute(
+        "SELECT status, result_json FROM eval_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    assert item[0] == "failed"
+    assert '"failure_class":"worker_timeout"' in item[1]
+    attempt = test_db.execute(
+        "SELECT status, failure_class FROM eval_attempts WHERE id = ?", (attempt_id,)
+    ).fetchone()
+    assert tuple(attempt) == ("failed", "worker_timeout")
+    assert test_db.execute(
+        "SELECT status FROM eval_runs WHERE id = ?", (run["id"],)
+    ).fetchone()[0] == "failed"
+    assert test_db.execute(
+        "SELECT status FROM eval_batches WHERE id = ?", (run["batch_id"],)
+    ).fetchone()[0] == "failed"

@@ -229,6 +229,129 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
     return result
 
 
+def reconcile_interrupted_eval_run(
+    run_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+    reason: str = "worker_cancelled",
+) -> dict[str, Any]:
+    """Close a run when the queue worker is cancelled before normal cleanup.
+
+    ARQ can cancel a coroutine at its job timeout boundary. That cancellation
+    bypasses the executor's per-item ``finally`` block, so the active item and
+    run would otherwise remain permanently ``running``. Active work is marked
+    failed, not-yet-started work is marked cancelled, and both run and batch
+    receive one durable terminal summary.
+    """
+    connection = conn or get_db_connection()
+    run_row = connection.execute(
+        "SELECT r.*, b.id AS batch_id FROM eval_runs r "
+        "JOIN eval_batches b ON b.id = r.batch_id WHERE r.id = ?",
+        (run_id,),
+    ).fetchone()
+    if run_row is None:
+        raise ValueError(f"Eval Run 不存在: {run_id}")
+    if run_row["status"] in {"completed", "failed", "cancelled"}:
+        return {"run_id": run_id, "status": run_row["status"]}
+
+    failure_class = str(reason or "worker_cancelled")[:100]
+    error_message = f"Eval Worker 中断了 Run（{failure_class}）"
+    active_items = connection.execute(
+        "SELECT id FROM eval_items WHERE run_id = ? AND status = 'running'",
+        (run_id,),
+    ).fetchall()
+    for item in active_items:
+        connection.execute(
+            """
+            UPDATE eval_attempts
+            SET status = 'failed', failure_class = ?, error_message = ?,
+                finished_at = CURRENT_TIMESTAMP
+            WHERE item_id = ? AND status = 'running'
+            """,
+            (failure_class, error_message, item["id"]),
+        )
+        connection.execute(
+            """
+            UPDATE eval_items
+            SET status = 'failed', result_json = ?, finished_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (_json_dumps({"error": error_message, "failure_class": failure_class}), item["id"]),
+        )
+        append_event(
+            connection,
+            run_id,
+            "item.failed",
+            {"item_id": item["id"], "failure_class": failure_class},
+        )
+
+    pending_items = connection.execute(
+        "SELECT id FROM eval_items WHERE run_id = ? AND status = 'pending'",
+        (run_id,),
+    ).fetchall()
+    for item in pending_items:
+        connection.execute(
+            """
+            UPDATE eval_items
+            SET status = 'cancelled', result_json = ?, finished_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (_json_dumps({"error": error_message, "failure_class": failure_class}), item["id"]),
+        )
+        append_event(
+            connection,
+            run_id,
+            "item.cancelled",
+            {"item_id": item["id"], "failure_class": failure_class},
+        )
+
+    counts = connection.execute(
+        """
+        SELECT
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+        FROM eval_items WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    summary = {
+        "total_items": run_row["total_items"],
+        "completed_items": int(counts["completed"] or 0),
+        "failed_items": int(counts["failed"] or 0),
+        "cancelled_items": int(counts["cancelled"] or 0),
+        "failure_class": failure_class,
+        "error": error_message,
+        "metric_summary": _aggregate_metric_summary(connection, run_id),
+    }
+    connection.execute(
+        """
+        UPDATE eval_runs
+        SET status = 'failed', completed_items = ?, failed_items = ?,
+            summary_json = ?, finished_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (summary["completed_items"], summary["failed_items"], _json_dumps(summary), run_id),
+    )
+    connection.execute(
+        """
+        UPDATE eval_batches
+        SET status = 'failed', completed_items = ?, failed_items = ?,
+            summary_json = ?, finished_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            summary["completed_items"],
+            summary["failed_items"],
+            _json_dumps(summary),
+            run_row["batch_id"],
+        ),
+    )
+    append_event(connection, run_id, "run.failed", summary)
+    connection.commit()
+    return {"run_id": run_id, "status": "failed", **summary}
+
+
 async def execute_eval_run(
     run_id: int,
     *,
@@ -372,19 +495,17 @@ async def execute_eval_run(
             evaluation_manifest = json.loads(run.get("evaluation_manifest_json") or "{}")
             protocol = evaluation_manifest.get("protocol")
             score = score_observation(observation, contract, protocol=protocol)
-            if score["hard_gate_status"] == "passed":
-                judge_result = await judge_observation(
-                    case_key=case_key,
-                    contract=contract,
-                    observation=observation,
-                    judge_model=run["judge_model"] or "",
-                )
-                score.update(judge_result)
-                score.update(combine_hybrid_score(score, judge_result.get("score")))
-            else:
-                score["judge_status"] = "skipped_hard_gate"
-                score["judge_model"] = run["judge_model"] or ""
-                score.update(combine_hybrid_score(score, None))
+            # Hard gates remain an independent deterministic result. They must
+            # not suppress the Judge: a failed contract still needs a durable
+            # quality explanation and a fixed-model score where possible.
+            judge_result = await judge_observation(
+                case_key=case_key,
+                contract=contract,
+                observation=observation,
+                judge_model=run["judge_model"] or "",
+            )
+            score.update(judge_result)
+            score.update(combine_hybrid_score(score, judge_result.get("score")))
             result_json = _json_dumps({"observation": observation, "score": score})
             connection.execute(
                 """

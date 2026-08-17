@@ -643,6 +643,7 @@ def test_draw_questions_embedding_supplement_when_pool_small(test_db, monkeypatc
 
     assert len(result) >= 1  # 补充了候选
     assert all(q["id"] in {101, 102, 103} for q in result)
+    assert all("embedding" not in q for q in result)
 
 
 def test_draw_questions_no_supplement_when_pool_enough(test_db, monkeypatch):

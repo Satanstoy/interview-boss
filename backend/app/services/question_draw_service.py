@@ -97,7 +97,15 @@ def _embedding_supplement(
             continue
         scored.append((_cosine(r["embedding"]), r))
     scored.sort(key=lambda t: t[0], reverse=True)
-    return [r for _, r in scored[:limit]]
+    # ``embedding`` is an internal BLOB used only for ranking.  Never return
+    # it in a question payload: the result is copied into the chat session
+    # state, which must remain JSON serializable for Redis/SQLite persistence.
+    result = []
+    for _, row in scored[:limit]:
+        item = dict(row)
+        item.pop("embedding", None)
+        result.append(item)
+    return result
 
 
 # 触发 embedding 补充的候选池下限（实验结论：SQL 候选萎缩是抽题 0 分主因）

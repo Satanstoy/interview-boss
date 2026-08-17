@@ -171,6 +171,7 @@ services:
       - EVAL_QUEUE_NAME=arq:eval
       - ARQ_QUEUE_NAME=arq:eval
       - EVAL_WORKER_NAME=eval-worker
+      - EVAL_JOB_TIMEOUT=21600
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=production

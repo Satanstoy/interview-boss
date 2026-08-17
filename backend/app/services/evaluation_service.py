@@ -359,6 +359,7 @@ def _create_dual_axis_eval_run(
     environment_fingerprint: str,
     comparison_group: str,
     idempotency_key: str | None,
+    case_keys: list[str] | None,
     require_published: bool,
 ) -> dict[str, Any]:
     if replication_count < 1:
@@ -389,17 +390,29 @@ def _create_dual_axis_eval_run(
     ).fetchone()
     if suite is None:
         raise ValueError("Evaluation Release 没有关联 Benchmark")
+    normalized_case_keys = None
+    case_filter = ""
+    case_params: list[Any] = [suite["id"]]
+    if case_keys is not None:
+        normalized_case_keys = list(dict.fromkeys(str(key).strip() for key in case_keys if str(key).strip()))
+        if not normalized_case_keys:
+            raise ValueError("case_keys 不能是空列表")
+        placeholders = ", ".join("?" for _ in normalized_case_keys)
+        case_filter = f" AND case_key IN ({placeholders})"
+        case_params.extend(normalized_case_keys)
     cases = conn.execute(
-        """
+        f"""
         SELECT id, case_key, scenario_key, input_snapshot_json, contract_json, input_digest
         FROM eval_benchmark_cases
-        WHERE suite_id = ? AND active = 1
+        WHERE suite_id = ? AND active = 1{case_filter}
         ORDER BY id
         """,
-        (suite["id"],),
+        case_params,
     ).fetchall()
     if not cases:
         raise ValueError("Evaluation Release 没有可执行的 Benchmark Case")
+    if normalized_case_keys and {row["case_key"] for row in cases} != set(normalized_case_keys):
+        raise ValueError("case_keys 包含不存在或未启用的 Benchmark Case")
 
     snapshot = {
         "schema_version": 1,
@@ -530,6 +543,7 @@ def create_eval_run(
     environment_fingerprint: str = "",
     comparison_group: str = "",
     idempotency_key: str | None = None,
+    case_keys: list[str] | None = None,
     require_published: bool = False,
 ) -> dict[str, Any]:
     """Create a run using the dual-axis model, with legacy read compatibility."""
@@ -544,6 +558,7 @@ def create_eval_run(
             environment_fingerprint=environment_fingerprint,
             comparison_group=comparison_group,
             idempotency_key=idempotency_key,
+            case_keys=case_keys,
             require_published=require_published,
         )
     legacy_ids = (

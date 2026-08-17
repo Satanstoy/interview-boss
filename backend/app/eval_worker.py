@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+
 from arq.connections import RedisSettings
 
 from app.evaluation.queue import EVAL_QUEUE_NAME, REDIS_URL
 
 
 async def eval_run_task(ctx, run_id: int):
-    from app.services.evaluation_executor import execute_eval_run
+    from app.services.evaluation_executor import (
+        execute_eval_run,
+        reconcile_interrupted_eval_run,
+    )
     from app.worker import record_worker_heartbeat
 
     try:
@@ -17,6 +23,18 @@ async def eval_run_task(ctx, run_id: int):
             "eval-worker",
             status="online",
             queue_name=EVAL_QUEUE_NAME,
+            metadata={"last_run_id": int(run_id)},
+        )
+        return result
+    except asyncio.CancelledError:
+        result = reconcile_interrupted_eval_run(
+            int(run_id), reason="worker_cancelled"
+        )
+        record_worker_heartbeat(
+            "eval-worker",
+            status="degraded",
+            queue_name=EVAL_QUEUE_NAME,
+            error="eval run cancelled by worker timeout or shutdown",
             metadata={"last_run_id": int(run_id)},
         )
         return result
@@ -62,6 +80,6 @@ class EvalWorkerSettings:
     queue_name = EVAL_QUEUE_NAME
     max_jobs = 1
     queue_read_limit = 1
-    job_timeout = 3600
+    job_timeout = max(6 * 60 * 60, int(os.environ.get("EVAL_JOB_TIMEOUT", "21600")))
     max_tries = 3
     keep_result = 3600

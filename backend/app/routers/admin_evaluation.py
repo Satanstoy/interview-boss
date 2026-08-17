@@ -37,6 +37,7 @@ class CreateEvalRunRequest(BaseModel):
     environment_fingerprint: str = ""
     comparison_group: str = ""
     idempotency_key: str | None = None
+    case_keys: list[str] | None = None
 
 
 class CreateHumanReviewRequest(BaseModel):
@@ -286,6 +287,7 @@ async def create_run(body: CreateEvalRunRequest, admin: dict = Depends(get_admin
                 environment_fingerprint=body.environment_fingerprint,
                 comparison_group=body.comparison_group,
                 idempotency_key=body.idempotency_key,
+                case_keys=body.case_keys,
                 require_published=True,
             )
             append_event(

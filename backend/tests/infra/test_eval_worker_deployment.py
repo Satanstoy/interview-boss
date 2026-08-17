@@ -22,6 +22,8 @@ def test_eval_worker_launcher_has_runtime_preflight_checks():
     assert "redis" in source
     assert "quick_check" in source
     assert "flock -n" in source
+    assert "docker ps" in source
+    assert "com.docker.compose.service=eval-worker" in source
 
 
 def test_eval_worker_deployment_scripts_are_valid_shell():
