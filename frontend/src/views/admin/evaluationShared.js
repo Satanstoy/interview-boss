@@ -11,12 +11,44 @@ export const STATUS_LABELS = {
 }
 
 export const RELEASE_TYPE_LABELS = {
-  target: 'Agent / Workflow',
-  benchmark_suite: 'Benchmark Suite',
-  eval_protocol: 'Eval Protocol',
-  judge: 'Judge',
-  simulator_harness: 'Simulator Harness',
-  candidate_simulator: 'Candidate Simulator',
+  target: '被测版本',
+  benchmark_suite: '评测题集',
+  eval_protocol: '评测规则',
+  judge: '评分模型',
+  simulator_harness: '模拟面试执行器',
+  candidate_simulator: '候选人模拟器',
+}
+
+export const EVALUATION_FLOW_STEPS = [
+  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁', route: '/admin/evals/releases' },
+  { key: 'benchmarks', keys: ['EvalBenchmarks', 'admin-evals-benchmarks'], label: 'Benchmark', description: '决定测什么', route: '/admin/evals/benchmarks' },
+  { key: 'experiments', keys: ['EvalExperiments', 'admin-evals-experiments', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
+  { key: 'results', keys: ['EvalOverview', 'admin-evals-overview'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/overview' },
+  { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
+]
+
+export const RELEASE_TYPE_META = {
+  target: { title: '被测版本', description: '待评测的 Agent、Workflow 或 Pipeline。' },
+  benchmark_suite: { title: '评测题集', description: '固定的 Case、输入快照与质量要求。' },
+  eval_protocol: { title: '评测规则', description: '重跑次数、聚合方式与通过门槛。' },
+  judge: { title: '评分模型', description: '固定的 Judge Model 与评分 Prompt。' },
+  simulator_harness: { title: '模拟面试执行器', description: '编排多轮 E2E、工具和轨迹采集。' },
+  candidate_simulator: { title: '候选人模拟器', description: '生成候选人行为的模型与策略。' },
+}
+
+export const REVIEW_CHOICE_LABELS = {
+  a: 'A 更好',
+  b: 'B 更好',
+  tie: '平局',
+  both_fail: '都失败',
+}
+
+export const CHECK_STATUS_LABELS = {
+  passed: '通过',
+  failed: '失败',
+  skipped: '跳过',
+  pending: '待检查',
+  invalid: '无效',
 }
 
 export function statusLabel(status) {
@@ -25,6 +57,18 @@ export function statusLabel(status) {
 
 export function releaseTypeLabel(type) {
   return RELEASE_TYPE_LABELS[type] || type || '未知'
+}
+
+export function releaseTypeMeta(type) {
+  return RELEASE_TYPE_META[type] || { title: releaseTypeLabel(type), description: '评测运行依赖的版本化组件。' }
+}
+
+export function checkStatusLabel(status) {
+  return CHECK_STATUS_LABELS[status] || status || '未知'
+}
+
+export function reviewChoiceLabel(choice) {
+  return REVIEW_CHOICE_LABELS[choice] || choice || '未选择'
 }
 
 export function statusClass(status) {
