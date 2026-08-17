@@ -5,6 +5,18 @@ import asyncio
 import pytest
 
 
+def _seed_position_catalog(test_db):
+    """Keep MCP position tests independent of the empty migration baseline."""
+    test_db.executemany(
+        "INSERT INTO job_positions (id, name, description) VALUES (?, ?, ?)",
+        [
+            (1, "agent开发/大模型应用开发/大模型开发", "Agent、LLM 应用和大模型应用开发岗位"),
+            (2, "后端开发", "后端服务开发岗位"),
+        ],
+    )
+    test_db.commit()
+
+
 def test_position_aliases_resolve_without_fuzzy_matching():
     from app.services.job_position_service import resolve_job_position
 
@@ -92,6 +104,7 @@ async def test_list_job_positions_db_error_is_stable(monkeypatch):
 async def test_search_alias_passes_canonical_position_and_id(test_db, monkeypatch):
     from app.mcp_server import interview_tools
 
+    _seed_position_catalog(test_db)
     captured = {}
 
     async def fake_search(**kwargs):
@@ -121,6 +134,7 @@ async def test_search_alias_passes_canonical_position_and_id(test_db, monkeypatc
 async def test_unknown_position_is_not_a_database_error(test_db, monkeypatch):
     from app.mcp_server import interview_tools
 
+    _seed_position_catalog(test_db)
     async def should_not_search(**kwargs):
         raise AssertionError("unknown position must be rejected before retrieval")
 
@@ -140,6 +154,7 @@ async def test_unknown_position_is_not_a_database_error(test_db, monkeypatch):
 async def test_draw_alias_is_filtered_and_empty_does_not_fallback(test_db, monkeypatch):
     from app.mcp_server import interview_tools
 
+    _seed_position_catalog(test_db)
     captured = {}
 
     async def fake_draw(**kwargs):
