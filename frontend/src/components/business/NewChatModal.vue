@@ -95,7 +95,7 @@
                   <div v-else class="flex items-center justify-center gap-2">
                     <svg class="size-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     <span class="text-sm text-foreground">{{ resumeFileName }}</span>
-                    <button @click.stop="clearResume" class="text-muted-foreground hover:text-red-500 transition">
+                    <button aria-label="清除简历" @click.stop="clearResume" class="text-muted-foreground hover:text-red-500 transition">
                       <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                   </div>

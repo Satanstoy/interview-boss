@@ -16,7 +16,7 @@
             {{ question?.difficulty || '-' }}
           </Badge>
         </div>
-        <button @click="emit('close')" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition shrink-0">
+        <button aria-label="关闭" @click="emit('close')" class="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground dark:hover:text-muted-foreground/50 hover:bg-muted dark:hover:bg-muted transition shrink-0">
           <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>

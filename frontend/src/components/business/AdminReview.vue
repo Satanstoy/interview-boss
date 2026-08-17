@@ -16,7 +16,7 @@
                 <p class="text-xs text-muted-foreground mt-0.5">审核用户提交到公共题库的题目</p>
               </div>
             </div>
-            <button @click="$emit('close')" class="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition">
+            <button aria-label="关闭" @click="$emit('close')" class="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition">
               <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </div>
