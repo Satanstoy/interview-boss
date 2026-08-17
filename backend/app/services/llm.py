@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import logging
+from urllib.parse import urlsplit
 import httpx
 from openai import (
     AsyncOpenAI,
@@ -109,6 +110,15 @@ _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
 _DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}
 
 
+def _provider_hostname(base_url: str | None) -> str:
+    """Extract a normalized hostname for exact provider capability matching."""
+    raw = str(base_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+    return (parsed.hostname or "").lower().rstrip(".")
+
+
 def get_provider_capabilities(base_url: str = None) -> dict:
     """按 base_url 前缀匹配供应商能力。
 
@@ -119,9 +129,9 @@ def get_provider_capabilities(base_url: str = None) -> dict:
     """
     if not base_url:
         return dict(_DEFAULT_CAPS)
-    lower = base_url.lower()
+    hostname = _provider_hostname(base_url)
     for prefix, caps in _PROVIDER_CAPABILITIES:
-        if prefix == "*" or prefix in lower:
+        if prefix == "*" or hostname == prefix:
             return dict(caps)
     return dict(_DEFAULT_CAPS)
 

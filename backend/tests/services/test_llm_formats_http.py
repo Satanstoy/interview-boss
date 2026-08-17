@@ -203,6 +203,42 @@ async def test_http_chat_sends_prompt_cache_key_only_to_known_openai(monkeypatch
     assert captured["prompt_cache_key"] == "abc123"
 
 
+async def test_http_chat_does_not_send_prompt_cache_key_to_openai_looking_relay(monkeypatch):
+    """A relay URL containing api.openai.com must not inherit OpenAI-only fields."""
+    captured = {}
+
+    def handler(request):
+        captured.update(_body(request))
+        return _ok({
+            "id": "x",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "继续。"},
+            }],
+        })
+
+    client, base_url = _mock_client(
+        handler, "https://relay.example/api.openai.com/v1"
+    )
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (client, "m", 60, base_url, "openai"),
+    )
+    from app.services.llm import llm_with_tools
+
+    await llm_with_tools(
+        [{"role": "user", "content": "继续"}],
+        [],
+        user_id=1,
+        prompt_cache_key="abc123",
+    )
+
+    assert "prompt_cache_key" not in captured
+
+
 async def test_http_chat_streaming(monkeypatch):
     """chat：流式 SSE delta 消费"""
     chunks = [

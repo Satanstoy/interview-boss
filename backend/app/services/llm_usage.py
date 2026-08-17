@@ -47,25 +47,27 @@ def normalize_cache_usage(usage: Any) -> dict[str, int | None]:
     }
 
 
-def aggregate_cache_usage(usages: list[dict[str, int | None]]) -> dict[str, int]:
-    """Aggregate known numeric usage fields for a turn-level trace."""
+def aggregate_cache_usage(
+    usages: list[dict[str, int | None]],
+) -> dict[str, int | None]:
+    """Aggregate usage while preserving fields providers did not return."""
 
-    totals = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "cached_input_tokens": 0,
-        "cache_write_input_tokens": 0,
+    totals: dict[str, int | None] = {
+        "input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
     }
     for usage in usages:
         for key in totals:
             value = usage.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
-                totals[key] += value
+                totals[key] = value if totals[key] is None else totals[key] + value
         if (
-            not isinstance(usage.get("cached_input_tokens"), int)
+            totals["cached_input_tokens"] is None
             and isinstance(usage.get("cache_read_input_tokens"), int)
             and not isinstance(usage.get("cache_read_input_tokens"), bool)
         ):
-            totals["cached_input_tokens"] += usage["cache_read_input_tokens"]
+            totals["cached_input_tokens"] = usage["cache_read_input_tokens"]
     return totals
