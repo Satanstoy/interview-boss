@@ -908,7 +908,12 @@ async def build_master_bank_task(ctx, job_id: int):
                         "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
                         (current_pos,)
                     )
-                    cursor.execute("DELETE FROM question_bank WHERE job_position = ? AND owner_id IS NULL", (current_pos,))
+                    cursor.execute(
+                        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP "
+                        "WHERE job_position = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                        (current_pos,),
+                    )
                     conn.commit()
                 except Exception:
                     conn.rollback()

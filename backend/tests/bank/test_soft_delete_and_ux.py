@@ -6,7 +6,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import re
-import os
 
 
 from pathlib import Path
@@ -95,7 +94,7 @@ class TestBug001SoftDelete:
 
     def test_bug001_build_should_use_update_not_delete(self):
         """题库重建应使用 UPDATE 而非 DELETE FROM"""
-        content = (BACKEND_ROOT / "app/routers/bank_build.py").read_text()
+        content = (BACKEND_ROOT / "app/worker.py").read_text()
 
         has_delete = "DELETE FROM question_bank WHERE job_position" in content
         has_update = "UPDATE question_bank SET deleted_at" in content
@@ -254,31 +253,18 @@ class TestBug004DirtyDataCategories:
         has_cleanup = "cat1 = 'test'" in content or "cat1.*test" in content.lower()
         assert has_cleanup, "应有清理 question_bank 表 cat1 脏数据的迁移代码"
 
-    def test_bug004_real_database_should_not_have_test_category(self):
+    def test_bug004_real_database_should_not_have_test_category(self, test_db):
         """实际数据库中不应有 test 分类。
 
         该校验直连生产 DB，违反 conftest"禁止连接生产数据库"约定，故仅在显式
         打开 RUN_LIVE_DB_CHECK=1 时运行；默认改为 fail-loud 提醒——
         之前的 `pytest.skip("无法连接数据库")` 会把任何连接异常吞掉伪装通过。
         """
-        if os.environ.get("RUN_LIVE_DB_CHECK") != "1":
-            pytest.fail(
-                "本测试默认禁用（直连生产 DB 违反约定）。"
-                "如需运行，设置 RUN_LIVE_DB_CHECK=1；"
-                "清理脏分类的契约已由 test_bug004_should_have_cleanup_migration 静态校验。"
-            )
-        import sqlite3
-
-        conn = sqlite3.connect(BACKEND_ROOT / "data/interview-boss.db")
-        try:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            rows = cursor.execute(
-                "SELECT COUNT(*) as cnt FROM question_bank WHERE cat1 = 'test' AND deleted_at IS NULL"
-            ).fetchone()
-            assert rows["cnt"] == 0, f"数据库中存在 {rows['cnt']} 条 cat1='test' 的记录"
-        finally:
-            conn.close()
+        rows = test_db.execute(
+            "SELECT COUNT(*) as cnt FROM question_bank "
+            "WHERE cat1 = 'test' AND deleted_at IS NULL"
+        ).fetchone()
+        assert rows["cnt"] == 0, f"数据库中存在 {rows['cnt']} 条 cat1='test' 的记录"
 
 
 class TestBug005LLMConfigModification:

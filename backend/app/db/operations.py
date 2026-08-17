@@ -624,6 +624,7 @@ def _apply_incremental_txn(
                 ],
             )
         )
+        oqs_json = json.dumps(original_question_sources, ensure_ascii=False)
         cursor.execute(
             "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, frequency, sources, original_questions, original_question_sources, owner_id, submitted_by, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -634,7 +635,7 @@ def _apply_incremental_txn(
                 diff_tag,
                 json.dumps(sources, ensure_ascii=False),
                 json.dumps(original_questions, ensure_ascii=False),
-                json.dumps(original_question_sources, ensure_ascii=False),
+                oqs_json,
                 owner_id,
                 submitter_id,
                 status,

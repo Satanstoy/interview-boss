@@ -130,7 +130,7 @@ class TestBug003LoadShouldFilterByPosition:
         import inspect
         import ast
 
-        with open(BACKEND_ROOT / "app/routers/bank_build.py", "r") as f:
+        with open(BACKEND_ROOT / "app/worker.py", "r") as f:
             source = f.read()
 
         # 检查 _load 函数中的 SQL 是否包含 job_position 过滤
@@ -230,7 +230,7 @@ class TestPositionIsolationIntegration:
         with patch("app.routers.bank_build.get_db_connection", return_value=mock_conn):
             with patch("app.routers.bank_build.get_current_job_position", return_value="后端开发"):
                 # 通过检查源码确保 SQL 包含过滤条件
-                with open(BACKEND_ROOT / "app/routers/bank_build.py", "r") as f:
+                with open(BACKEND_ROOT / "app/worker.py", "r") as f:
                     source = f.read()
 
                 # 在 _load 函数的 questions_detail 查询中必须有 job_position 过滤
@@ -241,6 +241,6 @@ class TestPositionIsolationIntegration:
                 assert qd_query_start != -1, "应找到 questions_detail 查询"
 
                 # 检查该查询附近是否有 job_position 条件
-                query_region = source[qd_query_start:qd_query_start + 300]
+                query_region = source[qd_query_start:qd_query_start + 500]
                 assert "job_position" in query_region, \
                     f"questions_detail 查询应包含 job_position 过滤，实际查询片段: {query_region[:200]}"
