@@ -122,6 +122,87 @@ async def test_http_chat_tool_calls_response(monkeypatch):
     assert result["tool_calls"][0]["function"]["arguments"] == '{"q": "限流"}'
 
 
+async def test_http_chat_tool_calls_normalizes_prompt_cache_usage(monkeypatch):
+    """Chat Completions 的缓存 usage 应统一暴露给 ReAct 调用方。"""
+
+    def handler(request):
+        return _ok({
+            "id": "x",
+            "object": "chat.completion",
+            "model": "m",
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 10,
+                "total_tokens": 130,
+                "prompt_tokens_details": {
+                    "cached_tokens": 96,
+                    "cache_write_tokens": 0,
+                },
+            },
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "继续。"},
+            }],
+        })
+
+    client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (client, "m", 60, base_url, "openai"),
+    )
+    from app.services.llm import llm_with_tools
+
+    result = await llm_with_tools(
+        [{"role": "user", "content": "继续"}],
+        [],
+        user_id=1,
+    )
+
+    assert result["usage"] == {
+        "input_tokens": 120,
+        "output_tokens": 10,
+        "total_tokens": 130,
+        "cached_input_tokens": 96,
+        "cache_write_input_tokens": 0,
+        "cache_read_input_tokens": None,
+    }
+
+
+async def test_http_chat_sends_prompt_cache_key_only_to_known_openai(monkeypatch):
+    """Provider-specific cache parameters must not leak to unknown endpoints."""
+    captured = {}
+
+    def handler(request):
+        captured.update(_body(request))
+        return _ok({
+            "id": "x",
+            "object": "chat.completion",
+            "model": "m",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "继续。"},
+            }],
+        })
+
+    client, base_url = _mock_client(handler, "https://api.openai.com/v1")
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id: (client, "m", 60, base_url, "openai"),
+    )
+    from app.services.llm import llm_with_tools
+
+    await llm_with_tools(
+        [{"role": "user", "content": "继续"}],
+        [],
+        user_id=1,
+        prompt_cache_key="abc123",
+    )
+
+    assert captured["prompt_cache_key"] == "abc123"
+
+
 async def test_http_chat_streaming(monkeypatch):
     """chat：流式 SSE delta 消费"""
     chunks = [
@@ -330,6 +411,7 @@ async def test_http_anthropic_tools(monkeypatch):
     )
     assert captured["tools"][0]["name"] == "search"
     assert captured["tools"][0]["input_schema"] == {"type": "object"}
+    assert captured["cache_control"] == {"type": "ephemeral"}
     assert captured["tool_choice"] == {"type": "tool", "name": "search"}
     assert result["tool_calls"][0]["id"] == "tool_1"
     assert result["tool_calls"][0]["function"]["name"] == "search"

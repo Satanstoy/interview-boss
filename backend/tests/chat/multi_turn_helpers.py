@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Any
@@ -277,6 +278,25 @@ async def run_single_turn(
     def stream_side_effect(*args, **kwargs):
         return _async_stream(*stream_chunks)
 
+    async def mock_question_writer(**kwargs):
+        text = re.sub(
+            r"\[BASIS\].*?\[/BASIS\]",
+            "",
+            "".join(stream_chunks),
+            flags=re.DOTALL,
+        ).strip()
+        return {
+            "status": "success",
+            "text": text,
+            "validator_result": {
+                "passes": True,
+                "score": 1.0,
+                "reason": "test contract fixture",
+                "issues": [],
+            },
+            "retry_count": 0,
+        }
+
     patchers = [
         patch(
             "app.agents.chat.nodes.build_react_system_prompt",
@@ -301,6 +321,26 @@ async def run_single_turn(
         patch(
             "app.services.llm.stream_llm_messages",
             side_effect=stream_side_effect,
+        ),
+        patch(
+            "app.agents.chat.nodes.stream_llm_messages",
+            side_effect=stream_side_effect,
+        ),
+        patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value="".join(stream_chunks),
+        ),
+        patch(
+            "app.agents.chat.contract_executor.generate_question_with_validation",
+            new=AsyncMock(side_effect=mock_question_writer),
+        ),
+        patch(
+            "app.mcp_server.interview_tools.load_active_position_rows",
+            return_value=[
+                {"id": 1, "name": "后端开发", "description": "后端服务开发岗位"},
+                {"id": 2, "name": "Agent开发", "description": "Agent 应用开发岗位"},
+            ],
         ),
     ]
     if tool_patches:

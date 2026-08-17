@@ -519,6 +519,10 @@ async def _llm_with_tools_call(
             call_kwargs["tools"] = anthropic_tools
         if tool_choice is not None:
             call_kwargs["tool_choice"] = _convert_tool_choice_to_anthropic(tool_choice)
+        if cache_control is not None or get_provider_capabilities(base_url).get(
+            "prompt_cache_control", False
+        ):
+            call_kwargs["cache_control"] = cache_control or {"type": "ephemeral"}
         response = await resolved_client.messages.create(**call_kwargs)
 
         tool_calls = _extract_tool_calls(response, "anthropic")
@@ -662,6 +666,9 @@ async def llm_with_tools(
             tool_choice=tool_choice,
             base_url=base_url,
             user_id=user_id,
+            cache_control=cache_control,
+            prompt_cache_key=prompt_cache_key,
+            prompt_cache_options=prompt_cache_options,
         )
 
     return await _llm_with_tools_call(
@@ -676,6 +683,9 @@ async def llm_with_tools(
         tool_choice=tool_choice,
         base_url=base_url,
         user_id=user_id,
+        cache_control=cache_control,
+        prompt_cache_key=prompt_cache_key,
+        prompt_cache_options=prompt_cache_options,
     )
 
 

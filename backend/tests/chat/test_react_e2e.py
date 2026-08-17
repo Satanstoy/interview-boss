@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -205,6 +206,25 @@ async def _run_react_case(
     def stream_side_effect(*args, **kwargs):
         return _stream_chunks(*stream_chunks)
 
+    async def mock_question_writer(**kwargs):
+        text = re.sub(
+            r"\[BASIS\].*?\[/BASIS\]",
+            "",
+            "".join(stream_chunks),
+            flags=re.DOTALL,
+        ).strip()
+        return {
+            "status": "success",
+            "text": text,
+            "validator_result": {
+                "passes": True,
+                "score": 1.0,
+                "reason": "test contract fixture",
+                "issues": [],
+            },
+            "retry_count": 0,
+        }
+
     patchers = [
         patch(
             "app.agents.chat.nodes.build_react_system_prompt",
@@ -229,6 +249,26 @@ async def _run_react_case(
         patch(
             "app.services.llm.stream_llm_messages",
             side_effect=stream_side_effect,
+        ),
+        patch(
+            "app.agents.chat.nodes.stream_llm_messages",
+            side_effect=stream_side_effect,
+        ),
+        patch(
+            "app.services.llm._call_llm_with_retry_messages",
+            new_callable=AsyncMock,
+            return_value="".join(stream_chunks),
+        ),
+        patch(
+            "app.agents.chat.contract_executor.generate_question_with_validation",
+            new=AsyncMock(side_effect=mock_question_writer),
+        ),
+        patch(
+            "app.mcp_server.interview_tools.load_active_position_rows",
+            return_value=[
+                {"id": 1, "name": "后端开发", "description": "后端服务开发岗位"},
+                {"id": 2, "name": "Agent开发", "description": "Agent 应用开发岗位"},
+            ],
         ),
     ]
     if tool_patches:
@@ -533,7 +573,7 @@ class TestReactE2E:
                     "finish_reason": "stop",
                 },
             ],
-            stream_chunks=("搜索出错了，我直接给你一道基础题。",),
+            stream_chunks=("Redis 缓存穿透可以通过布隆过滤器和限流策略缓解。",),
             tool_patches=[
                 patch(
                     "app.mcp_server.interview_tools._hybrid_search_for_tool",
@@ -735,8 +775,13 @@ class TestRealLinkSkillInjection:
             call_count += 1
             if call_count == 2:
                 messages = args[0] if args else kwargs.get("messages", [])
-                if messages and messages[0].get("role") == "system":
-                    captured_system_prompts.append(messages[0]["content"])
+                captured_system_prompts.append(
+                    "\n\n".join(
+                        str(message.get("content") or "")
+                        for message in messages
+                        if message.get("role") == "system"
+                    )
+                )
             return step1 if call_count == 1 else step2
 
         mock_skill = MagicMock()
@@ -765,6 +810,11 @@ class TestRealLinkSkillInjection:
                     side_effect=lambda *a, **kw: _mock_stream(
                         "请解释一下 JVM 内存模型。"
                     ),
+                ),
+                patch(
+                    "app.services.llm._call_llm_with_retry_messages",
+                    new_callable=AsyncMock,
+                    return_value="请解释一下 JVM 内存模型。",
                 ),
                 patch(
                     "app.agents.chat.tools._get_skill_registry",

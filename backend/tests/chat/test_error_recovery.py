@@ -334,7 +334,7 @@ class TestToolFailureRecovery:
                     "finish_reason": "stop",
                 },
             ],
-            stream_chunks=("搜索出错了，我直接给你一道基础题。",),
+            stream_chunks=("Redis 缓存穿透可以通过布隆过滤器和限流策略缓解。",),
             tool_patches=[
                 patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],

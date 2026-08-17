@@ -368,7 +368,7 @@ class TestSSEErrorEvents:
                     "finish_reason": "stop",
                 },
             ],
-            stream_chunks=("搜索服务暂时不可用，我直接出一道题。",),
+            stream_chunks=("Redis 缓存穿透可以通过布隆过滤器和限流策略缓解。",),
             tool_patches=[
                 patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
             ],

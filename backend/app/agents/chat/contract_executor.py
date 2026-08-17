@@ -106,7 +106,16 @@ def _validate_success(
     writer_trace: dict[str, Any],
     contract: TurnContract,
     validator_trace: list[dict[str, Any]] | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if state is not None:
+        from app.agents.chat.answer import (
+            _fallback_interviewer_response,
+            _is_internal_react_marker,
+        )
+
+        if _is_internal_react_marker(text):
+            text = _fallback_interviewer_response(text, state)
     trace = _deterministic_validation(text, contract.validation)
     if validator_trace:
         trace.extend(validator_trace)
@@ -253,6 +262,7 @@ async def execute_turn_contract(
                     "reason": validator.get("reason", ""),
                 }
             ],
+            state=state,
         )
 
     if action == TurnContractAction.CLARIFY_CANDIDATE_ANSWER:
@@ -266,6 +276,7 @@ async def execute_turn_contract(
                 result["text"],
                 {"writer": "clarify_writer", "result": "success"},
                 contract,
+                state=state,
             )
             if result["status"] == "success"
             else _error(result, "clarify_writer")
@@ -283,6 +294,7 @@ async def execute_turn_contract(
                 result["text"],
                 {"writer": "counter_writer", "result": "success"},
                 contract,
+                state=state,
             )
             if result["status"] == "success"
             else _error(result, "counter_writer")
@@ -306,6 +318,7 @@ async def execute_turn_contract(
                 result["text"],
                 {"writer": "followup_writer", "result": "success"},
                 contract,
+                state=state,
             )
             if result["status"] == "success"
             else _error(result, "followup_writer")
@@ -345,4 +358,5 @@ async def execute_turn_contract(
         {"writer": "closing_writer", "result": "success", "summary_writer": "success"},
         contract,
         closing_validator_trace,
+        state=state,
     )
