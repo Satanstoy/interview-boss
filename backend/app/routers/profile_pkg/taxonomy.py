@@ -1,9 +1,8 @@
 """分类体系管理端点"""
-import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
-from app.db.connection import get_db_connection, run_db, get_taxonomy_for_position
+from app.db.connection import run_db, get_taxonomy_for_position
 
 logger = logging.getLogger("interview-boss")
 

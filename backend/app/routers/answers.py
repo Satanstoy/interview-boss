@@ -4,19 +4,13 @@ import asyncio
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
-from app.core.auth import get_current_user, get_admin_user
+from app.core.auth import get_current_user
 from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
 from app.routers.questions import _build_bank_where_clause
-from app.services.llm import _call_llm_with_retry
+from app.services.llm import _call_llm_with_retry  # noqa: F401 — tests and integrations patch this seam
 from app.services.llm_quota import check_and_record
-from app.services.answer_enrichment import (
-    refine_answer,
-    sources_json,
-    prepare_answer_prompt,
-    prepare_recitation_prompt,
-)
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")

@@ -9,8 +9,6 @@ from app.core.validation import validate_source_url
 from app.db.connection import (
     get_db_connection,
     run_db,
-    get_current_job_position,
-    get_user_job_position,
 )
 from app.db.question_bank_sources import (
     restore_source_for_url,

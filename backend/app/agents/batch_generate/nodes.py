@@ -4,7 +4,7 @@ import logging
 import asyncio
 
 from app.agents.shared.state import BatchGenerateState
-from app.agents.shared.quality import evaluate_answer_quality, should_retry
+from app.agents.shared.quality import evaluate_answer_quality
 from app.agents.shared.events import make_progress_event
 
 logger = logging.getLogger("interview-boss")

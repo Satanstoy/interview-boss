@@ -12,7 +12,6 @@ docker compose run --rm -v $PWD/backend:/app/backend backend python -m app.servi
 import asyncio
 import json
 import os
-import sqlite3
 import struct
 import time
 import urllib.request

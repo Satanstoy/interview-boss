@@ -17,12 +17,6 @@ from app.agents.chat.nodes import (
     _question_plan_adherence,
     _repair_response_to_question_plan,
 )
-from app.agents.chat.chat_constants import (
-    FALLBACK_PROJECT_DEEP_DIVE,
-    FALLBACK_ALGORITHM_CODING,
-    FALLBACK_GENERIC,
-    FALLBACK_EMPTY_QUESTION,
-)
 from app.agents.chat.state import ChatState
 from app.agents.chat.tools import SKILL_NAMES
 from app.agents.shared.events import _event_queue_var

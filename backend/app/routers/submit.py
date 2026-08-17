@@ -19,7 +19,7 @@ from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
 from app.core.auth import get_current_user
 from app.core.validation import validate_source_url
-from app.db.connection import get_db_connection, run_db, get_taxonomy_for_position
+from app.db.connection import get_db_connection, run_db
 from app.db.operations import (
     _check_duplicate_url_sync,
 )
@@ -41,9 +41,9 @@ def _mark_job_dispatched(job_id: int, arq_job_id: str, marker) -> None:
 
 # Backward-compatible re-exports — business logic moved to app.services.submit_service
 from app.services.submit_service import (
-    tag_questions_batch,
-    incremental_update_master_bank,
-    background_generate_answer,
+    tag_questions_batch,  # noqa: F401 — backward-compatible router re-export
+    incremental_update_master_bank,  # noqa: F401 — backward-compatible router re-export
+    background_generate_answer,  # noqa: F401 — backward-compatible router re-export
     persist_answer_generation_jobs,
     _get_current_position_for_user,
 )

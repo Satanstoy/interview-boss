@@ -20,7 +20,6 @@ from app.services.chat_common import (
     TurnInProgress,
     TurnNotFound,
     TurnUserMessageConflict,
-    SideEffectConflict,
     _chat_turn_from_row,
     _safe_json_loads,
     build_turn_request_fingerprint,

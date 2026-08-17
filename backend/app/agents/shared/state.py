@@ -1,5 +1,5 @@
 """LangGraph State 定义 — Submit / BuildBank / BatchGenerate 三个流程的状态 TypedDict"""
-from typing import TypedDict, Annotated, Optional
+from typing import TypedDict, Annotated
 from operator import add
 
 

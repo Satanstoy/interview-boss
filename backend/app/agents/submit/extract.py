@@ -1,10 +1,8 @@
-import json
 import logging
 import secrets
-import time
 
 from app.agents.shared.state import SubmitState
-from app.agents.shared.quality import evaluate_extraction_quality, should_retry
+from app.agents.shared.quality import evaluate_extraction_quality
 from app.agents.shared.events import emit_progress, build_extraction_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")

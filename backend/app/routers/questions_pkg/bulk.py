@@ -3,7 +3,7 @@
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user, get_admin_user
+from app.core.auth import get_current_user
 from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import (
     get_db_connection,

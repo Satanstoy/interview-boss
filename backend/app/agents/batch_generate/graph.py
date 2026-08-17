@@ -37,7 +37,6 @@ batch_generate_graph = _build_batch_generate_graph().compile()
 
 async def stream_batch_generate(input_state: dict):
     """将 batch_generate astream_events 映射为 SSE 事件流"""
-    import json
     from app.agents.shared.events import format_sse, make_error_event
 
     config = {"configurable": {"thread_id": f"generate-{input_state.get('user_id', 0)}-{__import__('time').time():.0f}"}}

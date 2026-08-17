@@ -1,5 +1,4 @@
 import logging
-import json
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends

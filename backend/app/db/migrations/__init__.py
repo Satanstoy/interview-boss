@@ -73,14 +73,14 @@ from app.db.migrations.data_repair import (
     _migration_017_backfill_normalized_sources,
     _migration_018_composite_indexes,
     _migration_019_fix_cascades,
-    _migration_020_drop_json_columns,
+    _migration_020_drop_json_columns,  # noqa: F401 — migration re-export
     _migration_021_performance_indexes,
 )
 from app.db.migrations.sources import (
     _migration_016_normalized_source_tables,
     _migration_023_duplicate_of,
     _migration_047_soft_delete_sources,
-    ensure_public_url_signature_unique_indexes,
+    ensure_public_url_signature_unique_indexes,  # noqa: F401 — migration re-export
 )
 from app.db.migrations.view import (
     _migration_008_user_question_view,
@@ -120,7 +120,7 @@ from app.db.migrations.clustering import (
     _migration_033_cluster_id,
     _migration_034_backfill_confidence,
     _migration_035_split_e_category,
-    _migration_037_backfill_embeddings,
+    _migration_037_backfill_embeddings,  # noqa: F401 — migration re-export
     _migration_039_merge_review_tables,
     _migration_048_embedding_metadata,
     _migration_066_cluster_label,
@@ -129,7 +129,7 @@ from app.db.migrations.clustering import (
     _migration_072_cluster_review_lifecycle,
     _migration_076_question_variant_ownership,
     _migration_077_quality_issue_identity,
-    _classify_e_question,
+    _classify_e_question,  # noqa: F401 — migration re-export
 )
 from app.db.migrations.admin_assistant import (
     _migration_069_admin_assistant_log,

@@ -1,6 +1,5 @@
 """质量评估函数 — 纯规则检查，无 LLM 调用"""
 import logging
-from typing import List
 
 logger = logging.getLogger("interview-boss")
 

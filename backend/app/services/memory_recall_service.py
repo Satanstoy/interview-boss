@@ -844,8 +844,6 @@ async def classify_and_recall(
     Returns:
         (intent, relevant_memory_ids, keywords, search_query, answer_complete, structured_rewrite, classify_result)
     """
-    from app.agents.chat.classify_result import ClassifyResult
-
     # 3. 合并 LLM 调用：意图 + 记忆选择 + 检索查询
     memory_list = "\n".join(
         f"[id:{m['id']} {m['memory_type']}] {m['summary']}" for m in memory_summaries

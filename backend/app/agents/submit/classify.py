@@ -1,9 +1,8 @@
 import json
 import logging
-import time
 
 from app.agents.shared.state import SubmitState
-from app.agents.shared.quality import evaluate_tagging_quality, should_retry
+from app.agents.shared.quality import evaluate_tagging_quality
 from app.agents.shared.events import emit_progress, build_tagging_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")

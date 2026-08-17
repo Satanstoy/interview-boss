@@ -251,7 +251,6 @@ async def cluster_three_stage_v2(
     Returns:
         {"merged": [(survivor_id, merged_id, confidence)], "unmatched": [id]}
     """
-    import numpy as np
     from app.services.embedding_service import encode_texts, build_index
 
     merged_pairs = []

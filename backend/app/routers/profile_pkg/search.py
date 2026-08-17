@@ -10,7 +10,7 @@ from app.core.config import (
     get_user_search_config,
 )
 from app.db.connection import get_db_connection, run_db
-from app.services.encryption import encrypt_value, decrypt_value
+from app.services.encryption import encrypt_value
 from app.services.search_service import (
     SUPPORTED_SEARCH_PROVIDERS,
     get_search_provider_options,

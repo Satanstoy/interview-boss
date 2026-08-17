@@ -16,7 +16,6 @@ from app.core.config import (
 )
 from app.services.llm import _call_llm_with_retry, _extract_json
 from app.services.embedding_service import (
-    prefilter_centroids,
     prefilter_centroids_batch,
 )
 from app.services.clustering.prompts import (
