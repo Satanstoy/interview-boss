@@ -1,9 +1,60 @@
 """Tests for build_react_system_prompt — ReAct loop system prompt builder."""
 
-from app.agents.chat.nodes import build_react_system_prompt
+from app.agents.chat.nodes import build_react_prompt_parts, build_react_system_prompt
+from app.agents.chat.prompt_cache import build_prompt_cache_fingerprint
 
 
 class TestBuildReactSystemPrompt:
+    def test_prompt_cache_fingerprint_is_stable_for_equivalent_tools(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        equivalent_tools = [{"function": dict(tools[0]["function"]), "type": "function"}]
+
+        assert build_prompt_cache_fingerprint("stable", tools, "m") == build_prompt_cache_fingerprint(
+            "stable", equivalent_tools, "m"
+        )
+        assert build_prompt_cache_fingerprint("changed", tools, "m") != build_prompt_cache_fingerprint(
+            "stable", tools, "m"
+        )
+
+    def test_dynamic_state_is_outside_stable_prefix(self):
+        base_state = {
+            "user_id": 1,
+            "mode": "free_practice",
+            "interview_context": "项目 A",
+            "session_notes": "第一轮笔记",
+            "compressed_context": "历史摘要 A",
+            "memory_summaries": [],
+            "interview_state": {"current_phase": "project_followup"},
+            "answer_quality": "complete",
+            "active_skills": [],
+            "message_history": [],
+        }
+        next_state = {
+            **base_state,
+            "interview_context": "项目 B",
+            "session_notes": "第二轮笔记",
+            "compressed_context": "历史摘要 B",
+            "interview_state": {"current_phase": "knowledge_probe"},
+            "answer_quality": "incomplete",
+        }
+
+        first = build_react_prompt_parts(base_state)
+        second = build_react_prompt_parts(next_state)
+
+        assert first["stable_system_prompt"] == second["stable_system_prompt"]
+        assert "项目 A" not in first["stable_system_prompt"]
+        assert "第一轮笔记" not in first["stable_system_prompt"]
+        assert "项目 A" in first["dynamic_context"]
+        assert "项目 B" in second["dynamic_context"]
+
     def test_prompt_contains_base_info(self):
         state = {
             "user_id": 1,
@@ -53,7 +104,9 @@ class TestBuildReactSystemPrompt:
             "memory_summaries": [],
         }
         prompt = build_react_system_prompt(state)
-        assert len(prompt) < 10000
+        # The compatibility single-string form includes the cache envelope;
+        # the live ReAct path sends the same data as two messages.
+        assert len(prompt) < 12000
 
     def test_always_active_skill_body_injected_when_active_skills_empty(self):
         """interview-tool-use (always_active=true) body must appear even with no active_skills."""

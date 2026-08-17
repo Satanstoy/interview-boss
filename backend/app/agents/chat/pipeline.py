@@ -16,7 +16,7 @@ from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.nodes import (
-    _repair_response_to_question_plan,
+    _repair_response_to_question_plan,  # noqa: F401 - compatibility re-export
     check_round_limit,
     extract_memory,
     load_history,
@@ -110,6 +110,7 @@ from app.agents.chat.metadata import (  # noqa: F401
     _public_question,
 )
 from app.agents.chat.trace import build_reasoning_trace, merge_trace_metadata
+from app.services.llm_usage import aggregate_cache_usage
 from app.agents.chat.turn_contract import plan_turn
 
 logger = logging.getLogger("interview-boss")
@@ -201,6 +202,7 @@ def _initial_state(
         "should_show_references": False,
         "active_skills": [],
         "tool_steps": [],
+        "llm_usage_trace": [],
         "turn_contract": None,
         "turn_intent": None,
     }
@@ -872,6 +874,15 @@ async def run_chat(
                 metadata["insights"] = collected_insights
                 metadata["tool_steps"] = collected_tool_steps or state.get(
                     "tool_steps", []
+                )
+                usage_trace = state.get("llm_usage_trace", [])
+                metadata["llm_usage"] = aggregate_cache_usage(
+                    [
+                        item.get("usage", {})
+                        for item in usage_trace
+                        if isinstance(item, dict)
+                        and isinstance(item.get("usage"), dict)
+                    ]
                 )
                 metadata = _add_interview_observability_metadata(
                     metadata,

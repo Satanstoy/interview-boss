@@ -40,8 +40,8 @@ class TestExtractMemoryRichCapture:
             "conversation_id": "test-conv-id",
         }
 
-        with patch("app.agents.chat.nodes.chat_service") as mock_svc, \
-             patch("app.agents.chat.nodes._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+        with patch("app.agents.chat.memory_extract.chat_service") as mock_svc, \
+             patch("app.agents.chat.memory_extract._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             import json
             mock_llm.return_value = json.dumps(mock_memories)
 
@@ -69,8 +69,8 @@ class TestExtractMemoryRichCapture:
             "conversation_id": "test-conv-id",
         }
 
-        with patch("app.agents.chat.nodes.chat_service") as mock_svc, \
-             patch("app.agents.chat.nodes._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+        with patch("app.agents.chat.memory_extract.chat_service") as mock_svc, \
+             patch("app.agents.chat.memory_extract._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "[]"
 
             await extract_memory(state)
@@ -98,8 +98,8 @@ class TestExtractMemoryRichCapture:
             "conversation_id": "test-conv-id",
         }
 
-        with patch("app.agents.chat.nodes.chat_service") as mock_svc, \
-             patch("app.agents.chat.nodes._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+        with patch("app.agents.chat.memory_extract.chat_service") as mock_svc, \
+             patch("app.agents.chat.memory_extract._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "[]"
 
             await extract_memory(state)
@@ -140,8 +140,8 @@ class TestExtractMemoryRichCapture:
             "conversation_id": "test-conv-id",
         }
 
-        with patch("app.agents.chat.nodes.chat_service") as mock_svc, \
-             patch("app.agents.chat.nodes._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
+        with patch("app.agents.chat.memory_extract.chat_service") as mock_svc, \
+             patch("app.agents.chat.memory_extract._call_llm_with_retry", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "[]"
 
             await extract_memory(state)

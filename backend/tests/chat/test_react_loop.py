@@ -1,6 +1,5 @@
 """TDD tests for _react_loop — ReAct agent core loop in pipeline.py."""
 
-import asyncio
 import json
 import logging
 import pytest
@@ -3032,7 +3031,6 @@ class TestRepetitionProtection:
         """After MAX_CONSECUTIVE same-topic questions, protection note appears."""
         from app.agents.chat.pipeline import (
             _build_repetition_protection_note,
-            _MAX_CONSECUTIVE_SAME_QUESTION,
         )
 
         # Build a history where the last 3 assistant messages all ask about LRU Cache
@@ -3118,11 +3116,11 @@ class TestRepetitionProtection:
             }
         )
 
-        system_prompts: list[str] = []
+        dynamic_contexts: list[str] = []
 
         async def mock_llm(messages, *args, **kwargs):
-            system_prompts.append(messages[0]["content"])
-            if len(system_prompts) == 1:
+            dynamic_contexts.append(messages[1]["content"])
+            if len(dynamic_contexts) == 1:
                 return {
                     "content": None,
                     "tool_calls": [
@@ -3161,9 +3159,9 @@ class TestRepetitionProtection:
             async for event in _react_loop(base_state):
                 events.append(event)
 
-        assert len(system_prompts) == 2
-        assert "节奏保护" in system_prompts[0]
-        assert "节奏保护" in system_prompts[1]
+        assert len(dynamic_contexts) == 2
+        assert "节奏保护" in dynamic_contexts[0]
+        assert "节奏保护" in dynamic_contexts[1]
         assert any(e.get("type") == "chunk" for e in events)
 
 

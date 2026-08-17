@@ -117,6 +117,7 @@ class ChatState(TypedDict, total=False):
     response: str  # AI 面试官回复
     metadata: dict  # 回复元数据（检索到的题目等）
     tool_steps: list[dict]  # 本轮工具调用摘要，只进 metadata，不作为 raw payload 暴露
+    llm_usage_trace: list[dict]  # LLM token/cache usage per ReAct step
 
     # === 生成依据（basis） ===
     basis_type: str  # 'question' | 'resume' | 'conversation' | 'mixed' | 'none'

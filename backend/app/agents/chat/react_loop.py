@@ -6,7 +6,6 @@ budget control, tool validation, trace logging, and event emission.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -14,7 +13,6 @@ from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from app.agents.chat.answer import (
-    _final_answer_events_from_text,
     OutputDeduplicator,
     _stream_final_answer,  # kept for backward compat, no longer called in main path
 )
@@ -23,14 +21,15 @@ from app.agents.chat.routing import should_record_retrieval_gap
 from app.agents.chat.metadata import _extract_company, _extract_round
 from app.agents.chat.nodes import (
     _build_next_question_plan_prompt,
-    build_react_system_prompt,
+    build_react_system_prompt,  # noqa: F401 - compatibility for existing imports/tests
+    build_react_prompt_parts,
     build_runtime_tool_contract_message,
 )
+from app.agents.chat.prompt_cache import build_prompt_cache_fingerprint
 from app.agents.chat.question_plan import (
     _build_previously_asked_section,
     _build_repetition_protection_note,
     _maybe_create_question_plan,
-    _should_require_bank_question,
 )
 from app.agents.chat.state import ChatState
 from app.agents.chat.stop_policy import evaluate_interview_stop
@@ -302,15 +301,21 @@ def _log_react_llm_step(
     finish_reason: str | None,
     tool_count: int,
     elapsed_ms: int,
+    cache_fingerprint: str | None = None,
+    cache_usage: dict | None = None,
 ) -> None:
     logger.info(
         "ReAct trace: event=llm_step conversation_id=%s react_step=%s "
-        "finish_reason=%s tool_count=%s elapsed_ms=%s",
+        "finish_reason=%s tool_count=%s elapsed_ms=%s "
+        "cache_fingerprint=%s cached_input_tokens=%s input_tokens=%s",
         state.get("conversation_id"),
         react_step,
         finish_reason,
         tool_count,
         elapsed_ms,
+        cache_fingerprint,
+        (cache_usage or {}).get("cached_input_tokens"),
+        (cache_usage or {}).get("input_tokens"),
     )
 
 
@@ -533,16 +538,6 @@ async def _prepare_distribution_primary_question(state: ChatState) -> bool:
     # fabricated completed primary question for this plan.
     state["distribution_primary_required"] = False
     return False
-    logger.info(
-        "ReAct trace: event=retrieval_gap_recorded conversation_id=%s "
-        "intent=%s answer_quality=%s tool_names=%s",
-        state.get("conversation_id"),
-        state.get("intent"),
-        state.get("answer_quality"),
-        tool_names,
-    )
-
-
 async def _stream_final_answer_with_retry(
     messages: list[dict],
     state: ChatState,
@@ -597,7 +592,7 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     """ReAct loop: LLM autonomously selects tools, then streams final answer.
 
     Flow:
-    1. Build system prompt (with skill catalog + tool guidance)
+    1. Build a stable system prefix and dynamic context suffix
     2. Build messages
     3. ReAct loop: LLM calls tools or answers directly
     4. Stream final answer
@@ -700,27 +695,26 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
     await _prepare_distribution_primary_question(state)
 
-    # 1. Build system prompt
-    system_prompt = build_react_system_prompt(state)
-    state["active_skill_instructions"] = []  # consumed; skills baked into system prompt
+    # 1. Build a stable system prefix and a dynamic context suffix.  The
+    # provider can only reuse a prompt/KV prefix when it is byte-for-byte
+    # identical, so turn-scoped data must not be placed in messages[0].
+    prompt_parts = build_react_prompt_parts(state)
+    state["active_skill_instructions"] = []  # consumed; skills baked into dynamic context
 
     # 1.5 Inject repetition protection if needed
     repetition_note = _build_repetition_protection_note(state)
     if repetition_note:
-        system_prompt += f"\n\n{repetition_note}"
+        prompt_parts["dynamic_context"] += f"\n\n{repetition_note}"
 
     # 2. Build messages
-    messages: list[dict] = [{"role": "system", "content": system_prompt}]
-
-    # Compressed context
-    compressed = state.get("compressed_context")
-    if compressed:
-        messages.append(
-            {
-                "role": "user",
-                "content": f"[以下是更早对话的压缩摘要，由系统生成，不是候选人的话]\n{compressed}",
-            }
-        )
+    messages: list[dict] = [
+        {"role": "system", "content": prompt_parts["stable_system_prompt"]},
+        {"role": "system", "content": prompt_parts["dynamic_context"]},
+    ]
+    tools = chat_tools.get_tools_for_state(state)
+    cache_fingerprint = build_prompt_cache_fingerprint(
+        prompt_parts["stable_system_prompt"], tools, state.get("model")
+    )
 
     # Recent messages
     for msg in state.get("recent_messages", [])[-10:]:
@@ -760,20 +754,26 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         if time.monotonic() - react_started > REACT_BUDGET.max_seconds:
             stop_reason = "max_seconds"
             break
-        # Rebuild system prompt if skills were loaded in previous step
+        # A loaded skill changes only the dynamic suffix.  Keep the stable
+        # system prefix untouched so the next request can still reuse it when
+        # the provider supports prefix caching.
         if step > 0 and state.get("active_skill_instructions"):
-            system_prompt = build_react_system_prompt(state)
+            prompt_parts = build_react_prompt_parts(state)
             if repetition_note:
-                system_prompt += f"\n\n{repetition_note}"
-            messages[0] = {"role": "system", "content": system_prompt}
+                prompt_parts["dynamic_context"] += f"\n\n{repetition_note}"
+            messages[1] = {
+                "role": "system",
+                "content": prompt_parts["dynamic_context"],
+            }
             state["active_skill_instructions"] = []  # consumed
         llm_started = time.monotonic()
         try:
             result = await llm_service.llm_with_tools(
                 messages,
-                chat_tools.get_tools_for_state(state),
+                tools,
                 user_id=state["user_id"],
                 model=state.get("model"),
+                prompt_cache_key=cache_fingerprint,
             )
         except Exception as e:
             logger.error(f"ReAct step {step} LLM call failed: {e}")
@@ -790,6 +790,15 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             finish_reason=result.get("finish_reason"),
             tool_count=len(tool_calls),
             elapsed_ms=llm_elapsed_ms,
+            cache_fingerprint=cache_fingerprint,
+            cache_usage=result.get("usage"),
+        )
+        state.setdefault("llm_usage_trace", []).append(
+            {
+                "react_step": react_step,
+                "prompt_cache_fingerprint": cache_fingerprint,
+                "usage": result.get("usage") or {},
+            }
         )
 
         if not tool_calls:

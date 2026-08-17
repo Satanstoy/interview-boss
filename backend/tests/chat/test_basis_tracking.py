@@ -245,11 +245,28 @@ async def _run_basis_turn(
             "finish_reason": "tool_calls",
         },
         {
+            "content": None,
+            "tool_calls": [
+                tool_call(
+                    "select_question",
+                    {"candidate_index": 0, "question_source": "search"},
+                    tc_id="call_2",
+                ),
+            ],
+            "finish_reason": "tool_calls",
+        },
+        {
             "content": llm_response_text,
             "tool_calls": None,
             "finish_reason": "stop",
         },
     ]
+
+    def authoritative_question(question_id, state):
+        return next(
+            (question for question in search_results if question["id"] == question_id),
+            None,
+        )
 
     events, state, _ = await run_single_turn(
         user_message="给我出一道 Redis 相关的题",
@@ -258,6 +275,14 @@ async def _run_basis_turn(
         stream_chunks=stream_chunks,
         tool_patches=[
             patch("app.mcp_server.interview_tools._hybrid_search_for_tool", search_mock),
+            patch(
+                "app.mcp_server.interview_tools.load_active_position_rows",
+                return_value=[{"id": 1, "name": "后端开发", "description": ""}],
+            ),
+            patch(
+                "app.mcp_server.interview_tools._load_authoritative_question",
+                side_effect=authoritative_question,
+            ),
             patch(
                 "app.agents.chat.writers.question_writer.generate_question_with_validation",
                 new_callable=AsyncMock,
