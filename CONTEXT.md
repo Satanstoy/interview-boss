@@ -16,19 +16,43 @@ _避免使用_: 被测 Agent（当目标不是 Agent 时）
 评测系统建立时对整个 InterviewBoss 行为状态的固定起点，用于后续判断目标版本的变化。
 
 **评测系统 1.0 基线（Evaluation System 1.0 Baseline）**:
-当前评测系统建设采用的初始冻结基线，包含当前系统基线以及各评测目标、Simulator Harness、Candidate Simulator、Judge、Benchmark Suite 和评测协议的初始 `1.0` 版本。`1.0` 表示可追溯的版本起点，不表示所有评测指标已经达到合格标准；后续变化产生新的组件版本，不覆盖或重写 `1.0`。
+当前评测系统建设采用的初始冻结基线，包含当前系统基线、各评测目标的初始版本，以及按目标组织的完整评测版本 `1.0`。完整评测版本内部包含 Benchmark、评测协议、Judge、Harness、Candidate Simulator 和相关模型配置。`1.0` 表示可追溯的版本起点，不表示所有评测指标已经达到合格标准；后续变化产生新的目标版本或评测版本，不覆盖或重写 `1.0`。
 
 **版本 Manifest（Release Manifest）**:
-描述一个评测组件不可变版本的权威 JSON 快照，包含代码、运行环境、模型、Prompt、Skill、工具、采样和其他会影响评测结果的配置，并通过内容摘要保证创建后不可静默修改。数据库只保存其可查询索引和引用关系，不替代 Manifest 原文。
+描述一个 Target Release 或 Evaluation Release 的不可变版本权威 JSON 快照：前者记录被测对象的行为配置，后者记录完整评测内容及评测侧运行配置。Manifest 包含代码、运行环境、模型、Prompt、Skill、工具、采样和其他会影响评测结果的配置，并通过内容摘要保证创建后不可静默修改。数据库只保存可查询索引和引用关系，不替代 Manifest 原文。
+
+**版本草稿（Release Draft）**:
+一个尚未发布、允许管理员编辑的 Target Release 或 Evaluation Release；它可以被校验、复制和继续修改，也可以用于探索性 Eval Run，但不能直接作为正式人工 A/B 的不可变版本依据。
+_避免使用_: 可编辑 Release
+
+**已发布版本（Published Release）**:
+一个已经冻结、可被正式 Eval Run 和人工 A/B 绑定的不可变 Target Release 或 Evaluation Release；对其参数的任何改变都必须复制为新的版本草稿，不得原地覆盖。
+_避免使用_: 线上版本（评测版本不等同于用户服务发布版本）
+
+**评测配置显示名（Evaluation Configuration Display Label）**:
+评测控制台面向管理员展示的中文字段名、分组名、说明和校验提示；它只负责可读性，底层 API、Manifest 和数据库继续使用稳定的英文字段与枚举。
+_避免使用_: 用中文替换领域字段名
+
+**结构化评测配置表单（Structured Evaluation Configuration Form）**:
+管理员通过按版本类型和评测职责组织的中文字段表单编辑 Release Draft；常用参数直接展示，高级参数折叠，规范化 Manifest 原文只用于查看、审计和导出，不作为 1.0 的主要编辑入口。
+_避免使用_: 原始 JSON 配置编辑器
+
+**评测版本发布工作区（Evaluation Release Workspace）**:
+评测控制台分别管理评测目标版本和按目标组织的完整评测版本；完整评测版本内部以中文配置分组呈现评测题集、评测规则、评分模型、模拟面试执行器和候选人模拟器，但这些分组不作为管理员单独维护的公开版本。
+_避免使用_: 六类公开组件版本
+
+**评测凭证引用（Evaluation Credential Reference）**:
+Release Manifest 中对模型服务凭证来源的稳定标识，例如全局 LLM 凭证或 SiliconFlow Embedding 凭证；它不包含 API Key 明文，实际密钥由全局模型配置或运行环境提供。
+_避免使用_: Release API Key
 
 **执行镜像摘要（Execution Image Digest）**:
 Release Manifest 中用于锁定实际运行容器的不可变 Docker image digest；系统同时记录 Git SHA 和配置摘要，分别追溯源码、运行环境和行为配置，正式 Benchmark 不使用可变的 `latest` 标签作为唯一执行依据。
 
 **评测运行（Eval Run）**:
-管理员针对一个具体评测目标版本发起的一次完整评测执行记录；创建后锁定目标版本、Benchmark Suite、评测协议、Judge、Simulator Harness 和 Candidate Simulator 等依赖，并独立保存执行状态、原始轨迹和评分结果。
+管理员针对一个具体评测目标版本和一个完整评测版本发起的一次完整评测执行记录；创建后锁定这两个版本及其规范化执行快照，并独立保存执行状态、原始轨迹和评分结果。
 
 **评测批次（Eval Batch）**:
-一组共享同一执行上下文的 Eval Run 或 Eval Run Item；批次级的目标版本、Benchmark、评测协议、Judge、Harness、Candidate Simulator、运行环境、超时、重试、采样和并发规则必须一致。Case 输入、Replication 序号和按规则生成的 seed 属于 Item 级差异。
+一组共享同一执行上下文的 Eval Run 或 Eval Run Item；批次级的评测目标版本、完整评测版本、运行环境、超时、重试、采样和并发规则必须一致。Case 输入、Replication 序号和按规则生成的 seed 属于 Item 级差异。
 
 **评测 Item Attempt**:
 同一个 Eval Run Item 的一次实际执行尝试，用于记录 Worker 崩溃、网络错误、超时等操作性重试；Attempt 不增加统计样本数，原始失败 Attempt 不被覆盖，Item 最终引用一个有效 Attempt。
@@ -64,7 +88,7 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 运行在宿主机上的轻量调度器，负责发现待处理或需要恢复的 Eval Run、获取单实例启动锁并按需拉起 Compose Eval Worker；它不执行评测逻辑，也不由 FastAPI 请求直接驱动。
 
 **评测控制台（Evaluation Control Plane）**:
-面向管理员的前端控制界面，用于选择评测目标版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
+面向管理员的前端控制界面，用于管理评测目标版本和完整评测版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
 **评测中心（Evaluation Center）**:
 评测控制台在应用侧栏中的管理员分组标题；分组下先展示位于流程之上的测评可视化，再按“版本与发布、Benchmark、测评实验、评测结果、人工 A/B”五步顺序展示流程 Tab，运行详情作为这些页面中的路由下钻，不单独占用侧栏 Tab。
@@ -74,7 +98,23 @@ _避免使用_: 再增加一层评测中心内部导航
 由持久化的 `eval_run_events` 驱动的管理员 SSE 进度流；每个事件具有单调序号，支持通过 `Last-Event-ID` 断线重放。SSE 连接断开不改变 Eval Run 状态，取消必须通过独立的管理员操作完成。
 
 **评测目标版本（Evaluation Target Release）**:
-某个 Agent、Workflow 或 Pipeline 在特定代码、配置和评测依赖状态下的不可变行为快照；不同目标分别维护版本，不因其他目标变化而自动改版本。
+某个 Agent、Workflow 或 Pipeline 在特定代码、工作流、Prompt、工具和被测对象模型配置下的不可变行为快照；不同目标分别维护版本，不因其他目标或评测配置变化而自动改版本。
+
+**完整评测版本（Evaluation Release）**:
+面向一个评测目标的完整评测内容不可变快照，包含 Benchmark、评测协议、Judge、Simulator Harness、Candidate Simulator、Embedding/Retrieval 和相关模型参数；它与被测目标版本独立维护，但一次 Eval Run 必须一对一绑定一个目标版本和一个完整评测版本。
+_避免使用_: 评测组件版本、评测配置包
+
+**评测版本作用域（Evaluation Release Scope）**:
+完整评测版本按评测目标类型组织，例如 `interview-eval@1.0`、`experience-extraction-eval@1.0` 和 `resume-analysis-eval@1.0`；同一目标类型的多个 Target Release 可以复用同一完整评测版本，以保证回归和 A/B 的公平性。它不绑定某一个具体 Target Release，不同目标类型不能混用。
+
+**评测行为配置归属（Evaluation Behavior Ownership）**:
+会改变产品正常行为的代码、Workflow、Prompt、工具和被测对象模型属于 Target Release；决定“如何测”的 Benchmark、协议、Judge、Harness、Candidate Simulator、评测侧模型及其参数属于 Evaluation Release。一次评测的主版本边界只有这两个 Release。
+
+**评测运行快照（Eval Run Snapshot）**:
+Eval Run 创建时由后端解析并固化 Target Release、Evaluation Release 及其全部有效配置，至少包含两个 Manifest、Git SHA、配置摘要、模型标识与参数、随机种子策略、运行时限制和可获得的镜像摘要；执行、重试、恢复和重放只读取该快照，不重新读取可变草稿或全局默认配置。
+
+**可评测草稿（Runnable Draft）**:
+允许管理员用当前草稿启动探索性 Eval Run，以便快速验证配置；结果必须明确标记为 Draft Run，不能用于正式回归门禁或人工 A/B。发布后生成的 Published Release 才能进入正式比较。
 
 **Target Adapter**:
 评测目标接入 AI Evaluation System 的统一执行适配器，负责准备 Case、执行已锁定的 Target Release 和将原始结果转换为标准 Observation；它不负责决定 Benchmark 量规、Judge 结论或管理员聚合策略。
@@ -88,11 +128,11 @@ Target Adapter 输出的最小标准执行结果外壳，包含生命周期状�
 **固定基准集（Fixed Benchmark Suite）**:
 由不可变的基准案例组成、用于版本回归和发布判断的评测集合；它与会持续变化的生产采样集分开维护。
 
-**Benchmark Suite 1.0**:
-当前评测框架已有 12 个模拟面试场景组成的初始固定基准集；每个场景需要固化为 Benchmark Case，并补齐 Expected Behavior、Hard Assertions、Quality Rubric 和 Replication Policy 后，才能作为正式版本门禁。
+**初始模拟面试 Benchmark**:
+当前评测框架已有 12 个模拟面试场景组成的初始固定基准集；每个场景需要固化为 Benchmark Case，并补齐 Expected Behavior、Hard Assertions、Quality Rubric 和 Replication Policy 后，才能进入 `interview-eval@1.0` 的正式版本门禁。
 
-**目标专属 Benchmark Suite（Target-specific Benchmark Suite）**:
-为一个评测目标或同类目标定义的固定基准集；模拟面试、面经提取和简历分析分别维护自己的案例、量规和版本，不能将不同目标的指标混在一个 Suite 中聚合。
+**目标专属 Benchmark 内容（Target-specific Benchmark Content）**:
+为一个评测目标或同类目标定义的固定基准集；模拟面试、面经提取和简历分析分别维护自己的案例和量规，并放入各自的 Evaluation Release，不能将不同目标的指标混在一个结果中聚合。
 
 **Scenario**:
 描述测试意图、面试行为模式或失败模式的场景族；它可以包含多个不同输入和候选人行为的 Benchmark Case，不直接等同于一次执行样本。
@@ -124,26 +164,26 @@ Candidate Simulator 只接收候选人在真实面试中可见的白名单上下
 **评测评分流水线（Evaluation Scoring Pipeline）**:
 按 Harness 合约校验、Hard Assertions、LLM Judge、结果聚合的顺序处理有效 Observation；Harness 无效时终止该 Item，Agent 行为触发硬断言失败时仍可继续 Judge 以保留质量诊断。
 
-**评测裁判版本（Judge Release）**:
-用于执行评测判断的一组不可变裁判配置快照；它决定评测结果如何产生，历史结果必须保留其对应的裁判版本。
+**评测裁判配置（Judge Configuration）**:
+完整评测版本内部用于执行评测判断的一组不可变裁判配置，包含 Judge Model、Prompt、温度、结构化输出约束和评分规则；它决定评测结果如何产生，历史结果通过对应的完整评测版本追溯，不作为管理员单独发布的公开版本。
 
 **端到端面试评测（Interview E2E Evaluation）**:
 对一场完整多轮模拟面试的整体质量评估，综合候选人输入、面试官输出、工具轨迹、状态推进和最终收口；单步评测用于诊断，不替代端到端结论。
 
 **E2E 重复评测组（E2E Replication Group）**:
-在相同评测目标版本、基准案例和评测协议下重复执行多场端到端面试，并将这些运行作为一个稳定性统计单元。
+在相同评测目标版本、完整评测版本和基准案例下重复执行多场端到端面试，并将这些运行作为一个稳定性统计单元。
 
-**模拟器 Harness 版本（Simulator Harness Release）**:
-用于编排和观测 Candidate Simulator 的不可变评测基础设施快照，至少包含运行器、对话状态推进、工具与环境夹具、超时与重试策略、随机性配置、轨迹采集和输入组装规则；它与 Candidate Simulator Release 分开版本化。
+**模拟器 Harness 配置（Simulator Harness Configuration）**:
+完整评测版本内部用于编排和观测 Candidate Simulator 的不可变评测基础设施配置，至少包含运行器、对话状态推进、工具与环境夹具、超时与重试策略、随机性配置、轨迹采集和输入组装规则；它与 Candidate Simulator 配置分开分组，但不作为管理员单独维护的公开版本。
 
-**Candidate Simulator 版本（Candidate Simulator Release）**:
-用于生成候选人行为的不可变模拟器快照，包含模拟器模型、System Prompt、候选人画像、回复策略、工具配置和采样参数；它与被测评测目标版本、Simulator Harness Release 和 Judge Release 分开记录。
+**Candidate Simulator 配置（Candidate Simulator Configuration）**:
+完整评测版本内部用于生成候选人行为的不可变模拟器配置，包含模拟器模型、System Prompt、候选人画像、回复策略、工具配置和采样参数；它与被测评测目标版本分开记录，并随完整评测版本整体更新。
 
 **评测稳定性指标（Evaluation Stability Metrics）**:
 描述重复评测组整体水平和波动性的统计结果，包括典型质量、离散程度、失败率和关键门禁状态，不只使用单次分数或均值。
 
-**评测协议 1.0（Eval Protocol 1.0）**:
-默认每个 Benchmark Case 执行 5 次 Replication；当结果接近 Suite 门槛或波动超过协议阈值时，通过独立扩展 Batch 增加到 10 次。协议同时定义超时、重试预算、聚合方式、质量权重和通过门槛。
+**评测协议（Eval Protocol）**:
+完整评测版本内部的执行协议：每个 Benchmark Case 默认执行 5 次 Replication；当结果接近 Suite 门槛或波动超过协议阈值时，通过独立扩展 Batch 增加到 10 次。协议同时定义超时、重试预算、聚合方式、质量权重和通过门槛，不作为管理员单独维护的公开版本。
 
 **生产采样集（Production Sample Set）**:
 从真实使用中脱敏采样形成、用于发现分布变化和新问题的评测集合；它不直接作为固定版本回归的唯一依据。

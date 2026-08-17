@@ -6,4 +6,4 @@ Benchmark Case 的所有输入上下文必须在 Case 创建或发布时快照�
 
 Case Input Snapshot 至少记录来源类型、规范化内容、Schema 版本、创建时间和内容摘要。历史来源可以保留 source metadata 用于追溯，但重放和比较只依赖 Snapshot 内容。
 
-如果输入需要更新，创建新的 Case Release 或新的 Snapshot 绑定，不修改旧 Case。这样相同 Case 在不同 Target Release、Judge Release、Candidate Simulator Release 和 Harness Release 下可以公平重放，输入变化也不会被误判为 Agent 质量变化。
+如果输入需要更新，创建新的 Snapshot 绑定，并生成新的 Evaluation Release，不修改旧 Case 或旧 Release。这样相同 Case 在不同 Target Release 下可以公平重放；Judge、Candidate Simulator 和 Harness 的变化通过新的 Evaluation Release 固定，输入变化也不会被误判为 Agent 质量变化。

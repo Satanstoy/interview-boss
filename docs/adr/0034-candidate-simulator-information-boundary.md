@@ -2,7 +2,7 @@
 
 **Status:** accepted
 
-Candidate Simulator 必须模拟一个只知道候选人可见信息的外部参与者。Harness 通过显式的 `candidate_view` 白名单输入向 Simulator 提供简历、JD、当前问题、历史对话和其他真实候选人可见上下文；Expected Behavior、Hard Assertions、Quality Rubric、Judge Release、评分结果和内部诊断信息始终留在 Harness/Judge 上下文中。
+Candidate Simulator 必须模拟一个只知道候选人可见信息的外部参与者。Harness 通过显式的 `candidate_view` 白名单输入向 Simulator 提供简历、JD、当前问题、历史对话和其他真实候选人可见上下文；Expected Behavior、Hard Assertions、Quality Rubric、Judge 配置、评分结果和内部诊断信息始终留在 Harness/Judge 上下文中。
 
 该边界不是 Prompt 约定，而是输入契约：
 
