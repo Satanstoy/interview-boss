@@ -29,7 +29,11 @@ const releaseFields = [
   { key: 'simulator', label: '候选人模拟器', type: 'candidate_simulator', help: '负责生成候选人在面试中的行为。' },
 ]
 
-const byType = computed(() => type => releases.value.filter(release => release.release_type === type && release.status === 'published'))
+const byType = computed(() => type => releases.value.filter(release => (
+  release.release_type === type
+  && release.status === 'published'
+  && (!release.target_type || !selectedTargetType.value || release.target_type === selectedTargetType.value)
+)))
 
 function chooseDefaults() {
   const defaults = {
@@ -44,13 +48,19 @@ function chooseDefaults() {
       : releases.value.find(item => item.release_key === key)
     if (found) form.value[field] = String(found.id)
   }
-  selectedTargetType.value = releases.value.find(release => String(release.id) === form.value.target)?.target_type || 'interview'
+  selectedTargetType.value = releases.value.find(release => String(release.id) === form.value.target)?.target_type || ''
 }
 
 function selectTargetType(type) {
   selectedTargetType.value = type
   const targetRelease = releases.value.find(release => release.target_type === type && release.release_type === 'target' && release.status === 'published')
   if (targetRelease) form.value.target = String(targetRelease.id)
+  for (const field of releaseFields) {
+    const candidates = byType.value(field.type)
+    if (!candidates.some(release => String(release.id) === form.value[field.key])) {
+      form.value[field.key] = candidates[0] ? String(candidates[0].id) : ''
+    }
+  }
 }
 
 async function load() {
@@ -69,6 +79,10 @@ async function load() {
 }
 
 async function submit() {
+  if (!selectedTargetType.value) {
+    error.value = '当前被测版本没有评测对象类型，请先选择一个已接入的目标版本。'
+    return
+  }
   submitting.value = true
   error.value = ''
   try {

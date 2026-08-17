@@ -91,7 +91,7 @@ export function releaseTypeMeta(type) {
 }
 
 export function evaluationTargetLabel(type) {
-  return EVALUATION_TARGETS.find(target => target.key === type)?.label || type || '未知评测对象'
+  return EVALUATION_TARGETS.find(target => target.key === type)?.label || (type ? `未知评测对象（${type}）` : '未知评测对象')
 }
 
 export function checkStatusLabel(status) {

@@ -151,6 +151,9 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('固定的 Case、输入快照与质量要求。')).toBeVisible()
     const tableLayout = await page.locator('table').first().evaluate(element => getComputedStyle(element).tableLayout)
     expect(tableLayout).toBe('fixed')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.locator('table').first()).toHaveJSProperty('scrollWidth', await page.locator('table').first().evaluate(element => element.clientWidth))
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {
