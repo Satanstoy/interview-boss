@@ -164,6 +164,7 @@ from app.db.migrations.schema_hygiene import (
     _migration_086_drop_dead_columns_indexes,
 )
 from app.db.migrations.llm import _migration_089_llm_usage
+from app.db.migrations.schema_hygiene_2 import migration_090_analysis_queue_fk
 
 logger = logging.getLogger("interview-boss")
 
@@ -265,6 +266,7 @@ _MIGRATIONS = [
     (87, "evaluation_control_plane", _migration_087_evaluation_control_plane),
     (88, "practice_review_idempotency", _migration_088_practice_review_idempotency),
     (89, "llm_usage", _migration_089_llm_usage),
+    (90, "analysis_queue_fk_cascade", migration_090_analysis_queue_fk),
 ]
 
 
