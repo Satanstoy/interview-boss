@@ -63,6 +63,68 @@ async def get_llm_status(probe: int = 0, user: dict = Depends(get_current_user))
     return await check_llm_status(user["id"], force_probe=bool(probe))
 
 
+@router.post("/api/profile/llm/validate")
+async def validate_my_llm_config(req: dict, user: dict = Depends(get_current_user)):
+    """探测未保存的 LLM 配置，返回实际接口格式和必要的切换建议。"""
+
+    def _text_value(name: str, default: str = "") -> str:
+        value = req.get(name)
+        if value is None:
+            return default
+        if not isinstance(value, str):
+            raise HTTPException(status_code=400, detail=f"{name} 必须是文本")
+        return value.strip()
+
+    api_key = _text_value("llm_api_key")
+    base_url = _text_value("llm_base_url")
+    model = _text_value("llm_model")
+    api_format = _text_value("llm_api_format", "auto").lower()
+
+    if not model:
+        raise HTTPException(status_code=400, detail="模型名称不能为空")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Base URL 不能为空")
+    try:
+        validate_outbound_url_syntax(base_url)
+    except OutboundURLBlocked as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if api_format not in ("auto", "chat", "responses", "anthropic"):
+        raise HTTPException(
+            status_code=400,
+            detail="接口类型无效，可选：auto / chat / responses / anthropic",
+        )
+
+    if not api_key:
+        def _resolve_existing_key():
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT api_key FROM user_llm_config WHERE user_id = ?",
+                    (user["id"],),
+                ).fetchone()
+                return decrypt_value(row["api_key"]) if row and row["api_key"] else ""
+
+        api_key = await run_db(_resolve_existing_key)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 不能为空")
+
+    timeout = req.get("llm_timeout")
+    try:
+        timeout = int(timeout) if timeout is not None else 120
+        timeout = max(5, min(timeout, 600))
+    except (ValueError, TypeError):
+        timeout = 120
+
+    from app.services.llm import validate_llm_api_format
+
+    return await validate_llm_api_format(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout=timeout,
+        requested_format=api_format,
+    )
+
+
 @router.post("/api/profile/llm/test-global")
 async def test_global_llm(admin: dict = Depends(get_admin_user)):
     """用全局 LLM 配置探测连通性（仅管理员，绕过缓存）"""

@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
-import { fetchMyLLMConfig, updateMyLLMConfig, deleteMyLLMConfig } from '@/services/profileApi.js'
+import { fetchMyLLMConfig, validateMyLLMConfig, updateMyLLMConfig, deleteMyLLMConfig } from '@/services/profileApi.js'
 import { validateBaseUrl } from '@/utils/validate.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import ModelSelectField from '@/components/business/ModelSelectField.vue'
 
-const { success: toastSuccess, error: toastError } = useToast()
+const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
 const { confirm: showConfirm } = useConfirm()
 const { invalidateModelStatus, testModelConnection, testing } = useModelGuard()
 const loading = ref(false)
@@ -18,6 +18,10 @@ const saving = ref(false)
 const configured = ref(false)
 const editKey = ref(false)
 const showKey = ref(false)
+const validating = ref(false)
+const validationState = ref('')
+const validationMessage = ref('')
+const validatedFingerprint = ref('')
 
 const settings = reactive({
   llm_api_key: '',
@@ -64,38 +68,122 @@ const startEdit = () => {
   form.llm_timeout = settings.llm_timeout || 120
   form.llm_api_format = settings.llm_api_format || 'auto'
   form.llm_thinking = !!settings.llm_thinking
+  validatedFingerprint.value = ''
+  validationState.value = ''
+  validationMessage.value = ''
 }
 
-const handleSave = async () => {
-  error.value = ''
+const invalidateValidation = () => {
+  validatedFingerprint.value = ''
+  if (!validating.value) {
+    validationState.value = ''
+    validationMessage.value = ''
+  }
+}
 
+const validationFingerprint = () => JSON.stringify({
+  apiKey: form.llm_api_key.trim(),
+  baseUrl: form.llm_base_url.trim(),
+  model: form.llm_model.trim(),
+  timeout: Number(form.llm_timeout) || 120,
+  apiFormat: form.llm_api_format || 'auto',
+})
+
+const validateLocalFields = () => {
   if (!form.llm_base_url.trim()) {
     error.value = 'Base URL 不能为空'
-    return
+    return false
   }
   const urlResult = validateBaseUrl(form.llm_base_url, 'Base URL')
   if (!urlResult.valid) {
     error.value = urlResult.error
-    return
+    return false
   }
   if (!form.llm_model.trim()) {
     error.value = '模型名称不能为空'
-    return
+    return false
+  }
+  return true
+}
+
+const buildConfigPayload = () => {
+  const payload = {
+    llm_base_url: form.llm_base_url.trim(),
+    llm_model: form.llm_model.trim(),
+    llm_timeout: Number(form.llm_timeout) || 120,
+    llm_api_format: form.llm_api_format || 'auto',
+    llm_thinking: !!form.llm_thinking,
+  }
+  if (form.llm_api_key.trim()) {
+    payload.llm_api_key = form.llm_api_key.trim()
+  }
+  return payload
+}
+
+const validateFormConnection = async () => {
+  error.value = ''
+  if (!validateLocalFields()) return false
+
+  validating.value = true
+  validationState.value = ''
+  validationMessage.value = '正在探测接口格式，请稍候...'
+  const probeFingerprint = validationFingerprint()
+  try {
+    const result = await validateMyLLMConfig(buildConfigPayload())
+    if (validationFingerprint() !== probeFingerprint) {
+      validatedFingerprint.value = ''
+      validationState.value = 'warning'
+      validationMessage.value = '配置在探测期间发生变化，请重新检测接口'
+      toastWarning(validationMessage.value)
+      return false
+    }
+    if (result.connected && result.compatible) {
+      validationState.value = 'success'
+      validationMessage.value = result.message || '接口格式校验成功'
+      validatedFingerprint.value = probeFingerprint
+      return true
+    }
+
+    if (result.connected && result.suggested_format) {
+      form.llm_api_format = result.suggested_format
+      validatedFingerprint.value = ''
+      validationState.value = 'warning'
+      validationMessage.value = result.message || '已切换到检测到的接口格式，请再次保存确认'
+      toastWarning(validationMessage.value)
+      return false
+    }
+
+    validationState.value = 'error'
+    validationMessage.value = result.error || result.message || '接口探测失败，请检查配置'
+    toastError(validationMessage.value)
+    return false
+  } catch (e) {
+    validationState.value = 'error'
+    validationMessage.value = `接口探测失败：${e.message}`
+    toastError(validationMessage.value)
+    return false
+  } finally {
+    validating.value = false
+  }
+}
+
+const handleFormatChange = (value) => {
+  form.llm_api_format = value
+  invalidateValidation()
+}
+
+const handleSave = async () => {
+  error.value = ''
+  if (!validateLocalFields()) return
+
+  if (validatedFingerprint.value !== validationFingerprint()) {
+    const valid = await validateFormConnection()
+    if (!valid) return
   }
 
   saving.value = true
   try {
-    const payload = {
-      llm_base_url: form.llm_base_url.trim(),
-      llm_model: form.llm_model.trim(),
-      llm_timeout: Number(form.llm_timeout) || 120,
-      llm_api_format: form.llm_api_format || 'auto',
-      llm_thinking: !!form.llm_thinking,
-    }
-    if (form.llm_api_key) {
-      payload.llm_api_key = form.llm_api_key.trim()
-    }
-    await updateMyLLMConfig(payload)
+    await updateMyLLMConfig(buildConfigPayload())
     toastSuccess('AI 配置已保存')
     invalidateModelStatus()
     await loadConfig()
@@ -159,6 +247,7 @@ onMounted(loadConfig)
               :type="showKey ? 'text' : 'password'"
               placeholder="输入 API Key"
               class="font-mono pr-10"
+              @input="invalidateValidation"
             />
             <button
               @click="showKey = !showKey"
@@ -179,12 +268,24 @@ onMounted(loadConfig)
         <!-- Base URL -->
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">Base URL <span class="text-destructive">*</span></Label>
-          <Input
-            v-model="form.llm_base_url"
-            type="text"
-            placeholder="https://api.openai.com/v1"
-            class="font-mono"
-          />
+          <div class="flex gap-2">
+            <Input
+              v-model="form.llm_base_url"
+              type="text"
+              placeholder="https://api.openai.com/v1"
+              class="font-mono flex-1"
+              @input="invalidateValidation"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="saving || validating"
+              @click="validateFormConnection"
+            >
+              {{ validating ? '探测中...' : '检测接口' }}
+            </Button>
+          </div>
         </div>
 
         <!-- Model -->
@@ -193,6 +294,7 @@ onMounted(loadConfig)
           <ModelSelectField
             v-model="form.llm_model"
             placeholder="gpt-4o"
+            @update:model-value="invalidateValidation"
           />
         </div>
 
@@ -205,13 +307,14 @@ onMounted(loadConfig)
             :min="10"
             :max="600"
             placeholder="120"
+            @input="invalidateValidation"
           />
         </div>
 
         <!-- 接口类型 -->
         <div>
           <Label class="text-xs font-semibold text-muted-foreground mb-1.5">接口类型</Label>
-          <Select v-model="form.llm_api_format">
+          <Select v-model="form.llm_api_format" @update:model-value="handleFormatChange">
             <SelectTrigger class="w-full h-10 text-sm">
               <SelectValue placeholder="自动检测" />
             </SelectTrigger>
@@ -222,8 +325,16 @@ onMounted(loadConfig)
               <SelectItem value="anthropic">Anthropic Messages</SelectItem>
             </SelectContent>
           </Select>
-          <p class="text-xs text-muted-foreground mt-1.5">需与 Base URL 匹配：mimo OpenAI 端点支持 chat / responses，Anthropic 端点支持 anthropic；不匹配保存时会提示错误</p>
+          <p class="text-xs text-muted-foreground mt-1.5">保存前会验证接口类型；如果检测到实际格式不同，会自动切换并提示你再次确认保存。</p>
         </div>
+
+        <p
+          v-if="validationMessage"
+          class="text-xs"
+          :class="validationState === 'success' ? 'text-emerald-600 dark:text-emerald-400' : validationState === 'warning' ? 'text-amber-600 dark:text-amber-400' : validationState === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+        >
+          {{ validationMessage }}
+        </p>
 
         <!-- 深度思考 -->
         <div>
@@ -242,8 +353,8 @@ onMounted(loadConfig)
 
         <!-- Actions -->
         <div class="flex gap-2 pt-1">
-          <Button @click="handleSave" :disabled="saving" size="sm">
-            {{ saving ? '保存中...' : '保存' }}
+          <Button @click="handleSave" :disabled="saving || validating" size="sm">
+            {{ saving ? '保存中...' : validating ? '检测中...' : '保存' }}
           </Button>
           <Button variant="outline" size="sm" @click="editKey = false">取消</Button>
         </div>

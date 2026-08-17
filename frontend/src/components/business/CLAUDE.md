@@ -47,7 +47,7 @@
 | `SettingsProfile.vue` | 设置 - 个人信息（邮箱、简历、进度、分享默认值、外观） |
 | `SettingsInterview.vue` | 设置 - 面试偏好（岗位、收藏夹、AI 分类） |
 | `InterviewDistributionSettings.vue` | 五类模拟面试题型比例与主问题数；系统默认或用户自定义保存 |
-| `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数；保存/清除后失效模型缓存；「测试连接」实时探测模型可用性） |
+| `SettingsAIConfig.vue` | 设置 - AI 配置（API Key、模型参数；保存前探测 Chat/Responses/Anthropic 接口格式，错配时自动切换并要求再次保存；保存/清除后失效模型缓存；「测试连接」实时探测模型可用性） |
 | `SettingsSecurity.vue` | 设置 - 账户安全（当前密码/邮箱验证码两种改密方式、退出登录） |
 | `SettingsAdmin.vue` | 设置 - 管理员设置（招聘季、分类管理、题库操作；「聚合质量」tab：子分段切换「审查清单」|「AI 助手」|「来源健康」；「模型配置」tab：`SettingsGlobalModel` 管理全局 LLM 与 embedding） |
 | `SettingsGlobalModel.vue` | 设置 - 管理员模型配置：全局 LLM 表单（Base URL/模型名/API Key 掩码/超时 + 测试连接，复用 `GET/PUT /api/profile`）+ Embedding 表单（后端模式 onnx/siliconflow/auto、模型名、API Key、维度 + 测试连接；保存后若 `recompute_triggered` 用 `getSSE` 订阅 `/api/jobs/{id}/stream` 显示重算进度） |

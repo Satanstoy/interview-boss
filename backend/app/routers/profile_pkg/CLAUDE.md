@@ -6,7 +6,7 @@
 
 | 文件 | 端点前缀 | 职责 |
 |------|---------|------|
-| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL、接口类型 api_format、深度思考 thinking）；`/api/profile/llm/test-global` 用全局配置探测连通性（仅 admin，绕过缓存，`check_global_llm_status`）；PUT 只校验 `api_format` 枚举，显式协议与自定义网关的实际兼容性由 LLM 层探测/首次请求验证 |
+| `llm.py` | `/api/profile/llm` | LLM 配置 CRUD（模型、API Key、Base URL、接口类型 api_format、深度思考 thinking）；`POST /api/profile/llm/validate` 按表单选择探测 Chat/Responses/Anthropic 并返回实际格式建议，不保存配置；`/api/profile/llm/test-global` 用全局配置探测连通性（仅 admin，绕过缓存，`check_global_llm_status`）；PUT 只校验 `api_format` 枚举，显式协议与自定义网关的实际兼容性由 LLM 层探测/首次请求验证 |
 | `embedding.py` | `/api/profile/embedding` | 全局 Embedding 配置管理（仅 admin）：GET 读取（API key 掩码 + `api_key_set`）、PUT 保存到 `user_profile` 的 `embedding_*` key + `reload_embedding_config()` 热加载、模型/维度变化触发全量重算 job（复用 `jobs` 表 + SSE）、POST `/test` 连通性探测（siliconflow 调 embedding 接口 / onnx 校验模型文件） |
 | `taxonomy.py` | `/api/profile/taxonomy` | 分类体系管理（CRUD + 导入导出） |
 | `position.py` | `/api/profile/positions` | 岗位管理（CRUD + 切换） |

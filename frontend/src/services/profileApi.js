@@ -33,6 +33,8 @@ export const deletePublicTaxonomy = (taxonomyId) => del(`${API}/profile/taxonomy
 // ── Per-user LLM Config ──
 export const fetchMyLLMConfig = () => get(`${API}/profile/llm`)
 export const updateMyLLMConfig = (settings) => put(`${API}/profile/llm`, settings)
+export const validateMyLLMConfig = (settings) =>
+  post(`${API}/profile/llm/validate`, settings, { timeout: 60_000, noRetry: true })
 export const deleteMyLLMConfig = () => del(`${API}/profile/llm`)
 export const fetchAvailableModels = () => get(`${API}/profile/llm/models`)
 export const fetchLLMStatus = (opts = {}) =>

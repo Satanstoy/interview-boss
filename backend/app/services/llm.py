@@ -3,6 +3,7 @@ import re
 import json
 import time
 import asyncio
+import inspect
 import logging
 from urllib.parse import urlsplit
 import httpx
@@ -258,7 +259,24 @@ def _cached_api_format(
 
 def _is_endpoint_mismatch(exc: Exception) -> bool:
     """只有明确的路由不存在错误才允许探测下一个协议。"""
-    return getattr(exc, "status_code", None) in (404, 405, 415)
+    status_code = getattr(exc, "status_code", None)
+    if status_code not in (404, 405, 415):
+        return False
+
+    # SDK 异常通常把上游 JSON 放在 body；模型不存在是 404，但不是协议错配。
+    # 没有 body 的兼容网关一般只返回裸 404/405/415，保留探测下一个协议的行为。
+    body = getattr(exc, "body", None)
+    if body is None:
+        response = getattr(exc, "response", None)
+        body = getattr(response, "text", None) if response is not None else None
+    body_text = str(body or "").lower()
+    model_not_found = "model" in body_text and any(
+        marker in body_text
+        for marker in ("not found", "not_found", "does not exist", "doesn't exist", "unknown", "invalid")
+    )
+    if model_not_found:
+        return False
+    return True
 
 
 async def _probe_api_format(client, model: str, timeout: float, api_format: str):
@@ -602,6 +620,11 @@ def clear_llm_status_cache(user_id: int = None):
 
 def _classify_probe_error(exc: Exception) -> str:
     """把探测异常归类为用户可读的错误信息"""
+    status_code = getattr(exc, "status_code", None)
+    if status_code in (401, 403):
+        return "认证失败：请检查 API Key 是否正确"
+    if status_code == 429:
+        return "请求过于频繁：请稍后重试"
     if isinstance(exc, AuthenticationError) or isinstance(
         exc, anthropic_mod.AuthenticationError
     ):
@@ -618,7 +641,135 @@ def _classify_probe_error(exc: Exception) -> str:
         exc, anthropic_mod.APIConnectionError
     ):
         return "无法连接模型服务：请检查 Base URL"
-    return f"模型服务异常：{type(exc).__name__}: {str(exc)[:200]}"
+    if status_code == 404:
+        return "模型服务未找到：请检查 Base URL 和模型名称"
+    if status_code in (405, 415):
+        return "接口不支持当前请求格式：请检查 Base URL 和接口类型"
+    if status_code and status_code >= 500:
+        return "模型服务暂时不可用：请稍后重试"
+    return "模型服务异常：请检查 Base URL、模型名称和 API Key"
+
+
+def _api_format_label(api_format: str) -> str:
+    return {
+        "chat": "Chat Completions",
+        "responses": "Responses",
+        "anthropic": "Anthropic Messages",
+    }.get(api_format, api_format)
+
+
+def _validation_candidates(base_url: str, requested_format: str) -> list[str]:
+    """生成保存前探测顺序：用户选择优先，路由错配时再尝试其它协议。"""
+    requested = _normalise_api_format(requested_format)
+    hint = _endpoint_api_format_hint(base_url)
+    candidates: list[str] = []
+    preferred = [requested] if requested != "auto" else []
+    preferred.extend([hint] if hint else [])
+    if requested == "auto":
+        preferred.extend(get_provider_formats(base_url))
+    else:
+        # 能力矩阵只用于排序，不阻止自定义网关的实际探测。
+        preferred.extend(get_provider_formats(base_url))
+    preferred.extend(_SUPPORTED_API_FORMATS)
+    for candidate in preferred:
+        if candidate in _SUPPORTED_API_FORMATS and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+async def validate_llm_api_format(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout: float = 120,
+    requested_format: str = "auto",
+) -> dict:
+    """探测未保存的 LLM 配置，并报告用户选择是否匹配真实协议。
+
+    该函数不读取用户已保存的协议缓存，也不写入配置或自动探测缓存。只有
+    404/405/415 才会继续尝试下一个协议；认证、限流、超时等错误立即返回，
+    防止一次保存操作造成重复请求或重复计费。
+    """
+    requested = _normalise_api_format(requested_format)
+    candidates = _validation_candidates(base_url, requested)
+    last_mismatch: Exception | None = None
+
+    for candidate in candidates:
+        probe_client = None
+        try:
+            provider = _provider_for_api_format(candidate) or _detect_provider(base_url)
+            probe_client = _make_client(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,
+                provider=provider,
+                api_format=candidate,
+            )
+            await _probe_api_format(probe_client, model, timeout, candidate)
+        except Exception as exc:
+            if _is_endpoint_mismatch(exc):
+                last_mismatch = exc
+                continue
+            logger.warning("LLM configuration validation failed: %s", exc)
+            return {
+                "connected": False,
+                "compatible": False,
+                "requested_format": requested,
+                "detected_format": None,
+                "suggested_format": None,
+                "model": model,
+                "message": None,
+                "error": _classify_probe_error(exc),
+            }
+        finally:
+            if probe_client is not None:
+                close = getattr(probe_client, "close", None)
+                if close:
+                    try:
+                        close_result = close()
+                        if inspect.isawaitable(close_result):
+                            await close_result
+                    except Exception as close_exc:
+                        logger.warning("Failed to close temporary LLM client: %s", close_exc)
+
+        compatible = requested == "auto" or requested == candidate
+        if compatible:
+            message = f"接口格式校验成功：{_api_format_label(candidate)}"
+            suggested = None
+        else:
+            message = (
+                f"检测到实际接口格式为 {_api_format_label(candidate)}，"
+                "已为你切换建议格式，请再次保存确认"
+            )
+            suggested = candidate
+        return {
+            "connected": True,
+            "compatible": compatible,
+            "requested_format": requested,
+            "detected_format": candidate,
+            "suggested_format": suggested,
+            "model": model,
+            "message": message,
+            "error": None,
+        }
+
+    mismatch_detail = "未检测到可用的 Chat / Responses / Anthropic 接口"
+    if last_mismatch:
+        logger.warning(
+            "LLM configuration validation found no compatible protocol: %s",
+            last_mismatch,
+        )
+    return {
+        "connected": False,
+        "compatible": False,
+        "requested_format": requested,
+        "detected_format": None,
+        "suggested_format": None,
+        "model": model,
+        "message": mismatch_detail,
+        "error": mismatch_detail,
+    }
 
 
 async def _probe_resolved(client, model, timeout, base_url, provider, user_id=None) -> tuple:

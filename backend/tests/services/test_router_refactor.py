@@ -17,6 +17,7 @@ class TestProfileEndpoints:
     PROFILE_ENDPOINTS = [
         ("GET",  "/api/profile/public"),
         ("GET",  "/api/profile/llm"),
+        ("POST", "/api/profile/llm/validate"),
         ("PUT",  "/api/profile/llm"),
         ("DELETE", "/api/profile/llm"),
         ("GET",  "/api/profile/search"),

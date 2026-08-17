@@ -17,6 +17,7 @@
 | `test_llm_formats_http.py` | 三协议 HTTP 契约（Chat `/chat/completions`、Responses `/responses`、Anthropic `/messages`）：完整参数、结构化输出、多模态、工具调用/历史、流式 SSE、文本/usage/结束原因解析 |
 | `test_llm_protocol_converters.py` | 三协议内部消息/响应转换：Responses 多模态、Anthropic 多文本块、缓存 usage 归一化 |
 | `test_llm_protocol_detection.py` | 显式协议选择、未知自定义网关自动探测、认证失败不跨协议重试、配置指纹缓存 |
+| `test_llm_config_validation.py` | 保存前 Chat/Responses/Anthropic 三协议探测、错配格式建议、认证失败不跨协议重试、路由不落库契约 |
 | `test_llm_protocol_live.py` | 可选真实服务 smoke test；设置 `RUN_LIVE_LLM_TESTS=1` 后按 Chat/Responses/Anthropic 分别运行 |
 | `test_llm_tool_calling.py` | LLM tool calling 兼容 |
 | `test_memory_flush.py` | 记忆刷新 |

@@ -37,6 +37,7 @@ const MOCK_LLM_CONFIG = {
 // ── Helper ──
 async function mockAllAPIs(page, userOverrides = {}) {
   const user = { ...MOCK_USER, ...userOverrides }
+  let validationAttempts = 0
 
   await page.route('**/api/auth/refresh', async (route) => {
     await route.fulfill({ json: { token: 'mock-token', user } })
@@ -111,6 +112,37 @@ async function mockAllAPIs(page, userOverrides = {}) {
   // 其它 profile 子路径与全局数据兜底（避免泄露到真实后端）
   await page.route('**/api/profile**', async (route) => {
     await route.fulfill({ json: { status: 'success', settings: {} } })
+  })
+  await page.route('**/api/profile/llm/validate', async (route) => {
+    validationAttempts += 1
+    const requestedFormat = route.request().postDataJSON()?.llm_api_format
+    if (validationAttempts === 1 && requestedFormat === 'chat') {
+      await route.fulfill({
+        json: {
+          connected: true,
+          compatible: false,
+          requested_format: 'chat',
+          detected_format: 'responses',
+          suggested_format: 'responses',
+          model: 'gpt-4o',
+          message: '检测到实际接口格式为 Responses，已为你切换建议格式，请再次保存确认',
+          error: null,
+        },
+      })
+      return
+    }
+    await route.fulfill({
+      json: {
+        connected: true,
+        compatible: true,
+        requested_format: requestedFormat || 'responses',
+        detected_format: requestedFormat || 'responses',
+        suggested_format: null,
+        model: 'gpt-4o',
+        message: '接口格式校验成功：Responses',
+        error: null,
+      },
+    })
   })
   await page.route('**/api/practice-stats', async (route) => {
     await route.fulfill({ json: {} })
@@ -256,6 +288,49 @@ test.describe('设置深层', () => {
         await expect(page.locator('body')).toBeVisible()
       }
     }
+  })
+
+  test('接口格式错配时自动切换，并要求再次保存确认', async ({ page }) => {
+    await gotoLoggedIn(page)
+    await openSettings(page)
+    await page.locator('.settings-sidebar').getByText('AI 配置').click()
+    await page.waitForTimeout(500)
+
+    const configureBtn = page.getByText('立即配置')
+    if (await configureBtn.isVisible().catch(() => false)) {
+      await configureBtn.click()
+    } else {
+      await page.getByText('修改配置').click()
+    }
+
+    await page.locator('input[placeholder="输入 API Key"]').fill('test-key')
+    await page.locator('input[placeholder*="api.openai"]').fill('https://gateway.example/v1')
+    await page.locator('input[placeholder="gpt-4o"]').fill('gpt-4o')
+
+    const formatTrigger = page.locator('[data-slot="select-trigger"]').first()
+    await formatTrigger.click()
+    await page.getByText('OpenAI Chat Completions', { exact: true }).click()
+
+    const saveBtn = page.getByRole('button', { name: '保存' }).first()
+    const validationRequests = []
+    const saveRequests = []
+    page.on('request', (request) => {
+      if (request.method() !== 'POST' && request.method() !== 'PUT') return
+      if (request.url().endsWith('/api/profile/llm/validate')) validationRequests.push(request)
+      if (request.method() === 'PUT' && request.url().endsWith('/api/profile/llm')) saveRequests.push(request)
+    })
+    await saveBtn.click()
+    await expect(page.getByRole('main').getByText(/检测到实际接口格式为 Responses/)).toBeVisible()
+    await expect.poll(() => validationRequests.length).toBe(1)
+    expect(saveRequests).toHaveLength(0)
+    await expect(page.getByRole('main').getByText('OpenAI Responses', { exact: true })).toBeVisible()
+
+    await saveBtn.click()
+    await page.waitForTimeout(500)
+    await expect(page.locator('body')).toBeVisible()
+    await expect.poll(() => validationRequests.length).toBe(2)
+    await expect.poll(() => saveRequests.length).toBe(1)
+    expect(JSON.parse(saveRequests[0].postData()).llm_api_format).toBe('responses')
   })
 
   test('离开设置页', async ({ page }) => {
