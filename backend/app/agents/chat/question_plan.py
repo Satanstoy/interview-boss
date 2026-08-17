@@ -439,8 +439,8 @@ def _is_algorithm_candidate(candidate: dict) -> bool:
 
 def _allowed_focus_from_question(question: dict) -> list[str]:
     focus: list[str] = []
-    for field in ("cat2", "cat1", "tags"):
-        value = str(question.get(field) or "").strip()
+    for field_name in ("cat2", "cat1", "tags"):
+        value = str(question.get(field_name) or "").strip()
         if not value:
             continue
         for part in re.split(r"[,，、/\s]+", value):

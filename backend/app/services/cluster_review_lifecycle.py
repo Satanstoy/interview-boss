@@ -720,10 +720,11 @@ async def run_cluster_review_task(task_id: str, user_id: int | None = None) -> d
         return await asyncio.to_thread(_finish)
     except Exception as exc:
         logger.warning("cluster review task failed: %s (%s)", task_id, exc)
+        failure_reason = str(exc)
 
-        def _fail():
+        def _fail(reason=failure_reason):
             conn = get_db_connection()
-            result = fail_review_task(conn, task, str(exc))
+            result = fail_review_task(conn, task, reason)
             conn.commit()
             return result
 

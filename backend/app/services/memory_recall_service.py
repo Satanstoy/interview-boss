@@ -10,8 +10,12 @@ import asyncio
 import re
 import json
 import logging
+from typing import TYPE_CHECKING
 from app.services.llm import _call_llm_with_retry, _extract_json
 from app.agents.chat.prompts import INTENT_CLASSIFY_PROMPT
+
+if TYPE_CHECKING:
+    from app.agents.chat.classify_result import ClassifyResult
 
 logger = logging.getLogger("interview-boss")
 
