@@ -21,6 +21,10 @@ const stats = ref(null)
 const error = ref('')
 const total = computed(() => keys.reduce((sum, key) => sum + Number(distribution.value[key] || 0), 0))
 
+function unwrapData(response) {
+  return response?.data ?? response
+}
+
 function applyStats(value) {
   stats.value = value
   targetQuestionCount.value = value.recommended_total_count
@@ -41,9 +45,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [defaultStats, preference] = await Promise.all([
+    const [defaultResponse, preferenceResponse] = await Promise.all([
       getDistributionDefault(props.jobPosition), getDistributionPreference(props.jobPosition),
     ])
+    const defaultStats = unwrapData(defaultResponse)
+    const preference = unwrapData(preferenceResponse)
     applyStats(defaultStats)
     mode.value = preference.mode || 'system_default'
     if (preference.target_question_count) targetQuestionCount.value = preference.target_question_count

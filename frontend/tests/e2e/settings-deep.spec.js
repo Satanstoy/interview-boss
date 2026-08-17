@@ -219,6 +219,54 @@ test.describe('设置深层', () => {
     expect(body.includes('前端开发工程师') || body.includes('岗位')).toBeTruthy()
   })
 
+  test('面试分布正确解包后端 data 响应', async ({ page }) => {
+    await gotoLoggedIn(page)
+    await page.route('**/api/interview/distribution/default**', async (route) => {
+      await route.fulfill({
+        json: {
+          status: 'success',
+          data: {
+            sample_interview_count: 7,
+            stats_version: 'v1',
+            recommended_total_count: 12,
+            distribution: {
+              project_followup: 0.4,
+              knowledge_probe: 0.2,
+              algorithm_coding: 0.1,
+              system_design: 0.2,
+              behavioral: 0.1,
+            },
+          },
+        },
+      })
+    })
+    await page.route('**/api/profile/interview-distribution-preference**', async (route) => {
+      await route.fulfill({
+        json: {
+          status: 'success',
+          data: {
+            mode: 'custom',
+            target_question_count: 15,
+            custom_distribution: {
+              project_followup: 0.2,
+              knowledge_probe: 0.2,
+              algorithm_coding: 0.2,
+              system_design: 0.2,
+              behavioral: 0.2,
+            },
+          },
+        },
+      })
+    })
+    await openSettings(page)
+    await page.locator('.settings-sidebar').getByText('面试偏好').click()
+
+    await expect(page.getByText('样本 7 场 · 版本 v1')).toBeVisible()
+    await expect(page.getByText('默认题数中位数 12')).toBeVisible()
+    await expect(page.getByText('自定义比例合计 100%')).toBeVisible()
+    await expect(page.getByText('无法加载面试分布')).not.toBeVisible()
+  })
+
   test('岗位切换可操作', async ({ page }) => {
     await gotoLoggedIn(page)
     await openSettings(page)
