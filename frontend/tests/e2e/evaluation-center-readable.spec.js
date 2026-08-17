@@ -23,8 +23,8 @@ const overviewPayload = {
 
 const releasesPayload = {
   releases: [
-    { id: 1, release_key: 'interview-agent@1.0', release_type: 'target', status: 'published', version: '1.0' },
-    { id: 2, release_key: 'interview-e2e-suite@1.0', release_type: 'benchmark_suite', status: 'published', version: '1.0' },
+    { id: 1, release_key: 'interview-agent@1.0', release_type: 'target', target_type: 'interview', status: 'published', version: '1.0' },
+    { id: 2, release_key: 'interview-e2e-suite@1.0', release_type: 'benchmark_suite', target_type: 'interview', status: 'published', version: '1.0' },
     { id: 3, release_key: 'eval-protocol@1.0', release_type: 'eval_protocol', status: 'published', version: '1.0' },
     { id: 4, release_key: 'judge@1.0', release_type: 'judge', status: 'published', version: '1.0', judge_model: 'fixed-judge' },
     { id: 5, release_key: 'interview-harness@1.0', release_type: 'simulator_harness', status: 'published', version: '1.0' },
@@ -54,6 +54,7 @@ const benchmarksPayload = {
       release_key: 'interview-e2e-suite@1.0',
       release_status: 'published',
       description: '模拟面试的固定 E2E 场景。',
+      target_type: 'interview',
       judge_model: 'fixed-judge',
       cases: [],
     },
@@ -130,7 +131,26 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('第 3 步：固定运行参数')).toBeVisible()
     await expect(page.getByText('每个 Case 重跑次数')).toBeVisible()
     await expect(page.getByRole('button', { name: '创建并开始评测' })).toBeVisible()
-    await expect(page.locator('select').nth(5)).toHaveValue('7')
+    await expect(page.locator('#eval-candidate-simulator')).toHaveValue('7')
+  })
+
+  test('评测对象明确区分已支持和待接入', async ({ page }) => {
+    await page.goto('/admin/evals/experiments?preview=1')
+
+    await expect(page.getByText('评测对象')).toBeVisible()
+    await expect(page.getByRole('button', { name: /模拟面试 Agent/ })).toBeVisible()
+    await expect(page.getByText('可运行完整 E2E')).toBeVisible()
+    await expect(page.getByText('面经提取 Agent')).toBeVisible()
+    await expect(page.getByText('简历分析 Agent')).toBeVisible()
+    await expect(page.getByText('待接入').first()).toBeVisible()
+  })
+
+  test('版本列表使用固定列宽并保持关键固定项可读', async ({ page }) => {
+    await page.goto('/admin/evals/releases?preview=1')
+
+    await expect(page.getByText('固定的 Case、输入快照与质量要求。')).toBeVisible()
+    const tableLayout = await page.locator('table').first().evaluate(element => getComputedStyle(element).tableLayout)
+    expect(tableLayout).toBe('fixed')
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {

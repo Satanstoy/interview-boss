@@ -4,7 +4,7 @@ import { BookOpen, ChevronDown, ClipboardCheck, ShieldCheck } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { fetchEvaluationBenchmarks } from '@/services/evaluationApi.js'
-import { releaseTypeLabel, statusLabel } from './evaluationShared.js'
+import { evaluationTargetLabel, releaseTypeLabel, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const suites = ref([])
@@ -42,7 +42,7 @@ onMounted(load)
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ suite.release_key }}</span><span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">{{ statusLabel(suite.release_status) }}</span></div>
               <p class="mt-1 text-sm text-muted-foreground">{{ suite.description || '固定的评测场景与质量要求。' }}</p>
-              <div class="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3"><span><strong class="font-medium text-foreground">{{ suite.cases?.length || 0 }}</strong> 个 Case</span><span>评分模型：<strong class="font-medium text-foreground">{{ suite.judge_model || '按运行绑定' }}</strong></span><span>版本类型：{{ releaseTypeLabel('benchmark_suite') }}</span></div>
+              <div class="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4"><span><strong class="font-medium text-foreground">{{ suite.cases?.length || 0 }}</strong> 个 Case</span><span class="break-words">评分模型：<strong class="font-medium text-foreground">{{ suite.judge_model || '按运行绑定' }}</strong></span><span>版本类型：{{ releaseTypeLabel('benchmark_suite') }}</span><span>适用对象：<strong class="font-medium text-foreground">{{ evaluationTargetLabel(suite.target_type) }}</strong></span></div>
             </div>
             <ChevronDown :class="['mt-1 size-5 shrink-0 transition-transform', opened === suite.id ? 'rotate-180' : '']" />
           </button>

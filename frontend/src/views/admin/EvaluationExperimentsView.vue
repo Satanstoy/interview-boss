@@ -10,6 +10,7 @@ import { createEvaluationRun, fetchEvaluationReleases, fetchEvaluationRuns } fro
 import { formatDate, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
+import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
 
 const router = useRouter()
 const releases = ref([])
@@ -18,6 +19,7 @@ const loading = ref(true)
 const submitting = ref(false)
 const error = ref('')
 const form = ref({ target: '', suite: '', protocol: '', judge: '', harness: '', simulator: '', replication: 5, seed: 1, environment: 'local-baseline', comparison: '' })
+const selectedTargetType = ref('interview')
 
 const releaseFields = [
   { key: 'suite', label: '评测题集', type: 'benchmark_suite', help: '固定要测的场景、Case 和质量要求。' },
@@ -42,6 +44,13 @@ function chooseDefaults() {
       : releases.value.find(item => item.release_key === key)
     if (found) form.value[field] = String(found.id)
   }
+  selectedTargetType.value = releases.value.find(release => String(release.id) === form.value.target)?.target_type || 'interview'
+}
+
+function selectTargetType(type) {
+  selectedTargetType.value = type
+  const targetRelease = releases.value.find(release => release.target_type === type && release.release_type === 'target' && release.status === 'published')
+  if (targetRelease) form.value.target = String(targetRelease.id)
 }
 
 async function load() {
@@ -89,6 +98,7 @@ onMounted(load)
       <div v-else class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,500px)_minmax(0,1fr)]">
         <AppCard title="评测配置" description="同一批次的版本和参数会被固化，之后的代码变更不会改写这次历史记录。">
           <form class="space-y-3" @submit.prevent="submit">
+            <EvaluationTargetPicker :model-value="selectedTargetType" @update:model-value="selectTargetType" />
             <EvaluationStepCard :number="1" title="选择被测版本" description="这是本次要回答的核心问题：哪一个 Agent、Workflow 或 Pipeline 要接受评测？">
               <label class="block text-sm font-medium" for="eval-target">被测版本（Agent / Workflow）</label>
               <select id="eval-target" v-model="form.target" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required>
@@ -102,7 +112,7 @@ onMounted(load)
               <div class="space-y-3">
                 <label v-for="field in releaseFields" :key="field.key" class="block text-sm font-medium">
                   {{ field.label }}
-                  <select v-model="form[field.key]" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required>
+                  <select :id="field.key === 'simulator' ? 'eval-candidate-simulator' : undefined" v-model="form[field.key]" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required>
                     <option value="" disabled>请选择已发布版本</option>
                     <option v-for="release in byType(field.type)" :key="release.id" :value="String(release.id)">{{ release.release_key }}</option>
                   </select>

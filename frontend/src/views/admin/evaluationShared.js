@@ -19,6 +19,33 @@ export const RELEASE_TYPE_LABELS = {
   candidate_simulator: '候选人模拟器',
 }
 
+export const EVALUATION_TARGETS = [
+  {
+    key: 'interview',
+    label: '模拟面试 Agent',
+    description: '通过多轮 E2E 验证面试流程、工具调用、追问和收尾质量。',
+    status: 'available',
+    statusLabel: '已支持',
+    actionLabel: '可运行完整 E2E',
+  },
+  {
+    key: 'experience_extraction',
+    label: '面经提取 Agent',
+    description: '从面试记录或文本中提取题目、主题和结构化经验。',
+    status: 'planned',
+    statusLabel: '待接入',
+    actionLabel: '评测适配器待接入',
+  },
+  {
+    key: 'resume_analysis',
+    label: '简历分析 Agent',
+    description: '分析简历证据、岗位匹配度和改进建议的完整性。',
+    status: 'planned',
+    statusLabel: '待接入',
+    actionLabel: '评测适配器待接入',
+  },
+]
+
 export const EVALUATION_FLOW_STEPS = [
   { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁', route: '/admin/evals/releases' },
   { key: 'benchmarks', keys: ['EvalBenchmarks', 'admin-evals-benchmarks'], label: 'Benchmark', description: '决定测什么', route: '/admin/evals/benchmarks' },
@@ -61,6 +88,10 @@ export function releaseTypeLabel(type) {
 
 export function releaseTypeMeta(type) {
   return RELEASE_TYPE_META[type] || { title: releaseTypeLabel(type), description: '评测运行依赖的版本化组件。' }
+}
+
+export function evaluationTargetLabel(type) {
+  return EVALUATION_TARGETS.find(target => target.key === type)?.label || type || '未知评测对象'
 }
 
 export function checkStatusLabel(status) {
