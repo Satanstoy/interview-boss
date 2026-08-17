@@ -163,7 +163,7 @@ async def get_coding_problem(problem_id: int, user: dict = Depends(get_current_u
         return await run_db(_query)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取题目详情失败")
         raise HTTPException(status_code=500, detail="获取题目失败")
 
@@ -582,7 +582,7 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
         problem = await run_db(_get_problem)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取题目失败")
         raise HTTPException(status_code=500, detail="获取题目失败")
 
@@ -771,7 +771,7 @@ async def submit_coding_code(req: CodingSubmitRequest, user: dict = Depends(get_
                 "hint_round": hint_round,
             })
 
-        except Exception as e:
+        except Exception:
             logger.exception("AI 评审失败")
             yield _sse({"type": "error", "message": "AI 评审服务异常，请稍后重试"})
 
@@ -856,7 +856,7 @@ async def get_coding_submission(submission_id: int, user: dict = Depends(get_cur
         return await run_db(_query)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取提交详情失败")
         raise HTTPException(status_code=500, detail="获取提交详情失败")
 

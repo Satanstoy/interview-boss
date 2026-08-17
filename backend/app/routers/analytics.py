@@ -277,7 +277,7 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
             "status": "success",
             "message": f"规范化完成：questions_detail 更新 {detail_count} 条，question_bank 更新 {master_count} 条",
         }
-    except Exception as e:
+    except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="规范化失败，请查看服务端日志")
 
@@ -392,7 +392,7 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
             "status": "success",
             "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）",
         }
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="清空失败，请查看服务端日志")
 
 
@@ -407,7 +407,7 @@ async def sync_db(admin: dict = Depends(get_admin_user)):
             "status": "success",
             "message": f"数据库同步完成，共 {result.get('total_unique', 0)} 道核心真题",
         }
-    except Exception as e:
+    except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="数据库同步失败，请查看服务端日志")
 

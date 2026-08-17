@@ -248,7 +248,7 @@ async def delete_original_question(
         return {"status": "success", "message": msg}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("删除原始题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 
@@ -293,7 +293,7 @@ async def delete_master_question(
         return {"status": "success", "message": "题目已移入回收站"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="删除失败，请查看服务端日志")
 
 
@@ -348,7 +348,7 @@ async def batch_delete_master_bank(
         return {"status": "success", "deleted": deleted}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("批量删除失败")
         raise HTTPException(status_code=500, detail="批量删除失败，请查看服务端日志")
 

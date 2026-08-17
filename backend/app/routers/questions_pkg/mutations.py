@@ -196,7 +196,7 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
         return {"status": "success", "new_id": new_id, "message": "题目已拆分为独立题目"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("拆分题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 
@@ -498,7 +498,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
         return {"status": "success", "message": "题目已移动到目标聚类"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("合并题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 
@@ -604,6 +604,6 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
         raise HTTPException(status_code=500, detail="无法连接 LLM 服务，请检查系统配置中的 Base URL。")
     except openai.APITimeoutError:
         raise HTTPException(status_code=500, detail="LLM 服务响应超时，请增大超时时间或稍后重试。")
-    except Exception as e:
+    except Exception:
         logger.exception("重新打标失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")

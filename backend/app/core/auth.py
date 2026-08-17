@@ -168,7 +168,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
             issuer=TOKEN_ISSUER,
             options={"require_sub": True},
         )
-    except jwt.exceptions.PyJWTError as e:
+    except jwt.exceptions.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="token 已过期或无效"
         )

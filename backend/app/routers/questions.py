@@ -461,6 +461,6 @@ async def edit_question(
         return {"status": "success", "data": result}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("编辑题目失败")
         raise HTTPException(status_code=500, detail="服务器内部错误")

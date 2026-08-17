@@ -330,7 +330,7 @@ async def update_profile(
         _reload_from_db()
         _sync_env_file(filtered)
         return {"status": "success", "message": "配置已保存（已同步到 .env）"}
-    except Exception as e:
+    except Exception:
         logger.exception("保存配置失败")
         raise HTTPException(status_code=500, detail="保存配置失败，请查看服务端日志")
 

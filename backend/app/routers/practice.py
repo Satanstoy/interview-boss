@@ -315,7 +315,7 @@ async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
         return {"status": "success", "is_starred": bool(new_val)}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="操作失败，请稍后重试")
 
 
@@ -453,7 +453,7 @@ async def evaluate_answer(
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("答案评估失败")
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 

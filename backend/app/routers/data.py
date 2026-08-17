@@ -570,7 +570,7 @@ async def delete_data(
         return {"status": "success"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
@@ -647,7 +647,7 @@ async def batch_delete_data(
         return {"status": "success", "deleted": deleted}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("批量删除失败")
         raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
@@ -722,7 +722,7 @@ async def restore_data(
         return {"status": "success"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("恢复失败")
         raise HTTPException(status_code=500, detail="操作失败，请查看服务端日志")
 
@@ -942,6 +942,6 @@ async def update_generic_data(
         return response
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="数据库更新失败，请查看服务端日志")
