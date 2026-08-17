@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import jwt
+import bcrypt
 from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
@@ -62,16 +62,15 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 REFRESH_TOKEN_REMEMBER_DAYS = 30
 TOKEN_ISSUER = "interview-boss"
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def _generate_jti() -> str:
@@ -147,7 +146,7 @@ def decode_email_bind_token(token: str) -> dict:
             issuer=TOKEN_ISSUER,
             options={"require_sub": True},
         )
-    except JWTError:
+    except jwt.exceptions.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="临时令牌已过期或无效，请重新登录",
@@ -169,7 +168,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
             issuer=TOKEN_ISSUER,
             options={"require_sub": True},
         )
-    except JWTError as e:
+    except jwt.exceptions.PyJWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="token 已过期或无效"
         )

@@ -7,7 +7,7 @@ import os
 import secrets
 import time
 
-from jose import JWTError, jwt
+import jwt
 
 _SECRET = os.getenv("OAUTH_SECRET_KEY", "")
 _ALGORITHM = "HS256"
@@ -66,7 +66,7 @@ def verify_access_token(token: str, expected_resource: str | None = None) -> dic
         if expected_resource and claims.get("resource") != expected_resource:
             return None
         return claims
-    except JWTError:
+    except jwt.exceptions.PyJWTError:
         return None
 
 

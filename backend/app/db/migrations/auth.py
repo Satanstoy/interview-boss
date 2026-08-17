@@ -3,7 +3,7 @@
 import os
 import logging
 
-from passlib.context import CryptContext
+import bcrypt
 
 logger = logging.getLogger("interview-boss")
 
@@ -110,7 +110,6 @@ def _migration_012_admin_seed(conn):
     cursor = conn.cursor()
 
     # ── 种子管理员 ──
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
     admin_username = os.getenv("ADMIN_USERNAME", "sj")
     admin_password = os.getenv("ADMIN_PASSWORD")
     admin_row = conn.execute(
@@ -121,7 +120,7 @@ def _migration_012_admin_seed(conn):
             raise RuntimeError(
                 "首次启动需要设置管理员密码，请在 .env 中配置 ADMIN_PASSWORD 环境变量"
             )
-        admin_hash = pwd_ctx.hash(admin_password)
+        admin_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
         conn.execute(
             "INSERT INTO users (username, password_hash, is_admin, bank_mode) VALUES (?, ?, 1, 'public')",
             (admin_username, admin_hash),
