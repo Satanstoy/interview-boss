@@ -11,9 +11,10 @@ import os
 import sqlite3
 
 from app.core.config import DB_PATH
+from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
-DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86}
+DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91}
 
 
 def _backup_before_destructive(db_path: str, version: int, name: str) -> str | None:
@@ -267,6 +268,7 @@ _MIGRATIONS = [
     (88, "practice_review_idempotency", _migration_088_practice_review_idempotency),
     (89, "llm_usage", _migration_089_llm_usage),
     (90, "analysis_queue_fk_cascade", migration_090_analysis_queue_fk),
+    (91, "repair_fk_orphans", migration_091_repair_fk_orphans),
 ]
 
 

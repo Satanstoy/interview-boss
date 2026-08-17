@@ -45,13 +45,20 @@ def get_db_connection():
     return conn
 
 
+def prepare_migration_connection(conn):
+    """Configure a migration connection before any schema/data operation."""
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db():
     """初始化数据库：运行所有迁移"""
     from app.core.config import validate_runtime_secrets
 
     validate_runtime_secrets()
     with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
+        prepare_migration_connection(conn)
         from app.db.migrations import run_migrations
         run_migrations(conn)
         from app.db.migrations.sources import ensure_public_url_signature_unique_indexes
