@@ -1,0 +1,8 @@
+severity	dim	location	title	fix	effort	confidence
+2	D13	backend/.env.example:1-48	.env.example 仅文档 48 个变量，代码实际使用 ~110 个（缺 CLUSTER_*/EMBEDDING_*/SEARCH_*/REDIS_URL/DEEPGRAM_API_KEY/DAILY_LLM_CALL_LIMIT 等 63 个可选变量）	按功能域分组补全所有 os.environ.get 调用的可选变量占位行（含默认值注释），使新运维者无需 grep 源码即可发现可调旋钮	S	certain
+2	D14	backend/app/services/insights.py:479	datetime.now().date() 无时区感知，与 email_service 同类 naive datetime 问题	统一用 datetime.now(timezone.utc) 或项目级 utcnow() 辅助函数（round-2 已修 email_service；insights 为同类遗漏）	S	certain
+2	D14	backend/app/services/llm.py:290-294	_user_client_cache 半数淘汰策略无 TTL/LRU：缓存满时一次性丢弃最旧一半，高频用户可能刚被淘汰又被重建	改为 LRU 淘汰或加 TTL（如 maxsize + per-entry timestamp），减少无谓重建开销	S	probable
+2	D15	frontend/src/components/business/PracticePanel.vue:19	图标关闭按钮无 aria-label，纯 SVG 无文本标签，屏幕阅读器无法识别	加 aria-label="关闭" 或改用 AppTooltip 包裹	S	certain
+2	D15	frontend/src/components/business/CodingPractice.vue:68,378	移出题单/取消收藏 destructive action 无确认步骤，点击即执行（同组件其他删除操作已有 showConfirm 先例）	在 removeProblemFromCurrentList 入口加 useConfirm() 确认对话框	S	certain
+2	D16	frontend/src/components/business/KnowledgeGraph.vue:94-177	ECharts 图表配置内联 14 个 porcelain hex 值（#F7F2EB/#081F5C/#EDEFF1/#9EB3CD 等），绕过 chartTokens.js 设计 token（仅 import 了 RAMP_DARK 用于节点色阶）	统一 import { porcelain, porcelainTooltip } from '@/utils/chartTokens.js' 并引用 token 属性替换所有硬编码 hex	M	certain
+1	D16	frontend/src/components/business/ExamDistribution.vue:109-119	死组件（0 引用）内联 6 个主题色 hex（#574f49/#e8e4dd/#e7e5e2/#4a4540/#1a1816/#faf9f7），随 build 发布无用代码	删除文件或标 deprecated；保留则统一走 chartTokens	S	certain
