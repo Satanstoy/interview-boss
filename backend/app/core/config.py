@@ -16,6 +16,33 @@ ENV_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"
 )
 
+
+_RUNTIME_SECRET_MIN_LENGTHS = {
+    "ADMIN_PASSWORD": 16,
+    "JWT_SECRET": 32,
+    "OAUTH_SECRET_KEY": 32,
+}
+
+
+def validate_runtime_secrets(values: dict[str, str] | None = None) -> None:
+    """Reject weak production credentials before database initialization.
+
+    ``values`` is injectable for deterministic tests.  Non-production test and
+    development processes keep their existing placeholder setup, while the
+    production Docker profile must provide all configured secrets explicitly.
+    """
+    env = os.environ if values is None else values
+    if str(env.get("ENV", "")).strip().lower() not in {"production", "prod"}:
+        return
+
+    for name, minimum_length in _RUNTIME_SECRET_MIN_LENGTHS.items():
+        value = str(env.get(name, ""))
+        if len(value) < minimum_length:
+            raise RuntimeError(
+                f"{name} must be at least {minimum_length} characters in production"
+            )
+
+
 LLM_MODEL = os.environ.get("LLM_MODEL_NAME", "gpt-4o")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "120"))
 MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE_MB", "10")) * 1024 * 1024  # 默认 10MB
