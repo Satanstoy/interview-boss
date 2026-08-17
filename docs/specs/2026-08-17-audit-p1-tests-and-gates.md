@@ -15,10 +15,10 @@
 - Modify: 失败测试对应的 `backend/app/**` 与 `backend/tests/**`
 - Test: `backend/tests/bank/`、`chat/`、`pipeline/`、`services/`、`security/`、`infra/`
 
-- [ ] RED：按 bank/chat/pipeline/services/security/infra 分组记录当前失败数量和首个根因，不允许用 skip 掩盖。
-- [ ] GREEN：每个失败簇只修根因，优先处理 fixture/ContextVar、状态契约、环境依赖和测试期望漂移。
-- [ ] REFACTOR：删除重复 fixture，统一测试数据库、Redis mock 和外部服务边界。
-- [ ] 每个修复提交必须带一条固定回归行为的测试。
+- [x] RED：按 bank/chat/pipeline/services/security/infra 分组记录当前失败数量和首个根因，不允许用 skip 掩盖。
+- [x] GREEN：每个失败簇只修根因，优先处理 fixture/ContextVar、状态契约、环境依赖和测试期望漂移。
+- [x] REFACTOR：删除重复 fixture，统一测试数据库、Redis mock 和外部服务边界。
+- [x] 每个修复提交必须带一条固定回归行为的测试。
 
 **Done when**：关键子集 0 failed；失败测试不通过 `pytest.skip`、宽泛 mock 或修改断言语义来消失。
 
@@ -29,10 +29,17 @@
 - Modify: `backend/app/**`、`frontend/src/**`、`pyproject.toml`、`eslint.config.js`
 - Test: 对应 Python/Vue 单元测试
 
-- [ ] RED：把当前 ruff 175、mypy 436、ESLint 13 errors 固定为可比较基线。
+- [x] RED：把当前 ruff 175、mypy 436、ESLint 13 errors 固定为可比较基线。
 - [ ] GREEN：按模块清理未使用导入/变量、未定义名称、TypedDict/Optional 类型错误、Vue prop mutation。
 - [ ] REFACTOR：补充必要类型别名和 composable 边界，禁止通过大范围 ignore 降低检查强度。
-- [ ] 完成一个模块后立即运行该模块测试和对应静态检查。
+- [x] 完成一个模块后立即运行该模块测试和对应静态检查。
+
+### 进度记录（2026-08-17）
+
+- P1-A 已完成：关键后端子集与完整 `backend/tests/services`、`security`、`infra` 回归通过；chat、pipeline 也已分别复验。
+- 后端生产代码 `uv run ruff check backend/app` 已为 0 error；全仓初始可复现计数为 168（审计报告按旧入口记录为 175）。
+- 前端 Vue prop mutation 已修复，`npm run lint` 已从 13 errors 降为 0 errors，剩余 48 条 warning 尚未清零。
+- `mypy backend/app` 初始 446 errors，目前仍有 445 errors，主要集中在 Optional、TypedDict 和未标注容器；因此 P1-B 尚未完成。
 
 **Done when**：生产代码 ruff、mypy、ESLint error 为 0；warnings 只允许有明确编号和期限的例外。
 
