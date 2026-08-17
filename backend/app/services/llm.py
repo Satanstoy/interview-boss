@@ -23,6 +23,7 @@ from tenacity import (
 )
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
 from app.core.outbound_url import assert_safe_outbound_url_sync
+from app.services.llm_usage import normalize_cache_usage
 
 logger = logging.getLogger("interview-boss")
 
@@ -76,6 +77,7 @@ _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
             "json_mode": False,
             "max_output_tokens": 4096,
             "api_formats": ["chat", "responses"],
+            "prompt_cache_key": False,
         },
     ),
     # SiliconFlow：json_object 正常；responses 未实测，保守只声明 chat
@@ -89,11 +91,17 @@ _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
             "json_mode": True,
             "max_output_tokens": 4096,
             "api_formats": ["chat", "responses"],
+            "prompt_cache_key": True,
         },
     ),
     (
         "api.anthropic.com",
-        {"json_mode": False, "max_output_tokens": 8192, "api_formats": ["anthropic"]},
+        {
+            "json_mode": False,
+            "max_output_tokens": 8192,
+            "api_formats": ["anthropic"],
+            "prompt_cache_control": True,
+        },
     ),
     ("*", {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}),
 ]
@@ -106,7 +114,8 @@ def get_provider_capabilities(base_url: str = None) -> dict:
 
     Returns: {"json_mode": bool, "max_output_tokens": int, "api_formats": list[str]}
     api_formats 取值：chat（OpenAI Chat Completions）/ responses（OpenAI Responses）/
-    anthropic（Anthropic Messages）。未匹配到具名供应商时回退 "*" 保守默认。
+    anthropic（Anthropic Messages）。缓存能力只声明已知 provider 的安全参数；未匹配
+    到具名供应商时回退 "*" 保守默认，不向兼容端点发送未知字段。
     """
     if not base_url:
         return dict(_DEFAULT_CAPS)
@@ -491,6 +500,10 @@ async def _llm_with_tools_call(
     tool_choice=None,
     base_url=None,
     user_id: int = None,
+    cache_control=None,
+    prompt_cache_key=None,
+    prompt_cache_options=None,
+    api_format: str | None = None,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     if provider == "anthropic":
@@ -524,11 +537,18 @@ async def _llm_with_tools_call(
             "content": text_content if text_content else None,
             "tool_calls": tool_calls,
             "finish_reason": finish_reason,
+            "usage": normalize_cache_usage(getattr(response, "usage", None)),
         }
 
     # OpenAI path（chat 或 responses）
     if resolve_api_format(base_url, user_id) == "responses":
         caps = get_provider_capabilities(base_url)
+        if not system_text:
+            system_text = "\n\n".join(
+                str(msg.get("content") or "")
+                for msg in messages
+                if msg.get("role") == "system"
+            )
         input_items = _convert_messages_to_responses_input(messages, system_text)
         call_kwargs = dict(
             model=model,
@@ -541,6 +561,12 @@ async def _llm_with_tools_call(
             call_kwargs["tools"] = _convert_tools_to_responses(tools)
         if tool_choice is not None:
             call_kwargs["tool_choice"] = _convert_tool_choice_to_responses(tool_choice)
+        if prompt_cache_key is not None and get_provider_capabilities(base_url).get(
+            "prompt_cache_key", False
+        ):
+            call_kwargs["prompt_cache_key"] = prompt_cache_key
+        if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
+            call_kwargs["prompt_cache_options"] = prompt_cache_options
         response = await resolved_client.responses.create(**call_kwargs)
 
         tool_calls = _extract_responses_tool_calls(response)
@@ -556,6 +582,7 @@ async def _llm_with_tools_call(
             "content": text_content if text_content else None,
             "tool_calls": tool_calls,
             "finish_reason": finish_reason,
+            "usage": normalize_cache_usage(getattr(response, "usage", None)),
         }
 
     call_kwargs = dict(
@@ -568,6 +595,11 @@ async def _llm_with_tools_call(
         call_kwargs["tools"] = tools
     if tool_choice is not None:
         call_kwargs["tool_choice"] = tool_choice
+    caps = get_provider_capabilities(base_url)
+    if prompt_cache_key is not None and caps.get("prompt_cache_key", False):
+        call_kwargs["prompt_cache_key"] = prompt_cache_key
+    if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
+        call_kwargs["prompt_cache_options"] = prompt_cache_options
     response = await resolved_client.chat.completions.create(**call_kwargs)
 
     msg = response.choices[0].message
@@ -577,6 +609,7 @@ async def _llm_with_tools_call(
         "reasoning_content": getattr(msg, "reasoning_content", None),
         "tool_calls": tool_calls,
         "finish_reason": response.choices[0].finish_reason,
+        "usage": normalize_cache_usage(getattr(response, "usage", None)),
     }
 
 
@@ -598,6 +631,7 @@ async def llm_with_tools(
             "content": str | None,   # LLM 文本回复（tool calling 时可能为 None）
             "tool_calls": list | None,  # [{"id", "function": {"name", "arguments"}}]
             "finish_reason": "stop" | "tool_calls" | "length",
+            "usage": {"input_tokens": int | None, ...},  # token/cache usage
         }
     """
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
@@ -607,6 +641,9 @@ async def llm_with_tools(
     max_tokens = kwargs.get("max_tokens", 4096)
     temperature = kwargs.get("temperature", 0.7)
     tool_choice = kwargs.get("tool_choice")
+    cache_control = kwargs.get("cache_control")
+    prompt_cache_key = kwargs.get("prompt_cache_key")
+    prompt_cache_options = kwargs.get("prompt_cache_options")
 
     # Anthropic 需要预先转换消息格式
     if provider == "anthropic":
