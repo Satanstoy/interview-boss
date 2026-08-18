@@ -105,11 +105,12 @@ def _get_user_practice_summary(user_id: int) -> str:
                 weak_lines = [f"- {r[0]}（平均 {round(r[1])} 分）" for r in weak_cats[:3]]
                 lines.append("薄弱环节:\n" + "\n".join(weak_lines))
 
-            # 最近练习的 3 题
+            # 最近练习的 3 题（读 review 体系；user_practice_history 已停写）
             recent = conn.execute(
-                "SELECT qb.question, oph.score FROM user_practice_history oph "
-                "JOIN question_bank qb ON oph.question_bank_id = qb.id "
-                "WHERE oph.user_id = ? ORDER BY oph.created_at DESC LIMIT 3",
+                "SELECT qb.question, pr.score FROM practice_review_events pr "
+                "JOIN question_bank qb ON pr.question_bank_id = qb.id "
+                "WHERE pr.user_id = ? AND pr.source = 'self_check' AND pr.score IS NOT NULL "
+                "ORDER BY pr.reviewed_at DESC LIMIT 3",
                 (user_id,)
             ).fetchall()
             if recent:

@@ -451,12 +451,16 @@ async def execute_eval_run(
             "UPDATE eval_items SET status = 'running', started_at = CURRENT_TIMESTAMP WHERE id = ?",
             (item["id"],),
         )
+        attempt_index = connection.execute(
+            "SELECT COALESCE(MAX(attempt_index), 0) + 1 FROM eval_attempts WHERE item_id = ?",
+            (item["id"],),
+        ).fetchone()[0]
         attempt_cursor = connection.execute(
             """
             INSERT INTO eval_attempts (item_id, attempt_index, attempt_kind)
-            VALUES (?, 1, 'target')
+            VALUES (?, ?, 'target')
             """,
-            (item["id"],),
+            (item["id"], attempt_index),
         )
         attempt_id = attempt_cursor.lastrowid
         connection.commit()

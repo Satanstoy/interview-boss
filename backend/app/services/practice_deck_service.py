@@ -57,6 +57,20 @@ def _study_date_string(now: datetime | None = None) -> str:
     return current.astimezone(zone).date().isoformat()
 
 
+def _to_study_date(value) -> str:
+    """Convert a UTC-naive datetime (str/datetime) to the study-day date string."""
+
+    if not value:
+        return ""
+    try:
+        d = datetime.fromisoformat(str(value))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=UTC)
+        return d.astimezone(_study_timezone()).date().isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
 def _study_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
     """UTC-naive bounds for the current learner-facing calendar day."""
 
@@ -74,11 +88,15 @@ def _study_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
 
 
 def _split_bank_params(from_clause: str, params: list) -> tuple[list, list]:
-    """Separate position JOIN parameters from WHERE parameters."""
+    """Separate position JOIN parameters from WHERE parameters.
 
-    if "qp.position_id = ?" not in from_clause:
-        return [], list(params)
-    return list(params[:1]), list(params[1:])
+    以 from_clause 中 join 段的参数占位数（必须先于 where 条件的所有 ?）
+    作为切分点，而不是用脆弱的子串匹配；join 段不稳定时仍按占位数切分。
+    """
+
+    join_part = from_clause.split("WHERE", 1)[0] if "WHERE" in from_clause else from_clause
+    placeholder_count = join_part.count("?")
+    return list(params[:placeholder_count]), list(params[placeholder_count:])
 
 
 def _json_or_default(value, default):
@@ -492,19 +510,27 @@ def list_deck_questions(
             f"{from_clause}{_review_join('?')}{future_where}",
             params,
         ).fetchone()
+        # 未来 7 天研究日预测：把每个 next_review_at（UTC-naive）转换到研究日再分桶。
+        # SQLite date() 只能取 UTC 日期，无法感知 STUDY_TIMEZONE，因此在 Python 端转换。
         forecast_rows = conn.execute(
-            f"SELECT date(uqr.next_review_at) AS review_date, COUNT(*) AS count "
-            f"{from_clause}{_review_join('?')}{future_where} "
-            "AND date(uqr.next_review_at) > date('now') "
-            "AND date(uqr.next_review_at) <= date('now', '+7 days') "
-            "GROUP BY date(uqr.next_review_at)",
+            f"SELECT uqr.next_review_at {from_clause}{_review_join('?')}{future_where} "
+            "AND uqr.next_review_at IS NOT NULL "
+            "AND uqr.next_review_at <= datetime('now', '+8 days')",
             params,
         ).fetchall()
-        forecast_counts = {
-            row["review_date"]: int(row["count"] or 0) for row in forecast_rows
-        }
-        # forecast 日期用 study timezone 对齐 completed_today
+        zone = _study_timezone()
         study_start_date = datetime.strptime(study_start, "%Y-%m-%d %H:%M:%S").date()
+        forecast_counts: dict[str, int] = {}
+        for row in forecast_rows:
+            raw = str(row["next_review_at"] or "")
+            try:
+                due_dt = datetime.fromisoformat(raw).replace(tzinfo=UTC).astimezone(zone)
+            except (TypeError, ValueError):
+                continue
+            due_day = due_dt.date()
+            if study_start_date < due_day <= study_start_date + timedelta(days=7):
+                key = due_day.isoformat()
+                forecast_counts[key] = forecast_counts.get(key, 0) + 1
         review_forecast = [
             {
                 "date": (study_start_date + timedelta(days=day_offset)).isoformat(),
@@ -550,6 +576,11 @@ def list_deck_questions(
                     and row["last_rating"] in {"again", "hard"}
                     and study_start <= str(row["last_reviewed_at"] or "") < study_end
                 ),
+                "reviewed_today": (
+                    deck_key == "due"
+                    and study_start <= str(row["last_reviewed_at"] or "") < study_end
+                ),
+                "next_review_date": _to_study_date(row["next_review_at"]),
             }
             for row in rows
         ],

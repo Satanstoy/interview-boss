@@ -5,8 +5,8 @@ import { ArrowLeft, Ban, CheckCircle2, Circle, Radio } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
-import { cancelEvaluationRun, fetchEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
-import { checkStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { cancelEvaluationRun, fetchEvaluationItem, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
+import { checkStatusLabel, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const route = useRoute()
@@ -15,6 +15,10 @@ const run = ref(null)
 const loading = ref(true)
 const error = ref('')
 const lastSequence = ref(0)
+const itemEvidence = ref(null)
+const evidenceLoading = ref(false)
+const evidenceError = ref('')
+const retrying = ref(false)
 const abortController = new AbortController()
 const progress = computed(() => runProgress(run.value))
 const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(run.value?.status))
@@ -115,6 +119,32 @@ async function cancel() {
   }
 }
 
+async function retryFailed() {
+  retrying.value = true
+  error.value = ''
+  try {
+    await retryFailedEvaluationRun(route.params.runId)
+    await load()
+  } catch (err) {
+    error.value = err.message || '重跑失败 Case 失败'
+  } finally {
+    retrying.value = false
+  }
+}
+
+async function openEvidence(item) {
+  itemEvidence.value = null
+  evidenceError.value = ''
+  evidenceLoading.value = true
+  try {
+    itemEvidence.value = await fetchEvaluationItem(route.params.runId, item.id)
+  } catch (err) {
+    evidenceError.value = err.message || 'Case 证据加载失败'
+  } finally {
+    evidenceLoading.value = false
+  }
+}
+
 onMounted(async () => {
   await load()
   watchEvents()
@@ -127,13 +157,13 @@ onUnmounted(() => abortController.abort())
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <EvaluationPageHeader :title="`评测运行 #${route.params.runId}`" description="跟踪完整 E2E 的进度；最终分数由规则指标与固定 Judge 按评测协议合成。" active-key="experiments">
-        <template #actions><Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button><Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button></template>
+        <template #actions><Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button><Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button><Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button></template>
       </EvaluationPageHeader>
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <p v-else-if="error && !run" class="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
       <template v-else-if="run">
         <AppCard class="mt-6" title="当前执行阶段" description="实时进度来自可恢复 SSE 事件流，连接中断不会影响后台评测。">
-          <div class="flex flex-wrap items-center gap-3"><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span><span class="text-sm text-muted-foreground">已处理 {{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span class="ml-auto text-2xl font-semibold">{{ progress }}%</span></div>
+          <div class="flex flex-wrap items-center gap-3"><span class="text-xs text-muted-foreground">执行</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-xs text-muted-foreground">质量</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span><span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span><span class="text-sm text-muted-foreground">已处理 {{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span class="ml-auto text-2xl font-semibold">{{ progress }}%</span></div>
           <div class="mt-4 h-2 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all duration-500" :style="{ width: `${progress}%` }" /></div>
           <div v-if="run.summary?.metric_summary" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div v-if="run.summary.metric_summary.score" class="rounded-lg bg-primary/5 p-3 text-xs"><div class="font-medium">混合主分（Run 汇总）</div><div class="mt-1 text-muted-foreground">最终 {{ run.summary.metric_summary.score.final_mean == null ? '—' : Number(run.summary.metric_summary.score.final_mean).toFixed(3) }} · 规则 {{ run.summary.metric_summary.score.deterministic_mean == null ? '—' : Number(run.summary.metric_summary.score.deterministic_mean).toFixed(3) }} · Judge {{ run.summary.metric_summary.score.judge_mean == null ? '—' : Number(run.summary.metric_summary.score.judge_mean).toFixed(3) }}</div></div><div v-if="run.summary.metric_summary.tool" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">工具调用效果（Run 汇总）</div><div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.tool.call_count }} 次调用 · {{ run.summary.metric_summary.tool.failed_call_count }} 次失败 · 结果使用率 {{ run.summary.metric_summary.tool.result_used_rate == null ? '—' : `${Math.round(run.summary.metric_summary.tool.result_used_rate * 100)}%` }}</div></div><div v-if="run.summary.metric_summary.intent" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">意图识别效果（Run 汇总）</div><div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.intent.observed_turn_count }} 轮记录 · 覆盖率 {{ run.summary.metric_summary.intent.intent_coverage == null ? '—' : `${Math.round(run.summary.metric_summary.intent.intent_coverage * 100)}%` }} · 准确率 {{ run.summary.metric_summary.intent.accuracy == null ? '—' : `${Math.round(run.summary.metric_summary.intent.accuracy * 100)}%` }}</div></div><div v-if="run.summary.metric_summary.content" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">结构化抽取（Run 汇总）</div><div class="mt-1 text-muted-foreground">字段覆盖 {{ Math.round(run.summary.metric_summary.content.field_coverage * 100) }}% · 题目召回 {{ Math.round(run.summary.metric_summary.content.question_recall * 100) }}%</div></div><div v-if="run.summary.metric_summary.resume" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">简历分析（Run 汇总）</div><div class="mt-1 text-muted-foreground">事实覆盖 {{ Math.round(run.summary.metric_summary.resume.source_fact_coverage * 100) }}% · 岗位匹配 {{ Math.round(run.summary.metric_summary.resume.target_alignment * 100) }}%</div></div><div v-if="run.summary.metric_summary.tagging" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">题目分类（Run 汇总）</div><div class="mt-1 text-muted-foreground">分类合法 {{ Math.round(run.summary.metric_summary.tagging.taxonomy_validity * 100) }}% · 标签准确 {{ Math.round(run.summary.metric_summary.tagging.classification_accuracy * 100) }}%</div></div></div>
           <div class="mt-6 grid gap-2 sm:grid-cols-5">
@@ -144,8 +174,26 @@ onUnmounted(() => abortController.abort())
         </AppCard>
 
         <AppCard class="mt-6" title="逐 Case 结果" description="先看执行状态和门禁结果；完整 transcript、工具轨迹和 Judge 原文在单个 Artifact 中查看。" no-padding>
-          <div class="overflow-x-auto"><table class="w-full min-w-[1040px] text-left text-sm"><thead class="border-b border-border/60 bg-muted/30 text-xs text-muted-foreground"><tr><th class="px-5 py-3">Case / 重跑</th><th class="px-5 py-3">执行状态</th><th class="px-5 py-3">契约</th><th class="px-5 py-3">规则指标</th><th class="px-5 py-3">硬门禁</th><th class="px-5 py-3">Judge</th><th class="px-5 py-3">混合分</th></tr></thead><tbody class="divide-y divide-border/60"><tr v-for="item in run.items" :key="item.id" class="hover:bg-muted/20"><td class="px-5 py-3"><div class="font-medium">{{ item.case_key }}</div><div class="text-xs text-muted-foreground">第 {{ item.replication_index }} 次 · seed {{ item.seed }}</div></td><td class="px-5 py-3"><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(item.status)]">{{ statusLabel(item.status) }}</span></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.contract_status) }}</td><td class="px-5 py-3 text-xs"><div>{{ deterministicSummary(item) }}</div><div class="text-[11px] text-muted-foreground">工具 / 意图 / 结构化字段</div></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.hard_gate_status) }}</td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.judge_status) }}</td><td class="px-5 py-3 font-mono"><div>{{ item.score == null ? '—' : Number(item.score).toFixed(3) }}</div><div class="font-sans text-[11px] text-muted-foreground">{{ scoreSummary(item) }}</div></td></tr></tbody></table></div>
+          <div class="overflow-x-auto"><table class="w-full min-w-[1040px] text-left text-sm"><thead class="border-b border-border/60 bg-muted/30 text-xs text-muted-foreground"><tr><th class="px-5 py-3">Case / 重跑</th><th class="px-5 py-3">执行状态</th><th class="px-5 py-3">契约</th><th class="px-5 py-3">规则指标</th><th class="px-5 py-3">硬门禁</th><th class="px-5 py-3">Judge</th><th class="px-5 py-3">混合分</th><th class="px-5 py-3">证据</th></tr></thead><tbody class="divide-y divide-border/60"><tr v-for="item in run.items" :key="item.id" class="hover:bg-muted/20"><td class="px-5 py-3"><div class="font-medium">{{ item.case_key }}</div><div class="text-xs text-muted-foreground">第 {{ item.replication_index }} 次 · seed {{ item.seed }}</div></td><td class="px-5 py-3"><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(item.status)]">{{ statusLabel(item.status) }}</span></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.contract_status) }}</td><td class="px-5 py-3 text-xs"><div>{{ deterministicSummary(item) }}</div><div class="text-[11px] text-muted-foreground">工具 / 意图 / 结构化字段</div></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.hard_gate_status) }}</td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.judge_status) }}</td><td class="px-5 py-3 font-mono"><div>{{ item.score == null ? '—' : Number(item.score).toFixed(3) }}</div><div class="font-sans text-[11px] text-muted-foreground">{{ scoreSummary(item) }}</div></td><td class="px-5 py-3"><Button size="sm" variant="ghost" @click="openEvidence(item)">查看证据</Button></td></tr></tbody></table></div>
           <div v-if="!run.items?.length" class="p-8 text-center text-sm text-muted-foreground">暂无 Case 结果。</div>
+        </AppCard>
+
+        <AppCard v-if="evidenceLoading || evidenceError || itemEvidence" class="mt-6" title="Case 证据" description="查看冻结输入、生产输出、规则断言、Judge 结果和执行 Attempt。">
+          <div v-if="evidenceLoading" class="py-8 text-center text-sm text-muted-foreground">正在加载 Case 证据...</div>
+          <p v-else-if="evidenceError" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ evidenceError }}</p>
+          <div v-else-if="itemEvidence" class="space-y-4 text-sm">
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-lg bg-muted/40 p-3"><div class="font-medium">候选人可见输入</div><pre class="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.case?.input_snapshot || {}, null, 2) }}</pre></div>
+              <div class="rounded-lg bg-muted/40 p-3"><div class="font-medium">确定性契约</div><pre class="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.case?.contract || {}, null, 2) }}</pre></div>
+            </div>
+            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Agent 输出 / 轨迹</div><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.item?.result?.observation?.payload || {}, null, 2) }}</pre></div>
+            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Hard Gate 证据</div><div class="mt-2 space-y-2"><div v-for="assertion in itemEvidence.item?.result?.observation?.hard_assertions || []" :key="assertion.id" class="rounded-md bg-muted/40 p-2 text-xs"><span :class="assertion.passed ? 'text-emerald-600' : 'text-destructive'">{{ assertion.passed ? '通过' : '失败' }}</span><span class="ml-2 font-medium">{{ assertion.id }}</span><span class="ml-2 text-muted-foreground">{{ assertion.evidence }}</span></div><div v-if="!itemEvidence.item?.result?.observation?.hard_assertions?.length" class="text-xs text-muted-foreground">没有断言记录。</div></div></div>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Judge 结果</div><pre class="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.item?.result?.score || {}, null, 2) }}</pre></div>
+              <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Attempt 记录</div><div v-for="attempt in itemEvidence.attempts || []" :key="attempt.id" class="mt-2 rounded-md bg-muted/40 p-2 text-xs"><div class="font-medium">Attempt #{{ attempt.attempt_index }} · {{ attempt.status }}</div><pre class="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(attempt.raw_observation || {}, null, 2) }}</pre></div></div>
+            </div>
+            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Artifact 索引</div><div v-if="!itemEvidence.artifacts?.length" class="mt-2 text-xs text-muted-foreground">暂无独立 Artifact。</div><div v-for="artifact in itemEvidence.artifacts || []" :key="artifact.id" class="mt-2 text-xs text-muted-foreground">{{ artifact.artifact_type }} · {{ artifact.storage_path }} · {{ artifact.digest }}</div></div>
+          </div>
         </AppCard>
       </template>
     </div>

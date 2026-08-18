@@ -10,6 +10,13 @@ export const STATUS_LABELS = {
   archived: '已归档',
 }
 
+export const QUALITY_STATUS_LABELS = {
+  pending: '质量待判定',
+  passed: '质量通过',
+  failed: '质量未通过',
+  not_evaluated: '未完成质量评测',
+}
+
 export const RELEASE_TYPE_LABELS = {
   target: '被测版本',
   evaluation: '完整评测版本',
@@ -66,7 +73,7 @@ export const EVALUATION_TARGETS = [
 export const EVALUATION_FLOW_STEPS = [
   { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁', route: '/admin/evals/releases' },
   { key: 'benchmarks', keys: ['EvalBenchmarks', 'admin-evals-benchmarks'], label: 'Benchmark', description: '决定测什么', route: '/admin/evals/benchmarks' },
-  { key: 'experiments', keys: ['EvalExperiments', 'admin-evals-experiments', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
+  { key: 'experiments', keys: ['EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
   { key: 'results', keys: ['EvalResults', 'admin-evals-results'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/results' },
   { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
 ]
@@ -98,6 +105,10 @@ export const CHECK_STATUS_LABELS = {
 
 export function statusLabel(status) {
   return STATUS_LABELS[status] || status || '未知'
+}
+
+export function qualityStatusLabel(status) {
+  return QUALITY_STATUS_LABELS[status] || QUALITY_STATUS_LABELS.pending
 }
 
 export function releaseTypeLabel(type) {

@@ -244,6 +244,8 @@ def _insert_review(conn, user_id, review_id, question_bank_id, rating, reviewed_
 
 def test_practice_activity_heatmap_trend_and_streak(test_db):
     from datetime import datetime, timedelta
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
 
     from app.services.insights import build_practice_activity
 
@@ -259,7 +261,10 @@ def test_practice_activity_heatmap_trend_and_streak(test_db):
     _insert_review(test_db, 401, 1, 1, "good", f"{yesterday} 20:00:00", score=85)
     test_db.commit()
 
-    data = build_practice_activity({"id": 401})
+    # 本测试用 naive now() 构造日期，固定 study tz 为 UTC 使分桶与数据一致；
+    # +8 偏移的真实转换在 test_practice_activity_uses_study_day_date 单独验证。
+    with patch("app.services.practice_deck_service._study_timezone", return_value=ZoneInfo("UTC")):
+        data = build_practice_activity({"id": 401})
 
     assert data["streak"] == {"current": 2, "longest": 2}
     assert len(data["heatmap"]) == 365
@@ -276,6 +281,8 @@ def test_practice_activity_heatmap_trend_and_streak(test_db):
 
 def test_practice_activity_streak_breaks_with_gap(test_db):
     from datetime import datetime, timedelta
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
 
     from app.services.insights import build_practice_activity
 
@@ -287,7 +294,9 @@ def test_practice_activity_streak_breaks_with_gap(test_db):
     _insert_self_check(test_db, 402, 2, 70, f"{three_days_ago} 09:00:00")
     test_db.commit()
 
-    data = build_practice_activity({"id": 402})
+    # 固定 study tz 为 UTC 使 naive 日期分桶与数据一致（+8 偏移由专用测试验证）
+    with patch("app.services.practice_deck_service._study_timezone", return_value=ZoneInfo("UTC")):
+        data = build_practice_activity({"id": 402})
 
     assert data["streak"] == {"current": 1, "longest": 1}
 
@@ -532,24 +541,22 @@ def test_insights_readiness_items_include_srs_proficiency(test_db):
     assert items["未练主题"]["proficiency"] is None
 
 
-def test_practice_activity_uses_utc_date_not_naive(test_db):
-    """build_practice_activity 必须用 datetime.now(timezone.utc) 而非 datetime.now()。
+def test_practice_activity_uses_study_day_date(test_db):
+    """build_practice_activity 必须用 STUDY_TIMEZONE 的学习日而非 UTC 或 naive。
 
-    模拟 UTC 23:30 / 本地次日 07:30（+8 时区）的场景：
-    如果用 naive datetime.now()，today 会是次日，导致 heatmap 末尾日期错位。
+    模拟 UTC 23:30（上海次日 07:30）的场景：
+    若用 UTC，today 会是 2026-08-17；正确学习日是 2026-08-18（Asia/Shanghai +8）。
     """
     from unittest.mock import patch
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
 
     from app.services.insights import build_practice_activity
 
     _insert_user(test_db, 801)
     test_db.commit()
 
-    # UTC 时间：2026-08-17 23:30:00
+    # UTC 时间：2026-08-17 23:30:00 → 上海 2026-08-18 07:30:00
     fake_utc = datetime(2026, 8, 17, 23, 30, 0, tzinfo=timezone.utc)
-    # 如果用 naive now() 模拟本地 +8，会得到 2026-08-18 07:30:00
-    fake_local = datetime(2026, 8, 18, 7, 30, 0)
 
     original_datetime = datetime
 
@@ -558,7 +565,7 @@ def test_practice_activity_uses_utc_date_not_naive(test_db):
         def now(tz=None):
             if tz == timezone.utc:
                 return fake_utc
-            return fake_local
+            return fake_utc.astimezone()
 
         @staticmethod
         def strptime(*args, **kwargs):
@@ -567,6 +574,6 @@ def test_practice_activity_uses_utc_date_not_naive(test_db):
     with patch("app.services.insights.datetime", FakeDatetime):
         data = build_practice_activity({"id": 801})
 
-    # 应该使用 UTC 日期 2026-08-17，而非本地日期 2026-08-18
-    assert data["heatmap"][-1]["date"] == "2026-08-17"
-    assert data["trend"][-1]["date"] == "2026-08-17"
+    # 学习日（Asia/Shanghai）2026-08-18，而不是 UTC 的 2026-08-17
+    assert data["heatmap"][-1]["date"] == "2026-08-18"
+    assert data["trend"][-1]["date"] == "2026-08-18"

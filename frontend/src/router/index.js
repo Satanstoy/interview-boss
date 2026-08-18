@@ -117,6 +117,12 @@ const routes = [
         component: () => import('@/views/admin/EvaluationExperimentsView.vue'),
       },
       {
+        path: 'admin/evals/experiments/:experimentId',
+        name: 'admin-evals-experiment',
+        meta: { adminOnly: true },
+        component: () => import('@/views/admin/EvaluationExperimentView.vue'),
+      },
+      {
         path: 'admin/evals/benchmarks',
         name: 'admin-evals-benchmarks',
         meta: { adminOnly: true },

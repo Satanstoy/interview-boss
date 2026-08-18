@@ -6,7 +6,7 @@ import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { formatDate, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { formatDate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const router = useRouter()
@@ -82,7 +82,7 @@ onMounted(load)
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
                   <span class="font-medium">评测 #{{ run.id }}</span>
-                  <span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span>
+                  <span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span>
                 </div>
                 <div class="mt-1 text-xs text-muted-foreground">{{ formatDate(run.created_at) }} · 被测版本：{{ run.target_release_key || '未命名' }}</div>
               </div>

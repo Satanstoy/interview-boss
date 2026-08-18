@@ -290,30 +290,51 @@ def _difficulty_label(raw: str | None) -> str:
     return _DIFFICULTY_LABELS.get((raw or "").lower(), raw or "未标注")
 
 
+def _study_day_key(value) -> str | None:
+    """把 UTC-naive reviewed_at 转成学习日（STUDY_TIMEZONE）的 YYYY-MM-DD。
+
+    SQLite date() 只能取 UTC 日期，无法感知 STUDY_TIMEZONE，因此在
+    Python 端用与 practice_deck_service 相同的时区转换，保证接着的
+    热量图/连击/趋势与刷题页「学习日」一致。
+    """
+    try:
+        from app.services.practice_deck_service import _study_timezone
+
+        d = datetime.fromisoformat(str(value)).replace(tzinfo=timezone.utc)
+        return d.astimezone(_study_timezone()).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
 def _activity_day_counts(conn, user_id: int, since: str) -> dict[str, int]:
-    """按天统计练习次数（正式答题 + 闪卡复习）。"""
+    """按天统计练习次数（正式答题 + 闪卡复习，按学习日分桶）。"""
     counts: dict[str, int] = {}
     # 双写收敛: user_practice_history 已停写; 只统计 practice_review_events
     # (评估 + 闪卡复习), 修复同一评估被双计的问题。
     for row in conn.execute(
-        "SELECT date(reviewed_at) AS day, COUNT(*) AS cnt FROM practice_review_events "
-        "WHERE user_id = ? AND reviewed_at >= ? GROUP BY day",
+        "SELECT reviewed_at FROM practice_review_events "
+        "WHERE user_id = ? AND reviewed_at >= ?",
         (user_id, since),
     ).fetchall():
-        counts[row["day"]] = counts.get(row["day"], 0) + row["cnt"]
+        day = _study_day_key(row["reviewed_at"])
+        if day:
+            counts[day] = counts.get(day, 0) + 1
     return counts
 
 
 def _daily_avg_scores(conn, user_id: int, since: str) -> dict[str, float]:
-    """按天统计答题平均分（仅 user_practice_history 的有分记录）。"""
+    """按天统计答题平均分（self_check 有分记录，按学习日分桶）。"""
     avgs = {}
     for row in conn.execute(
-        "SELECT date(reviewed_at) AS day, AVG(score) AS avg_s FROM practice_review_events "
-        "WHERE user_id = ? AND score IS NOT NULL AND source = 'self_check' AND reviewed_at >= ? GROUP BY day",
+        "SELECT reviewed_at, score FROM practice_review_events "
+        "WHERE user_id = ? AND score IS NOT NULL AND source = 'self_check' AND reviewed_at >= ?",
         (user_id, since),
     ).fetchall():
-        avgs[row["day"]] = round(row["avg_s"] or 0, 1)
-    return avgs
+        day = _study_day_key(row["reviewed_at"])
+        if day:
+            scores = avgs.setdefault(day, [])
+            scores.append(row["score"])
+    return {day: round(sum(v) / len(v), 1) for day, v in avgs.items()}
 
 
 def _build_daily_series(
@@ -337,19 +358,17 @@ def _build_daily_series(
 
 
 def _practice_days(conn, user_id: int) -> set[str]:
-    """返回用户全部有练习活动的日期集合（跨 90 天窗口，用于 streak）。"""
+    """返回用户全部有练习活动的日期集合（跨 90 天窗口，用于 streak，按学习日）。"""
     days = set()
     # 双写收敛后 user_practice_history 已停写, 只统计 review 事件表
-    for table, column in (
-        ("practice_review_events", "reviewed_at"),
-    ):
-        rows = conn.execute(
-            f"SELECT DISTINCT date({column}) AS day FROM {table} WHERE user_id = ?",
-            (user_id,),
-        ).fetchall()
-        for row in rows:
-            if row["day"]:
-                days.add(row["day"])
+    rows = conn.execute(
+        "SELECT reviewed_at FROM practice_review_events WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    for row in rows:
+        day = _study_day_key(row["reviewed_at"])
+        if day:
+            days.add(day)
     return days
 
 
@@ -477,7 +496,9 @@ def build_practice_activity(user: dict) -> dict:
     user_id = int(user["id"])
     _, position_name = get_user_job_position(user_id)
     with get_db_connection() as conn:
-        today = datetime.now(timezone.utc).date()
+        from app.services.practice_deck_service import _study_timezone
+
+        today = datetime.now(timezone.utc).astimezone(_study_timezone()).date()
         heatmap = _build_daily_series(conn, user_id, 365, today)
         trend = _build_daily_series(conn, user_id, 30, today)
         days = _practice_days(conn, user_id)

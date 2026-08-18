@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.practice_scheduler import ReviewState, schedule_review, state_from_row
 
@@ -15,6 +17,26 @@ PASSING_RATINGS = frozenset({"good", "easy"})
 
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _study_timezone() -> ZoneInfo:
+    """Return the product study-day timezone, independent of container TZ."""
+
+    name = os.environ.get("STUDY_TIMEZONE", "Asia/Shanghai")
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _to_study_date(value: datetime | None) -> str:
+    """Convert a UTC-naive datetime to the learner-facing study-day date (YYYY-MM-DD)."""
+
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(_study_timezone()).date().isoformat()
 
 
 class ReviewCorrectionError(ValueError):
@@ -31,6 +53,7 @@ def _review_payload(result, *, score, timestamp, event_id: int) -> dict:
         "last_score": score,
         "last_reviewed_at": timestamp,
         "next_review_at": result.next_review_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "next_review_date": _to_study_date(result.next_review_at),
         "interval_days": result.interval_days,
         "ease_factor": result.ease_factor,
         "algorithm": "sm2_lite",
@@ -123,6 +146,11 @@ def _duplicate_payload(row, event) -> dict:
         "last_score": event["score"] if event is not None else None,
         "last_reviewed_at": str(row["last_reviewed_at"] or ""),
         "next_review_at": str(row["next_review_at"] or ""),
+        "next_review_date": _to_study_date(
+            datetime.fromisoformat(str(row["next_review_at"]))
+            if row["next_review_at"]
+            else None
+        ),
         "interval_days": row["interval_days"] or 0,
         "ease_factor": row["ease_factor"] or 2.3,
         "algorithm": "sm2_lite",
@@ -145,6 +173,7 @@ def record_review(
     now: datetime | None = None,
     urgency: float = 0.0,
     idempotency_key: str | None = None,
+    user_answer: str | None = None,
 ) -> dict:
     """Atomically update a user's state and append an auditable review event.
 
@@ -195,8 +224,8 @@ def record_review(
         """
         INSERT INTO practice_review_events
             (user_id, question_bank_id, review_id, rating, score, source,
-             reviewed_at, before_state_json, idempotency_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             reviewed_at, before_state_json, idempotency_key, user_answer)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id,
@@ -208,6 +237,7 @@ def record_review(
             timestamp,
             json.dumps(asdict(before_state), separators=(",", ":")),
             idempotency_key,
+            user_answer,
         ),
     )
     return _review_payload(

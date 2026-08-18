@@ -291,6 +291,75 @@ def test_executor_marks_failed_target_observation_as_failed_item(test_db):
     assert item[0] == "failed"
 
 
+def test_executor_retry_creates_next_attempt_and_replaces_failed_item(test_db):
+    executor = _executor()
+    target, suite, protocol, judge, harness, simulator = _context(test_db)
+    run = _service().create_eval_run(
+        test_db,
+        created_by=None,
+        target_release_id=target["id"],
+        benchmark_suite_release_id=suite["id"],
+        eval_protocol_release_id=protocol["id"],
+        judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"],
+        replication_count=1,
+        seed=14,
+    )
+    test_db.commit()
+
+    class FailedAdapter:
+        async def prepare(self, case_snapshot, target_release):
+            return case_snapshot
+
+        async def run(self, prepared_case, target_release):
+            return {"error": "temporary failure"}
+
+        async def observe(self, raw_result):
+            return {"status": "failed", "payload": {"errors": [raw_result["error"]]}}
+
+    first = asyncio.run(executor.execute_eval_run(run["id"], conn=test_db, adapter_resolver=lambda _: FailedAdapter()))
+    assert first["status"] == "failed"
+
+    item_id = test_db.execute("SELECT id FROM eval_items WHERE run_id = ?", (run["id"],)).fetchone()[0]
+    test_db.execute(
+        "UPDATE eval_items SET status = 'pending', result_json = '{}', contract_status = 'pending', hard_gate_status = 'pending', judge_status = 'pending', finished_at = NULL WHERE id = ?",
+        (item_id,),
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'created', completed_items = 0, failed_items = 0, finished_at = NULL WHERE id = ?",
+        (run["id"],),
+    )
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'created', completed_items = 0, failed_items = 0, finished_at = NULL WHERE id = ?",
+        (run["batch_id"],),
+    )
+    test_db.commit()
+
+    class SuccessfulAdapter:
+        async def prepare(self, case_snapshot, target_release):
+            return case_snapshot
+
+        async def run(self, prepared_case, target_release):
+            return {"answer": "recovered"}
+
+        async def observe(self, raw_result):
+            return {
+                "status": "succeeded",
+                "payload": raw_result,
+                "hard_assertions": [],
+            }
+
+    second = asyncio.run(executor.execute_eval_run(run["id"], conn=test_db, adapter_resolver=lambda _: SuccessfulAdapter()))
+
+    assert second["status"] == "completed"
+    attempts = test_db.execute(
+        "SELECT attempt_index, status FROM eval_attempts WHERE item_id = ? ORDER BY attempt_index",
+        (item_id,),
+    ).fetchall()
+    assert [tuple(attempt) for attempt in attempts] == [(1, "failed"), (2, "succeeded")]
+
+
 def test_reconcile_interrupted_run_closes_active_items_and_batch(test_db):
     executor = _executor()
     target, suite, protocol, judge, harness, simulator = _context(test_db)

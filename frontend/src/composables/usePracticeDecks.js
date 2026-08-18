@@ -7,6 +7,7 @@ import { useToast, useConfirm } from './useNotification.js'
 export function usePracticeDecks(filter = 'all') {
   const QUESTION_PAGE_SIZE = 100
   const DUE_CACHE_TTL_MS = 60 * 1000
+  const MAX_CACHE_ENTRIES = 20
   const toast = useToast()
   const { confirm: showConfirm } = useConfirm()
   const decks = ref([])
@@ -25,6 +26,18 @@ export function usePracticeDecks(filter = 'all') {
   const questionRefreshes = new Map()
   const questionRefreshModes = new Map()
   const questionRequestVersions = new Map()
+
+  function trimCache() {
+    if (questionCache.size <= MAX_CACHE_ENTRIES) return
+    const byAge = [...questionCacheUpdatedAt.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, questionCache.size - MAX_CACHE_ENTRIES)
+    for (const [key] of byAge) {
+      questionCache.delete(key)
+      questionCacheUpdatedAt.delete(key)
+      questionRequestVersions.delete(key)
+    }
+  }
   let activeLoadingRequest = null
   let reviewMutationVersion = 0
   let reviewedDueQueueIds = new Set()
@@ -45,12 +58,12 @@ export function usePracticeDecks(filter = 'all') {
     selectedDeck.value = response.deck || decks.value.find(deck => deck.key === deckKey) || null
     loadedDeckKey.value = deckKey
     if (deckKey === 'due') {
-      const studyDate = response.deck?.study_date
+      // reviewed_today 由服务端用 STUDY_TIMEZONE 计算，前端零时区逻辑
       reviewedDueQueueIds = new Set((response.items || [])
-        .filter(question => isStudyDayToday(question.last_reviewed_at, studyDate) && ['good', 'easy'].includes(question.last_rating))
+        .filter(question => question.reviewed_today && ['good', 'easy'].includes(question.last_rating))
         .map(question => question.id))
       attemptedDueQueueIds = new Set((response.items || [])
-        .filter(question => isStudyDayToday(question.last_reviewed_at, studyDate))
+        .filter(question => question.reviewed_today)
         .map(question => question.id))
     }
   }
@@ -86,6 +99,7 @@ export function usePracticeDecks(filter = 'all') {
 
         questionCache.set(cacheKey, response)
         questionCacheUpdatedAt.set(cacheKey, Date.now())
+        trimCache()
         if (deckKey === selectedDeckKey.value) applyQuestionResponse(response, deckKey)
         return response
       } catch (err) {
@@ -229,12 +243,12 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
-    const studyDate = selectedDeck.value?.study_date
-    const wasPassedToday = isStudyDayToday(item?.last_reviewed_at, studyDate) && ['good', 'easy'].includes(item?.last_rating)
+    // reviewed_today 由服务端计算；item 变更后 selectedDeck 已同步最新状态
+    const wasPassedToday = item?.reviewed_today && ['good', 'easy'].includes(item?.last_rating)
     const wasDailyRelearning = Boolean(item?.is_daily_relearning)
     const wasPracticed = Number(item?.review_count || 0) > 0
-    const previousNextReviewAt = item?.next_review_at || null
-    const originalQueueKind = !previousNextReviewAt
+    const previousNextReviewDate = item?.next_review_date || null
+    const originalQueueKind = !previousNextReviewDate
       ? 'new_question_count'
       : (item?.is_checkin ? 'checkin_count' : 'due_review_count')
     const queueKind = wasDailyRelearning ? 'relearning_count' : originalQueueKind
@@ -286,7 +300,7 @@ export function usePracticeDecks(filter = 'all') {
             reviewedDeck.next_due_at = nextState.next_review_at
           }
         }
-        if (passedNow) adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+        if (passedNow) adjustReviewForecast(reviewedDeck, previousNextReviewDate, nextState.next_review_date)
       }
       const deck = decks.value.find(candidate => candidate.key === reviewedDeckKey)
       if (deck) {
@@ -306,11 +320,10 @@ export function usePracticeDecks(filter = 'all') {
     const reviewedDeckKey = selectedDeckKey.value
     const reviewedDeck = selectedDeck.value
     const item = questions.value.find(question => question.id === questionId)
-    const studyDate = selectedDeck.value?.study_date
     const wasPassedToday = previousRating
       ? ['good', 'easy'].includes(previousRating)
-      : (isStudyDayToday(item?.last_reviewed_at, studyDate) && ['good', 'easy'].includes(item?.last_rating))
-    const previousNextReviewAt = item?.next_review_at || null
+      : (item?.reviewed_today && ['good', 'easy'].includes(item?.last_rating))
+    const previousNextReviewDate = item?.next_review_date || null
     try {
       const response = await api.correctPracticeReview(eventId, { rating, score })
       const nextState = response.review || {}
@@ -334,11 +347,11 @@ export function usePracticeDecks(filter = 'all') {
           reviewedDeck.planned_today = Number(reviewedDeck.completed_today || 0) + Number(reviewedDeck.remaining_today || 0)
         }
         if (wasPassedToday && !passedNow) {
-          adjustReviewForecast(reviewedDeck, previousNextReviewAt, null)
+          adjustReviewForecast(reviewedDeck, previousNextReviewDate, null)
         } else if (!wasPassedToday && passedNow) {
-          adjustReviewForecast(reviewedDeck, null, nextState.next_review_at)
+          adjustReviewForecast(reviewedDeck, null, nextState.next_review_date)
         } else if (passedNow) {
-          adjustReviewForecast(reviewedDeck, previousNextReviewAt, nextState.next_review_at)
+          adjustReviewForecast(reviewedDeck, previousNextReviewDate, nextState.next_review_date)
         }
       }
       return response
@@ -350,31 +363,13 @@ export function usePracticeDecks(filter = 'all') {
     }
   }
 
-  function isStudyDayToday(value, studyDate) {
-    if (!value || !studyDate) return false
-    const raw = String(value)
-    // 后端存储格式 "YYYY-MM-DD HH:MM:SS"（UTC-naive）
-    // 取前 10 位即日期部分，与服务端 study_date 比较
-    return raw.slice(0, 10) === studyDate
-  }
-
-  function utcDateKey(value) {
-    if (!value) return ''
-    const raw = String(value)
-    const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw)
-      ? raw
-      : `${raw.replace(' ', 'T')}Z`)
-    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
-  }
-
   function adjustReviewForecast(deck, previousDate, nextDate) {
+    // previousDate/nextDate 均为服务端下发的研究日日期（YYYY-MM-DD），前端零时区逻辑
     if (!Array.isArray(deck?.review_forecast)) return
-    const previousKey = utcDateKey(previousDate)
-    const nextKey = utcDateKey(nextDate)
     deck.review_forecast = deck.review_forecast.map(day => {
       let count = Number(day.count || 0)
-      if (previousKey && day.date === previousKey) count = Math.max(0, count - 1)
-      if (nextKey && day.date === nextKey) count += 1
+      if (previousDate && day.date === previousDate) count = Math.max(0, count - 1)
+      if (nextDate && day.date === nextDate) count += 1
       return { ...day, count }
     })
   }

@@ -347,6 +347,16 @@ async def evaluate_answer(
     if not await check_and_record(user["id"]):
         raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
 
+    # 超出 3000 字符的输入会被静默截断——记录日志，避免误判为评估遗漏
+    truncated = len(req.user_answer) > 3000 or len(req.reference_answer) > 3000
+    if truncated:
+        logger.info(
+            "evaluate-answer 输入截断: question_id=%s user_answer=%s reference_answer=%s",
+            req.question_id,
+            len(req.user_answer),
+            len(req.reference_answer),
+        )
+
     prompt = EVAL_PROMPT.format(
         question=req.question_text,
         user_answer=req.user_answer[:3000],
@@ -376,6 +386,7 @@ async def evaluate_answer(
         result["overall_score"] = max(0, min(100, int(result["overall_score"])))
         for dim in result["dimensions"].values():
             dim["score"] = max(0, min(100, int(dim.get("score", 0))))
+        result["truncated"] = truncated
 
         # 记录自评评估（只写 review 体系，双写收敛后 user_practice_history 不再写入）
         if req.question_id:
@@ -410,6 +421,7 @@ async def evaluate_answer(
                         score=result["overall_score"],
                         source="self_check",
                         urgency=urgency,
+                        user_answer=req.user_answer,
                     )
                     conn.commit()
 
@@ -478,12 +490,20 @@ async def get_practiced_questions(user: dict = Depends(get_current_user)):
 async def get_practice_history(
     question_id: int, user: dict = Depends(get_current_user)
 ):
-    """获取指定题目的练习历史（当前用户的）"""
+    """获取指定题目的练习历史（当前用户的，读 review 体系）。
+
+    user_practice_history 已停写（双写收敛），history 改读
+    practice_review_events（self_check 源含 user_answer 快照）。
+    """
 
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                "SELECT id, question_bank_id, user_answer, evaluation_result, score, created_at FROM user_practice_history WHERE question_bank_id = ? AND user_id = ? ORDER BY created_at DESC",
+                "SELECT id, question_bank_id, user_answer, score, rating, source, "
+                "reviewed_at AS created_at "
+                "FROM practice_review_events "
+                "WHERE question_bank_id = ? AND user_id = ? "
+                "ORDER BY reviewed_at DESC",
                 (question_id, user["id"]),
             ).fetchall()
             return rows
@@ -492,11 +512,7 @@ async def get_practice_history(
     result = []
     for r in rows:
         d = dict(r)
-        try:
-            d["evaluation_result"] = (
-                json.loads(d["evaluation_result"]) if d["evaluation_result"] else None
-            )
-        except Exception:
-            d["evaluation_result"] = None
+        # 兼容旧前端：evaluation_result 字段保留为 None（评估明细不再存储）
+        d["evaluation_result"] = None
         result.append(d)
     return result

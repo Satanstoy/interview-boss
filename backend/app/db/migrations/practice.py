@@ -159,3 +159,39 @@ def _migration_055_practice_review_system(conn):
         GROUP BY user_id, question_bank_id
         """
     )
+
+
+def _migration_094_review_event_answer_snapshot(conn):
+    """Store the user answer snapshot on self-check review events (migration 094).
+
+    双写收敛后 user_practice_history 已停写，练习记录 history tab 需读
+    practice_review_events。新增可选 user_answer 快照列，仅 self_check
+    源写入（闪卡复习无用户答案文本）。
+    """
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(practice_review_events)").fetchall()
+    }
+    if "user_answer" not in columns:
+        conn.execute(
+            "ALTER TABLE practice_review_events ADD COLUMN user_answer TEXT"
+        )
+
+    # best-effort 回填：从存量 user_practice_history 取每个 (user, question) 最新答案
+    existing = conn.execute(
+        "SELECT COUNT(*) AS c FROM practice_review_events WHERE user_answer IS NOT NULL"
+    ).fetchone()
+    if existing and existing[0] == 0:
+        conn.execute(
+            """
+            UPDATE practice_review_events SET user_answer = (
+                SELECT uph.user_answer FROM user_practice_history uph
+                WHERE uph.user_id = practice_review_events.user_id
+                  AND uph.question_bank_id = practice_review_events.question_bank_id
+                ORDER BY uph.created_at DESC LIMIT 1
+            )
+            WHERE source = 'self_check' AND user_answer IS NULL
+            """
+        )
+

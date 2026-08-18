@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,6 +15,8 @@ from typing import Literal
 
 from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db
+from app.evaluation.adapters import AdapterNotConfigured, get_target_adapter
+from app.evaluation.benchmark_catalog import BUILTIN_SUITES
 from app.evaluation.queue import enqueue_eval_run_job
 from app.services.evaluation_service import (
     append_event,
@@ -40,6 +43,14 @@ class CreateEvalRunRequest(BaseModel):
     case_keys: list[str] | None = None
 
 
+class CreateEvalExperimentRequest(BaseModel):
+    target_types: list[str] | None = Field(default=None, min_length=1, max_length=5)
+    replication_count: int = Field(default=5, ge=1, le=100)
+    seed: int = 1
+    environment_fingerprint: str = ""
+    comparison_group: str = ""
+
+
 class CreateHumanReviewRequest(BaseModel):
     comparison_group: str = Field(min_length=1, max_length=200)
     run_a_id: int = Field(gt=0)
@@ -48,6 +59,153 @@ class CreateHumanReviewRequest(BaseModel):
     choice: Literal["a", "b", "tie", "both_fail"]
     dimensions: dict[str, Any] = Field(default_factory=dict)
     comment: str = Field(default="", max_length=4000)
+
+
+def _capability_release(row) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "release_key": row["release_key"],
+        "version": row["version"],
+        "target_type": row["target_type"],
+        "status": row["status"],
+        "judge_model": row["judge_model"],
+        "manifest_digest": row["manifest_digest"],
+    }
+
+
+def _experiment_event(conn, experiment_id: int, event_type: str, payload: dict[str, Any] | None = None):
+    sequence = conn.execute(
+        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM eval_experiment_events WHERE experiment_id = ?",
+        (experiment_id,),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO eval_experiment_events (experiment_id, sequence, event_type, payload_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        (experiment_id, sequence, event_type, json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)),
+    )
+
+
+def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
+    experiment = conn.execute(
+        "SELECT * FROM eval_experiments WHERE id = ?", (experiment_id,)
+    ).fetchone()
+    if experiment is None:
+        return None
+    children = conn.execute(
+        """
+        SELECT er.target_type, er.display_order, r.id AS run_id, r.status,
+               r.total_items, r.completed_items, r.failed_items,
+               r.created_at, r.started_at, r.finished_at,
+               tr.release_key AS target_release_key,
+               ev.release_key AS evaluation_release_key
+        FROM eval_experiment_runs er
+        JOIN eval_runs r ON r.id = er.run_id
+        JOIN eval_releases tr ON tr.id = r.target_release_id
+        LEFT JOIN eval_releases ev ON ev.id = r.evaluation_release_id
+        WHERE er.experiment_id = ?
+        ORDER BY er.display_order, er.id
+        """,
+        (experiment_id,),
+    ).fetchall()
+    total_runs = len(children)
+    completed_runs = sum(row["status"] == "completed" for row in children)
+    failed_runs = sum(row["status"] == "failed" for row in children)
+    cancelled_runs = sum(row["status"] == "cancelled" for row in children)
+    total_items = sum(row["total_items"] or 0 for row in children)
+    completed_items = sum(row["completed_items"] or 0 for row in children)
+    failed_items = sum(row["failed_items"] or 0 for row in children)
+    if total_runs and completed_runs + failed_runs + cancelled_runs == total_runs:
+        status = "failed" if failed_runs else "cancelled" if cancelled_runs else "completed"
+    elif any(row["status"] == "running" for row in children):
+        status = "running"
+    elif any(row["status"] == "queued" for row in children):
+        status = "queued"
+    else:
+        status = "created"
+    summary = {
+        "total_runs": total_runs,
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "cancelled_runs": cancelled_runs,
+        "total_items": total_items,
+        "completed_items": completed_items,
+        "failed_items": failed_items,
+    }
+    child_payloads = []
+    for row in children:
+        child = dict(row)
+        child["quality_status"] = _quality_status(conn, row["run_id"], row["status"])
+        child_payloads.append(child)
+    child_quality = [child["quality_status"] for child in child_payloads]
+    quality_status = (
+        "pending" if any(value == "pending" for value in child_quality)
+        else "failed" if any(value == "failed" for value in child_quality)
+        else "not_evaluated" if any(value == "not_evaluated" for value in child_quality)
+        else "passed"
+    )
+    summary["quality_status"] = quality_status
+    previous_summary = _decode_json(experiment["summary_json"], {})
+    previous_status = experiment["status"]
+    conn.execute(
+        """
+        UPDATE eval_experiments
+        SET status = ?, total_runs = ?, completed_runs = ?, failed_runs = ?,
+            cancelled_runs = ?, summary_json = ?,
+            started_at = CASE WHEN ? IN ('running', 'completed', 'failed')
+                              THEN COALESCE(started_at, CURRENT_TIMESTAMP) ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled')
+                               THEN COALESCE(finished_at, CURRENT_TIMESTAMP) ELSE NULL END
+        WHERE id = ?
+        """,
+        (
+            status,
+            total_runs,
+            completed_runs,
+            failed_runs,
+            cancelled_runs,
+            json.dumps(summary, ensure_ascii=False, sort_keys=True),
+            status,
+            status,
+            experiment_id,
+        ),
+    )
+    if previous_status != status:
+        _experiment_event(
+            conn,
+            experiment_id,
+            "experiment.status_changed",
+            {"from": previous_status, "to": status},
+        )
+    progress_keys = (
+        "total_runs", "completed_runs", "failed_runs", "cancelled_runs",
+        "total_items", "completed_items", "failed_items", "quality_status",
+    )
+    if any(previous_summary.get(key) != summary.get(key) for key in progress_keys):
+        _experiment_event(
+            conn,
+            experiment_id,
+            "experiment.progress",
+            {key: summary[key] for key in progress_keys},
+        )
+    return {
+        **dict(experiment),
+        "status": status,
+        "target_types": _decode_json(experiment["target_types_json"], []),
+        "summary": summary,
+        "total_runs": total_runs,
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "cancelled_runs": cancelled_runs,
+        "total_items": total_items,
+        "completed_items": completed_items,
+        "failed_items": failed_items,
+        "quality_status": quality_status,
+        "runs": child_payloads,
+    }
 
 
 def _decode_json(value: str | None, default: Any):
@@ -63,6 +221,27 @@ def _serialize_run(row) -> dict[str, Any]:
     result["snapshot"] = _decode_json(result.pop("snapshot_json", "{}"), {})
     result["cancel_requested"] = bool(result.get("cancel_requested"))
     return result
+
+
+def _quality_status(conn, run_id: int, execution_status: str) -> str:
+    """Separate quality outcome from whether the execution job finished."""
+    rows = conn.execute(
+        "SELECT status, contract_status, hard_gate_status, judge_status FROM eval_items WHERE run_id = ?",
+        (run_id,),
+    ).fetchall()
+    if not rows or any(row["status"] in {"pending", "running"} for row in rows):
+        return "pending"
+    if execution_status == "cancelled":
+        return "not_evaluated"
+    if execution_status != "completed":
+        return "failed"
+    return "passed" if all(
+        row["status"] == "completed"
+        and row["contract_status"] == "valid"
+        and row["hard_gate_status"] == "passed"
+        and row["judge_status"] == "succeeded"
+        for row in rows
+    ) else "failed"
 
 
 def _run_query(conn, run_id: int):
@@ -190,6 +369,369 @@ async def overview(admin: dict = Depends(get_admin_user)):
             }
 
     return await run_db(_query)
+
+
+@router.get("/capabilities")
+async def capabilities(admin: dict = Depends(get_admin_user)):
+    """Return the frontend's actual runnable evaluation capabilities."""
+
+    def _query():
+        with get_db_connection() as conn:
+            result = []
+            for spec in BUILTIN_SUITES:
+                target = conn.execute(
+                    """
+                    SELECT id, release_key, version, target_type, status,
+                           judge_model, manifest_digest
+                    FROM eval_releases
+                    WHERE release_type = 'target'
+                      AND target_type = ?
+                      AND status = 'published'
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (spec["target_type"],),
+                ).fetchone()
+                evaluation = conn.execute(
+                    """
+                    SELECT id, release_key, version, target_type, status,
+                           judge_model, manifest_digest
+                    FROM eval_releases
+                    WHERE release_type = 'evaluation'
+                      AND target_type = ?
+                      AND status = 'published'
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (spec["target_type"],),
+                ).fetchone()
+                case_count = 0
+                if evaluation is not None:
+                    case_count = conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM eval_benchmark_cases c
+                        JOIN eval_benchmark_suites s ON s.id = c.suite_id
+                        WHERE s.release_id = ? AND c.active = 1
+                        """,
+                        (evaluation["id"],),
+                    ).fetchone()[0]
+                adapter_available = True
+                adapter_name = spec["adapter"]
+                reason = None
+                try:
+                    adapter = get_target_adapter(spec["target_type"])
+                    adapter_name = type(adapter).__name__
+                except AdapterNotConfigured as exc:
+                    adapter_available = False
+                    reason = str(exc)
+                if not target:
+                    reason = reason or "没有已发布的被测版本"
+                elif not evaluation:
+                    reason = reason or "没有已发布的完整评测版本"
+                elif not case_count:
+                    reason = reason or "完整评测版本没有可执行 Case"
+                elif not adapter_available:
+                    reason = reason or "没有注册评测 Adapter"
+                result.append(
+                    {
+                        "target_type": spec["target_type"],
+                        "target_key": spec["target_key"],
+                        "evaluation_key": spec["evaluation_key"],
+                        "workflow": spec["workflow"],
+                        "adapter": adapter_name,
+                        "adapter_available": adapter_available,
+                        "target_release": _capability_release(target),
+                        "evaluation_release": _capability_release(evaluation),
+                        "case_count": int(case_count),
+                        "can_run": bool(
+                            adapter_available and target and evaluation and case_count
+                        ),
+                        "reason": reason,
+                    }
+                )
+            return {"targets": result}
+
+    return await run_db(_query)
+
+
+@router.post("/experiments")
+async def create_experiment(
+    body: CreateEvalExperimentRequest,
+    admin: dict = Depends(get_admin_user),
+):
+    """Create and dispatch one frontend experiment with multiple child Runs."""
+
+    def _create():
+        with get_db_connection() as conn:
+            specs_by_type = {spec["target_type"]: spec for spec in BUILTIN_SUITES}
+            requested = body.target_types or list(specs_by_type)
+            if len(set(requested)) != len(requested):
+                raise ValueError("target_types 不能重复")
+            unknown = [target_type for target_type in requested if target_type not in specs_by_type]
+            if unknown:
+                raise ValueError(f"不支持的评测对象: {', '.join(unknown)}")
+
+            pairs = []
+            for target_type in requested:
+                spec = specs_by_type[target_type]
+                try:
+                    get_target_adapter(target_type)
+                except AdapterNotConfigured as exc:
+                    raise ValueError(str(exc)) from exc
+                target = conn.execute(
+                    """
+                    SELECT * FROM eval_releases
+                    WHERE release_type = 'target' AND target_type = ? AND status = 'published'
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (target_type,),
+                ).fetchone()
+                evaluation = conn.execute(
+                    """
+                    SELECT * FROM eval_releases
+                    WHERE release_type = 'evaluation' AND target_type = ? AND status = 'published'
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (target_type,),
+                ).fetchone()
+                if target is None or evaluation is None:
+                    raise ValueError(f"{target_type} 没有可用的已发布版本")
+                case_count = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM eval_benchmark_cases c
+                    JOIN eval_benchmark_suites s ON s.id = c.suite_id
+                    WHERE s.release_id = ? AND c.active = 1
+                    """,
+                    (evaluation["id"],),
+                ).fetchone()[0]
+                if not case_count:
+                    raise ValueError(f"{target_type} 没有可执行的 Benchmark Case")
+                pairs.append((spec, target, evaluation))
+
+            experiment_key = f"frontend-{uuid.uuid4().hex}"
+            comparison_group = body.comparison_group or experiment_key
+            cursor = conn.execute(
+                """
+                INSERT INTO eval_experiments
+                    (experiment_key, target_types_json, comparison_group,
+                     environment_fingerprint, seed, replication_count,
+                     total_runs, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    experiment_key,
+                    json.dumps(requested, ensure_ascii=False),
+                    comparison_group,
+                    body.environment_fingerprint,
+                    body.seed,
+                    body.replication_count,
+                    len(pairs),
+                    admin["id"],
+                ),
+            )
+            experiment_id = cursor.lastrowid
+            _experiment_event(
+                conn,
+                experiment_id,
+                "experiment.created",
+                {"target_types": requested},
+            )
+            runs = []
+            for display_order, (spec, target, evaluation) in enumerate(pairs):
+                run = create_eval_run(
+                    conn,
+                    created_by=admin["id"],
+                    target_release_id=target["id"],
+                    evaluation_release_id=evaluation["id"],
+                    replication_count=body.replication_count,
+                    seed=body.seed,
+                    environment_fingerprint=body.environment_fingerprint,
+                    comparison_group=comparison_group,
+                    idempotency_key=f"{experiment_key}:{spec['target_type']}",
+                    require_published=True,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO eval_experiment_runs
+                        (experiment_id, run_id, target_type, display_order)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (experiment_id, run["id"], spec["target_type"], display_order),
+                )
+                append_event(conn, run["id"], "run.created", {"experiment_id": experiment_id})
+                runs.append(
+                    {
+                        "run_id": run["id"],
+                        "batch_id": run["batch_id"],
+                        "target_type": spec["target_type"],
+                        "target_release_key": target["release_key"],
+                        "evaluation_release_key": evaluation["release_key"],
+                        "total_items": run["total_items"],
+                        "status": run["status"],
+                    }
+                )
+            conn.commit()
+            return {"experiment_id": experiment_id, "experiment_key": experiment_key, "runs": runs}
+
+    try:
+        result = await run_db(_create)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    dispatch_errors = []
+    for child in result["runs"]:
+        try:
+            job = await enqueue_eval_run_job(child["run_id"])
+            arq_job_id = getattr(job, "job_id", None)
+
+            def _mark_child_queued(run_id=child["run_id"], job_id=arq_job_id):
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "UPDATE eval_runs SET status = 'queued' WHERE id = ? AND status = 'created'",
+                        (run_id,),
+                    )
+                    conn.execute(
+                        "UPDATE eval_batches SET status = 'queued' WHERE id = (SELECT batch_id FROM eval_runs WHERE id = ?)",
+                        (run_id,),
+                    )
+                    append_event(conn, run_id, "run.queued", {"arq_job_id": job_id})
+                    experiment_id = conn.execute(
+                        "SELECT experiment_id FROM eval_experiment_runs WHERE run_id = ?", (run_id,)
+                    ).fetchone()[0]
+                    _experiment_event(conn, experiment_id, "experiment.run_queued", {"run_id": run_id})
+                    conn.commit()
+
+            await run_db(_mark_child_queued)
+        except Exception as exc:
+            dispatch_errors.append({"run_id": child["run_id"], "error": str(exc)[:300]})
+
+    def _refresh():
+        with get_db_connection() as conn:
+            refreshed = _refresh_experiment(conn, result["experiment_id"])
+            conn.commit()
+            return refreshed
+
+    refreshed = await run_db(_refresh)
+    return {
+        **(refreshed or {}),
+        "experiment_id": result["experiment_id"],
+        "experiment_key": result["experiment_key"],
+        "runs": (refreshed or {}).get("runs", result["runs"]),
+        "dispatch_errors": dispatch_errors,
+    }
+
+
+@router.get("/experiments/{experiment_id}")
+async def get_experiment(experiment_id: int, admin: dict = Depends(get_admin_user)):
+    def _query():
+        with get_db_connection() as conn:
+            result = _refresh_experiment(conn, experiment_id)
+            conn.commit()
+            return result
+
+    result = await run_db(_query)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Eval Experiment 不存在")
+    result.pop("target_types_json", None)
+    return result
+
+
+@router.post("/experiments/{experiment_id}/cancel")
+async def cancel_experiment(experiment_id: int, admin: dict = Depends(get_admin_user)):
+    def _cancel():
+        with get_db_connection() as conn:
+            experiment = conn.execute(
+                "SELECT id FROM eval_experiments WHERE id = ?", (experiment_id,)
+            ).fetchone()
+            if experiment is None:
+                return None
+            child_runs = conn.execute(
+                "SELECT run_id FROM eval_experiment_runs WHERE experiment_id = ?",
+                (experiment_id,),
+            ).fetchall()
+            for child in child_runs:
+                run_id = child["run_id"]
+                row = conn.execute(
+                    "SELECT batch_id, status FROM eval_runs WHERE id = ?", (run_id,)
+                ).fetchone()
+                if row is None or row["status"] in {"completed", "failed", "cancelled"}:
+                    continue
+                conn.execute(
+                    "UPDATE eval_runs SET cancel_requested = 1, status = CASE "
+                    "WHEN status IN ('created', 'queued') THEN 'cancelled' ELSE status END "
+                    "WHERE id = ?",
+                    (run_id,),
+                )
+                conn.execute(
+                    "UPDATE eval_batches SET cancel_requested = 1, status = CASE "
+                    "WHEN status IN ('created', 'queued') THEN 'cancelled' ELSE status END "
+                    "WHERE id = ?",
+                    (row["batch_id"],),
+                )
+                append_event(conn, run_id, "run.cancel_requested", {"admin_id": admin["id"]})
+            _experiment_event(conn, experiment_id, "experiment.cancel_requested", {"admin_id": admin["id"]})
+            result = _refresh_experiment(conn, experiment_id)
+            conn.commit()
+            return result
+
+    result = await run_db(_cancel)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Eval Experiment 不存在")
+    result.pop("target_types_json", None)
+    return result
+
+
+@router.get("/experiments/{experiment_id}/events")
+async def experiment_events(
+    request: Request,
+    experiment_id: int,
+    after_sequence: int = Query(default=0, ge=0),
+    admin: dict = Depends(get_admin_user),
+):
+    header_value = request.headers.get("last-event-id")
+    if header_value and header_value.isdigit():
+        after_sequence = max(after_sequence, int(header_value))
+
+    async def stream():
+        cursor = after_sequence
+        while True:
+            def _read():
+                with get_db_connection() as conn:
+                    experiment = _refresh_experiment(conn, experiment_id)
+                    if experiment is None:
+                        return None, []
+                    events = [dict(row) for row in conn.execute(
+                        """
+                        SELECT sequence, event_type, payload_json, created_at
+                        FROM eval_experiment_events
+                        WHERE experiment_id = ? AND sequence > ?
+                        ORDER BY sequence
+                        """,
+                        (experiment_id, cursor),
+                    ).fetchall()]
+                    conn.commit()
+                    return experiment, events
+
+            experiment, events = await run_db(_read)
+            if experiment is None:
+                return
+            for event in events:
+                cursor = event["sequence"]
+                event["payload"] = _decode_json(event.pop("payload_json"), {})
+                yield (
+                    f"id: {cursor}\n"
+                    f"event: {event['event_type']}\n"
+                    f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                )
+            if experiment["status"] in {"completed", "failed", "cancelled"}:
+                return
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/releases")
@@ -365,7 +907,12 @@ async def list_runs(
                 "ORDER BY r.id DESC LIMIT ?",
                 params,
             ).fetchall()
-            return [dict(row) for row in rows]
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["quality_status"] = _quality_status(conn, row["id"], row["status"])
+                result.append(item)
+            return result
 
     return {"runs": await run_db(_query)}
 
@@ -505,11 +1052,89 @@ async def get_run(run_id: int, admin: dict = Depends(get_admin_user)):
                 serialized["result"] = _decode_json(serialized.pop("result_json", "{}"), {})
                 serialized["cancel_requested"] = bool(serialized.get("cancel_requested", 0))
                 result["items"].append(serialized)
+            result["quality_status"] = _quality_status(conn, run_id, result["status"])
             return result
 
     result = await run_db(_query)
     if result is None:
         raise HTTPException(status_code=404, detail="Eval Run 不存在")
+    return result
+
+
+@router.get("/runs/{run_id}/items/{item_id}")
+async def get_run_item(
+    run_id: int,
+    item_id: int,
+    admin: dict = Depends(get_admin_user),
+):
+    """Return one Case's frozen input, result, attempts and artifact index."""
+
+    def _query():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT i.*, c.case_key, c.scenario_key,
+                       c.input_snapshot_json, c.contract_json, c.input_digest
+                FROM eval_items i
+                JOIN eval_benchmark_cases c ON c.id = i.case_id
+                WHERE i.run_id = ? AND i.id = ?
+                """,
+                (run_id, item_id),
+            ).fetchone()
+            if row is None:
+                return None
+            item = dict(row)
+            item["result"] = _decode_json(item.pop("result_json", "{}"), {})
+            item.pop("input_snapshot_json", None)
+            item.pop("contract_json", None)
+            item["cancel_requested"] = bool(item.get("cancel_requested", 0))
+
+            case_row = conn.execute(
+                """
+                SELECT case_key, scenario_key, input_snapshot_json,
+                       contract_json, input_digest, active
+                FROM eval_benchmark_cases WHERE id = ?
+                """,
+                (row["case_id"],),
+            ).fetchone()
+            case = dict(case_row)
+            case["input_snapshot"] = _decode_json(case.pop("input_snapshot_json"), {})
+            case["contract"] = _decode_json(case.pop("contract_json"), {})
+            case["active"] = bool(case["active"])
+
+            attempts = []
+            for attempt_row in conn.execute(
+                """
+                SELECT id, item_id, attempt_index, attempt_kind, status,
+                       failure_class, raw_observation_json, error_message,
+                       started_at, finished_at
+                FROM eval_attempts WHERE item_id = ? ORDER BY attempt_index
+                """,
+                (item_id,),
+            ).fetchall():
+                attempt = dict(attempt_row)
+                attempt["raw_observation"] = _decode_json(
+                    attempt.pop("raw_observation_json"), {}
+                )
+                attempts.append(attempt)
+
+            artifacts = [
+                dict(artifact_row)
+                for artifact_row in conn.execute(
+                    """
+                    SELECT id, run_id, item_id, attempt_id, artifact_type,
+                           storage_path, digest, size_bytes, retention_class, created_at
+                    FROM eval_artifacts
+                    WHERE run_id = ? AND item_id = ? ORDER BY id
+                    """,
+                    (run_id, item_id),
+                ).fetchall()
+            ]
+            return {"item": item, "case": case, "attempts": attempts, "artifacts": artifacts}
+
+    result = await run_db(_query)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Eval Case 不存在")
     return result
 
 
@@ -549,6 +1174,103 @@ async def cancel_run(run_id: int, admin: dict = Depends(get_admin_user)):
     if result is None:
         raise HTTPException(status_code=404, detail="Eval Run 不存在")
     return result
+
+
+@router.post("/runs/{run_id}/retry-failed")
+async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
+    """Requeue failed Cases while preserving the Run's immutable context."""
+
+    def _prepare_retry():
+        with get_db_connection() as conn:
+            run = conn.execute(
+                "SELECT id, batch_id, status FROM eval_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if run is None:
+                return None
+            failed_count = conn.execute(
+                "SELECT COUNT(*) FROM eval_items WHERE run_id = ? AND status = 'failed'",
+                (run_id,),
+            ).fetchone()[0]
+            if not failed_count:
+                raise HTTPException(status_code=409, detail="当前 Run 没有可重跑的失败 Case")
+            if run["status"] not in {"failed", "completed", "cancelled"}:
+                raise HTTPException(status_code=409, detail="当前 Run 仍在执行，不能重跑失败 Case")
+
+            conn.execute(
+                """
+                UPDATE eval_items
+                SET status = 'pending', selected_attempt_id = NULL,
+                    contract_status = 'pending', hard_gate_status = 'pending',
+                    judge_status = 'pending', score = NULL, result_json = '{}',
+                    started_at = NULL, finished_at = NULL
+                WHERE run_id = ? AND status = 'failed'
+                """,
+                (run_id,),
+            )
+            completed_count = conn.execute(
+                "SELECT COUNT(*) FROM eval_items WHERE run_id = ? AND status = 'completed'",
+                (run_id,),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE eval_runs
+                SET status = 'created', completed_items = ?, failed_items = 0,
+                    summary_json = '{}', cancel_requested = 0,
+                    started_at = NULL, finished_at = NULL
+                WHERE id = ?
+                """,
+                (completed_count, run_id),
+            )
+            conn.execute(
+                """
+                UPDATE eval_batches
+                SET status = 'created', completed_items = ?, failed_items = 0,
+                    summary_json = '{}', cancel_requested = 0,
+                    started_at = NULL, finished_at = NULL
+                WHERE id = ?
+                """,
+                (completed_count, run["batch_id"]),
+            )
+            append_event(
+                conn,
+                run_id,
+                "run.retry_requested",
+                {"admin_id": admin["id"], "failed_items": failed_count},
+            )
+            conn.commit()
+            return {
+                "run_id": run_id,
+                "batch_id": run["batch_id"],
+                "retried_items": failed_count,
+            }
+
+    result = await run_db(_prepare_retry)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Eval Run 不存在")
+    dispatch_error = None
+    status = "created"
+    try:
+        job = await enqueue_eval_run_job(run_id)
+        arq_job_id = getattr(job, "job_id", None)
+
+        def _mark_queued():
+            with get_db_connection() as conn:
+                conn.execute(
+                    "UPDATE eval_runs SET status = 'queued' WHERE id = ? AND status = 'created'",
+                    (run_id,),
+                )
+                conn.execute(
+                    "UPDATE eval_batches SET status = 'queued' WHERE id = ? AND status = 'created'",
+                    (result["batch_id"],),
+                )
+                append_event(conn, run_id, "run.queued", {"arq_job_id": arq_job_id})
+                conn.commit()
+
+        await run_db(_mark_queued)
+        status = "queued"
+    except Exception as exc:
+        dispatch_error = str(exc)[:300]
+    return {**result, "status": status, "dispatch_error": dispatch_error}
 
 
 @router.get("/runs/{run_id}/events")
