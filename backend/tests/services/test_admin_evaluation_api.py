@@ -227,8 +227,76 @@ def test_get_run_item_returns_frozen_case_attempt_and_artifacts(test_db, monkeyp
     assert result["attempts"][0]["raw_observation"]["observation"]["status"] == "succeeded"
     assert result["artifacts"][0]["artifact_type"] == "transcript"
 
+def test_get_run_item_dual_axis_returns_frozen_snapshot_not_live_case(test_db, monkeypatch):
+    """Item evidence for a dual-axis Run must come from the immutable
+    snapshot_json, not the current eval_benchmark_cases row: editing a case
+    after the Run exists must not change what the historical Run shows."""
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    target = service.create_release(
+        test_db,
+        release_key="snap-agent@1.0",
+        release_type="target",
+        version="1.0",
+        target_type="fixture",
+        manifest={"model": "target-v1"},
+    )
+    evaluation = service.create_release(
+        test_db,
+        release_key="snap-eval@1.0",
+        release_type="evaluation",
+        version="1.0",
+        target_type="fixture",
+        manifest={
+            "benchmark": {"suite_key": "snap-suite"},
+            "judge": {"model": "judge-v1"},
+            "simulator_harness": {"version": "1.0"},
+        },
+    )
+    suite = service.create_benchmark_suite(
+        test_db,
+        release_id=evaluation["id"],
+        suite_key="snap-suite",
+        target_type="fixture",
+    )
+    service.create_benchmark_case(
+        test_db,
+        suite_id=suite["id"],
+        case_key="snap-case",
+        scenario_key="snap",
+        input_snapshot={"candidate_view": {"opening": "冻结输入"}},
+        contract={"hard_assertions": [{"id": "unchanged"}]},
+    )
+    test_db.execute("UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP")
+    test_db.commit()
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=target["id"],
+        evaluation_release_id=evaluation["id"],
+        replication_count=1,
+        seed=11,
+    )
+    item_id = test_db.execute("SELECT id FROM eval_items WHERE run_id = ?", (run["id"],)).fetchone()[0]
+    # Simulate the case being edited AFTER the run was created (release drift on live table).
+    test_db.execute(
+        "UPDATE eval_benchmark_cases SET input_snapshot_json = ? WHERE id = (SELECT case_id FROM eval_items WHERE id = ?)",
+        ('{"candidate_view": {"opening": "被篡改的输入"}}', item_id),
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
 
-def test_retry_failed_run_requeues_only_failed_items(test_db, monkeypatch):
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+    result = asyncio.run(module.get_run_item(run["id"], item_id, {"id": 1, "is_admin": 1}))
+
+    assert result["case"]["input_snapshot"]["candidate_view"]["opening"] == "冻结输入"
+    assert result["case"]["contract"]["hard_assertions"][0]["id"] == "unchanged"
+
+
+
     module = _router()
     context = _context(test_db)
     service = importlib.import_module("app.services.evaluation_service")

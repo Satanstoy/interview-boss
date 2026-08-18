@@ -1097,10 +1097,34 @@ async def get_run_item(
                 """,
                 (row["case_id"],),
             ).fetchone()
-            case = dict(case_row)
-            case["input_snapshot"] = _decode_json(case.pop("input_snapshot_json"), {})
-            case["contract"] = _decode_json(case.pop("contract_json"), {})
-            case["active"] = bool(case["active"])
+            # Prefer the immutable run snapshot for dual-axis evidence: the live
+            # eval_benchmark_cases row is authoritative only for legacy runs and
+            # may drift after the Run exists (ADR 0022/0024 immutable context).
+            base_case = dict(case_row)
+            case = dict(base_case)
+            snapshot = _decode_json(conn.execute(
+                "SELECT snapshot_json FROM eval_runs WHERE id = ?", (run_id,)
+            ).fetchone()["snapshot_json"], {})
+            frozen_cases = snapshot.get("cases") if isinstance(snapshot, dict) else None
+            frozen = None
+            if isinstance(frozen_cases, list):
+                frozen = next(
+                    (c for c in frozen_cases if isinstance(c, dict) and c.get("id") == row["case_id"]),
+                    None,
+                )
+            if frozen is not None:
+                case["case_key"] = frozen.get("case_key", case["case_key"])
+                case["scenario_key"] = frozen.get("scenario_key", case["scenario_key"])
+                frozen_input = frozen.get("input_snapshot")
+                frozen_contract = frozen.get("contract")
+                case["input_snapshot"] = frozen_input if isinstance(frozen_input, dict) else _decode_json(frozen_input, {})
+                case["contract"] = frozen_contract if isinstance(frozen_contract, dict) else _decode_json(frozen_contract, {})
+                if frozen.get("input_digest"):
+                    case["input_digest"] = frozen["input_digest"]
+            else:
+                case["input_snapshot"] = _decode_json(base_case.get("input_snapshot_json"), {})
+                case["contract"] = _decode_json(base_case.get("contract_json"), {})
+            case["active"] = bool(base_case.get("active"))
 
             attempts = []
             for attempt_row in conn.execute(
