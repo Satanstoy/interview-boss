@@ -59,6 +59,51 @@ def test_eval_worker_has_low_concurrency_and_separate_queue():
     assert worker.eval_run_task in settings.functions
 
 
+def test_enqueue_eval_run_accepts_custom_job_id_to_avoid_retry_collision(monkeypatch):
+    queue = _queue_module()
+    calls = []
+
+    class FakePool:
+        async def enqueue_job(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return "queued"
+
+        async def close(self):
+            calls.append(("close", {}))
+
+    async def fake_pool():
+        return FakePool()
+
+    monkeypatch.setattr(queue, "_get_eval_redis_pool", fake_pool)
+    result = asyncio.run(queue.enqueue_eval_run_job(42, job_id="eval-run-42-refire-1"))
+
+    assert result == "queued"
+    assert calls[0] == (
+        ("eval_run_task", 42),
+        {"_queue_name": queue.EVAL_QUEUE_NAME, "_job_id": "eval-run-42-refire-1"},
+    )
+
+
+def test_enqueue_eval_run_default_job_id_stable_for_created_run(monkeypatch):
+    queue = _queue_module()
+    calls = []
+
+    class FakePool:
+        async def enqueue_job(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return "queued"
+
+        async def close(self):
+            pass
+
+    async def fake_pool():
+        return FakePool()
+
+    monkeypatch.setattr(queue, "_get_eval_redis_pool", fake_pool)
+    asyncio.run(queue.enqueue_eval_run_job(7))
+    assert calls[0][1]["_job_id"] == "eval-run-7"
+
+
 def test_eval_worker_reconciles_cancelled_run(monkeypatch):
     worker = _worker_module()
     calls = []

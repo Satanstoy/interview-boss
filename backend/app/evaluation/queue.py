@@ -21,15 +21,22 @@ async def _get_eval_redis_pool():
     return await create_pool(RedisSettings.from_dsn(REDIS_URL))
 
 
-async def enqueue_eval_run_job(run_id: int):
-    """Queue one durable Eval Run on the isolated queue."""
+async def enqueue_eval_run_job(run_id: int, *, job_id: str | None = None):
+    """Queue one durable Eval Run on the isolated queue.
+
+    ``job_id`` defaults to a stable per-run id, but re-dispatching an already
+    executed Run (e.g. retry-failed) MUST pass a fresh id: ARQ treats the job
+    id as a unique key and keeps the result for ``keep_result`` (1h), so
+    reusing "eval-run-{run_id}" within that window makes ``enqueue_job``
+    return None and the retry would be silently dropped.
+    """
     pool = await _get_eval_redis_pool()
     try:
         return await pool.enqueue_job(
             "eval_run_task",
             run_id,
             _queue_name=EVAL_QUEUE_NAME,
-            _job_id=f"eval-run-{run_id}",
+            _job_id=job_id or f"eval-run-{run_id}",
         )
     finally:
         await pool.close()

@@ -1178,7 +1178,12 @@ async def cancel_run(run_id: int, admin: dict = Depends(get_admin_user)):
 
 @router.post("/runs/{run_id}/retry-failed")
 async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
-    """Requeue failed Cases while preserving the Run's immutable context."""
+    """Requeue a Run that never finished (failed cases or a dispatch-failed orphan).
+
+    Preserves the Run's immutable context. ``created`` runs whose enqueue failed
+    at creation time are re-dispatched here too; every re-dispatch uses a fresh
+    ARQ job id so ARQ's retained result (keep_result) can never swallow the job.
+    """
 
     def _prepare_retry():
         with get_db_connection() as conn:
@@ -1187,14 +1192,18 @@ async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
             ).fetchone()
             if run is None:
                 return None
+            if run["status"] in {"queued", "running"}:
+                raise HTTPException(status_code=409, detail="当前 Run 仍在执行，不能重跑")
             failed_count = conn.execute(
                 "SELECT COUNT(*) FROM eval_items WHERE run_id = ? AND status = 'failed'",
                 (run_id,),
             ).fetchone()[0]
-            if not failed_count:
-                raise HTTPException(status_code=409, detail="当前 Run 没有可重跑的失败 Case")
-            if run["status"] not in {"failed", "completed", "cancelled"}:
-                raise HTTPException(status_code=409, detail="当前 Run 仍在执行，不能重跑失败 Case")
+            pending_count = conn.execute(
+                "SELECT COUNT(*) FROM eval_items WHERE run_id = ? AND status = 'pending'",
+                (run_id,),
+            ).fetchone()[0]
+            if not failed_count and not pending_count:
+                raise HTTPException(status_code=409, detail="当前 Run 没有可重跑或待执行的 Case")
 
             conn.execute(
                 """
@@ -1235,13 +1244,14 @@ async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
                 conn,
                 run_id,
                 "run.retry_requested",
-                {"admin_id": admin["id"], "failed_items": failed_count},
+                {"admin_id": admin["id"], "failed_items": failed_count, "pending_items": pending_count},
             )
             conn.commit()
             return {
                 "run_id": run_id,
                 "batch_id": run["batch_id"],
                 "retried_items": failed_count,
+                "requeued_pending": pending_count,
             }
 
     result = await run_db(_prepare_retry)
@@ -1250,8 +1260,12 @@ async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
     dispatch_error = None
     status = "created"
     try:
-        job = await enqueue_eval_run_job(run_id)
+        # Fresh per-dispatch job id: ARQ keeps the previous result for keep_result
+        # (1h), so reusing "eval-run-{run_id}" would make enqueue_job return None.
+        job = await enqueue_eval_run_job(run_id, job_id=f"eval-run-{run_id}-{uuid.uuid4().hex[:8]}")
         arq_job_id = getattr(job, "job_id", None)
+        if job is None:
+            dispatch_error = "ARQ 未接受入队（job id 冲突或排队被拒），Run 保持 created，可稍后重试"
 
         def _mark_queued():
             with get_db_connection() as conn:
@@ -1266,12 +1280,12 @@ async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
                 append_event(conn, run_id, "run.queued", {"arq_job_id": arq_job_id})
                 conn.commit()
 
-        await run_db(_mark_queued)
-        status = "queued"
+        if job is not None:
+            await run_db(_mark_queued)
+            status = "queued"
     except Exception as exc:
         dispatch_error = str(exc)[:300]
     return {**result, "status": status, "dispatch_error": dispatch_error}
-
 
 @router.get("/runs/{run_id}/events")
 async def run_events(

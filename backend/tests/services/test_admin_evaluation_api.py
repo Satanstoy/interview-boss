@@ -272,10 +272,11 @@ def test_retry_failed_run_requeues_only_failed_items(test_db, monkeypatch):
         return func()
 
     monkeypatch.setattr(module, "run_db", sync_run_db)
-    monkeypatch.setattr(module, "enqueue_eval_run_job", lambda run_id: None)
+    class _Job:
+        job_id = "eval-run-refire"
 
-    async def fake_enqueue(run_id):
-        return None
+    async def fake_enqueue(run_id, **kwargs):
+        return _Job()
 
     monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
     result = asyncio.run(module.retry_failed_run(run["id"], {"id": 1, "is_admin": 1}))
@@ -300,8 +301,87 @@ def test_retry_failed_run_requeues_only_failed_items(test_db, monkeypatch):
     ]
     assert event_types[-2:] == ["run.retry_requested", "run.queued"]
 
+def test_retry_failed_allows_created_run_with_pending_items(test_db, monkeypatch):
+    """A Run stuck in 'created' (queue dispatch failure) must be re-dispatchable."""
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    context = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=7,
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
 
-def test_create_experiment_creates_child_runs_for_selected_target_types(test_db, monkeypatch):
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+    enqueued_job_id = {}
+
+    class _Job:
+        job_id = "eval-run-created-refire"
+
+    async def fake_enqueue(run_id, **kwargs):
+        enqueued_job_id["job_id"] = kwargs.get("job_id")
+        return _Job()
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    result = asyncio.run(module.retry_failed_run(run["id"], {"id": 1, "is_admin": 1}))
+
+    assert result["status"] == "queued"
+    assert enqueued_job_id["job_id"] != f"eval-run-{run['id']}"  # must not reuse the first enqueue id
+    assert test_db.execute("SELECT status FROM eval_runs WHERE id = ?", (run["id"],)).fetchone()[0] == "queued"
+    assert test_db.execute("SELECT status FROM eval_items WHERE run_id = ?", (run["id"],)).fetchone()[0] == "pending"
+
+
+def test_retry_failed_enqueue_none_leaves_created_not_queued(test_db, monkeypatch):
+    """If ARQ refuses to enqueue (job id collision / existing result), do not
+    mark the Run queued — leave it 'created' so it stays re-dispatchable."""
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    context = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=9,
+    )
+    # Simulate a dispatch failure leaving the run 'created' with only pending items.
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    async def fake_enqueue(run_id, **kwargs):
+        return None  # ARQ collision → no job actually queued
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    result = asyncio.run(module.retry_failed_run(run["id"], {"id": 1, "is_admin": 1}))
+
+    assert result["status"] == "created"
+    assert result["dispatch_error"]
+    assert test_db.execute("SELECT status FROM eval_runs WHERE id = ?", (run["id"],)).fetchone()[0] == "created"
+    events = [row[0] for row in test_db.execute("SELECT event_type FROM eval_events WHERE run_id = ? ORDER BY sequence", (run["id"],)).fetchall()]
+    assert "run.queued" not in events
+
     module = _router()
     catalog = importlib.import_module("app.evaluation.benchmark_catalog")
     catalog.sync_builtin_benchmarks(test_db)
