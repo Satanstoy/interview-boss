@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -544,6 +545,37 @@ async def execute_eval_run(
                 "item.completed",
                 {"item_id": item["id"], "case_key": case_key},
             )
+            # Materialize the durable evidence index. The transcript/observation
+            # itself lives in the attempt's raw_observation_json / item result;
+            # this row is what the control plane surfaces as the artifact index
+            # (ADR 0026/0027). Digest guards against later mutation.
+            try:
+                artifact_digest = hashlib.sha256(
+                    (result_json or "").encode("utf-8")
+                ).hexdigest()
+                connection.execute(
+                    """
+                    INSERT INTO eval_artifacts
+                        (run_id, item_id, attempt_id, artifact_type, storage_path,
+                         digest, size_bytes, retention_class)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'official')
+                    """,
+                    (
+                        run_id,
+                        item["id"],
+                        attempt_id,
+                        "transcript",
+                        f"eval_runs/{run_id}/items/{item['id']}/attempts/{attempt_id}",
+                        artifact_digest,
+                        len(result_json or ""),
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "评测 Artifact 索引写入失败: run_id=%s item_id=%s",
+                    run_id,
+                    item["id"],
+                )
         except Exception as exc:
             logger.exception("评测 Item 执行失败: run_id=%s item_id=%s", run_id, item["id"])
             connection.execute(

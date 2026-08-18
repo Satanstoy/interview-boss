@@ -123,6 +123,59 @@ def test_executor_completes_items_and_persists_attempt_evidence(test_db):
     ]
     assert event_types == ["run.started", "item.completed", "run.completed"]
 
+def test_executor_writes_transcript_artifact_for_completed_item(test_db):
+    """A completed item must materialize a durable eval_artifacts row so the
+    evidence index is real (was: table never written, UI index always empty)."""
+    executor = _executor()
+    target, suite, protocol, judge, harness, simulator = _context(test_db)
+    run = _service().create_eval_run(
+        test_db,
+        created_by=None,
+        target_release_id=target["id"],
+        benchmark_suite_release_id=suite["id"],
+        eval_protocol_release_id=protocol["id"],
+        judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"],
+        replication_count=1,
+        seed=7,
+    )
+    test_db.commit()
+
+    class FakeAdapter:
+        async def prepare(self, case_snapshot, target_release):
+            return {"case": case_snapshot, "target": target_release["release_key"]}
+
+        async def run(self, prepared_case, target_release):
+            return {"answer": prepared_case["case"]["candidate_view"]["answer"]}
+
+        async def observe(self, raw_result):
+            return {
+                "status": "succeeded",
+                "payload": raw_result,
+                "hard_assertions": [{"id": "has_answer", "passed": True}],
+            }
+
+    result = asyncio.run(
+        executor.execute_eval_run(
+            run["id"],
+            conn=test_db,
+            adapter_resolver=lambda target_type: FakeAdapter(),
+        )
+    )
+
+    assert result["status"] == "completed"
+    artifact = test_db.execute(
+        "SELECT run_id, item_id, attempt_id, artifact_type, storage_path, digest, size_bytes "
+        "FROM eval_artifacts WHERE run_id = ? ORDER BY id",
+        (run["id"],),
+    ).fetchone()
+    assert artifact is not None
+    assert artifact[3] == "transcript"
+    assert artifact[4]
+    assert artifact[5]
+    assert int(artifact[6]) > 0
+
 
 def test_executor_runs_fixed_judge_for_interview_targets(test_db, monkeypatch):
     executor = _executor()
