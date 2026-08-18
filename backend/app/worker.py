@@ -844,6 +844,13 @@ async def process_chat_side_effects_task(ctx, limit: int = 10):
     return {"status": "completed", "processed": processed}
 
 
+from app.services.backpressure import AdaptiveSemaphore
+
+# 重活写任务共享并发闸门(批量答案生成/题库重建),限制同一时刻批量写并发,
+# 降低对 SQLite 单写锁的突发抢占(spec M5 / Task 7)。
+_WORKER_DB_SEMAPHORE = AdaptiveSemaphore(initial=4, min_concurrency=1)
+
+
 def _backup_db_online(db_path: str, backup_path: str) -> None:
     """在线备份:用 sqlite backup API 生成一致性快照。
 
@@ -863,6 +870,14 @@ def _backup_db_online(db_path: str, backup_path: str) -> None:
 
 
 async def build_master_bank_task(ctx, job_id: int):
+    """后台任务：重建 master bank 题库(经 _WORKER_DB_SEMAPHORE 限流)。"""
+    async with _WORKER_DB_SEMAPHORE:
+        result = await _build_master_bank_job(ctx, job_id)
+        _WORKER_DB_SEMAPHORE.record_success()
+        return result
+
+
+async def _build_master_bank_job(ctx, job_id: int):
     """后台任务：重建 master bank 题库"""
     from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
     from app.db.connection import get_db_connection
@@ -1366,6 +1381,17 @@ async def _refresh_answer_batch_parent(parent_job_id: int):
 
 
 async def generate_answer_task(ctx, job_id: int):
+    """ARQ task: generate one answer with durable claim/retry semantics.
+
+    经 _WORKER_DB_SEMAPHORE 限流:有限批量写并发,降低对 SQLite 单写锁突发抢占。
+    """
+    async with _WORKER_DB_SEMAPHORE:
+        result = await _generate_answer_job(ctx, job_id)
+        _WORKER_DB_SEMAPHORE.record_success()
+        return result
+
+
+async def _generate_answer_job(ctx, job_id: int):
     """ARQ task: generate one answer with durable claim/retry semantics."""
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
