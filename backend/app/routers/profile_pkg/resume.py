@@ -2,8 +2,10 @@
 import asyncio
 import json
 import logging
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from app.core.auth import get_current_user
 from app.db.connection import run_db
 
@@ -60,17 +62,14 @@ async def get_resume(user: dict = Depends(get_current_user)):
     """获取当前用户的简历信息（不含 raw_text，仅元数据）"""
     from app.services import resume_service
 
-    resume = await run_db(lambda: resume_service.get_resume(user['id']))
+    # audit D10 / spec Task G2 M45：轻量 meta 查询，不 SELECT raw_text
+    resume = await run_db(lambda: resume_service.get_resume_meta(user['id']))
     if not resume:
         return {"has_resume": False, "resume": None}
 
     return {
         "has_resume": True,
-        "resume": {
-            "id": resume["id"],
-            "filename": resume["filename"],
-            "created_at": resume["created_at"],
-        }
+        "resume": resume,
     }
 
 @router.delete("/api/profile/resume")
@@ -104,13 +103,22 @@ async def get_optimization(user: dict = Depends(get_current_user)):
         return {"has_optimization": False, "optimization": None}
     return {"has_optimization": True, "optimization": opt}
 
+class OptimizeResumeRequest(BaseModel):
+    """简历优化请求体（audit D14 / spec Task G4 M45）
+
+    用 Pydantic 模型代替裸 dict：类型错误（如 position 传数组）由 FastAPI 返回
+    422 而非内部 500；超长岗位名（>100）同样被模型层拒绝。
+    """
+    position: Optional[str] = Field(None, max_length=100)
+
+
 @router.post("/api/profile/resume/optimize")
 async def optimize_resume(
-    body: dict,
+    body: OptimizeResumeRequest,
     user: dict = Depends(get_current_user),
 ):
     """生成简历优化版（SSE 流式）"""
-    position = (body.get("position") or "").strip()
+    position = (body.position or "").strip()
     if not position:
         raise HTTPException(status_code=400, detail="请提供目标岗位")
 

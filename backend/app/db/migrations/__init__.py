@@ -114,7 +114,10 @@ from app.db.migrations.coding import (
     _migration_053_coding_library,
     _migration_058_coding_playlist_order,
 )
-from app.db.migrations.resume import _migration_061_resume_optimization
+from app.db.migrations.resume import (
+    _migration_061_resume_optimization,
+    _migration_097_resume_user_unique,
+)
 from app.db.migrations.clustering import (
     _migration_032_embedding_column,
     _migration_033_cluster_id,
@@ -280,6 +283,7 @@ _MIGRATIONS = [
     (94, "review_event_answer_snapshot", _migration_094_review_event_answer_snapshot),
     (95, "evaluation_experiment", _migration_095_evaluation_experiment),
     (96, "review_event_evaluation_snapshot", _migration_096_review_event_evaluation_snapshot),
+    (97, "resume_user_unique", _migration_097_resume_user_unique),
 ]
 
 

@@ -44,8 +44,11 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
                 if page_text:
                     text_parts.append(page_text.strip())
             return "\n\n".join(text_parts)
-    except Exception:
-        raise ValueError("无效的 PDF 文件，无法解析")
+    except Exception as e:
+        # audit D14 / spec Task G6 M45：记录 pdfplumber 根因，避免把真实解析错误
+        # 掩盖成通用「无效 PDF」而无从排查
+        logger.warning("PDF 解析失败: %s", e)
+        raise ValueError("无效的 PDF 文件，无法解析") from e
 
 
 def save_resume(user_id: int, filename: str, raw_text: str) -> int:
@@ -67,9 +70,10 @@ def save_resume(user_id: int, filename: str, raw_text: str) -> int:
     with get_db_connection() as conn:
         # 删除旧简历
         conn.execute("DELETE FROM user_resumes WHERE user_id = ?", (user_id,))
-        # 插入新简历
+        # 插入新简历（显式维护 updated_at，消除死列歧义，audit D9 / spec Task G8 M45）
         cursor = conn.execute(
-            "INSERT INTO user_resumes (user_id, filename, raw_text) VALUES (?, ?, ?)",
+            "INSERT INTO user_resumes (user_id, filename, raw_text, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
             (user_id, filename, raw_text)
         )
         conn.commit()
@@ -80,6 +84,31 @@ def save_resume(user_id: int, filename: str, raw_text: str) -> int:
     except Exception:
         logger.exception("停用旧简历记忆失败")
     return resume_id
+
+
+def get_resume_meta(user_id: int) -> Optional[dict]:
+    """获取简历元数据（轻量级，不 SELECT raw_text，避免每次加载大文本）
+
+    audit D10 / spec Task G2 M45：元数据端点只展示 id/filename/created_at，
+    全量 raw_text（≤50KB）不应被拉进内存再丢弃。
+
+    Returns:
+        {id, filename, created_at} 或 None
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT id, filename, created_at FROM user_resumes WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "filename": row[1],
+        "created_at": row[2],
+    }
 
 
 def get_resume(user_id: int) -> Optional[dict]:
@@ -184,7 +213,8 @@ def save_optimization(
             SET optimized_text = ?,
                 optimization_points = ?,
                 optimized_position = ?,
-                optimized_at = CURRENT_TIMESTAMP
+                optimized_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
             """,
             (
@@ -256,6 +286,8 @@ async def optimize_resume_event_stream(user_id: int, position: str):
             points = points_data if isinstance(points_data, list) else points_data.get("points", [])
             if not isinstance(points, list):
                 points = []
+            # audit D14 / spec Task G3 M45：强制 str，避免数字/dict 渲染成 [object Object]
+            points = [str(p) for p in points if p is not None]
         except Exception as e:
             logger.warning(f"简历优化要点生成失败，跳过要点: {e}")
             points = []
@@ -281,9 +313,13 @@ async def optimize_resume_event_stream(user_id: int, position: str):
         if not optimized_text.strip():
             raise RuntimeError("模型未生成优化内容")
 
-        await run_db(lambda: save_optimization(
+        saved = await run_db(lambda: save_optimization(
             user_id, position, points, optimized_text
         ))
+        if not saved:
+            # audit D14 / spec Task G5 M45：流式中删除了简历则不得谎报「已保存」
+            yield f"data: {json.dumps({'type': 'error', 'message': '未找到简历，可能已删除'}, ensure_ascii=False)}\n\n"
+            return
 
         yield f"data: {json.dumps({'type': 'done', 'position': position}, ensure_ascii=False)}\n\n"
     except Exception:

@@ -4,6 +4,7 @@
 50k 截断、跨用户隔离、重复上传单行不变量、错误类型 position。
 """
 import json
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -136,6 +137,35 @@ class TestResumeTruncation:
         assert saved_text.endswith(suffix)
 
 
+class TestResumeUniqueIndex:
+    """G1 (M45): user_resumes 必须有 user_id 唯一索引（schema 级不变量）"""
+
+    def test_unique_index_exists(self, test_db):
+        from app.db.connection import get_db_connection
+        with get_db_connection() as conn:
+            rows = conn.execute("PRAGMA index_list('user_resumes')").fetchall()
+        by_name = {r[1]: r for r in rows}
+        assert "idx_resume_user_unique" in by_name
+        assert by_name["idx_resume_user_unique"][2] == 1  # unique = 1
+
+    def test_duplicate_user_id_rows_rejected(self, test_db):
+        from app.services import resume_service
+        import sqlite3
+
+        conn = test_db
+        conn.execute("INSERT INTO users (username, password_hash, is_admin) VALUES ('uniq', 'hash', 0)")
+        conn.commit()
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'uniq'").fetchone()[0]
+
+        resume_service.save_resume(user_id, "a.pdf", "第一份")
+        # 绕过 service 的 DELETE（模拟未来跳删导致的重复行），唯一索引必须兜底
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO user_resumes (user_id, filename, raw_text) VALUES (?, ?, ?)",
+                (user_id, "b.pdf", "第二份"),
+            )
+
+
 class TestResumeIsolation:
     """跨用户隔离 + 重复上传单行不变量"""
 
@@ -173,3 +203,38 @@ class TestResumeIsolation:
                 "SELECT COUNT(*) as cnt FROM user_resumes WHERE user_id = ?", (user_id,)
             ).fetchone()
         assert row[0] == 1
+
+class TestResumeOptimizeBodyValidation:
+    """G4 (M45): optimize 请求体用 Pydantic 模型——错误类型 position 返回 422 而非 500"""
+
+    def test_position_non_string_rejected(self, client, test_db):
+        from app.asgi import app
+        from app.services import resume_service
+        _auth(app)
+        try:
+            resume_service.save_resume(1, "resume.pdf", "张三")
+            resp = client.post(
+                "/api/profile/resume/optimize",
+                json={"position": ["后端工程师"]},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+            # list 不匹配 str -> 422（此前裸 dict 会引发 AttributeError -> 500）
+            assert resp.status_code == 422
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_position_overlong_rejected(self, client, test_db):
+        from app.asgi import app
+        from app.services import resume_service
+        _auth(app)
+        try:
+            resume_service.save_resume(1, "resume.pdf", "张三")
+            long_position = "岗" * 200
+            resp = client.post(
+                "/api/profile/resume/optimize",
+                json={"position": long_position},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+            assert resp.status_code == 422
+        finally:
+            app.dependency_overrides.clear()

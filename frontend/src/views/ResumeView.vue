@@ -5,6 +5,8 @@ import { FileText, Upload, RefreshCw, Copy, Download, Trash2, Sparkles } from '@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   uploadResume, getResume, deleteResume,
   getResumeText, getResumeOptimization, optimizeResume,
@@ -256,16 +258,20 @@ onUnmounted(() => {
       </CardHeader>
       <CardContent class="flex flex-col gap-3">
         <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <select
+          <Select
             v-model="selectedPosition"
-            :disabled="useManual || !positions.length"
-            class="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm sm:h-9 sm:w-auto"
+            :disabled="useManual"
+            class="w-full sm:w-56"
           >
-            <option v-if="!positions.length" value="">暂无岗位，可在设置中添加</option>
-            <option v-for="p in positions" :key="p" :value="p">{{ p }}</option>
-          </select>
+            <SelectTrigger class="h-10 w-full text-sm sm:h-9">
+              <SelectValue :placeholder="positions.length ? '选择目标岗位' : '暂无岗位，可在设置中添加'" />
+            </SelectTrigger>
+            <SelectContent v-if="positions.length">
+              <SelectItem v-for="p in positions" :key="p" :value="p">{{ p }}</SelectItem>
+            </SelectContent>
+          </Select>
           <label class="flex items-center gap-2 text-sm text-muted-foreground">
-            <input v-model="useManual" type="checkbox" class="h-4 w-4 rounded border-border" />
+            <Checkbox :checked="useManual" @update:checked="useManual = $event" />
             手动输入岗位
           </label>
           <input
