@@ -42,7 +42,7 @@ class TestResumeOptimizeEndpoint:
 
     def test_optimize_streams_points_delta_done(self, client, test_db, monkeypatch):
         """T-203: SSE 事件顺序 points → delta → done，且结果存库"""
-        from app.routers.profile_pkg.resume import optimize_resume_event_stream
+        from app.services.resume_service import optimize_resume_event_stream
 
         async def fake_raw_llm_call(user_id, **kwargs):
             return json.dumps(["量化成果", "补关键词"], ensure_ascii=False)
@@ -54,8 +54,8 @@ class TestResumeOptimizeEndpoint:
         app = self._auth()
         try:
             self._seed_resume(test_db)
-            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call), \
-                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream):
+            with patch("app.services.resume_service.raw_llm_call", fake_raw_llm_call), \
+                 patch("app.services.resume_service.stream_llm_messages", fake_stream):
                 response = client.post(
                     "/api/profile/resume/optimize", json={"position": "后端工程师"}
                 )
@@ -118,8 +118,8 @@ class TestResumeOptimizeEndpoint:
         app = self._auth()
         try:
             self._seed_resume(test_db)
-            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call), \
-                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream_raise):
+            with patch("app.services.resume_service.raw_llm_call", fake_raw_llm_call), \
+                 patch("app.services.resume_service.stream_llm_messages", fake_stream_raise):
                 response = client.post(
                     "/api/profile/resume/optimize", json={"position": "后端工程师"}
                 )
@@ -146,8 +146,8 @@ class TestResumeOptimizeEndpoint:
         app = self._auth()
         try:
             self._seed_resume(test_db)
-            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call_bad), \
-                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream):
+            with patch("app.services.resume_service.raw_llm_call", fake_raw_llm_call_bad), \
+                 patch("app.services.resume_service.stream_llm_messages", fake_stream):
                 response = client.post(
                     "/api/profile/resume/optimize", json={"position": "后端工程师"}
                 )
@@ -287,7 +287,7 @@ class TestResumeOptimizeMaxTokens:
     async def test_text_phase_passes_max_tokens(self):
         """全文流式调用带 max_tokens，避免服务端默认值截断优化版"""
         import json as _json
-        from app.routers.profile_pkg.resume import optimize_resume_event_stream
+        from app.services.resume_service import optimize_resume_event_stream
 
         captured = {}
 
@@ -302,12 +302,12 @@ class TestResumeOptimizeMaxTokens:
         try:
             from app.services import resume_service
             resume_service.save_resume(1, "resume.pdf", "张三\n后端工程师")
-            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call), \
-                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream):
+            with patch("app.services.resume_service.raw_llm_call", fake_raw_llm_call), \
+                 patch("app.services.resume_service.stream_llm_messages", fake_stream):
                 events = [
                     _json.loads(line[5:])
                     for line in ("".join([
-                        d async for d in optimize_resume_event_stream({"id": 1, "username": "opt_user"}, "后端工程师")
+                        d async for d in optimize_resume_event_stream(1, "后端工程师")
                     ])).splitlines() if line.startswith("data: ")
                 ]
         finally:

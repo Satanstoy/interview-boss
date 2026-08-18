@@ -6,11 +6,6 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user
 from app.db.connection import run_db
-from app.services.llm import raw_llm_call, stream_llm_messages, _extract_json
-from app.core.prompts import (
-    build_resume_optimize_points_prompt,
-    build_resume_optimize_text_prompt,
-)
 
 logger = logging.getLogger("interview-boss")
 
@@ -18,7 +13,6 @@ router = APIRouter()
 
 # 简历上传大小上限（字节），在 file.read() 之前用 Content-Length 提前拦截
 _MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024
-
 
 @router.post("/api/profile/resume")
 async def upload_resume(
@@ -61,7 +55,6 @@ async def upload_resume(
         logger.error(f"简历上传失败: {e}")
         raise HTTPException(status_code=500, detail="简历上传失败，请稍后重试")
 
-
 @router.get("/api/profile/resume")
 async def get_resume(user: dict = Depends(get_current_user)):
     """获取当前用户的简历信息（不含 raw_text，仅元数据）"""
@@ -80,7 +73,6 @@ async def get_resume(user: dict = Depends(get_current_user)):
         }
     }
 
-
 @router.delete("/api/profile/resume")
 async def delete_resume(user: dict = Depends(get_current_user)):
     """删除当前用户的简历"""
@@ -92,7 +84,6 @@ async def delete_resume(user: dict = Depends(get_current_user)):
 
     return {"status": "success", "message": "简历已删除"}
 
-
 @router.get("/api/profile/resume/text")
 async def get_resume_text(user: dict = Depends(get_current_user)):
     """获取当前用户简历的原始文本（用于原文预览）"""
@@ -103,7 +94,6 @@ async def get_resume_text(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="未找到简历")
     return {"raw_text": raw_text}
 
-
 @router.get("/api/profile/resume/optimization")
 async def get_optimization(user: dict = Depends(get_current_user)):
     """获取最新简历优化结果"""
@@ -113,68 +103,6 @@ async def get_optimization(user: dict = Depends(get_current_user)):
     if not opt:
         return {"has_optimization": False, "optimization": None}
     return {"has_optimization": True, "optimization": opt}
-
-
-async def optimize_resume_event_stream(user: dict, position: str):
-    """简历优化 SSE 事件流：points → delta* → done/error"""
-    from app.services import resume_service
-
-    try:
-        raw_text = await run_db(lambda: resume_service.get_resume_text(user['id']))
-        if not raw_text:
-            yield f"data: {json.dumps({'type': 'error', 'message': '未找到简历，请先上传'})}\n\n"
-            return
-
-        # 第一阶段：非流式生成要点 JSON
-        try:
-            points_raw = await raw_llm_call(
-                user["id"],
-                messages=[{
-                    "role": "user",
-                    "content": build_resume_optimize_points_prompt(raw_text, position),
-                }],
-                temperature=0.3,
-                max_tokens=1024,
-                response_format={"type": "json_object"},
-            )
-            points_data = _extract_json(points_raw)
-            points = points_data if isinstance(points_data, list) else points_data.get("points", [])
-            if not isinstance(points, list):
-                points = []
-        except Exception as e:
-            logger.warning(f"简历优化要点生成失败，跳过要点: {e}")
-            points = []
-
-        yield f"data: {json.dumps({'type': 'points', 'points': points}, ensure_ascii=False)}\n\n"
-
-        # 第二阶段：流式生成优化版全文
-        text_chunks = []
-        async for chunk in stream_llm_messages(
-            messages=[{
-                "role": "user",
-                "content": build_resume_optimize_text_prompt(raw_text, position),
-            }],
-            user_id=user["id"],
-            temperature=0.4,
-            # audit D14 / spec Task C M41：显式下发 max_tokens 防服务端默认值截断
-            max_tokens=4096,
-        ):
-            text_chunks.append(chunk)
-            yield f"data: {json.dumps({'type': 'delta', 'content': chunk}, ensure_ascii=False)}\n\n"
-
-        optimized_text = "".join(text_chunks)
-        if not optimized_text.strip():
-            raise RuntimeError("模型未生成优化内容")
-
-        await run_db(lambda: resume_service.save_optimization(
-            user["id"], position, points, optimized_text
-        ))
-
-        yield f"data: {json.dumps({'type': 'done', 'position': position}, ensure_ascii=False)}\n\n"
-    except Exception:
-        logger.exception("简历优化失败")
-        yield f"data: {json.dumps({'type': 'error', 'message': '优化失败，请稍后重试'}, ensure_ascii=False)}\n\n"
-
 
 @router.post("/api/profile/resume/optimize")
 async def optimize_resume(
@@ -193,7 +121,7 @@ async def optimize_resume(
         raise HTTPException(status_code=400, detail="请先上传简历")
 
     return StreamingResponse(
-        optimize_resume_event_stream(user, position),
+        resume_service.optimize_resume_event_stream(user["id"], position),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
     )

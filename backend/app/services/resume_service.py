@@ -7,7 +7,12 @@ import json
 import logging
 from io import BytesIO
 from typing import Optional
-from app.db.connection import get_db_connection
+from app.db.connection import get_db_connection, run_db
+from app.services.llm import raw_llm_call, stream_llm_messages, _extract_json
+from app.core.prompts import (
+    build_resume_optimize_points_prompt,
+    build_resume_optimize_text_prompt,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -222,3 +227,65 @@ def get_optimization(user_id: int) -> Optional[dict]:
         "position": row[2],
         "optimized_at": row[3],
     }
+
+async def optimize_resume_event_stream(user_id: int, position: str):
+    """简历优化 SSE 事件流：points → delta* → done/error
+
+    audit D1 / spec Task D M42：LLM 编排从 router 移入 service，router 只做
+    HTTP 感知。签名使用 user_id（而非 user dict），service 可独立测试。
+    """
+    try:
+        raw_text = await run_db(lambda: get_resume_text(user_id))
+        if not raw_text:
+            yield f"data: {json.dumps({'type': 'error', 'message': '未找到简历，请先上传'})}\n\n"
+            return
+
+        # 第一阶段：非流式生成要点 JSON
+        try:
+            points_raw = await raw_llm_call(
+                user_id,
+                messages=[{
+                    "role": "user",
+                    "content": build_resume_optimize_points_prompt(raw_text, position),
+                }],
+                temperature=0.3,
+                max_tokens=1024,
+                response_format={"type": "json_object"},
+            )
+            points_data = _extract_json(points_raw)
+            points = points_data if isinstance(points_data, list) else points_data.get("points", [])
+            if not isinstance(points, list):
+                points = []
+        except Exception as e:
+            logger.warning(f"简历优化要点生成失败，跳过要点: {e}")
+            points = []
+
+        yield f"data: {json.dumps({'type': 'points', 'points': points}, ensure_ascii=False)}\n\n"
+
+        # 第二阶段：流式生成优化版全文
+        text_chunks = []
+        async for chunk in stream_llm_messages(
+            messages=[{
+                "role": "user",
+                "content": build_resume_optimize_text_prompt(raw_text, position),
+            }],
+            user_id=user_id,
+            temperature=0.4,
+            # audit D14 / spec Task C M41：显式下发 max_tokens 防服务端默认值截断
+            max_tokens=4096,
+        ):
+            text_chunks.append(chunk)
+            yield f"data: {json.dumps({'type': 'delta', 'content': chunk}, ensure_ascii=False)}\n\n"
+
+        optimized_text = "".join(text_chunks)
+        if not optimized_text.strip():
+            raise RuntimeError("模型未生成优化内容")
+
+        await run_db(lambda: save_optimization(
+            user_id, position, points, optimized_text
+        ))
+
+        yield f"data: {json.dumps({'type': 'done', 'position': position}, ensure_ascii=False)}\n\n"
+    except Exception:
+        logger.exception("简历优化失败")
+        yield f"data: {json.dumps({'type': 'error', 'message': '优化失败，请稍后重试'}, ensure_ascii=False)}\n\n"
