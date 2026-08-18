@@ -23,6 +23,7 @@
 | `adminAssistantApi.js` | 管理员 AI 助手（聚合质量审查）：发消息 / 确认执行写操作 / 会话历史。历史 GET 必须 `{ ttl: 0 }` 绕过 http.js 30s 缓存 | `/api/admin/assistant/*` |
 | `adminQualityApi.js` | 管理员聚合质量审查：启动全量误合并/漏合并扫描、读取扫描 Job、清单列表与审批 | `/api/admin/quality-issues/*`, `/api/jobs/{id}` |
 | `adminSourceHealthApi.js` | 来源健康（同签名重复公共面经）：列表 / 合并（dry_run 参数）。列表 GET 必须 `{ ttl: 0 }` 绕过 http.js 30s 缓存 | `/api/admin/source-health/*` |
+| `evaluationApi.js` | 评测控制面：capabilities / releases / benchmarks / runs / items（冻结快照取证）/ retry-failed / experiments（列表、详情、SSE）/ human reviews；SSE 用 `getSSE` + `Last-Event-ID` 断线恢复 | `/api/admin/evals/*` |
 
 ## 核心规则
 

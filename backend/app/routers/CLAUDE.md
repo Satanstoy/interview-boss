@@ -27,6 +27,7 @@
 | `audio.py` | `/api/audio/*` | 语音转文字（Deepgram） |
 | `error_report.py` | `/api/error-report` | 前端错误上报（匿名）。限长防刷：最多 50 条、单字段截断 2000、超限返回 ok:false |
 | `interview_distribution.py` | `/api/interview/distribution/*` | 模拟面试题型的系统默认分布与用户岗位偏好 |
+| `admin_evaluation.py` | `/api/admin/evals/*` | 评测控制面（admin-only）：capabilities / releases / benchmarks / runs（创建、列表、详情、cancel）、`runs/{id}/items/{item_id}`（冻结快照取证 + attempts + artifacts 索引）、`retry-failed`（支持 created 孤儿重投，**每次入队必须传唯一 job id**，enqueue 返回 None 时不标记 queued）、`runs/{id}/events` SSE、experiments（创建/列表/详情/cancel/events SSE；`_refresh_experiment` 只在状态或进度实际变化时写库，避免 GET/SSE 读路径每次轮询写库） |
 | `health.py` | `/api/health` | 健康检查 |
 
 ## 子路由包
