@@ -545,6 +545,128 @@ def test_get_experiment_aggregates_child_run_progress(test_db, monkeypatch):
         ).fetchall()
     ]
     assert "experiment.progress" in event_types
+def test_repeated_experiment_read_does_not_write_or_append_events(test_db, monkeypatch):
+    """A read-only GET/SSE poll must not write the experiment row or append
+    events when nothing changed (write-on-read amplification)."""
+    module = _router()
+    catalog = importlib.import_module("app.evaluation.benchmark_catalog")
+    catalog.sync_builtin_benchmarks(test_db)
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    async def fake_enqueue(run_id):
+        return None
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    created = asyncio.run(
+        module.create_experiment(
+            module.CreateEvalExperimentRequest(target_types=["interview"], replication_count=1),
+            {"id": 1, "is_admin": 1},
+        )
+    )
+    experiment_id = created["experiment_id"]
+    before = test_db.execute(
+        "SELECT COUNT(*) FROM eval_experiment_events WHERE experiment_id = ?", (experiment_id,)
+    ).fetchone()[0]
+    before_status = None
+
+    # Poll twice with no child-run changes: neither poll should write events.
+    for _ in range(2):
+        result = asyncio.run(module.get_experiment(experiment_id, {"id": 1, "is_admin": 1}))
+        before_status = result["status"]
+    after_nochange = test_db.execute(
+        "SELECT COUNT(*) FROM eval_experiment_events WHERE experiment_id = ?", (experiment_id,)
+    ).fetchone()[0]
+    assert after_nochange == before, (before, after_nochange)
+
+    # A child status change should still be reflected and evented once.
+    run_id = result["runs"][0]["run_id"]
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'completed', completed_items = total_items WHERE id = ?",
+        (run_id,),
+    )
+    test_db.commit()
+    asyncio.run(module.get_experiment(experiment_id, {"id": 1, "is_admin": 1}))
+    after_change = test_db.execute(
+        "SELECT COUNT(*) FROM eval_experiment_events WHERE experiment_id = ?", (experiment_id,)
+    ).fetchone()[0]
+    assert after_change >= after_nochange + 1
+
+    # And polling again after the change is a no-op write.
+    asyncio.run(module.get_experiment(experiment_id, {"id": 1, "is_admin": 1}))
+    after_poll = test_db.execute(
+        "SELECT COUNT(*) FROM eval_experiment_events WHERE experiment_id = ?", (experiment_id,)
+    ).fetchone()[0]
+    assert after_poll == after_change
+
+
+def test_list_experiments_returns_summaries_with_runs(test_db, monkeypatch):
+    module = _router()
+    catalog = importlib.import_module("app.evaluation.benchmark_catalog")
+    catalog.sync_builtin_benchmarks(test_db)
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    async def fake_enqueue(run_id):
+        return None
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    created = asyncio.run(
+        module.create_experiment(
+            module.CreateEvalExperimentRequest(target_types=["interview"], replication_count=1),
+            {"id": 1, "is_admin": 1},
+        )
+    )
+
+    result = asyncio.run(module.list_experiments(admin={"id": 1, "is_admin": 1}, limit=50))
+
+    assert result["experiments"][0]["id"] == created["experiment_id"]
+    item = result["experiments"][0]
+    assert item["total_runs"] >= 1
+    assert item["status"] in {"created", "queued", "running", "completed", "failed", "cancelled"}
+    assert "runs" in item
+
+
+def test_list_experiments_status_filter(test_db, monkeypatch):
+    module = _router()
+    catalog = importlib.import_module("app.evaluation.benchmark_catalog")
+    catalog.sync_builtin_benchmarks(test_db)
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    async def fake_enqueue(run_id):
+        return None
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    created = asyncio.run(
+        module.create_experiment(
+            module.CreateEvalExperimentRequest(target_types=["interview"], replication_count=1),
+            {"id": 1, "is_admin": 1},
+        )
+    )
+    test_db.execute("UPDATE eval_experiments SET status = 'queued' WHERE id = ?", (created["experiment_id"],))
+    test_db.commit()
+
+    queued = asyncio.run(module.list_experiments(admin={"id": 1, "is_admin": 1}, status="queued", limit=50))
+    assert [item["id"] for item in queued["experiments"]] == [created["experiment_id"]]
+
+    running = asyncio.run(module.list_experiments(admin={"id": 1, "is_admin": 1}, status="running", limit=50))
+    assert running["experiments"] == []
 
 
 def test_cancel_experiment_cancels_queued_children(test_db, monkeypatch):

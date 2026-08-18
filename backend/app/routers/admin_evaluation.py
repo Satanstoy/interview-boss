@@ -150,47 +150,54 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
     summary["quality_status"] = quality_status
     previous_summary = _decode_json(experiment["summary_json"], {})
     previous_status = experiment["status"]
-    conn.execute(
-        """
-        UPDATE eval_experiments
-        SET status = ?, total_runs = ?, completed_runs = ?, failed_runs = ?,
-            cancelled_runs = ?, summary_json = ?,
-            started_at = CASE WHEN ? IN ('running', 'completed', 'failed')
-                              THEN COALESCE(started_at, CURRENT_TIMESTAMP) ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled')
-                               THEN COALESCE(finished_at, CURRENT_TIMESTAMP) ELSE NULL END
-        WHERE id = ?
-        """,
-        (
-            status,
-            total_runs,
-            completed_runs,
-            failed_runs,
-            cancelled_runs,
-            json.dumps(summary, ensure_ascii=False, sort_keys=True),
-            status,
-            status,
-            experiment_id,
-        ),
-    )
-    if previous_status != status:
-        _experiment_event(
-            conn,
-            experiment_id,
-            "experiment.status_changed",
-            {"from": previous_status, "to": status},
-        )
     progress_keys = (
         "total_runs", "completed_runs", "failed_runs", "cancelled_runs",
         "total_items", "completed_items", "failed_items", "quality_status",
     )
-    if any(previous_summary.get(key) != summary.get(key) for key in progress_keys):
-        _experiment_event(
-            conn,
-            experiment_id,
-            "experiment.progress",
-            {key: summary[key] for key in progress_keys},
+    derived_progress = {key: summary[key] for key in progress_keys}
+    progress_changed = any(
+        previous_summary.get(key) != summary.get(key) for key in progress_keys
+    )
+    # Read-only polls (GET/SSE) must not write the row or append events when
+    # nothing changed: derive first, persist only on actual change.
+    if previous_status != status or progress_changed:
+        conn.execute(
+            """
+            UPDATE eval_experiments
+            SET status = ?, total_runs = ?, completed_runs = ?, failed_runs = ?,
+                cancelled_runs = ?, summary_json = ?,
+                started_at = CASE WHEN ? IN ('running', 'completed', 'failed')
+                                  THEN COALESCE(started_at, CURRENT_TIMESTAMP) ELSE started_at END,
+                finished_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled')
+                                   THEN COALESCE(finished_at, CURRENT_TIMESTAMP) ELSE NULL END
+            WHERE id = ?
+            """,
+            (
+                status,
+                total_runs,
+                completed_runs,
+                failed_runs,
+                cancelled_runs,
+                json.dumps(summary, ensure_ascii=False, sort_keys=True),
+                status,
+                status,
+                experiment_id,
+            ),
         )
+        if previous_status != status:
+            _experiment_event(
+                conn,
+                experiment_id,
+                "experiment.status_changed",
+                {"from": previous_status, "to": status},
+            )
+        if progress_changed:
+            _experiment_event(
+                conn,
+                experiment_id,
+                "experiment.progress",
+                derived_progress,
+            )
     return {
         **dict(experiment),
         "status": status,
@@ -449,6 +456,73 @@ async def capabilities(admin: dict = Depends(get_admin_user)):
                     }
                 )
             return {"targets": result}
+
+    return await run_db(_query)
+
+
+@router.get("/experiments")
+async def list_experiments(
+    status: str | None = None,
+    limit: int = 50,
+    admin: dict = Depends(get_admin_user),
+):
+    """List Eval Experiments with per-child Run summaries (browse + restore)."""
+
+    def _query():
+        with get_db_connection() as conn:
+            params = []
+            where = ""
+            if status:
+                where = "WHERE e.status = ?"
+                params.append(status)
+            params.append(limit)
+            rows = conn.execute(
+                f"""
+                SELECT e.id, e.experiment_key, e.status, e.total_runs,
+                       e.completed_runs, e.failed_runs, e.cancelled_runs,
+                       e.replication_count, e.environment_fingerprint,
+                       e.comparison_group, e.created_at, e.started_at, e.finished_at,
+                       e.summary_json
+                FROM eval_experiments e
+                {where}
+                ORDER BY e.id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            experiments = []
+            for row in rows:
+                item = dict(row)
+                item["summary"] = _decode_json(item.pop("summary_json"), {})
+                item["runs"] = []
+                child_quality = []
+                for child in conn.execute(
+                    """
+                    SELECT er.run_id, er.target_type,
+                           r.status, r.total_items, r.completed_items, r.failed_items,
+                           r.created_at, r.started_at, r.finished_at,
+                           tr.release_key AS target_release_key,
+                           ev.release_key AS evaluation_release_key
+                    FROM eval_experiment_runs er
+                    JOIN eval_runs r ON r.id = er.run_id
+                    JOIN eval_releases tr ON tr.id = r.target_release_id
+                    LEFT JOIN eval_releases ev ON ev.id = r.evaluation_release_id
+                    WHERE er.experiment_id = ?
+                    ORDER BY er.display_order, er.id
+                    """,
+                    (item["id"],),
+                ).fetchall():
+                    child = dict(child)
+                    child["quality_status"] = _quality_status(conn, child["run_id"], child["status"])
+                    child_quality.append(child["quality_status"])
+                    item["runs"].append(child)
+                item["quality_status"] = (
+                    "pending" if any(v == "pending" for v in child_quality)
+                    else "failed" if any(v == "failed" for v in child_quality)
+                    else "not_evaluated" if any(v == "not_evaluated" for v in child_quality)
+                    else "passed"
+                )
+                experiments.append(item)
+            return {"experiments": experiments}
 
     return await run_db(_query)
 

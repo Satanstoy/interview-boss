@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CheckCircle2, Play, RefreshCw } from '@lucide/vue'
+import { ArrowRight, CheckCircle2, Play, RefreshCw } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationCapabilities, fetchEvaluationReleases, fetchEvaluationRuns } from '@/services/evaluationApi.js'
+import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchEvaluationRuns } from '@/services/evaluationApi.js'
 import { evaluationTargetLabel, formatDate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
@@ -17,6 +17,8 @@ const route = useRoute()
 const releases = ref([])
 const capabilities = ref([])
 const runs = ref([])
+const experiments = ref([])
+const benchmarks = ref([])
 const loading = ref(true)
 const submitting = ref(false)
 const experimentSubmitting = ref(false)
@@ -59,6 +61,53 @@ const evaluationConfig = computed(() => {
   }
 })
 
+const executionEstimate = computed(() => {
+  const caseCount = evaluationConfig.value.caseCount || 0
+  const replication = Number(form.value.replication) || 1
+  const total = Math.max(0, caseCount * replication)
+  const judgeCalls = Math.max(0, caseCount) * Math.max(0, Math.min(replication, 3))
+  let estimate = total ? `${total} 次 E2E 执行` : '—'
+  if (judgeCalls) estimate += `（约 ${judgeCalls} 次 Judge 调用）`
+  return { total, judgeCalls, text: estimate }
+})
+
+function smokeCaseKey() {
+  const evId = String(form.value.evaluation)
+  const suite = benchmarks.value.find(s => String(s.evaluation_release_key || s.release_key) === evId || s.id === Number(evId))
+  return suite?.cases?.[0]?.case_key || ''
+}
+
+async function submitSmoke() {
+  if (!form.value.target || !form.value.evaluation) {
+    error.value = '请选择被测版本和完整评测版本。'
+    return
+  }
+  const caseKey = smokeCaseKey()
+  if (!caseKey) {
+    error.value = '没有找到 Benchmark Case，无法执行 Smoke。'
+    return
+  }
+  submitting.value = true
+  error.value = ''
+  try {
+    const result = await createEvaluationRun({
+      target_release_id: Number(form.value.target),
+      evaluation_release_id: Number(form.value.evaluation),
+      replication_count: 1,
+      seed: Number(form.value.seed),
+      environment_fingerprint: form.value.environment,
+      comparison_group: form.value.comparison,
+      case_keys: [caseKey],
+    })
+    if (result?.dispatch_error) error.value = `入队异常：${result.dispatch_error}（Run 保持可重试状态）`
+    router.push(`/admin/evals/runs/${result.run_id}`)
+  } catch (err) {
+    error.value = err.message || 'Smoke 评测失败'
+  } finally {
+    submitting.value = false
+  }
+}
+
 function chooseDefaults() {
   const target = targets.value.find(release => release.release_key === 'interview-agent@1.0') || targets.value[0]
   if (target) {
@@ -88,14 +137,18 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [releaseData, runData, capabilityData] = await Promise.all([
+    const [releaseData, runData, capabilityData, experimentData, benchmarkData] = await Promise.all([
       fetchEvaluationReleases(),
       fetchEvaluationRuns(),
       fetchEvaluationCapabilities(),
+      fetchEvaluationExperiments(),
+      fetchEvaluationBenchmarks(),
     ])
     releases.value = releaseData.releases || []
     runs.value = runData.runs || []
     capabilities.value = capabilityData.targets || []
+    experiments.value = experimentData.experiments || []
+    benchmarks.value = benchmarkData.suites || []
     selectedExperimentTargets.value = runnableCapabilities.value.map(item => item.target_type)
     chooseDefaults()
   } catch (err) {
@@ -215,8 +268,9 @@ onMounted(load)
               <p class="mt-1.5 text-xs text-muted-foreground">人工 A/B 必须使用同一完整评测版本、同一 Case 和同一输入快照，只改变被测版本。</p>
             </EvaluationStepCard>
 
+            <div class="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">预计执行量：<span class="font-medium text-foreground">{{ executionEstimate.text }}</span><span v-if="executionEstimate.total" class="ml-1">· 完整评测耗时较长且消耗 Token，建议先用 Smoke 验证单 Case</span></div>
             <p v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ error }}</p>
-            <Button class="w-full" type="submit" :disabled="submitting"><Play class="mr-1.5 size-4" />{{ submitting ? '正在创建...' : '创建并开始评测' }}</Button>
+            <div class="flex flex-wrap gap-2"><Button class="flex-1" type="submit" :disabled="submitting"><Play class="mr-1.5 size-4" />{{ submitting ? '正在创建...' : '创建并开始评测' }}</Button><Button type="button" variant="outline" :disabled="submitting || !executionEstimate.total" @click="submitSmoke"><Play class="mr-1.5 size-4" />执行 1 Case Smoke</Button></div>
           </form>
         </AppCard>
 
@@ -250,6 +304,17 @@ onMounted(load)
           </div>
         </AppCard>
       </div>
+        <AppCard title="批量实验历史" description="查看一键启动的 Experiment 汇总进度，可进入任意子 Run 查看证据。" no-padding>
+          <div class="flex items-center justify-end border-b border-border/60 p-3"><Button size="sm" variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button></div>
+          <div v-if="!experiments.length" class="p-8 text-center text-sm text-muted-foreground">还没有批量实验记录。</div>
+          <div v-else class="divide-y divide-border/60">
+            <button v-for="experiment in experiments.slice(0, 10)" :key="experiment.id" type="button" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/experiments/${experiment.id}`)">
+              <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">实验 #{{ experiment.id }}</span><span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(experiment.status)]">{{ statusLabel(experiment.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(experiment.quality_status)]">{{ qualityStatusLabel(experiment.quality_status) }}</span></div><div class="mt-1 text-xs text-muted-foreground">{{ experiment.total_runs }} 个子 Run · {{ (experiment.completed_runs || 0) + (experiment.failed_runs || 0) + (experiment.cancelled_runs || 0) }}/{{ experiment.total_runs }} 已完成 · {{ formatDate(experiment.created_at) }}</div></div>
+              <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
+            </button>
+          </div>
+        </AppCard>
+
     </div>
   </div>
 </template>

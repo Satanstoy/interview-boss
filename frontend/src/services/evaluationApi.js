@@ -28,6 +28,13 @@ export const fetchHumanReviews = (comparisonGroup = '') => {
   const suffix = comparisonGroup ? `?comparison_group=${encodeURIComponent(comparisonGroup)}` : ''
   return get(`${ROOT}/reviews${suffix}`, { noCache: true })
 }
+
+export const fetchEvaluationExperiments = (params = {}) => {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  const suffix = query.toString() ? `?${query}` : ''
+  return get(`${ROOT}/experiments${suffix}`, { noCache: true })
+}
 export const createHumanReview = (payload) => post(`${ROOT}/reviews`, payload)
 
 export const streamEvaluationRun = (runId, onEvent, options = {}) => (
