@@ -8,9 +8,9 @@ FastAPI 应用初始化、中间件、路由注册。
 |------|------|
 | `asgi.py` | FastAPI app 创建、中间件注册、路由注册、生命周期事件 |
 | `mcp_server/` | 后端内嵌 MCP 工具服务，承载稳定的搜索、抽题、选题执行边界 |
-| `worker.py` | ARQ 后台任务 worker（task handlers + WorkerSettings）｜仲裁：面试分布刷新、durable chat side-effect、聚类质量审查 task、build/submit/generate 等处理函数；`build_master_bank_task` 全量重建**只允许公共已审核面经**（`interview.owner_id IS NULL AND status='approved'`，audit D5：私有/pending 面经不得公开化） |
+| `worker.py` | ARQ 后台任务 worker（task handlers + WorkerSettings）｜仲裁：面试分布刷新、durable chat side-effect、聚类质量审查 task、build/submit/generate 等处理函数；`build_master_bank_task` 全量重建**只允许公共已审核面经**（`interview.owner_id IS NULL AND status='approved'`，audit D5：私有/pending 面经不得公开化） **写端健康治理（spec 2026-08-19 / ADR 0046）**：心跳 `record_worker_heartbeat_async` 与 cron 运行记账 `observed_cron_task` 优先走 Redis（`core.cache.worker_status_*`），仅失败/状态变化落 SQLite；cron 已降频（heartbeat/submit dispatch 每 5 分钟，cluster review / chat 副作用兜底每 30 分钟）；重活写任务（`generate_answer_task`/`build_master_bank_task`）经共享 `_WORKER_DB_SEMAPHORE` 限流；题库重建备份用 `_backup_db_online`（sqlite `Connection.backup()`，WAL 下不用 `shutil.copy2`） |
 | `worker_enqueue.py` | 任务入队（submission side）：`_get_redis_pool` + 13 个 `enqueue_*`，供 router/service 调用（从 worker.py 重导出兼容） |
-| `worker_scheduled.py` | 定时/保留侧：`scheduled_*` cron processor + `run_db_retention`（从 worker.py 重导出兼容） |
+| `worker_scheduled.py` | 定时/保留侧：`scheduled_*` cron processor + `run_db_retention`（从 worker.py 重导出兼容）；**`scheduled_wal_checkpoint_task`（每日 4:10，PASSIVE→TRUNCATE）** 治理 WAL 超阈值（ADR 0046），`wal_checkpoint_now`/`_run_passive`/`_run_truncate` 可注入测试 |
 | `__init__.py` | 包初始化 |
 
 ## asgi.py 中间件顺序
