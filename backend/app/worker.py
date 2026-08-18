@@ -193,18 +193,43 @@ def get_cron_status(task_name: str, *, conn=None) -> dict:
     return dict(row)
 
 
+def _cron_should_record_success(task_name: str) -> bool:
+    """上一次持久化状态已是成功且无错误时,本次成功无需再写 SQLite。
+
+    配合 observed_cron_task:成功且状态无变化时只刷 Redis,减少高频成功重写
+    对 SQLite 单写锁的获取(spec R1)。
+    """
+    with _connection_context() as connection:
+        _ensure_observability_tables(connection)
+        row = connection.execute(
+            "SELECT status, last_error FROM worker_cron_runs WHERE task_name = ?",
+            (task_name,),
+        ).fetchone()
+    if not row:
+        return False
+    return row["status"] == "succeeded" and not row["last_error"]
+
+
 def observed_cron_task(task):
     """Wrap an ARQ cron task without swallowing errors or changing its name."""
 
     @wraps(task)
     async def wrapped(ctx):
+        from app.core.cache import worker_status_set
+
         task_name = task.__name__
-        record_cron_execution(task_name, status="running")
+        redis_ok = await worker_status_set(task_name, "running")
+        if not redis_ok:
+            record_cron_execution(task_name, status="running")
         try:
             result = await task(ctx)
         except Exception as exc:
             record_cron_execution(task_name, status="failed", error=str(exc))
             raise
+        if redis_ok:
+            await worker_status_set(task_name, "succeeded")
+            if _cron_should_record_success(task_name):
+                return result
         record_cron_execution(task_name, status="succeeded", result=result)
         return result
 

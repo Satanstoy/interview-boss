@@ -84,3 +84,79 @@ async def test_heartbeat_async_falls_back_to_sqlite(monkeypatch):
     assert ok is False
     assert calls.get("status") == "online"
 
+
+
+
+# ── Task 3: cron 记账走 Redis,仅失败/状态变化写 SQLite ─────────────
+
+
+async def _noop_cron_task(ctx):
+    return {"ok": True}
+
+
+async def _failing_cron_task(ctx):
+    raise RuntimeError("boom")
+
+
+@pytest.mark.asyncio
+async def test_cron_success_marks_redis_and_skips_sqlite_repeat(fake_redis, test_db, monkeypatch):
+    """Redis 可用:首次成功写一次 SQLite;连续成功不再写(削减高频成功重写)。"""
+    from app import worker as worker_mod
+
+    wrapped = worker_mod.observed_cron_task(_noop_cron_task)
+    calls = {"n": 0}
+    orig = worker_mod.record_cron_execution
+
+    def spy(*a, **kw):
+        calls["n"] += 1
+        return orig(*a, **kw)
+
+    monkeypatch.setattr(worker_mod, "record_cron_execution", spy)
+    await wrapped({})
+    await wrapped({})
+
+    assert calls["n"] == 1  # 仅首次成功落一次 SQLite
+    assert await cache.worker_status_get("_noop_cron_task") == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_cron_failure_still_writes_sqlite(fake_redis, test_db, monkeypatch):
+    """失败路径仍写 SQLite 且记录 last_error。"""
+    from app import worker as worker_mod
+
+    wrapped = worker_mod.observed_cron_task(_failing_cron_task)
+    calls = []
+    orig = worker_mod.record_cron_execution
+
+    def spy(*a, **kw):
+        calls.append(kw)
+        return orig(*a, **kw)
+
+    monkeypatch.setattr(worker_mod, "record_cron_execution", spy)
+    with pytest.raises(RuntimeError):
+        await wrapped({})
+
+    assert any(c.get("status") == "failed" for c in calls)
+    assert any("boom" in (c.get("error") or "") for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_cron_falls_back_to_sqlite_when_redis_down(test_db, monkeypatch):
+    """Redis 不可用:维持旧行为(running + succeeded 双写 SQLite)。"""
+    monkeypatch.setattr(cache, "_cache_client", None)
+    from app import worker as worker_mod
+
+    wrapped = worker_mod.observed_cron_task(_noop_cron_task)
+    calls = {"n": 0}
+    orig = worker_mod.record_cron_execution
+
+    def spy(*a, **kw):
+        calls["n"] += 1
+        return orig(*a, **kw)
+
+    monkeypatch.setattr(worker_mod, "record_cron_execution", spy)
+    await wrapped({})
+    await wrapped({})
+
+    assert calls["n"] == 4  # 2 次运行 × (running + succeeded)
+
