@@ -221,3 +221,36 @@ async def invalidate_master_bank_cache(user_id: int | None = None) -> None:
             await client.incr(f"{_MASTER_BANK_PREFIX}:u{uid}:epoch")
     except RedisError as exc:
         logger.debug("失效 master-bank Redis cache 失败: %s", exc)
+
+
+_WORKER_STATUS_PREFIX = "interview-boss:worker:status"
+
+
+async def worker_status_set(name: str, status: str, ttl: int = 300) -> bool:
+    """Persist a worker/cron liveness status to Redis, fail-open.
+
+    Returns False (never raises) when Redis is unavailable/misconfigured so
+    callers can fall back to durable SQLite bookkeeping.
+    """
+    client = get_cache_client()
+    if client is None:
+        return False
+    try:
+        await client.set(f"{_WORKER_STATUS_PREFIX}:{name}", str(status), ex=ttl)
+        return True
+    except (RedisError, TypeError, ValueError):
+        logger.debug("写入 worker 状态 Redis 失败: %s", name)
+        return False
+
+
+async def worker_status_get(name: str) -> str | None:
+    """Read a worker/cron liveness status; None when unavailable/missing."""
+    client = get_cache_client()
+    if client is None:
+        return None
+    try:
+        value = await client.get(f"{_WORKER_STATUS_PREFIX}:{name}")
+        return str(value) if value is not None else None
+    except (RedisError, TypeError, ValueError):
+        return None
+
