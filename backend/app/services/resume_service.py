@@ -46,6 +46,9 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
 def save_resume(user_id: int, filename: str, raw_text: str) -> int:
     """保存用户简历（覆盖旧简历）
 
+    同时停用 chat_memories 中的旧简历记忆（audit D9 / spec Task A M39）：
+    user_resumes 是简历唯一事实源，旧副本不得被面试 agent 继续召回。
+
     Args:
         user_id: 用户 ID
         filename: 原始文件名
@@ -54,6 +57,8 @@ def save_resume(user_id: int, filename: str, raw_text: str) -> int:
     Returns:
         简历记录 ID
     """
+    from app.services.chat_memory_service import deactivate_resume_memories
+
     with get_db_connection() as conn:
         # 删除旧简历
         conn.execute("DELETE FROM user_resumes WHERE user_id = ?", (user_id,))
@@ -63,7 +68,13 @@ def save_resume(user_id: int, filename: str, raw_text: str) -> int:
             (user_id, filename, raw_text)
         )
         conn.commit()
-        return cursor.lastrowid
+        resume_id = cursor.lastrowid
+    # 同步停用 chat 旧简历记忆；失败不阻断上传（记录日志）
+    try:
+        deactivate_resume_memories(user_id)
+    except Exception:
+        logger.exception("停用旧简历记忆失败")
+    return resume_id
 
 
 def get_resume(user_id: int) -> Optional[dict]:
@@ -110,13 +121,23 @@ def get_resume_text(user_id: int) -> Optional[str]:
 def delete_resume(user_id: int) -> bool:
     """删除用户的简历
 
+    同时停用 chat_memories 中的简历记忆，避免已删除简历的 PII 被
+    面试 agent 继续召回（audit D9 / spec Task A M39）。
+
     Returns:
         是否成功删除
     """
+    from app.services.chat_memory_service import deactivate_resume_memories
+
     with get_db_connection() as conn:
         cursor = conn.execute("DELETE FROM user_resumes WHERE user_id = ?", (user_id,))
         conn.commit()
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+    try:
+        deactivate_resume_memories(user_id)
+    except Exception:
+        logger.exception("删除简历时停用记忆失败")
+    return deleted
 
 
 def has_resume(user_id: int) -> bool:

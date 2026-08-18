@@ -197,6 +197,22 @@ def get_resume_memory(user_id: int) -> Optional[str]:
     return row[0] if row else None
 
 
+def deactivate_resume_memories(user_id: int) -> int:
+    """停用用户所有 active 简历记忆（profile save/delete 时同步清理）。
+
+    audit D9 / spec Task A：user_resumes 与 chat_memories 的简历副本必须同步，
+    删除/替换简历后旧副本不得继续被面试 agent 召回（含已删简历的 PII）。
+    """
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE chat_memories SET is_active = 0, updated_at = CURRENT_TIMESTAMP "
+            "WHERE user_id = ? AND memory_type = 'resume' AND is_active = 1",
+            (user_id,),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
 def save_resume_memory(user_id: int, resume_text: str) -> int:
     """保存或更新用户的简历记忆（停用旧的，创建新的）"""
     with get_db_connection() as conn:

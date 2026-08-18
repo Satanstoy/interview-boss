@@ -184,9 +184,25 @@ def _restore_active_skills_from_metadata(
 
 
 async def recall_memories(state: ChatState) -> dict:
-    """加载简历记忆（轻量级预加载，其他记忆延迟到意图分类后）"""
+    """加载简历记忆（轻量级预加载，其他记忆延迟到意图分类后）
+
+    audit D9 / spec Task A M39：user_resumes 是简历唯一事实源。
+    优先读取 user_resumes 的当前简历文本；仅当用户从未通过 profile 上传过
+    简历时才回退到 chat_memories 的简历记忆（兼容旧对话在新建会话内
+    直接粘贴简历的路径）。
+    """
     user_id = state["user_id"]
-    resume_summary = chat_service.get_resume_memory(user_id)
+    resume_summary = ""
+    from app.db.connection import run_db
+    try:
+        from app.services import resume_service
+        current = await run_db(lambda: resume_service.get_resume_text(user_id))
+        if current:
+            resume_summary = current
+    except Exception:
+        logger.debug("读取 user_resumes 简历失败，回退 chat 记忆", exc_info=True)
+    if not resume_summary:
+        resume_summary = chat_service.get_resume_memory(user_id)
     return {
         "memory_summaries": [],
         "resume_summary": resume_summary,
