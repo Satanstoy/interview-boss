@@ -73,7 +73,7 @@ async def test_build_master_bank_rebuild_only_enqueues_public_approved(_seed_reb
         patch.object(queue_mod, "get_db_connection", return_value=conn),
         patch.object(batch_mod, "get_db_connection", return_value=conn),
         patch("app.services.pipeline.cluster_batch", side_effect=fake_cluster_batch),
-        patch.object(worker_mod, "shutil"),
+        patch.object(worker_mod, "_backup_db_online"),
         patch("app.db.connection.get_current_job_position", return_value=JOB_POSITION),
     ):
         result = await worker_mod.build_master_bank_task({}, 1)
