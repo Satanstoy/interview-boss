@@ -29,14 +29,22 @@ def _study_timezone() -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
-def _to_study_date(value: datetime | None) -> str:
-    """Convert a UTC-naive datetime to the learner-facing study-day date (YYYY-MM-DD)."""
+def _to_study_date(value) -> str:
+    """Convert a UTC-naive datetime (str/datetime) to the study-day date string.
 
-    if value is None:
+    与 practice_deck_service._to_study_date 语义一致（接收 str/datetime/None，
+    带 try/except 兜底），避免两处实现漂移。
+    """
+
+    if not value:
         return ""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(_study_timezone()).date().isoformat()
+    try:
+        d = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return ""
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=UTC)
+    return d.astimezone(_study_timezone()).date().isoformat()
 
 
 class ReviewCorrectionError(ValueError):
@@ -146,11 +154,8 @@ def _duplicate_payload(row, event) -> dict:
         "last_score": event["score"] if event is not None else None,
         "last_reviewed_at": str(row["last_reviewed_at"] or ""),
         "next_review_at": str(row["next_review_at"] or ""),
-        "next_review_date": _to_study_date(
-            datetime.fromisoformat(str(row["next_review_at"]))
-            if row["next_review_at"]
-            else None
-        ),
+        # _to_study_date 内部有 try/except，直接传原始值（含 str）
+        "next_review_date": _to_study_date(row["next_review_at"]),
         "interval_days": row["interval_days"] or 0,
         "ease_factor": row["ease_factor"] or 2.3,
         "algorithm": "sm2_lite",
@@ -174,6 +179,7 @@ def record_review(
     urgency: float = 0.0,
     idempotency_key: str | None = None,
     user_answer: str | None = None,
+    evaluation_result: str | None = None,
 ) -> dict:
     """Atomically update a user's state and append an auditable review event.
 
@@ -224,8 +230,8 @@ def record_review(
         """
         INSERT INTO practice_review_events
             (user_id, question_bank_id, review_id, rating, score, source,
-             reviewed_at, before_state_json, idempotency_key, user_answer)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             reviewed_at, before_state_json, idempotency_key, user_answer, evaluation_result)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id,
@@ -238,6 +244,7 @@ def record_review(
             json.dumps(asdict(before_state), separators=(",", ":")),
             idempotency_key,
             user_answer,
+            evaluation_result,
         ),
     )
     return _review_payload(

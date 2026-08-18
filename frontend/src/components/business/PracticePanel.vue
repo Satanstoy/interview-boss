@@ -234,6 +234,7 @@
               <p class="text-[10px] font-semibold text-foreground mb-1">改进建议</p>
               <div class="text-xs text-muted-foreground leading-relaxed answer-content prose prose-sm dark:prose-invert max-w-none" v-html="renderMarkdown(qState._evaluation.suggestions)"></div>
             </div>
+            <p v-if="qState._evaluation.truncated" class="text-[10px] text-amber-600 dark:text-amber-400">你的回答已超长，评估基于前 3000 字符，可精简后重新评估。</p>
           </div>
         </div>
       </div>

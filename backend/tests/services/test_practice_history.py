@@ -63,9 +63,9 @@ def test_evaluate_answer_stores_user_answer_snapshot(client, test_db, mock_llm):
             )
         assert resp.status_code == 200, resp.text
 
-        # 验证 review events 里有 user_answer 快照
+        # 验证 review events 里有 user_answer + evaluation_result 快照
         row = test_db.execute(
-            "SELECT user_answer, source, score FROM practice_review_events "
+            "SELECT user_answer, evaluation_result, source, score FROM practice_review_events "
             "WHERE question_bank_id = ? AND user_id = 1 ORDER BY id DESC LIMIT 1",
             (qid,),
         ).fetchone()
@@ -74,6 +74,12 @@ def test_evaluate_answer_stores_user_answer_snapshot(client, test_db, mock_llm):
             f"user_answer 快照缺失: {row['user_answer']}"
         )
         assert row["source"] == "self_check"
+        # R11: evaluation_result JSON 快照应落库（含维度分解）
+        assert row["evaluation_result"], "evaluation_result 快照缺失"
+        persisted = json.loads(row["evaluation_result"])
+        assert persisted["overall_score"] == 88
+        assert "dimensions" in persisted
+        assert "suggestions" in persisted
     finally:
         app.dependency_overrides.pop(dependency, None)
 
@@ -90,10 +96,15 @@ def test_practice_history_reads_review_events(client, test_db):
         "VALUES (1, ?, 'review', 1, 1, 'good', 88, '2026-08-18 02:00:00', NULL, 3.0, 2.3, 3.0, 0.6, 'sm2_lite', '2026-08-18 02:00:00')",
         (qid,),
     ).lastrowid
+    eval_result = json.dumps({
+        "overall_score": 88,
+        "dimensions": {"completeness": {"score": 90, "comment": "全面"}},
+        "suggestions": "补充示例",
+    }, ensure_ascii=False)
     test_db.execute(
-        "INSERT INTO practice_review_events (user_id, question_bank_id, review_id, rating, score, source, reviewed_at, user_answer) "
-        "VALUES (1, ?, ?, 'good', 88, 'self_check', '2026-08-18 02:00:00', '我的答案')",
-        (qid, rev),
+        "INSERT INTO practice_review_events (user_id, question_bank_id, review_id, rating, score, source, reviewed_at, user_answer, evaluation_result) "
+        "VALUES (1, ?, ?, 'good', 88, 'self_check', '2026-08-18 02:00:00', '我的答案', ?)",
+        (qid, rev, eval_result),
     )
     test_db.commit()
 
@@ -107,5 +118,10 @@ def test_practice_history_reads_review_events(client, test_db):
         assert items[0]["user_answer"] == "我的答案"
         assert items[0]["rating"] == "good"
         assert items[0]["source"] == "self_check"
+        # R11: evaluation_result 应往返解析为 dict
+        assert items[0]["evaluation_result"] is not None, "evaluation_result 不应为 None"
+        assert items[0]["evaluation_result"]["overall_score"] == 88
+        assert items[0]["evaluation_result"]["dimensions"]["completeness"]["score"] == 90
+        assert items[0]["evaluation_result"]["suggestions"] == "补充示例"
     finally:
         app.dependency_overrides.pop(dependency, None)

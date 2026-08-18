@@ -422,6 +422,7 @@ async def evaluate_answer(
                         source="self_check",
                         urgency=urgency,
                         user_answer=req.user_answer,
+                        evaluation_result=json.dumps(result, ensure_ascii=False),
                     )
                     conn.commit()
 
@@ -499,8 +500,8 @@ async def get_practice_history(
     def _query():
         with get_db_connection() as conn:
             rows = conn.execute(
-                "SELECT id, question_bank_id, user_answer, score, rating, source, "
-                "reviewed_at AS created_at "
+                "SELECT id, question_bank_id, user_answer, evaluation_result, "
+                "score, rating, source, reviewed_at AS created_at "
                 "FROM practice_review_events "
                 "WHERE question_bank_id = ? AND user_id = ? "
                 "ORDER BY reviewed_at DESC",
@@ -512,7 +513,14 @@ async def get_practice_history(
     result = []
     for r in rows:
         d = dict(r)
-        # 兼容旧前端：evaluation_result 字段保留为 None（评估明细不再存储）
-        d["evaluation_result"] = None
+        # 评估明细以 JSON 快照落到 review event；解析失败降级为 None
+        try:
+            d["evaluation_result"] = (
+                json.loads(d["evaluation_result"])
+                if d["evaluation_result"]
+                else None
+            )
+        except (json.JSONDecodeError, TypeError):
+            d["evaluation_result"] = None
         result.append(d)
     return result

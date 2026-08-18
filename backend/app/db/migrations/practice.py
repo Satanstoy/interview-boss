@@ -195,3 +195,39 @@ def _migration_094_review_event_answer_snapshot(conn):
             """
         )
 
+
+def _migration_096_review_event_evaluation_snapshot(conn):
+    """Store the full evaluation JSON on self-check review events (migration 096).
+
+    补 R11 回归：round-2 迁移 history 只快照了 user_answer，丢掉了
+    evaluation_result（维度分解/改进建议）。新增可选 evaluation_result
+    JSON 快照列，仅 self_check 源写入，history 端点返回它。
+    """
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(practice_review_events)").fetchall()
+    }
+    if "evaluation_result" not in columns:
+        conn.execute(
+            "ALTER TABLE practice_review_events ADD COLUMN evaluation_result TEXT"
+        )
+
+    # best-effort 回填：从存量 user_practice_history 取每个 (user, question) 最新评估 JSON
+    existing = conn.execute(
+        "SELECT COUNT(*) AS c FROM practice_review_events WHERE evaluation_result IS NOT NULL"
+    ).fetchone()
+    if existing and existing[0] == 0:
+        conn.execute(
+            """
+            UPDATE practice_review_events SET evaluation_result = (
+                SELECT uph.evaluation_result FROM user_practice_history uph
+                WHERE uph.user_id = practice_review_events.user_id
+                  AND uph.question_bank_id = practice_review_events.question_bank_id
+                ORDER BY uph.created_at DESC LIMIT 1
+            )
+            WHERE source = 'self_check' AND evaluation_result IS NULL
+            """
+        )
+
+

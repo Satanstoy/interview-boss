@@ -342,6 +342,7 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
     deck_definitions = [{**deck, "kind": deck["kind"]} for deck in DECKS]
     deck_definitions.extend(dict(row) for row in custom_decks)
     _parts_cache = {}
+    study_date = _study_date_string()
     for deck in deck_definitions:
         cache_key = deck["key"]
         if cache_key not in _parts_cache:
@@ -370,7 +371,7 @@ def list_decks(conn, user_id: int, filter_mode: str = "all") -> list[dict]:
                 "reviewed": reviewed,
                 "due": due,
                 "progress": round(reviewed / total * 100) if total else 0,
-                "study_date": _study_date_string(),
+                "study_date": study_date,
             }
         )
     return result
