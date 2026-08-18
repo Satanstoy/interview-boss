@@ -226,3 +226,93 @@ class TestChatExtractPdf:
             assert response.status_code == 400
         finally:
             app.dependency_overrides.clear()
+
+class TestPdfExtractOffload:
+    """Task B (M40): async 路由中的 pdfplumber 解析必须经 asyncio.to_thread 离开事件循环"""
+
+    async def test_upload_resume_offloads_extract_to_thread(self):
+        from unittest.mock import AsyncMock, patch
+        from app.routers.profile_pkg.resume import upload_resume
+
+        f = AsyncMock()
+        f.filename = "resume.pdf"
+        f.size = 1024
+        f.read = AsyncMock(return_value=b"%PDF-1.4 fake")
+
+        with patch("app.services.resume_service.extract_pdf_text", return_value="姓名：张三") as extract, \
+             patch("app.services.resume_service.save_resume", return_value=7) as save, \
+             patch("app.routers.profile_pkg.resume.asyncio.to_thread") as to_thread:
+            to_thread.side_effect = lambda fn, *a, **k: fn(*a, **k)  # 同步执行以便断言
+            result = await upload_resume(file=f, user={"id": 1, "username": "u", "bank_mode": "public"})
+
+        assert result["status"] == "success"
+        # asyncio 是全局单例：run_db 内部的 asyncio.to_thread 也走同一 mock，
+        # 因此断言存在一次「以 extract_pdf_text 为第一参数」的 offload 调用即可
+        assert any(
+            call.args[0] is extract for call in to_thread.call_args_list
+        ), "extract_pdf_text 必须经 asyncio.to_thread 离开事件循环"
+        save.assert_called_once()
+
+    async def test_chat_extract_pdf_offloads_extract_to_thread(self):
+        from unittest.mock import AsyncMock, patch
+        from app.routers.chat import extract_pdf
+
+        f = AsyncMock()
+        f.filename = "resume.pdf"
+        f.size = 1024
+        f.read = AsyncMock(return_value=b"%PDF-1.4 fake")
+
+        with patch("app.services.resume_service.extract_pdf_text", return_value="教育背景") as extract, \
+             patch("app.routers.chat.asyncio.to_thread") as to_thread:
+            to_thread.side_effect = lambda fn, *a, **k: fn(*a, **k)
+            result = await extract_pdf(file=f, user={"id": 1, "username": "u", "bank_mode": "public"})
+
+        assert result["status"] == "success"
+        assert any(
+            call.args[0] is extract for call in to_thread.call_args_list
+        ), "extract_pdf_text 必须经 asyncio.to_thread 离开事件循环"
+
+
+class TestResumeOptimizeMaxTokens:
+    """Task C (M41): 优化全文阶段 stream_llm_messages 必须显式下发 max_tokens"""
+
+    def _auth(self):
+        from app.asgi import app
+        from app.core.auth import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {
+            "id": 1, "username": "opt_user", "bank_mode": "public"
+        }
+        return app
+
+    async def test_text_phase_passes_max_tokens(self):
+        """全文流式调用带 max_tokens，避免服务端默认值截断优化版"""
+        import json as _json
+        from app.routers.profile_pkg.resume import optimize_resume_event_stream
+
+        captured = {}
+
+        async def fake_raw_llm_call(user_id, **kwargs):
+            return _json.dumps(["量化成果"], ensure_ascii=False)
+
+        async def fake_stream(messages, user_id=None, **kwargs):
+            captured["kwargs"] = kwargs
+            yield "# 优化版"
+
+        app = self._auth()
+        try:
+            from app.services import resume_service
+            resume_service.save_resume(1, "resume.pdf", "张三\n后端工程师")
+            with patch("app.routers.profile_pkg.resume.raw_llm_call", fake_raw_llm_call), \
+                 patch("app.routers.profile_pkg.resume.stream_llm_messages", fake_stream):
+                events = [
+                    _json.loads(line[5:])
+                    for line in ("".join([
+                        d async for d in optimize_resume_event_stream({"id": 1, "username": "opt_user"}, "后端工程师")
+                    ])).splitlines() if line.startswith("data: ")
+                ]
+        finally:
+            app.dependency_overrides.clear()
+
+        assert any(e["type"] == "done" for e in events)
+        assert captured.get("kwargs", {}).get("max_tokens", 0) >= 4096, \
+            "全文阶段必须显式下发 max_tokens（防服务端默认值截断）"

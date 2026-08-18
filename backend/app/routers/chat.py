@@ -1,5 +1,6 @@
 """对话 API — 会话管理 + 消息流式输出"""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -703,7 +704,8 @@ async def extract_pdf(
 
     try:
         content = await file.read()
-        full_text = resume_service.extract_pdf_text(content)
+        # audit D14 / spec Task B M40：pdfplumber 是 CPU 密集解析，移到线程池避免阻塞事件循环
+        full_text = await asyncio.to_thread(resume_service.extract_pdf_text, content)
 
         if not full_text.strip():
             raise HTTPException(

@@ -1,4 +1,5 @@
 """简历管理端点"""
+import asyncio
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
@@ -39,7 +40,9 @@ async def upload_resume(
         if len(content) > _MAX_RESUME_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="文件过大，请上传 10MB 以内的 PDF")
 
-        raw_text = resume_service.extract_pdf_text(content)
+        # audit D14 / spec Task B M40：pdfplumber 是 CPU 密集解析，必须移到线程池，
+        # 避免在事件循环内同步执行阻塞全站（10MB 恶意/扫描件可卡住所有请求）
+        raw_text = await asyncio.to_thread(resume_service.extract_pdf_text, content)
         if not raw_text.strip():
             raise HTTPException(status_code=400, detail="无法从 PDF 中提取文本，可能是扫描件或空白文件")
 
@@ -153,6 +156,8 @@ async def optimize_resume_event_stream(user: dict, position: str):
             }],
             user_id=user["id"],
             temperature=0.4,
+            # audit D14 / spec Task C M41：显式下发 max_tokens 防服务端默认值截断
+            max_tokens=4096,
         ):
             text_chunks.append(chunk)
             yield f"data: {json.dumps({'type': 'delta', 'content': chunk}, ensure_ascii=False)}\n\n"
