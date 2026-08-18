@@ -1668,12 +1668,14 @@ class WorkerSettings:
     # 定时任务：每天凌晨 3 点运行 compaction，每周日 3:30 质量审查、3:40 来源健康检查
     cron_jobs = [
         cron(scheduled_compaction_task, hour={3}, minute={0}),
-        cron(scheduled_submit_job_dispatch_task, minute=set(range(0, 60))),
+        # 降频(spec R1 / ADR 0046):派发/兜底调度不需要分钟级,降低对 SQLite
+        # 单写锁的获取(原每分钟/每5分钟 → 每5分钟/每30分钟)。
+        cron(scheduled_submit_job_dispatch_task, minute=set(range(0, 60, 5))),
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
-        cron(scheduled_cluster_review_dispatch_task, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+        cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(scheduled_db_retention_task, hour={4}, minute={0}),
-        cron(process_chat_side_effects_task, minute={0, 10, 20, 30, 40, 50}),
-        cron(scheduled_worker_heartbeat_task, minute=set(range(0, 60))),
+        cron(process_chat_side_effects_task, minute={0, 30}),
+        cron(scheduled_worker_heartbeat_task, minute=set(range(0, 60, 5))),
     ]

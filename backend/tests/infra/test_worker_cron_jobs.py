@@ -113,3 +113,28 @@ async def test_quality_audit_cron_generates_admin_issue_lists(monkeypatch):
         "quality_issues": {"created": 2},
         "weak_representative_issues": {"created": 1},
     }
+
+
+class TestCronFrequencyThrottle:
+    """spec R1 / Task 4: 高频自审 cron 降频,减少对 SQLite 单写锁的获取。"""
+
+    @staticmethod
+    def _minutes_for(task_name):
+        from app.worker import WorkerSettings
+
+        for cj in WorkerSettings.cron_jobs:
+            if cj.name == f"cron:{task_name}":
+                return set(cj.minute)
+        return None
+
+    def test_heartbeat_throttled_to_every_5min(self):
+        assert self._minutes_for("scheduled_worker_heartbeat_task") == set(range(0, 60, 5))
+
+    def test_submit_dispatch_throttled_to_every_5min(self):
+        assert self._minutes_for("scheduled_submit_job_dispatch_task") == set(range(0, 60, 5))
+
+    def test_cluster_review_dispatch_throttled_to_30min(self):
+        assert self._minutes_for("scheduled_cluster_review_dispatch_task") == {0, 30}
+
+    def test_chat_side_effects_throttled_to_30min(self):
+        assert self._minutes_for("process_chat_side_effects_task") == {0, 30}
