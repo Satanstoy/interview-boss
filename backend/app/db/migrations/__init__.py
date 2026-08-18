@@ -161,7 +161,7 @@ from app.db.migrations.interview_import import _migration_080_interview_import
 from app.db.migrations.evaluation import _migration_087_evaluation_control_plane
 from app.db.migrations.evaluation_dual_axis import _migration_093_evaluation_dual_axis
 from app.db.migrations.evaluation_experiment import _migration_095_evaluation_experiment
-from app.db.migrations.practice import _migration_094_review_event_answer_snapshot, _migration_096_review_event_evaluation_snapshot
+from app.db.migrations.practice import (_migration_094_review_event_answer_snapshot, _migration_096_review_event_evaluation_snapshot, _migration_098_practiced_list_index)
 from app.db.migrations.schema_hygiene import (
     _migration_081_cleanup_fk_orphans,
     _migration_082_fts_rebuild_triggers,
@@ -284,6 +284,7 @@ _MIGRATIONS = [
     (95, "evaluation_experiment", _migration_095_evaluation_experiment),
     (96, "review_event_evaluation_snapshot", _migration_096_review_event_evaluation_snapshot),
     (97, "resume_user_unique", _migration_097_resume_user_unique),
+    (98, "practiced_list_index", _migration_098_practiced_list_index),
 ]
 
 

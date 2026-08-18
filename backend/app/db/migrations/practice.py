@@ -230,4 +230,9 @@ def _migration_096_review_event_evaluation_snapshot(conn):
             """
         )
 
-
+def _migration_098_practiced_list_index(conn):
+    """Index for get_practiced_questions (user_id, updated_at) — R17."""
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_uqr_user_updated "
+        "ON user_question_review(user_id, updated_at)"
+    )

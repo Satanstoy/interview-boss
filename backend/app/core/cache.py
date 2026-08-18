@@ -20,6 +20,9 @@ logger = logging.getLogger("interview-boss")
 _cache_client: Redis | None = None
 _MASTER_BANK_PREFIX = "interview-boss:cache:v2:master-bank"
 _MASTER_BANK_EPOCH_KEY = f"{_MASTER_BANK_PREFIX}:epoch"
+# per-user epoch process cache：复习/收藏只改本人视图，避免全局 epoch 失效全站缓存。
+# 进程内缓存降低 Redis 往返；失效时 pop 该用户条目。
+_USER_EPOCH_CACHE: dict[int, str] = {}
 
 
 def set_cache_client(client: Redis | None) -> None:
@@ -62,8 +65,14 @@ def _cache_signature(
     compact: bool,
     filter_mode: str,
     epoch: str,
+    user_epoch: str = "1",
 ) -> str:
-    """Build a bounded key while retaining every visibility dimension."""
+    """Build a bounded key while retaining every visibility dimension.
+
+    ``epoch`` is the global version bump (bank-level changes invalidate
+    everyone); ``user_epoch`` is the per-user version bump (review/star
+    only invalidate that user's master-bank view).
+    """
 
     payload = {
         "user_id": int(user["id"]),
@@ -77,6 +86,7 @@ def _cache_signature(
         "compact": bool(compact),
         "filter": filter_mode,
         "epoch": epoch,
+        "user_epoch": user_epoch,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()
@@ -89,6 +99,24 @@ async def _get_master_bank_epoch(client: Redis) -> str:
         await client.set(_MASTER_BANK_EPOCH_KEY, "1", nx=True)
         epoch = await client.get(_MASTER_BANK_EPOCH_KEY)
     return str(epoch or "1")
+
+
+async def _user_epoch(client: Redis, user_id: int) -> str:
+    """Return the per-user epoch (process-cached), used to invalidate only
+    the reviewing user's master-bank view on review/star mutations."""
+
+    user_id = int(user_id)
+    cached = _USER_EPOCH_CACHE.get(user_id)
+    if cached is not None:
+        return cached
+    key = f"{_MASTER_BANK_PREFIX}:u{user_id}:epoch"
+    epoch = await client.get(key)
+    if epoch is None:
+        await client.set(key, "1", nx=True)
+        epoch = await client.get(key)
+    value = str(epoch or "1")
+    _USER_EPOCH_CACHE[user_id] = value
+    return value
 
 
 async def get_master_bank_cache(
@@ -108,6 +136,7 @@ async def get_master_bank_cache(
         return None
     try:
         epoch = await _get_master_bank_epoch(client)
+        user_epoch = await _user_epoch(client, int(user["id"]))
         key = _cache_signature(
             user,
             sort=sort,
@@ -117,6 +146,7 @@ async def get_master_bank_cache(
             compact=compact,
             filter_mode=filter_mode,
             epoch=epoch,
+            user_epoch=user_epoch,
         )
         raw = await client.get(key)
         if raw is None:
@@ -146,6 +176,7 @@ async def set_master_bank_cache(
         return
     try:
         epoch = await _get_master_bank_epoch(client)
+        user_epoch = await _user_epoch(client, int(user["id"]))
         key = _cache_signature(
             user,
             sort=sort,
@@ -155,6 +186,7 @@ async def set_master_bank_cache(
             compact=compact,
             filter_mode=filter_mode,
             epoch=epoch,
+            user_epoch=user_epoch,
         )
         encoded = json.dumps(
             response, ensure_ascii=False, separators=(",", ":")
@@ -170,13 +202,22 @@ async def set_master_bank_cache(
         logger.debug("写入 master-bank Redis cache 失败，继续返回 SQLite 结果: %s", exc)
 
 
-async def invalidate_master_bank_cache() -> None:
-    """Invalidate all user variants with one version bump, without key scans."""
+async def invalidate_master_bank_cache(user_id: int | None = None) -> None:
+    """Invalidate master-bank caches with version bumps, without key scans.
+
+    - ``user_id`` omitted -> bump the global epoch (bank-level changes).
+    - ``user_id`` given -> bump only that user's epoch (review/star only).
+    """
 
     client = get_cache_client()
     if client is None:
         return
     try:
-        await client.incr(_MASTER_BANK_EPOCH_KEY)
+        if user_id is None:
+            await client.incr(_MASTER_BANK_EPOCH_KEY)
+        else:
+            _USER_EPOCH_CACHE.pop(int(user_id), None)
+            uid = int(user_id)
+            await client.incr(f"{_MASTER_BANK_PREFIX}:u{uid}:epoch")
     except RedisError as exc:
         logger.debug("失效 master-bank Redis cache 失败: %s", exc)

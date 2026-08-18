@@ -152,3 +152,50 @@ def test_coding_submit_returns_429_when_quota_exceeded(client, test_db):
         )
     assert resp.status_code == 429
     assert "上限" in resp.json()["detail"]
+
+
+# ── R18 + R21 ──────────────────────────────────────────────────────────────
+
+
+async def test_release_quota_rolls_back_consumed_call(sync_db):
+    """R18: LLM 失败后 release_quota 有界回退配额计数。"""
+    with patch.object(quota, "_today", return_value="2026-08-10"):
+        assert await quota.check_and_record(20) is True
+        assert await quota.check_and_record(20, limit=1) is False
+    # 成功调用 +1，失败后 release -1
+    with patch.object(quota, "_today", return_value="2026-08-10"):
+        await quota.release_quota(20)
+    row = sync_db.execute(
+        "SELECT call_count FROM llm_usage WHERE user_id = 20 AND day = '2026-08-10'"
+    ).fetchone()
+    assert row is not None
+    assert row["call_count"] == 0  # 失败调用被 release 释放
+
+
+async def test_release_quota_never_goes_negative(sync_db):
+    """R18: release_quota 有界，不计成负数。"""
+    with patch.object(quota, "_today", return_value="2026-08-10"):
+        # 无记录时 release 不应报错也不应生成负数行
+        await quota.release_quota(21)
+    row = sync_db.execute(
+        "SELECT call_count FROM llm_usage WHERE user_id = 21 AND day = '2026-08-10'"
+    ).fetchone()
+    assert row is None or row["call_count"] == 0
+
+
+async def test_today_real_study_day_format(sync_db):
+    """R21: _today 返回 YYYY-MM-DD 且为合法日期。"""
+    import re
+    day = quota._today()
+    assert re.match(r"\d{4}-\d{2}-\d{2}$", day), f"日期格式异常: {day}"
+
+
+async def test_today_matches_study_timezone_date(sync_db):
+    """R21: _today 应与 STUDY_TIMEZONE（默认上海）的当天日期一致，而非服务器本地。"""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    day = quota._today()
+    expected = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    assert day == expected, f"_today={day} 应为上海学习日 {expected}"
+

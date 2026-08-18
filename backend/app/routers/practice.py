@@ -32,7 +32,7 @@ from app.services.practice_review_service import (
 )
 from app.services.question_draw_service import draw_questions
 from app.services.llm import _call_llm_with_retry, _extract_json
-from app.services.llm_quota import check_and_record
+from app.services.llm_quota import check_and_record, release_quota
 from app.services.recruitment_milestones import compute_urgency, get_season_windows
 
 logger = logging.getLogger("interview-boss")
@@ -235,7 +235,7 @@ async def review_practice_question(
             return result
 
     result = await run_db(_review)
-    await invalidate_master_bank_cache()
+    await invalidate_master_bank_cache(user_id=user["id"])
     return {"question_id": req.question_id, "review": result}
 
 
@@ -264,7 +264,7 @@ async def correct_practice_review(
             return question_id, result
 
     question_id, result = await run_db(_correct)
-    await invalidate_master_bank_cache()
+    await invalidate_master_bank_cache(user_id=user["id"])
     return {"question_id": question_id, "review": result}
 
 
@@ -307,7 +307,7 @@ async def toggle_star(question_id: int, user: dict = Depends(get_current_user)):
 
     try:
         new_val = await run_db(_toggle)
-        await invalidate_master_bank_cache()
+        await invalidate_master_bank_cache(user_id=user["id"])
         return {"status": "success", "is_starred": bool(new_val)}
     except HTTPException:
         raise
@@ -428,7 +428,7 @@ async def evaluate_answer(
 
             try:
                 await run_db(_record)
-                await invalidate_master_bank_cache()
+                await invalidate_master_bank_cache(user_id=user["id"])
             except PermissionError:
                 raise HTTPException(status_code=404, detail="题目不存在或无权访问")
             except Exception as e:
@@ -438,22 +438,26 @@ async def evaluate_answer(
 
     except json.JSONDecodeError as e:
         logger.error(f"评估结果 JSON 解析失败: {e}")
+        await release_quota(user["id"])
         raise HTTPException(
             status_code=500, detail="评估结果解析失败，LLM 未返回有效 JSON，请重试"
         )
     except openai.AuthenticationError:
         logger.error("评估失败: API Key 无效")
+        await release_quota(user["id"])
         raise HTTPException(
             status_code=500, detail="API Key 无效或已过期，请在系统配置中更新 API Key。"
         )
     except openai.APIConnectionError:
         logger.error("评估失败: LLM 连接失败")
+        await release_quota(user["id"])
         raise HTTPException(
             status_code=500,
             detail="无法连接 LLM 服务，请检查系统配置中的 Base URL 是否正确。",
         )
     except openai.APITimeoutError:
         logger.error("评估失败: LLM 调用超时")
+        await release_quota(user["id"])
         raise HTTPException(
             status_code=500,
             detail="LLM 服务响应超时，请在系统配置中增大超时时间或稍后重试。",
@@ -462,6 +466,7 @@ async def evaluate_answer(
         raise
     except Exception:
         logger.exception("答案评估失败")
+        await release_quota(user["id"])
         raise HTTPException(status_code=500, detail="服务器内部错误，请查看服务端日志")
 
 

@@ -577,7 +577,6 @@ const resumeRestoredKey = ref(null)
 const answerRevealed = ref(false)
 const showSelfCheck = ref(false)
 const showHistory = ref(false)
-const rememberedIds = ref(new Set())
 const pendingReviewedId = ref(null)
 const showDeckPicker = ref(false)
 const addDeckKey = ref('')
@@ -885,7 +884,6 @@ function goNext() {
 }
 function markAndNext(rating) {
   if (!currentQ.value?.id) return
-  if (rating === 'good' || rating === 'easy') rememberedIds.value = new Set([...rememberedIds.value, currentQ.value.id])
   pendingReviewedId.value = currentQ.value.id
   if (serverDeckMode.value) {
     const payload = { questionId: currentQ.value.id, rating }
@@ -1030,17 +1028,17 @@ function resetSessionSummary() {
 function toggleStar() { if (currentQ.value) emit('toggle-star', currentQ.value) }
 async function togglePracticed() {
   showPracticed.value = !showPracticed.value
-  if (showPracticed.value && !practicedList.value.length) {
-    practicedLoading.value = true
-    try {
-      const { fetchPracticedQuestions } = await import('@/services/practiceApi.js')
-      const data = await fetchPracticedQuestions()
-      practicedList.value = data.items || []
-    } catch (e) {
-      toast.error('加载已刷题列表失败')
-    } finally {
-      practicedLoading.value = false
-    }
+  // R20: 每次打开都刷新（会话内新复习要即时可见），不再只在首次为空时加载
+  if (!showPracticed.value || practicedLoading.value) return
+  practicedLoading.value = true
+  try {
+    const { fetchPracticedQuestions } = await import('@/services/practiceApi.js')
+    const data = await fetchPracticedQuestions()
+    practicedList.value = data.items || []
+  } catch (e) {
+    toast.error('加载已刷题列表失败')
+  } finally {
+    practicedLoading.value = false
   }
 }
 function formatNextReview(date) {

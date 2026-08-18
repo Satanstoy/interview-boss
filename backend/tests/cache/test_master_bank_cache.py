@@ -28,6 +28,8 @@ class FakeRedis:
 def fake_cache(monkeypatch):
     client = FakeRedis()
     monkeypatch.setattr(cache, "_cache_client", client)
+    # 进程级 per-user epoch 缓存会跨测试泄漏，每个测试清空
+    monkeypatch.setattr(cache, "_USER_EPOCH_CACHE", {})
     return client
 
 
@@ -100,3 +102,38 @@ async def test_master_bank_invalidation_changes_cache_epoch(fake_cache):
 
     await cache.invalidate_master_bank_cache()
     assert await cache.get_master_bank_cache(user, **kwargs) is None
+
+
+
+@pytest.mark.asyncio
+async def test_master_bank_per_user_invalidation_only_affects_that_user(fake_cache):
+    """R16: review/star 只失效本人 master-bank 缓存，不影响其他用户。"""
+    kwargs = {
+        "sort": "frequency_desc",
+        "page": 1,
+        "page_size": 50,
+        "cat1": None,
+        "compact": False,
+        "filter_mode": "all",
+    }
+    user_a = _user(user_id=7)
+    user_b = _user(user_id=8)
+
+    resp_a = {"items": [{"id": 1}], "total": 1}
+    resp_b = {"items": [{"id": 2}], "total": 1}
+    await cache.set_master_bank_cache(user_a, resp_a, **kwargs)
+    await cache.set_master_bank_cache(user_b, resp_b, **kwargs)
+    assert await cache.get_master_bank_cache(user_a, **kwargs) == resp_a
+    assert await cache.get_master_bank_cache(user_b, **kwargs) == resp_b
+
+    # 只失效 user_a（复习/收藏场景）
+    await cache.invalidate_master_bank_cache(user_id=user_a["id"])
+
+    assert await cache.get_master_bank_cache(user_a, **kwargs) is None, (
+        "user_a 缓存应失效"
+    )
+    assert await cache.get_master_bank_cache(user_b, **kwargs) == resp_b, (
+        "user_b 缓存不应被 user_a 的复习失效连带清掉"
+    )
+
+

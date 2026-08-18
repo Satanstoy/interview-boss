@@ -27,8 +27,14 @@ DAILY_LLM_CALL_LIMIT = int(os.environ.get("DAILY_LLM_CALL_LIMIT", "200"))
 
 
 def _today() -> str:
-    """当前 UTC/本地日期字符串（YYYY-MM-DD）。独立函数便于测试固定日期。"""
-    return date.today().isoformat()
+    """当前学习日日期字符串（YYYY-MM-DD，STUDY_TIMEZONE）。
+
+    用 study-day 边界（与刷题学习日一致）而非服务器本地时区，
+    避免跨日临界点配额与学习日不同步。独立函数便于测试固定日期。
+    """
+    from datetime import datetime, timezone
+    from app.services.practice_deck_service import _study_timezone
+    return datetime.now(timezone.utc).astimezone(_study_timezone()).date().isoformat()
 
 
 def _increment_usage(conn, user_id: int, day: str, tokens: int = 0, limit: int = DAILY_LLM_CALL_LIMIT) -> bool:
@@ -75,3 +81,23 @@ async def check_and_record(
         return _increment_usage(conn, user_id, day, tokens, effective_limit)
 
     return await run_db(_run)
+
+
+async def release_quota(user_id: int, day: str | None = None) -> None:
+    """释放一次已预留的配额（LLM 调用失败时回滚计数）。
+
+    check_and_record 先 +1 再让调用方发 LLM 请求；若 LLM 失败，
+    这条计数已消耗但没有产出。release_quota 有界回退（不降为负），
+    避免失败调用消耗用户当日配额。
+    """
+    day = day or _today()
+
+    def _run():
+        conn = get_db_connection()
+        conn.execute(
+            "UPDATE llm_usage SET call_count = MAX(0, call_count - 1) "
+            "WHERE user_id = ? AND day = ? AND call_count > 0",
+            (user_id, day),
+        )
+        conn.commit()
+    await run_db(_run)
