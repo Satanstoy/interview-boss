@@ -31,7 +31,7 @@
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |
-| `resume_service.py` | 简历 PDF 解析、存储、查询，优化结果存取（`save_optimization`/`get_optimization`） | `db/connection` |
+| `resume_service.py` | 简历 PDF 解析、存储、查询，优化结果存取（`save_optimization`/`get_optimization`）；`optimize_resume_event_stream`（SSE 生成器，audit D1 从 router 移入）；`save_resume`/`delete_resume` 同步停用 `chat_memories` 简历记忆（audit D9 单一事实源）；`get_resume_meta` 轻量元数据查询 | `db/connection`, `chat_memory_service`, `llm` |
 | `email_service.py` | 邮箱验证码发送/验证（注册、登录、绑定邮箱、重置密码）；`verify_code` 用单条原子 UPDATE 完成「校验+标记已用」（audit D14，防并发双消费）；每邮箱连续失败达 `LOCKOUT_THRESHOLD`(5) 作废该码（audit D4，账本复用 `email_verification_codes` 表的 `code='__lockout__'` 保留行，不新增表列） | `core/config` |
 | `taxonomy_suggest.py` | 分类建议 | `llm` |
 | `utils.py` | 图片编码、URL 签名、分类规范化 | — |

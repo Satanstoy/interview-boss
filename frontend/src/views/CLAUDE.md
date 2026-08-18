@@ -17,7 +17,7 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `ImportView.vue` | 导入工作台页 |
 | `CodingView.vue` | 手撕代码页；页面外层与 `/chat` 的 `ChatView.vue` 保持一致的全屏高度和主工作区约束 |
 | `SettingsView.vue` | 设置页：在主工作区外壳内承载 `SettingsPage.vue` |
-| `ResumeView.vue` | 简历保存与优化页 |
+| `ResumeView.vue` | 简历保存与优化页（删除有 ConfirmDialog 确认、删除按钮带 aria-label、optimize SSE 离开页面即 abort、岗位选择用 shadcn Select/Checkbox） |
 | `LoginView.vue` | 登录页 |
 | `NotFoundView.vue` | 404 页面：页面不存在提示 + 返回首页按钮 |
 

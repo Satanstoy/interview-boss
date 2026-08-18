@@ -16,6 +16,8 @@
 | 账户信息 | 用户名、密码（bcrypt 哈希）、邮箱、管理员标记、题库可见模式、分享默认值 | 注册/登录时提供 | users 表、认证模块 |
 | JD/面经文本 | 粘贴或上传的 JD、面经文本、截图 OCR、来源链接 | 提交导入 | jd / interview / questions_detail / sources |
 | 简历数据 | 简历文件名、解析出的纯文本 | 上传简历/简历优化 | user_resumes |
+
+> 简历文本的副本会写入 `chat_memories`（`memory_type='resume'`）用于模拟面试上下文。**在简历页删除简历时，会同步停用该记忆副本**，不再被面试 agent 召回；账号删除则通过 `user_resumes`/`chat_memories` 的外键级联一并清除。
 | 练习/复习记录 | 练习作答、评分、复习事件、熟练度(SM-2-lite)、题单、收藏 | 刷题与复习时生成 | user_practice_history / practice_review_events / user_question_review / practice_decks |
 | 模拟面试记录 | 与 AI 面试官的对话、回合、工具调用痕迹、被抽题目 | 模拟面试时生成 | chat_conversations / chat_messages / chat_turns / chat_tool_traces |
 | 语义记忆 | 从对话自动抽取的长期记忆（岗位/技能/目标/偏好） | 对话后自动抽取 | chat_memories / memory_recall_service |
