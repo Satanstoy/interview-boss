@@ -44,3 +44,43 @@ async def test_worker_status_fail_open_without_client(monkeypatch):
     monkeypatch.setattr(cache, "_cache_client", None)
     assert await cache.worker_status_set("x", "running") is False
     assert await cache.worker_status_get("x") is None
+
+
+
+# ── Task 2: 心跳 Redis 优先、SQLite 兜底 ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_async_writes_redis_only(fake_redis, monkeypatch):
+    """Redis 可用时心跳只写 Redis,不碰 SQLite(worker_heartbeats)。"""
+    from app import worker as worker_mod
+
+    def _fail_if_called(*a, **k):
+        raise AssertionError("Redis 可用时不应写 SQLite 心跳")
+
+    monkeypatch.setattr(worker_mod, "record_worker_heartbeat", _fail_if_called)
+    ok = await worker_mod.record_worker_heartbeat_async(
+        "arq-worker", status="online", queue_name="arq:default", metadata={"pid": 1}
+    )
+    assert ok is True
+    assert await cache.worker_status_get("arq-worker") == "online"
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_async_falls_back_to_sqlite(monkeypatch):
+    """Redis 不可用时回退 SQLite(record_worker_heartbeat 被调用)。"""
+    monkeypatch.setattr(cache, "_cache_client", None)
+    from app import worker as worker_mod
+
+    calls = {}
+
+    def _spy(*a, **kw):
+        calls.update(kw)
+
+    monkeypatch.setattr(worker_mod, "record_worker_heartbeat", _spy)
+    ok = await worker_mod.record_worker_heartbeat_async(
+        "arq-worker", status="online", queue_name="arq:default"
+    )
+    assert ok is False
+    assert calls.get("status") == "online"
+

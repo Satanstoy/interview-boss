@@ -104,6 +104,35 @@ def record_worker_heartbeat(
     }
 
 
+async def record_worker_heartbeat_async(
+    worker_name: str,
+    *,
+    status: str,
+    queue_name: str = "",
+    error: str = "",
+    metadata: dict | None = None,
+) -> bool:
+    """Redis-first worker heartbeat; falls back to SQLite when Redis is down.
+
+    关联 spec R1 / ADR 0046:心跳记帐优先走 Redis,避免与读端抢同一把
+    SQLite 单写锁。返回 True=已写 Redis(本次不写 SQLite);False=Redis
+    不可用,已回退到 record_worker_heartbeat(SQLite,fail-open)。
+    """
+    from app.core.cache import worker_status_set
+
+    ok = await worker_status_set(worker_name, status)
+    if not ok:
+        record_worker_heartbeat(
+            worker_name,
+            status=status,
+            queue_name=queue_name,
+            error=error,
+            metadata=metadata,
+        )
+        return False
+    return True
+
+
 def record_cron_execution(
     task_name: str,
     *,
@@ -365,7 +394,7 @@ async def startup(ctx):
     from app.core.config import _reload_from_db
     from app.services.embedding_service import reload_embedding_config
     init_db()
-    record_worker_heartbeat(
+    await record_worker_heartbeat_async(
         "arq-worker",
         status="online",
         queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
@@ -389,7 +418,7 @@ async def startup(ctx):
 
 async def shutdown(ctx):
     """Worker 关闭时清理"""
-    record_worker_heartbeat(
+    await record_worker_heartbeat_async(
         "arq-worker",
         status="offline",
         queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
@@ -1563,7 +1592,7 @@ from app.worker_scheduled import (
 
 async def scheduled_worker_heartbeat_task(ctx):
     """Keep the ARQ worker liveness record fresh between restarts."""
-    return record_worker_heartbeat(
+    return await record_worker_heartbeat_async(
         "arq-worker",
         status="online",
         queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
