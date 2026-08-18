@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { FileText, Upload, RefreshCw, Copy, Download, Trash2, Sparkles } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -11,9 +11,11 @@ import {
 } from '@/services/resumeApi.js'
 import { fetchPositions } from '@/services/profileApi.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
+import { useConfirm } from '@/composables/useNotification.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 
 const { ensureModelReady } = useModelGuard()
+const { confirm: showConfirm } = useConfirm()
 
 const resume = ref(null)          // { id, filename, created_at }
 const rawText = ref('')           // 原文预览
@@ -31,6 +33,8 @@ const savedOptimization = ref(null) // 存库结果（重进页面可见）
 const optimizingErrors = ref('')
 
 const hasResume = computed(() => !!resume.value)
+
+let abortOptimize = null   // 当前 optimize SSE 的 AbortController（页面离开即中止）
 const targetPosition = computed(() => (useManual.value ? manualPosition.value : selectedPosition.value))
 
 const renderMarkdown = (text) => (text ? renderSafeMarkdown(text) : '')
@@ -100,6 +104,11 @@ async function handleUpload(event) {
 }
 
 async function handleDelete() {
+  const ok = await showConfirm('删除后简历原文与优化记录将不可恢复，确定删除？', {
+    title: '删除简历',
+    confirmLabel: '删除',
+  })
+  if (!ok) return
   try {
     await deleteResume()
     toast.success('简历已删除')
@@ -144,6 +153,8 @@ async function handleOptimize() {
       } else if (event.type === 'error') {
         optimizingErrors.value = event.message || '优化失败'
       }
+    }, {
+      onController: (c) => { abortOptimize = c },
     })
   } catch (e) {
     optimizingErrors.value = e.message || '优化失败，请稍后重试'
@@ -178,6 +189,10 @@ onMounted(() => {
   loadResume()
   loadOptimization()
   loadPositions()
+})
+
+onUnmounted(() => {
+  abortOptimize?.abort()
 })
 </script>
 
@@ -220,7 +235,7 @@ onMounted(() => {
                 </Button>
                 <input type="file" accept=".pdf" class="hidden" @change="handleUpload" />
               </label>
-              <Button variant="ghost" size="sm" class="text-destructive" @click="handleDelete">
+              <Button variant="ghost" size="sm" class="text-destructive" aria-label="删除简历" @click="handleDelete">
                 <Trash2 :size="14" />
               </Button>
             </div>
