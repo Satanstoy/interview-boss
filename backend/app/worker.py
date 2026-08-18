@@ -8,7 +8,6 @@ import os
 import time
 import json
 import base64
-import shutil
 import asyncio
 import logging
 from functools import wraps
@@ -845,6 +844,24 @@ async def process_chat_side_effects_task(ctx, limit: int = 10):
     return {"status": "completed", "processed": processed}
 
 
+def _backup_db_online(db_path: str, backup_path: str) -> None:
+    """在线备份:用 sqlite backup API 生成一致性快照。
+
+    WAL 模式下 shutil.copy2 只拷主库、漏掉 -wal 未合并帧,是不一致备份;
+    改用 sqlite3.Connection.backup()(对照 migrations/__init__.py:32)。
+    """
+    import sqlite3
+
+    src = sqlite3.connect(db_path)
+    dst = sqlite3.connect(backup_path)
+    try:
+        with dst:
+            src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
+
+
 async def build_master_bank_task(ctx, job_id: int):
     """后台任务：重建 master bank 题库"""
     from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
@@ -897,7 +914,7 @@ async def build_master_bank_task(ctx, job_id: int):
         backup_dir = os.path.join(os.path.dirname(DB_PATH), 'backups')
         os.makedirs(backup_dir, exist_ok=True)
         backup_path = os.path.join(backup_dir, f'interview-boss-build-{int(time.time())}.db')
-        shutil.copy2(DB_PATH, backup_path)
+        _backup_db_online(DB_PATH, backup_path)
         # 清理旧备份（保留最近 3 个）
         try:
             import glob
