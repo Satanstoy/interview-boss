@@ -1612,6 +1612,7 @@ from app.worker_scheduled import (
     scheduled_source_health_task,
     run_db_retention,
     scheduled_db_retention_task,
+    scheduled_wal_checkpoint_task,
 )
 
 
@@ -1632,6 +1633,7 @@ scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dis
 scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
 scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
 scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
+scheduled_wal_checkpoint_task = observed_cron_task(scheduled_wal_checkpoint_task)
 process_chat_side_effects_task = observed_cron_task(process_chat_side_effects_task)
 
 class WorkerSettings:
@@ -1654,6 +1656,7 @@ class WorkerSettings:
         cluster_review_task,
         scheduled_source_health_task,
         scheduled_db_retention_task,
+        scheduled_wal_checkpoint_task,
         recompute_embedding_task,
         scheduled_worker_heartbeat_task,
     ]
@@ -1676,6 +1679,7 @@ class WorkerSettings:
         cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(scheduled_db_retention_task, hour={4}, minute={0}),
+        cron(scheduled_wal_checkpoint_task, hour={4}, minute={10}),
         cron(process_chat_side_effects_task, minute={0, 30}),
         cron(scheduled_worker_heartbeat_task, minute=set(range(0, 60, 5))),
     ]

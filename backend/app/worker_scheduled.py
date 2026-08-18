@@ -345,3 +345,64 @@ async def scheduled_db_retention_task(ctx):
     except Exception as e:
         logger.exception(f"[定时任务] DB 保留期清理失败: {e}")
         raise
+
+
+
+def wal_checkpoint_now(conn, *, max_passes: int = 5) -> dict:
+    """对一个连接执行 WAL checkpoint 策略:PASSIVE 循环至 busy=0 再 TRUNCATE。
+
+    关联 ADR 0046:自动 checkpoint(PASSIVE,默认 1000 页≈4MB)在常驻读者持有
+    旧快照时会提前停止,WAL 可涨到 11MB+;每次 checkpoint 一次性回写大量帧会
+    阻塞读端。此处低峰主动 PASSIVE→TRUNCATE,把 -wal 压回正常。
+    """
+    return _wal_checkpoint_now(conn, max_passes=max_passes)
+
+
+def _run_passive(conn, max_passes: int) -> tuple[int, int, int]:
+    "PASSIVE checkpoint 循环至 busy=0(或达到轮数上限)。"
+    busy, log_frames, checkpointed = 1, 0, 0
+    for _ in range(max(1, int(max_passes))):
+        row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        busy = int(row[0])
+        log_frames = int(row[1])
+        checkpointed = int(row[2])
+        if busy == 0:
+            break
+    return busy, log_frames, checkpointed
+
+
+def _run_truncate(conn) -> list[int]:
+    "TRUNCATE checkpoint:抄写剩余帧后清空 -wal。"
+    row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    return [int(x) for x in row]
+
+
+def _wal_checkpoint_now(conn, *, max_passes: int = 5) -> dict:
+    "PASSIVE 循环至 busy=0 再 TRUNCATE 的核心决策(可注入测试)。"
+    busy, log_frames, checkpointed = _run_passive(conn, max_passes)
+    truncate = _run_truncate(conn) if busy == 0 else None
+    return {
+        "busy": busy,
+        "log_frames": log_frames,
+        "checkpointed": checkpointed,
+        "truncate": truncate,
+    }
+
+
+async def scheduled_wal_checkpoint_task(ctx):
+    """每日凌晨 4:10 显式 WAL checkpoint 纪律(spec M5 / ADR 0046)。
+
+    保持同步执行(避免跨线程使用线程本地连接);失败仅记日志,幂等,次日重跑。
+    """
+    from app.db.connection import get_db_connection
+
+    start = time.time()
+    try:
+        result = wal_checkpoint_now(get_db_connection())
+    except Exception as exc:
+        logger.exception("[定时任务] WAL checkpoint 失败: %s", exc)
+        result = {"busy": -1, "log_frames": -1, "checkpointed": -1, "truncate": None}
+    result["elapsed"] = round(time.time() - start, 3)
+    logger.info("[定时任务] WAL checkpoint 完成: %s", result)
+    return result
+
